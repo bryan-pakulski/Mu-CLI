@@ -32,7 +32,7 @@
       const primary = ref.status === 'running' ? 'stop' : 'start';
       return `<article class="manager-card">
         <div class="manager-card-head"><div><span class="manager-card-kicker">environment</span><h3>${esc(ref.name)}</h3></div><span class="manager-status ${esc(ref.status)}">${esc(ref.status)}</span></div>
-        <dl class="manager-meta"><dt>image</dt><dd>${esc(ref.image)}</dd><dt>template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>sessions</dt><dd>${sessions}</dd><dt>network</dt><dd>${esc(ref.network_name || '—')}</dd></dl>
+        <dl class="manager-meta"><dt>image</dt><dd>${esc(ref.image)}</dd><dt>template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>sessions</dt><dd>${sessions}</dd><dt>network</dt><dd>${esc(ref.network_name || '—')}</dd><dt>worker</dt><dd>${esc(ref.worker_port || '—')}</dd></dl>
         <div class="manager-actions manager-actions-primary">
           <button class="primary" data-action="${primary}" data-name="${esc(ref.name)}">${primary}</button>
           <button data-action="shell" data-name="${esc(ref.name)}">shell</button>

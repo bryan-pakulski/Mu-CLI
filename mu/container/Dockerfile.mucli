@@ -14,5 +14,5 @@ COPY . /opt/mucli
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/requirements.txt
 
 WORKDIR /workspace
-EXPOSE 9090
+EXPOSE 30312
 ENTRYPOINT ["python3", "-m", "mu.container.worker"]

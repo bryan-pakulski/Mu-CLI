@@ -234,22 +234,57 @@ async def send_message(request: Request, payload: Dict[str, Any]):
     session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
     if session_type == "container":
         busy.set()
-        try:
-            await asyncio.to_thread(
-                request.app.state.container_supervisor.send,
-                name,
-                text,
-                provider=session.provider.name,
-                model=session.provider.model_name,
-                agent_mode=str(session.variables.get("agent_mode", "default")),
-                system_instruction=session.system_instruction,
-            )
-        except Exception as exc:
-            busy.clear()
-            await bus.publish(
-                {"kind": "error", "text": f"container send failed: {exc}", "session_name": name}
-            )
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        async def _drive_container() -> None:
+            try:
+                response = await asyncio.to_thread(
+                    request.app.state.container_supervisor.send_sync,
+                    name,
+                    text,
+                    provider=session.provider.name,
+                    model=session.provider.model_name,
+                    agent_mode=str(session.variables.get("agent_mode", "default")),
+                    system_instruction=session.system_instruction,
+                    timeout=None,
+                )
+                result = response.get("result") if isinstance(response, dict) else None
+                # The worker writes through the mounted session directory.
+                # Refresh the host mirror before notifying panels/history.
+                try:
+                    session.session_manager._load_session(name)
+                    session.sync_runtime_state()
+                except Exception:
+                    pass
+                if isinstance(result, dict) and result.get("status") == "error":
+                    await bus.publish(
+                        {
+                            "kind": "error",
+                            "text": str(result.get("error") or "Container turn failed."),
+                            "session_name": name,
+                        }
+                    )
+                await bus.publish(
+                    {
+                        "kind": "turn_complete",
+                        "result": _summarize_result(result),
+                        "session_name": name,
+                    }
+                )
+                await bus.publish(
+                    {"kind": "history_refresh", "session_name": name}
+                )
+            except Exception as exc:
+                await bus.publish(
+                    {
+                        "kind": "error",
+                        "text": f"container send failed: {exc}",
+                        "session_name": name,
+                    }
+                )
+            finally:
+                busy.clear()
+
+        asyncio.create_task(_drive_container())
         return {"accepted": True, "kind": "container", "session_name": name}
 
     lock = request.app.state.session_lock_for(name)

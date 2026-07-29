@@ -515,8 +515,8 @@ def test_interactive_ollama_auto_mode_prompts_before_model_discovery(monkeypatch
         return provider
 
     monkeypatch.setattr(mucli, "init_provider", fake_init)
-    monkeypatch.setattr(mucli.Prompt, "ask", lambda *args, **kwargs: "local")
-    monkeypatch.setattr(mucli.IntPrompt, "ask", lambda *args, **kwargs: "1")
+    answers = iter(["local", "local-model"])
+    monkeypatch.setattr(mucli, "prompt_choice", lambda *args, **kwargs: next(answers))
 
     selected = mucli.select_provider_and_model(
         "ollama", None, ollama_mode="auto", allow_prompt=True

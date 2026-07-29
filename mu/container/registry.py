@@ -9,7 +9,7 @@ from pathlib import Path
 
 from utils.config import HISTORY_DIR
 
-from .ref import ContainerRef
+from .ref import DEFAULT_WORKER_PORT, ContainerRef
 
 
 class ContainerRegistry:
@@ -66,6 +66,30 @@ class ContainerRegistry:
             values = self._read().values()
             refs = [ContainerRef.from_dict(value) for value in values if isinstance(value, dict)]
         return sorted(refs, key=lambda item: item.created_at, reverse=True)
+
+    def allocate_worker_port(
+        self,
+        *,
+        start: int = DEFAULT_WORKER_PORT,
+        exclude_name: str | None = None,
+    ) -> int:
+        """Return the first unused managed-worker port.
+
+        Workers are addressed on their private Docker IPs, so sharing a port
+        would technically work.  Keeping a stable unique port per managed
+        environment makes diagnostics clearer and avoids clashes with custom
+        images that already use the conventional worker port.
+        """
+        with self._lock:
+            used = {
+                int(ref.worker_port)
+                for ref in self.list_containers()
+                if ref.name != exclude_name and int(ref.worker_port or 0) > 0
+            }
+            candidate = max(1, int(start))
+            while candidate in used:
+                candidate += 1
+            return candidate
 
     def attach_session(self, container_name: str, session_name: str) -> ContainerRef:
         ref = self.get(container_name)

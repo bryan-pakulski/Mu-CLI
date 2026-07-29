@@ -65,7 +65,7 @@ def test_snapshot_commits_and_registers_template(tmp_path):
     assert "ENV MUCLI_WORKER_TOKEN=" in commit
 
 
-def test_create_standalone_environment_from_template_skips_build(tmp_path):
+def test_create_standalone_environment_from_template_refreshes_worker_layer(tmp_path):
     runner = CommandRunner(dry_run=True)
     container_registry = ContainerRegistry(str(tmp_path / "containers"))
     template_registry = TemplateRegistry(str(tmp_path / "templates"))
@@ -91,8 +91,8 @@ def test_create_standalone_environment_from_template_skips_build(tmp_path):
 
     assert ref.standalone is True
     assert ref.template_name == "python-tools"
-    assert ref.image == "mucli/template-python-tools:1"
-    assert not any("build" in command for command in runner.commands)
+    assert ref.image.startswith("mucli/standalone:")
+    assert any(command[1] == "build" for command in runner.commands)
     assert any(command[1:3] == ["image", "inspect"] for command in runner.commands)
 
 

@@ -44,8 +44,10 @@ Build and attach progress is printed as each lifecycle stage executes.
 - additional host paths appear only through explicit bind mounts.
 - the Docker socket, host PID/IPC namespaces, and privileged mode are never
   exposed.
-- the worker listens only on its user-defined bridge network. Requests and
-  callbacks require a per-container random bearer token.
+- the worker listens only on its user-defined bridge network. Managed workers
+  receive unique internal ports beginning at `30312`; the ports are not
+  published on the host. Requests and callbacks require a per-container random
+  bearer token.
 
 ## Artifacts
 
@@ -75,6 +77,21 @@ Artifacts are copied into:
 
 The registry is atomic and independent from `session.json`. Web and mobile
 clients list, download, and delete artifacts through session-scoped endpoints.
+The web chat always shows an expandable **Artifacts** section, including an
+empty state before the first deliverable is published.
+
+## Worker upgrades and diagnostics
+
+Container registry records include a worker protocol version. Loading an older
+container session automatically rebuilds the worker image from the current
+MuCLI source while preserving its named home/workspace volumes and explicit
+bind mounts. Template-backed workers retain the template filesystem but receive
+a fresh MuCLI worker layer.
+
+Host-to-worker requests bypass parent-process HTTP proxy environment variables;
+provider traffic inside the worker still uses the configured egress proxy. A
+failed worker request reports the response detail and a redacted Docker log tail
+in the GUI or TUI instead of only returning an opaque HTTP status.
 
 ## Network allowlist
 

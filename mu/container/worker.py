@@ -4,17 +4,23 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import logging
 import os
 import threading
+import traceback
 import uuid
 from contextlib import AbstractContextManager
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
 from mu.ui.base import BaseUI
+
+
+logger = logging.getLogger("mucli.container.worker")
 
 
 class _Status(AbstractContextManager):
@@ -248,6 +254,8 @@ def _build_session(request: SendRequest):
         session=request.session_name,
         provider=request.provider,
         model=request.model,
+        provider_prevalidated=True,
+        session_type="container",
         system=request.system_instruction,
         debug=False,
         workspace=workspaces,
@@ -329,7 +337,14 @@ def send_sync(request: SendRequest, x_mucli_worker_token: str | None = Header(de
     _authorize(x_mucli_worker_token)
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-    session = _build_session(request)
+    try:
+        session = _build_session(request)
+    except Exception as exc:
+        logger.exception("failed to initialise container session %s", request.session_name)
+        raise HTTPException(
+            status_code=500,
+            detail=f"worker session initialisation failed: {type(exc).__name__}: {exc}",
+        ) from exc
     if _busy[request.session_name].is_set():
         raise HTTPException(status_code=409, detail="session already has a turn in flight")
     name = request.session_name
@@ -341,14 +356,19 @@ def send_sync(request: SendRequest, x_mucli_worker_token: str | None = Header(de
         with _locks[name]:
             result = session.send_message(request.text)
             session.session_manager.save_history(session.folder_context)
-        return {
+        return jsonable_encoder({
             "ok": bool(not isinstance(result, dict) or result.get("status") != "error"),
             "session_name": name,
             "assistant_text": _assistant_text_since(session, start_index),
             "result": result if isinstance(result, dict) else {"status": "complete"},
-        }
+        })
     except KeyboardInterrupt:
         return {"ok": False, "session_name": name, "assistant_text": "", "result": {"status": "interrupted"}}
+    except Exception as exc:
+        logger.exception("container turn failed for %s", request.session_name)
+        detail = f"worker turn failed: {type(exc).__name__}: {exc}"
+        logger.debug("worker traceback:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=detail) from exc
     finally:
         busy.clear()
         _threads.pop(name, None)
@@ -359,7 +379,14 @@ def send(request: SendRequest, x_mucli_worker_token: str | None = Header(default
     _authorize(x_mucli_worker_token)
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-    session = _build_session(request)
+    try:
+        session = _build_session(request)
+    except Exception as exc:
+        logger.exception("failed to initialise container session %s", request.session_name)
+        raise HTTPException(
+            status_code=500,
+            detail=f"worker session initialisation failed: {type(exc).__name__}: {exc}",
+        ) from exc
     if _busy[request.session_name].is_set():
         raise HTTPException(status_code=409, detail="session already has a turn in flight")
     thread = threading.Thread(target=_run_turn, args=(session, request), daemon=True)
@@ -385,7 +412,7 @@ def main() -> None:
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=int(os.getenv("MUCLI_WORKER_PORT", "9090")),
+        port=int(os.getenv("MUCLI_WORKER_PORT", "30312")),
         log_level=os.getenv("MUCLI_WORKER_LOG_LEVEL", "info"),
     )
 

@@ -29,6 +29,7 @@ from mu.feature.engine import (
 )
 from mu.tools._dispatcher import execute_tool
 from mu.ui.rich_ui import RichUI
+from mu.ui.choice_picker import prompt_choice, prompt_confirm
 from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
 from mu.tools.capabilities import normalize_session_type
 
@@ -779,13 +780,16 @@ def select_provider_and_model(
     if provider_name not in providers:
         if not allow_prompt:
             raise ValueError("A valid --provider is required in non-interactive mode.")
-        console.print("\n[bold cyan]Available Providers:[/bold cyan]")
-        for i, p in enumerate(providers, 1):
-            console.print(f" {i}. {p}", markup=False)
-        choice = IntPrompt.ask(
-            "Select a provider", choices=[str(i) for i in range(1, len(providers) + 1)]
+        provider_name = prompt_choice(
+            "Select a provider",
+            [
+                ("gemini", "Gemini", "Google Gemini models"),
+                ("ollama", "Ollama", "Local daemon or Ollama cloud"),
+                ("openai", "OpenAI", "OpenAI API models"),
+            ],
+            default="gemini",
+            subtitle="Use the arrow keys, then press Enter.",
         )
-        provider_name = providers[int(choice) - 1]
 
     # An Ollama API key traditionally selected ollama.com implicitly.  Ask
     # terminal users explicitly so local models remain selectable even when
@@ -799,8 +803,13 @@ def select_provider_and_model(
         and allow_prompt
         and ollama_mode not in {"local", "cloud"}
     ):
-        ollama_mode = Prompt.ask(
-            "Ollama connection", choices=["local", "cloud"], default="local"
+        ollama_mode = prompt_choice(
+            "Ollama connection",
+            [
+                ("local", "Local", "Use OLLAMA_HOST or the local Ollama daemon"),
+                ("cloud", "Cloud", "Use ollama.com with an API key"),
+            ],
+            default="local",
         )
 
     provider = init_provider(
@@ -837,14 +846,12 @@ def select_provider_and_model(
                 f"A valid --model is required for provider '{provider_name}' in "
                 "non-interactive mode."
             )
-        console.print(f"\n[bold cyan]Available Models for {safe_markup(provider_name)}:[/bold cyan]")
-        for i, m in enumerate(models, 1):
-            console.print(f" {i}. {m}", markup=False)
-
-        choice = IntPrompt.ask(
-            "Select a model", choices=[str(i) for i in range(1, len(models) + 1)]
+        model_name = prompt_choice(
+            f"Select a {provider_name} model",
+            [(model, model) for model in models],
+            default=models[0],
+            subtitle=f"{len(models)} models available",
         )
-        model_name = models[int(choice) - 1]
 
     provider.model_name = model_name
     # Callers that own session variables use this to persist the interactive
@@ -889,14 +896,20 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
 
 
 def choose_session(session_manager):
-    """Top-level terminal launcher mirroring the web/mobile welcome flow."""
+    """Top-level arrow-key launcher mirroring the web/mobile welcome flow."""
     while True:
-        console.print("\n[bold cyan]MuCLI[/bold cyan]")
-        console.print("[dim]Choose a saved session, create a new one, or manage containers.[/dim]")
-        action = Prompt.ask(
-            "Open",
-            choices=["sessions", "create", "containers", "quit"],
-            default="sessions" if session_manager.get_session_list() else "create",
+        sessions = session_manager.get_session_list()
+        default_action = "sessions" if sessions else "create"
+        action = prompt_choice(
+            "MuCLI",
+            [
+                ("sessions", "Sessions", "Open, inspect, or delete a saved session"),
+                ("create", "Create new", "Create a chat, workspace, or container session"),
+                ("containers", "Container management", "Create and manage standalone environments and templates"),
+                ("quit", "Quit", "Exit MuCLI"),
+            ],
+            default=default_action,
+            subtitle="Choose where to begin.",
         )
         if action == "quit":
             raise SystemExit(0)
@@ -909,38 +922,47 @@ def choose_session(session_manager):
             raw = Prompt.ask(
                 "Session name (optional, press enter for default)", default=""
             ).strip()
-            session_manager._startup_session_type = Prompt.ask(
+            session_manager._startup_session_type = prompt_choice(
                 "Session type",
-                choices=["chat", "workspace", "container"],
+                [
+                    ("chat", "Chat", "Conversation only; no filesystem tools"),
+                    ("workspace", "Workspace", "Attach a host folder and enable workspace tools"),
+                    ("container", "Container", "Run tools inside an isolated managed environment"),
+                ],
                 default="workspace",
             )
             return "new", raw or None
 
-        sessions = session_manager.get_session_list()
         if not sessions:
             console.print("[dim]No saved sessions. Choose create to begin.[/dim]")
             continue
-        console.print("\n[bold cyan]Saved sessions[/bold cyan]")
-        for index, name in enumerate(sessions, 1):
-            console.print(f" {index}. {name}", markup=False)
-        back = len(sessions) + 1
-        console.print(f" {back}. [dim]Back[/dim]")
-        choice = IntPrompt.ask(
-            "Select session",
-            choices=[str(index) for index in range(1, back + 1)],
+        session_options = [
+            (name, name, "Load or manage this session") for name in sessions
+        ]
+        session_options.append(
+            ("__back__", "Back", "Return to the MuCLI launcher")
         )
-        if int(choice) == back:
+        selected = prompt_choice(
+            "Saved sessions",
+            session_options,
+            default=sessions[0],
+            subtitle=f"{len(sessions)} saved session{'s' if len(sessions) != 1 else ''}",
+        )
+        if selected == "__back__":
             continue
-        selected = sessions[int(choice) - 1]
-        session_action = Prompt.ask(
-            "Session action",
-            choices=["load", "delete", "back"],
+        session_action = prompt_choice(
+            selected,
+            [
+                ("load", "Load session", "Open this session"),
+                ("delete", "Delete session", "Permanently remove its saved state"),
+                ("back", "Back", "Return to the session list"),
+            ],
             default="load",
         )
         if session_action == "back":
             continue
         if session_action == "delete":
-            if Confirm.ask(f"Delete session {selected!r}? This cannot be undone."):
+            if prompt_confirm(f"Delete session {selected!r}?", default=False):
                 _safe_delete_session(session_manager, selected)
             continue
         return "load", selected
@@ -1049,9 +1071,13 @@ def build_session(args, ui, allow_prompt=True):
         if action == "new" and requested_session_type is None:
             selected_session_type = normalize_session_type(
                 startup_session_type
-                or Prompt.ask(
+                or prompt_choice(
                     "Session type",
-                    choices=["chat", "workspace", "container"],
+                    [
+                        ("chat", "Chat", "Conversation only; no filesystem tools"),
+                        ("workspace", "Workspace", "Attach a host folder and enable workspace tools"),
+                        ("container", "Container", "Run tools inside an isolated managed environment"),
+                    ],
                     default="workspace",
                 )
             )
@@ -1103,14 +1129,25 @@ def build_session(args, ui, allow_prompt=True):
         provider_config = session_manager.provider_config
 
         if provider_name and model_name:
-            provider = select_provider_and_model(
-                provider_name,
-                model_name,
-                ollama_host=ollama_host,
-                ollama_mode=ollama_mode,
-                ollama_api_key=ollama_api_key,
-                allow_prompt=allow_prompt,
-            )
+            if getattr(args, "provider_prevalidated", False):
+                provider = init_provider(
+                    provider_name,
+                    model_name,
+                    ollama_host=ollama_host,
+                    ollama_mode=ollama_mode,
+                    ollama_api_key=ollama_api_key,
+                )
+                if provider is None:
+                    raise ValueError(f"Unknown provider: {provider_name}")
+            else:
+                provider = select_provider_and_model(
+                    provider_name,
+                    model_name,
+                    ollama_host=ollama_host,
+                    ollama_mode=ollama_mode,
+                    ollama_api_key=ollama_api_key,
+                    allow_prompt=allow_prompt,
+                )
             session_manager.provider_config = {
                 "provider": provider.name,
                 "model": provider.model_name,
@@ -1144,6 +1181,14 @@ def build_session(args, ui, allow_prompt=True):
         ui=ui,
         debug=args.debug,
     )
+
+    if created_new_session and provider.name == "ollama":
+        selected_ollama_mode = getattr(provider, "_mu_ollama_mode", None)
+        if selected_ollama_mode in {"local", "cloud"}:
+            session.variables["ollama_mode"] = selected_ollama_mode
+            if selected_ollama_mode == "local":
+                session.variables["ollama_host"] = ""
+            session.session_manager.save_history(session.folder_context)
 
     # File-based system-prompt overrides. --system-file replaces the
     # non-agentic base instruction; --mode-prompt NAME=PATH installs a

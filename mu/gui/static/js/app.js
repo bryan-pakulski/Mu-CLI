@@ -3998,6 +3998,13 @@ function routeEvent(ev) {
             // reflect whatever the just-finished turn changed.
             if (isFocused) refreshActivePanel();
             break;
+        case "history_refresh":
+            chat.loadHistory(name, { force: true });
+            if (isFocused) {
+                Alpine.store("artifacts").load(name, true);
+                refreshActivePanel();
+            }
+            break;
         case "command_result":
             chat.addCommandResult(ev.result, name);
             slot.busy = false;

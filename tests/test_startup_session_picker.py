@@ -1,6 +1,5 @@
 """Startup control-centre flow for terminal users."""
 
-import os
 from pathlib import Path
 
 import pytest
@@ -22,13 +21,19 @@ def _make_session_dir(session_manager, name: str) -> None:
     (path / "session.json").write_text("{}", encoding="utf-8")
 
 
-def _prompt_sequence(monkeypatch, *answers):
+def _choice_sequence(monkeypatch, *answers):
+    values = iter(answers)
+    monkeypatch.setattr("mucli.prompt_choice", lambda *args, **kwargs: next(values))
+
+
+def _text_sequence(monkeypatch, *answers):
     values = iter(answers)
     monkeypatch.setattr("mucli.Prompt.ask", lambda *args, **kwargs: next(values))
 
 
 def test_create_flow_records_type_when_no_sessions(session_manager, monkeypatch):
-    _prompt_sequence(monkeypatch, "create", "", "workspace")
+    _choice_sequence(monkeypatch, "create", "workspace")
+    _text_sequence(monkeypatch, "")
 
     action, name = mucli.choose_session(session_manager)
 
@@ -37,7 +42,8 @@ def test_create_flow_records_type_when_no_sessions(session_manager, monkeypatch)
 
 
 def test_create_container_flow_with_explicit_name(session_manager, monkeypatch):
-    _prompt_sequence(monkeypatch, "create", "container-work", "container")
+    _choice_sequence(monkeypatch, "create", "container")
+    _text_sequence(monkeypatch, "container-work")
 
     action, name = mucli.choose_session(session_manager)
 
@@ -48,24 +54,22 @@ def test_create_container_flow_with_explicit_name(session_manager, monkeypatch):
 def test_sessions_flow_loads_selected_session(session_manager, monkeypatch):
     _make_session_dir(session_manager, "alpha")
     _make_session_dir(session_manager, "beta")
-    _prompt_sequence(monkeypatch, "sessions", "load")
-    monkeypatch.setattr("mucli.IntPrompt.ask", lambda *args, **kwargs: 1)
+    _choice_sequence(monkeypatch, "sessions", "alpha", "load")
 
     action, name = mucli.choose_session(session_manager)
 
-    assert action == "load"
-    assert name in {"alpha", "beta"}
+    assert (action, name) == ("load", "alpha")
 
 
 def test_sessions_flow_can_delete_then_create(session_manager, monkeypatch):
     _make_session_dir(session_manager, "alpha")
-    _prompt_sequence(
+    _choice_sequence(
         monkeypatch,
-        "sessions", "delete",
-        "create", "fresh", "chat",
+        "sessions", "alpha", "delete",
+        "create", "chat",
     )
-    monkeypatch.setattr("mucli.IntPrompt.ask", lambda *args, **kwargs: 1)
-    monkeypatch.setattr("mucli.Confirm.ask", lambda *args, **kwargs: True)
+    _text_sequence(monkeypatch, "fresh")
+    monkeypatch.setattr("mucli.prompt_confirm", lambda *args, **kwargs: True)
 
     action, name = mucli.choose_session(session_manager)
 
@@ -76,7 +80,8 @@ def test_sessions_flow_can_delete_then_create(session_manager, monkeypatch):
 
 def test_container_manager_returns_to_launcher(session_manager, monkeypatch):
     calls = []
-    _prompt_sequence(monkeypatch, "containers", "create", "", "workspace")
+    _choice_sequence(monkeypatch, "containers", "create", "workspace")
+    _text_sequence(monkeypatch, "")
     monkeypatch.setattr(
         "mu.container.tui.run_container_manager",
         lambda: calls.append("opened"),
@@ -89,7 +94,7 @@ def test_container_manager_returns_to_launcher(session_manager, monkeypatch):
 
 
 def test_quit_exits_cleanly(session_manager, monkeypatch):
-    _prompt_sequence(monkeypatch, "quit")
+    _choice_sequence(monkeypatch, "quit")
     with pytest.raises(SystemExit) as exc:
         mucli.choose_session(session_manager)
     assert exc.value.code == 0

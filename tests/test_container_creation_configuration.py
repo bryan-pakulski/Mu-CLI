@@ -64,8 +64,11 @@ def test_tui_can_select_an_existing_managed_container(monkeypatch):
         folder_context=SimpleNamespace(folders=[]),
     )
 
-    monkeypatch.setattr("mu.container.tui.Prompt.ask", lambda *a, **k: "existing")
-    monkeypatch.setattr("mu.container.tui.IntPrompt.ask", lambda *a, **k: 1)
+    answers = iter(["existing", "mucli-shared"])
+    monkeypatch.setattr(
+        "mu.container.tui.prompt_choice",
+        lambda *args, **kwargs: next(answers),
+    )
 
     config = configure_tui_container(session, supervisor=supervisor)
 

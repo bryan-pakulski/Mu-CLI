@@ -12,7 +12,7 @@ import utils.config as _config
 from .builder import build_container, container_slug
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback
 from .network import teardown_network
-from .ref import ContainerRef
+from .ref import ContainerRef, DEFAULT_WORKER_PORT, WORKER_PROTOCOL_VERSION
 from .registry import ContainerRegistry
 from .templates import ContainerTemplate, TemplateRegistry
 from .runner import attach_session_folder, detach_session_folder, mount_folder
@@ -164,12 +164,20 @@ class ContainerSupervisor:
 
         report("resolving_container", "Checking for an existing managed container…")
         existing = self.resolve(container_name)
+        restore_sessions: list[str] = []
         if existing is not None:
             exists, _running = self._container_state(existing.name)
-            if existing.status == "error" or not exists or not existing.proxy_name:
+            if (
+                existing.status == "error"
+                or not exists
+                or not existing.proxy_name
+                or int(existing.worker_protocol or 0) < WORKER_PROTOCOL_VERSION
+                or int(existing.worker_port or 0) < DEFAULT_WORKER_PORT
+            ):
+                restore_sessions = list(existing.attached_sessions)
                 report(
                     "recovering_container",
-                    "Migrating stale or legacy container metadata and rebuilding without host privileges…",
+                    "Migrating the container worker runtime and rebuilding without host privileges…",
                 )
                 self._discard_stale_registration(existing)
                 existing = None
@@ -193,6 +201,17 @@ class ContainerSupervisor:
                 progress=progress,
                 output=output,
             )
+            for attached_name in restore_sessions:
+                if attached_name == session_name or attached_name in ref.attached_sessions:
+                    continue
+                ref = attach_session_folder(
+                    ref,
+                    attached_name,
+                    registry=self.registry,
+                    runner=self.runner,
+                )
+            report("checking_worker", f"Waiting for worker API on port {ref.worker_port}…")
+            self.wait_worker_ready(ref)
         else:
             report("reusing_container", "Reusing the existing managed container…")
             ref = existing
@@ -227,7 +246,7 @@ class ContainerSupervisor:
         return True, inspect.stdout.strip().lower() == "true"
 
     def _discard_stale_registration(self, ref: ContainerRef) -> None:
-        """Remove registry/network state for a worker missing from Docker.
+        """Remove registry/network state before rebuilding a managed worker.
 
         Persistent volumes are deliberately retained. A replacement worker uses
         the same volume names, so user-installed packages and workspace data are
@@ -272,7 +291,9 @@ class ContainerSupervisor:
         if not running:
             self.runner.run([self.runner.require("docker"), "start", ref.name])
         ref.status = "running"
-        return self.registry.upsert(ref)
+        ref = self.registry.upsert(ref)
+        self.wait_worker_ready(ref)
+        return ref
 
     def worker_url(self, ref: ContainerRef) -> str:
         docker = self.runner.require("docker")
@@ -281,7 +302,7 @@ class ContainerSupervisor:
                 docker,
                 "inspect",
                 "-f",
-                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                f'{{{{(index .NetworkSettings.Networks "{ref.network_name}").IPAddress}}}}',
                 ref.name,
             ]
         )
@@ -290,15 +311,101 @@ class ContainerSupervisor:
             raise ContainerRuntimeError(f"worker container has no network address: {ref.name}")
         return f"http://{host}:{ref.worker_port}"
 
+    def _worker_log_tail(self, ref: ContainerRef, *, lines: int = 80) -> str:
+        try:
+            result = self.runner.run(
+                [
+                    self.runner.require("docker"),
+                    "logs",
+                    "--tail",
+                    str(max(1, int(lines))),
+                    ref.name,
+                ],
+                check=False,
+            )
+        except Exception:
+            return ""
+        text = "\n".join(
+            value.strip()
+            for value in (result.stdout, result.stderr)
+            if str(value or "").strip()
+        )[-12000:]
+        secrets = [
+            ref.worker_token,
+            *(os.environ.get(key, "") for key in (
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "OLLAMA_API_KEY",
+            )),
+        ]
+        for secret in secrets:
+            if secret and len(secret) >= 4:
+                text = text.replace(secret, "<redacted>")
+        return text
+
+    @staticmethod
+    def _response_detail(response: httpx.Response) -> str:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            detail = payload.get("detail") or payload.get("error") or payload.get("message")
+            if detail:
+                return str(detail)
+        return str(response.text or "").strip() or response.reason_phrase
+
+    def _raise_worker_response(self, ref: ContainerRef, response: httpx.Response) -> None:
+        detail = self._response_detail(response)
+        logs = self._worker_log_tail(ref)
+        message = f"container worker returned HTTP {response.status_code}: {detail}"
+        if logs:
+            message += f"\n\nworker log tail:\n{logs}"
+        raise ContainerRuntimeError(message)
+
+    def wait_worker_ready(
+        self,
+        ref: ContainerRef,
+        *,
+        timeout: float = 45.0,
+        interval: float = 0.25,
+    ) -> None:
+        """Wait until the worker API is accepting authenticated requests."""
+        if type(self.runner) is not CommandRunner or bool(getattr(self.runner, "dry_run", False)):
+            return
+        deadline = time.monotonic() + max(0.1, float(timeout))
+        last_error = "worker did not answer"
+        while time.monotonic() < deadline:
+            try:
+                with httpx.Client(timeout=2.0, trust_env=False) as client:
+                    response = client.get(
+                        f"{self.worker_url(ref)}/health",
+                        headers={"X-MuCLI-Worker-Token": ref.worker_token},
+                    )
+                if response.status_code == 200:
+                    return
+                last_error = f"HTTP {response.status_code}: {self._response_detail(response)}"
+            except Exception as exc:
+                last_error = str(exc)
+            time.sleep(max(0.05, float(interval)))
+        logs = self._worker_log_tail(ref)
+        message = f"container worker did not become ready on port {ref.worker_port}: {last_error}"
+        if logs:
+            message += f"\n\nworker log tail:\n{logs}"
+        raise ContainerRuntimeError(message)
+
     def _post(self, ref: ContainerRef, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_running(ref)
-        response = httpx.post(
-            f"{self.worker_url(ref)}{path}",
-            json=payload,
-            headers={"X-MuCLI-Worker-Token": ref.worker_token},
-            timeout=self.request_timeout,
-        )
-        response.raise_for_status()
+        with httpx.Client(timeout=self.request_timeout, trust_env=False) as client:
+            response = client.post(
+                f"{self.worker_url(ref)}{path}",
+                json=payload,
+                headers={"X-MuCLI-Worker-Token": ref.worker_token},
+            )
+        if response.status_code >= 400:
+            self._raise_worker_response(ref, response)
         value = response.json()
         return value if isinstance(value, dict) else {"ok": True}
 
@@ -349,20 +456,21 @@ class ContainerSupervisor:
         if ref is None:
             raise ContainerRuntimeError(f"no container attached to session {session_name!r}")
         self.ensure_running(ref)
-        response = httpx.post(
-            f"{self.worker_url(ref)}/send-sync",
-            json={
-                "session_name": session_name,
-                "text": text,
-                "provider": provider,
-                "model": model,
-                "agent_mode": agent_mode,
-                "system_instruction": system_instruction,
-            },
-            headers={"X-MuCLI-Worker-Token": ref.worker_token},
-            timeout=timeout or None,
-        )
-        response.raise_for_status()
+        with httpx.Client(timeout=timeout or None, trust_env=False) as client:
+            response = client.post(
+                f"{self.worker_url(ref)}/send-sync",
+                json={
+                    "session_name": session_name,
+                    "text": text,
+                    "provider": provider,
+                    "model": model,
+                    "agent_mode": agent_mode,
+                    "system_instruction": system_instruction,
+                },
+                headers={"X-MuCLI-Worker-Token": ref.worker_token},
+            )
+        if response.status_code >= 400:
+            self._raise_worker_response(ref, response)
         value = response.json()
         return value if isinstance(value, dict) else {"ok": True}
 
@@ -488,6 +596,8 @@ class ContainerSupervisor:
                 dockerfile = None
         return {
             "container_name": ref.name,
+            "worker_port": ref.worker_port,
+            "worker_protocol": ref.worker_protocol,
             "dockerfile": dockerfile,
             "template_name": ref.template_name or None,
             "mounts": [item.to_dict() for item in ref.mounts],
@@ -530,6 +640,7 @@ class ContainerSupervisor:
             "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
             "GOOGLE_API_KEY", "OLLAMA_API_KEY", "OLLAMA_HOST",
             "MUCLI_WORKER_TOKEN", "MUCLI_SUPERVISOR_URL",
+            "MUCLI_WORKER_PORT",
             "MUCLI_CONTAINER_NAME", "MUCLI_EGRESS_ALLOW",
             "MUCLI_EGRESS_DENY", "MUCLI_WORKSPACES",
             "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",

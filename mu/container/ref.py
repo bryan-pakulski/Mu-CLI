@@ -6,6 +6,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+DEFAULT_WORKER_PORT = 30312
+WORKER_PROTOCOL_VERSION = 2
+
+
 @dataclass(frozen=True)
 class MountSpec:
     host_path: str
@@ -51,7 +55,8 @@ class ContainerRef:
     egress_network_name: str = ""
     session_volume: str = ""  # first attached session path (compatibility)
     container_volume: str = "/root/.mucli"
-    worker_port: int = 9090
+    worker_port: int = DEFAULT_WORKER_PORT
+    worker_protocol: int = WORKER_PROTOCOL_VERSION
     worker_token: str = ""
     supervisor_url: str = ""
     created_at: float = field(default_factory=time.time)
@@ -71,6 +76,10 @@ class ContainerRef:
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ContainerRef":
         data = dict(value or {})
+        if "worker_protocol" not in data:
+            # Registry records written before the versioned worker bridge must
+            # be rebuilt so their baked-in source and port are upgraded.
+            data["worker_protocol"] = 0
         data["mounts"] = [
             item if isinstance(item, MountSpec) else MountSpec.from_dict(item)
             for item in data.get("mounts", [])

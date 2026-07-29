@@ -13,7 +13,12 @@ from utils.config import HISTORY_DIR
 
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback, run_with_output
 from .network import DEFAULT_EGRESS_ALLOW, create_isolated_network, teardown_network
-from .ref import ContainerRef, MountSpec
+from .ref import (
+    DEFAULT_WORKER_PORT,
+    ContainerRef,
+    MountSpec,
+    WORKER_PROTOCOL_VERSION,
+)
 from .registry import ContainerRegistry
 
 ProgressCallback = Callable[[str, str], None]
@@ -49,6 +54,29 @@ def _default_source_path() -> str:
 def default_dockerfile() -> str:
     """Return the maintained MuCLI worker Dockerfile template."""
     return Path(__file__).with_name("Dockerfile.mucli").read_text(encoding="utf-8")
+
+
+def template_overlay_dockerfile(base_image: str) -> str:
+    """Overlay the current MuCLI worker onto a saved environment template.
+
+    Templates intentionally preserve user-installed packages and writable-layer
+    configuration.  Re-copying the current source prevents an old snapshot from
+    reviving a stale worker bridge after a MuCLI upgrade.
+    """
+    return f"""FROM {base_image}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \\
+    PYTHONUNBUFFERED=1 \\
+    MUCLI_CONTAINER_MODE=1 \\
+    PYTHONPATH=/opt/mucli
+
+COPY . /opt/mucli
+RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/requirements.txt
+
+WORKDIR /workspace
+EXPOSE {DEFAULT_WORKER_PORT}
+ENTRYPOINT [\"python3\", \"-m\", \"mu.container.worker\"]
+"""
 
 
 def provider_environment() -> dict[str, str]:
@@ -106,6 +134,7 @@ def build_create_command(
         "MUCLI_CONTAINER_NAME": ref.name,
         "MUCLI_SUPERVISOR_URL": ref.supervisor_url,
         "MUCLI_WORKER_TOKEN": ref.worker_token,
+        "MUCLI_WORKER_PORT": str(ref.worker_port),
         "HTTP_PROXY": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
         "HTTPS_PROXY": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
         "http_proxy": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
@@ -154,15 +183,17 @@ def build_container(
     if not os.path.isdir(source_path):
         raise ValueError(f"MuCLI source directory does not exist: {source_path}")
 
-    content = dockerfile_content if dockerfile_content is not None else default_dockerfile()
+    content = (
+        template_overlay_dockerfile(base_image)
+        if base_image
+        else (dockerfile_content if dockerfile_content is not None else default_dockerfile())
+    )
     dockerfile_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    if base_image:
-        dockerfile_hash = f"template:{hashlib.sha256(base_image.encode('utf-8')).hexdigest()}"
     container_dir = os.path.join(registry.root, managed_name)
     os.makedirs(container_dir, exist_ok=True)
     dockerfile_path = os.path.join(container_dir, "Dockerfile")
     Path(dockerfile_path).write_text(content, encoding="utf-8")
-    image = str(base_image or f"mucli/{slug}:{dockerfile_hash[:12]}")
+    image = f"mucli/{slug}:{dockerfile_hash[:12]}"
     network_name = f"{managed_name}-net"
     root_volume = f"{managed_name}-home"
     workspace_volume = f"{managed_name}-workspace"
@@ -186,6 +217,8 @@ def build_container(
         ),
         container_volume="/root/.mucli",
         worker_token=secrets.token_urlsafe(32),
+        worker_port=registry.allocate_worker_port(exclude_name=managed_name),
+        worker_protocol=WORKER_PROTOCOL_VERSION,
         supervisor_url=supervisor_url.rstrip("/"),
         status="building",
         attached_sessions=[session_name] if session_name else [],
@@ -203,13 +236,16 @@ def build_container(
             run_with_output(
                 runner, [docker, "image", "inspect", "--format", "{{.Id}}", base_image], output_callback=output
             )
-        else:
-            _report(progress, "building_image", "Building the MuCLI worker image…")
-            run_with_output(
-                runner,
-                [docker, "build", "--pull", "-t", image, "-f", dockerfile_path, source_path],
-                output_callback=output,
-            )
+        _report(
+            progress,
+            "building_image",
+            "Refreshing the MuCLI worker layer…" if base_image else "Building the MuCLI worker image…",
+        )
+        run_with_output(
+            runner,
+            [docker, "build", "--pull", "-t", image, "-f", dockerfile_path, source_path],
+            output_callback=output,
+        )
         _report(progress, "creating_storage", "Creating persistent container storage…")
         run_with_output(
             runner, [docker, "volume", "create", root_volume], output_callback=output

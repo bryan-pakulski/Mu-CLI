@@ -262,7 +262,16 @@ def _persist_session_container_binding(
         variables["session_type"] = "workspace"
         data.pop("container_config", None)
     else:
-        variables.update({"session_type": "container", "yolo": True, "strict_mode": False})
+        variables.update(
+            {
+                "session_type": "container",
+                "yolo": True,
+                "strict_mode": False,
+                "plan_mode": False,
+                "lazy_tools_enabled": False,
+                "security_allow_secret_paths": False,
+            }
+        )
         data["container_config"] = dict(config)
     data["variables"] = variables
     with open(path, "w", encoding="utf-8") as handle:

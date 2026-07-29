@@ -13,7 +13,7 @@ Per child:
     its own `model_name` slot while sharing the underlying thread-safe HTTP
     client. This removes the old race where concurrent children clobbered a
     single shared `model_name`.
-  * **Shared folder context** — the child sees the same workspace folders.
+  * **Shared runtime context** — the child sees the same mounts and filesystem.
   * **YOLO by default** — the user already approved the spawn; the child is
     trusted within its run. (Plan mode still blocks the spawn itself.)
   * **Depth-capped** — children may spawn grandchildren up to
@@ -442,13 +442,22 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
                     item["content"][:60],
                 )
 
-    # Inherit the folder context — the child reads/writes within the same workspace.
+    # Inherit mounts and folder metadata without turning them into a container boundary.
     child.folder_context = parent.folder_context
     child.session_manager.folder_context = parent.folder_context
 
     # Auto-approve so the child runs to completion without blocking the parent.
     child.variables["yolo"] = True
     child.variables["max_iterations"] = max_iterations
+    parent_session_type = str(
+        parent.variables.get("session_type", "workspace") or "workspace"
+    ).strip().lower()
+    child.variables["session_type"] = parent_session_type
+    if parent_session_type == "container":
+        child.variables["strict_mode"] = False
+        child.variables["plan_mode"] = False
+        child.variables["lazy_tools_enabled"] = False
+        child.variables["security_allow_secret_paths"] = False
     # Subagent runs are short — never compact history mid-run.
     child.variables["compact_history"] = False
     # Skip the agent_mode-specific prompts (feature / loop) for subagent turns.
@@ -464,6 +473,11 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     # and disable `spawn_agent` if we're at the depth cap for the child.
     requested_tools = args.get("tools")
     disabled: list = []
+    # A container sub-agent inherits the complete in-container tool surface.
+    # Host isolation and secret guards remain process-wide; a tool whitelist
+    # would only recreate the workspace restrictions container mode removes.
+    if parent_session_type == "container":
+        requested_tools = None
     if requested_tools:
         from mu.tools.descriptors import TOOLS
 

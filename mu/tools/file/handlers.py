@@ -1,8 +1,8 @@
 """File mutator `@tool` handlers.
 
-`write_file` / `apply_diff` / `search_and_replace_file`. All three keep
-`requires_approval=True` so the loop's approval pipeline gates them
-before they run.
+`write_file` / `apply_diff` / `search_and_replace_file`. The descriptors retain
+normal host-workspace approval metadata; container workers force YOLO execution
+so these tools run autonomously within the Docker boundary.
 
 Each tool is a positional-signature body (publicly callable, easy to
 test) plus a thin `_<name>_tool(args, context)` wrapper that carries
@@ -22,14 +22,21 @@ from typing import Any, Dict
 
 from mu.tools import tool
 from mu.tools._bounds import check_bounds as _check_bounds
+from mu.tools.capabilities import session_type_from_context
 from utils.logger import logger
 
 
 # ============================================================== write_file
 
-def write_file(filename: str, content: str, folder_context) -> str:
+def write_file(
+    filename: str,
+    content: str,
+    folder_context,
+    *,
+    session_type: str = "workspace",
+) -> str:
     """Creates or overwrites a file with the provided content."""
-    if not _check_bounds(filename, folder_context):
+    if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"write_file: Access denied or path ignored: {filename}")
         return f"Error: Access denied or path ignored. '{filename}'"
 
@@ -67,6 +74,7 @@ def _write_file_tool(args: Dict[str, Any], context) -> str:
         args.get("filename", ""),
         args.get("content", ""),
         context.folder_context,
+        session_type=session_type_from_context(context),
     )
 
 
@@ -179,9 +187,9 @@ def _sanitize_diff(diff: str, filename: str) -> str:
     return "\n".join(sanitized) + "\n"
 
 
-def apply_diff(filename: str, diff: str, folder_context) -> str:
+def apply_diff(filename: str, diff: str, folder_context, *, session_type: str = "workspace") -> str:
     """Applies a unified diff to a file."""
-    if not _check_bounds(filename, folder_context):
+    if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"apply_diff: Access denied or path ignored: {filename}")
         return f"Error: Access denied or path ignored. '{filename}'"
 
@@ -258,6 +266,7 @@ def _apply_diff_tool(args: Dict[str, Any], context) -> str:
         args.get("filename", ""),
         args.get("diff", ""),
         context.folder_context,
+        session_type=session_type_from_context(context),
     )
 
 
@@ -271,13 +280,14 @@ def search_and_replace_file(
     normalize_whitespace: bool = False,
     dry_run: bool = False,
     folder_context=None,
+    session_type: str = "workspace",
 ) -> str:
     """Search and replace text in a file using exact string matching.
 
     Returns a JSON string carrying success/matches_found/match_locations/
     modified/preview/diff/error fields. See docstring on the @tool
     registration below for the agent-facing semantics."""
-    if not _check_bounds(filename, folder_context):
+    if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(
             f"search_and_replace_file: Access denied or path ignored: {filename}"
         )
@@ -527,4 +537,5 @@ def _search_and_replace_file_tool(args: Dict[str, Any], context) -> str:
         args.get("normalize_whitespace", False),
         args.get("dry_run", False),
         context.folder_context,
+        session_type=session_type_from_context(context),
     )

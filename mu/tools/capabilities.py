@@ -73,6 +73,28 @@ def tools_enabled_without_workspace(session_type: str) -> bool:
     return normalize_session_type(session_type) in {"chat", "container"}
 
 
+def session_type_from_context(context: Any) -> str:
+    """Resolve ``session_type`` from a tool execution context or session.
+
+    Tool handlers use this instead of assuming that an attached
+    ``FolderContext`` defines their filesystem boundary.  Container sessions
+    deliberately expose the complete container filesystem while workspace
+    sessions retain host-side containment.
+    """
+    if context is None:
+        return "workspace"
+    variables = getattr(context, "variables", None) or {}
+    session = getattr(context, "session", None)
+    if session is not None:
+        variables = {**(getattr(session, "variables", None) or {}), **variables}
+    return normalize_session_type(variables.get("session_type", "workspace"))
+
+
+def unrestricted_container_filesystem(session_type: str) -> bool:
+    """Return whether workspace containment is disabled for this runtime."""
+    return normalize_session_type(session_type) == "container"
+
+
 __all__ = [
     "CHAT_TOOLS",
     "SESSION_TYPE_TOOLS",
@@ -81,5 +103,7 @@ __all__ = [
     "filter_tools_for_session_type",
     "is_tool_allowed",
     "normalize_session_type",
+    "session_type_from_context",
     "tools_enabled_without_workspace",
+    "unrestricted_container_filesystem",
 ]

@@ -15,8 +15,11 @@ does not make arbitrary code intrinsically trustworthy.
   internal Docker bridge. A read-only, capability-free proxy container is the
   only egress path and enforces allowlist/blocklist policy.
 - **Filesystem exposure:** host data is visible only through the MuCLI state
-  mount and user-declared bind mounts. The existing secret-path denylist and
-  output scrubber still run in the worker.
+  mount and user-declared bind mounts. Within that Docker boundary the agent is
+  not constrained to workspace roots or gitignore rules; it can administer the
+  complete container filesystem. The secret-path denylist, credential-dump
+  guard, and output scrubber remain active and cannot be disabled by a
+  container-session variable.
 - **Authenticated bridge:** a random per-container token authenticates host to
   worker calls and worker event callbacks.
 

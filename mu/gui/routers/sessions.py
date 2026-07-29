@@ -626,7 +626,15 @@ async def create_session(request: Request, payload: Dict[str, Any]):
     ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
     variables: Dict[str, Any] = {**ollama_vars, "session_type": session_type}
     if session_type == "container":
-        variables.update({"yolo": True, "strict_mode": False})
+        variables.update(
+            {
+                "yolo": True,
+                "strict_mode": False,
+                "plan_mode": False,
+                "lazy_tools_enabled": False,
+                "security_allow_secret_paths": False,
+            }
+        )
 
     data: Dict[str, Any] = {
         "history": [],
@@ -843,7 +851,15 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
         session.session_manager.container_config = dict(container_config or {})
         session.variables["session_type"] = session_type
         if session_type == "container":
-            session.variables.update({"yolo": True, "strict_mode": False})
+            session.variables.update(
+                {
+                    "yolo": True,
+                    "strict_mode": False,
+                    "plan_mode": False,
+                    "lazy_tools_enabled": False,
+                    "security_allow_secret_paths": False,
+                }
+            )
             session.container_ref = container_ref
         session.session_manager.save_history(session.folder_context)
         session.sync_runtime_state()

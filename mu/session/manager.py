@@ -736,6 +736,9 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         if self.variables["session_type"] == "container":
             self.variables["yolo"] = True
             self.variables["strict_mode"] = False
+            self.variables["plan_mode"] = False
+            self.variables["lazy_tools_enabled"] = False
+            self.variables["security_allow_secret_paths"] = False
         self.save_history()
         if self.ui:
             self.ui.show_info(f"Started new session: '{name}'")

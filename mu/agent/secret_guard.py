@@ -11,9 +11,9 @@ Two checks run before `bash` / `bash_background` reach the shell:
    bare `env` / `printenv`, history dumps, or `find / -name id_rsa` are
    blocked even when no explicit path argument is present.
 
-The session variable `security_allow_secret_paths` (truthy) bypasses both
-checks. Set with `/set security_allow_secret_paths true` only for
-deliberate one-off work; it does not survive a session reload.
+The session variable `security_allow_secret_paths` (truthy) may bypass both
+checks in host workspace sessions. It is intentionally ignored in container
+sessions, where secret/leak protection is the only in-container policy floor.
 
 The output scrubber in `mu.security.secret_paths.redact_secrets` continues to
 apply even when this guard is bypassed.
@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from mu.tools.capabilities import normalize_session_type
 from mu.security.secret_paths import (
     extract_paths_from_command,
     is_denied_path,
@@ -75,6 +76,12 @@ def _override_active(ctx: HookContext) -> bool:
     if ctx.session is not None:
         session_vars = getattr(ctx.session, "variables", None) or {}
         vars_ = {**session_vars, **vars_}
+    # Container mode deliberately removes workspace restrictions, so the
+    # secret/leak guard becomes the non-bypassable security floor.  Provider
+    # credentials are present in the worker process and must not be exposable
+    # by toggling a session variable.
+    if normalize_session_type(vars_.get("session_type")) == "container":
+        return False
     val = vars_.get("security_allow_secret_paths")
     if isinstance(val, bool):
         return val

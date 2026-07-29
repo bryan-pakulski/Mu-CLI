@@ -287,6 +287,10 @@ def _build_session(request: SendRequest):
     session.variables["agent_mode"] = request.agent_mode or "default"
     session.variables["yolo"] = True
     session.variables["strict_mode"] = False
+    session.variables["plan_mode"] = False
+    session.variables["lazy_tools_enabled"] = False
+    session.variables["security_allow_secret_paths"] = False
+    session.disabled_tools = []
     session.session_manager.save_history(session.folder_context)
     session.sync_runtime_state()
     _sessions[request.session_name] = session

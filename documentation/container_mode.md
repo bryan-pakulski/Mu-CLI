@@ -35,6 +35,23 @@ can attach the new session to an existing managed worker, or configure a new
 container stage by stage: name, Dockerfile, mounts, allowlist, and blocklist.
 Build and attach progress is printed as each lifecycle stage executes.
 
+## In-container autonomy
+
+The Docker sandbox, rather than the attached workspace list, is the filesystem
+boundary. Container agents may inspect and modify any non-secret path inside
+the worker, including `/`, system configuration, installed packages,
+`/workspace`, and every declared bind mount. Workspace containment, gitignore
+filtering, approval prompts, plan-mode write blocking, lazy tool exposure, and
+saved tool-disable lists are cleared when the worker session starts. Recursive
+search and semantic retrieval accept an optional `path` root for exploring
+locations outside the project mount.
+
+This does not expose the host filesystem. A host path must still be mounted by
+Docker before it exists inside the worker. The Docker socket, host namespaces,
+network proxy policy, secret-path denylist, credential-dump guard, and output
+redaction remain enforced. Secret-path overrides are ignored in container
+sessions.
+
 ## Runtime layout
 
 - MuCLI source is copied into the image at `/opt/mucli`.

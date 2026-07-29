@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 from mu.tools import tool
 from mu.tools._bounds import check_bounds as _check_bounds
+from mu.tools.capabilities import session_type_from_context
 from utils.citation_manager import SourceType, register_source
 from utils.logger import logger
 
@@ -998,10 +999,6 @@ def reddit_search(
     folder_context=None,
 ) -> str:
     """Searches Reddit for posts and comments using Reddit's JSON API."""
-    if not _check_bounds(query, folder_context):
-        logger.warning(f"reddit_search: Access denied for query: {query}")
-        return json.dumps({"error": "Access denied"})
-
     if limit is None:
         limit = 10
 
@@ -1578,7 +1575,7 @@ def _read_pdf_from_url(url: str) -> str:
     return text + citation_footer
 
 
-def read_document(filename: str, folder_context) -> str:
+def read_document(filename: str, folder_context, *, session_type: str = "workspace") -> str:
     """Reads and parses documents like PDFs to gather additional context.
 
     Accepts either a local path (subject to workspace bounds) or an
@@ -1590,7 +1587,7 @@ def read_document(filename: str, folder_context) -> str:
     if _looks_like_url(target):
         return _read_pdf_from_url(target)
 
-    if not _check_bounds(filename, folder_context):
+    if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"read_document: Access denied or file ignored: {filename}")
         return f"Error: Access denied or file ignored. '{filename}'"
 
@@ -1615,7 +1612,7 @@ def read_document(filename: str, folder_context) -> str:
     # Defer to read_file for non-PDF documents.
     from mu.tools.workspace.handlers import read_file
 
-    return read_file(filename, folder_context)
+    return read_file(filename, folder_context, session_type=session_type)
 
 
 @tool(
@@ -1646,4 +1643,8 @@ def read_document(filename: str, folder_context) -> str:
     result_mode="structured+collated",
 )
 def _read_document_tool(args: Dict[str, Any], context) -> str:
-    return read_document(args.get("filename", ""), context.folder_context)
+    return read_document(
+        args.get("filename", ""),
+        context.folder_context,
+        session_type=session_type_from_context(context),
+    )

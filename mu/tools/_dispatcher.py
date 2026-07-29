@@ -18,6 +18,7 @@ it directly. The canonical handler registry lives in `mu/tools/__init__.py`.
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from typing import Any, Callable, Dict, Optional
 
@@ -51,7 +52,7 @@ _RESEARCH_SOURCE_TOOLS = {
 def _path_arg_error(key: str) -> str:
     return (
         f"Error: The '{key}' argument is empty. "
-        "You must provide a valid file path from the workspace map."
+        "You must provide a valid filesystem path for the active runtime."
     )
 
 
@@ -65,6 +66,13 @@ def _apply_diff_review_gate(
     The check is scoped to `apply_diff` only — every other tool returns
     None immediately."""
     if tool_name != "apply_diff" or session is None:
+        return None
+    from mu.tools.capabilities import normalize_session_type
+
+    variables = getattr(session, "variables", None) or {}
+    if normalize_session_type(variables.get("session_type")) == "container":
+        # Container mode intentionally removes workflow-level write gates.
+        # The Docker boundary and non-bypassable secret guard remain active.
         return None
     if not hasattr(session, "session_manager"):
         return None

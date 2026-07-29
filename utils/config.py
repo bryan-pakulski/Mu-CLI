@@ -29,11 +29,16 @@ SESSION_TYPE_PROMPTS = {
         "explicitly enabled an override."
     ),
     "container": (
-        "You are in CONTAINER session type. The complete agent loop and tools run "
-        "inside a disposable Docker sandbox. You may install software inside the "
-        "container. Only explicit mounts reach the host, outbound traffic is "
-        "host-firewall allowlisted, and deliverables must be published with "
-        "upload_artifact so the user can download them."
+        "You are in CONTAINER session type. The Docker sandbox itself is the "
+        "filesystem and process boundary: freely inspect and modify any non-secret "
+        "path inside the container, including /, installed packages, system "
+        "configuration, /workspace, and every mounted path. Do not treat attached "
+        "workspace folders or gitignore rules as access restrictions. Install and "
+        "run software autonomously without approval prompts. Host paths that were "
+        "not mounted remain inaccessible; the Docker socket is unavailable; "
+        "outbound traffic follows the configured proxy policy; secret paths, "
+        "credential dumping, and output leakage remain blocked. Publish user "
+        "deliverables with upload_artifact."
     ),
 }
 

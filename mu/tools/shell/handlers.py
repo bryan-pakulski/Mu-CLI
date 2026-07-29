@@ -6,11 +6,16 @@ so the tools still work in session-less unit tests).
 """
 
 import json
+import os
 import subprocess
 from typing import Any, Dict
 
 from mu.tools import tool
-from mu.tools._bounds import check_bounds as _check_bounds
+from mu.tools._bounds import (
+    check_bounds as _check_bounds,
+    default_working_directory as _default_working_directory,
+)
+from mu.tools.capabilities import normalize_session_type, session_type_from_context
 from mu.tools._scrub import scrub_and_annotate as _scrub_and_annotate
 from utils.logger import logger
 
@@ -45,17 +50,30 @@ def bash_command(
     cwd: str | None = None,
     timeout_seconds: int = 120,
     max_output_chars: int = 12000,
+    session_type: str = "workspace",
 ) -> str:
-    """Executes a raw bash command in the workspace."""
+    """Execute a raw shell command in the active runtime.
+
+    Container sessions use the Docker filesystem itself as the boundary; an
+    attached workspace is not required and ``cwd`` may be any non-secret path
+    inside the container.
+    """
     command = str(command or "").strip()
     if not command:
         return "Error: command is required."
 
-    if not folder_context or not folder_context.folders:
+    if (
+        normalize_session_type(session_type) != "container"
+        and (not folder_context or not folder_context.folders)
+    ):
         return "Error: No workspace attached."
 
-    workdir = str(cwd or folder_context.folders[0]).strip()
-    if not _check_bounds(workdir, folder_context):
+    workdir = str(
+        cwd or _default_working_directory(folder_context, session_type)
+    ).strip()
+    if not os.path.isdir(os.path.expanduser(workdir)):
+        return f"Error: Working directory does not exist: '{workdir}'"
+    if not _check_bounds(workdir, folder_context, session_type=session_type):
         logger.warning(f"bash_command: Access denied or path ignored: {workdir}")
         return f"Error: Access denied or path ignored. '{workdir}'"
 
@@ -100,8 +118,9 @@ def bash_command(
 @tool(
     name="bash",
     description=(
-        "Executes a raw bash command in the attached workspace and returns "
-        "combined STDOUT/STDERR."
+        "Executes a raw bash command in the active runtime and returns "
+        "combined STDOUT/STDERR. Container sessions may use any non-secret "
+        "working directory inside the container."
     ),
     parameters={
         "type": "object",
@@ -113,8 +132,9 @@ def bash_command(
             "cwd": {
                 "type": "string",
                 "description": (
-                    "Optional working directory. Must be within the "
-                    "attached workspace."
+                    "Optional working directory. Workspace sessions require "
+                    "an attached path; container sessions may use any non-secret "
+                    "directory inside the container."
                 ),
             },
             "timeout_seconds": {
@@ -146,6 +166,7 @@ def _bash_tool(args: Dict[str, Any], context) -> str:
         cwd=args.get("cwd"),
         timeout_seconds=args.get("timeout_seconds", 120),
         max_output_chars=args.get("max_output_chars", 12000),
+        session_type=session_type_from_context(context),
     )
 
 
@@ -191,11 +212,18 @@ def bash_background(args: Dict[str, Any], context) -> str:
     command = str(args.get("command", "") or "").strip()
     if not command:
         return json.dumps({"error": "command is required"})
+    session_type = session_type_from_context(context)
+    raw_cwd = str(args.get("cwd", "") or "").strip()
+    cwd = raw_cwd or _default_working_directory(context.folder_context, session_type)
+    if not os.path.isdir(os.path.expanduser(cwd)):
+        return json.dumps({"error": f"Working directory does not exist: {cwd}"})
+    if not _check_bounds(cwd, context.folder_context, session_type=session_type):
+        return json.dumps({"error": f"Access denied for working directory: {cwd}"})
     try:
         task = registry.start(
             command,
             name=str(args.get("name", "") or "") or None,
-            cwd=str(args.get("cwd", "") or "") or None,
+            cwd=cwd,
         )
     except (ValueError, RuntimeError) as e:
         return json.dumps({"error": str(e)})

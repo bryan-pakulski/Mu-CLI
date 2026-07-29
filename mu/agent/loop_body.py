@@ -1443,9 +1443,7 @@ def run_turn(session, text):
                     messages=messages,
                     system_prompt=dynamic_system_prompt,
                     thinking=session.thinking,
-                    tools=active_tools
-                    if (session.folder_context.folders and session.agentic)
-                    else None,
+                    tools=active_tools if expose_tools else None,
                     turn_start_index=turn_start_index,
                 )
 

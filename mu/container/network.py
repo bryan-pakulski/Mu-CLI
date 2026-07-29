@@ -10,6 +10,7 @@ mutation, privileged container, or Docker socket mount is required.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback, run_with_output
@@ -22,6 +23,60 @@ DEFAULT_EGRESS_ALLOW = [
     "openaipublic.blob.core.windows.net",
 ]
 DEFAULT_PROXY_PORT = 3128
+
+
+def _proxy_logs(runner: CommandRunner, docker: str, proxy_name: str, *, lines: int = 120) -> str:
+    result = runner.run(
+        [docker, "logs", "--tail", str(max(1, int(lines))), proxy_name],
+        check=False,
+    )
+    return "\n".join(
+        part.strip()
+        for part in (result.stdout, result.stderr)
+        if str(part or "").strip()
+    )[-16000:]
+
+
+def _wait_proxy_ready(
+    runner: CommandRunner,
+    docker: str,
+    proxy_name: str,
+    *,
+    timeout: float = 30.0,
+    interval: float = 0.2,
+    output_callback: OutputCallback | None = None,
+) -> None:
+    """Wait for the unprivileged proxy process to bind its listener.
+
+    Readiness is determined from the proxy's own startup marker instead of a
+    host connection to the private Docker bridge, which also works with
+    rootless Docker.  A crashed process fails immediately with its log tail.
+    """
+    if runner.dry_run:
+        return
+    deadline = time.monotonic() + max(0.1, float(timeout))
+    last_logs = ""
+    while time.monotonic() < deadline:
+        state_result = runner.run(
+            [docker, "inspect", "-f", "{{.State.Status}}|{{.State.ExitCode}}|{{.State.Error}}", proxy_name],
+            check=False,
+        )
+        state = str(state_result.stdout or "").strip()
+        last_logs = _proxy_logs(runner, docker, proxy_name)
+        if "MuCLI egress proxy listening on" in last_logs:
+            if output_callback is not None:
+                output_callback("stdout", "MuCLI egress proxy is ready.")
+            return
+        if state and not state.startswith(("running|", "created|", "restarting|")):
+            raise ContainerRuntimeError(
+                f"egress proxy {proxy_name!r} exited before becoming ready ({state})"
+                + (f"\n\nproxy log tail:\n{last_logs}" if last_logs else "")
+            )
+        time.sleep(max(0.05, float(interval)))
+    raise ContainerRuntimeError(
+        f"egress proxy {proxy_name!r} did not become ready within {timeout:.0f}s"
+        + (f"\n\nproxy log tail:\n{last_logs}" if last_logs else "")
+    )
 
 
 def _normalise_domains(values: list[str] | None) -> list[str]:
@@ -214,11 +269,14 @@ def create_isolated_network(
             f"MUCLI_PROXY_DENY={json.dumps(denied_domains)}",
             "-e",
             f"MUCLI_PROXY_HOST_ALLOW={json.dumps(explicit_host_allow, sort_keys=True)}",
+            "-e",
+            "HOME=/tmp",
+            "-e",
+            "MUCLI_HOME=/tmp/.mucli",
             "--entrypoint",
             "python3",
             image,
-            "-m",
-            "mu.container.egress_proxy",
+            "/opt/mucli/mu/container/egress_proxy.py",
             "--listen",
             "0.0.0.0",
             "--port",
@@ -234,6 +292,12 @@ def create_isolated_network(
         start_command = [docker, "start", proxy_name]
         run_with_output(runner, start_command, output_callback=output_callback)
         commands.append(start_command)
+        _wait_proxy_ready(
+            runner,
+            docker,
+            proxy_name,
+            output_callback=output_callback,
+        )
 
         proxy_inspect = run_with_output(
             runner,

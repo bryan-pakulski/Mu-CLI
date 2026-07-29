@@ -504,6 +504,9 @@ async def _run_container_creation_job(
                 request.app.state.container_supervisor.attach_session,
                 existing_container,
                 name,
+                supervisor_url=f"http://host.docker.internal:{request.app.state.port}",
+                progress=report_progress,
+                output=report_output,
             )
             attached_existing = True
             container_config = request.app.state.container_supervisor.configuration(ref.name)

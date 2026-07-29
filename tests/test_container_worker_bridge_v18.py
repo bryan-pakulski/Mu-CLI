@@ -256,3 +256,9 @@ def test_web_and_mobile_render_terminal_container_errors():
     assert 'ev.result.status === "error"' in web
     assert "result?.status === 'error'" in mobile
     assert "setError(String(result.error))" in mobile
+
+
+def test_current_worker_protocol_rebuilds_broken_proxy_entrypoint():
+    from mu.container.ref import WORKER_PROTOCOL_VERSION
+
+    assert WORKER_PROTOCOL_VERSION >= 4

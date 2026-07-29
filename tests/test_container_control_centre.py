@@ -108,7 +108,7 @@ def test_existing_container_session_attaches_without_rebuilding(tmp_path, monkey
     supervisor = SimpleNamespace(
         resolve=lambda name: ref if name == "mucli-shared" else None,
         configuration=lambda _name: dict(configuration),
-        attach_session=lambda name, session_name: attached.append((name, session_name)) or ref,
+        attach_session=lambda name, session_name, **_kwargs: attached.append((name, session_name)) or ref,
         detach_session=lambda *args, **kwargs: None,
         container_for_session=lambda _name: ref,
     )

@@ -307,3 +307,71 @@ def test_background_container_creation_returns_before_build_finishes(tmp_path, m
     assert completed.is_set()
     assert status["state"] == "ready"
     assert any(item["text"] == "docker build output" for item in status["logs"])
+
+
+def test_existing_container_attach_receives_progress_and_output(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(sessions._config, "HISTORY_DIR", str(tmp_path))
+    session_dir = tmp_path / "sessions" / "demo"
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.json").write_text(
+        json.dumps({
+            "provider_config": {"provider": "openai", "model": "gpt-test"},
+            "variables": {"session_type": "container"},
+        }),
+        encoding="utf-8",
+    )
+    recorded = {}
+    ref = _FakeRef()
+
+    def attach_session(name, session_name, **kwargs):
+        recorded["name"] = name
+        recorded["session_name"] = session_name
+        recorded.update(kwargs)
+        kwargs["progress"]("recovering_container", "Repairing network…")
+        kwargs["output"]("stdout", "rebuilding topology")
+        return ref
+
+    supervisor = SimpleNamespace(
+        attach_session=attach_session,
+        configuration=lambda _name: {
+            "container_name": "mucli-demo",
+            "mounts": [],
+            "egress_allow": [],
+            "egress_deny": [],
+        },
+        detach_session=lambda *args, **kwargs: None,
+    )
+    state = SimpleNamespace(
+        port=30311,
+        container_supervisor=supervisor,
+        container_creation_status={},
+        container_creation_lock=threading.Lock(),
+        container_creation_tasks={},
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=state))
+
+    async def fake_load_session(name, request, payload=None):
+        return {"ok": True, "name": name, "active": True}
+
+    monkeypatch.setattr(sessions, "load_session", fake_load_session)
+
+    asyncio.run(
+        sessions._run_container_creation_job(
+            request,
+            name="demo",
+            provider="openai",
+            model="gpt-test",
+            ollama_vars={},
+            container_config={"container_name": "mucli-demo"},
+            existing_container="mucli-demo",
+        )
+    )
+
+    assert recorded["name"] == "mucli-demo"
+    assert recorded["session_name"] == "demo"
+    assert recorded["supervisor_url"] == "http://host.docker.internal:30311"
+    status = sessions._get_container_creation_status(request, "demo")
+    assert any(item["text"] == "rebuilding topology" for item in status["logs"])
+    assert status["state"] == "ready"

@@ -119,3 +119,90 @@ def test_ensure_running_does_not_start_missing_container(tmp_path):
         raise AssertionError("missing container should raise")
 
     assert ["docker", "start", "mucli-demo"] not in runner.commands
+
+
+def test_network_ip_rejects_malformed_docker_inspect_output(tmp_path):
+    class InvalidIpRunner(FakeRunner):
+        def run(self, args, *, check=True, input_text=None, timeout=None):
+            command = [str(item) for item in args]
+            self.commands.append(command)
+            if command[1:3] == ["inspect", "-f"] and "NetworkSettings.Networks" in command[3]:
+                return CommandResult(command, 0, "invalid IP\n", "")
+            return super().run(args, check=check, input_text=input_text, timeout=timeout)
+
+    registry = ContainerRegistry(str(tmp_path / "containers"))
+    supervisor = ContainerSupervisor(
+        registry=registry,
+        runner=InvalidIpRunner(container_exists=True),
+    )
+
+    assert supervisor._network_ip("mucli-demo-proxy", "mucli-demo-net") == ""
+
+
+def test_attach_session_rebuilds_invalid_proxy_topology(tmp_path, monkeypatch):
+    monkeypatch.setattr("mu.container.supervisor._config.HISTORY_DIR", str(tmp_path))
+    session_dir = tmp_path / "sessions" / "new-session"
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.json").write_text("{}", encoding="utf-8")
+
+    class InvalidProxyRunner(FakeRunner):
+        def run(self, args, *, check=True, input_text=None, timeout=None):
+            command = [str(item) for item in args]
+            if command[1:3] == ["inspect", "-f"] and "NetworkSettings.Networks" in command[3]:
+                self.commands.append(command)
+                return CommandResult(command, 0, "invalid IP\n", "")
+            return super().run(args, check=check, input_text=input_text, timeout=timeout)
+
+    registry = ContainerRegistry(str(tmp_path / "containers"))
+    stale = make_ref("mucli-existing")
+    stale.status = "running"
+    stale.attached_sessions = []
+    registry.upsert(stale)
+    runner = InvalidProxyRunner(container_exists=True)
+    supervisor = ContainerSupervisor(registry=registry, runner=runner)
+    rebuilt = make_ref("mucli-existing")
+    rebuilt.status = "running"
+    rebuilt.attached_sessions = []
+    stages: list[str] = []
+    output: list[tuple[str, str]] = []
+    recorded: dict = {}
+
+    monkeypatch.setattr(
+        supervisor,
+        "configuration",
+        lambda _name: {
+            "dockerfile": "FROM ubuntu:24.04",
+            "template_name": None,
+            "mounts": [],
+            "egress_allow": ["api.openai.com"],
+            "egress_deny": [],
+        },
+    )
+
+    def fake_reconfigure(name, **kwargs):
+        recorded["name"] = name
+        recorded.update(kwargs)
+        registry.upsert(rebuilt)
+        return rebuilt
+
+    def fake_attach(ref, session_name, **kwargs):
+        ref.attached_sessions.append(session_name)
+        return registry.upsert(ref)
+
+    monkeypatch.setattr(supervisor, "reconfigure_environment", fake_reconfigure)
+    monkeypatch.setattr("mu.container.supervisor.attach_session_folder", fake_attach)
+
+    result = supervisor.attach_session(
+        "mucli-existing",
+        "new-session",
+        supervisor_url="http://host.docker.internal:30311",
+        progress=lambda stage, _message: stages.append(stage),
+        output=lambda stream, text: output.append((stream, text)),
+    )
+
+    assert result.name == "mucli-existing"
+    assert "new-session" in result.attached_sessions
+    assert recorded["name"] == "mucli-existing"
+    assert recorded["supervisor_url"] == "http://host.docker.internal:30311"
+    assert "recovering_container" in stages
+    assert any("rebuilding the worker topology" in text for _stream, text in output)

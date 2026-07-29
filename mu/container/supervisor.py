@@ -1,6 +1,7 @@
 """Host-side lifecycle and message bridge for container sessions."""
 from __future__ import annotations
 
+import ipaddress
 import os
 import subprocess
 import time
@@ -254,6 +255,13 @@ class ContainerSupervisor:
         return True, inspect.stdout.strip().lower() == "true"
 
     def _network_ip(self, container_name: str, network_name: str) -> str:
+        """Return a normalized Docker-network address or an empty string.
+
+        Docker inspect can return placeholders or malformed text when a
+        container has stale network metadata.  Treat those values as a missing
+        attachment so callers can rebuild the topology instead of persisting an
+        unusable proxy URL such as ``http://invalid IP:3128``.
+        """
         if not container_name or not network_name:
             return ""
         docker = self.runner.require("docker")
@@ -267,7 +275,13 @@ class ContainerSupervisor:
             ],
             check=False,
         )
-        return str(result.stdout or "").strip() if result.returncode == 0 else ""
+        if result.returncode != 0:
+            return ""
+        value = str(result.stdout or "").strip()
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            return ""
 
     def _discard_stale_registration(self, ref: ContainerRef) -> None:
         """Remove registry/network state before rebuilding a managed worker.
@@ -346,6 +360,28 @@ class ContainerSupervisor:
         if not host:
             raise ContainerRuntimeError(f"worker container has no network address: {ref.name}")
         return f"http://{host}:{ref.worker_port}"
+
+    def _proxy_log_tail(self, ref: ContainerRef, *, lines: int = 80) -> str:
+        if not ref.proxy_name:
+            return ""
+        try:
+            result = self.runner.run(
+                [
+                    self.runner.require("docker"),
+                    "logs",
+                    "--tail",
+                    str(max(1, int(lines))),
+                    ref.proxy_name,
+                ],
+                check=False,
+            )
+        except Exception:
+            return ""
+        return "\n".join(
+            value.strip()
+            for value in (result.stdout, result.stderr)
+            if str(value or "").strip()
+        )[-12000:]
 
     def _worker_log_tail(self, ref: ContainerRef, *, lines: int = 80) -> str:
         try:
@@ -427,9 +463,12 @@ class ContainerSupervisor:
                 last_error = str(exc)
             time.sleep(max(0.05, float(interval)))
         logs = self._worker_log_tail(ref)
+        proxy_logs = self._proxy_log_tail(ref)
         message = f"container worker did not become ready on port {ref.worker_port}: {last_error}"
         if logs:
             message += f"\n\nworker log tail:\n{logs}"
+        if proxy_logs:
+            message += f"\n\negress proxy log tail:\n{proxy_logs}"
         raise ContainerRuntimeError(message)
 
     def _post(self, ref: ContainerRef, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -599,11 +638,71 @@ class ContainerSupervisor:
         ref.status = "running"
         return self.registry.upsert(ref)
 
-    def attach_session(self, container_name: str, session_name: str) -> ContainerRef:
+    def _recoverable_runtime_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return any(
+            marker in text
+            for marker in (
+                "missing from docker",
+                "legacy host-firewall",
+                "egress proxy is missing",
+                "is not attached to",
+                "egress proxy address changed",
+            )
+        )
+
+    def _rebuild_environment_runtime(
+        self,
+        ref: ContainerRef,
+        *,
+        supervisor_url: str = "",
+        progress: Callable[[str, str], None] | None = None,
+        output: OutputCallback | None = None,
+    ) -> ContainerRef:
+        """Recreate a managed environment from its persisted configuration.
+
+        Named home/workspace volumes and attached session directories are
+        preserved by ``reconfigure_environment``.  This is used when Docker has
+        reassigned or lost the egress-proxy address, because the worker's proxy
+        environment is fixed at container creation time and cannot be repaired
+        by merely updating the registry.
+        """
+        config = self.configuration(ref.name)
+        if progress is not None:
+            progress(
+                "recovering_container",
+                "Repairing the container network and worker proxy configuration…",
+            )
+        if output is not None:
+            output(
+                "stdout",
+                "Detected stale or invalid container network metadata; rebuilding the worker topology.",
+            )
+        return self.reconfigure_environment(
+            ref.name,
+            dockerfile=config.get("dockerfile"),
+            template_name=config.get("template_name"),
+            mounts=list(config.get("mounts") or []),
+            egress_allow=list(config.get("egress_allow") or []),
+            egress_deny=list(config.get("egress_deny") or []),
+            supervisor_url=(supervisor_url or ref.supervisor_url),
+            start=True,
+            progress=progress,
+            output=output,
+        )
+
+    def attach_session(
+        self,
+        container_name: str,
+        session_name: str,
+        *,
+        supervisor_url: str = "",
+        progress: Callable[[str, str], None] | None = None,
+        output: OutputCallback | None = None,
+    ) -> ContainerRef:
         ref = self.resolve(container_name)
         if ref is None:
             raise ContainerRuntimeError(f"managed container not found: {container_name}")
-        self.ensure_running(ref)
         session_file = os.path.join(
             os.path.expanduser(_config.HISTORY_DIR),
             "sessions",
@@ -612,6 +711,17 @@ class ContainerSupervisor:
         )
         if not os.path.isfile(session_file):
             raise ContainerRuntimeError(f"saved session not found: {session_name}")
+        try:
+            ref = self.ensure_running(ref)
+        except ContainerRuntimeError as exc:
+            if not self._recoverable_runtime_error(exc):
+                raise
+            ref = self._rebuild_environment_runtime(
+                ref,
+                supervisor_url=supervisor_url,
+                progress=progress,
+                output=output,
+            )
         if session_name not in ref.attached_sessions:
             ref = attach_session_folder(
                 ref, session_name, registry=self.registry, runner=self.runner

@@ -74,6 +74,11 @@ class WebUI(BaseUI):
         self._asst_buf: list[str] = []
         self._think_buf: list[str] = []
         self._last_delta_flush = 0.0
+        # Mirrors RichUI._streamed_any_text: when True, the assistant text
+        # was already delivered token-by-token via assistant_delta events,
+        # so the post-stream render_message("assistant", full_text) call in
+        # loop_body must be suppressed to avoid a duplicate bubble.
+        self._streamed_any_text = False
 
     def _publish_raw(self, event: Dict[str, Any]) -> None:
         """Low-level publish — stamps the session name and hands off to
@@ -132,6 +137,12 @@ class WebUI(BaseUI):
     # --- BaseUI surface ---------------------------------------------------
 
     def render_message(self, role, content, model_name=None):
+        # Suppress the duplicate assistant bubble: loop_body calls
+        # render_message("assistant", full_text) right after the streaming
+        # loop delivers the same text token-by-token. If we already streamed
+        # it, skip. _streamed_any_text resets on the next stream start.
+        if role == "assistant" and self._streamed_any_text:
+            return
         self._publish(
             {
                 "kind": "message",
@@ -170,10 +181,14 @@ class WebUI(BaseUI):
         if not text:
             return
         if self._current_turn_id is None:
+            # New turn — reset the dedup flag from the previous turn so
+            # history replay / non-streaming callers still render normally.
+            self._streamed_any_text = False
             self._new_turn()
             self._publish_raw(
                 {"kind": "assistant_start", "turn_id": self._current_turn_id}
             )
+        self._streamed_any_text = True
         with self._delta_lock:
             self._asst_buf.append(text)
         self._flush_deltas()
@@ -209,6 +224,9 @@ class WebUI(BaseUI):
             return  # No deltas this turn — nothing to close.
         self._publish({"kind": "assistant_end", "turn_id": self._current_turn_id})
         self._current_turn_id = None
+        # _streamed_any_text stays True so the immediately-following
+        # render_message("assistant", full_text) in loop_body is suppressed.
+        # It resets on the next stream_assistant_delta (new turn).
 
     def set_variables(self, variables_dict):
         self._variables = dict(variables_dict or {})

@@ -13,3 +13,4 @@ export { BottomSheet } from './BottomSheet';
 export { Header } from './Header';
 export { SessionsDrawer } from './SessionsDrawer';
 export { InspectorDrawer } from './InspectorDrawer';
+export { CodeBlock } from './CodeBlock';

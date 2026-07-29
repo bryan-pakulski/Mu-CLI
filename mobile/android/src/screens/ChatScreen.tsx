@@ -20,6 +20,7 @@ import { Text, Button, Card, Skeleton, EmptyState, ErrorState } from '../compone
 import { BottomSheet } from '../components/BottomSheet';
 import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
+import { CodeBlock } from '../components/CodeBlock';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCompletion';
 import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
@@ -161,37 +162,29 @@ export function ChatScreen() {
               rules={{
                 fence: (node) => {
                   const code = node.content;
+                  const lang = (node.sourceInfo || '').trim();
                   return (
-                    <View key={node.key} style={[styles.codeBlock, { backgroundColor: colors.bgHover }]}>
-                      <View style={styles.codeBlockHeader}>
-                        <TouchableOpacity onPress={() => copyMessage(code)} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
-                          <Ionicons name="copy-outline" size={15} color={colors.textDim} />
-                        </TouchableOpacity>
-                      </View>
-                      <Text variant="sm" style={{ color: colors.textSoft, fontFamily: 'monospace' }}>
-                        {code}
-                      </Text>
-                    </View>
+                    <CodeBlock
+                      key={node.key}
+                      code={code}
+                      language={lang}
+                      colors={colors}
+                    />
                   );
                 },
                 code_block: (node) => {
                   const code = node.content;
                   return (
-                    <View key={node.key} style={[styles.codeBlock, { backgroundColor: colors.bgHover }]}>
-                      <View style={styles.codeBlockHeader}>
-                        <TouchableOpacity onPress={() => copyMessage(code)} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
-                          <Ionicons name="copy-outline" size={15} color={colors.textDim} />
-                        </TouchableOpacity>
-                      </View>
-                      <Text variant="sm" style={{ color: colors.textSoft, fontFamily: 'monospace' }}>
-                        {code}
-                      </Text>
-                    </View>
+                    <CodeBlock
+                      key={node.key}
+                      code={code}
+                      colors={colors}
+                    />
                   );
                 },
                 code_inline: (node) => {
                   return (
-                    <Text key={node.key} style={{ color: colors.accent, fontFamily: 'monospace', fontSize: 13 }}>
+                    <Text key={node.key} style={{ color: colors.syntax.keyword, fontFamily: 'monospace', fontSize: 13, backgroundColor: colors.bgHover, borderRadius: 4, paddingHorizontal: 4 }}>
                       {node.content}
                     </Text>
                   );

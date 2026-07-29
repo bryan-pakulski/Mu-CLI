@@ -49,6 +49,10 @@ class WorkerBridgeUI(BaseUI):
         self.variables: dict[str, Any] = {}
         self.turn_id: str | None = None
         self._client = httpx.Client(timeout=10.0)
+        # Dedup flag: when True, assistant text was already streamed via
+        # assistant_delta events, so the post-stream render_message call
+        # from loop_body must be suppressed to avoid a duplicate bubble.
+        self._streamed_any_text = False
 
     def publish(self, event: dict[str, Any]) -> None:
         if not self.supervisor_url:
@@ -134,6 +138,12 @@ class WorkerBridgeUI(BaseUI):
     def render_message(self, role, content, model_name=None):
         text = str(content or "")
         if role == "assistant":
+            # Suppress the duplicate assistant bubble: loop_body calls
+            # render_message("assistant", full_text) right after the streaming
+            # loop delivers the same text token-by-token. If we already
+            # streamed it, skip. _streamed_any_text resets on next stream.
+            if self._streamed_any_text:
+                return
             turn_id = uuid.uuid4().hex[:12]
             self.publish({"kind": "assistant_start", "turn_id": turn_id})
             self.publish({"kind": "assistant_delta", "turn_id": turn_id, "text": text})
@@ -162,8 +172,11 @@ class WorkerBridgeUI(BaseUI):
         if not text:
             return
         if self.turn_id is None:
+            # New turn — reset the dedup flag from the previous turn.
+            self._streamed_any_text = False
             self.turn_id = uuid.uuid4().hex[:12]
             self.publish({"kind": "assistant_start", "turn_id": self.turn_id})
+        self._streamed_any_text = True
         self.publish({"kind": "assistant_delta", "turn_id": self.turn_id, "text": text})
 
     def stream_thinking_delta(self, text: str):

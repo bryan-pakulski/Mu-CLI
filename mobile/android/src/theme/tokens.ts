@@ -26,6 +26,20 @@ export const radii = {
   pill: 999,
 } as const;
 
+export type SyntaxColors = {
+  keyword: string;
+  string: string;
+  comment: string;
+  number: string;
+  func: string;
+  operator: string;
+  punctuation: string;
+  plain: string;
+  added: string;
+  removed: string;
+  diffHeader: string;
+};
+
 export type ThemeColors = {
   bg: string;
   bgLift: string;
@@ -42,6 +56,7 @@ export type ThemeColors = {
   warning: string;
   error: string;
   info: string;
+  syntax: SyntaxColors;
 };
 
 export const lightColors: ThemeColors = {
@@ -60,6 +75,19 @@ export const lightColors: ThemeColors = {
   warning: '#9A6A28',
   error: '#C8455D',
   info: '#667A8E',
+  syntax: {
+    keyword: '#8B5A9F',
+    string: '#5C7A4E',
+    comment: '#999999',
+    number: '#9A6A28',
+    func: '#4A6B8A',
+    operator: '#7A7A7A',
+    punctuation: '#9C998F',
+    plain: '#2B2B2B',
+    added: '#587A5C',
+    removed: '#C8455D',
+    diffHeader: '#667A8E',
+  },
 };
 
 export const darkColors: ThemeColors = {
@@ -78,6 +106,19 @@ export const darkColors: ThemeColors = {
   warning: '#C6A15B',
   error: '#D98787',
   info: '#8EA4B8',
+  syntax: {
+    keyword: '#B89AD4',
+    string: '#A3C795',
+    comment: '#6B6860',
+    number: '#D9B98A',
+    func: '#94B5D9',
+    operator: '#9C998F',
+    punctuation: '#7A7770',
+    plain: '#D4D0C8',
+    added: '#8CAA83',
+    removed: '#D98787',
+    diffHeader: '#8EA4B8',
+  },
 };
 
 export type Theme = {

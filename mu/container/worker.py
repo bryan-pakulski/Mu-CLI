@@ -80,6 +80,10 @@ class WorkerBridgeUI(BaseUI):
         source_path: str | None = None,
         content: str | bytes | None = None,
         mime_type: str = "application/octet-stream",
+        kind: str = "file",
+        display: str = "download",
+        title: str | None = None,
+        height: int | None = None,
     ) -> dict[str, Any]:
         if not self.supervisor_url:
             raise RuntimeError("container supervisor URL is unavailable")
@@ -90,7 +94,13 @@ class WorkerBridgeUI(BaseUI):
             "container_name": self.container_name,
             "name": str(name or ""),
             "mime_type": str(mime_type or "application/octet-stream"),
+            "kind": str(kind or "file"),
+            "display": str(display or "download"),
         }
+        if title:
+            params["title"] = str(title)
+        if height is not None:
+            params["height"] = str(int(height))
         headers = {"X-MuCLI-Worker-Token": self.token}
         if source_path is not None:
             with open(source_path, "rb") as handle:

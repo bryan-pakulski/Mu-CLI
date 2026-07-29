@@ -28,6 +28,32 @@
                 </div>
             </template>
 
+            <!-- sandboxed interactive HTML artifact -->
+            <template x-if="t.role === 'visualization'">
+                <section class="msg visualization">
+                    <div class="visualization-head">
+                        <div>
+                            <div class="role">visualization</div>
+                            <strong x-text="t.artifact.title || t.artifact.name"></strong>
+                        </div>
+                        <div class="visualization-actions">
+                            <a :href="t.artifact.view_url" target="_blank" rel="noopener noreferrer">Open</a>
+                            <a :href="t.artifact.download_url" download>Download</a>
+                        </div>
+                    </div>
+                    <iframe class="visualization-frame"
+                            :src="t.artifact.view_url"
+                            :title="t.artifact.title || t.artifact.name || 'Interactive visualization'"
+                            :style="'height:' + t.height + 'px'"
+                            loading="lazy"
+                            referrerpolicy="no-referrer"
+                            sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
+                    <noscript>
+                        <a :href="t.artifact.view_url" target="_blank" rel="noopener noreferrer">Open visualization</a>
+                    </noscript>
+                </section>
+            </template>
+
             <!-- collapsed trace block: tool calls, thinking, results -->
             <template x-if="t.role === 'trace'">
                 <div class="trace" :class="{ open: t.open, running: t.running }">

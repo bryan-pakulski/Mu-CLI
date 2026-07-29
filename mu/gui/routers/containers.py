@@ -490,6 +490,10 @@ async def worker_artifact(
     container_name: str,
     name: str,
     mime_type: str = "application/octet-stream",
+    kind: str = "file",
+    display: str = "download",
+    title: str | None = None,
+    height: int = 480,
     x_mucli_worker_token: str | None = Header(default=None),
 ):
     """Persist a worker artifact directly into the host session registry.
@@ -538,6 +542,10 @@ async def worker_artifact(
             name=name,
             source_path=incoming_path,
             mime_type=mime_type,
+            kind=kind,
+            display=display,
+            title=title,
+            height=height,
         )
     finally:
         try:

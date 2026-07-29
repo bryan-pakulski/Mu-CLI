@@ -32,6 +32,7 @@ CHAT_TOOLS = frozenset(
         "ask_user_choice",
         "set_session_goal",
         "upload_artifact",
+        "publish_visualization",
         "list_artifacts",
     }
 )

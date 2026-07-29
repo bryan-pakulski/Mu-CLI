@@ -2,37 +2,69 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { chatApi } from '../api/chat';
 import { sessionsApi, type SessionHistoryTurn } from '../api/sessions';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
+import type { ArtifactDescriptor } from '../api/artifacts';
 
 const SESSION_POLL_MS = 2500;
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'visualization';
   text: string;
   turnId?: string;
   streaming?: boolean;
   origin?: 'history' | 'local' | 'stream';
+  artifact?: ArtifactDescriptor;
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
 type ActiveSessionState = { active?: boolean; is_busy?: boolean; external_active?: boolean; external_last_at?: number };
 
+function asVisualization(value: unknown): ArtifactDescriptor | null {
+  if (!value || typeof value !== 'object') return null;
+  const artifact = value as ArtifactDescriptor;
+  return artifact.kind === 'visualization' && typeof artifact.artifact_id === 'string'
+    ? artifact
+    : null;
+}
+
 function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
   return turns.flatMap(turn => {
     if (turn.role !== 'user' && turn.role !== 'assistant') return [];
-    const text = turn.parts
-      .filter(part => part.type === 'text' && typeof part.text === 'string')
-      .map(part => String(part.text))
-      .join('\n\n')
-      .trim();
-    if (!text) return [];
-    return [{
-      id: `history-${turn.index}`,
-      role: turn.role,
-      text,
-      streaming: false,
-      origin: 'history' as const,
-    }];
+    const messages: ChatMessage[] = [];
+    let pendingText: string[] = [];
+    let partIndex = 0;
+    const flushText = () => {
+      const text = pendingText.join('\n\n').trim();
+      pendingText = [];
+      if (!text) return;
+      messages.push({
+        id: `history-${turn.index}-${partIndex++}`,
+        role: turn.role as 'user' | 'assistant',
+        text,
+        streaming: false,
+        origin: 'history',
+      });
+    };
+
+    for (const part of turn.parts) {
+      if (part.type === 'text' && typeof part.text === 'string') {
+        pendingText.push(String(part.text));
+        continue;
+      }
+      const artifact = asVisualization(part.artifact);
+      if (!artifact) continue;
+      flushText();
+      messages.push({
+        id: `visualization-${artifact.artifact_id}`,
+        role: 'visualization',
+        text: '',
+        streaming: false,
+        origin: 'history',
+        artifact,
+      });
+    }
+    flushText();
+    return messages;
   });
 }
 
@@ -160,6 +192,12 @@ export function useChatSession(activeSessionName: string | null) {
           const unchanged = current.length === historyMessages.length
             && current.every((message, index) => {
               const next = historyMessages[index];
+              if (message.role === 'visualization' || next.role === 'visualization') {
+                return message.role === next.role
+                  && message.artifact?.artifact_id === next.artifact?.artifact_id
+                  && message.artifact?.height === next.artifact?.height
+                  && message.origin === 'history';
+              }
               return message.role === next.role
                 && message.text === next.text
                 && !message.streaming
@@ -353,6 +391,27 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'artifact_created') {
+      const artifact = asVisualization(event.artifact);
+      if (artifact) {
+        setMessages(current => {
+          const index = current.findIndex(message =>
+            message.role === 'visualization'
+            && message.artifact?.artifact_id === artifact.artifact_id,
+          );
+          const next: ChatMessage = {
+            id: `visualization-${artifact.artifact_id}`,
+            role: 'visualization',
+            text: '',
+            streaming: false,
+            origin: 'stream',
+            artifact,
+          };
+          if (index < 0) return [...current, next];
+          const updated = [...current];
+          updated[index] = next;
+          return updated;
+        });
+      }
       setArtifactRevision(value => value + 1);
       return;
     }

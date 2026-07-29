@@ -273,6 +273,44 @@ document.addEventListener("alpine:init", () => {
             if (!name || name === this.currentName) this.scroll();
         },
 
+        _visualizationTurn(artifact, name) {
+            if (!artifact || artifact.kind !== "visualization" || !artifact.artifact_id) return null;
+            const sessionName = name || this.currentName || "";
+            const artifactId = String(artifact.artifact_id);
+            const encodedSession = encodeURIComponent(sessionName);
+            const encodedArtifact = encodeURIComponent(artifactId);
+            const height = Math.max(180, Math.min(1200, Number(artifact.height) || 480));
+            return {
+                id: `viz-${artifactId}`,
+                role: "visualization",
+                artifact: {
+                    ...artifact,
+                    title: artifact.title || artifact.name || "Visualization",
+                    view_url: artifact.view_url ||
+                        `/api/sessions/${encodedSession}/artifacts/${encodedArtifact}/view`,
+                    download_url: artifact.download_url ||
+                        `/api/sessions/${encodedSession}/artifacts/${encodedArtifact}/download`,
+                },
+                height,
+            };
+        },
+        addVisualization(artifact, name) {
+            const slot = this._slot(name);
+            const turn = this._visualizationTurn(artifact, name);
+            if (!turn) return;
+            const existing = slot.turns.findIndex((item) =>
+                item.role === "visualization" &&
+                item.artifact &&
+                item.artifact.artifact_id === turn.artifact.artifact_id
+            );
+            if (existing >= 0) {
+                slot.turns[existing] = turn;
+            } else {
+                slot.turns.push(turn);
+            }
+            if (!name || name === this.currentName) this.scroll();
+        },
+
         addCommandResult(result, name) {
             const slot = this._slot(name);
             this._closeTrace(slot);
@@ -613,6 +651,13 @@ document.addEventListener("alpine:init", () => {
                                 rawText: typeof part.preview === "string" ? part.preview : null,
                                 at: 0,
                             });
+                            const visualization = this._visualizationTurn(part.artifact, skey);
+                            if (visualization && !dst.turns.some((item) =>
+                                item.role === "visualization" &&
+                                item.artifact?.artifact_id === visualization.artifact.artifact_id
+                            )) {
+                                dst.turns.push(visualization);
+                            }
                         }
                     }
                 }
@@ -4081,6 +4126,7 @@ function routeEvent(ev) {
             break;
         case "artifact_created":
             Alpine.store("artifacts").add(ev.artifact, name);
+            chat.addVisualization(ev.artifact, name);
             break;
         case "info": chat.addInfo(ev.text || "", null, name); break;
         case "error":

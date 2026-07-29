@@ -73,19 +73,66 @@ class ArtifactRegistry:
                 os.unlink(tmp_path)
 
     def _descriptor(
-        self, artifact_id: str, name: str, size: int, mime_type: str
+        self,
+        artifact_id: str,
+        name: str,
+        size: int,
+        mime_type: str,
+        *,
+        kind: str = "file",
+        display: str = "download",
+        title: str | None = None,
+        height: int | None = None,
     ) -> dict[str, Any]:
-        return {
+        descriptor = {
             "artifact_id": artifact_id,
             "name": name,
             "size": int(size),
             "mime_type": mime_type or "application/octet-stream",
             "created_at": time.time(),
+            "kind": kind,
+            "display": display,
             "download_url": (
                 f"/api/sessions/{self.session_name}/artifacts/"
                 f"{artifact_id}/download"
             ),
         }
+        if kind == "visualization":
+            descriptor.update(
+                {
+                    "title": str(title or name)[:240],
+                    "height": self._clamp_height(height),
+                    "view_url": (
+                        f"/api/sessions/{self.session_name}/artifacts/"
+                        f"{artifact_id}/view"
+                    ),
+                }
+            )
+        return descriptor
+
+    @staticmethod
+    def _clamp_height(value: Any) -> int:
+        try:
+            return max(180, min(1200, int(value or 480)))
+        except (TypeError, ValueError):
+            return 480
+
+    def _normalize_descriptor(self, entry: dict[str, Any]) -> dict[str, Any]:
+        fresh = dict(entry)
+        kind = str(fresh.get("kind") or "file").strip().lower()
+        fresh["kind"] = kind
+        fresh.setdefault("display", "inline" if kind == "visualization" else "download")
+        if kind == "visualization":
+            fresh.setdefault("title", fresh.get("name") or "Visualization")
+            fresh["height"] = self._clamp_height(fresh.get("height"))
+            fresh.setdefault(
+                "view_url",
+                (
+                    f"/api/sessions/{self.session_name}/artifacts/"
+                    f"{fresh.get('artifact_id')}/view"
+                ),
+            )
+        return fresh
 
     def add(
         self,
@@ -93,6 +140,10 @@ class ArtifactRegistry:
         source_path: str | None = None,
         content: str | bytes | None = None,
         mime_type: str = "application/octet-stream",
+        kind: str = "file",
+        display: str = "download",
+        title: str | None = None,
+        height: int | None = None,
     ) -> dict[str, Any]:
         if (source_path is None) == (content is None):
             raise ArtifactError("provide exactly one of source_path or content")
@@ -121,6 +172,18 @@ class ArtifactRegistry:
             else mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
         )
 
+        resolved_kind = str(kind or "file").strip().lower()
+        if resolved_kind not in {"file", "visualization"}:
+            raise ArtifactError("artifact kind must be file or visualization")
+        resolved_display = str(display or "download").strip().lower()
+        if resolved_display not in {"download", "inline"}:
+            raise ArtifactError("artifact display must be download or inline")
+        if resolved_kind == "visualization":
+            base_mime = resolved_mime.split(";", 1)[0].strip().lower()
+            if base_mime not in {"text/html", "application/xhtml+xml"}:
+                raise ArtifactError("visualizations must use an HTML mime type")
+            resolved_display = "inline"
+
         with self._lock:
             os.makedirs(target_dir, exist_ok=False)
             try:
@@ -130,7 +193,14 @@ class ArtifactRegistry:
                     with open(target_path, "wb") as handle:
                         handle.write(payload)
                 descriptor = self._descriptor(
-                    artifact_id, safe_name, os.path.getsize(target_path), resolved_mime
+                    artifact_id,
+                    safe_name,
+                    os.path.getsize(target_path),
+                    resolved_mime,
+                    kind=resolved_kind,
+                    display=resolved_display,
+                    title=title,
+                    height=height,
                 )
                 entries = self._read()
                 entries.append(descriptor)
@@ -148,8 +218,10 @@ class ArtifactRegistry:
                 artifact_id = str(entry.get("artifact_id") or "")
                 path = self.resolve_path(artifact_id, _entry=entry)
                 if path and os.path.isfile(path):
-                    fresh = dict(entry)
+                    fresh = self._normalize_descriptor(entry)
                     fresh["size"] = os.path.getsize(path)
+                    if fresh != entry:
+                        changed = True
                     entries.append(fresh)
                 else:
                     changed = True
@@ -164,7 +236,7 @@ class ArtifactRegistry:
         with self._lock:
             for entry in self._read():
                 if entry.get("artifact_id") == target:
-                    return dict(entry)
+                    return self._normalize_descriptor(entry)
         return None
 
     def resolve_path(

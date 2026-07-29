@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 import os
+from pathlib import Path
 import select
 import sys
 import threading
@@ -160,6 +161,33 @@ class RichUI:
         else:
             self.console.print(f"\nAssistant [{ts}]:")
         render_response(content)
+
+    def render_visualization(self, artifact, *, local_path=None):
+        """Render a compact TUI wrapper with an OSC-8 browser link."""
+        descriptor = artifact if isinstance(artifact, dict) else {}
+        title = str(descriptor.get("title") or descriptor.get("name") or "Visualization")
+        url = str(descriptor.get("view_url") or "")
+        if local_path:
+            try:
+                url = Path(local_path).resolve().as_uri()
+            except (OSError, ValueError):
+                pass
+
+        body = Text()
+        body.append("Interactive visualization ready.\n", style="dim")
+        if url:
+            body.append("Open visualization", style=f"bold underline link {url}")
+            body.append(f"\n{url}", style="dim")
+        else:
+            body.append("Open it from the web or mobile Artifacts view.", style="dim")
+        self.console.print(
+            Panel(
+                body,
+                title=title,
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
 
     def get_input(
         self,

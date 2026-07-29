@@ -21,6 +21,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
 import { CodeBlock } from '../components/CodeBlock';
+import { VisualizationCard } from '../components/VisualizationCard';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCompletion';
 import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
@@ -134,6 +135,12 @@ export function ChatScreen() {
   };
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
+    if (item.role === 'visualization' && item.artifact && activeSessionName) {
+      return (
+        <VisualizationCard artifact={item.artifact} sessionName={activeSessionName} />
+      );
+    }
+
     const isUser = item.role === 'user';
     const isAssistant = item.role === 'assistant';
 

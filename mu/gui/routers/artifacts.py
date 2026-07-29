@@ -31,6 +31,43 @@ async def list_artifacts(name: str, response: Response):
     return {"artifacts": _registry(name).list()}
 
 
+@router.get("/{name}/artifacts/{artifact_id}/view")
+async def view_artifact(name: str, artifact_id: str):
+    registry = _registry(name)
+    descriptor = registry.get(artifact_id)
+    path = registry.resolve_path(artifact_id)
+    if descriptor is None or path is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    if descriptor.get("kind") != "visualization":
+        raise HTTPException(status_code=415, detail="artifact is not a visualization")
+    mime_type = str(descriptor.get("mime_type") or "").split(";", 1)[0].lower()
+    if mime_type not in {"text/html", "application/xhtml+xml"}:
+        raise HTTPException(status_code=415, detail="visualization is not HTML")
+
+    # The document runs with scripts enabled, but without allow-same-origin.
+    # It therefore cannot read the parent DOM, cookies, localStorage, or MuCLI
+    # API responses. Network access remains available for charting CDNs/data.
+    headers = {
+        "Cache-Control": "no-store, max-age=0",
++        "Content-Security-Policy": (
+            "sandbox allow-scripts allow-forms allow-modals allow-downloads; "
+            "default-src 'none'; "
+            "script-src 'unsafe-inline' 'unsafe-eval' https: http:; "
+            "style-src 'unsafe-inline' https: http:; "
+            "img-src data: blob: https: http:; "
+            "font-src data: https: http:; "
+            "connect-src https: http: ws: wss:; "
+            "media-src data: blob: https: http:; "
+            "worker-src blob:; frame-ancestors 'self'"
+        ),
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "SAMEORIGIN",
+    }
+    return FileResponse(path, media_type=mime_type, headers=headers)
+
+
 @router.get("/{name}/artifacts/{artifact_id}/download")
 async def download_artifact(name: str, artifact_id: str):
     registry = _registry(name)

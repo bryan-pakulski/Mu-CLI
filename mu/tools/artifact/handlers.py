@@ -152,6 +152,132 @@ def upload_artifact_tool(args: dict[str, Any], context) -> str:
 
 
 @tool(
+    name="publish_visualization",
+    description=(
+        "Publish an interactive visualization as a sandboxed HTML artifact. "
+        "Provide exactly one of html or file_path. Prefer a self-contained HTML "
+        "document; CDN scripts are allowed but the page cannot access the parent "
+        "chat. Web and mobile render it inline, while terminal clients receive a "
+        "clickable browser link."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "HTML file name, normally ending in .html.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Short title shown above the visualization.",
+            },
+            "html": {
+                "type": "string",
+                "description": "Complete UTF-8 HTML document.",
+            },
+            "file_path": {
+                "type": "string",
+                "description": "Existing HTML file in the current runtime.",
+            },
+            "height": {
+                "type": "integer",
+                "minimum": 180,
+                "maximum": 1200,
+                "default": 480,
+                "description": "Preferred inline frame height in CSS pixels.",
+            },
+        },
+        "required": ["name"],
+    },
+    requires_approval=False,
+    execution_kind="mutate",
+    preview_policy="none",
+    group="artifact",
+)
+def publish_visualization_tool(args: dict[str, Any], context) -> str:
+    try:
+        source_path = _validated_source_path(args, context)
+        html = args.get("html") if "html" in args else None
+        if (source_path is None) == (html is None):
+            raise ArtifactError("provide exactly one of html or file_path")
+        if source_path is not None and not source_path.lower().endswith((".html", ".htm")):
+            raise ArtifactError("visualization file_path must point to an HTML file")
+
+        session = getattr(context, "session", None)
+        variables = (
+            getattr(session, "variables", None)
+            or getattr(context, "variables", None)
+            or {}
+        )
+        session_type = normalize_session_type(
+            variables.get("session_type", "workspace")
+        )
+        ui = getattr(context, "ui", None) or getattr(session, "ui", None)
+        name = str(args.get("name") or "visualization.html")
+        title = str(args.get("title") or name)
+        height = max(180, min(1200, int(args.get("height") or 480)))
+        host_published = (
+            session_type == "container"
+            and ui is not None
+            and hasattr(ui, "publish_artifact")
+        )
+
+        registry = None
+        if host_published:
+            descriptor = ui.publish_artifact(
+                name=name,
+                source_path=source_path,
+                content=html,
+                mime_type="text/html",
+                kind="visualization",
+                display="inline",
+                title=title,
+                height=height,
+            )
+        else:
+            registry = _registry(context)
+            descriptor = registry.add(
+                name=name,
+                source_path=source_path,
+                content=html,
+                mime_type="text/html",
+                kind="visualization",
+                display="inline",
+                title=title,
+                height=height,
+            )
+
+        if not host_published:
+            try:
+                if ui is not None and hasattr(ui, "publish"):
+                    ui.publish({"kind": "artifact_created", "artifact": descriptor})
+                elif ui is not None and hasattr(ui, "_publish"):
+                    ui._publish({"kind": "artifact_created", "artifact": descriptor})
+            except Exception:
+                pass
+
+        if ui is not None and hasattr(ui, "render_visualization"):
+            local_path = (
+                registry.resolve_path(descriptor["artifact_id"])
+                if registry is not None
+                else None
+            )
+            ui.render_visualization(descriptor, local_path=local_path)
+
+        return json.dumps(
+            {
+                "ok": True,
+                "message": f"Visualization ready: {descriptor['title']}",
+                "artifact": descriptor,
+                "artifacts": [descriptor],
+            },
+            indent=2,
+        )
+    except (ArtifactError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        return json.dumps({"ok": False, "error": str(exc), "artifacts": []}, indent=2)
+
+
+@tool(
     name="list_artifacts",
     description="List downloadable artifacts already published for this session.",
     parameters={"type": "object", "properties": {}},

@@ -7,6 +7,11 @@ export interface ArtifactDescriptor {
   mime_type: string;
   created_at: number;
   download_url: string;
+  kind?: 'file' | 'visualization';
+  display?: 'download' | 'inline';
+  title?: string;
+  height?: number;
+  view_url?: string;
 }
 
 export const artifactsApi = {
@@ -17,6 +22,8 @@ export const artifactsApi = {
     ),
   downloadUrl: (sessionName: string, artifactId: string) =>
     `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+  viewUrl: (sessionName: string, artifactId: string) =>
+    `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/artifacts/${encodeURIComponent(artifactId)}/view`,
   remove: (sessionName: string, artifactId: string) =>
     api.delete<{ ok: boolean; artifact_id: string }>(
       `/api/sessions/${encodeURIComponent(sessionName)}/artifacts/${encodeURIComponent(artifactId)}`,

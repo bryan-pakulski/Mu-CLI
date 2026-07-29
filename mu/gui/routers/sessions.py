@@ -323,6 +323,46 @@ def _resolve(request: Request, name: Optional[str]):
     return request.app.state.session_by_name(name)
 
 
+def _visualization_from_tool_result(value: Any) -> Dict[str, Any] | None:
+    payload = value
+    for _ in range(3):
+        if not isinstance(payload, str):
+            break
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+
+    candidates = [payload.get("artifact")]
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(data.get("artifact"))
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        candidates.extend(artifacts)
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or candidate.get("kind") != "visualization":
+            continue
+        allowed = {
+            "artifact_id",
+            "name",
+            "title",
+            "size",
+            "mime_type",
+            "created_at",
+            "kind",
+            "display",
+            "height",
+            "view_url",
+            "download_url",
+        }
+        return {key: candidate[key] for key in allowed if key in candidate}
+    return None
+
+
 @router.get("")
 async def list_sessions(request: Request):
     state = request.app.state
@@ -414,13 +454,16 @@ async def get_history(request: Request, session_name: Optional[str] = None):
                     }
                 )
             elif ptype == "tool_result":
-                parts_out.append(
-                    {
-                        "type": "tool_result",
-                        "tool_name": part.get("tool_name"),
-                        "preview": str(part.get("tool_result", ""))[:400],
-                    }
-                )
+                raw_result = part.get("tool_result", "")
+                result_part = {
+                    "type": "tool_result",
+                    "tool_name": part.get("tool_name"),
+                    "preview": str(raw_result)[:400],
+                }
+                visualization = _visualization_from_tool_result(raw_result)
+                if visualization is not None:
+                    result_part["artifact"] = visualization
+                parts_out.append(result_part)
         turns.append({"index": idx, "role": role, "parts": parts_out})
     return {"name": sm.current_session_name, "turns": turns}
 

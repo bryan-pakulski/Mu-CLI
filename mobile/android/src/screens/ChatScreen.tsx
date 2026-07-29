@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   FlatList,
@@ -21,6 +21,8 @@ import { BottomSheet } from '../components/BottomSheet';
 import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
+import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCompletion';
+import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
 import { spacing } from '../theme/tokens';
 
 export function ChatScreen() {
@@ -52,12 +54,49 @@ export function ChatScreen() {
   const yolo = useConnectionStore(state => state.yolo);
   const connection = { activeProvider, activeModel, yolo };
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
+  const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completion = useCommandCompletion();
+
+  // Throttled auto-scroll: coalesce rapid content-size changes (one per
+  // streaming token) into a single non-animated scrollToEnd per ~100ms.
+  // Animated scroll on every token was a major perf bottleneck on mobile.
+  const scrollToBottom = useCallback(() => {
+    if (scrollThrottleRef.current) return;
+    scrollThrottleRef.current = setTimeout(() => {
+      scrollThrottleRef.current = null;
+      flatListRef.current?.scrollToEnd({ animated: false });
+    }, 100);
+  }, []);
+
+  // Clear any pending throttle on unmount
+  useEffect(() => () => { if (scrollThrottleRef.current) clearTimeout(scrollThrottleRef.current); }, []);
 
   const send = async () => {
     const text = input.trim();
     if (!text || streaming) return;
     setInput('');
+    completion.close();
     await sendMessage(text);
+  };
+
+  const onInputChange = (text: string) => {
+    setInput(text);
+    if (text.startsWith('/')) {
+      completion.update(text);
+    } else if (completion.visible) {
+      completion.close();
+    }
+  };
+
+  const onAcceptCompletion = (item: CompletionItem) => {
+    const newText = item.value + ' ';
+    setInput(newText);
+    // If the command has subcommands, keep the dropdown open for next level.
+    if (item.level === 0) {
+      completion.update(newText);
+    } else {
+      completion.close();
+    }
   };
 
   const loadModes = useCallback(async () => {
@@ -112,6 +151,10 @@ export function ChatScreen() {
         >
           {isUser ? (
             <Text style={{ color: colors.text }}>{item.text}</Text>
+          ) : item.streaming ? (
+            <Text style={{ color: colors.text, fontSize: 15, lineHeight: 23 }}>
+              {item.text}
+            </Text>
           ) : (
             <Markdown
               style={markdownStyles(colors)}
@@ -190,8 +233,8 @@ export function ChatScreen() {
           ]}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: messages.length > 0 })}
-          onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={scrollToBottom}
+          onLayout={scrollToBottom}
           ListHeaderComponent={
             error && messages.length > 0 ? (
               <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>
@@ -231,9 +274,15 @@ export function ChatScreen() {
           }
         />
         <ArtifactStrip sessionName={activeSessionName} refreshKey={artifactRevision} />
+        <CommandSuggestionBar
+          visible={completion.visible}
+          items={completion.items}
+          selectedIdx={completion.selectedIdx}
+          onSelect={onAcceptCompletion}
+        />
         <Composer
           input={input}
-          setInput={setInput}
+          setInput={onInputChange}
           onSend={send}
           onStop={stop}
           streaming={streaming}

@@ -1,0 +1,46 @@
+<aside class="mode-panel shell-panel"
+       data-mode="shell"
+       x-show="$store.mode.active === 'shell'"
+       x-transition.opacity.duration.200ms
+       x-effect="$store.mode.active === 'shell' && $store.shell.load()">
+    <div class="shell-panel-head">
+        <div>
+            <span class="label-mono">Shell</span>
+            <p>Interactive shell into the attached container.</p>
+        </div>
+        <div class="shell-panel-actions">
+            <button type="button" class="icon-btn"
+                    @click="$store.shell.clear()"
+                    title="Clear output" aria-label="Clear output">clr</button>
+            <button type="button" class="icon-btn"
+                    @click="$store.shell.connected ? $store.shell.disconnect() : $store.shell.connect()"
+                    :title="$store.shell.connected ? 'Disconnect' : 'Reconnect'"
+                    aria-label="Toggle shell connection">
+                <span x-show="$store.shell.connected">disconnect</span>
+                <span x-show="!$store.shell.connected">connect</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="shell-panel-status">
+        <span x-show="$store.shell.connecting" class="muted">Connecting…</span>
+        <span x-show="$store.shell.connected" class="shell-status-ok">connected</span>
+        <span x-show="!$store.shell.connected && !$store.shell.connecting && !$store.shell.error" class="muted">disconnected</span>
+        <span x-show="$store.shell.error" class="shell-status-err" x-text="$store.shell.error"></span>
+        <span x-show="$store.shell.containerName" class="shell-container-name mono"
+              x-text="'· ' + $store.shell.containerName"></span>
+    </div>
+
+    <pre id="shell-output" class="shell-output" x-text="$store.shell.output"></pre>
+
+    <form class="shell-input-bar" @submit.prevent="$store.shell.send()">
+        <span class="shell-prompt mono">$</span>
+        <input type="text"
+               class="shell-input"
+               x-model="$store.shell.input"
+               autocomplete="off"
+               spellcheck="false"
+               :disabled="!$store.shell.connected"
+               placeholder="Type a command and press Enter…">
+    </form>
+</aside>

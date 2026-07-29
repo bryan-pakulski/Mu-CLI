@@ -35,6 +35,7 @@ import { SecurityScreen } from '../screens/SecurityScreen';
 import { LoopScreen } from '../screens/LoopScreen';
 import { DebugScreen } from '../screens/DebugScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
+import { ShellScreen } from '../screens/ShellScreen';
 
 export type RootStackParamList = {
   Chat: undefined;
@@ -57,6 +58,7 @@ export type RootStackParamList = {
   Connection: undefined;
   Modes: undefined;
   Prompts: undefined;
+  Shell: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -84,6 +86,7 @@ const PANEL_SCREENS: {
   { name: 'Connection', title: 'Connection', component: ConnectionScreen },
   { name: 'Modes', title: 'Modes', component: ModesScreen },
   { name: 'Prompts', title: 'Pending prompts', component: PromptsScreen },
+  { name: 'Shell', title: 'Shell', component: ShellScreen },
 ];
 
 function ChatScreenWithChrome() {

@@ -29,6 +29,18 @@ export type PromptShape =
   | 'tool_approval'
   | string;
 
+export interface QuizQuestion {
+  qid: string;
+  prompt: string;
+  kind: 'multiple_choice' | 'fill_blank';
+  options?: string[];
+  correct_index?: number;
+  expected_answer?: string;
+  explanation?: string;
+  case_sensitive?: boolean;
+  expected_pattern?: string;
+}
+
 export interface PendingPrompt {
   id: string;
   shape: PromptShape;
@@ -44,6 +56,8 @@ export interface PendingPrompt {
   tool_name?: string;
   tool_args?: unknown;
   risk?: string;
+  /** Quiz shape: array of questions from the server. */
+  questions?: QuizQuestion[];
   [key: string]: unknown;
 }
 

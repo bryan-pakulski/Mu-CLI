@@ -146,6 +146,14 @@ def build_create_command(
             "-v",
             f"{session_dir}:{ref.container_volume}/sessions/{session_name}:rw",
         ]
+    # Bind-mount the host trace directory into the container so trace JSONL
+    # files written by the in-container TraceEmitter are immediately visible
+    # to the host's trace router (/api/traces) and CLI.  Without this mount
+    # traces land in the Docker named volume (mucli-*-home) and are invisible
+    # to the host — the "trace stats not available in container mode" bug.
+    host_trace_dir = os.path.join(os.path.abspath(os.path.expanduser(HISTORY_DIR)), "trace")
+    os.makedirs(host_trace_dir, exist_ok=True)
+    command += ["-v", f"{host_trace_dir}:{ref.container_volume}/trace:rw"]
     if ref.workspace_volume:
         command += ["-v", f"{ref.workspace_volume}:/workspace:rw"]
     for mount in ref.mounts:

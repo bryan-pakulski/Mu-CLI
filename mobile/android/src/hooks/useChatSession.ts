@@ -401,6 +401,10 @@ export function useChatSession(activeSessionName: string | null) {
 
     void syncSessionState();
     const poll = setInterval(() => {
+      // Skip polling while SSE is connected and streaming — the event stream
+      // already drives state updates. Polling during active streaming causes
+      // unnecessary network calls and can trigger redundant history loads.
+      if (sseConnectedRef.current && busyRef.current) return;
       void syncSessionState();
     }, SESSION_POLL_MS);
 

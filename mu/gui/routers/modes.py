@@ -18,6 +18,12 @@ def _has_workspace(session) -> bool:
     return bool(fc and getattr(fc, "folders", None))
 
 
+def _is_container_session(session) -> bool:
+    if session is None:
+        return False
+    return getattr(session, "container_ref", None) is not None
+
+
 @router.get("")
 async def list_modes(request: Request):
     session = request.app.state.session_by_name()
@@ -46,6 +52,7 @@ async def list_modes(request: Request):
     # render off session state and never need a workspace; the Files panel
     # is the exception (it edits workspace files), so it honors
     # `needs_workspace` and is disabled when no folder is attached.
+    has_container = _is_container_session(session)
     views = [
         {
             "name": panel["name"],
@@ -53,7 +60,12 @@ async def list_modes(request: Request):
             "description": panel["description"],
             "view_only": True,
             "needs_workspace": bool(panel.get("needs_workspace")),
-            "disabled": bool(panel.get("needs_workspace")) and not has_ws,
+            "needs_container": bool(panel.get("needs_container")),
+            "disabled": (
+                bool(panel.get("needs_workspace")) and not has_ws
+            ) or (
+                bool(panel.get("needs_container")) and not has_container
+            ),
             # External full-page routes (e.g. the Trace Analyzer) open in a
             # new tab rather than rendering as an in-page panel.
             "external": bool(panel.get("external")),
@@ -64,7 +76,13 @@ async def list_modes(request: Request):
         }
         for panel in GUI_VIEW_PANELS
     ]
-    return {"current": current, "modes": modes, "views": views, "has_workspace": has_ws}
+    return {
+        "current": current,
+        "modes": modes,
+        "views": views,
+        "has_workspace": has_ws,
+        "has_container": has_container,
+    }
 
 
 @router.post("/{name}")

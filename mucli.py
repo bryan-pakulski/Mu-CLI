@@ -677,6 +677,8 @@ def print_splash(session):
     mode_meta = AGENT_MODE_METADATA.get(str(agent_mode), {})
     mode_description = mode_meta.get("description", "")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
+    _session_type_glyph = {"chat": "○", "workspace": "▱", "container": "◇"}
+    session_type_glyph = _session_type_glyph.get(session_type, "▱")
 
     # Workspace Folder info
     folders = session.folder_context.folders
@@ -697,7 +699,7 @@ def print_splash(session):
     [bold magenta]System:[/bold magenta]   {sys_status}                                
     [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
-    [bold magenta]Type:[/bold magenta]     [bold cyan]{session_type}[/bold cyan]
+    [bold magenta]Type:[/bold magenta]     [bold cyan]{session_type_glyph} {session_type}[/bold cyan]
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
@@ -925,9 +927,9 @@ def choose_session(session_manager):
             session_manager._startup_session_type = prompt_choice(
                 "Session type",
                 [
-                    ("chat", "Chat", "Conversation only; no filesystem tools"),
-                    ("workspace", "Workspace", "Attach a host folder and enable workspace tools"),
-                    ("container", "Container", "Run tools inside an isolated managed environment"),
+                    ("chat", "○ Chat", "Conversation only; no filesystem tools"),
+                    ("workspace", "▱ Workspace", "Attach a host folder and enable workspace tools"),
+                    ("container", "◇ Container", "Run tools inside an isolated managed environment"),
                 ],
                 default="workspace",
             )
@@ -936,8 +938,20 @@ def choose_session(session_manager):
         if not sessions:
             console.print("[dim]No saved sessions. Choose create to begin.[/dim]")
             continue
+        # Build options with session-type glyph prefix.
+        _session_type_glyph = {
+            "chat": "○",
+            "workspace": "▱",
+            "container": "◇",
+        }
+        sessions_typed = session_manager.get_session_list_with_type()
         session_options = [
-            (name, name, "Load or manage this session") for name in sessions
+            (
+                name,
+                f"{_session_type_glyph.get(st, '▱')} {name}",
+                f"{st} · Load or manage this session",
+            )
+            for name, st in sessions_typed
         ]
         session_options.append(
             ("__back__", "Back", "Return to the MuCLI launcher")

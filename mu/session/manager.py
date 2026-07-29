@@ -767,6 +767,26 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             sessions.append(os.path.basename(os.path.dirname(f)))
         return sorted(sessions)
 
+    def get_session_list_with_type(self):
+        """Return ``[(name, session_type), …]`` sorted by name.
+
+        Reads ``variables.session_type`` from each saved session.json.
+        Falls back to ``"workspace"`` when the key is missing or unreadable.
+        """
+        files = glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json"))
+        result = []
+        for f in files:
+            name = os.path.basename(os.path.dirname(f))
+            st = "workspace"
+            try:
+                with open(f, "r") as fh:
+                    data = json.load(fh)
+                st = str((data.get("variables") or {}).get("session_type") or "workspace")
+            except (OSError, ValueError):
+                pass
+            result.append((name, st))
+        return sorted(result, key=lambda pair: pair[0])
+
     def delete_session(self, name):
         logger.info(f"Deleting session: {name}")
         if name == self.current_session_name:

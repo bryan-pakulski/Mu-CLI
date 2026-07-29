@@ -27,7 +27,10 @@ export function subscribeToEvents(handlers: SSEHandlers): SSESubscription {
 
   const es = new EventSource(url, {
     headers: { Accept: 'text/event-stream' },
-    pollingInterval: 3000,
+    // 0 = push-based (disable polling). Non-zero values cause react-native-sse
+    // to batch events and poll on an interval, which makes streaming appear
+    // chunky/slow compared to the web GUI's native EventSource.
+    pollingInterval: 0,
   });
 
   es.addEventListener('open', () => {

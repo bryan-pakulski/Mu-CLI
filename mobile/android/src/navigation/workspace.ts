@@ -17,7 +17,8 @@ export type WorkspaceScreenName =
   | 'Traces'
   | 'Audio'
   | 'Providers'
-  | 'Connection';
+  | 'Connection'
+  | 'Shell';
 
 export type WorkspaceCategoryId = 'workflows' | 'context' | 'review' | 'runtime';
 
@@ -84,6 +85,7 @@ export const WORKSPACE_CATEGORIES: readonly WorkspaceCategory[] = [
     items: [
       { screen: 'Providers', title: 'Providers', description: 'Choose a provider and model.', icon: 'server-outline' },
       { screen: 'Connection', title: 'Connection', description: 'Configure and test the MuCLI server.', icon: 'wifi-outline' },
+      { screen: 'Shell', title: 'Shell', description: 'Open an interactive terminal into the session container.', icon: 'terminal-outline' },
     ],
   },
 ] as const;

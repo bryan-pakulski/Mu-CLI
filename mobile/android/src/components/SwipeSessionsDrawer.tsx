@@ -123,6 +123,13 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
     return colors.textDim;
   };
 
+  const typeIcon = (session: SessionSummary): keyof typeof Ionicons.glyphMap => {
+    const t = session.session_type;
+    if (t === 'container') return 'cube-outline';
+    if (t === 'chat') return 'chatbubble-ellipses-outline';
+    return 'folder-open-outline';
+  };
+
   return (
     <>
     <SafeAreaModal visible={visible && !createOpen} transparent animationType="fade" onRequestClose={onClose}>
@@ -167,10 +174,12 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   activeSessionName === item.name && { backgroundColor: colors.bgHover },
                 ]}
               >
-                <View style={[styles.statusDot, { backgroundColor: statusColor(item) }]} />
+                <View style={[styles.typeIconWrap, { backgroundColor: colors.bgHover }]}>
+                  <Ionicons name={typeIcon(item)} size={17} color={statusColor(item)} />
+                </View>
                 <View style={styles.rowCopy}>
                   <Text variant="sm" style={styles.rowName} numberOfLines={1}>{item.name}</Text>
-                  <Text variant="xs" dim>{item.is_busy ? 'Running' : item.is_loaded ? 'Loaded' : 'Saved'}</Text>
+                  <Text variant="xs" dim>{item.is_busy ? 'Running' : item.is_loaded ? 'Loaded' : 'Saved'}{item.session_type ? ` · ${item.session_type}` : ''}</Text>
                 </View>
                 <TouchableOpacity onPress={() => unloadSession(item)} style={styles.rowAction}>
                   <Ionicons name="remove-circle-outline" size={19} color={colors.textDim} />
@@ -207,6 +216,7 @@ const styles = StyleSheet.create({
   empty: { padding: 28, alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', minHeight: 62, borderRadius: 15, paddingHorizontal: 12, marginBottom: 4 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 11 },
+  typeIconWrap: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
   rowCopy: { flex: 1 },
   rowName: { fontWeight: '600' },
   rowAction: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },

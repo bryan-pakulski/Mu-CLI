@@ -1087,6 +1087,19 @@ GUI_VIEW_PANELS = [
         ),
     },
     {
+        "name": "shell",
+        "display_name": "Shell",
+        "description": (
+            "Interactive shell into the session's attached container. "
+            "Send commands and see output in real time via WebSocket. "
+            "Requires a container session."
+        ),
+        # Unlike the other view panels, Shell only makes sense with a
+        # container-backed session. modes.py honors this to disable the
+        # entry (and the tools button) when no container is attached.
+        "needs_container": True,
+    },
+    {
         "name": "trace",
         "display_name": "Trace Analyzer",
         "description": (

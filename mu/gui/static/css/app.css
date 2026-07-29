@@ -4776,3 +4776,26 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 .quiet-action:hover{background:var(--bg-hover);color:var(--text)}
 .quiet-action-accent{color:var(--accent)}
 @media(max-width:520px){.welcome-session-row{flex-wrap:nowrap}.welcome-session-row button{flex:0 0 32px}.welcome-session-open{display:none}}
+
+/* ------------------------------------------------------------ shell panel
+ * Container-mode interactive shell — WebSocket-backed terminal in the RHS
+ * panel. Output in a scrollable <pre>, input in a text field below.
+ */
+
+.shell-panel { display:flex; flex-direction:column; min-height:0; padding:0; }
+.app.has-panel .mode-panel.shell-panel { display:flex; }
+.shell-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:18px 18px 12px; border-bottom:1px solid var(--border); }
+.shell-panel-head > div { min-width:0; }
+.shell-panel-head p { margin:5px 0 0; color:var(--text-dim); font-size:.76rem; line-height:1.45; }
+.shell-panel-actions { display:flex; gap:6px; }
+.shell-panel-actions .icon-btn { flex:0 0 auto; width:auto; min-width:30px; height:30px; padding:0 8px; font-size:10.5px; }
+.shell-panel-status { display:flex; align-items:center; gap:8px; min-height:34px; padding:0 18px; color:var(--text-dim); font:500 .69rem/1 var(--mono); border-bottom:1px solid var(--border); }
+.shell-status-ok { color:var(--accent); }
+.shell-status-err { color:var(--err); }
+.shell-container-name { color:var(--text-dimmer); }
+.shell-output { flex:1; min-height:0; overflow:auto; margin:0; padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.5; color:var(--text-soft); white-space:pre-wrap; word-break:break-word; background:var(--bg-lift); }
+.shell-input-bar { display:flex; align-items:center; gap:8px; padding:10px 16px; border-top:1px solid var(--border); background:var(--bg); }
+.shell-prompt { color:var(--accent); font-size:13px; flex:0 0 auto; }
+.shell-input { flex:1; border:0; background:transparent; color:var(--text); font-family:var(--mono); font-size:12.5px; outline:none; }
+.shell-input::placeholder { color:var(--text-dimmer); }
+.shell-input:disabled { opacity:.45; }

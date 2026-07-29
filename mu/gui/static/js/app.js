@@ -825,6 +825,108 @@ document.addEventListener("alpine:init", () => {
     // features, files, etc.). Mirrors the TUI's SlashCommandCompleter
     // tree from mu/ui/input.py.
 
+    // ── Shell panel (container mode) ───────────────────────────────────
+    //
+    // WebSocket-backed interactive shell into the session's attached
+    // container. Opens via the tools menu → Shell entry (only visible
+    // for container sessions). Uses the same /api/containers/{name}/shell
+    // WS endpoint as the containers page modal.
+
+    Alpine.store("shell", {
+        output: "",
+        input: "",
+        containerName: null,
+        connected: false,
+        connecting: false,
+        error: null,
+        _socket: null,
+
+        async load() {
+            // Called when the shell panel becomes active (via setView).
+            // Resolve the current session's container name, then connect.
+            if (this._socket) this.disconnect();
+            this.output = "";
+            this.error = null;
+            this.containerName = null;
+
+            try {
+                const r = await fetch("/api/sessions/active");
+                const d = await r.json();
+                const container = d.container;
+                if (!container || !container.name) {
+                    this.error = "No container attached to this session.";
+                    return;
+                }
+                this.containerName = container.name;
+                this.connect();
+            } catch (e) {
+                this.error = `Failed to resolve container: ${e}`;
+            }
+        },
+
+        connect() {
+            if (!this.containerName) return;
+            this.connecting = true;
+            this.connected = false;
+            const proto = location.protocol === "https:" ? "wss:" : "ws:";
+            const url = `${proto}//${location.host}/api/containers/${encodeURIComponent(this.containerName)}/shell`;
+            const socket = new WebSocket(url);
+            this._socket = socket;
+
+            socket.onopen = () => {
+                this.connecting = false;
+                this.connected = true;
+                this.error = null;
+            };
+            socket.onmessage = (event) => {
+                // Strip ANSI escape sequences for clean display in <pre>.
+                this.output += String(event.data).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+                this._scroll();
+            };
+            socket.onclose = () => {
+                this.connecting = false;
+                this.connected = false;
+                if (this._socket === socket) {
+                    this.output += "\n[shell disconnected]\n";
+                    this._socket = null;
+                }
+            };
+            socket.onerror = () => {
+                this.connecting = false;
+                this.connected = false;
+                this.error = "Shell connection failed. Is the container running?";
+            };
+        },
+
+        send(command) {
+            const cmd = command !== undefined ? command : this.input;
+            if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                this._socket.send(cmd + "\n");
+                this.input = "";
+            }
+        },
+
+        disconnect() {
+            if (this._socket) {
+                this._socket.close();
+                this._socket = null;
+            }
+            this.connected = false;
+            this.connecting = false;
+        },
+
+        clear() {
+            this.output = "";
+        },
+
+        _scroll() {
+            this.$nextTick(() => {
+                const el = document.getElementById("shell-output");
+                if (el) el.scrollTop = el.scrollHeight;
+            });
+        },
+    });
+
     Alpine.store("cmdComplete", {
         commands: [],
         visible: false,
@@ -1079,7 +1181,7 @@ document.addEventListener("alpine:init", () => {
         realMode: "default",
         modes: [],
         views: [],
-        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files", "artifacts"],
+        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files", "artifacts", "shell"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();

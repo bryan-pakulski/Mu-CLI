@@ -391,10 +391,19 @@ class ToolResultCache:
     # ----------------------------------------------------- range memo (spec #7)
 
     @staticmethod
-    def _range_key(tool_args: Any) -> Optional[tuple]:
+    def _range_key(tool_name: str, tool_args: Any) -> Optional[tuple]:
         """Normalize a read tool's args into (path, (start, end)) for the
         range memo. ``read_file`` (whole file) → (filename, (1, None)).
-        ``get_chunk`` → (file, (start_line, end_line)). None otherwise."""
+        ``get_chunk`` → (file, (start_line, end_line)). None otherwise.
+
+        Only read-only locator tools are eligible — write tools
+        (``write_file``, ``apply_diff``, ``search_and_replace_file``) must
+        NEVER hit the range memo, otherwise a write to a previously-read
+        file is silently short-circuited to a dedup marker and the write
+        never executes (P0 execution-flow breakage).
+        """
+        if tool_name not in _LOCATOR_TOOLS:
+            return None
         if not isinstance(tool_args, dict):
             return None
         path = ToolResultCache._path_arg(tool_args)
@@ -412,7 +421,7 @@ class ToolResultCache:
         keyed by the file's current content_hash so a later overlapping read
         of an unchanged file can dedup. Best-effort."""
         try:
-            rk = self._range_key(tool_args)
+            rk = self._range_key(tool_name, tool_args)
             if rk is None:
                 return
             path, (start, end) = rk
@@ -432,7 +441,7 @@ class ToolResultCache:
         can emit a dedup marker instead of re-injecting the content. None on
         any miss / stale / error."""
         try:
-            rk = self._range_key(tool_args)
+            rk = self._range_key(tool_name, tool_args)
             if rk is None:
                 return None
             path, (start, end) = rk

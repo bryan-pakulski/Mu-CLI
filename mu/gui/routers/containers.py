@@ -392,9 +392,18 @@ async def delete_container_template(name: str, request: Request):
 async def managed_container_shell(websocket: WebSocket, name: str):
     client = getattr(websocket, "client", None)
     host = str(getattr(client, "host", "") or "")
-    if host and host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
-        await websocket.close(code=1008, reason="Container shell is restricted to localhost")
-        return
+    if not host or host in {"127.0.0.1", "::1", "localhost", "testclient"}:
+        pass
+    else:
+        try:
+            if ipaddress.ip_address(host).is_private:
+                pass
+            else:
+                await websocket.close(code=1008, reason="Container shell is restricted to localhost or a private network")
+                return
+        except ValueError:
+            await websocket.close(code=1008, reason="Container shell is restricted to localhost or a private network")
+            return
     await websocket.accept()
     supervisor = websocket.app.state.container_supervisor
     try:

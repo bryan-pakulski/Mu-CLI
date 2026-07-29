@@ -477,8 +477,9 @@ async def _run_container_creation_job(
     model: str,
     ollama_vars: Dict[str, Any],
     container_config: Dict[str, Any],
+    existing_container: str | None = None,
 ) -> None:
-    """Build and load a container session after the create request returns."""
+    """Build or attach a container session after the create request returns."""
 
     def report_progress(stage: str, message: str) -> None:
         _set_container_creation_status(
@@ -492,20 +493,42 @@ async def _run_container_creation_job(
         _append_container_creation_output(request, name, stream, text)
 
     container_started = False
+    attached_existing = False
     try:
-        await asyncio.to_thread(
-            request.app.state.container_supervisor.create,
-            container_name=container_config["container_name"],
-            session_name=name,
-            dockerfile=container_config["dockerfile"],
-            template_name=container_config.get("template_name"),
-            mounts=container_config["mounts"],
-            egress_allow=container_config["egress_allow"],
-            egress_deny=container_config["egress_deny"],
-            supervisor_url=f"http://host.docker.internal:{request.app.state.port}",
-            progress=report_progress,
-            output=report_output,
-        )
+        if existing_container:
+            report_progress(
+                "attaching_container",
+                f"Attaching the session to {existing_container}…",
+            )
+            ref = await asyncio.to_thread(
+                request.app.state.container_supervisor.attach_session,
+                existing_container,
+                name,
+            )
+            attached_existing = True
+            container_config = request.app.state.container_supervisor.configuration(ref.name)
+            session_path = os.path.join(
+                _config.HISTORY_DIR, "sessions", name, "session.json"
+            )
+            with open(session_path, "r", encoding="utf-8") as handle:
+                saved = json.load(handle)
+            saved["container_config"] = dict(container_config)
+            with open(session_path, "w", encoding="utf-8") as handle:
+                json.dump(saved, handle, indent=2)
+        else:
+            await asyncio.to_thread(
+                request.app.state.container_supervisor.create,
+                container_name=container_config["container_name"],
+                session_name=name,
+                dockerfile=container_config["dockerfile"],
+                template_name=container_config.get("template_name"),
+                mounts=container_config["mounts"],
+                egress_allow=container_config["egress_allow"],
+                egress_deny=container_config["egress_deny"],
+                supervisor_url=f"http://host.docker.internal:{request.app.state.port}",
+                progress=report_progress,
+                output=report_output,
+            )
         container_started = True
         _set_container_creation_status(
             request,
@@ -526,6 +549,16 @@ async def _run_container_creation_job(
     except Exception as exc:  # keep the status endpoint alive for diagnostics
         detail = str(getattr(exc, "detail", None) or exc)
         report_output("stderr", detail)
+        if attached_existing:
+            try:
+                await asyncio.to_thread(
+                    request.app.state.container_supervisor.detach_session,
+                    existing_container or container_config["container_name"],
+                    name,
+                    stop_if_idle=False,
+                )
+            except Exception:
+                pass
         if not container_started:
             session_dir = os.path.join(_config.HISTORY_DIR, "sessions", name)
             shutil.rmtree(session_dir, ignore_errors=True)
@@ -550,6 +583,8 @@ async def create_session(request: Request, payload: Dict[str, Any]):
     activate = bool(payload.get("activate", True))
     background_container = bool(payload.get("background_container", False))
     session_type = normalize_session_type(payload.get("session_type"))
+    container_source = str(payload.get("container_source") or "new").strip().lower()
+    existing_container = str(payload.get("existing_container") or "").strip() or None
 
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
@@ -600,26 +635,40 @@ async def create_session(request: Request, payload: Dict[str, Any]):
 
     container_config: Dict[str, Any] | None = None
     if session_type == "container":
-        container_name = str(payload.get("container_name") or f"mucli-{name}").strip()
-        mounts = [item for item in (payload.get("mounts") or []) if isinstance(item, dict)]
-        egress_allow = [
-            str(item).strip()
-            for item in (payload.get("egress_allow") or DEFAULT_EGRESS_ALLOW)
-            if str(item).strip()
-        ]
-        egress_deny = [
-            str(item).strip()
-            for item in (payload.get("egress_deny") or [])
-            if str(item).strip()
-        ]
-        container_config = {
-            "container_name": container_name,
-            "dockerfile": payload.get("dockerfile") or None,
-            "template_name": str(payload.get("template_name") or "") or None,
-            "mounts": mounts,
-            "egress_allow": egress_allow,
-            "egress_deny": egress_deny,
-        }
+        if container_source not in {"new", "existing"}:
+            raise HTTPException(status_code=400, detail="container_source must be new or existing")
+        if container_source == "existing":
+            if not existing_container:
+                raise HTTPException(status_code=400, detail="existing_container is required")
+            ref = request.app.state.container_supervisor.resolve(existing_container)
+            if ref is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Managed container not found: {existing_container}",
+                )
+            container_config = request.app.state.container_supervisor.configuration(ref.name)
+            existing_container = ref.name
+        else:
+            container_name = str(payload.get("container_name") or f"mucli-{name}").strip()
+            mounts = [item for item in (payload.get("mounts") or []) if isinstance(item, dict)]
+            egress_allow = [
+                str(item).strip()
+                for item in (payload.get("egress_allow") or DEFAULT_EGRESS_ALLOW)
+                if str(item).strip()
+            ]
+            egress_deny = [
+                str(item).strip()
+                for item in (payload.get("egress_deny") or [])
+                if str(item).strip()
+            ]
+            container_config = {
+                "container_name": container_name,
+                "dockerfile": payload.get("dockerfile") or None,
+                "template_name": str(payload.get("template_name") or "") or None,
+                "mounts": mounts,
+                "egress_allow": egress_allow,
+                "egress_deny": egress_deny,
+            }
         data["container_config"] = container_config
 
     path = os.path.join(_config.HISTORY_DIR, "sessions", name)
@@ -658,6 +707,7 @@ async def create_session(request: Request, payload: Dict[str, Any]):
                     model=model,
                     ollama_vars=ollama_vars,
                     container_config=container_config,
+                    existing_container=existing_container if container_source == "existing" else None,
                 ),
                 name=f"mucli-container-create-{name}",
             )
@@ -680,6 +730,7 @@ async def create_session(request: Request, payload: Dict[str, Any]):
             model=model,
             ollama_vars=ollama_vars,
             container_config=container_config,
+            existing_container=existing_container if container_source == "existing" else None,
         )
         status = _get_container_creation_status(request, name)
         if status.get("state") == "error":

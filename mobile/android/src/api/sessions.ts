@@ -9,11 +9,23 @@ export interface ContainerMount {
 }
 
 export interface ContainerCreateOptions {
+  source?: 'new' | 'existing';
+  existingContainer?: string;
   containerName: string;
+  templateName?: string;
   dockerfile?: string;
   mounts?: ContainerMount[];
   egressAllow?: string[];
   egressDeny?: string[];
+}
+
+export interface ContainerCreationStatus {
+  name: string;
+  state: 'idle' | 'running' | 'ready' | 'error';
+  stage: string;
+  message: string;
+  detail?: string;
+  logs?: Array<{ seq: number; stream: string; text: string }>;
 }
 
 export interface ContainerDefaultsResponse {
@@ -98,12 +110,18 @@ export const sessionsApi = {
       ollama_mode: options?.ollamaMode,
       ollama_host: options?.ollamaHost,
       ollama_api_key: options?.ollamaApiKey,
+      background_container: options?.sessionType === 'container',
+      container_source: options?.container?.source || 'new',
+      existing_container: options?.container?.existingContainer,
       container_name: options?.container?.containerName,
+      template_name: options?.container?.templateName,
       dockerfile: options?.container?.dockerfile,
       mounts: options?.container?.mounts,
       egress_allow: options?.container?.egressAllow,
       egress_deny: options?.container?.egressDeny,
     }),
+  getContainerCreationStatus: (name: string, after: number = 0) =>
+    api.get<ContainerCreationStatus>(`/api/sessions/creation-status/${encodeURIComponent(name)}`, { query: { after } }),
   load: (name: string, provider?: string, model?: string) =>
     api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/load`, { provider, model }),
   focus: (name: string) =>

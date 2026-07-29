@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProviderInfo, providersApi } from '../api/providers';
+import { containersApi, ManagedContainer, ContainerTemplateSummary } from '../api/containers';
 import { ContainerMount, SessionType, sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
@@ -24,44 +25,19 @@ export type NewSessionSheetProps = {
   onCreated: (session: { name: string; provider: string; model: string }) => void;
 };
 
-const SESSION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const DEFAULT_EGRESS = 'api.openai.com\napi.anthropic.com\ngenerativelanguage.googleapis.com\nollama.com';
-const DEFAULT_DOCKERFILE = String.raw`FROM ubuntu:24.04
+type EditorMode = 'dockerfile' | 'network' | null;
+type ContainerSource = 'new' | 'existing';
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    MUCLI_CONTAINER_MODE=1 \
-    PYTHONPATH=/opt/mucli
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git patch python3 python3-pip python3-venv ripgrep fd-find \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY . /opt/mucli
-RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/requirements.txt
-
-WORKDIR /workspace
-EXPOSE 9090
-ENTRYPOINT ["python3", "-m", "mu.container.worker"]
-`;
-
-type SessionTypeMeta = {
-  type: SessionType;
-  label: string;
-  detail: string;
-  icon: keyof typeof Ionicons.glyphMap;
-};
-
-const SESSION_TYPES: SessionTypeMeta[] = [
-  { type: 'chat', label: 'Chat', detail: 'Research and conversation without local tools.', icon: 'chatbubble-ellipses-outline' },
-  { type: 'workspace', label: 'Workspace', detail: 'Tools run on the MuCLI host in attached folders.', icon: 'folder-open-outline' },
-  { type: 'container', label: 'Container', detail: 'Disposable Docker sandbox with native tools and isolated egress.', icon: 'cube-outline' },
+const SESSION_TYPES: Array<{ type: SessionType; label: string; detail: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { type: 'chat', label: 'Chat', detail: 'Conversation and research without local execution.', icon: 'chatbubble-ellipses-outline' },
+  { type: 'workspace', label: 'Workspace', detail: 'Host tools scoped to an attached folder.', icon: 'folder-open-outline' },
+  { type: 'container', label: 'Container', detail: 'Isolated Docker tools with controlled egress.', icon: 'cube-outline' },
 ];
 
 export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheetProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const [step, setStep] = useState(1);
   const [sessionType, setSessionType] = useState<SessionType>('workspace');
   const [name, setName] = useState('');
   const [workspace, setWorkspace] = useState('');
@@ -69,626 +45,226 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const [provider, setProvider] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
-  const [loadingProviders, setLoadingProviders] = useState(false);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [ollamaMode, setOllamaMode] = useState<'local' | 'cloud'>('local');
-  const [ollamaHost, setOllamaHost] = useState('');
   const [ollamaApiKey, setOllamaApiKey] = useState('');
+  const [ollamaKeySet, setOllamaKeySet] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [containerSource, setContainerSource] = useState<ContainerSource>('new');
+  const [containers, setContainers] = useState<ManagedContainer[]>([]);
+  const [templates, setTemplates] = useState<ContainerTemplateSummary[]>([]);
+  const [existingContainer, setExistingContainer] = useState('');
   const [containerName, setContainerName] = useState('');
-  const [dockerfile, setDockerfile] = useState(DEFAULT_DOCKERFILE);
-  const [egressAllow, setEgressAllow] = useState(DEFAULT_EGRESS);
+  const [templateName, setTemplateName] = useState('');
+  const [dockerfile, setDockerfile] = useState('');
+  const [egressAllow, setEgressAllow] = useState('');
   const [egressDeny, setEgressDeny] = useState('');
-  const [containerEditor, setContainerEditor] = useState<'dockerfile' | 'network' | null>(null);
   const [mounts, setMounts] = useState<ContainerMount[]>([]);
   const [mountHost, setMountHost] = useState('');
-  const [mountContainer, setMountContainer] = useState('/workspace/project');
-  const [mountMode, setMountMode] = useState<'ro' | 'rw'>('rw');
+  const [mountTarget, setMountTarget] = useState('/workspace/project');
+  const [mountMode, setMountMode] = useState<'rw' | 'ro'>('rw');
+  const [containerEditor, setContainerEditor] = useState<EditorMode>(null);
+  const [creating, setCreating] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const reset = useCallback(() => {
-    setSessionType('workspace');
-    setName('');
-    setWorkspace('');
-    setProvider('');
-    setModels([]);
-    setModel('');
-    setError(null);
-    setOllamaMode('local');
-    setOllamaHost('');
-    setOllamaApiKey('');
-    setContainerName('');
-    setDockerfile(DEFAULT_DOCKERFILE);
-    setEgressAllow(DEFAULT_EGRESS);
-    setEgressDeny('');
-    setContainerEditor(null);
-    setMounts([]);
-    setMountHost('');
-    setMountContainer('/workspace/project');
-    setMountMode('rw');
+    setStep(1); setSessionType('workspace'); setName(''); setWorkspace(''); setProvider(''); setModels([]); setModel('');
+    setOllamaMode('local'); setOllamaApiKey(''); setContainerSource('new'); setExistingContainer(''); setContainerName('');
+    setTemplateName(''); setMounts([]); setMountHost(''); setMountTarget('/workspace/project'); setMountMode('rw'); setContainerEditor(null);
+    setCreating(false); setProgress(''); setError(null);
   }, []);
 
-  const loadContainerDefaults = useCallback(async () => {
+  const loadInitial = useCallback(async () => {
     try {
-      const defaults = await sessionsApi.getContainerDefaults();
-      setDockerfile(defaults.dockerfile || DEFAULT_DOCKERFILE);
-      setEgressAllow((defaults.egress_allow || []).join('\n') || DEFAULT_EGRESS);
-      setEgressDeny((defaults.egress_deny || []).join('\n'));
-    } catch {
-      // The bundled defaults keep creation usable with an older GUI daemon.
-    }
-  }, []);
-
-  const loadProviders = useCallback(async () => {
-    setLoadingProviders(true);
-    setError(null);
-    try {
-      const response = await providersApi.list();
-      const available = response.providers || [];
+      const [providerResponse, containerResponse, defaults] = await Promise.all([
+        providersApi.list(), containersApi.list(), sessionsApi.getContainerDefaults(),
+      ]);
+      const available = providerResponse.providers || [];
       setProviders(available);
       const first = available.find(item => item.configured) || available[0];
       if (first) setProvider(first.name);
+      const ollama = available.find(item => item.name === 'ollama');
+      setOllamaKeySet(Boolean(ollama?.cloud_key_set));
+      setContainers(containerResponse.containers || []);
+      setTemplates(containerResponse.templates || []);
+      setDockerfile(defaults.dockerfile || '');
+      setEgressAllow((defaults.egress_allow || []).join('\n'));
+      setEgressDeny((defaults.egress_deny || []).join('\n'));
     } catch (cause) {
-      setError(`Could not load providers: ${String(cause)}`);
-    } finally {
-      setLoadingProviders(false);
+      setError(`Could not load session options: ${String(cause)}`);
     }
   }, []);
-
-  const loadModels = useCallback(async (providerName: string) => {
-    if (!providerName) return;
-    setLoadingModels(true);
-    setModels([]);
-    setModel('');
-    setError(null);
-    try {
-      const response = await providersApi.listModels(
-        providerName,
-        providerName === 'ollama' ? ollamaMode : undefined,
-        providerName === 'ollama' && ollamaMode === 'cloud' ? ollamaApiKey : undefined,
-      );
-      const available = response.models || [];
-      setModels(available);
-      if (available.length > 0) setModel(available[0]);
-      if (response.error) setError(response.error);
-    } catch (cause) {
-      setError(`Model discovery failed. Enter a model manually. ${String(cause)}`);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [ollamaApiKey, ollamaMode]);
 
   useEffect(() => {
     if (!visible) return;
     reset();
-    loadProviders();
-    loadContainerDefaults();
-  }, [loadContainerDefaults, loadProviders, reset, visible]);
+    loadInitial();
+  }, [loadInitial, reset, visible]);
 
-  useEffect(() => {
-    if (!visible || !provider) return;
-    loadModels(provider);
-  }, [loadModels, provider, visible]);
-
-  useEffect(() => {
-    if (sessionType === 'container' && !containerName && name.trim()) {
-      setContainerName(`mucli-${name.trim()}`);
+  const loadModels = useCallback(async () => {
+    if (!provider) return;
+    if (provider === 'ollama' && ollamaMode === 'cloud' && !ollamaApiKey && !ollamaKeySet) {
+      setModels([]); setModel(''); return;
     }
-  }, [containerName, name, sessionType]);
+    setLoadingModels(true); setError(null);
+    try {
+      const response = await providersApi.listModels(provider, provider === 'ollama' ? ollamaMode : undefined, provider === 'ollama' && ollamaMode === 'cloud' ? ollamaApiKey : undefined);
+      setModels(response.models || []);
+      setModel(response.models?.[0] || '');
+      if (response.error) setError(response.error);
+    } catch (cause) {
+      setError(`Model discovery failed: ${String(cause)}`);
+    } finally { setLoadingModels(false); }
+  }, [ollamaApiKey, ollamaKeySet, ollamaMode, provider]);
 
-  const nameError = useMemo(() => {
-    if (!name.trim()) return null;
-    return SESSION_NAME_PATTERN.test(name.trim())
-      ? null
-      : 'Use letters, numbers, dots, dashes, or underscores.';
-  }, [name]);
+  useEffect(() => { if (visible && provider) loadModels(); }, [loadModels, provider, visible]);
+  useEffect(() => { if (sessionType === 'container' && name.trim() && !containerName) setContainerName(`mucli-${name.trim()}`); }, [containerName, name, sessionType]);
 
-  const containerError = useMemo(() => {
-    if (sessionType !== 'container') return null;
-    if (!containerName.trim()) return 'Container name is required.';
-    const invalidMount = mounts.find(item => !item.host_path || !item.container_path);
-    return invalidMount ? 'Every mount requires host and container paths.' : null;
-  }, [containerName, mounts, sessionType]);
-
-  const canCreate = Boolean(
-    name.trim()
-      && !nameError
-      && !containerError
-      && provider
-      && model.trim()
-      && !creating,
-  );
+  const validName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name.trim());
+  const canContinue = useMemo(() => {
+    if (step === 1) return validName;
+    if (step === 2) return Boolean(provider && model.trim());
+    if (step === 3 && sessionType === 'container') return containerSource === 'existing' ? Boolean(existingContainer) : Boolean(containerName.trim());
+    return true;
+  }, [containerName, containerSource, existingContainer, model, provider, sessionType, step, validName]);
 
   const addMount = () => {
-    const host = mountHost.trim();
-    const target = mountContainer.trim();
+    const host = mountHost.trim(); const target = mountTarget.trim();
     if (!host || !target) return;
-    if (mounts.some(item => item.container_path === target)) {
-      setError(`Container path already mounted: ${target}`);
-      return;
-    }
+    if (mounts.some(item => item.host_path === host || item.container_path === target)) { setError('That folder or container target is already mounted.'); return; }
     setMounts(current => [...current, { host_path: host, container_path: target, mode: mountMode }]);
-    setMountHost('');
-    setMountContainer('/workspace/project');
+    setMountHost(''); setMountTarget('/workspace/project');
   };
 
-  const createSession = async () => {
-    if (!canCreate) return;
-    setCreating(true);
-    setError(null);
+  const pollCreation = async () => {
+    let after = 0;
+    for (;;) {
+      const status = await sessionsApi.getContainerCreationStatus(name.trim(), after);
+      setProgress(status.message || status.stage);
+      for (const line of status.logs || []) after = Math.max(after, line.seq);
+      if (status.state === 'ready') return;
+      if (status.state === 'error') throw new Error(status.detail || status.message);
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
+  };
+
+  const create = async () => {
+    if (!canContinue || creating) return;
+    setCreating(true); setError(null); setProgress(sessionType === 'container' ? 'Queueing container setup…' : 'Creating session…');
     try {
-      await sessionsApi.create(
-        name.trim(),
-        provider,
-        model.trim(),
-        sessionType === 'workspace' ? workspace.trim() || undefined : undefined,
-        {
-          sessionType,
-          ollamaMode: provider === 'ollama' ? ollamaMode : undefined,
-          ollamaHost: provider === 'ollama' ? ollamaHost.trim() || undefined : undefined,
-          ollamaApiKey: provider === 'ollama' ? ollamaApiKey.trim() || undefined : undefined,
-          container: sessionType === 'container'
-            ? {
-                containerName: containerName.trim(),
-                dockerfile: dockerfile.trim() || undefined,
-                mounts,
-                egressAllow: splitLines(egressAllow),
-                egressDeny: splitLines(egressDeny),
-              }
-            : undefined,
-        },
-      );
+      await sessionsApi.create(name.trim(), provider, model.trim(), sessionType === 'workspace' ? workspace.trim() || undefined : undefined, {
+        sessionType,
+        ollamaMode: provider === 'ollama' ? ollamaMode : undefined,
+        ollamaApiKey: provider === 'ollama' ? ollamaApiKey.trim() || undefined : undefined,
+        container: sessionType === 'container' ? {
+          source: containerSource,
+          existingContainer: containerSource === 'existing' ? existingContainer : undefined,
+          containerName: containerName.trim(),
+          templateName: templateName || undefined,
+          dockerfile: templateName ? undefined : dockerfile,
+          mounts,
+          egressAllow: splitLines(egressAllow),
+          egressDeny: splitLines(egressDeny),
+        } : undefined,
+      });
+      if (sessionType === 'container') await pollCreation();
       onCreated({ name: name.trim(), provider, model: model.trim() });
     } catch (cause) {
       setError(String(cause));
-    } finally {
-      setCreating(false);
-    }
+    } finally { setCreating(false); setProgress(''); }
   };
+
+  const stepTitle = ['','Choose a boundary','Select a provider','Configure access','Review and create'][step];
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: colors.bg }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
-          <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}>
-            <Ionicons name="close" size={20} color={colors.text} />
-          </TouchableOpacity>
-          <View style={styles.headerCopy}>
-            <Text style={[styles.title, { color: colors.text }]}>New session</Text>
-            <Text variant="xs" dim>Choose capability, provider, and execution boundary.</Text>
-          </View>
-          <View style={styles.iconSpacer} />
+      <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} disabled={creating} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity>
+          <View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{stepTitle}</Text><Text variant="xs" dim>New session · step {step} of 4</Text></View>
+          <View style={styles.iconButton} />
         </View>
+        <View style={styles.progressDots}>{[1,2,3,4].map(item => <TouchableOpacity key={item} onPress={() => item < step && !creating && setStep(item)} style={[styles.dot, { backgroundColor: item <= step ? colors.accent : colors.bgHover }]} />)}</View>
 
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 96 }]}
-        >
-          <SectionLabel label="Session type" />
-          <View style={styles.typeGrid}>
-            {SESSION_TYPES.map(item => {
-              const selected = item.type === sessionType;
-              return (
-                <TouchableOpacity
-                  key={item.type}
-                  onPress={() => setSessionType(item.type)}
-                  style={[
-                    styles.typeCard,
-                    { backgroundColor: selected ? colors.bgHover : colors.bgLift, borderColor: selected ? colors.accent : colors.border },
-                  ]}
-                >
-                  <View style={styles.typeTitleRow}>
-                    <Ionicons name={item.icon} size={20} color={selected ? colors.accent : colors.textDim} />
-                    <Text variant="sm" style={styles.typeTitle}>{item.label}</Text>
-                    {selected ? <Ionicons name="checkmark-circle" size={18} color={colors.accent} /> : null}
-                  </View>
-                  <Text variant="xs" dim style={styles.typeDetail}>{item.detail}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 18) + 104 }]}>
+          {step === 1 ? <>
+            <Text variant="sm" dim style={styles.intro}>Name the session and choose its execution boundary.</Text>
+            <FieldLabel label="Session name" />
+            <TextInput value={name} onChangeText={setName} autoCapitalize="none" autoCorrect={false} placeholder="project-research" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} />
+            {name.trim() && !validName ? <Text variant="xs" style={{ color: colors.error, marginTop: 7 }}>Use letters, numbers, dots, dashes, or underscores.</Text> : null}
+            <View style={styles.typeGrid}>{SESSION_TYPES.map(item => { const selected = item.type === sessionType; return <TouchableOpacity key={item.type} onPress={() => setSessionType(item.type)} style={[styles.typeCard, { backgroundColor: colors.bgLift, borderColor: selected ? colors.accent : colors.border }]}><View style={[styles.typeIcon, { backgroundColor: colors.bgHover }]}><Ionicons name={item.icon} size={20} color={selected ? colors.accent : colors.textDim} /></View><View style={styles.cardCopy}><Text variant="sm" style={styles.typeTitle}>{item.label}</Text><Text variant="xs" dim style={styles.typeDetail}>{item.detail}</Text></View>{selected ? <Ionicons name="checkmark-circle" size={19} color={colors.accent} /> : null}</TouchableOpacity>; })}</View>
+          </> : null}
 
-          <SectionLabel label="Session" />
-          <FieldLabel label="Name" />
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="my-session"
-            placeholderTextColor={colors.textDim}
-            style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]}
-          />
-          {nameError ? <Text variant="xs" style={{ color: colors.error, marginTop: 6 }}>{nameError}</Text> : null}
+          {step === 2 ? <>
+            <Text variant="sm" dim style={styles.intro}>Select the provider and model for this session.</Text>
+            <FieldLabel label="Provider" />
+            <View style={styles.choiceList}>{providers.map(item => <TouchableOpacity key={item.name} onPress={() => setProvider(item.name)} style={[styles.choiceRow, { backgroundColor: colors.bgLift, borderColor: provider === item.name ? colors.accent : colors.border }]}><Text variant="sm" style={{ fontWeight: '600' }}>{item.name}</Text><Text variant="xs" dim>{item.configured ? 'configured' : 'unconfigured'}</Text></TouchableOpacity>)}</View>
+            {provider === 'ollama' ? <View style={styles.segment}><Segment label="Local" selected={ollamaMode === 'local'} onPress={() => setOllamaMode('local')} /><Segment label="Cloud" selected={ollamaMode === 'cloud'} onPress={() => setOllamaMode('cloud')} /></View> : null}
+            {provider === 'ollama' && ollamaMode === 'cloud' ? <><FieldLabel label="Ollama cloud API key" optional={ollamaKeySet} /><TextInput value={ollamaApiKey} onChangeText={setOllamaApiKey} onBlur={loadModels} secureTextEntry placeholder={ollamaKeySet ? 'Key available · enter to replace' : 'API key'} placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} /></> : null}
+            <FieldLabel label="Model" />
+            {loadingModels ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 18 }} /> : <View style={styles.choiceList}>{models.slice(0, 30).map(item => <TouchableOpacity key={item} onPress={() => setModel(item)} style={[styles.choiceRow, { backgroundColor: colors.bgLift, borderColor: model === item ? colors.accent : colors.border }]}><Text variant="sm" numberOfLines={1}>{item}</Text>{model === item ? <Ionicons name="checkmark" size={18} color={colors.accent} /> : null}</TouchableOpacity>)}</View>}
+            {!models.length && !loadingModels ? <TextInput value={model} onChangeText={setModel} autoCapitalize="none" autoCorrect={false} placeholder="Enter model name" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} /> : null}
+          </> : null}
 
-          {sessionType === 'workspace' ? (
-            <>
-              <FieldLabel label="Workspace" optional />
-              <WorkspacePathField
-                value={workspace}
-                onChangeText={setWorkspace}
-                placeholder="/home/user/dev/project"
-              />
-              <Text variant="xs" dim style={styles.help}>Type to browse folders on the MuCLI host.</Text>
-            </>
-          ) : null}
+          {step === 3 ? <>
+            {sessionType === 'chat' ? <Notice icon="shield-checkmark-outline" text="Filesystem and shell tools are unavailable in chat sessions." /> : null}
+            {sessionType === 'workspace' ? <><Text variant="sm" dim style={styles.intro}>Choose a host folder. Leave empty for a tool-limited workspace session.</Text><WorkspacePathField value={workspace} onChangeText={setWorkspace} placeholder="Browse a workspace folder" /></> : null}
+            {sessionType === 'container' ? <>
+              <Text variant="sm" dim style={styles.intro}>Create a new environment or attach to one already managed by MuCLI.</Text>
+              <View style={styles.segment}><Segment label="Create new" selected={containerSource === 'new'} onPress={() => setContainerSource('new')} /><Segment label="Attach existing" selected={containerSource === 'existing'} onPress={() => setContainerSource('existing')} /></View>
+              {containerSource === 'existing' ? <View style={styles.choiceList}>{containers.length ? containers.map(item => <TouchableOpacity key={item.name} onPress={() => setExistingContainer(item.name)} style={[styles.choiceRow, { backgroundColor: colors.bgLift, borderColor: existingContainer === item.name ? colors.accent : colors.border }]}><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: '600' }}>{item.name}</Text><Text variant="xs" dim>{item.status} · {item.template_name || 'custom'}</Text></View>{existingContainer === item.name ? <Ionicons name="checkmark-circle" size={19} color={colors.accent} /> : null}</TouchableOpacity>) : <Notice icon="information-circle-outline" text="No managed containers. Create one here or from Container management." />}</View> : <>
+                <FieldLabel label="Container name" /><TextInput value={containerName} onChangeText={setContainerName} autoCapitalize="none" autoCorrect={false} placeholder="mucli-project" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} />
+                <FieldLabel label="Base" /><View style={styles.choiceList}><TouchableOpacity onPress={() => setTemplateName('')} style={[styles.choiceRow, { backgroundColor: colors.bgLift, borderColor: !templateName ? colors.accent : colors.border }]}><Text variant="sm">Editable Dockerfile</Text>{!templateName ? <Ionicons name="checkmark" size={18} color={colors.accent} /> : null}</TouchableOpacity>{templates.map(item => <TouchableOpacity key={item.name} onPress={() => setTemplateName(item.name)} style={[styles.choiceRow, { backgroundColor: colors.bgLift, borderColor: templateName === item.name ? colors.accent : colors.border }]}><Text variant="sm">Template · {item.name}</Text>{templateName === item.name ? <Ionicons name="checkmark" size={18} color={colors.accent} /> : null}</TouchableOpacity>)}</View>
+                {!templateName ? <View style={styles.editorGrid}><EditorCard icon="document-text-outline" title="Worker image template" detail={`${countLines(dockerfile)} lines`} onPress={() => setContainerEditor('dockerfile')} /><EditorCard icon="globe-outline" title="Allowlist and blocklist" detail={`${countLines(egressAllow)} allowed · ${countLines(egressDeny)} blocked`} onPress={() => setContainerEditor('network')} /></View> : null}
+                <FieldLabel label="Folder mounts" optional />
+                {mounts.map((mount, index) => <View key={`${mount.host_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.bgLift }]}><View style={styles.cardCopy}><Text variant="xs" style={{ fontWeight: '600' }}>{mount.container_path}</Text><Text variant="xs" dim numberOfLines={1}>{mount.host_path} · {mount.mode}</Text></View><TouchableOpacity onPress={() => setMounts(current => current.filter((_, i) => i !== index))}><Ionicons name="close" size={18} color={colors.error} /></TouchableOpacity></View>)}
+                <WorkspacePathField value={mountHost} onChangeText={value => { setMountHost(value); const base=value.split('/').filter(Boolean).pop(); if(base)setMountTarget(`/workspace/${base}`); }} placeholder="Browse a host folder" />
+                <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift, marginTop: 8 }]} />
+                <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment label="RW" selected={mountMode === 'rw'} onPress={() => setMountMode('rw')} compact /><Segment label="RO" selected={mountMode === 'ro'} onPress={() => setMountMode('ro')} compact /></View><TouchableOpacity onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addMount, { backgroundColor: mountHost.trim() && mountTarget.trim() ? colors.accent : colors.bgHover }]}><Ionicons name="add" size={18} color={mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim} /><Text variant="xs" style={{ color: mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim, fontWeight: '700' }}>Add folder</Text></TouchableOpacity></View>
+              </>}
+            </> : null}
+          </> : null}
 
-          {sessionType === 'chat' ? (
-            <View style={[styles.notice, { backgroundColor: colors.bgLift }]}>
-              <Ionicons name="shield-checkmark-outline" size={19} color={colors.accent} />
-              <Text variant="xs" dim style={styles.noticeText}>Filesystem and shell tools are omitted from the provider schema and rejected by the dispatcher.</Text>
-            </View>
-          ) : null}
-
-          {sessionType === 'container' ? (
-            <>
-              <SectionLabel label="Container" />
-              <FieldLabel label="Container name" />
-              <TextInput
-                value={containerName}
-                onChangeText={setContainerName}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="mucli-my-session"
-                placeholderTextColor={colors.textDim}
-                style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]}
-              />
-              <Text variant="xs" dim style={styles.help}>An existing managed container is reused; otherwise MuCLI builds it.</Text>
-
-              <FieldLabel label="Dockerfile" />
-              <ContainerEditorRow
-                icon="document-text-outline"
-                title="Worker image template"
-                detail={`${countLines(dockerfile)} lines · tap to edit`}
-                onPress={() => setContainerEditor('dockerfile')}
-              />
-
-              <FieldLabel label="Initial mounts" optional />
-              {mounts.map((item, index) => (
-                <View key={`${item.container_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.bgLift }]}>
-                  <View style={styles.mountCopy}>
-                    <Text variant="xs" style={styles.mountPath} numberOfLines={1}>{item.container_path}</Text>
-                    <Text variant="xs" dim numberOfLines={1}>{item.host_path} · {item.mode}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setMounts(current => current.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeMount}>
-                    <Ionicons name="close" size={17} color={colors.error} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              <WorkspacePathField value={mountHost} onChangeText={setMountHost} placeholder="Host folder" />
-              <TextInput
-                value={mountContainer}
-                onChangeText={setMountContainer}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="/workspace/project"
-                placeholderTextColor={colors.textDim}
-                style={[styles.input, styles.mountTarget, { color: colors.text, backgroundColor: colors.bgLift }]}
-              />
-              <View style={styles.mountActionRow}>
-                <View style={styles.segmentRowCompact}>
-                  {(['rw', 'ro'] as const).map(mode => (
-                    <TouchableOpacity
-                      key={mode}
-                      onPress={() => setMountMode(mode)}
-                      style={[styles.modeChip, { backgroundColor: mountMode === mode ? colors.text : colors.bgLift }]}
-                    >
-                      <Text variant="xs" style={{ color: mountMode === mode ? colors.bg : colors.text }}>{mode.toUpperCase()}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <TouchableOpacity onPress={addMount} disabled={!mountHost.trim() || !mountContainer.trim()} style={[styles.addMount, { backgroundColor: mountHost.trim() && mountContainer.trim() ? colors.accent : colors.bgHover }]}>
-                  <Ionicons name="add" size={17} color={mountHost.trim() && mountContainer.trim() ? colors.accentText : colors.textDim} />
-                  <Text variant="xs" style={{ color: mountHost.trim() && mountContainer.trim() ? colors.accentText : colors.textDim, fontWeight: '700' }}>Add mount</Text>
-                </TouchableOpacity>
-              </View>
-
-              <FieldLabel label="Network policy" />
-              <ContainerEditorRow
-                icon="globe-outline"
-                title="Allowlist and blocklist"
-                detail={`${countLines(egressAllow)} allowed · ${countLines(egressDeny)} blocked`}
-                onPress={() => setContainerEditor('network')}
-              />
-              <Text variant="xs" dim style={styles.help}>Blocklist entries override the allowlist. All other forwarded traffic is denied.</Text>
-              {containerError ? <Text variant="xs" style={{ color: colors.error, marginTop: 6 }}>{containerError}</Text> : null}
-            </>
-          ) : null}
-
-          <SectionLabel label="Provider" />
-          {loadingProviders ? (
-            <ActivityIndicator color={colors.accent} style={styles.loader} />
-          ) : (
-            <View style={styles.choiceGrid}>
-              {providers.map(item => {
-                const selected = item.name === provider;
-                return (
-                  <TouchableOpacity
-                    key={item.name}
-                    onPress={() => setProvider(item.name)}
-                    style={[
-                      styles.choice,
-                      { backgroundColor: selected ? colors.bgHover : colors.bgLift },
-                      selected && { borderColor: colors.accent },
-                    ]}
-                  >
-                    <View style={[styles.providerDot, { backgroundColor: item.configured ? colors.success : colors.warning }]} />
-                    <Text variant="sm" style={styles.choiceText}>{item.name}</Text>
-                    {selected ? <Ionicons name="checkmark" size={17} color={colors.accent} /> : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-
-          {provider === 'ollama' ? (
-            <View style={styles.ollamaBlock}>
-              <FieldLabel label="Ollama mode" />
-              <View style={styles.segmentRow}>
-                {(['local', 'cloud'] as const).map(mode => (
-                  <TouchableOpacity
-                    key={mode}
-                    onPress={() => setOllamaMode(mode)}
-                    style={[styles.segment, { backgroundColor: ollamaMode === mode ? colors.text : colors.bgLift }]}
-                  >
-                    <Text variant="sm" style={{ color: ollamaMode === mode ? colors.bg : colors.text }}>{mode === 'local' ? 'Local' : 'Cloud'}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {ollamaMode === 'local' ? (
-                <>
-                  <FieldLabel label="Host override" optional />
-                  <TextInput value={ollamaHost} onChangeText={setOllamaHost} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="http://127.0.0.1:11434" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} />
-                </>
-              ) : (
-                <>
-                  <FieldLabel label="Ollama API key" />
-                  <TextInput value={ollamaApiKey} onChangeText={setOllamaApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="API key" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} />
-                </>
-              )}
-            </View>
-          ) : null}
-
-          <SectionLabel label="Model" />
-          <TextInput
-            value={model}
-            onChangeText={setModel}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder={loadingModels ? 'Loading models…' : 'Model name'}
-            placeholderTextColor={colors.textDim}
-            style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]}
-          />
-          {loadingModels ? <ActivityIndicator color={colors.accent} style={styles.inlineLoader} /> : null}
-          {models.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modelStrip}>
-              {models.map(item => (
-                <TouchableOpacity key={item} onPress={() => setModel(item)} style={[styles.modelChip, { backgroundColor: item === model ? colors.text : colors.bgLift }]}>
-                  <Text variant="xs" style={{ color: item === model ? colors.bg : colors.text }} numberOfLines={1}>{item}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          ) : null}
-
-          {error ? (
-            <View style={[styles.errorBox, { backgroundColor: colors.bgLift }]}>
-              <Ionicons name="alert-circle-outline" size={18} color={colors.error} />
-              <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
-            </View>
-          ) : null}
+          {step === 4 ? <>
+            <Text variant="sm" dim style={styles.intro}>Review the configuration before MuCLI creates and loads the session.</Text>
+            <View style={[styles.review, { borderColor: colors.border }]}><Review label="Session" value={name} /><Review label="Type" value={sessionType} /><Review label="Provider" value={`${provider} · ${model}`} />{sessionType === 'workspace' ? <Review label="Workspace" value={workspace || 'none'} /> : null}{sessionType === 'container' ? <Review label="Container" value={containerSource === 'existing' ? `Attach · ${existingContainer}` : `Create · ${containerName}`} /> : null}</View>
+            {creating ? <View style={[styles.progressBox, { backgroundColor: colors.bgLift }]}><ActivityIndicator color={colors.accent} /><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: '600' }}>Preparing session</Text><Text variant="xs" dim>{progress}</Text></View></View> : null}
+          </> : null}
+          {error ? <Text variant="xs" style={{ color: colors.error, marginTop: 14 }}>{error}</Text> : null}
         </ScrollView>
 
-        <View style={[styles.footer, { backgroundColor: colors.bg, paddingBottom: Math.max(insets.bottom, 14) }]}>
-          <TouchableOpacity onPress={createSession} disabled={!canCreate} style={[styles.createButton, { backgroundColor: canCreate ? colors.text : colors.bgHover }]}>
-            {creating ? <ActivityIndicator color={colors.bg} /> : (
-              <>
-                <Text style={{ color: canCreate ? colors.bg : colors.textDim, fontWeight: '700' }}>Create {sessionType} session</Text>
-                <Ionicons name="arrow-forward" size={18} color={canCreate ? colors.bg : colors.textDim} />
-              </>
-            )}
-          </TouchableOpacity>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14), borderTopColor: colors.border, backgroundColor: colors.bg }]}>
+          {step > 1 ? <TouchableOpacity onPress={() => setStep(current => current - 1)} disabled={creating} style={styles.backButton}><Text variant="sm">Back</Text></TouchableOpacity> : <View />}
+          <TouchableOpacity onPress={() => step < 4 ? canContinue && setStep(current => current + 1) : create()} disabled={!canContinue || creating} style={[styles.primaryButton, { backgroundColor: canContinue && !creating ? colors.text : colors.bgHover }]}>{creating ? <ActivityIndicator color={colors.bg} /> : <Text style={{ color: canContinue ? colors.bg : colors.textDim, fontWeight: '700' }}>{step < 4 ? 'Continue' : 'Create and load'}</Text>}</TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
-      <Modal
-        visible={containerEditor !== null}
-        animationType="slide"
-        onRequestClose={() => setContainerEditor(null)}
-        statusBarTranslucent
-      >
-        <KeyboardAvoidingView
-          style={[styles.editorRoot, { backgroundColor: colors.bg }]}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={[styles.editorHeader, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}>
-            <View style={styles.editorHeaderCopy}>
-              <Text style={[styles.editorTitle, { color: colors.text }]}>
-                {containerEditor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}
-              </Text>
-              <Text variant="xs" dim>
-                {containerEditor === 'dockerfile'
-                  ? 'The maintained template is loaded and editable.'
-                  : 'Blocklist entries take precedence over allowed domains.'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setContainerEditor(null)}
-              style={[styles.iconButton, { backgroundColor: colors.bgHover }]}
-            >
-              <Ionicons name="close" size={20} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-
-          {containerEditor === 'dockerfile' ? (
-            <TextInput
-              value={dockerfile}
-              onChangeText={setDockerfile}
-              multiline
-              textAlignVertical="top"
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              style={[styles.fullEditor, { color: colors.text, backgroundColor: colors.bgLift }]}
-            />
-          ) : (
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={[styles.networkEditorContent, { paddingBottom: Math.max(insets.bottom, 16) + 84 }]}
-            >
-              <FieldLabel label="Allowlist" />
-              <Text variant="xs" dim style={styles.editorHelp}>One domain or IPv4 address per line.</Text>
-              <TextInput
-                value={egressAllow}
-                onChangeText={setEgressAllow}
-                multiline
-                textAlignVertical="top"
-                autoCapitalize="none"
-                autoCorrect={false}
-                spellCheck={false}
-                placeholder="api.openai.com"
-                placeholderTextColor={colors.textDim}
-                style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]}
-              />
-
-              <FieldLabel label="Blocklist" optional />
-              <Text variant="xs" dim style={styles.editorHelp}>Matching entries are removed from the allowlist.</Text>
-              <TextInput
-                value={egressDeny}
-                onChangeText={setEgressDeny}
-                multiline
-                textAlignVertical="top"
-                autoCapitalize="none"
-                autoCorrect={false}
-                spellCheck={false}
-                placeholder="telemetry.example.com"
-                placeholderTextColor={colors.textDim}
-                style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]}
-              />
-            </ScrollView>
-          )}
-
-          <View style={[styles.editorFooter, { backgroundColor: colors.bg, paddingBottom: Math.max(insets.bottom, 14), borderTopColor: colors.border }]}>
-            <TouchableOpacity
-              onPress={() => setContainerEditor(null)}
-              style={[styles.editorDoneButton, { backgroundColor: colors.text }]}
-            >
-              <Text style={{ color: colors.bg, fontWeight: '700' }}>Done</Text>
-            </TouchableOpacity>
-          </View>
+      <Modal visible={containerEditor !== null} animationType="slide" onRequestClose={() => setContainerEditor(null)}>
+        <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.header, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{containerEditor === 'dockerfile' ? 'Worker image template' : 'Network policy'}</Text><Text variant="xs" dim>{containerEditor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><TouchableOpacity onPress={() => setContainerEditor(null)} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity></View>
+          {containerEditor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={egressAllow} onChangeText={setEgressAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /><FieldLabel label="Blocklist" optional /><TextInput value={egressDeny} onChangeText={setEgressDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /></ScrollView>}
         </KeyboardAvoidingView>
       </Modal>
     </Modal>
   );
 }
 
-function ContainerEditorRow({
-  icon,
-  title,
-  detail,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  detail: string;
-  onPress: () => void;
-}) {
-  const { colors } = useTheme();
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[styles.editorRow, { backgroundColor: colors.bgLift, borderColor: colors.border }]}
-    >
-      <View style={[styles.editorRowIcon, { backgroundColor: colors.bgHover }]}>
-        <Ionicons name={icon} size={19} color={colors.accent} />
-      </View>
-      <View style={styles.editorRowCopy}>
-        <Text variant="sm" style={styles.editorRowTitle}>{title}</Text>
-        <Text variant="xs" dim>{detail}</Text>
-      </View>
-      <Ionicons name="expand-outline" size={18} color={colors.textDim} />
-    </TouchableOpacity>
-  );
-}
-
-function countLines(value: string): number {
-  return value.split(/\r?\n/).filter(line => line.trim()).length;
-}
-
-function splitLines(value: string): string[] {
-  return [...new Set(value.split(/[\n,]/).map(item => item.trim()).filter(Boolean))];
-}
-
-function SectionLabel({ label }: { label: string }) {
-  return <Text variant="xs" dim style={styles.sectionLabel}>{label.toUpperCase()}</Text>;
-}
-
-function FieldLabel({ label, optional = false }: { label: string; optional?: boolean }) {
-  return (
-    <View style={styles.fieldLabelRow}>
-      <Text variant="sm" style={styles.fieldLabel}>{label}</Text>
-      {optional ? <Text variant="xs" dim>Optional</Text> : null}
-    </View>
-  );
-}
+function FieldLabel({ label, optional = false }: { label: string; optional?: boolean }) { return <View style={styles.fieldLabel}><Text variant="xs" style={{ fontWeight: '700' }}>{label}</Text>{optional ? <Text variant="xs" dim>optional</Text> : null}</View>; }
+function Segment({ label, selected, onPress, compact = false }: { label: string; selected: boolean; onPress: () => void; compact?: boolean }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[compact ? styles.segmentButtonCompact : styles.segmentButton, { backgroundColor: selected ? colors.text : colors.bgLift }]}><Text variant="xs" style={{ color: selected ? colors.bg : colors.textDim, fontWeight: '700' }}>{label}</Text></TouchableOpacity>; }
+function Notice({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) { const { colors } = useTheme(); return <View style={[styles.notice, { backgroundColor: colors.bgLift }]}><Ionicons name={icon} size={20} color={colors.accent} /><Text variant="xs" dim style={{ flex: 1, lineHeight: 18 }}>{text}</Text></View>; }
+function EditorCard({ icon, title, detail, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; detail: string; onPress: () => void }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[styles.editorCard, { backgroundColor: colors.bgLift, borderColor: colors.border }]}><Ionicons name={icon} size={20} color={colors.accent} /><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: '600' }}>{title}</Text><Text variant="xs" dim>{detail}</Text></View><Ionicons name="expand-outline" size={18} color={colors.textDim} /></TouchableOpacity>; }
+function Review({ label, value }: { label: string; value: string }) { const { colors } = useTheme(); return <View style={[styles.reviewRow, { borderBottomColor: colors.border }]}><Text variant="xs" dim style={styles.reviewLabel}>{label}</Text><Text variant="xs" style={styles.reviewValue}>{value}</Text></View>; }
+function splitLines(value: string): string[] { return value.split(/[\n,]/).map(item => item.trim()).filter(Boolean); }
+function countLines(value: string): number { return value.split(/\r?\n/).filter(item => item.trim()).length; }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14 },
-  headerCopy: { flex: 1, alignItems: 'center' },
-  title: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
-  iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  iconSpacer: { width: 40 },
-  content: { paddingHorizontal: 18, paddingTop: 10 },
-  sectionLabel: { marginTop: 22, marginBottom: 12, letterSpacing: 0.7, fontWeight: '700' },
-  fieldLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 7 },
-  fieldLabel: { fontWeight: '600' },
-  input: { minHeight: 48, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  help: { marginTop: 7, lineHeight: 17 },
-  typeGrid: { gap: 8 },
-  typeCard: { minHeight: 76, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 13 },
-  typeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  typeTitle: { flex: 1, fontWeight: '700' },
-  typeDetail: { marginTop: 6, lineHeight: 17 },
-  notice: { flexDirection: 'row', gap: 10, borderRadius: 14, padding: 12, marginTop: 14 },
-  noticeText: { flex: 1, lineHeight: 18 },
-  loader: { marginVertical: 18 },
-  inlineLoader: { marginTop: 10, alignSelf: 'flex-start' },
-  choiceGrid: { gap: 8 },
-  choice: { minHeight: 50, borderWidth: 1, borderColor: 'transparent', borderRadius: 15, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center' },
-  choiceText: { flex: 1, fontWeight: '600' },
-  providerDot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
-  ollamaBlock: { marginTop: 16 },
-  segmentRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  segment: { flex: 1, minHeight: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  editorRow: { minHeight: 64, borderWidth: StyleSheet.hairlineWidth, borderRadius: 15, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 11 },
-  editorRowIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  editorRowCopy: { flex: 1, gap: 3 },
-  editorRowTitle: { fontWeight: '600' },
-  mountRow: { minHeight: 56, borderRadius: 13, paddingLeft: 12, flexDirection: 'row', alignItems: 'center', marginBottom: 7 },
-  mountCopy: { flex: 1 },
-  mountPath: { fontWeight: '600' },
-  removeMount: { width: 42, height: 48, alignItems: 'center', justifyContent: 'center' },
-  mountTarget: { marginTop: 8 },
-  mountActionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, gap: 8 },
-  segmentRowCompact: { flexDirection: 'row', gap: 6 },
-  modeChip: { minWidth: 42, minHeight: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  addMount: { minHeight: 38, borderRadius: 12, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  modelStrip: { gap: 8, paddingTop: 10, paddingBottom: 2 },
-  modelChip: { maxWidth: 220, minHeight: 36, borderRadius: 12, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
-  errorBox: { flexDirection: 'row', gap: 9, borderRadius: 14, padding: 12, marginTop: 16 },
-  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12 },
-  createButton: { minHeight: 50, borderRadius: 16, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },
-  editorRoot: { flex: 1 },
-  editorHeader: { minHeight: 82, paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  editorHeaderCopy: { flex: 1, gap: 3 },
-  editorTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
-  fullEditor: { flex: 1, margin: 14, borderRadius: 15, padding: 14, fontSize: 13, lineHeight: 20, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }) },
-  networkEditorContent: { paddingHorizontal: 18, paddingTop: 4 },
-  editorHelp: { marginBottom: 7, lineHeight: 17 },
-  policyEditor: { minHeight: 190, borderRadius: 15, padding: 14, fontSize: 13, lineHeight: 20, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }) },
-  editorFooter: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
-  editorDoneButton: { minHeight: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  root: { flex: 1 }, header: { minHeight: 86, paddingHorizontal: 18, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 }, headerCopy: { flex: 1 }, title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.5 }, iconButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  progressDots: { height: 26, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 9 }, dot: { width: 8, height: 8, borderRadius: 4 }, content: { padding: 18 }, intro: { lineHeight: 21, marginBottom: 18 }, fieldLabel: { marginTop: 15, marginBottom: 7, flexDirection: 'row', justifyContent: 'space-between' }, input: { minHeight: 50, borderRadius: 15, paddingHorizontal: 14, fontSize: 15 },
+  typeGrid: { gap: 9, marginTop: 18 }, typeCard: { minHeight: 92, borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }, typeIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }, cardCopy: { flex: 1 }, typeTitle: { fontWeight: '700' }, typeDetail: { marginTop: 4, lineHeight: 17 },
+  choiceList: { gap: 7 }, choiceRow: { minHeight: 50, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, segment: { flexDirection: 'row', gap: 6, marginTop: 15, marginBottom: 12 }, segmentButton: { flex: 1, minHeight: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, segmentCompact: { flexDirection: 'row', gap: 4 }, segmentButtonCompact: { minWidth: 48, minHeight: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  notice: { minHeight: 70, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 11 }, editorGrid: { gap: 8, marginTop: 14 }, editorCard: { minHeight: 66, borderWidth: StyleSheet.hairlineWidth, borderRadius: 15, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  mountRow: { minHeight: 58, borderRadius: 14, paddingHorizontal: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 10 }, mountActions: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }, addMount: { minHeight: 40, borderRadius: 12, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  review: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, overflow: 'hidden' }, reviewRow: { minHeight: 52, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }, reviewLabel: { width: 86 }, reviewValue: { flex: 1, fontWeight: '600' }, progressBox: { marginTop: 14, borderRadius: 15, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 78, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }, backButton: { minHeight: 48, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' }, primaryButton: { minWidth: 150, minHeight: 48, borderRadius: 15, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
+  fullEditor: { flex: 1, margin: 16, borderRadius: 15, padding: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, lineHeight: 20 }, policyEditor: { minHeight: 220, borderRadius: 15, padding: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, lineHeight: 20 },
 });

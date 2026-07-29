@@ -889,39 +889,61 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
 
 
 def choose_session(session_manager):
-    """Interactive session picker at startup.
-
-    Prefers an arrow-key + key-shortcut picker (prompt-toolkit). Falls
-    back to a numbered IntPrompt menu when the TTY isn't suitable
-    (CI, weird shells, redirected stdin)."""
-    sessions = session_manager.get_session_list()
-    if not sessions:
-        return "new", None
-
-    try:
-        from mu.ui.session_picker import run_interactive_picker
-
-        action, name = run_interactive_picker(
-            sessions,
-            on_delete=lambda n: _safe_delete_session(session_manager, n, silent=True),
+    """Top-level terminal launcher mirroring the web/mobile welcome flow."""
+    while True:
+        console.print("\n[bold cyan]MuCLI[/bold cyan]")
+        console.print("[dim]Choose a saved session, create a new one, or manage containers.[/dim]")
+        action = Prompt.ask(
+            "Open",
+            choices=["sessions", "create", "containers", "quit"],
+            default="sessions" if session_manager.get_session_list() else "create",
         )
-    except Exception:
-        # Fall back to the numbered picker so non-TTY environments
-        # (CI, pipes) still work.
-        return _choose_session_numbered(session_manager)
+        if action == "quit":
+            raise SystemExit(0)
+        if action == "containers":
+            from mu.container.tui import run_container_manager
 
-    if action == "load":
-        return "load", name
-    if action == "new":
-        from rich.prompt import Prompt
+            run_container_manager()
+            continue
+        if action == "create":
+            raw = Prompt.ask(
+                "Session name (optional, press enter for default)", default=""
+            ).strip()
+            session_manager._startup_session_type = Prompt.ask(
+                "Session type",
+                choices=["chat", "workspace", "container"],
+                default="workspace",
+            )
+            return "new", raw or None
 
-        raw = Prompt.ask(
-            "Enter name for new session (optional, press enter for default)"
+        sessions = session_manager.get_session_list()
+        if not sessions:
+            console.print("[dim]No saved sessions. Choose create to begin.[/dim]")
+            continue
+        console.print("\n[bold cyan]Saved sessions[/bold cyan]")
+        for index, name in enumerate(sessions, 1):
+            console.print(f" {index}. {name}", markup=False)
+        back = len(sessions) + 1
+        console.print(f" {back}. [dim]Back[/dim]")
+        choice = IntPrompt.ask(
+            "Select session",
+            choices=[str(index) for index in range(1, back + 1)],
         )
-        return "new", raw if raw else None
-    # "quit" — caller treats this as a clean exit.
-    raise SystemExit(0)
-
+        if int(choice) == back:
+            continue
+        selected = sessions[int(choice) - 1]
+        session_action = Prompt.ask(
+            "Session action",
+            choices=["load", "delete", "back"],
+            default="load",
+        )
+        if session_action == "back":
+            continue
+        if session_action == "delete":
+            if Confirm.ask(f"Delete session {selected!r}? This cannot be undone."):
+                _safe_delete_session(session_manager, selected)
+            continue
+        return "load", selected
 
 def _choose_session_numbered(session_manager):
     """Numbered fallback for environments where the prompt-toolkit picker
@@ -1023,11 +1045,15 @@ def build_session(args, ui, allow_prompt=True):
 
     if allow_prompt and not args.session:
         action, session_name = choose_session(session_manager)
+        startup_session_type = getattr(session_manager, "_startup_session_type", None)
         if action == "new" and requested_session_type is None:
-            selected_session_type = Prompt.ask(
-                "Session type",
-                choices=["chat", "workspace", "container"],
-                default="workspace",
+            selected_session_type = normalize_session_type(
+                startup_session_type
+                or Prompt.ask(
+                    "Session type",
+                    choices=["chat", "workspace", "container"],
+                    default="workspace",
+                )
             )
         if action == "load":
             session_manager.switch_session(session_name)

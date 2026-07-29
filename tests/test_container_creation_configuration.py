@@ -27,6 +27,7 @@ def test_network_blocklist_takes_precedence_over_allowlist():
         "mucli-policy-net",
         ["api.openai.com", "ollama.com"],
         egress_deny=["OLLAMA.COM"],
+        proxy_image="mucli/policy:test",
         runner=runner,
     )
     assert policy.allowed_domains == ["api.openai.com"]

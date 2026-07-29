@@ -241,6 +241,6 @@ MuCLI sessions now have a capability type independent of agent strategy mode:
 
 - **chat** — conversational/research/memory tools only; no host filesystem or shell.
 - **workspace** — current host execution with explicit workspace folders and approvals.
-- **container** — the full MuCLI worker runs natively in a Docker sandbox with explicit mounts, auto-approved modifying tools, host-enforced egress policy, persistent session state, and downloadable artifacts.
+- **container** — the full MuCLI worker runs natively in a Docker sandbox with explicit mounts, auto-approved modifying tools, proxy-enforced egress policy, persistent session state, and downloadable artifacts.
 
 See [Container mode](container_mode.md) for creation, mounts, egress, lifecycle, and artifacts. Strategy modes such as Feature, Research, Debug, or Teacher continue to compose with all three capability types.

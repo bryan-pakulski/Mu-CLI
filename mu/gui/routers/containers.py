@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import time
@@ -19,14 +20,28 @@ import utils.config as _config
 router = APIRouter()
 
 
-def _require_local_client(connection) -> None:
+def _require_local_client(connection, *, allow_private_network: bool = True) -> None:
+    """Restrict host-container controls to loopback or an explicitly exposed LAN.
+
+    The mobile application reaches the GUI over a private address, so lifecycle
+    APIs may be used from RFC1918/ULA clients when the operator has bound MuCLI
+    to the LAN. Interactive shell access remains loopback-only.
+    """
     client = getattr(connection, "client", None)
     host = str(getattr(client, "host", "") or "")
-    if host and host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
-        raise HTTPException(
-            status_code=403,
-            detail="Container management and shell access are restricted to localhost.",
-        )
+    if not host or host in {"127.0.0.1", "::1", "localhost", "testclient"}:
+        return
+    if allow_private_network:
+        try:
+            if ipaddress.ip_address(host).is_private:
+                return
+        except ValueError:
+            pass
+    scope = "localhost" if not allow_private_network else "localhost or a private network"
+    raise HTTPException(
+        status_code=403,
+        detail=f"Container management access is restricted to {scope}.",
+    )
 
 
 def _environment_jobs(request: Request) -> dict[str, dict[str, Any]]:
@@ -79,22 +94,42 @@ async def _run_environment_creation(request: Request, job_id: str, payload: dict
         _append_environment_log(request, job_id, stream, text)
 
     try:
-        ref = await asyncio.to_thread(
-            request.app.state.container_supervisor.create_environment,
-            container_name=str(payload.get("name") or ""),
-            dockerfile=payload.get("dockerfile"),
-            template_name=str(payload.get("template_name") or "") or None,
-            mounts=[item for item in (payload.get("mounts") or []) if isinstance(item, dict)],
-            egress_allow=payload.get("egress_allow"),
-            egress_deny=payload.get("egress_deny"),
-            supervisor_url=f"http://host.docker.internal:{request.app.state.port}",
-            start=bool(payload.get("start", True)),
-            progress=progress,
-            output=output,
+        operation = str(payload.get("operation") or "create")
+        method = (
+            request.app.state.container_supervisor.reconfigure_environment
+            if operation == "reconfigure"
+            else request.app.state.container_supervisor.create_environment
         )
+        call_kwargs = {
+            "dockerfile": payload.get("dockerfile"),
+            "template_name": str(payload.get("template_name") or "") or None,
+            "mounts": [item for item in (payload.get("mounts") or []) if isinstance(item, dict)],
+            "egress_allow": payload.get("egress_allow"),
+            "egress_deny": payload.get("egress_deny"),
+            "supervisor_url": f"http://host.docker.internal:{request.app.state.port}",
+            "start": bool(payload.get("start", True)),
+            "progress": progress,
+            "output": output,
+        }
+        if operation == "reconfigure":
+            ref = await asyncio.to_thread(
+                method,
+                str(payload.get("name") or ""),
+                **call_kwargs,
+            )
+        else:
+            ref = await asyncio.to_thread(
+                method,
+                container_name=str(payload.get("name") or ""),
+                **call_kwargs,
+            )
         _set_environment_job(
             request, job_id, state="ready", stage="ready",
-            message="Container environment is ready.",
+            message=(
+                "Container environment was updated."
+                if str(payload.get("operation") or "create") == "reconfigure"
+                else "Container environment is ready."
+            ),
             container=ref.to_dict(include_secret=False),
         )
     except Exception as exc:
@@ -127,6 +162,54 @@ async def list_managed_containers(request: Request):
         "containers": [ref.to_dict(include_secret=False) for ref in refs],
         "templates": [item.to_dict() for item in templates],
     }
+
+
+@router.get("/api/containers/{name}/configuration")
+async def get_managed_container_configuration(name: str, request: Request):
+    _require_local_client(request)
+    try:
+        config = await asyncio.to_thread(
+            request.app.state.container_supervisor.configuration, name
+        )
+    except (ContainerRuntimeError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"name": name, **config}
+
+
+@router.put("/api/containers/{name}")
+async def update_managed_container(name: str, request: Request, payload: dict[str, Any]):
+    _require_local_client(request)
+    supervisor = request.app.state.container_supervisor
+    ref = supervisor.resolve(name)
+    if ref is None:
+        raise HTTPException(status_code=404, detail="managed container not found")
+    busy = [
+        session_name
+        for session_name in ref.attached_sessions
+        if request.app.state.session_busy_for(session_name).is_set()
+    ]
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail="Container has active session turns: " + ", ".join(busy),
+        )
+    job_id = uuid.uuid4().hex
+    job_payload = dict(payload)
+    job_payload.update({"name": ref.name, "operation": "reconfigure"})
+    _set_environment_job(
+        request,
+        job_id,
+        state="queued",
+        stage="queued",
+        message="Container environment update queued.",
+    )
+    tasks = getattr(request.app.state, "container_environment_tasks", None)
+    if tasks is None:
+        tasks = {}
+        request.app.state.container_environment_tasks = tasks
+    task = asyncio.create_task(_run_environment_creation(request, job_id, job_payload))
+    tasks[job_id] = task
+    return JSONResponse(status_code=202, content={"ok": True, "job_id": job_id})
 
 
 @router.post("/api/containers")

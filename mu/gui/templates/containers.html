@@ -5,37 +5,41 @@
 <div class="container-manager" id="container-manager">
     <header class="container-manager-header">
         <div>
-            <a href="/" class="container-back">← sessions</a>
-            <h1>Container environments</h1>
-            <p>Manage Docker workers independently of MuCLI sessions, open a shell, and capture reusable templates.</p>
+            <a href="/" class="container-back">← welcome</a>
+            <p class="manager-kicker">Container environments</p>
+            <h1>Container management</h1>
+            <p>Create, inspect, edit, clone, shell into, and snapshot isolated MuCLI environments.</p>
         </div>
         <button class="primary" id="create-environment-button">create environment</button>
     </header>
 
     <section class="manager-section">
-        <div class="manager-section-head"><h2>Environments</h2><button id="refresh-containers">refresh</button></div>
+        <div class="manager-section-head"><div><h2>Environments</h2><span class="muted">Independent of sessions until attached</span></div><button id="refresh-containers">refresh</button></div>
         <div id="container-empty" class="manager-empty">No managed environments.</div>
         <div id="container-list" class="manager-grid"></div>
     </section>
 
     <section class="manager-section">
-        <div class="manager-section-head"><h2>Templates</h2><span class="muted">Snapshots used as a base for new environments</span></div>
+        <div class="manager-section-head"><div><h2>Templates</h2><span class="muted">Snapshots used as a base for new environments</span></div></div>
         <div id="template-empty" class="manager-empty">No templates yet.</div>
         <div id="template-list" class="manager-grid manager-grid-templates"></div>
     </section>
 
     <div class="manager-modal" id="create-modal" hidden>
         <div class="manager-modal-card manager-modal-wide">
-            <header><div><h2>Create environment</h2><p>Standalone containers are not tied to a session.</p></div><button data-close="create-modal">×</button></header>
+            <header><div><p class="manager-kicker" id="environment-kicker">New environment</p><h2 id="environment-modal-title">Create environment</h2><p id="environment-modal-description">Standalone containers are not tied to a session.</p></div><button data-close="create-modal">×</button></header>
             <div class="manager-form">
                 <label>Name<input id="environment-name" placeholder="research-box"></label>
                 <label>Base<select id="environment-source"><option value="dockerfile">Dockerfile</option><option value="template">Template</option></select></label>
                 <label id="template-select-row" hidden>Template<select id="environment-template"></select></label>
                 <div id="dockerfile-row" class="manager-editor-row">
-                    <button id="edit-dockerfile" class="manager-expand-card"><span><strong>Dockerfile</strong><small id="dockerfile-summary">editable worker image</small></span><span>expand ↗</span></button>
+                    <button id="edit-dockerfile" class="manager-expand-card"><span><strong>Dockerfile</strong><small id="dockerfile-summary">editable worker image</small></span><span>edit ↗</span></button>
                 </div>
-                <label>Bind mounts<textarea id="environment-mounts" rows="3" placeholder="/host/project:/workspace/project:rw"></textarea></label>
-                <button id="edit-network" class="manager-expand-card"><span><strong>Network policy</strong><small id="network-summary">default allowlist · empty blocklist</small></span><span>expand ↗</span></button>
+                <div class="manager-mounts">
+                    <div class="manager-mounts-head"><div><strong>Folder mounts</strong><small>Choose host folders with the MuCLI browser.</small></div><button type="button" id="add-environment-mount">add folder</button></div>
+                    <div id="environment-mount-list" class="manager-mount-list"></div>
+                </div>
+                <button id="edit-network" class="manager-expand-card"><span><strong>Network policy</strong><small id="network-summary">default allowlist · empty blocklist</small></span><span>edit ↗</span></button>
                 <label class="manager-check"><input type="checkbox" id="environment-start" checked> Start after creation</label>
                 <div id="environment-error" class="manager-error"></div>
             </div>
@@ -60,7 +64,7 @@
         <div class="manager-modal-card">
             <header><div><h2 id="progress-title">Creating environment</h2><p id="progress-message">Queued…</p></div></header>
             <div class="manager-progress"><span class="container-creation-spinner"></span><span id="progress-stage">queued</span></div>
-            <details id="progress-output"><summary>Docker output</summary><pre id="progress-log"></pre></details>
+            <details id="progress-output"><summary>Container output</summary><pre id="progress-log"></pre></details>
             <footer><button id="close-progress" hidden>close</button></footer>
         </div>
     </div>
@@ -70,7 +74,7 @@
             <header><h2>Create template</h2><button data-close="snapshot-modal">×</button></header>
             <label>Template name<input id="snapshot-name" placeholder="python-data-science"></label>
             <label>Description<input id="snapshot-description" placeholder="Configured Python and analysis tools"></label>
-            <p class="muted">Templates capture the container filesystem and image configuration. Mounted session, home, and workspace volumes are not included. Provider secrets and worker tokens are cleared.</p>
+            <p class="muted">Templates capture the writable image filesystem. Mounted session, home, workspace, and bind volumes are excluded. Provider secrets and worker tokens are cleared.</p>
             <input type="hidden" id="snapshot-container">
             <div class="manager-error" id="snapshot-error"></div>
             <footer><button data-close="snapshot-modal">cancel</button><button class="primary" id="submit-snapshot">snapshot</button></footer>
@@ -85,5 +89,6 @@
         </div>
     </div>
 </div>
+{% include "fragments/file_browser.html" %}
 <script src="/static/js/containers.js"></script>
 {% endblock %}

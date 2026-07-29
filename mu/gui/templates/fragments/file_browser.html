@@ -3,6 +3,9 @@
      folder" button; mode "file" lets you click individual files. -->
 <div class="file-browser-backdrop"
      x-show="$store.fileBrowser.open"
+     x-cloak
+     role="dialog"
+     aria-modal="true"
      x-transition.opacity.duration.150ms
      @click.self="$store.fileBrowser.cancel()">
     <div class="file-browser"

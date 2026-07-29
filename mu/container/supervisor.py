@@ -102,6 +102,47 @@ class ContainerSupervisor:
             output=output,
         )
 
+    def reconfigure_environment(
+        self,
+        container_name: str,
+        *,
+        dockerfile: str | None = None,
+        template_name: str | None = None,
+        mounts: list[dict] | None = None,
+        egress_allow: list[str] | None = None,
+        egress_deny: list[str] | None = None,
+        supervisor_url: str = "",
+        start: bool = True,
+        progress: Callable[[str, str], None] | None = None,
+        output: OutputCallback | None = None,
+    ) -> ContainerRef:
+        """Recreate a managed environment while retaining its named volumes and sessions."""
+        ref = self.resolve(container_name)
+        if ref is None:
+            raise ContainerRuntimeError(f"managed container not found: {container_name}")
+        attached_sessions = list(ref.attached_sessions)
+        standalone = bool(ref.standalone)
+        if progress is not None:
+            progress("reconfiguring_container", "Stopping and recreating the managed environment…")
+        self._discard_stale_registration(ref)
+        rebuilt = self.create_environment(
+            container_name=ref.name,
+            dockerfile=dockerfile,
+            template_name=template_name,
+            mounts=mounts,
+            egress_allow=egress_allow,
+            egress_deny=egress_deny,
+            supervisor_url=supervisor_url,
+            start=start,
+            progress=progress,
+            output=output,
+        )
+        rebuilt.standalone = standalone
+        self.registry.upsert(rebuilt)
+        for session_name in attached_sessions:
+            rebuilt = self.attach_session(rebuilt.name, session_name)
+        return rebuilt
+
     def create(
         self,
         *,
@@ -125,10 +166,10 @@ class ContainerSupervisor:
         existing = self.resolve(container_name)
         if existing is not None:
             exists, _running = self._container_state(existing.name)
-            if existing.status == "error" or not exists:
+            if existing.status == "error" or not exists or not existing.proxy_name:
                 report(
                     "recovering_container",
-                    "Removing stale container metadata and rebuilding the worker…",
+                    "Migrating stale or legacy container metadata and rebuilding without host privileges…",
                 )
                 self._discard_stale_registration(existing)
                 existing = None
@@ -195,23 +236,30 @@ class ContainerSupervisor:
         docker = self.runner.require("docker")
         self.runner.run([docker, "rm", "-f", ref.name], check=False)
 
-        subnet = ref.network_subnet
-        network_inspect = self.runner.run(
-            [
-                docker,
-                "network",
-                "inspect",
-                ref.network_name,
-                "--format",
-                "{{range .IPAM.Config}}{{.Subnet}}{{end}}",
-            ],
-            check=False,
-        )
-        if network_inspect.returncode == 0 and network_inspect.stdout.strip():
-            subnet = network_inspect.stdout.strip()
         if ref.network_name:
-            teardown_network(ref.network_name, subnet, runner=self.runner)
+            teardown_network(
+                ref.network_name,
+                ref.network_subnet,
+                proxy_name=ref.proxy_name,
+                egress_network_name=ref.egress_network_name,
+                runner=self.runner,
+            )
         self.registry.remove(ref.name, force=True)
+
+    def _ensure_proxy_running(self, ref: ContainerRef) -> None:
+        if not ref.proxy_name:
+            raise ContainerRuntimeError(
+                f"managed container uses the legacy host-firewall network model: {ref.name}; "
+                "reload or recreate it to migrate to the unprivileged proxy network"
+            )
+        exists, running = self._container_state(ref.proxy_name)
+        if not exists:
+            raise ContainerRuntimeError(
+                f"egress proxy is missing from Docker: {ref.proxy_name}; "
+                "reload or recreate the environment"
+            )
+        if not running:
+            self.runner.run([self.runner.require("docker"), "start", ref.proxy_name])
 
     def ensure_running(self, ref: ContainerRef) -> ContainerRef:
         exists, running = self._container_state(ref.name)
@@ -220,6 +268,7 @@ class ContainerSupervisor:
                 f"managed container is missing from Docker: {ref.name}; "
                 "reload the session to rebuild it"
             )
+        self._ensure_proxy_running(ref)
         if not running:
             self.runner.run([self.runner.require("docker"), "start", ref.name])
         ref.status = "running"
@@ -350,7 +399,10 @@ class ContainerSupervisor:
             recreate_if_empty=not stop_if_idle,
         )
         if stop_if_idle and not ref.attached_sessions:
-            self.runner.run([self.runner.require("docker"), "stop", "-t", "20", ref.name], check=False)
+            docker = self.runner.require("docker")
+            self.runner.run([docker, "stop", "-t", "20", ref.name], check=False)
+            if ref.proxy_name:
+                self.runner.run([docker, "stop", "-t", "10", ref.proxy_name], check=False)
             ref.status = "stopped"
             self.registry.upsert(ref)
         return ref
@@ -363,7 +415,13 @@ class ContainerSupervisor:
             raise RuntimeError("detach all sessions before removing the container")
         docker = self.runner.require("docker")
         self.runner.run([docker, "rm", "-f", ref.name], check=False)
-        teardown_network(ref.network_name, ref.network_subnet, runner=self.runner)
+        teardown_network(
+            ref.network_name,
+            ref.network_subnet,
+            proxy_name=ref.proxy_name,
+            egress_network_name=ref.egress_network_name,
+            runner=self.runner,
+        )
         if ref.workspace_volume:
             self.runner.run([docker, "volume", "rm", ref.workspace_volume], check=False)
         if ref.root_volume:
@@ -380,7 +438,10 @@ class ContainerSupervisor:
         ref = self.resolve(container_name)
         if ref is None:
             raise ContainerRuntimeError(f"managed container not found: {container_name}")
-        self.runner.run([self.runner.require("docker"), "stop", "-t", "20", ref.name], check=False)
+        docker = self.runner.require("docker")
+        self.runner.run([docker, "stop", "-t", "20", ref.name], check=False)
+        if ref.proxy_name:
+            self.runner.run([docker, "stop", "-t", "10", ref.proxy_name], check=False)
         ref.status = "stopped"
         return self.registry.upsert(ref)
 
@@ -388,7 +449,9 @@ class ContainerSupervisor:
         ref = self.resolve(container_name)
         if ref is None:
             raise ContainerRuntimeError(f"managed container not found: {container_name}")
-        self.runner.run([self.runner.require("docker"), "restart", "-t", "20", ref.name])
+        docker = self.runner.require("docker")
+        self._ensure_proxy_running(ref)
+        self.runner.run([docker, "restart", "-t", "20", ref.name])
         ref.status = "running"
         return self.registry.upsert(ref)
 
@@ -430,6 +493,8 @@ class ContainerSupervisor:
             "mounts": [item.to_dict() for item in ref.mounts],
             "egress_allow": list(ref.egress_allow),
             "egress_deny": list(ref.egress_deny),
+            "network_isolation": "internal-proxy" if ref.proxy_name else "legacy",
+            "proxy_name": ref.proxy_name or None,
         }
 
     def detach_session(
@@ -467,6 +532,8 @@ class ContainerSupervisor:
             "MUCLI_WORKER_TOKEN", "MUCLI_SUPERVISOR_URL",
             "MUCLI_CONTAINER_NAME", "MUCLI_EGRESS_ALLOW",
             "MUCLI_EGRESS_DENY", "MUCLI_WORKSPACES",
+            "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+            "NO_PROXY", "no_proxy",
         )
         commit_command = [docker, "commit"]
         for key in scrub_keys:
@@ -514,6 +581,9 @@ class ContainerSupervisor:
         # Containers are intentionally not removed.  Stop only idle workers.
         for ref in self.registry.list_containers():
             if not ref.attached_sessions and not ref.standalone and ref.status == "running":
-                self.runner.run([self.runner.require("docker"), "stop", "-t", "20", ref.name], check=False)
+                docker = self.runner.require("docker")
+                self.runner.run([docker, "stop", "-t", "20", ref.name], check=False)
+                if ref.proxy_name:
+                    self.runner.run([docker, "stop", "-t", "10", ref.proxy_name], check=False)
                 ref.status = "stopped"
                 self.registry.upsert(ref)

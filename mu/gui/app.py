@@ -258,7 +258,7 @@ def create_app(
     app.state.unload_session = lambda **kw: _unload_session(app, **kw)
     app.state.watcher = SessionWatcher(app)
     # Lazy with respect to Docker: constructing the supervisor only reads its
-    # JSON registry. Docker/iptables are touched when a container session is
+    # JSON registry. Docker objects are touched when a container session is
     # explicitly created, loaded, mounted, stopped, or removed.
     app.state.container_supervisor = ContainerSupervisor()
 

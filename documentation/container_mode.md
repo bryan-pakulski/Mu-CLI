@@ -78,23 +78,30 @@ clients list, download, and delete artifacts through session-scoped endpoints.
 
 ## Network allowlist
 
-Container mode uses a normal Docker bridge plus rules in the host
-`DOCKER-USER` chain:
+Container mode does not modify the host firewall. Each worker is attached only
+to a Docker ``--internal`` bridge, which has no direct external route. A small
+dedicated egress proxy container is attached to both that internal bridge and a
+separate ordinary bridge. Worker HTTP and HTTPS clients receive proxy
+environment variables, so provider traffic can leave only through the proxy.
 
-1. established/related flows are accepted;
-2. DNS is accepted;
-3. TCP 80/443 is accepted only to the currently resolved IPv4 addresses of
-   allowlisted domains;
-4. all other forwarded packets from the worker subnet are dropped.
+The proxy applies these rules in order:
 
-The optional blocklist has precedence over the allowlist. A domain present in
-both is removed before DNS resolution and firewall rules are generated. Entries
-that are not allowlisted are already blocked by the default-deny policy.
+1. MuCLI control-plane endpoints such as the supervisor callback are allowed
+   only on their exact configured host and port;
+2. the user blocklist is evaluated and takes precedence;
+3. the user allowlist is evaluated by hostname, wildcard hostname, explicit IP,
+   or CIDR entry;
+4. every other CONNECT or HTTP destination is rejected.
 
-The worker has neither `NET_ADMIN` nor `SYS_ADMIN`, so root inside the worker
-cannot alter host firewall rules. Domain-to-IP mappings should be refreshed
-when a provider/CDN rotates addresses. The persisted policy records both the
-requested domains and addresses used when rules were installed.
+The worker network has no external route, so connecting directly to a resolved
+provider IP does not bypass the proxy. The egress proxy has no host mounts, runs
+read-only as UID 65534, drops all Linux capabilities, and has
+``no-new-privileges`` enabled. Neither the worker nor proxy receives the Docker
+socket.
+
+This model requires only normal access to the Docker daemon. MuCLI does not run
+``sudo``, iptables, nftables, or any other host firewall command during create,
+start, stop, migration, or removal.
 
 ## Dynamic mounts
 
@@ -111,14 +118,13 @@ Mount changes are refused while a turn is active.
 
 ## Operational requirements
 
-- Docker Engine and CLI
-- root access, or passwordless `sudo iptables`, to install host policy
+- Docker Engine and CLI available to the current user
 - reachability from the host process to Docker bridge addresses
 - the GUI server bound to an address reachable through
   `host.docker.internal` (the builder adds the Linux host-gateway mapping)
 
 Use `CommandRunner(dry_run=True)` in tests and planning tools to inspect every
-Docker/iptables command without executing it.
+Docker command without executing it.
 
 ## Host-level container manager
 

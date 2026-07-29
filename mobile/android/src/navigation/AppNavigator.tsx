@@ -6,6 +6,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { WorkspaceCategoryId } from './workspace';
 
 import { ConnectionPrompt } from '../components/ConnectionPrompt';
+import { ContainerManagerSheet } from '../components/ContainerManagerSheet';
 import { EdgeSwipeView } from '../components/EdgeSwipeView';
 import { ModeDrawer } from '../components/ModeDrawer';
 import { ModernHeader } from '../components/ModernHeader';
@@ -89,6 +90,7 @@ function ChatScreenWithChrome() {
   const { isConnected, activeSessionName, setActiveSession } = useConnectionStore();
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [containersOpen, setContainersOpen] = useState(false);
   const [createRequestToken, setCreateRequestToken] = useState(0);
 
   const openSessions = useCallback(() => setSessionsOpen(true), []);
@@ -133,13 +135,18 @@ function ChatScreenWithChrome() {
         ) : activeSessionName ? (
           <ChatScreen />
         ) : (
-          <SessionStartPrompt onLoadSession={openSessions} onCreateSession={createSession} />
+          <SessionStartPrompt
+            onLoadSession={openSessions}
+            onCreateSession={createSession}
+            onManageContainers={() => setContainersOpen(true)}
+          />
         )}
         <SwipeSessionsDrawer
           visible={sessionsOpen}
           onClose={() => setSessionsOpen(false)}
           createRequestToken={createRequestToken}
         />
+        <ContainerManagerSheet visible={containersOpen} onClose={() => setContainersOpen(false)} />
         <ModeDrawer
           visible={Boolean(activeSessionName) && modeOpen}
           onClose={() => setModeOpen(false)}

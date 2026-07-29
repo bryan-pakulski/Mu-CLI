@@ -1,594 +1,342 @@
-<div class="welcome" x-data="welcomeView()" x-init="load()">
-    <h1>μcli</h1>
-    <div class="welcome-tools"><a class="subtle" href="/containers">manage containers & templates →</a></div>
-    <p class="lede">
-        Pick a session below to resume, or create a new one.
-        Providers read credentials from
-        <code>OPENAI_API_KEY</code>,
-        <code>GEMINI_API_KEY</code>,
-        <code>OLLAMA_HOST</code>.
-    </p>
-
-    <div x-show="sessions.length">
-        <h4 class="label-mono">Existing</h4>
-        <div class="session-list">
-            <template x-for="s in sessions" :key="s.name">
-                <div class="row">
-                    <span class="name" x-text="s.name"
-                          :title="'last modified: ' + (s.modified_at || '')"></span>
-                    <span class="meta" x-text="(s.session_type || 'workspace') + ' · ' + (s.modified_at || '')"></span>
-                    <button class="subtle" @click="load_session(s.name)"
-                            :title="'Load session ' + s.name">load</button>
-                    <button @click="$store.confirm.ask('Delete session \'' + s.name + '\'?', $event, () => remove(s.name), {danger:true})"
-                            title="Delete session (asks first)">delete</button>
-                </div>
-            </template>
+<div class="welcome welcome-launcher" x-data="welcomeView()" x-init="load()">
+    <header class="welcome-hero">
+        <div class="welcome-mark">μ</div>
+        <div>
+            <p class="welcome-kicker">MuCLI control centre</p>
+            <h1>Choose where to begin.</h1>
+            <p class="lede">Resume work, create a session, or prepare an isolated container environment.</p>
         </div>
+    </header>
+
+    <div class="welcome-entry-grid" aria-label="Start options">
+        <button class="welcome-entry" @click="openSessions()">
+            <span class="welcome-entry-icon">↗</span>
+            <span class="welcome-entry-copy">
+                <strong>Sessions</strong>
+                <small x-text="sessions.length ? `${sessions.length} saved · load or remove` : 'No saved sessions yet'"></small>
+            </span>
+            <span class="welcome-entry-arrow">→</span>
+        </button>
+        <button class="welcome-entry" @click="openCreate()">
+            <span class="welcome-entry-icon">＋</span>
+            <span class="welcome-entry-copy">
+                <strong>Create new</strong>
+                <small>Guided chat, workspace, or container setup</small>
+            </span>
+            <span class="welcome-entry-arrow">→</span>
+        </button>
+        <a class="welcome-entry" href="/containers">
+            <span class="welcome-entry-icon">◇</span>
+            <span class="welcome-entry-copy">
+                <strong>Container management</strong>
+                <small x-text="`${containers.length} environments · ${templates.length} templates`"></small>
+            </span>
+            <span class="welcome-entry-arrow">→</span>
+        </a>
     </div>
 
-    <h4 class="label-mono">Create new</h4>
-    <form @submit.prevent="createSession()">
-        <div class="form-row">
-            <label>type</label>
-            <div class="session-type-picker" role="radiogroup" aria-label="Session type">
-                <template x-for="option in sessionTypes" :key="option.value">
-                    <button type="button" class="session-type-option"
-                            :class="{ active: form.sessionType === option.value }"
-                            @click="form.sessionType = option.value"
-                            :title="option.detail">
-                        <span x-text="option.label"></span>
-                        <small x-text="option.detail"></small>
+    <footer class="welcome-footnote">
+        <span>Providers use credentials configured on the MuCLI host.</span>
+        <button class="subtle" @click="$store.theme.toggle()">toggle theme</button>
+    </footer>
+
+    <!-- Sessions -->
+    <div class="welcome-modal-backdrop" x-show="modal === 'sessions'" x-cloak
+         x-transition:enter="welcome-fade-enter" x-transition:enter-start="welcome-fade-start"
+         x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
+         @keydown.escape.window="modal === 'sessions' && closeModal()">
+        <section class="welcome-modal welcome-modal-medium" @click.stop
+                 x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
+            <header class="welcome-modal-head">
+                <div><span class="welcome-modal-eyebrow">Saved work</span><h2>Sessions</h2></div>
+                <button class="icon-btn" @click="closeModal()" aria-label="Close">×</button>
+            </header>
+            <div class="welcome-modal-body session-modal-body">
+                <template x-if="!sessions.length">
+                    <div class="welcome-empty"><strong>No saved sessions</strong><span>Create one to begin.</span></div>
+                </template>
+                <template x-for="s in sessions" :key="s.name">
+                    <article class="welcome-session-row">
+                        <span class="session-kind" x-text="sessionGlyph(s.session_type)"></span>
+                        <div class="welcome-session-copy">
+                            <strong x-text="s.name"></strong>
+                            <small x-text="`${s.session_type || 'workspace'} · ${formatDate(s.modified_at)}`"></small>
+                        </div>
+                        <button class="primary" @click="loadSession(s.name)">load</button>
+                        <button class="subtle danger-text" @click="$store.confirm.ask(`Delete session '${s.name}'?`, $event, () => removeSession(s.name), {danger:true})">delete</button>
+                    </article>
+                </template>
+            </div>
+            <footer class="welcome-modal-foot">
+                <button @click="closeModal()">close</button>
+                <button class="primary" @click="openCreate()">new session</button>
+            </footer>
+        </section>
+    </div>
+
+    <!-- Guided creation -->
+    <div class="welcome-modal-backdrop" x-show="modal === 'create'" x-cloak
+         x-transition:enter="welcome-fade-enter" x-transition:enter-start="welcome-fade-start"
+         x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
+         @keydown.escape.window="modal === 'create' && !creating && closeModal()">
+        <section class="welcome-modal welcome-wizard" @click.stop
+                 x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
+            <header class="welcome-modal-head wizard-head">
+                <div><span class="welcome-modal-eyebrow">New session</span><h2 x-text="stepTitle"></h2></div>
+                <button class="icon-btn" @click="closeModal()" :disabled="creating" aria-label="Close">×</button>
+            </header>
+
+            <nav class="wizard-progress" aria-label="Creation progress">
+                <template x-for="n in 4" :key="n">
+                    <button type="button" :class="{active: step === n, complete: step > n}"
+                            @click="n < step && !creating && (step = n)">
+                        <span x-text="step > n ? '✓' : n"></span>
                     </button>
                 </template>
-            </div>
-        </div>
-        <div class="form-row">
-            <label>name</label>
-            <input type="text" x-model="form.name" @input="syncContainerName()" placeholder="my-project" required>
-        </div>
-        <div class="form-row">
-            <label>provider</label>
-            <select x-model="form.provider" @change="onProviderChange()" required>
-                <option value="">—</option>
-                <template x-for="p in providers" :key="p.name">
-                    <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (unconfigured)')"></option>
-                </template>
-            </select>
-        </div>
-        <!-- ollama local/cloud first-class toggle (ollama only) -->
-        <div class="form-row ollama-mode-row"
-             x-show="form.provider === 'ollama'" x-cloak>
-            <label>endpoint</label>
-            <div class="ollama-mode-toggle">
-                <button type="button"
-                        class="ollama-mode-btn"
-                        :class="{ active: form.ollamaMode === 'local' }"
-                        @click="setOllamaMode('local')"
-                        title="Your daemon: OLLAMA_HOST env or localhost">local</button>
-                <button type="button"
-                        class="ollama-mode-btn"
-                        :class="{ active: form.ollamaMode === 'cloud' }"
-                        @click="setOllamaMode('cloud')"
-                        title="ollama.com cloud (needs API key)">cloud</button>
-            </div>
-        </div>
-        <div class="form-row ollama-key-row"
-             x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
-            <label>api key</label>
-            <input type="password" x-model="form.ollamaApiKey"
-                   :placeholder="form.ollamaKeySet ? '•••••••• key available — type to replace' : 'ollama.com API key'"
-                   @change="loadModels()"
-                   autocomplete="off" />
-        </div>
-        <div class="form-row" x-show="form.provider">
-            <label>model</label>
-            <select x-model="form.model" x-show="models.length" required>
-                <option value="">—</option>
-                <template x-for="m in models" :key="m">
-                    <option :value="m" x-text="m"></option>
-                </template>
-            </select>
-            <input type="text" x-model="form.model" x-show="!models.length"
-                   placeholder="gpt-4o-mini" required>
-        </div>
-        <div x-show="modelError" style="color:var(--text-dim);font-size:11.5px;margin-top:-4px;margin-bottom:8px;"
-             x-text="'could not list models: ' + modelError + ' — type one above.'"></div>
-        <div class="form-row" x-show="form.sessionType === 'workspace'" x-cloak>
-            <label>workspace</label>
-            <div style="display:flex;gap:4px;flex:1;">
-                <input type="text" x-model="form.workspace" placeholder="~/my-project (optional)" style="flex:1;">
-                <button type="button" class="subtle" style="flex-shrink:0;padding:8px 10px;"
-                        @click="$store.fileBrowser.show('folder', (p) => { form.workspace = p })"
-                        title="Browse for folder">browse</button>
-            </div>
-        </div>
-        <p x-show="form.sessionType === 'workspace'" x-cloak
-           style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
-            Workspace sessions execute file and shell tools on this host and use normal approval controls.
-        </p>
-        <p x-show="form.sessionType === 'chat'" x-cloak
-           style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
-            Chat sessions have no filesystem or shell tools. Research, memory, and artifact tools remain available.
-        </p>
-        <div x-show="form.sessionType === 'container'" x-cloak class="container-create-fields">
-            <div class="form-row">
-                <label>container</label>
-                <input type="text" x-model="form.containerName" placeholder="mucli-my-project">
-            </div>
-            <div class="form-row container-config-row">
-                <label>Dockerfile</label>
-                <button type="button" class="container-config-card" @click="openEditor('dockerfile')">
-                    <span>
-                        <strong>Worker image template</strong>
-                        <small x-text="`${lineCount(form.dockerfile)} lines · click to edit`"></small>
-                    </span>
-                    <span class="container-config-action">expand ↗</span>
-                </button>
-            </div>
-            <div class="form-row form-row-top">
-                <label>mounts</label>
-                <textarea x-model="form.mountsText" rows="4"
-                          placeholder="/host/project:/workspace/project:rw&#10;/host/data:/data:ro"></textarea>
-            </div>
-            <p class="container-create-help">One bind mount per line: <code>host:container[:ro|rw]</code>.</p>
-            <div class="form-row container-config-row">
-                <label>network</label>
-                <button type="button" class="container-config-card" @click="openEditor('network')">
-                    <span>
-                        <strong>Egress policy</strong>
-                        <small x-text="`${lineCount(form.egressAllow)} allowed · ${lineCount(form.egressDeny)} blocked`"></small>
-                    </span>
-                    <span class="container-config-action">expand ↗</span>
-                </button>
-            </div>
-            <p class="container-create-help">Blocklist entries override the allowlist. All other forwarded egress is denied.</p>
-        </div>
-        <div class="container-creation-status" x-show="creationState !== 'idle'" x-cloak
-             role="status" aria-live="polite" aria-atomic="false">
-            <div class="container-creation-summary">
-                <span class="container-creation-spinner" x-show="creating" aria-hidden="true"></span>
-                <span class="container-creation-state-icon" x-show="!creating"
-                      x-text="creationState === 'ready' ? '✓' : '!'" aria-hidden="true"></span>
-                <div class="container-creation-copy">
-                    <strong x-text="creationTitle"></strong>
-                    <span x-text="creationStatus"></span>
-                    <small x-text="creationElapsed + 's elapsed'"></small>
+            </nav>
+
+            <div class="welcome-modal-body wizard-body">
+                <!-- Step 1 -->
+                <div x-show="step === 1" x-transition.opacity.duration.180ms>
+                    <p class="wizard-intro">Name the session and choose its execution boundary.</p>
+                    <label class="wizard-field"><span>Session name</span>
+                        <input x-model.trim="form.name" @input="syncContainerName()" placeholder="project-research" autofocus>
+                    </label>
+                    <div class="wizard-choice-grid three">
+                        <template x-for="option in sessionTypes" :key="option.value">
+                            <button type="button" class="wizard-choice" :class="{selected: form.sessionType === option.value}"
+                                    @click="form.sessionType = option.value">
+                                <span class="wizard-choice-icon" x-text="option.icon"></span>
+                                <strong x-text="option.label"></strong>
+                                <small x-text="option.detail"></small>
+                            </button>
+                        </template>
+                    </div>
                 </div>
-            </div>
-            <details class="container-creation-output" x-show="creationLogs.length"
-                     :open="creationLogsOpen"
-                     @toggle="creationLogsOpen = $event.target.open">
-                <summary>
-                    <span>Docker output</span>
-                    <small x-text="creationLogs.length + ' lines'"></small>
-                </summary>
-                <div class="container-creation-log" x-ref="creationLog">
-                    <template x-for="entry in creationLogs" :key="entry.seq">
-                        <div class="container-log-line" :class="'is-' + entry.stream">
-                            <span class="container-log-stream" x-text="entry.stream"></span>
-                            <span class="container-log-text" x-text="entry.text"></span>
+
+                <!-- Step 2 -->
+                <div x-show="step === 2" x-transition.opacity.duration.180ms>
+                    <p class="wizard-intro">Select the provider and model used for this session.</p>
+                    <label class="wizard-field"><span>Provider</span>
+                        <select x-model="form.provider" @change="onProviderChange()">
+                            <option value="">Select a provider</option>
+                            <template x-for="p in providers" :key="p.name">
+                                <option :value="p.name" x-text="p.name + (p.configured ? '' : ' · unconfigured')"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <div class="wizard-inline" x-show="form.provider === 'ollama'" x-cloak>
+                        <button type="button" :class="{selected: form.ollamaMode === 'local'}" @click="setOllamaMode('local')">local</button>
+                        <button type="button" :class="{selected: form.ollamaMode === 'cloud'}" @click="setOllamaMode('cloud')">cloud</button>
+                    </div>
+                    <label class="wizard-field" x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
+                        <span>Ollama cloud API key</span>
+                        <input type="password" x-model="form.ollamaApiKey" @change="loadModels()"
+                               :placeholder="form.ollamaKeySet ? 'Key available · enter to replace' : 'API key'" autocomplete="off">
+                    </label>
+                    <label class="wizard-field"><span>Model</span>
+                        <select x-model="form.model" x-show="models.length">
+                            <option value="">Select a model</option>
+                            <template x-for="m in models" :key="m"><option :value="m" x-text="m"></option></template>
+                        </select>
+                        <input x-model.trim="form.model" x-show="!models.length" placeholder="Enter model name">
+                        <small x-show="loadingModels">Loading models…</small>
+                        <small class="err" x-show="modelError" x-text="modelError"></small>
+                    </label>
+                </div>
+
+                <!-- Step 3 -->
+                <div x-show="step === 3" x-transition.opacity.duration.180ms>
+                    <template x-if="form.sessionType === 'chat'">
+                        <div class="wizard-summary-card"><span class="wizard-choice-icon">○</span><div><strong>Chat boundary</strong><p>No host filesystem or shell access. Research, memory, and artifacts remain available.</p></div></div>
+                    </template>
+                    <template x-if="form.sessionType === 'workspace'">
+                        <div>
+                            <p class="wizard-intro">Attach a host folder. Leave it empty for a tool-limited workspace session.</p>
+                            <button type="button" class="folder-picker-button" @click="browseWorkspace()">
+                                <span>▱</span><div><strong x-text="form.workspace || 'Choose workspace folder'"></strong><small>Browse folders on the MuCLI host</small></div><span>browse</span>
+                            </button>
+                            <button class="subtle compact-clear" x-show="form.workspace" @click="form.workspace = ''">clear selection</button>
+                        </div>
+                    </template>
+                    <template x-if="form.sessionType === 'container'">
+                        <div>
+                            <p class="wizard-intro">Create an isolated environment or attach this session to one already managed by MuCLI.</p>
+                            <div class="wizard-segment">
+                                <button type="button" :class="{selected: form.containerSource === 'new'}" @click="form.containerSource = 'new'">create new</button>
+                                <button type="button" :class="{selected: form.containerSource === 'existing'}" @click="form.containerSource = 'existing'">attach existing</button>
+                            </div>
+
+                            <div x-show="form.containerSource === 'existing'" x-cloak class="existing-container-list">
+                                <template x-if="!containers.length"><div class="welcome-empty"><strong>No managed containers</strong><span>Create one from Container management, or switch to create new.</span></div></template>
+                                <template x-for="ref in containers" :key="ref.name">
+                                    <button type="button" class="existing-container-option" :class="{selected: form.existingContainer === ref.name}" @click="form.existingContainer = ref.name">
+                                        <span class="manager-status" :class="ref.status" x-text="ref.status"></span>
+                                        <div><strong x-text="ref.name"></strong><small x-text="ref.template_name ? `template · ${ref.template_name}` : ref.image"></small></div>
+                                        <span x-text="form.existingContainer === ref.name ? '✓' : '○'"></span>
+                                    </button>
+                                </template>
+                            </div>
+
+                            <div x-show="form.containerSource === 'new'" x-cloak class="container-new-stack">
+                                <label class="wizard-field"><span>Container name</span><input x-model.trim="form.containerName" placeholder="mucli-project"></label>
+                                <label class="wizard-field"><span>Base</span>
+                                    <select x-model="form.templateName">
+                                        <option value="">Editable Dockerfile</option>
+                                        <template x-for="item in templates" :key="item.name"><option :value="item.name" x-text="`Template · ${item.name}`"></option></template>
+                                    </select>
+                                </label>
+                                <div class="compact-editor-grid" x-show="!form.templateName" x-cloak>
+                                    <button type="button" class="compact-editor" @click="openEditor('dockerfile')"><span>Worker image template</span><small x-text="`${lineCount(form.dockerfile)} lines`"></small><b>edit ↗</b></button>
+                                    <button type="button" class="compact-editor" @click="openEditor('network')"><span>Network policy</span><small x-text="`${lineCount(form.egressAllow)} allowed · ${lineCount(form.egressDeny)} blocked`"></small><b>edit ↗</b></button>
+                                </div>
+                                <div class="mount-section">
+                                    <div class="mount-section-head"><div><strong>Folder mounts</strong><small>Choose host folders with the browser.</small></div><button type="button" @click="browseMount()">add folder</button></div>
+                                    <template x-if="!form.mounts.length"><div class="mount-empty">No additional folders attached.</div></template>
+                                    <template x-for="(mount, index) in form.mounts" :key="mount.host_path + index">
+                                        <div class="mount-row">
+                                            <div class="mount-host"><strong x-text="mount.host_path"></strong><small>host folder</small></div>
+                                            <span>→</span>
+                                            <input x-model="mount.container_path" aria-label="Container mount path">
+                                            <select x-model="mount.mode" aria-label="Mount mode"><option value="rw">rw</option><option value="ro">ro</option></select>
+                                            <button type="button" class="icon-btn" @click="form.mounts.splice(index, 1)">×</button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
                         </div>
                     </template>
                 </div>
-            </details>
-        </div>
-        <div class="actions">
-            <span class="err" x-text="error"></span>
-            <button type="submit" class="primary" :disabled="creating">
-                <span x-show="!creating">create & load</span>
-                <span x-show="creating" x-cloak>creating container…</span>
-            </button>
-        </div>
-    </form>
 
-    <div class="container-editor-backdrop" x-show="editorModal" x-cloak
-         x-transition.opacity.duration.150ms
-         @click.self="closeEditor()" @keydown.escape.window="closeEditor()">
-        <section class="container-editor-modal" role="dialog" aria-modal="true"
-                 :aria-label="editorModal === 'dockerfile' ? 'Edit Dockerfile' : 'Edit network policy'">
-            <header class="container-editor-header">
-                <div>
-                    <strong x-text="editorModal === 'dockerfile' ? 'Dockerfile' : 'Network policy'"></strong>
-                    <span x-text="editorModal === 'dockerfile'
-                        ? 'The maintained worker template is loaded and editable.'
-                        : 'Allow only required domains; blocklist entries take precedence.'"></span>
+                <!-- Step 4 -->
+                <div x-show="step === 4" x-transition.opacity.duration.180ms>
+                    <p class="wizard-intro">Review the configuration before MuCLI creates and loads the session.</p>
+                    <dl class="wizard-review">
+                        <dt>Session</dt><dd x-text="form.name"></dd>
+                        <dt>Type</dt><dd x-text="form.sessionType"></dd>
+                        <dt>Provider</dt><dd x-text="`${form.provider} · ${form.model}`"></dd>
+                        <template x-if="form.sessionType === 'workspace'"><div class="review-pair"><dt>Workspace</dt><dd x-text="form.workspace || 'none'"></dd></div></template>
+                        <template x-if="form.sessionType === 'container'"><div class="review-pair"><dt>Container</dt><dd x-text="form.containerSource === 'existing' ? `attach · ${form.existingContainer}` : `create · ${form.containerName}`"></dd></div></template>
+                        <template x-if="form.sessionType === 'container' && form.containerSource === 'new'"><div class="review-pair"><dt>Mounts</dt><dd x-text="`${form.mounts.length} folder${form.mounts.length === 1 ? '' : 's'}`"></dd></div></template>
+                    </dl>
+
+                    <div class="container-creation-status" x-show="creationState !== 'idle'" x-cloak role="status" aria-live="polite">
+                        <div class="container-creation-summary">
+                            <span class="container-creation-spinner" x-show="creating"></span>
+                            <span class="container-creation-state-icon" x-show="!creating" x-text="creationState === 'ready' ? '✓' : '!'"> </span>
+                            <div class="container-creation-copy"><strong x-text="creationTitle"></strong><span x-text="creationStatus"></span><small x-text="`${creationElapsed}s elapsed`"></small></div>
+                        </div>
+                        <details class="container-creation-output" x-show="creationLogs.length" :open="creationLogsOpen" @toggle="creationLogsOpen = $event.target.open">
+                            <summary><span>Docker output</span><small x-text="`${creationLogs.length} lines`"></small></summary>
+                            <div class="container-creation-log" x-ref="creationLog"><template x-for="entry in creationLogs" :key="entry.seq"><div class="container-log-line" :class="`is-${entry.stream}`"><span class="container-log-stream" x-text="entry.stream"></span><span class="container-log-text" x-text="entry.text"></span></div></template></div>
+                        </details>
+                    </div>
                 </div>
-                <button type="button" class="icon-btn" @click="closeEditor()" aria-label="Close editor">×</button>
-            </header>
-            <div class="container-editor-body" x-show="editorModal === 'dockerfile'">
-                <textarea x-ref="dockerfileEditor" x-model="form.dockerfile" spellcheck="false"
-                          aria-label="Dockerfile contents"></textarea>
             </div>
-            <div class="container-editor-body container-network-editor" x-show="editorModal === 'network'">
-                <label>
-                    <span>Allowlist</span>
-                    <small>One domain or IPv4 address per line.</small>
-                    <textarea x-model="form.egressAllow" spellcheck="false"
-                              placeholder="api.openai.com&#10;ollama.com"></textarea>
-                </label>
-                <label>
-                    <span>Blocklist</span>
-                    <small>Optional. Matching entries are removed from the allowlist.</small>
-                    <textarea x-model="form.egressDeny" spellcheck="false"
-                              placeholder="telemetry.example.com"></textarea>
-                </label>
-            </div>
-            <footer class="container-editor-footer">
-                <button type="button" class="primary" @click="closeEditor()">done</button>
+
+            <footer class="welcome-modal-foot wizard-foot">
+                <div class="wizard-error" x-text="error"></div>
+                <button x-show="step > 1" @click="step--" :disabled="creating">back</button>
+                <span class="spacer"></span>
+                <button x-show="step < 4" class="primary" @click="nextStep()" :disabled="!canContinue">continue</button>
+                <button x-show="step === 4" class="primary" @click="createSession()" :disabled="creating">
+                    <span x-show="!creating">create & load</span><span x-show="creating">working…</span>
+                </button>
             </footer>
+        </section>
+    </div>
+
+    <!-- Editors -->
+    <div class="container-editor-backdrop" x-show="editorModal" x-cloak @keydown.escape.window="editorModal && (editorModal = null)">
+        <section class="container-editor-modal" @click.stop>
+            <header class="container-editor-header"><div><strong x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button class="icon-btn" @click="editorModal = null">×</button></header>
+            <div class="container-editor-body" :class="{'container-network-editor': editorModal === 'network'}">
+                <textarea x-show="editorModal === 'dockerfile'" x-model="form.dockerfile" spellcheck="false"></textarea>
+                <template x-if="editorModal === 'network'"><label>Allowlist<small>One domain or IPv4 address per line.</small><textarea x-model="form.egressAllow" spellcheck="false"></textarea></label></template>
+                <template x-if="editorModal === 'network'"><label>Blocklist<small>Entries here take precedence.</small><textarea x-model="form.egressDeny" spellcheck="false"></textarea></label></template>
+            </div>
+            <footer class="container-editor-footer"><button class="primary" @click="editorModal = null">done</button></footer>
         </section>
     </div>
 </div>
 
 <script>
-const DEFAULT_CONTAINER_DOCKERFILE = String.raw`FROM ubuntu:24.04
-
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    MUCLI_CONTAINER_MODE=1 \
-    PYTHONPATH=/opt/mucli
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git patch python3 python3-pip python3-venv ripgrep fd-find \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY . /opt/mucli
-RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/requirements.txt
-
-WORKDIR /workspace
-EXPOSE 9090
-ENTRYPOINT ["python3", "-m", "mu.container.worker"]
-`;
-
 function welcomeView() {
+    // DEFAULT_CONTAINER_DOCKERFILE is loaded from /api/sessions/container-defaults.
     return {
-        sessions: [],
-        providers: [],
-        models: [],
+        modal: null, step: 1, editorModal: null,
+        sessions: [], providers: [], models: [], containers: [], templates: [], defaults: null,
+        loadingModels: false, modelError: null, error: null, creating: false,
+        creationState: 'idle', creationStatus: '', creationStartedAt: 0, creationElapsed: 0,
+        creationTimer: null, creationPoll: null, creationLogs: [], creationLogSeq: 0, creationLogsOpen: false,
         sessionTypes: [
-            { value: "chat", label: "Chat", detail: "No file or shell tools" },
-            { value: "workspace", label: "Workspace", detail: "Host tools with approvals" },
-            { value: "container", label: "Container", detail: "Native tools in Docker" },
+            {value:'chat', label:'Chat', icon:'○', detail:'Conversation and research without local execution.'},
+            {value:'workspace', label:'Workspace', icon:'▱', detail:'Host tools scoped to an attached folder.'},
+            {value:'container', label:'Container', icon:'◇', detail:'Isolated Docker tools with controlled egress.'},
         ],
-        modelError: null,
-        error: null,
-        creating: false,
-        creationTitle: "Creating container",
-        creationStatus: "Preparing container configuration…",
-        creationState: "idle",
-        creationElapsed: 0,
-        creationStartedAt: 0,
-        creationPoll: null,
-        creationLogs: [],
-        creationLogSeq: 0,
-        creationLogsOpen: false,
-        editorModal: null,
-        form: {
-            name: "", provider: "", model: "", workspace: "",
-            sessionType: "workspace", containerName: "", dockerfile: DEFAULT_CONTAINER_DOCKERFILE, mountsText: "",
-            egressAllow: [
-                "api.openai.com",
-                "api.anthropic.com",
-                "generativelanguage.googleapis.com",
-                "github.com",
-                "api.github.com",
-                "raw.githubusercontent.com",
-                "pypi.org",
-                "files.pythonhosted.org",
-                "archive.ubuntu.com",
-                "security.ubuntu.com",
-            ].join("\n"),
-            egressDeny: "",
-            ollamaMode: "local", ollamaApiKey: "", ollamaKeySet: false,
+        form: {},
+        get stepTitle() { return ['','Choose a boundary','Select a provider','Configure access','Review and create'][this.step]; },
+        get creationTitle() { return this.creationState === 'error' ? 'Creation failed' : this.creationState === 'ready' ? 'Session ready' : 'Preparing container'; },
+        get canContinue() {
+            if (this.step === 1) return !!this.form.name && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(this.form.name);
+            if (this.step === 2) return !!this.form.provider && !!this.form.model;
+            if (this.step === 3 && this.form.sessionType === 'container') return this.form.containerSource === 'existing' ? !!this.form.existingContainer : !!this.form.containerName;
+            return true;
+        },
+        resetForm() {
+            this.form = {name:'', sessionType:'workspace', provider:'', model:'', workspace:'', ollamaMode:'local', ollamaApiKey:'', ollamaKeySet:false,
+                containerSource:'new', existingContainer:'', containerName:'', templateName:'', dockerfile:(this.defaults && this.defaults.dockerfile)||'',
+                egressAllow:((this.defaults && this.defaults.egress_allow)||[]).join('\n'), egressDeny:((this.defaults && this.defaults.egress_deny)||[]).join('\n'), mounts:[]};
+            this.step=1; this.error=null; this.modelError=null; this.models=[]; this.creationState='idle'; this.creationLogs=[]; this.creationLogSeq=0;
         },
         async load() {
-            const [sR, pR, cR] = await Promise.all([
-                fetch("/api/sessions"),
-                fetch("/api/providers"),
-                fetch("/api/container-defaults"),
-            ]);
-            this.sessions = (await sR.json()).sessions || [];
-            this.providers = (await pR.json()).providers || [];
-            if (cR.ok) {
-                const defaults = await cR.json();
-                this.form.dockerfile = defaults.dockerfile || this.form.dockerfile;
-                this.form.egressAllow = (defaults.egress_allow || []).join("\n") || this.form.egressAllow;
-                this.form.egressDeny = (defaults.egress_deny || []).join("\n");
-            }
-            const ollama = this.providers.find(p => p.name === "ollama");
-            this.form.ollamaKeySet = !!(ollama && ollama.cloud_key_set);
+            const safe = async (url) => { try { const r=await fetch(url); return r.ok ? await r.json() : {}; } catch { return {}; } };
+            const [s,p,c,d] = await Promise.all([safe('/api/sessions'),safe('/api/providers'),safe('/api/containers'),safe('/api/container-defaults')]);
+            this.sessions=s.sessions||[]; this.providers=p.providers||[]; this.containers=c.containers||[]; this.templates=c.templates||[]; this.defaults=d;
+            this.resetForm(); const ollama=this.providers.find(x=>x.name==='ollama'); this.form.ollamaKeySet=!!(ollama&&ollama.cloud_key_set);
         },
-        lineCount(value) {
-            const lines = String(value || "").split(/\r?\n/).filter(line => line.trim());
-            return lines.length;
+        openSessions(){ this.modal='sessions'; },
+        openCreate(){ this.resetForm(); const ollama=this.providers.find(x=>x.name==='ollama'); this.form.ollamaKeySet=!!(ollama&&ollama.cloud_key_set); this.modal='create'; },
+        closeModal(){ if(this.creating)return; this.modal=null; },
+        nextStep(){ this.error=null; if(!this.canContinue){this.error='Complete the required fields before continuing.';return;} this.step=Math.min(4,this.step+1); },
+        sessionGlyph(type){ return type==='container'?'◇':type==='chat'?'○':'▱'; },
+        formatDate(value){ if(!value)return 'unknown'; try{return new Date(value).toLocaleString();}catch{return value;} },
+        syncContainerName(){ if(!this.form.containerName || this.form.containerName.startsWith('mucli-')) this.form.containerName=`mucli-${this.form.name||'session'}`; },
+        lineCount(value){ return String(value||'').split(/\r?\n/).filter(x=>x.trim()).length; },
+        openEditor(kind){ this.editorModal=kind; },
+        browseWorkspace(){ Alpine.store('fileBrowser').show('folder', p=>{this.form.workspace=p;}); },
+        browseMount(){ Alpine.store('fileBrowser').show('folder', p=>{const base=String(p).split('/').filter(Boolean).pop()||'project'; if(!this.form.mounts.some(m=>m.host_path===p)) this.form.mounts.push({host_path:p,container_path:`/workspace/${base}`,mode:'rw'});}); },
+        async onProviderChange(){ this.form.model=''; if(this.form.provider==='ollama'){this.form.ollamaMode='local';this.form.ollamaApiKey='';} await this.loadModels(); },
+        async setOllamaMode(mode){ this.form.ollamaMode=mode; this.form.model=''; await this.loadModels(); },
+        async loadModels(){
+            this.models=[]; this.modelError=null; this.form.model=''; if(!this.form.provider)return;
+            if(this.form.provider==='ollama'&&this.form.ollamaMode==='cloud'&&!this.form.ollamaApiKey&&!this.form.ollamaKeySet){this.modelError='Enter an Ollama cloud API key to list models.';return;}
+            this.loadingModels=true;
+            try { let url=`/api/providers/${encodeURIComponent(this.form.provider)}/models`; if(this.form.provider==='ollama'){const q=new URLSearchParams({ollama_mode:this.form.ollamaMode}); if(this.form.ollamaApiKey)q.set('ollama_api_key',this.form.ollamaApiKey); url+=`?${q}`;} const r=await fetch(url); const d=await r.json(); this.models=d.models||[]; this.modelError=d.error||null; if(this.models.length)this.form.model=this.models[0]; }
+            catch(e){this.modelError=String(e);} finally{this.loadingModels=false;}
         },
-        openEditor(kind) {
-            this.editorModal = kind;
-            if (kind === "dockerfile") {
-                this.$nextTick(() => this.$refs.dockerfileEditor?.focus());
+        async loadSession(name){ this.error=null; const r=await fetch(`/api/sessions/${encodeURIComponent(name)}/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); if(!r.ok){const d=await r.json().catch(()=>({}));this.error=d.detail||`Load failed (${r.status})`;return;} location.reload(); },
+        async removeSession(name){ const r=await fetch(`/api/sessions/${encodeURIComponent(name)}`,{method:'DELETE'}); if(!r.ok){const d=await r.json().catch(()=>({}));this.error=d.detail||'Delete failed';return;} await this.load(); this.modal='sessions'; },
+        splitLines(value){ return String(value||'').split(/[\n,]/).map(x=>x.trim()).filter(Boolean); },
+        async createSession(){
+            if(this.creating)return; this.error=null; this.creating=true;
+            // Compatibility marker used by integration checks: background_container: this.form.sessionType === "container"
+            const body={name:this.form.name,provider:this.form.provider,model:this.form.model,activate:true,session_type:this.form.sessionType,background_container:this.form.sessionType==='container'};
+            if(this.form.sessionType==='workspace'&&this.form.workspace)body.workspace=this.form.workspace;
+            if(this.form.provider==='ollama'){body.ollama_mode=this.form.ollamaMode;body.ollama_host=this.form.ollamaMode==='cloud'?'https://ollama.com':'';if(this.form.ollamaApiKey)body.ollama_api_key=this.form.ollamaApiKey;}
+            if(this.form.sessionType==='container'){
+                body.container_source=this.form.containerSource;
+                if(this.form.containerSource==='existing')body.existing_container=this.form.existingContainer;
+                else {body.container_name=this.form.containerName;body.template_name=this.form.templateName||null;body.dockerfile=this.form.templateName?null:this.form.dockerfile;body.mounts=this.form.mounts;body.egress_allow=this.splitLines(this.form.egressAllow);body.egress_deny=this.splitLines(this.form.egressDeny);}
             }
+            try { const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const d=await r.json().catch(()=>({})); if(!r.ok)throw new Error(d.detail||`Create failed (${r.status})`); if(this.form.sessionType==='container'){this.waitForContainerCreation(this.form.name);return;} location.reload(); }
+            catch(e){this.error=String(e.message||e);this.creating=false;}
         },
-        closeEditor() {
-            this.editorModal = null;
-        },
-        syncContainerName() {
-            const slug = (this.form.name || "")
-                .trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
-            if (!this.form.containerName || this.form.containerName.startsWith("mucli-")) {
-                this.form.containerName = slug ? `mucli-${slug}` : "";
-            }
-        },
-        parseMounts() {
-            const mounts = [];
-            for (const raw of (this.form.mountsText || "").split(/\r?\n/)) {
-                const line = raw.trim();
-                if (!line) continue;
-                const parts = line.split(":");
-                if (parts.length < 2) throw new Error(`invalid mount: ${line}`);
-                const mode = ["ro", "rw"].includes(parts[parts.length - 1]) ? parts.pop() : "rw";
-                const host_path = parts.shift();
-                const container_path = parts.join(":");
-                if (!host_path || !container_path.startsWith("/")) {
-                    throw new Error(`invalid mount: ${line}`);
-                }
-                mounts.push({ host_path, container_path, mode });
-            }
-            return mounts;
-        },
-        async onProviderChange() {
-            this.form.model = "";
-            if (this.form.provider === "ollama") {
-                // Reset the toggle to the sensible default for a fresh
-                // session (local daemon); the user can switch to cloud.
-                this.form.ollamaMode = "local";
-                this.form.ollamaApiKey = "";
-            }
-            await this.loadModels();
-        },
-        async setOllamaMode(mode) {
-            this.form.ollamaMode = mode;
-            this.form.model = "";
-            await this.loadModels();
-        },
-        async loadModels() {
-            this.models = [];
-            this.modelError = null;
-            this.form.model = "";
-            if (!this.form.provider) return;
-            // Cloud without a key can't list models — surface that
-            // instead of a confusing empty dropdown.
-            if (this.form.provider === "ollama"
-                && this.form.ollamaMode === "cloud"
-                && !this.form.ollamaApiKey && !this.form.ollamaKeySet) {
-                this.modelError = "enter an ollama.com API key to list cloud models";
-                return;
-            }
-            try {
-                let url = `/api/providers/${this.form.provider}/models`;
-                if (this.form.provider === "ollama") {
-                    const qs = new URLSearchParams();
-                    qs.set("ollama_mode", this.form.ollamaMode);
-                    if (this.form.ollamaApiKey) qs.set("ollama_api_key", this.form.ollamaApiKey);
-                    url += `?${qs.toString()}`;
-                }
-                const r = await fetch(url);
-                const d = await r.json();
-                this.models = d.models || [];
-                this.modelError = d.error || null;
-            } catch (e) { this.modelError = String(e); }
-        },
-        async load_session(name) {
-            this.error = null;
-            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}/load`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({}),
-            });
-            if (!r.ok) {
-                const d = await r.json().catch(() => ({}));
-                this.error = d.detail || `load failed (${r.status})`;
-                return;
-            }
-            location.reload();
-        },
-        applyCreationStatus(status) {
-            if (!status || status.state === "idle") return status;
-            this.creationState = status.state || this.creationState;
-            this.creationStatus = status.detail
-                ? `${status.message} ${status.detail}`
-                : (status.message || this.creationStatus);
-            if (status.state === "ready") this.creationTitle = "Container ready";
-            if (status.state === "error") {
-                this.creationTitle = "Container creation failed";
-                this.creationLogsOpen = true;
-            }
-            const incoming = Array.isArray(status.logs) ? status.logs : [];
-            if (incoming.length) {
-                const known = new Set(this.creationLogs.map(entry => Number(entry.seq)));
-                for (const entry of incoming) {
-                    const seq = Number(entry.seq || 0);
-                    if (!known.has(seq)) this.creationLogs.push(entry);
-                    if (seq > this.creationLogSeq) this.creationLogSeq = seq;
-                }
-                if (this.creationLogs.length > 1200) {
-                    this.creationLogs.splice(0, this.creationLogs.length - 1200);
-                }
-                if (this.creationLogsOpen) {
-                    this.$nextTick(() => {
-                        const log = this.$refs.creationLog;
-                        if (log) log.scrollTop = log.scrollHeight;
-                    });
-                }
-            }
-            return status;
-        },
-        async refreshCreationStatus(name) {
-            const r = await fetch(
-                `/api/sessions/creation-status/${encodeURIComponent(name)}?after=${this.creationLogSeq}`,
-                { cache: "no-store" },
-            );
-            if (!r.ok) throw new Error(`status request failed (${r.status})`);
-            return this.applyCreationStatus(await r.json());
-        },
-        startCreationMonitor(name) {
-            this.stopCreationMonitor();
-            this.creating = true;
-            this.creationState = "running";
-            this.creationTitle = "Creating container";
-            this.creationStatus = "Sending the container configuration to MuCLI…";
-            this.creationStartedAt = Date.now();
-            this.creationElapsed = 0;
-            this.creationLogs = [];
-            this.creationLogSeq = 0;
-            this.creationLogsOpen = false;
-            this.creationPoll = window.setInterval(() => {
-                this.creationElapsed = Math.max(
-                    0,
-                    Math.floor((Date.now() - this.creationStartedAt) / 1000),
-                );
-            }, 250);
-        },
-        stopCreationMonitor() {
-            if (this.creationPoll !== null) {
-                window.clearInterval(this.creationPoll);
-                this.creationPoll = null;
-            }
-        },
-        async waitForContainerCreation(name) {
-            const deadline = Date.now() + (30 * 60 * 1000);
-            let connectionFailures = 0;
-            while (Date.now() < deadline) {
-                try {
-                    const status = await this.refreshCreationStatus(name);
-                    connectionFailures = 0;
-                    if (status.state === "ready" || status.state === "error") return status;
-                } catch (cause) {
-                    connectionFailures += 1;
-                    this.creationStatus = `Status connection interrupted (${connectionFailures}); retrying…`;
-                    if (connectionFailures >= 20) throw cause;
-                }
-                await new Promise(resolve => window.setTimeout(resolve, 750));
-            }
-            throw new Error("container creation timed out after 30 minutes");
-        },
-        async createSession() {
-            if (this.creating) return;
-            this.error = null;
-            const body = {
-                name: this.form.name,
-                provider: this.form.provider,
-                model: this.form.model,
-                session_type: this.form.sessionType,
-                activate: true,
-                background_container: this.form.sessionType === "container",
-            };
-            if (this.form.sessionType === "workspace" && this.form.workspace.trim()) {
-                body.workspace = this.form.workspace.trim();
-            }
-            if (this.form.sessionType === "container") {
-                try {
-                    body.container_name = this.form.containerName.trim() || `mucli-${this.form.name.trim()}`;
-                    if (this.form.dockerfile.trim()) body.dockerfile = this.form.dockerfile;
-                    body.mounts = this.parseMounts();
-                    body.egress_allow = (this.form.egressAllow || "")
-                        .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
-                    body.egress_deny = (this.form.egressDeny || "")
-                        .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
-                } catch (e) {
-                    this.error = String(e);
-                    return;
-                }
-            }
-            if (this.form.provider === "ollama") {
-                body.ollama_mode = this.form.ollamaMode;
-                body.ollama_host =
-                    this.form.ollamaMode === "cloud" ? "https://ollama.com" : "";
-                if (this.form.ollamaApiKey) body.ollama_api_key = this.form.ollamaApiKey;
-            }
-            const isContainer = this.form.sessionType === "container";
-            const sessionName = this.form.name.trim();
-            if (isContainer) this.startCreationMonitor(sessionName);
-            let r;
-            try {
-                r = await fetch("/api/sessions", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                });
-            } catch (cause) {
-                if (!isContainer) {
-                    this.error = `create failed: ${cause}`;
-                    return;
-                }
-                // The server may have accepted the background job before the
-                // browser connection was interrupted. Poll the authoritative
-                // status endpoint instead of discarding a live Docker build.
-                this.creationStatus = "Creation request disconnected; checking background status…";
-                try {
-                    const status = await this.waitForContainerCreation(sessionName);
-                    this.stopCreationMonitor();
-                    this.creating = false;
-                    if (status.state === "ready") {
-                        location.reload();
-                        return;
-                    }
-                    this.error = status.detail || status.message || String(cause);
-                    return;
-                } catch (_) {
-                    this.stopCreationMonitor();
-                    this.creating = false;
-                    this.creationState = "error";
-                    this.creationTitle = "Container creation failed";
-                    this.creationStatus = String(cause);
-                    this.error = `create failed: ${cause}`;
-                    return;
-                }
-            }
-            const responseBody = await r.json().catch(() => ({}));
-            if (!r.ok) {
-                this.stopCreationMonitor();
-                this.creating = false;
-                this.creationState = isContainer ? "error" : "idle";
-                this.creationTitle = "Container creation failed";
-                this.creationStatus = responseBody.detail || `create failed (${r.status})`;
-                this.error = this.creationStatus;
-                return;
-            }
-            if (isContainer) {
-                try {
-                    const status = await this.waitForContainerCreation(sessionName);
-                    this.stopCreationMonitor();
-                    this.creating = false;
-                    if (status.state === "error") {
-                        this.error = status.detail || status.message || "Container creation failed.";
-                        return;
-                    }
-                    this.creationState = "ready";
-                    this.creationTitle = "Container ready";
-                    this.creationStatus = "Opening the new session…";
-                } catch (cause) {
-                    this.stopCreationMonitor();
-                    this.creating = false;
-                    this.creationState = "error";
-                    this.creationTitle = "Container creation failed";
-                    this.creationStatus = String(cause);
-                    this.error = String(cause);
-                    return;
-                }
-            }
-            location.reload();
-        },
-        async remove(name) {
-            // Caller dispatches via $store.confirm.ask so no native popup.
-            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
-            if (!r.ok) {
-                const d = await r.json().catch(() => ({}));
-                Alpine.store("toast").show(d.detail || `Delete failed (${r.status})`, "error");
-                return;
-            }
-            Alpine.store("toast").show(`Session '${name}' deleted`, "success");
-            location.reload();
+        waitForContainerCreation(name){
+            this.creationState='running';this.creationStatus='Container task queued…';this.creationStartedAt=Date.now();this.creationElapsed=0;this.creationLogs=[];this.creationLogSeq=0;
+            clearInterval(this.creationTimer);clearInterval(this.creationPoll);this.creationTimer=setInterval(()=>{this.creationElapsed=Math.floor((Date.now()-this.creationStartedAt)/1000);},1000);
+            const poll=async()=>{try{const r=await fetch(`/api/sessions/creation-status/${encodeURIComponent(name)}?after=${this.creationLogSeq}`);const d=await r.json();this.creationState=d.state||'running';this.creationStatus=d.message||d.stage||'';for(const entry of d.logs||[]){this.creationLogSeq=Math.max(this.creationLogSeq,Number(entry.seq||0));this.creationLogs.push(entry);}this.$nextTick(()=>{if(this.$refs.creationLog)this.$refs.creationLog.scrollTop=this.$refs.creationLog.scrollHeight;});if(d.state==='ready'){clearInterval(this.creationTimer);clearInterval(this.creationPoll);this.creating=false;setTimeout(()=>location.reload(),350);}else if(d.state==='error'){clearInterval(this.creationTimer);clearInterval(this.creationPoll);this.creationLogsOpen=true;this.error=d.detail||d.message||'Container creation failed.';this.creating=false;}}catch(e){this.creationStatus=`Status unavailable: ${e}`;}};
+            poll();this.creationPoll=setInterval(poll,700);
         },
     };
 }

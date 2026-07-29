@@ -83,6 +83,28 @@ def _edit_dockerfile(initial: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _browse_host_folder(label: str = "Host folder") -> str:
+    """Prompt with directory completion and require an existing host folder."""
+    try:
+        from prompt_toolkit import prompt as pt_prompt
+        from prompt_toolkit.completion import PathCompleter
+
+        value = pt_prompt(
+            f"{label}> ",
+            completer=PathCompleter(expanduser=True, only_directories=True),
+            default="",
+        ).strip()
+    except (ImportError, EOFError, KeyboardInterrupt):
+        value = Prompt.ask(label, default="").strip()
+    if not value:
+        return ""
+    path = str(Path(value).expanduser().resolve())
+    if not Path(path).is_dir():
+        console.print(f"[yellow]not a directory: {path}[/yellow]")
+        return ""
+    return path
+
+
 def _prompt_mounts(current: list[dict[str, str]]) -> list[dict[str, str]]:
     mounts = [dict(item) for item in current]
     if mounts:
@@ -105,10 +127,9 @@ def _prompt_mounts(current: list[dict[str, str]]) -> list[dict[str, str]]:
         return mounts
 
     while True:
-        host_path = Prompt.ask("Host path (blank finishes)", default="").strip()
+        host_path = _browse_host_folder("Host folder (blank finishes)")
         if not host_path:
             break
-        host_path = str(Path(host_path).expanduser().resolve())
         container_path = Prompt.ask(
             "Container path",
             default=f"/workspace/{Path(host_path).name or 'project'}",
@@ -157,21 +178,35 @@ def configure_tui_container(
     session._container_supervisor = supervisor
 
     refs = supervisor.registry.list_containers()
+    template_registry = getattr(supervisor, "template_registry", None)
+    templates = template_registry.list_templates() if template_registry else []
     console.print("\n[bold cyan]Container setup[/bold cyan]")
+    choices = ["new"]
     if refs:
-        source = Prompt.ask(
-            "Container source",
-            choices=["configure", "existing"],
-            default="configure",
-        )
-    else:
-        source = "configure"
-        console.print("[dim]No managed containers are available; configure a new worker.[/dim]")
+        choices.append("existing")
+    if templates:
+        choices.append("template")
+    source = Prompt.ask("Container source", choices=choices, default=choices[0])
+
+    if source == "template":
+        names = [item.name for item in templates]
+        console.print("Templates: " + ", ".join(names), markup=False)
+        selected = Prompt.ask("Template", choices=names)
+        template = template_registry.get(selected) if template_registry else None
+        default_name = str(config.get("container_name") or f"mucli-{name}").strip()
+        config = {
+            "container_name": Prompt.ask("Container name", default=default_name).strip(),
+            "dockerfile": None,
+            "template_name": template.name if template else selected,
+            "mounts": _prompt_mounts([]),
+            "egress_allow": list(template.egress_allow if template else DEFAULT_EGRESS_ALLOW),
+            "egress_deny": list(template.egress_deny if template else []),
+        }
 
     if source == "existing":
         ref = _select_existing_container(supervisor)
         if ref is None:
-            source = "configure"
+            source = "new"
         else:
             config = {
                 "container_name": ref.name,
@@ -183,7 +218,7 @@ def configure_tui_container(
             }
             console.print(f"[dim]selected → {ref.name}[/dim]", markup=False)
 
-    if source == "configure":
+    if source == "new":
         default_name = str(config.get("container_name") or f"mucli-{name}").strip()
         config["container_name"] = Prompt.ask("Container name", default=default_name).strip()
 
@@ -209,6 +244,162 @@ def configure_tui_container(
     manager.container_config = config
     manager.save_history(session.folder_context)
     return config
+
+
+def _show_environment_table(supervisor: ContainerSupervisor):
+    refs = supervisor.list_environments()
+    if not refs:
+        console.print("[dim]No managed container environments.[/dim]")
+        return []
+    console.print("\n[bold cyan]Managed environments[/bold cyan]")
+    for index, ref in enumerate(refs, 1):
+        attached = ", ".join(ref.attached_sessions) or "none"
+        console.print(
+            f" {index}. {ref.name}  [{ref.status}]  template={ref.template_name or 'custom'}  sessions={attached}",
+            markup=False,
+        )
+    return refs
+
+
+def _select_environment(supervisor: ContainerSupervisor):
+    refs = _show_environment_table(supervisor)
+    if not refs:
+        return None
+    choices = [str(index) for index in range(1, len(refs) + 1)] + ["b"]
+    choice = Prompt.ask("Select environment (b to go back)", choices=choices, default="b")
+    return None if choice == "b" else refs[int(choice) - 1]
+
+
+def _prompt_environment_config(
+    supervisor: ContainerSupervisor,
+    *,
+    config: dict[str, Any] | None = None,
+    default_name: str = "",
+) -> dict[str, Any]:
+    current = dict(config or {})
+    templates = supervisor.template_registry.list_templates()
+    source_choices = ["dockerfile"] + (["template"] if templates else [])
+    source_default = "template" if current.get("template_name") and templates else "dockerfile"
+    source = Prompt.ask("Environment base", choices=source_choices, default=source_default)
+    name = Prompt.ask("Environment name", default=default_name or current.get("container_name") or "sandbox").strip()
+    result: dict[str, Any] = {"container_name": name, "mounts": _prompt_mounts(list(current.get("mounts") or []))}
+    if source == "template":
+        names = [item.name for item in templates]
+        template_name = Prompt.ask("Template", choices=names, default=current.get("template_name") if current.get("template_name") in names else names[0])
+        result.update({"template_name": template_name, "dockerfile": None, "egress_allow": None, "egress_deny": None})
+    else:
+        dockerfile = str(current.get("dockerfile") or default_dockerfile())
+        if Confirm.ask("Edit Dockerfile", default=False):
+            dockerfile = _edit_dockerfile(dockerfile)
+        allow = _domain_list(current.get("egress_allow"), DEFAULT_EGRESS_ALLOW)
+        deny = _domain_list(current.get("egress_deny"), [])
+        if Confirm.ask("Edit network policy", default=False):
+            allow = _prompt_domain_list("Allowed domains", allow)
+            deny = _prompt_domain_list("Blocked domains", deny)
+        result.update({"template_name": None, "dockerfile": dockerfile, "egress_allow": allow, "egress_deny": deny})
+    return result
+
+
+def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None:
+    """Host-level interactive container manager available before loading a session."""
+    supervisor = supervisor or ContainerSupervisor()
+    while True:
+        console.print("\n[bold cyan]Container management[/bold cyan]")
+        action = Prompt.ask(
+            "Action",
+            choices=["list", "create", "manage", "templates", "back"],
+            default="list",
+        )
+        if action == "back":
+            return
+        if action == "list":
+            _show_environment_table(supervisor)
+            continue
+        if action == "create":
+            config = _prompt_environment_config(supervisor)
+            try:
+                supervisor.create_environment(
+                    container_name=config["container_name"],
+                    dockerfile=config.get("dockerfile"),
+                    template_name=config.get("template_name"),
+                    mounts=config.get("mounts"),
+                    egress_allow=config.get("egress_allow"),
+                    egress_deny=config.get("egress_deny"),
+                    start=True,
+                    progress=_progress,
+                )
+                console.print(f"[green]Created {config['container_name']}[/green]")
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+            continue
+        if action == "templates":
+            templates = supervisor.template_registry.list_templates()
+            if not templates:
+                console.print("[dim]No templates.[/dim]")
+                continue
+            for index, item in enumerate(templates, 1):
+                console.print(f" {index}. {item.name} — {item.description or item.image}", markup=False)
+            template_action = Prompt.ask("Template action", choices=["use", "delete", "back"], default="back")
+            if template_action == "back":
+                continue
+            names = [item.name for item in templates]
+            selected = Prompt.ask("Template", choices=names)
+            if template_action == "delete":
+                if Confirm.ask(f"Delete template {selected}", default=False):
+                    supervisor.remove_template(selected)
+            else:
+                name = Prompt.ask("New environment name", default=f"{selected}-env")
+                try:
+                    supervisor.create_environment(container_name=name, template_name=selected, start=True, progress=_progress)
+                except Exception as exc:
+                    console.print(f"[red]{exc}[/red]")
+            continue
+
+        ref = _select_environment(supervisor)
+        if ref is None:
+            continue
+        operation = Prompt.ask(
+            f"Manage {ref.name}",
+            choices=["shell", "start", "stop", "restart", "edit", "clone", "snapshot", "remove", "back"],
+            default="shell",
+        )
+        if operation == "back":
+            continue
+        try:
+            if operation == "shell":
+                supervisor.interactive_shell(ref.name)
+            elif operation == "start":
+                supervisor.start(ref.name)
+            elif operation == "stop":
+                supervisor.stop(ref.name)
+            elif operation == "restart":
+                supervisor.restart(ref.name)
+            elif operation in {"edit", "clone"}:
+                config = supervisor.configuration(ref.name)
+                default_name = ref.name if operation == "edit" else f"{ref.name.replace('mucli-', '')}-copy"
+                updated = _prompt_environment_config(supervisor, config=config, default_name=default_name)
+                if operation == "edit":
+                    supervisor.reconfigure_environment(
+                        ref.name,
+                        dockerfile=updated.get("dockerfile"), template_name=updated.get("template_name"),
+                        mounts=updated.get("mounts"), egress_allow=updated.get("egress_allow"),
+                        egress_deny=updated.get("egress_deny"), start=True, progress=_progress,
+                    )
+                else:
+                    supervisor.create_environment(
+                        container_name=updated["container_name"], dockerfile=updated.get("dockerfile"),
+                        template_name=updated.get("template_name"), mounts=updated.get("mounts"),
+                        egress_allow=updated.get("egress_allow"), egress_deny=updated.get("egress_deny"),
+                        start=True, progress=_progress,
+                    )
+            elif operation == "snapshot":
+                template_name = Prompt.ask("Template name", default=ref.name.replace("mucli-", ""))
+                description = Prompt.ask("Description", default="")
+                supervisor.snapshot(ref.name, template_name, description=description)
+            elif operation == "remove" and Confirm.ask(f"Remove {ref.name} and its volumes", default=False):
+                supervisor.remove(ref.name, force=True)
+        except Exception as exc:
+            console.print(f"[red]{exc}[/red]")
 
 
 def _progress(stage: str, message: str) -> None:

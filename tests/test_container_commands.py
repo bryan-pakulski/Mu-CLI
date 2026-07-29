@@ -12,6 +12,9 @@ def test_create_command_has_no_privileged_or_docker_socket():
         dockerfile_hash="hash",
         mounts=[MountSpec("/host/project", "/workspace/project", "ro")],
         network_name="mucli-demo-net",
+        proxy_name="mucli-demo-proxy",
+        proxy_port=3128,
+        egress_network_name="mucli-demo-net-egress",
         session_volume="/home/user/.mucli/sessions/demo",
         worker_token="secret",
         supervisor_url="http://host.docker.internal:30311",
@@ -27,18 +30,29 @@ def test_create_command_has_no_privileged_or_docker_socket():
     assert "mucli-demo-home:/root/.mucli:rw" in command
     assert "/root/.mucli/sessions/demo:rw" in joined
     assert "/host/project:/workspace/project:ro" in command
+    assert "HTTP_PROXY=http://mucli-demo-proxy:3128" in command
+    assert "HTTPS_PROXY=http://mucli-demo-proxy:3128" in command
 
 
-def test_network_policy_is_default_deny_in_dry_run():
+def test_network_policy_uses_internal_bridge_and_unprivileged_proxy():
     runner = CommandRunner(dry_run=True)
     policy = create_isolated_network(
-        "mucli-demo-net", ["api.openai.com"], runner=runner
+        "mucli-demo-net",
+        ["api.openai.com"],
+        proxy_image="mucli/demo:test",
+        runner=runner,
     )
     flattened = [" ".join(command) for command in runner.commands]
-    assert any("DOCKER-USER" in command for command in flattened)
-    assert any(" INPUT " in f" {command} " for command in flattened)
-    assert sum(command.endswith("-j DROP") for command in flattened) >= 2
-    assert not any("--dport 53" in command for command in flattened)
+    assert any("network create --driver bridge --internal mucli-demo-net" in command for command in flattened)
+    assert any("network create --driver bridge mucli-demo-net-egress" in command for command in flattened)
+    proxy_create = next(command for command in flattened if "io.mucli.role=egress-proxy" in command)
+    assert "--cap-drop ALL" in proxy_create
+    assert "no-new-privileges:true" in proxy_create
+    assert "--read-only" in proxy_create
+    assert "--user 65534:65534" in proxy_create
+    assert not any("iptables" in command or "sudo" in command for command in flattened)
+    assert policy.proxy_name == "mucli-demo-proxy"
+    assert policy.egress_network_name == "mucli-demo-net-egress"
     assert policy.subnet == "172.31.0.0/24"
 
 

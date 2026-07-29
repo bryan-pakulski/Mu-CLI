@@ -106,6 +106,12 @@ def build_create_command(
         "MUCLI_CONTAINER_NAME": ref.name,
         "MUCLI_SUPERVISOR_URL": ref.supervisor_url,
         "MUCLI_WORKER_TOKEN": ref.worker_token,
+        "HTTP_PROXY": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
+        "HTTPS_PROXY": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
+        "http_proxy": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
+        "https_proxy": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
+        "NO_PROXY": "localhost,127.0.0.1,::1",
+        "no_proxy": "localhost,127.0.0.1,::1",
         "MUCLI_EGRESS_ALLOW": __import__("json").dumps(ref.egress_allow),
         "MUCLI_EGRESS_DENY": __import__("json").dumps(ref.egress_deny),
         "MUCLI_WORKSPACES": __import__("json").dumps(
@@ -211,25 +217,39 @@ def build_container(
         run_with_output(
             runner, [docker, "volume", "create", workspace_volume], output_callback=output
         )
-        host_ports: list[int] = []
+        host_allow: dict[str, list[int]] = {}
         if ref.supervisor_url:
             parsed_supervisor = urlparse(ref.supervisor_url)
-            host_ports.append(
-                parsed_supervisor.port
-                or (443 if parsed_supervisor.scheme == "https" else 80)
-            )
-        if os.environ.get("OLLAMA_HOST", "").startswith(("http://host.docker.internal", "http://172.")):
-            host_ports.append(urlparse(os.environ["OLLAMA_HOST"]).port or 11434)
-        _report(progress, "configuring_network", "Applying the isolated network and egress policy…")
+            if parsed_supervisor.hostname:
+                host_allow.setdefault(parsed_supervisor.hostname, []).append(
+                    parsed_supervisor.port
+                    or (443 if parsed_supervisor.scheme == "https" else 80)
+                )
+        ollama_host = os.environ.get("OLLAMA_HOST", "")
+        if ollama_host:
+            parsed_ollama = urlparse(ollama_host)
+            if parsed_ollama.hostname in {"host.docker.internal", "localhost", "127.0.0.1"} or (parsed_ollama.hostname or "").startswith("172."):
+                host = "host.docker.internal" if parsed_ollama.hostname in {"localhost", "127.0.0.1"} else parsed_ollama.hostname
+                host_allow.setdefault(str(host), []).append(parsed_ollama.port or 11434)
+        _report(
+            progress,
+            "configuring_network",
+            "Creating an internal network and unprivileged egress proxy…",
+        )
         policy = create_isolated_network(
             network_name,
             ref.egress_allow,
             egress_deny=ref.egress_deny,
-            host_allow_ports=host_ports,
+            host_allow=host_allow,
+            proxy_image=ref.image,
             runner=runner,
             output_callback=output,
         )
         ref.network_subnet = policy.subnet
+        ref.proxy_name = policy.proxy_name
+        ref.proxy_port = policy.proxy_port
+        ref.proxy_image = policy.proxy_image
+        ref.egress_network_name = policy.egress_network_name
         _report(progress, "creating_container", "Creating the worker container…")
         create_cmd = build_create_command(ref, environment=provider_environment())
         create_cmd[0] = docker
@@ -242,6 +262,10 @@ def build_container(
             )
             ref.status = "running"
         else:
+            if ref.proxy_name:
+                run_with_output(
+                    runner, [docker, "stop", "-t", "10", ref.proxy_name], output_callback=output
+                )
             ref.status = "stopped"
         registry.upsert(ref)
         _report(progress, "worker_ready", "Worker started; attaching the session…")
@@ -256,5 +280,11 @@ def build_container(
         except Exception:
             pass
         if policy is not None:
-            teardown_network(network_name, policy.subnet, runner=runner)
+            teardown_network(
+                network_name,
+                policy.subnet,
+                proxy_name=policy.proxy_name,
+                egress_network_name=policy.egress_network_name,
+                runner=runner,
+            )
         raise

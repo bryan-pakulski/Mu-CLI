@@ -1,4 +1,4 @@
-"""Small injectable subprocess wrapper for Docker and firewall commands."""
+"""Small injectable subprocess wrapper for Docker commands."""
 from __future__ import annotations
 
 import json

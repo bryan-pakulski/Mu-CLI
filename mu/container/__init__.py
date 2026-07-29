@@ -1,7 +1,6 @@
 """Docker-backed MuCLI session runtime.
 
-The package has no import-time Docker side effects.  Docker and host firewall
-commands run only when a container session is explicitly created or resumed.
+The package has no import-time Docker side effects.  Docker commands run only when a container session is explicitly created or resumed.
 """
 
 from .ref import ContainerRef, MountSpec

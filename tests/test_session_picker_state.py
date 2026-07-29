@@ -217,33 +217,8 @@ def test_safe_delete_session_loud_mode_keeps_ui_attached(tmp_path, monkeypatch):
     )
 
 
-def test_choose_session_falls_back_to_numbered_picker_in_headless(
-    tmp_path, monkeypatch
-):
-    """When prompt-toolkit's `Application.run()` can't drive the
-    current terminal (e.g. pytest's captured stdin), `choose_session`
-    must fall through to the numbered IntPrompt fallback rather than
-    crash. End-to-end check using the same fixture pattern as the
-    other picker tests."""
-    import os
-    from pathlib import Path
+def test_legacy_picker_remains_available_for_embedded_callers():
+    """The old full-screen picker remains importable for downstream integrations."""
+    from mu.ui.session_picker import run_interactive_picker
 
-    import mucli
-    from mu.session.session import SessionManager
-
-    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
-    (tmp_path / "sessions" / "alpha").mkdir(parents=True)
-    Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
-    sm = SessionManager()
-
-    # Force the interactive picker to raise so we exercise the fallback.
-    def _boom(*a, **kw):
-        raise RuntimeError("no tty for prompt-toolkit")
-
-    monkeypatch.setattr("mu.ui.session_picker.run_interactive_picker", _boom)
-    # Fallback uses IntPrompt — return 1 (load alpha).
-    monkeypatch.setattr("mucli.IntPrompt.ask", lambda *a, **kw: 1)
-
-    action, name = mucli.choose_session(sm)
-    assert action == "load"
-    assert name == "alpha"
+    assert callable(run_interactive_picker)

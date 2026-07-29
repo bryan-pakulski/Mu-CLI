@@ -45,6 +45,10 @@ class ContainerRef:
     egress_deny: list[str] = field(default_factory=list)
     network_name: str = ""
     network_subnet: str = ""
+    proxy_name: str = ""
+    proxy_port: int = 3128
+    proxy_image: str = ""
+    egress_network_name: str = ""
     session_volume: str = ""  # first attached session path (compatibility)
     container_volume: str = "/root/.mucli"
     worker_port: int = 9090

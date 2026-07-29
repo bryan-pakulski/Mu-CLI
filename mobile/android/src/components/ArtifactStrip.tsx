@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { AppState, Linking, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 
-export function ArtifactStrip({ sessionName }: { sessionName: string | null }) {
+export function ArtifactStrip({
+  sessionName,
+  refreshKey = 0,
+}: {
+  sessionName: string | null;
+  refreshKey?: number;
+}) {
   const { colors } = useTheme();
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([]);
 
@@ -16,24 +22,39 @@ export function ArtifactStrip({ sessionName }: { sessionName: string | null }) {
     }
     try {
       const response = await artifactsApi.list(sessionName);
-      setArtifacts(response.artifacts || []);
+      const next = response.artifacts || [];
+      setArtifacts(current => {
+        const unchanged = current.length === next.length
+          && current.every((item, index) => item.artifact_id === next[index]?.artifact_id
+            && item.size === next[index]?.size);
+        return unchanged ? current : next;
+      });
     } catch {
       // Chat history remains useful when artifact refresh is temporarily unavailable.
     }
   }, [sessionName]);
 
   useEffect(() => {
-    load();
+    void load();
     if (!sessionName) return undefined;
-    const timer = setInterval(load, 3000);
-    return () => clearInterval(timer);
-  }, [load, sessionName]);
+    const timer = setInterval(() => { void load(); }, 5000);
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'active') void load();
+    });
+    return () => {
+      clearInterval(timer);
+      appState.remove();
+    };
+  }, [load, sessionName, refreshKey]);
 
   if (!sessionName || artifacts.length === 0) return null;
 
   return (
     <View style={styles.wrap}>
-      <Text variant="xs" dim style={styles.label}>ARTIFACTS</Text>
+      <View style={styles.heading}>
+        <Text variant="xs" dim style={styles.label}>ARTIFACTS</Text>
+        <Text variant="xs" dim>{artifacts.length}</Text>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {artifacts.map(artifact => (
           <TouchableOpacity
@@ -61,8 +82,9 @@ function formatBytes(value: number): string {
 }
 
 const styles = StyleSheet.create({
-  wrap: { paddingTop: 12, paddingBottom: 4 },
-  label: { paddingHorizontal: 16, marginBottom: 7, fontWeight: '700', letterSpacing: 0.8 },
+  wrap: { paddingTop: 8, paddingBottom: 4 },
+  heading: { paddingHorizontal: 16, marginBottom: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  label: { fontWeight: '700', letterSpacing: 0.8 },
   row: { paddingHorizontal: 16, gap: 8 },
   chip: { width: 210, minHeight: 54, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 9 },
   copy: { flex: 1 },

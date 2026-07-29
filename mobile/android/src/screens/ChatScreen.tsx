@@ -35,6 +35,7 @@ export function ChatScreen() {
     activityLabel,
     sseConnected,
     error,
+    artifactRevision,
     sendMessage,
     stop,
     retry,
@@ -223,13 +224,13 @@ export function ChatScreen() {
           }
           ListFooterComponent={
             <View>
-              <ArtifactStrip sessionName={activeSessionName} />
               {streaming && waitingForFirstToken ? (
                 <GeneratingIndicator label={sseConnected ? activityLabel : 'Reconnecting to session'} />
               ) : null}
             </View>
           }
         />
+        <ArtifactStrip sessionName={activeSessionName} refreshKey={artifactRevision} />
         <Composer
           input={input}
           setInput={setInput}

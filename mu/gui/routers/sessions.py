@@ -366,8 +366,16 @@ async def active_session(request: Request, session_name: Optional[str] = None):
             if getattr(session, "container_ref", None) is not None
             else None
         ),
-        "external_active": bool(getattr(watcher, "external_active", False)),
-        "external_last_at": float(getattr(watcher, "external_last_at", 0.0)),
+        "external_active": bool(
+            watcher.external_active_for(sm.current_session_name)
+            if watcher is not None and hasattr(watcher, "external_active_for")
+            else False
+        ),
+        "external_last_at": float(
+            watcher.external_last_at_for(sm.current_session_name)
+            if watcher is not None and hasattr(watcher, "external_last_at_for")
+            else 0.0
+        ),
         "is_busy": is_busy,
         "is_current": sm.current_session_name == state.current_session_name,
         "workspaces": list(getattr(session.folder_context, "folders", []) or []),

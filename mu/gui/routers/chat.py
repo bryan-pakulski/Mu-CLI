@@ -68,6 +68,41 @@ def _run_send(
         _agent_threads.pop(session_name, None)
 
 
+def _artifact_snapshot(session) -> dict[str, dict[str, Any]]:
+    """Return persisted artifacts keyed by id without affecting a turn."""
+    registry = getattr(session, "artifact_registry", None)
+    if registry is None:
+        try:
+            session.sync_runtime_state()
+            registry = getattr(session, "artifact_registry", None)
+        except Exception:
+            registry = None
+    if registry is None:
+        return {}
+    try:
+        return {
+            str(item.get("artifact_id")): dict(item)
+            for item in registry.list()
+            if isinstance(item, dict) and item.get("artifact_id")
+        }
+    except Exception:
+        return {}
+
+
+async def _replay_new_artifacts(bus, session, session_name: str, before: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replay artifacts persisted by a worker even if its callback was missed."""
+    after = _artifact_snapshot(session)
+    created = [item for artifact_id, item in after.items() if artifact_id not in before]
+    created.sort(key=lambda item: float(item.get("created_at", 0) or 0))
+    for artifact in created:
+        await bus.publish({
+            "kind": "artifact_created",
+            "artifact": artifact,
+            "session_name": session_name,
+        })
+    return created
+
+
 @router.get("/commands")
 async def list_commands_endpoint():
     from mu.commands import list_commands
@@ -236,6 +271,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
         busy.set()
 
         async def _drive_container() -> None:
+            artifacts_before = _artifact_snapshot(session)
             try:
                 response = await asyncio.to_thread(
                     request.app.state.container_supervisor.send_sync,
@@ -255,6 +291,13 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                     session.sync_runtime_state()
                 except Exception:
                     pass
+                new_artifacts = await _replay_new_artifacts(
+                    bus, session, name, artifacts_before
+                )
+                # Clear the authoritative host busy flag before terminal events
+                # reach reconnecting clients; otherwise a status poll can race
+                # the event and put mobile back into "thinking".
+                busy.clear()
                 if isinstance(result, dict) and result.get("status") == "error":
                     await bus.publish(
                         {
@@ -266,7 +309,10 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                 await bus.publish(
                     {
                         "kind": "turn_complete",
-                        "result": _summarize_result(result),
+                        "result": {
+                            **_summarize_result(result),
+                            "artifacts": new_artifacts,
+                        },
                         "session_name": name,
                     }
                 )
@@ -274,7 +320,18 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                     {"kind": "history_refresh", "session_name": name}
                 )
             except Exception as exc:
+                # A tool may have published an artifact before a later provider
+                # or transport failure. Surface it even on failed turns.
+                try:
+                    session.session_manager._load_session(name)
+                    session.sync_runtime_state()
+                except Exception:
+                    pass
+                new_artifacts = await _replay_new_artifacts(
+                    bus, session, name, artifacts_before
+                )
                 error_text = f"container send failed: {exc}"
+                busy.clear()
                 await bus.publish(
                     {
                         "kind": "error",
@@ -292,6 +349,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                             "ok": False,
                             "status": "error",
                             "error": error_text,
+                            "artifacts": new_artifacts,
                         },
                         "session_name": name,
                     }

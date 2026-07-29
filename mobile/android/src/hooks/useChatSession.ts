@@ -15,7 +15,7 @@ export interface ChatMessage {
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
-type ActiveSessionState = { active?: boolean; is_busy?: boolean; external_active?: boolean };
+type ActiveSessionState = { active?: boolean; is_busy?: boolean; external_active?: boolean; external_last_at?: number };
 
 function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
   return turns.flatMap(turn => {
@@ -50,6 +50,7 @@ export function useChatSession(activeSessionName: string | null) {
   const [sseConnected, setSseConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
+  const [artifactRevision, setArtifactRevision] = useState(0);
 
   const subscriptionRef = useRef<SSESubscription | null>(null);
   const messageIdRef = useRef(0);
@@ -59,6 +60,8 @@ export function useChatSession(activeSessionName: string | null) {
   const lastSessionRef = useRef<string | null>(null);
   const historyHydratedRef = useRef<string | null>(null);
   const historyRequestRef = useRef<{ sessionName: string; promise: Promise<void> } | null>(null);
+  const externalWriteAtRef = useRef(0);
+  const completionProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -183,7 +186,13 @@ export function useChatSession(activeSessionName: string | null) {
     if (!activeSessionName) return;
     try {
       const response = await sessionsApi.getActive(activeSessionName) as ActiveSessionState;
-      const busy = Boolean(response.active && (response.is_busy || response.external_active));
+      // `external_active` is a short cross-process write pulse, not evidence
+      // that an agent turn is still running. Only the server-owned busy event
+      // controls the mobile generating state.
+      const busy = Boolean(response.active && response.is_busy);
+      const externalWriteAt = Number(response.external_last_at || 0);
+      const sawExternalWrite = externalWriteAt > externalWriteAtRef.current;
+      if (sawExternalWrite) externalWriteAtRef.current = externalWriteAt;
       const wasBusy = busyRef.current;
       busyRef.current = busy;
       setStreaming(busy);
@@ -197,7 +206,7 @@ export function useChatSession(activeSessionName: string | null) {
       } else {
         setWaitingForFirstToken(false);
         setActivityLabel('Thinking');
-        if (wasBusy || historyHydratedRef.current !== activeSessionName) {
+        if (wasBusy || sawExternalWrite || historyHydratedRef.current !== activeSessionName) {
           await loadHistory(false);
         }
       }
@@ -275,7 +284,11 @@ export function useChatSession(activeSessionName: string | null) {
       finalizeAssistant(String(event.turn_id || 'active-turn'));
       if (busyRef.current) {
         setWaitingForFirstToken(true);
-        setActivityLabel('Thinking');
+        setActivityLabel('Finishing');
+        if (completionProbeRef.current) clearTimeout(completionProbeRef.current);
+        completionProbeRef.current = setTimeout(() => {
+          void syncSessionState();
+        }, 500);
       }
       return;
     }
@@ -297,6 +310,10 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'turn_complete') {
+      if (completionProbeRef.current) {
+        clearTimeout(completionProbeRef.current);
+        completionProbeRef.current = null;
+      }
       busyRef.current = false;
       setStreaming(false);
       setWaitingForFirstToken(false);
@@ -307,7 +324,19 @@ export function useChatSession(activeSessionName: string | null) {
       if (result?.status === 'error' && result.error) {
         setError(String(result.error));
       }
+      setArtifactRevision(value => value + 1);
       void loadHistory(false);
+      return;
+    }
+
+    if (kind === 'artifact_created') {
+      setArtifactRevision(value => value + 1);
+      return;
+    }
+
+    if (kind === 'history_refresh') {
+      setArtifactRevision(value => value + 1);
+      if (!busyRef.current) void loadHistory(false);
       return;
     }
 
@@ -317,13 +346,17 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'error') {
+      if (completionProbeRef.current) {
+        clearTimeout(completionProbeRef.current);
+        completionProbeRef.current = null;
+      }
       busyRef.current = false;
       setStreaming(false);
       setWaitingForFirstToken(false);
       setError(String(event.text || 'Agent error'));
       void loadHistory(false);
     }
-  }, [activeSessionName, appendAssistantDelta, appendUserMessage, finalizeAssistant, loadHistory]);
+  }, [activeSessionName, appendAssistantDelta, appendUserMessage, finalizeAssistant, loadHistory, syncSessionState]);
 
   useEffect(() => {
     subscriptionRef.current?.close();
@@ -336,6 +369,8 @@ export function useChatSession(activeSessionName: string | null) {
       setActivityLabel('Thinking');
       busyRef.current = false;
       historyHydratedRef.current = null;
+      externalWriteAtRef.current = 0;
+      setArtifactRevision(value => value + 1);
     }
     setSseConnected(false);
 
@@ -371,6 +406,10 @@ export function useChatSession(activeSessionName: string | null) {
 
     return () => {
       clearInterval(poll);
+      if (completionProbeRef.current) {
+        clearTimeout(completionProbeRef.current);
+        completionProbeRef.current = null;
+      }
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
     };
@@ -421,6 +460,7 @@ export function useChatSession(activeSessionName: string | null) {
     activityLabel,
     sseConnected,
     error,
+    artifactRevision,
     sendMessage,
     stop,
     retry,

@@ -27,6 +27,11 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# External writes are activity pulses, not durable busy state. A container
+# worker saves session.json at turn completion; retaining this flag forever
+# makes reconnecting clients display an infinite "thinking" state.
+_EXTERNAL_ACTIVITY_TTL_SECONDS = 8.0
+
 
 @dataclass
 class _Track:
@@ -50,8 +55,8 @@ class SessionWatcher:
     # values so the existing /api/sessions/active endpoint keeps working.
     @property
     def external_active(self) -> bool:
-        track = self._focused_track()
-        return bool(track and track.external_active)
+        cur = self._app.state.current_session_name
+        return self.external_active_for(cur) if cur else False
 
     @property
     def external_last_at(self) -> float:
@@ -60,7 +65,12 @@ class SessionWatcher:
 
     def external_active_for(self, name: str) -> bool:
         track = self._tracks.get(name)
-        return bool(track and track.external_active)
+        if not track or not track.external_active:
+            return False
+        if time.time() - float(track.external_last_at or 0.0) <= _EXTERNAL_ACTIVITY_TTL_SECONDS:
+            return True
+        track.external_active = False
+        return False
 
     def external_last_at_for(self, name: str) -> float:
         track = self._tracks.get(name)

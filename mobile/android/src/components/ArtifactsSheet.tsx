@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { useConnectionStore } from '../store/connection';
@@ -26,7 +26,14 @@ export function ArtifactsSheet({ visible, onClose }: { visible: boolean; onClose
     }
   }, [sessionName]);
 
-  useEffect(() => { if (visible) load(); }, [load, visible]);
+  useEffect(() => {
+    if (!visible) return undefined;
+    void load();
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'active') void load();
+    });
+    return () => appState.remove();
+  }, [load, visible]);
 
   const remove = (artifact: ArtifactDescriptor) => {
     if (!sessionName) return;

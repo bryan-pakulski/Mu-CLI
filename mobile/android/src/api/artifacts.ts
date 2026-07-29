@@ -13,6 +13,7 @@ export const artifactsApi = {
   list: (sessionName: string) =>
     api.get<{ artifacts: ArtifactDescriptor[] }>(
       `/api/sessions/${encodeURIComponent(sessionName)}/artifacts`,
+      { query: { _ts: Date.now() } },
     ),
   downloadUrl: (sessionName: string, artifactId: string) =>
     `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/artifacts/${encodeURIComponent(artifactId)}/download`,

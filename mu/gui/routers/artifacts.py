@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
 from mu.artifact import ArtifactRegistry
@@ -23,7 +23,11 @@ def _registry(session_name: str) -> ArtifactRegistry:
 
 
 @router.get("/{name}/artifacts")
-async def list_artifacts(name: str):
+async def list_artifacts(name: str, response: Response):
+    # Artifact registries are written by both the host and mounted container
+    # workers. Never let a mobile HTTP cache hide a newly published entry.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return {"artifacts": _registry(name).list()}
 
 

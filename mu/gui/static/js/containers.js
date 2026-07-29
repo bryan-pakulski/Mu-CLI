@@ -27,33 +27,40 @@
     $('container-empty').hidden = state.containers.length > 0;
     $('container-list').innerHTML = state.containers.map(ref => {
       const sessions = (ref.attached_sessions || []).map(name =>
-        `<span class="session-chip">${esc(name)}<button data-action="detach" data-name="${esc(ref.name)}" data-session="${esc(name)}" title="Detach">×</button></span>`
+        `<span class="session-chip">${esc(name)}<button data-action="detach" data-name="${esc(ref.name)}" data-session="${esc(name)}" title="Detach session" aria-label="Detach ${esc(name)}">×</button></span>`
       ).join('') || '—';
       const primary = ref.status === 'running' ? 'stop' : 'start';
-      return `<article class="manager-card">
-        <div class="manager-card-head"><div><span class="manager-card-kicker">environment</span><h3>${esc(ref.name)}</h3></div><span class="manager-status ${esc(ref.status)}">${esc(ref.status)}</span></div>
+      const primaryGlyph = ref.status === 'running' ? '■' : '▶';
+      return `<article class="manager-card manager-card-interactive" data-card-action="edit" data-name="${esc(ref.name)}" tabindex="0" role="button" aria-label="Edit environment ${esc(ref.name)}">
+        <div class="manager-card-head">
+          <div><span class="manager-card-kicker">environment</span><h3>${esc(ref.name)}</h3></div>
+          <div class="manager-card-tools">
+            <span class="manager-status ${esc(ref.status)}">${esc(ref.status)}</span>
+            <button class="manager-icon-action" data-action="${primary}" data-name="${esc(ref.name)}" title="${primary} environment" aria-label="${primary} ${esc(ref.name)}">${primaryGlyph}</button>
+            <details class="manager-overflow">
+              <summary class="manager-icon-action" title="More actions" aria-label="More actions for ${esc(ref.name)}">•••</summary>
+              <div class="manager-overflow-menu">
+                <button data-action="shell" data-name="${esc(ref.name)}">Open shell</button>
+                <button data-action="restart" data-name="${esc(ref.name)}">Restart</button>
+                <button data-action="clone" data-name="${esc(ref.name)}">Clone</button>
+                <button data-action="attach" data-name="${esc(ref.name)}">Attach session</button>
+                <button data-action="snapshot" data-name="${esc(ref.name)}">Create template</button>
+                <button class="danger-text" data-action="remove" data-name="${esc(ref.name)}">Remove environment</button>
+              </div>
+            </details>
+          </div>
+        </div>
         <dl class="manager-meta"><dt>image</dt><dd>${esc(ref.image)}</dd><dt>template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>sessions</dt><dd>${sessions}</dd><dt>network</dt><dd>${esc(ref.network_name || '—')}</dd><dt>worker</dt><dd>${esc(ref.worker_port || '—')}</dd></dl>
-        <div class="manager-actions manager-actions-primary">
-          <button class="primary" data-action="${primary}" data-name="${esc(ref.name)}">${primary}</button>
-          <button data-action="shell" data-name="${esc(ref.name)}">shell</button>
-          <button data-action="edit" data-name="${esc(ref.name)}">edit</button>
-          <button data-action="clone" data-name="${esc(ref.name)}">clone</button>
-        </div>
-        <div class="manager-actions manager-actions-secondary">
-          <button data-action="restart" data-name="${esc(ref.name)}">restart</button>
-          <button data-action="attach" data-name="${esc(ref.name)}">attach session</button>
-          <button data-action="snapshot" data-name="${esc(ref.name)}">create template</button>
-          <button class="danger-text" data-action="remove" data-name="${esc(ref.name)}">remove</button>
-        </div>
+        <div class="manager-card-hint"><span>Open configuration</span><span aria-hidden="true">→</span></div>
       </article>`;
     }).join('');
 
     $('template-empty').hidden = state.templates.length > 0;
-    $('template-list').innerHTML = state.templates.map(item => `<article class="manager-card manager-template-card">
-      <div class="manager-card-head"><div><span class="manager-card-kicker">template</span><h3>${esc(item.name)}</h3></div><span class="manager-status">snapshot</span></div>
+    $('template-list').innerHTML = state.templates.map(item => `<article class="manager-card manager-template-card manager-card-interactive" data-template-action="use" data-name="${esc(item.name)}" tabindex="0" role="button" aria-label="Create environment from template ${esc(item.name)}">
+      <div class="manager-card-head"><div><span class="manager-card-kicker">template</span><h3>${esc(item.name)}</h3></div><button class="manager-icon-action danger-text" data-template-action="remove" data-name="${esc(item.name)}" title="Delete template" aria-label="Delete template ${esc(item.name)}">⌫</button></div>
       <p class="manager-template-description">${esc(item.description || 'Reusable container environment')}</p>
       <dl class="manager-meta"><dt>source</dt><dd>${esc(item.source_container)}</dd><dt>image</dt><dd>${esc(item.image)}</dd></dl>
-      <div class="manager-actions"><button class="primary" data-template-action="use" data-name="${esc(item.name)}">create environment</button><button class="danger-text" data-template-action="remove" data-name="${esc(item.name)}">delete</button></div>
+      <div class="manager-card-hint"><span>Use as a base</span><span aria-hidden="true">→</span></div>
     </article>`).join('');
 
     $('environment-template').innerHTML = state.templates.map(item => `<option value="${esc(item.name)}">${esc(item.name)}</option>`).join('');
@@ -251,6 +258,22 @@
       if (templateButton.dataset.templateAction === 'use') return openCreate(name);
       if (window.confirm(`Delete template ${name}?`)) { await api(`/api/container-templates/${encodeURIComponent(name)}`, {method:'DELETE'}); await load(); }
     }
+  });
+
+  $('container-manager').addEventListener('keydown', async event => {
+    const card = event.target.closest('[data-card-action], article[data-template-action="use"]');
+    if (!card || !['Enter', ' '].includes(event.key)) return;
+    if (event.target.closest('button, summary, details, input, select, textarea, a')) return;
+    event.preventDefault();
+    if (card.dataset.cardAction === 'edit') await openEdit(card.dataset.name, false);
+    else openCreate(card.dataset.name);
+  });
+
+  $('container-manager').addEventListener('click', async event => {
+    const card = event.target.closest('[data-card-action]');
+    if (!card || event.target.closest('button, summary, details, input, select, textarea, a')) return;
+    try { await openEdit(card.dataset.name, false); }
+    catch (error) { window.alert(String(error.message || error)); }
   });
 
   $('container-manager').addEventListener('input', event => {

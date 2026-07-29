@@ -26,7 +26,7 @@ import { spacing } from '../theme/tokens';
 export function ChatScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { activeSessionName } = useConnectionStore();
+  const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const {
     messages,
     streaming,
@@ -46,7 +46,10 @@ export function ChatScreen() {
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [varGroups, setVarGroups] = useState<InspectorVariableGroup[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
-  const connection = useConnectionStore();
+  const activeProvider = useConnectionStore(state => state.activeProvider);
+  const activeModel = useConnectionStore(state => state.activeModel);
+  const yolo = useConnectionStore(state => state.yolo);
+  const connection = { activeProvider, activeModel, yolo };
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
 
   const send = async () => {
@@ -168,57 +171,6 @@ export function ChatScreen() {
     );
   };
 
-  if (error && messages.length === 0 && !historyLoading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <ErrorState message={error} onRetry={retry} />
-      </SafeAreaView>
-    );
-  }
-
-  if (messages.length === 0 && !waitingForFirstToken && !historyLoading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <EmptyState
-          icon="sparkles-outline"
-          title="What should we build?"
-          message="Ask MuCLI to inspect, explain, debug, or change your workspace."
-          actionLabel={activeMode ? `Mode: ${activeMode}` : 'Select Mode'}
-          onAction={() => { loadModes(); setModeSheetOpen(true); }}
-        />
-        <ArtifactStrip sessionName={activeSessionName} />
-        <Composer
-          input={input}
-          setInput={setInput}
-          onSend={send}
-          onStop={stop}
-          streaming={streaming}
-          colors={colors}
-          insets={insets}
-          onModePress={() => { loadModes(); setModeSheetOpen(true); }}
-          onSettingsPress={() => { loadVariables(); setSettingsSheetOpen(true); }}
-        />
-        <ModeBottomSheet
-          visible={modeSheetOpen}
-          onClose={() => setModeSheetOpen(false)}
-          modes={modes}
-          activeMode={activeMode}
-          onSelect={selectMode}
-          colors={colors}
-        />
-        <SettingsBottomSheet
-          visible={settingsSheetOpen}
-          onClose={() => setSettingsSheetOpen(false)}
-          varGroups={varGroups}
-          varsLoading={varsLoading}
-          connection={connection}
-          onSetVariable={setVariable}
-          colors={colors}
-        />
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.bg }}>
       <KeyboardAvoidingView
@@ -231,8 +183,12 @@ export function ChatScreen() {
           data={messages}
           keyExtractor={item => item.id}
           renderItem={renderMessage}
-          contentContainerStyle={styles.messageList}
-          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[
+            styles.messageList,
+            messages.length === 0 ? styles.messageListEmpty : null,
+          ]}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: messages.length > 0 })}
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
           ListHeaderComponent={
@@ -253,7 +209,17 @@ export function ChatScreen() {
                 <Skeleton height={18} style={{ marginBottom: 10, width: '88%' }} />
                 <Skeleton height={18} style={{ width: '56%' }} />
               </View>
-            ) : null
+            ) : error ? (
+              <ErrorState message={error} onRetry={retry} />
+            ) : (
+              <EmptyState
+                icon="sparkles-outline"
+                title="What should we build?"
+                message="Ask MuCLI to inspect, explain, debug, or change your workspace."
+                actionLabel={activeMode ? `Mode: ${activeMode}` : 'Select Mode'}
+                onAction={() => { loadModes(); setModeSheetOpen(true); }}
+              />
+            )
           }
           ListFooterComponent={
             <View>
@@ -335,7 +301,8 @@ function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, 
         placeholderTextColor={colors.textDim}
         multiline
         style={[styles.input, { color: colors.text }]}
-        editable={!streaming}
+        // Keep focus and the draft keyboard open while a turn is running.
+        // Sending is still gated by the composer action and hook busy state.
       />
       {streaming ? (
         <TouchableOpacity
@@ -416,6 +383,7 @@ function markdownStyles(colors: any) {
 
 const styles = StyleSheet.create({
   messageList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 96 },
+  messageListEmpty: { flexGrow: 1 },
   msgRow: { flexDirection: 'row', marginBottom: 14 },
   msgBubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   copyButton: { alignSelf: 'flex-start', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', marginTop: 1 },

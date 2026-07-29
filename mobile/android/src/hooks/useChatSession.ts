@@ -57,6 +57,8 @@ export function useChatSession(activeSessionName: string | null) {
   const busyRef = useRef(false);
   const sseConnectedRef = useRef(false);
   const lastSessionRef = useRef<string | null>(null);
+  const historyHydratedRef = useRef<string | null>(null);
+  const historyRequestRef = useRef<{ sessionName: string; promise: Promise<void> } | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -125,27 +127,55 @@ export function useChatSession(activeSessionName: string | null) {
 
   const loadHistory = useCallback(async (preserveLive = true) => {
     if (!activeSessionName) {
+      historyHydratedRef.current = null;
       setMessages([]);
       setHistoryLoading(false);
       return;
     }
 
-    setHistoryLoading(true);
-    try {
-      const response = await sessionsApi.getHistory(activeSessionName);
-      const historyMessages = historyToMessages(response.turns || []);
-      setMessages(current => {
-        const hasLiveContent = current.some(message => message.origin !== 'history' || message.streaming);
-        if (preserveLive && busyRef.current && hasLiveContent) return current;
-        return historyMessages;
-      });
-      setError(null);
-    } catch (historyError) {
-      if (messagesRef.current.length === 0) {
-        setError(`Could not load conversation: ${String(historyError)}`);
+    const inFlight = historyRequestRef.current;
+    if (inFlight?.sessionName === activeSessionName) {
+      await inFlight.promise;
+      return;
+    }
+
+    const initialLoad = historyHydratedRef.current !== activeSessionName;
+    if (initialLoad) setHistoryLoading(true);
+
+    const request = (async () => {
+      try {
+        const response = await sessionsApi.getHistory(activeSessionName);
+        if (lastSessionRef.current !== activeSessionName) return;
+        const historyMessages = historyToMessages(response.turns || []);
+        setMessages(current => {
+          const hasLiveContent = current.some(message => message.origin !== 'history' || message.streaming);
+          if (preserveLive && busyRef.current && hasLiveContent) return current;
+          const unchanged = current.length === historyMessages.length
+            && current.every((message, index) => {
+              const next = historyMessages[index];
+              return message.role === next.role
+                && message.text === next.text
+                && !message.streaming
+                && message.origin === 'history';
+            });
+          return unchanged ? current : historyMessages;
+        });
+        historyHydratedRef.current = activeSessionName;
+        setError(null);
+      } catch (historyError) {
+        if (messagesRef.current.length === 0) {
+          setError(`Could not load conversation: ${String(historyError)}`);
+        }
+      } finally {
+        if (initialLoad) setHistoryLoading(false);
       }
+    })();
+
+    historyRequestRef.current = { sessionName: activeSessionName, promise: request };
+    try {
+      await request;
     } finally {
-      setHistoryLoading(false);
+      if (historyRequestRef.current?.promise === request) historyRequestRef.current = null;
     }
   }, [activeSessionName]);
 
@@ -167,7 +197,7 @@ export function useChatSession(activeSessionName: string | null) {
       } else {
         setWaitingForFirstToken(false);
         setActivityLabel('Thinking');
-        if (wasBusy || messagesRef.current.length === 0) {
+        if (wasBusy || historyHydratedRef.current !== activeSessionName) {
           await loadHistory(false);
         }
       }
@@ -190,7 +220,7 @@ export function useChatSession(activeSessionName: string | null) {
       busyRef.current = busy;
       setStreaming(busy);
       setWaitingForFirstToken(busy);
-      if (!busy) void loadHistory(false);
+      if (!busy && historyHydratedRef.current !== activeSessionName) void loadHistory(false);
       return;
     }
 
@@ -299,6 +329,7 @@ export function useChatSession(activeSessionName: string | null) {
       setError(null);
       setActivityLabel('Thinking');
       busyRef.current = false;
+      historyHydratedRef.current = null;
     }
     setSseConnected(false);
 

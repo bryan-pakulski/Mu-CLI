@@ -22,6 +22,7 @@ import {
 import { sessionsApi, ContainerMount } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
 import { WorkspacePathField } from './WorkspacePathField';
 
 export type ContainerManagerSheetProps = {
@@ -54,13 +55,21 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
   const [editor, setEditor] = useState<EditorMode>(null);
   const [saving, setSaving] = useState(false);
   const [jobMessage, setJobMessage] = useState('');
+  const [jobLogs, setJobLogs] = useState<ContainerProgressLog[]>([]);
+  const [jobExpanded, setJobExpanded] = useState(false);
+  const [jobFailed, setJobFailed] = useState(false);
   const [snapshotContainer, setSnapshotContainer] = useState<string | null>(null);
   const [snapshotName, setSnapshotName] = useState('');
   const [snapshotDescription, setSnapshotDescription] = useState('');
+  const [actionContainer, setActionContainer] = useState<ManagedContainer | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setJobMessage('');
+    setJobLogs([]);
+    setJobExpanded(false);
+    setJobFailed(false);
     try {
       const response = await containersApi.list();
       setContainers(response.containers || []);
@@ -154,9 +163,17 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     for (;;) {
       const job = await containersApi.job(jobId, after);
       setJobMessage(job.message || job.stage);
-      for (const line of job.logs || []) after = Math.max(after, line.seq);
+      const incoming = job.logs || [];
+      if (incoming.length) {
+        setJobLogs(current => [...current, ...incoming]);
+        for (const line of incoming) after = Math.max(after, line.seq);
+      }
       if (job.state === 'ready') return;
-      if (job.state === 'error') throw new Error(job.detail || job.message);
+      if (job.state === 'error') {
+        setJobFailed(true);
+        setJobExpanded(true);
+        throw new Error(job.detail || job.message);
+      }
       await new Promise(resolve => setTimeout(resolve, 700));
     }
   };
@@ -165,6 +182,9 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     if (!name.trim()) return;
     setSaving(true);
     setError(null);
+    setJobLogs([]);
+    setJobExpanded(false);
+    setJobFailed(false);
     setJobMessage(editingName ? 'Updating environment…' : 'Creating environment…');
     try {
       const payload = {
@@ -181,12 +201,15 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
         : await containersApi.create(payload);
       await pollJob(result.job_id);
       await load();
+      setJobMessage('');
       setMode('list');
     } catch (cause) {
+      setJobFailed(true);
+      setJobExpanded(true);
+      setJobMessage('Container build failed');
       setError(String(cause));
     } finally {
       setSaving(false);
-      setJobMessage('');
     }
   };
 
@@ -248,31 +271,28 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             <SectionTitle label="Environments" detail={`${containers.length} managed`} />
             {containers.length === 0 && !loading ? <EmptyCard text="No managed environments." /> : null}
             {containers.map(container => (
-              <View key={container.name} style={[styles.card, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
+              <TouchableOpacity key={container.name} onPress={() => openEdit(container, false)} activeOpacity={0.72} style={[styles.card, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
                 <View style={styles.cardHead}>
                   <View style={styles.cardCopy}><Text variant="sm" style={styles.cardTitle}>{container.name}</Text><Text variant="xs" dim numberOfLines={1}>{container.template_name ? `Template · ${container.template_name}` : container.image}</Text></View>
-                  <View style={[styles.status, { backgroundColor: colors.bgHover }]}><Text variant="xs" style={{ color: container.status === 'running' ? colors.success : colors.textDim }}>{container.status}</Text></View>
+                  <View style={styles.cardTools}>
+                    <View style={[styles.status, { backgroundColor: colors.bgHover }]}><Text variant="xs" style={{ color: container.status === 'running' ? colors.success : colors.textDim }}>{container.status}</Text></View>
+                    <TouchableOpacity onPress={event => { event.stopPropagation(); runAction(container, container.status === 'running' ? 'stop' : 'start'); }} style={styles.smallIcon} accessibilityLabel={`${container.status === 'running' ? 'Stop' : 'Start'} ${container.name}`}><Ionicons name={container.status === 'running' ? 'stop-outline' : 'play-outline'} size={18} color={colors.textDim} /></TouchableOpacity>
+                    <TouchableOpacity onPress={event => { event.stopPropagation(); setActionContainer(container); }} style={styles.smallIcon} accessibilityLabel={`More actions for ${container.name}`}><Ionicons name="ellipsis-horizontal" size={19} color={colors.textDim} /></TouchableOpacity>
+                  </View>
                 </View>
                 <Text variant="xs" dim>{container.attached_sessions?.length ? `Sessions · ${container.attached_sessions.join(', ')}` : 'No attached sessions'}</Text>
-                <View style={styles.actionGrid}>
-                  <Action icon={container.status === 'running' ? 'stop-outline' : 'play-outline'} label={container.status === 'running' ? 'Stop' : 'Start'} onPress={() => runAction(container, container.status === 'running' ? 'stop' : 'start')} />
-                  <Action icon="refresh-outline" label="Restart" onPress={() => runAction(container, 'restart')} />
-                  <Action icon="create-outline" label="Edit" onPress={() => openEdit(container, false)} />
-                  <Action icon="copy-outline" label="Clone" onPress={() => openEdit(container, true)} />
-                  <Action icon="layers-outline" label="Template" onPress={() => { setSnapshotContainer(container.name); setSnapshotName(container.name.replace(/^mucli-/, '')); setSnapshotDescription(''); }} />
-                  <Action icon="trash-outline" label="Remove" destructive onPress={() => remove(container)} />
-                </View>
-              </View>
+                <View style={[styles.cardHint, { borderTopColor: colors.border }]}><Text variant="xs" dim>Open configuration</Text><Ionicons name="arrow-forward" size={16} color={colors.textDim} /></View>
+              </TouchableOpacity>
             ))}
 
             <SectionTitle label="Templates" detail={`${templates.length} saved`} />
             {templates.length === 0 ? <EmptyCard text="Snapshots will appear here." /> : null}
             {templates.map(template => (
-              <View key={template.name} style={[styles.templateRow, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
+              <TouchableOpacity key={template.name} onPress={() => openCreate(template.name)} activeOpacity={0.72} style={[styles.templateRow, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
                 <View style={styles.cardCopy}><Text variant="sm" style={styles.cardTitle}>{template.name}</Text><Text variant="xs" dim numberOfLines={2}>{template.description || template.image}</Text></View>
-                <TouchableOpacity onPress={() => openCreate(template.name)} style={[styles.smallButton, { backgroundColor: colors.text }]}><Text variant="xs" style={{ color: colors.bg, fontWeight: '700' }}>Use</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => Alert.alert('Delete template?', template.name, [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{await containersApi.removeTemplate(template.name);load();}}])} style={styles.smallIcon}><Ionicons name="trash-outline" size={18} color={colors.textDim} /></TouchableOpacity>
-              </View>
+                <Ionicons name="arrow-forward" size={17} color={colors.textDim} />
+                <TouchableOpacity onPress={event => { event.stopPropagation(); Alert.alert('Delete template?', template.name, [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{await containersApi.removeTemplate(template.name);load();}}]); }} style={styles.smallIcon} accessibilityLabel={`Delete template ${template.name}`}><Ionicons name="trash-outline" size={18} color={colors.textDim} /></TouchableOpacity>
+              </TouchableOpacity>
             ))}
           </ScrollView>
         ) : (
@@ -299,7 +319,16 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift, marginTop: 8 }]} />
             <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment selected={mountMode === 'rw'} label="RW" onPress={() => setMountMode('rw')} compact /><Segment selected={mountMode === 'ro'} label="RO" onPress={() => setMountMode('ro')} compact /></View><TouchableOpacity onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addButton, { backgroundColor: mountHost.trim() && mountTarget.trim() ? colors.accent : colors.bgHover }]}><Ionicons name="add" size={18} color={mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim} /><Text variant="xs" style={{ color: mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim, fontWeight: '700' }}>Add folder</Text></TouchableOpacity></View>
 
-            {jobMessage ? <View style={[styles.progress, { backgroundColor: colors.bgLift }]}><ActivityIndicator color={colors.accent} /><Text variant="xs" dim style={{ flex: 1 }}>{jobMessage}</Text></View> : null}
+            {jobMessage ? (
+              <ContainerBuildProgress
+                message={jobMessage}
+                logs={jobLogs}
+                expanded={jobExpanded}
+                onToggle={() => setJobExpanded(current => !current)}
+                running={saving}
+                failed={jobFailed}
+              />
+            ) : null}
             {error ? <Text variant="xs" style={{ color: colors.error, marginTop: 12 }}>{error}</Text> : null}
           </ScrollView>
         )}
@@ -314,6 +343,21 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal visible={actionContainer !== null} transparent animationType="fade" onRequestClose={() => setActionContainer(null)}>
+        <View style={styles.overlay}>
+          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setActionContainer(null)} accessibilityLabel="Close environment actions" />
+          <View style={[styles.actionSheet, { backgroundColor: colors.bg, borderColor: colors.border }]}>
+            <View style={styles.actionSheetHead}><View style={styles.cardCopy}><Text style={[styles.title, { color: colors.text }]}>{actionContainer?.name}</Text><Text variant="xs" dim>Environment actions</Text></View><TouchableOpacity onPress={() => setActionContainer(null)} style={styles.smallIcon}><Ionicons name="close" size={19} color={colors.textDim} /></TouchableOpacity></View>
+            {actionContainer ? <>
+              <ActionRow icon="refresh-outline" label="Restart" onPress={() => { const item=actionContainer; setActionContainer(null); runAction(item, 'restart'); }} />
+              <ActionRow icon="copy-outline" label="Clone configuration" onPress={() => { const item=actionContainer; setActionContainer(null); openEdit(item, true); }} />
+              <ActionRow icon="layers-outline" label="Create template" onPress={() => { const item=actionContainer; setActionContainer(null); setSnapshotContainer(item.name); setSnapshotName(item.name.replace(/^mucli-/, '')); setSnapshotDescription(''); }} />
+              <ActionRow icon="trash-outline" label="Remove environment" destructive onPress={() => { const item=actionContainer; setActionContainer(null); remove(item); }} />
+            </> : null}
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={snapshotContainer !== null} transparent animationType="fade" onRequestClose={() => setSnapshotContainer(null)}>
         <View style={styles.overlay}><View style={[styles.snapshotCard, { backgroundColor: colors.bg, borderColor: colors.border }]}><Text style={[styles.title, { color: colors.text }]}>Create template</Text><TextInput value={snapshotName} onChangeText={setSnapshotName} placeholder="template-name" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} /><TextInput value={snapshotDescription} onChangeText={setSnapshotDescription} placeholder="Description" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} /><View style={styles.snapshotActions}><TouchableOpacity onPress={() => setSnapshotContainer(null)} style={styles.cancel}><Text variant="sm">Cancel</Text></TouchableOpacity><TouchableOpacity onPress={createSnapshot} style={[styles.smallButton, { backgroundColor: colors.text }]}><Text variant="sm" style={{ color: colors.bg, fontWeight: '700' }}>Snapshot</Text></TouchableOpacity></View></View></View>
       </Modal>
@@ -325,7 +369,7 @@ function SectionTitle({ label, detail }: { label: string; detail: string }) { re
 function FieldLabel({ label, optional = false }: { label: string; optional?: boolean }) { return <View style={styles.fieldLabel}><Text variant="xs" style={{ fontWeight: '700' }}>{label}</Text>{optional ? <Text variant="xs" dim>optional</Text> : null}</View>; }
 function EmptyCard({ text }: { text: string }) { const { colors } = useTheme(); return <View style={[styles.empty, { borderColor: colors.border }]}><Text variant="xs" dim>{text}</Text></View>; }
 function Segment({ selected, label, onPress, compact = false }: { selected: boolean; label: string; onPress: () => void; compact?: boolean }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[compact ? styles.segmentButtonCompact : styles.segmentButton, { backgroundColor: selected ? colors.text : 'transparent' }]}><Text variant="xs" style={{ color: selected ? colors.bg : colors.textDim, fontWeight: '700' }}>{label}</Text></TouchableOpacity>; }
-function Action({ icon, label, onPress, destructive = false }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; destructive?: boolean }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[styles.action, { backgroundColor: colors.bgHover }]}><Ionicons name={icon} size={17} color={destructive ? colors.error : colors.textDim} /><Text variant="xs" style={{ color: destructive ? colors.error : colors.text }}>{label}</Text></TouchableOpacity>; }
+function ActionRow({ icon, label, onPress, destructive = false }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; destructive?: boolean }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[styles.actionRow, { borderTopColor: colors.border }]}><Ionicons name={icon} size={19} color={destructive ? colors.error : colors.textDim} /><Text variant="sm" style={{ flex: 1, color: destructive ? colors.error : colors.text, fontWeight: '600' }}>{label}</Text><Ionicons name="chevron-forward" size={17} color={colors.textDim} /></TouchableOpacity>; }
 function EditorCard({ title, detail, icon, onPress }: { title: string; detail: string; icon: keyof typeof Ionicons.glyphMap; onPress: () => void }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[styles.editorCard, { backgroundColor: colors.bgLift, borderColor: colors.border }]}><Ionicons name={icon} size={20} color={colors.accent} /><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: '600' }}>{title}</Text><Text variant="xs" dim>{detail}</Text></View><Ionicons name="expand-outline" size={18} color={colors.textDim} /></TouchableOpacity>; }
 function splitLines(value: string): string[] { return value.split(/[\n,]/).map(item => item.trim()).filter(Boolean); }
 function countLines(value: string): number { return value.split(/\r?\n/).filter(item => item.trim()).length; }
@@ -334,8 +378,8 @@ const styles = StyleSheet.create({
   root: { flex: 1 }, header: { minHeight: 86, paddingHorizontal: 18, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerCopy: { flex: 1 }, title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.5 }, iconButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   content: { padding: 18 }, loader: { marginVertical: 20 }, sectionTitle: { marginTop: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, padding: 16, marginBottom: 10, gap: 12 }, cardHead: { flexDirection: 'row', alignItems: 'center', gap: 12 }, cardCopy: { flex: 1 }, cardTitle: { fontWeight: '700' }, status: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, action: { minHeight: 38, borderRadius: 12, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, padding: 16, marginBottom: 10, gap: 12 }, cardHead: { flexDirection: 'row', alignItems: 'center', gap: 12 }, cardCopy: { flex: 1 }, cardTitle: { fontWeight: '700' }, cardTools: { flexDirection: 'row', alignItems: 'center', gap: 2 }, status: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
+  cardHint: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   templateRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 10 }, smallButton: { minHeight: 38, borderRadius: 12, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' }, smallIcon: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   empty: { minHeight: 90, borderWidth: StyleSheet.hairlineWidth, borderStyle: 'dashed', borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }, fieldLabel: { marginTop: 16, marginBottom: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   input: { minHeight: 50, borderRadius: 15, paddingHorizontal: 14, fontSize: 15 }, segment: { flexDirection: 'row', gap: 5, marginBottom: 12 }, segmentButton: { flex: 1, minHeight: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, segmentCompact: { flexDirection: 'row', gap: 4 }, segmentButtonCompact: { minWidth: 48, minHeight: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
@@ -343,5 +387,5 @@ const styles = StyleSheet.create({
   mountRow: { minHeight: 58, borderRadius: 14, paddingHorizontal: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 10 }, mountActions: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }, addButton: { minHeight: 40, borderRadius: 12, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 6 },
   progress: { marginTop: 16, borderRadius: 14, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 10 }, footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth }, submit: { minHeight: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   fullEditor: { flex: 1, margin: 16, borderRadius: 15, padding: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, lineHeight: 20 }, policyEditor: { minHeight: 220, borderRadius: 15, padding: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, lineHeight: 20 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }, snapshotCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 20, padding: 18, gap: 12 }, snapshotActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }, cancel: { minHeight: 38, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', padding: 20 }, sheetBackdrop: { ...StyleSheet.absoluteFillObject }, actionSheet: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 14, marginBottom: 10 }, actionSheetHead: { minHeight: 58, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center', gap: 10 }, actionRow: { minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 11 }, snapshotCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 20, padding: 18, gap: 12 }, snapshotActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }, cancel: { minHeight: 38, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
 });

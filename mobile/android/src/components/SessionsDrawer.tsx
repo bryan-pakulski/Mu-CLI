@@ -98,10 +98,15 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
         <View style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: Math.max(insets.top, 16) }]}>
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.title, { color: colors.text }]}>Sessions</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color={colors.textDim} />
-            </TouchableOpacity>
+            <View><Text style={[styles.title, { color: colors.text }]}>Sessions</Text><Text variant="xs" dim>Tap a row to open it.</Text></View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={newSession} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn} accessibilityLabel="Create session">
+                <Ionicons name="add" size={22} color={colors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn} accessibilityLabel="Close sessions">
+                <Ionicons name="close" size={22} color={colors.textDim} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <FlatList
@@ -145,12 +150,6 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
             )}
           />
 
-          <View style={[styles.footer, { borderTopColor: colors.border }]}>
-            <TouchableOpacity onPress={newSession} style={[styles.newBtn, { backgroundColor: colors.accent }]} activeOpacity={0.8}>
-              <Ionicons name="add" size={22} color="#fff" />
-              <Text style={styles.newBtnText}>New session</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </View>
     </Modal>
@@ -187,6 +186,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
   },
+  headerActions: { flexDirection: 'row', gap: 4 },
   closeBtn: {
     minHeight: 44,
     minWidth: 44,
@@ -222,23 +222,5 @@ const styles = StyleSheet.create({
     minWidth: 44,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  footer: {
-    padding: 16,
-    borderTopWidth: 0,
-  },
-  newBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 14,
-    minHeight: 44,
-  },
-  newBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

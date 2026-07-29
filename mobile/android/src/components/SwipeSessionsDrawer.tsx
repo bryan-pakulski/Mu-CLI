@@ -136,11 +136,16 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
           <View style={styles.header}>
             <View>
               <Text style={[styles.title, { color: colors.text }]}>Sessions</Text>
-              <Text variant="xs" dim>Swipe left to close</Text>
+              <Text variant="xs" dim>Tap a row to open it.</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}>
-              <Ionicons name="close" size={20} color={colors.text} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={newSession} style={[styles.iconButton, { backgroundColor: colors.bgHover }]} accessibilityLabel="Create session">
+                <Ionicons name="add" size={20} color={colors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]} accessibilityLabel="Close sessions">
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <FlatList
@@ -179,12 +184,6 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
             )}
           />
 
-          <View style={styles.footer}>
-            <TouchableOpacity onPress={newSession} style={[styles.newButton, { backgroundColor: colors.accent }]}>
-              <Ionicons name="add" size={21} color={colors.accentText} />
-              <Text style={[styles.newButtonText, { color: colors.accentText }]}>New session</Text>
-            </TouchableOpacity>
-          </View>
         </View>
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
       </View>
@@ -203,6 +202,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)' },
   drawer: { width: '88%', maxWidth: 380, elevation: 10, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 24, shadowOffset: { width: 8, height: 0 } },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 16 },
+  headerActions: { flexDirection: 'row', gap: 7 },
   title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.4 },
   iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingHorizontal: 8, paddingBottom: 12 },
@@ -212,7 +212,4 @@ const styles = StyleSheet.create({
   rowCopy: { flex: 1 },
   rowName: { fontWeight: '600' },
   rowAction: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
-  footer: { padding: 16 },
-  newButton: { minHeight: 48, borderRadius: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  newButtonText: { fontSize: 14, fontWeight: '700' },
 });

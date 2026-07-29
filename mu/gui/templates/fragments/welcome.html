@@ -56,20 +56,26 @@
                     <div class="welcome-empty"><strong>No saved sessions</strong><span>Create one to begin.</span></div>
                 </template>
                 <template x-for="s in sessions" :key="s.name">
-                    <article class="welcome-session-row">
+                    <article class="welcome-session-row" role="button" tabindex="0"
+                             @click="loadSession(s.name)"
+                             @keydown.enter.prevent="loadSession(s.name)"
+                             @keydown.space.prevent="loadSession(s.name)"
+                             :aria-label="`Open session ${s.name}`">
                         <span class="session-kind" x-text="sessionGlyph(s.session_type)"></span>
                         <div class="welcome-session-copy">
                             <strong x-text="s.name"></strong>
                             <small x-text="`${s.session_type || 'workspace'} · ${formatDate(s.modified_at)}`"></small>
                         </div>
-                        <button class="primary" @click="loadSession(s.name)">load</button>
-                        <button class="subtle danger-text" @click="$store.confirm.ask(`Delete session '${s.name}'?`, $event, () => removeSession(s.name), {danger:true})">delete</button>
+                        <span class="welcome-session-open" aria-hidden="true">→</span>
+                        <button class="welcome-row-icon danger-text" type="button"
+                                @click.stop="$store.confirm.ask(`Delete session '${s.name}'?`, $event, () => removeSession(s.name), {danger:true})"
+                                :aria-label="`Delete session ${s.name}`" title="Delete session">⌫</button>
                     </article>
                 </template>
             </div>
-            <footer class="welcome-modal-foot">
-                <button @click="closeModal()">close</button>
-                <button class="primary" @click="openCreate()">new session</button>
+            <footer class="welcome-modal-foot welcome-modal-foot-light">
+                <button class="quiet-action" @click="closeModal()">Close</button>
+                <button class="quiet-action quiet-action-accent" @click="openCreate()"><span aria-hidden="true">＋</span> Create session</button>
             </footer>
         </section>
     </div>

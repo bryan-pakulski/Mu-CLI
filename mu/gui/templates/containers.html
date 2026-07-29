@@ -10,11 +10,11 @@
             <h1>Container management</h1>
             <p>Create, inspect, edit, clone, shell into, and snapshot isolated MuCLI environments.</p>
         </div>
-        <button class="primary" id="create-environment-button">create environment</button>
+        <button class="manager-header-action" id="create-environment-button" title="Create environment"><span aria-hidden="true">＋</span><span>New environment</span></button>
     </header>
 
     <section class="manager-section">
-        <div class="manager-section-head"><div><h2>Environments</h2><span class="muted">Independent of sessions until attached</span></div><button id="refresh-containers">refresh</button></div>
+        <div class="manager-section-head"><div><h2>Environments</h2><span class="muted">Independent of sessions until attached</span></div><button class="manager-icon-action" id="refresh-containers" aria-label="Refresh environments" title="Refresh">↻</button></div>
         <div id="container-empty" class="manager-empty">No managed environments.</div>
         <div id="container-list" class="manager-grid"></div>
     </section>

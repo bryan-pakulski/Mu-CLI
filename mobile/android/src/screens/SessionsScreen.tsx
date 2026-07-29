@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, Alert, Modal, TextInput, TouchableOpacity } from 'react-native';
+import { View, FlatList, RefreshControl, Alert, Modal, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
+import { Text, Button, Skeleton, ErrorState } from '../components';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { providersApi } from '../api/providers';
 import { spacing } from '../theme/tokens';
@@ -133,12 +134,14 @@ export function SessionsScreen() {
   if (sessions.length === 0) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <EmptyState
-          title="No sessions"
-          message="Create a new session to get started"
-          actionLabel="Create Session"
-          onAction={() => setShowCreate(true)}
-        />
+        <View style={styles.emptyState}>
+          <View style={[styles.emptyGlyph, { backgroundColor: colors.bgLift }]}><Ionicons name="chatbubbles-outline" size={24} color={colors.textDim} /></View>
+          <Text variant="lg" style={styles.emptyTitle}>No sessions</Text>
+          <Text variant="sm" style={{ color: colors.textDim }}>Create one when you are ready to begin.</Text>
+          <TouchableOpacity onPress={() => setShowCreate(true)} style={styles.emptyAction}>
+            <Ionicons name="add" size={18} color={colors.accent} /><Text variant="sm" style={{ color: colors.accent, fontWeight: '700' }}>Create session</Text>
+          </TouchableOpacity>
+        </View>
         <CreateSessionModal
           visible={showCreate}
           newName={newName}
@@ -153,39 +156,45 @@ export function SessionsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={styles.screenHeader}>
+        <View>
+          <Text variant="xl" style={styles.screenTitle}>Sessions</Text>
+          <Text variant="xs" style={{ color: colors.textDim }}>Tap a session to open it.</Text>
+        </View>
+        <TouchableOpacity onPress={() => setShowCreate(true)} style={[styles.headerAction, { backgroundColor: colors.bgLift }]} accessibilityLabel="Create session">
+          <Ionicons name="add" size={21} color={colors.accent} />
+        </TouchableOpacity>
+      </View>
       <FlatList
         data={sessions}
         keyExtractor={item => item.name}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={{ padding: spacing.base }}
+        contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: spacing.xl }}
         renderItem={({ item }) => (
-          <Card
-            style={{
-              marginBottom: spacing.sm,
-              minHeight: 44,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
+          <TouchableOpacity
+            onPress={() => switchSession(item.name)}
+            activeOpacity={0.72}
+            style={[styles.sessionRow, { backgroundColor: colors.bgLift, borderColor: colors.border }, activeSessionName === item.name && { backgroundColor: colors.bgHover }]}
           >
-            <View style={{ flex: 1 }}>
-              <Text variant="base" style={{ fontWeight: '500' }}>
-                {item.name}
-                {activeSessionName === item.name && ' (active)'}
+            <View style={[styles.sessionGlyph, { backgroundColor: colors.bgHover }]}>
+              <Ionicons name="chatbubble-ellipses-outline" size={17} color={colors.accent} />
+            </View>
+            <View style={styles.sessionCopy}>
+              <Text variant="base" style={styles.sessionName}>{item.name}</Text>
+              <Text variant="xs" style={{ color: colors.textDim, marginTop: 3 }}>
+                {activeSessionName === item.name ? 'Active' : item.is_loaded ? 'Loaded' : 'Saved'}{item.modified_at ? ` · ${item.modified_at}` : ''}
               </Text>
-              {item.modified_at && (
-                <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
-                  {item.modified_at}
-                </Text>
-              )}
             </View>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {activeSessionName !== item.name && (
-                <Button title="Switch" variant="ghost" onPress={() => switchSession(item.name)} />
-              )}
-              <Button title="Delete" variant="ghost" onPress={() => deleteSession(item.name)} />
-            </View>
-          </Card>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+            <TouchableOpacity
+              onPress={event => { event.stopPropagation(); deleteSession(item.name); }}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              style={styles.rowIcon}
+              accessibilityLabel={`Delete session ${item.name}`}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.textDim} />
+            </TouchableOpacity>
+          </TouchableOpacity>
         )}
       />
       <CreateSessionModal
@@ -196,9 +205,6 @@ export function SessionsScreen() {
         onCancel={() => { setShowCreate(false); setNewName(''); }}
         colors={colors}
       />
-      <View style={{ padding: spacing.base }}>
-        <Button title="New Session" onPress={() => setShowCreate(true)} />
-      </View>
     </SafeAreaView>
   );
 }
@@ -250,3 +256,16 @@ function CreateSessionModal({ visible, newName, setNewName, onCreate, onCancel, 
     </Modal>
   );
 }
+const styles = StyleSheet.create({
+  screenHeader: { paddingHorizontal: spacing.base, paddingTop: spacing.base, paddingBottom: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  screenTitle: { fontWeight: '700', letterSpacing: -0.5 },
+  headerAction: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  sessionRow: { minHeight: 68, borderWidth: StyleSheet.hairlineWidth, borderRadius: 17, paddingHorizontal: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sessionGlyph: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  sessionCopy: { flex: 1 }, sessionName: { fontWeight: '600' },
+  rowIcon: { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
+  emptyGlyph: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  emptyTitle: { fontWeight: '700', marginBottom: 6 },
+  emptyAction: { marginTop: 20, minHeight: 40, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+});

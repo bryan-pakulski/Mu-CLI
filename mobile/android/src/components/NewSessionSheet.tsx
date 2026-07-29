@@ -17,6 +17,7 @@ import { containersApi, ManagedContainer, ContainerTemplateSummary } from '../ap
 import { ContainerMount, SessionType, sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
 import { WorkspacePathField } from './WorkspacePathField';
 
 export type NewSessionSheetProps = {
@@ -65,13 +66,16 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const [containerEditor, setContainerEditor] = useState<EditorMode>(null);
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState('');
+  const [progressLogs, setProgressLogs] = useState<ContainerProgressLog[]>([]);
+  const [progressExpanded, setProgressExpanded] = useState(false);
+  const [progressFailed, setProgressFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reset = useCallback(() => {
     setStep(1); setSessionType('workspace'); setName(''); setWorkspace(''); setProvider(''); setModels([]); setModel('');
     setOllamaMode('local'); setOllamaApiKey(''); setContainerSource('new'); setExistingContainer(''); setContainerName('');
     setTemplateName(''); setMounts([]); setMountHost(''); setMountTarget('/workspace/project'); setMountMode('rw'); setContainerEditor(null);
-    setCreating(false); setProgress(''); setError(null);
+    setCreating(false); setProgress(''); setProgressLogs([]); setProgressExpanded(false); setProgressFailed(false); setError(null);
   }, []);
 
   const loadInitial = useCallback(async () => {
@@ -141,16 +145,24 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
     for (;;) {
       const status = await sessionsApi.getContainerCreationStatus(name.trim(), after);
       setProgress(status.message || status.stage);
-      for (const line of status.logs || []) after = Math.max(after, line.seq);
+      const incoming = status.logs || [];
+      if (incoming.length) {
+        setProgressLogs(current => [...current, ...incoming]);
+        for (const line of incoming) after = Math.max(after, line.seq);
+      }
       if (status.state === 'ready') return;
-      if (status.state === 'error') throw new Error(status.detail || status.message);
+      if (status.state === 'error') {
+        setProgressFailed(true);
+        setProgressExpanded(true);
+        throw new Error(status.detail || status.message);
+      }
       await new Promise(resolve => setTimeout(resolve, 700));
     }
   };
 
   const create = async () => {
     if (!canContinue || creating) return;
-    setCreating(true); setError(null); setProgress(sessionType === 'container' ? 'Queueing container setup…' : 'Creating session…');
+    setCreating(true); setError(null); setProgressLogs([]); setProgressExpanded(false); setProgressFailed(false); setProgress(sessionType === 'container' ? 'Queueing container setup…' : 'Creating session…');
     try {
       await sessionsApi.create(name.trim(), provider, model.trim(), sessionType === 'workspace' ? workspace.trim() || undefined : undefined, {
         sessionType,
@@ -169,9 +181,13 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
       });
       if (sessionType === 'container') await pollCreation();
       onCreated({ name: name.trim(), provider, model: model.trim() });
+      setProgress('');
     } catch (cause) {
+      setProgressFailed(sessionType === 'container');
+      setProgressExpanded(sessionType === 'container');
+      setProgress(sessionType === 'container' ? 'Container creation failed' : 'Session creation failed');
       setError(String(cause));
-    } finally { setCreating(false); setProgress(''); }
+    } finally { setCreating(false); }
   };
 
   const stepTitle = ['','Choose a boundary','Select a provider','Configure access','Review and create'][step];
@@ -228,7 +244,24 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
           {step === 4 ? <>
             <Text variant="sm" dim style={styles.intro}>Review the configuration before MuCLI creates and loads the session.</Text>
             <View style={[styles.review, { borderColor: colors.border }]}><Review label="Session" value={name} /><Review label="Type" value={sessionType} /><Review label="Provider" value={`${provider} · ${model}`} />{sessionType === 'workspace' ? <Review label="Workspace" value={workspace || 'none'} /> : null}{sessionType === 'container' ? <Review label="Container" value={containerSource === 'existing' ? `Attach · ${existingContainer}` : `Create · ${containerName}`} /> : null}</View>
-            {creating ? <View style={[styles.progressBox, { backgroundColor: colors.bgLift }]}><ActivityIndicator color={colors.accent} /><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: '600' }}>Preparing session</Text><Text variant="xs" dim>{progress}</Text></View></View> : null}
+            {(creating || progressFailed) && sessionType === 'container' ? (
+              <ContainerBuildProgress
+                message={progress}
+                logs={progressLogs}
+                expanded={progressExpanded}
+                onToggle={() => setProgressExpanded(current => !current)}
+                running={creating}
+                failed={progressFailed}
+              />
+            ) : creating ? (
+              <View style={[styles.progressBox, { backgroundColor: colors.bgLift }]}>
+                <ActivityIndicator color={colors.accent} />
+                <View style={styles.cardCopy}>
+                  <Text variant="sm" style={{ fontWeight: '600' }}>Preparing session</Text>
+                  <Text variant="xs" dim>{progress}</Text>
+                </View>
+              </View>
+            ) : null}
           </> : null}
           {error ? <Text variant="xs" style={{ color: colors.error, marginTop: 14 }}>{error}</Text> : null}
         </ScrollView>

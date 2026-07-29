@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -11,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProviderInfo, providersApi } from '../api/providers';
 import { containersApi, ManagedContainer, ContainerTemplateSummary } from '../api/containers';
 import { ContainerMount, SessionType, sessionsApi } from '../api/sessions';
@@ -19,6 +17,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
 import { WorkspacePathField } from './WorkspacePathField';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type NewSessionSheetProps = {
   visible: boolean;
@@ -36,7 +35,6 @@ const SESSION_TYPES: Array<{ type: SessionType; label: string; detail: string; i
 ];
 
 export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheetProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [sessionType, setSessionType] = useState<SessionType>('workspace');
@@ -193,16 +191,16 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const stepTitle = ['','Choose a boundary','Select a provider','Configure access','Review and create'][step];
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}>
+    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.bg }}>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.header, { paddingTop: 16, borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} disabled={creating} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity>
           <View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{stepTitle}</Text><Text variant="xs" dim>New session · step {step} of 4</Text></View>
           <View style={styles.iconButton} />
         </View>
         <View style={styles.progressDots}>{[1,2,3,4].map(item => <TouchableOpacity key={item} onPress={() => item < step && !creating && setStep(item)} style={[styles.dot, { backgroundColor: item <= step ? colors.accent : colors.bgHover }]} />)}</View>
 
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 18) + 104 }]}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: 104 }]}>
           {step === 1 ? <>
             <Text variant="sm" dim style={styles.intro}>Name the session and choose its execution boundary.</Text>
             <FieldLabel label="Session name" />
@@ -266,19 +264,19 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
           {error ? <Text variant="xs" style={{ color: colors.error, marginTop: 14 }}>{error}</Text> : null}
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14), borderTopColor: colors.border, backgroundColor: colors.bg }]}>
+        <View style={[styles.footer, { paddingBottom: 14, borderTopColor: colors.border, backgroundColor: colors.bg }]}>
           {step > 1 ? <TouchableOpacity onPress={() => setStep(current => current - 1)} disabled={creating} style={styles.backButton}><Text variant="sm">Back</Text></TouchableOpacity> : <View />}
           <TouchableOpacity onPress={() => step < 4 ? canContinue && setStep(current => current + 1) : create()} disabled={!canContinue || creating} style={[styles.primaryButton, { backgroundColor: canContinue && !creating ? colors.text : colors.bgHover }]}>{creating ? <ActivityIndicator color={colors.bg} /> : <Text style={{ color: canContinue ? colors.bg : colors.textDim, fontWeight: '700' }}>{step < 4 ? 'Continue' : 'Create and load'}</Text>}</TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
-      <Modal visible={containerEditor !== null} animationType="slide" onRequestClose={() => setContainerEditor(null)}>
-        <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.header, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{containerEditor === 'dockerfile' ? 'Worker image template' : 'Network policy'}</Text><Text variant="xs" dim>{containerEditor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><TouchableOpacity onPress={() => setContainerEditor(null)} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity></View>
+      <SafeAreaModal visible={containerEditor !== null} animationType="slide" onRequestClose={() => setContainerEditor(null)} containerStyle={{ backgroundColor: colors.bg }}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.header, { paddingTop: 16, borderBottomColor: colors.border }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{containerEditor === 'dockerfile' ? 'Worker image template' : 'Network policy'}</Text><Text variant="xs" dim>{containerEditor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><TouchableOpacity onPress={() => setContainerEditor(null)} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity></View>
           {containerEditor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={egressAllow} onChangeText={setEgressAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /><FieldLabel label="Blocklist" optional /><TextInput value={egressDeny} onChangeText={setEgressDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /></ScrollView>}
         </KeyboardAvoidingView>
-      </Modal>
-    </Modal>
+      </SafeAreaModal>
+    </SafeAreaModal>
   );
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, Alert, Modal, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, FlatList, RefreshControl, Alert, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -9,6 +9,7 @@ import { Text, Button, Skeleton, ErrorState } from '../components';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { providersApi } from '../api/providers';
 import { spacing } from '../theme/tokens';
+import { SafeAreaModal } from '../components/SafeAreaModal';
 
 export function SessionsScreen() {
   const { colors } = useTheme();
@@ -220,7 +221,7 @@ interface CreateSessionModalProps {
 
 function CreateSessionModal({ visible, newName, setNewName, onCreate, onCancel, colors }: CreateSessionModalProps) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={onCancel} activeOpacity={1}>
         <View style={{
           margin: spacing.base,
@@ -253,7 +254,7 @@ function CreateSessionModal({ visible, newName, setNewName, onCreate, onCancel, 
           </View>
         </View>
       </TouchableOpacity>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 const styles = StyleSheet.create({

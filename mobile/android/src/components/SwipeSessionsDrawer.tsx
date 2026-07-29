@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
-  Modal,
   PanResponder,
   RefreshControl,
   StyleSheet,
@@ -10,12 +9,12 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { NewSessionSheet } from './NewSessionSheet';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
@@ -24,7 +23,6 @@ export type SwipeSessionsDrawerProps = {
 };
 
 export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }: SwipeSessionsDrawerProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { activeSessionName, setActiveSession, setActiveProviderModel } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -127,11 +125,11 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
 
   return (
     <>
-    <Modal visible={visible && !createOpen} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <SafeAreaModal visible={visible && !createOpen} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View
           {...swipeResponder.panHandlers}
-          style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: Math.max(insets.top, 16) }]}
+          style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: 16 }]}
         >
           <View style={styles.header}>
             <View>
@@ -187,7 +185,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
         </View>
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
       </View>
-    </Modal>
+    </SafeAreaModal>
     <NewSessionSheet
       visible={createOpen}
       onClose={() => setCreateOpen(false)}

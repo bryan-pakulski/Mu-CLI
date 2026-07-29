@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, RefreshControl, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
+import { View, ScrollView, RefreshControl, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button } from '../components';
 import { memoryApi, MemorySnapshot, MemoryLayer } from '../api/memory';
 import { spacing } from '../theme/tokens';
+import { SafeAreaModal } from '../components/SafeAreaModal';
 
 export function MemoryScreen() {
   const { colors } = useTheme();
@@ -114,7 +115,7 @@ export function MemoryScreen() {
         ))}
       </ScrollView>
 
-      <Modal visible={!!selectedLayer} transparent animationType="slide" onRequestClose={() => setSelectedLayer(null)}>
+      <SafeAreaModal visible={!!selectedLayer} transparent animationType="slide" onRequestClose={() => setSelectedLayer(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center' }}>
           <View style={{ margin: spacing.base, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base, maxHeight: '85%' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
@@ -134,7 +135,7 @@ export function MemoryScreen() {
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      </SafeAreaModal>
     </SafeAreaView>
   );
 }

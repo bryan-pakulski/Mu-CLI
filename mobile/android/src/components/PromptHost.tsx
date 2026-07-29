@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from './Button';
 import { Text } from './Text';
@@ -7,6 +7,7 @@ import { promptsApi, type PendingPrompt } from '../api/prompts';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
+import { SafeAreaModal } from './SafeAreaModal';
 
 const RECOVERY_POLL_MS = 2000;
 
@@ -134,11 +135,10 @@ export function PromptHost() {
     `Allow ${activeApproval.tool_name || 'this tool'} to run?`;
 
   return (
-    <Modal
+    <SafeAreaModal
       visible
       transparent
       animationType="fade"
-      statusBarTranslucent
       onRequestClose={() => answer(false, false)}
     >
       <View style={styles.backdrop}>
@@ -213,7 +213,7 @@ export function PromptHost() {
           )}
         </View>
       </View>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 

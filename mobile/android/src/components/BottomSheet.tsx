@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Modal,
   View,
   StyleSheet,
   TouchableWithoutFeedback,
@@ -9,6 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type BottomSheetProps = {
   visible: boolean;
@@ -20,7 +20,7 @@ export type BottomSheetProps = {
 export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
   const { colors, spacing, radii } = useTheme();
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent edges={['bottom']}>
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }} />
       </TouchableWithoutFeedback>
@@ -47,6 +47,6 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
           <ScrollView>{children}</ScrollView>
         </KeyboardAvoidingView>
       </View>
-    </Modal>
+    </SafeAreaModal>
   );
 }

@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -9,10 +8,10 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type ModernBottomSheetProps = {
   visible: boolean;
@@ -22,11 +21,10 @@ export type ModernBottomSheetProps = {
 };
 
 export function ModernBottomSheet({ visible, onClose, children, title }: ModernBottomSheetProps) {
-  const insets = useSafeAreaInsets();
   const { colors, spacing, radii } = useTheme();
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent edges={['bottom']}>
       <View style={styles.root}>
         <TouchableWithoutFeedback onPress={onClose}>
           <View style={[StyleSheet.absoluteFillObject, styles.backdrop]} />
@@ -40,7 +38,7 @@ export function ModernBottomSheet({ visible, onClose, children, title }: ModernB
                 borderTopLeftRadius: radii.lg + 8,
                 borderTopRightRadius: radii.lg + 8,
                 paddingHorizontal: spacing.base,
-                paddingBottom: Math.max(insets.bottom, spacing.base),
+                paddingBottom: spacing.base,
               },
             ]}
           >
@@ -64,7 +62,7 @@ export function ModernBottomSheet({ visible, onClose, children, title }: ModernB
           </View>
         </KeyboardAvoidingView>
       </View>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 

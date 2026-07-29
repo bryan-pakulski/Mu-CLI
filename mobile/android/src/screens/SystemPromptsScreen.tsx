@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
+import { FlatList, View, RefreshControl, TouchableOpacity, TextInput, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Button, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { systemPromptsApi, SystemPromptInfo } from '../api/systemPrompts';
 import { spacing } from '../theme/tokens';
+import { SafeAreaModal } from '../components/SafeAreaModal';
 
 export function SystemPromptsScreen() {
   const { colors } = useTheme();
@@ -118,7 +119,7 @@ export function SystemPromptsScreen() {
           </Card>
         )}
       />
-      <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+      <SafeAreaModal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center' }}>
           <View style={{ margin: spacing.base, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base, maxHeight: '85%' }}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>{editing?.name}</Text>
@@ -139,7 +140,7 @@ export function SystemPromptsScreen() {
             </View>
           </View>
         </View>
-      </Modal>
+      </SafeAreaModal>
     </SafeAreaView>
   );
 }

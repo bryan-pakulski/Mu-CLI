@@ -1,13 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
   PanResponder,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { modesApi, ModeInfo } from '../api/modes';
 import { useTheme } from '../theme/ThemeContext';
 import { DebugScreen } from '../screens/DebugScreen';
@@ -18,6 +16,7 @@ import { SecurityScreen } from '../screens/SecurityScreen';
 import { TeacherScreen } from '../screens/TeacherScreen';
 import { Button } from './Button';
 import { Text } from './Text';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type ModeDrawerProps = {
   visible: boolean;
@@ -35,7 +34,6 @@ const MODE_COMPONENTS: Record<string, React.ComponentType | undefined> = {
 };
 
 export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [activeMode, setActiveMode] = useState<ModeInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,12 +69,12 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
         <View
           {...swipeResponder.panHandlers}
-          style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: Math.max(insets.top, 16) }]}
+          style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: 16 }]}
         >
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             <View style={styles.headerCopy}>
@@ -111,7 +109,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
           </View>
         </View>
       </View>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 

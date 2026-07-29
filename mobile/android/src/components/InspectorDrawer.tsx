@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, FlatList, RefreshControl, Modal, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { Text } from './Text';
 import { memoryApi, type MemorySnapshot } from '../api/memory';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type InspectorDrawerProps = {
   visible: boolean;
@@ -40,7 +41,7 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
   }, []);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent edges={['bottom']}>
       <View style={styles.overlay}>
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
         <View style={[styles.drawer, { backgroundColor: colors.bgLift }]}>
@@ -121,7 +122,7 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
           </ScrollView>
         </View>
       </View>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 

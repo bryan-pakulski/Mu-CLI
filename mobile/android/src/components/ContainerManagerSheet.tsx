@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -12,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ContainerConfiguration,
   ContainerTemplateSummary,
@@ -24,6 +22,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
 import { WorkspacePathField } from './WorkspacePathField';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type ContainerManagerSheetProps = {
   visible: boolean;
@@ -34,7 +33,6 @@ type ViewMode = 'list' | 'form';
 type EditorMode = 'dockerfile' | 'network' | null;
 
 export function ContainerManagerSheet({ visible, onClose }: ContainerManagerSheetProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [mode, setMode] = useState<ViewMode>('list');
   const [containers, setContainers] = useState<ManagedContainer[]>([]);
@@ -247,9 +245,9 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
   const title = mode === 'list' ? 'Container management' : editingName ? 'Edit environment' : 'Create environment';
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}>
+    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.bg }}>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.header, { paddingTop: 16, borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={mode === 'form' ? () => setMode('list') : onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}>
             <Ionicons name={mode === 'form' ? 'arrow-back' : 'close'} size={20} color={colors.text} />
           </TouchableOpacity>
@@ -265,7 +263,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
         </View>
 
         {mode === 'list' ? (
-          <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 18) + 24 }]}>
+          <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 24 }]}>
             {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
             {error ? <Text variant="xs" style={{ color: colors.error, marginBottom: 12 }}>{error}</Text> : null}
             <SectionTitle label="Environments" detail={`${containers.length} managed`} />
@@ -296,7 +294,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             ))}
           </ScrollView>
         ) : (
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 108 }]}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: 108 }]}>
             <FieldLabel label="Name" />
             <TextInput value={name} onChangeText={setName} editable={!editingName} autoCapitalize="none" autoCorrect={false} placeholder="research-box" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} />
             <FieldLabel label="Base" />
@@ -333,17 +331,17 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
           </ScrollView>
         )}
 
-        {mode === 'form' ? <View style={[styles.footer, { backgroundColor: colors.bg, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 14) }]}><TouchableOpacity onPress={submit} disabled={!canSubmit} style={[styles.submit, { backgroundColor: canSubmit ? colors.text : colors.bgHover }]}>{saving ? <ActivityIndicator color={colors.bg} /> : <Text style={{ color: canSubmit ? colors.bg : colors.textDim, fontWeight: '700' }}>{editingName ? 'Save and recreate' : 'Create environment'}</Text>}</TouchableOpacity></View> : null}
+        {mode === 'form' ? <View style={[styles.footer, { backgroundColor: colors.bg, borderTopColor: colors.border, paddingBottom: 14 }]}><TouchableOpacity onPress={submit} disabled={!canSubmit} style={[styles.submit, { backgroundColor: canSubmit ? colors.text : colors.bgHover }]}>{saving ? <ActivityIndicator color={colors.bg} /> : <Text style={{ color: canSubmit ? colors.bg : colors.textDim, fontWeight: '700' }}>{editingName ? 'Save and recreate' : 'Create environment'}</Text>}</TouchableOpacity></View> : null}
       </KeyboardAvoidingView>
 
-      <Modal visible={editor !== null} animationType="slide" onRequestClose={() => setEditor(null)}>
-        <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.header, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{editor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}</Text><Text variant="xs" dim>{editor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><TouchableOpacity onPress={() => setEditor(null)} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity></View>
+      <SafeAreaModal visible={editor !== null} animationType="slide" onRequestClose={() => setEditor(null)} containerStyle={{ backgroundColor: colors.bg }}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.header, { paddingTop: 16, borderBottomColor: colors.border }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.text }]}>{editor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}</Text><Text variant="xs" dim>{editor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><TouchableOpacity onPress={() => setEditor(null)} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity></View>
           {editor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={allow} onChangeText={setAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /><FieldLabel label="Blocklist" optional /><TextInput value={deny} onChangeText={setDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.text, backgroundColor: colors.bgLift }]} /></ScrollView>}
         </KeyboardAvoidingView>
-      </Modal>
+      </SafeAreaModal>
 
-      <Modal visible={actionContainer !== null} transparent animationType="fade" onRequestClose={() => setActionContainer(null)}>
+      <SafeAreaModal visible={actionContainer !== null} transparent animationType="fade" onRequestClose={() => setActionContainer(null)} edges={['bottom']} statusBarTranslucent>
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setActionContainer(null)} accessibilityLabel="Close environment actions" />
           <View style={[styles.actionSheet, { backgroundColor: colors.bg, borderColor: colors.border }]}>
@@ -356,12 +354,12 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             </> : null}
           </View>
         </View>
-      </Modal>
+      </SafeAreaModal>
 
-      <Modal visible={snapshotContainer !== null} transparent animationType="fade" onRequestClose={() => setSnapshotContainer(null)}>
+      <SafeAreaModal visible={snapshotContainer !== null} transparent animationType="fade" onRequestClose={() => setSnapshotContainer(null)} edges={['top', 'bottom']}>
         <View style={styles.overlay}><View style={[styles.snapshotCard, { backgroundColor: colors.bg, borderColor: colors.border }]}><Text style={[styles.title, { color: colors.text }]}>Create template</Text><TextInput value={snapshotName} onChangeText={setSnapshotName} placeholder="template-name" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} /><TextInput value={snapshotDescription} onChangeText={setSnapshotDescription} placeholder="Description" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]} /><View style={styles.snapshotActions}><TouchableOpacity onPress={() => setSnapshotContainer(null)} style={styles.cancel}><Text variant="sm">Cancel</Text></TouchableOpacity><TouchableOpacity onPress={createSnapshot} style={[styles.smallButton, { backgroundColor: colors.text }]}><Text variant="sm" style={{ color: colors.bg, fontWeight: '700' }}>Snapshot</Text></TouchableOpacity></View></View></View>
-      </Modal>
-    </Modal>
+      </SafeAreaModal>
+    </SafeAreaModal>
   );
 }
 

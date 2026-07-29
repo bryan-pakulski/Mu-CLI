@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -10,11 +9,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { WorkspacePathField } from './WorkspacePathField';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type WorkspaceSettingsSheetProps = {
   visible: boolean;
@@ -29,7 +28,6 @@ export function WorkspaceSettingsSheet({
   onClose,
   onSaved,
 }: WorkspaceSettingsSheetProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [workspaces, setWorkspaces] = useState<string[]>([]);
   const [candidate, setCandidate] = useState('');
@@ -93,12 +91,12 @@ export function WorkspaceSettingsSheet({
   }, [workspaces.length]);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.bg }}>
       <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: colors.bg }]}
+        style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
+        <View style={[styles.header, { paddingTop: 16 }]}>
           <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}>
             <Ionicons name="close" size={20} color={colors.text} />
           </TouchableOpacity>
@@ -111,7 +109,7 @@ export function WorkspaceSettingsSheet({
 
         <ScrollView
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 96 }]}
+          contentContainerStyle={[styles.content, { paddingBottom: 96 }]}
         >
           {loading ? (
             <ActivityIndicator color={colors.accent} style={styles.loader} />
@@ -168,7 +166,7 @@ export function WorkspaceSettingsSheet({
           ) : null}
         </ScrollView>
 
-        <View style={[styles.footer, { backgroundColor: colors.bg, paddingBottom: Math.max(insets.bottom, 14) }]}>
+        <View style={[styles.footer, { backgroundColor: colors.bg, paddingBottom: 14 }]}>
           <TouchableOpacity
             onPress={save}
             disabled={!canSave}
@@ -182,7 +180,7 @@ export function WorkspaceSettingsSheet({
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 

@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
+import { FlatList, View, RefreshControl, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
 import { promptsApi } from '../api/prompts';
 import { spacing } from '../theme/tokens';
+import { SafeAreaModal } from '../components/SafeAreaModal';
 
 interface PendingPrompt {
   id: string;
@@ -108,7 +109,7 @@ export function PromptsScreen() {
           </Card>
         )}
       />
-      <Modal visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
+      <SafeAreaModal visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
         <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setAnswering(null)} activeOpacity={1}>
           <View style={{ margin: spacing.base, marginTop: 80, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base }}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>Answer prompt</Text>
@@ -127,7 +128,7 @@ export function PromptsScreen() {
             </View>
           </View>
         </TouchableOpacity>
-      </Modal>
+      </SafeAreaModal>
     </SafeAreaView>
   );
 }

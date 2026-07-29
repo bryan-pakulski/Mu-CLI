@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, Modal, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { Text } from './Text';
+import { SafeAreaModal } from './SafeAreaModal';
 
 export type SessionsDrawerProps = {
   visible: boolean;
@@ -13,7 +13,6 @@ export type SessionsDrawerProps = {
 };
 
 export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { activeSessionName, setActiveSession } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -93,10 +92,10 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
-        <View style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: Math.max(insets.top, 16) }]}>
+        <View style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: 16 }]}>
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             <View><Text style={[styles.title, { color: colors.text }]}>Sessions</Text><Text variant="xs" dim>Tap a row to open it.</Text></View>
             <View style={styles.headerActions}>
@@ -152,7 +151,7 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
 
         </View>
       </View>
-    </Modal>
+    </SafeAreaModal>
   );
 }
 

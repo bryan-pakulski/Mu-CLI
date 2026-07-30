@@ -17,6 +17,7 @@ from mu.artifact import ArtifactRegistry
 from mu.container.builder import default_dockerfile
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.network import DEFAULT_EGRESS_ALLOW
+from mu.container.shell_qol import CWD_MARKER_PREFIX, CWD_MARKER_SUFFIX, CwdMarkerFilter
 import utils.config as _config
 
 router = APIRouter()
@@ -390,8 +391,68 @@ async def delete_container_template(name: str, request: Request):
     return {"ok": True}
 
 
+async def _shell_completion(
+    docker: str,
+    container_name: str,
+    *,
+    cwd: str,
+    line: str,
+    cursor: int,
+    request_id: str,
+) -> dict[str, Any]:
+    """Run bounded bash completion inside the container without executing input."""
+    from mu.container.shell_qol import build_completion_response, completion_target
+
+    line = str(line or "")[:8192]
+    target = completion_target(line, cursor)
+    script = r"""
+prefix=${MUCLI_SHELL_PREFIX-}
+while IFS= read -r item; do
+    if [ -d "$item" ]; then
+        printf '%s/\n' "${item%/}"
+    else
+        printf '%s\n' "$item"
+    fi
+done < <(compgen -cdfa -- "$prefix" 2>/dev/null | LC_ALL=C sort -u | head -200)
+"""
+
+    async def run(workdir: str) -> tuple[int, str]:
+        command = [docker, "exec", "-i"]
+        if workdir:
+            command += ["-w", workdir]
+        command += [
+            "-e", f"MUCLI_SHELL_PREFIX={target.prefix}",
+            container_name,
+            "/bin/bash", "--noprofile", "--norc", "-c", script,
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return 124, ""
+        return int(process.returncode or 0), stdout.decode("utf-8", errors="replace")
+
+    code, stdout = await run(cwd)
+    if code != 0 and cwd:
+        code, stdout = await run("")
+    candidates = stdout.splitlines() if code == 0 else []
+    return build_completion_response(
+        line=line,
+        cursor=cursor,
+        candidates=candidates,
+        request_id=request_id,
+    )
+
+
 @router.websocket("/api/containers/{name}/shell")
 async def managed_container_shell(websocket: WebSocket, name: str):
+    # MUCLI_SHELL_QOL_V1
     client = getattr(websocket, "client", None)
     host = str(getattr(client, "host", "") or "")
     if not host or host in {"127.0.0.1", "::1", "localhost", "testclient"}:
@@ -412,14 +473,33 @@ async def managed_container_shell(websocket: WebSocket, name: str):
         ref = await asyncio.to_thread(supervisor.start, name)
         docker = supervisor.runner.require("docker")
         process = await asyncio.create_subprocess_exec(
-            docker, "exec", "-i", "-e", "TERM=dumb", ref.name, "/bin/bash", "-i",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            docker,
+            "exec",
+            "-i",
+            "-e",
+            "TERM=dumb",
+            ref.name,
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-i",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
+        if process.stdin is not None:
+            initialization = (
+                "export PS1='' PS2=''; "
+                "PROMPT_COMMAND='printf \"\\036MUCLI_CWD:%s\\037\\n\" \"$PWD\"'\n"
+            )
+            process.stdin.write(initialization.encode("utf-8"))
+            await process.stdin.drain()
     except Exception as exc:
         await websocket.send_text(f"Unable to open shell: {exc}\n")
         await websocket.close(code=1011)
         return
+
+    cwd_filter = CwdMarkerFilter()
 
     async def pump_output() -> None:
         assert process.stdout is not None
@@ -427,15 +507,45 @@ async def managed_container_shell(websocket: WebSocket, name: str):
             chunk = await process.stdout.read(4096)
             if not chunk:
                 break
-            await websocket.send_text(chunk.decode("utf-8", errors="replace"))
+            visible = cwd_filter.feed(chunk.decode("utf-8", errors="replace"))
+            if visible:
+                await websocket.send_text(visible)
+        tail = cwd_filter.flush()
+        if tail:
+            await websocket.send_text(tail)
 
     output_task = asyncio.create_task(pump_output())
     try:
         while process.returncode is None:
             data = await websocket.receive_text()
+            control: dict[str, Any] | None = None
+            if data.startswith("{"):
+                try:
+                    parsed = json.loads(data)
+                    control = parsed if isinstance(parsed, dict) else None
+                except (TypeError, ValueError):
+                    control = None
+
+            if control and control.get("type") == "shell_complete":
+                response = await _shell_completion(
+                    docker,
+                    ref.name,
+                    cwd=cwd_filter.cwd,
+                    line=str(control.get("line") or ""),
+                    cursor=int(control.get("cursor") or 0),
+                    request_id=str(control.get("request_id") or ""),
+                )
+                await websocket.send_text(json.dumps(response))
+                continue
+
+            shell_input = (
+                str(control.get("data") or "")
+                if control and control.get("type") == "shell_input"
+                else data
+            )
             if process.stdin is None:
                 break
-            process.stdin.write(data.encode("utf-8"))
+            process.stdin.write(shell_input.encode("utf-8"))
             await process.stdin.drain()
     except WebSocketDisconnect:
         pass
@@ -444,6 +554,7 @@ async def managed_container_shell(websocket: WebSocket, name: str):
             process.terminate()
         await process.wait()
         output_task.cancel()
+        await asyncio.gather(output_task, return_exceptions=True)
 
 
 

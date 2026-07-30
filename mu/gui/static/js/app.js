@@ -1073,26 +1073,30 @@ ${problem.text}`, "error", 16000);
     // WS endpoint as the containers page modal.
 
     Alpine.store("shell", {
+        // MUCLI_SHELL_QOL_V1
         output: "",
         input: "",
         containerName: null,
         connected: false,
         connecting: false,
         error: null,
+        followOutput: true,
+        history: [],
+        historyIndex: 0,
+        historyDraft: "",
         _socket: null,
         _loaded: false,
         _intentional_close: false,
+        _completionSeq: 0,
 
         async load() {
-            // Called when the shell panel becomes active (via $watch on
-            // $store.mode.active).  Guard against double-load: if we're
-            // already connected or a load is in-flight, skip.
             if (this._loaded) return;
             this._loaded = true;
             if (this._socket) this.disconnect();
             this.output = "";
             this.error = null;
             this.containerName = null;
+            this.followOutput = true;
 
             try {
                 const r = await fetch("/api/sessions/active");
@@ -1103,6 +1107,7 @@ ${problem.text}`, "error", 16000);
                     return;
                 }
                 this.containerName = container.name;
+                this._loadHistory();
                 this.connect();
             } catch (e) {
                 this.error = `Failed to resolve container: ${e}`;
@@ -1114,6 +1119,7 @@ ${problem.text}`, "error", 16000);
             this._intentional_close = false;
             this.connecting = true;
             this.connected = false;
+            this.followOutput = true;
             const proto = location.protocol === "https:" ? "wss:" : "ws:";
             const url = `${proto}//${location.host}/api/containers/${encodeURIComponent(this.containerName)}/shell`;
             const socket = new WebSocket(url);
@@ -1123,18 +1129,29 @@ ${problem.text}`, "error", 16000);
                 this.connecting = false;
                 this.connected = true;
                 this.error = null;
+                this._appendOutput(`Connected to ${this.containerName}\n`, true);
             };
             socket.onmessage = (event) => {
-                // Strip ANSI escape sequences for clean display in <pre>.
-                this.output += String(event.data).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-                this._scroll();
+                const raw = String(event.data);
+                if (raw.startsWith("{")) {
+                    try {
+                        const message = JSON.parse(raw);
+                        if (message.type === "shell_completion") {
+                            this._applyCompletion(message);
+                            return;
+                        }
+                    } catch (_) {
+                        // A command may legitimately print JSON.
+                    }
+                }
+                this._appendOutput(raw.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""));
             };
             socket.onclose = () => {
                 this.connecting = false;
                 this.connected = false;
                 if (this._socket === socket) {
                     if (!this._intentional_close) {
-                        this.output += "\n[shell disconnected]\n";
+                        this._appendOutput("\n[shell disconnected]\n");
                     }
                     this._socket = null;
                 }
@@ -1149,9 +1166,35 @@ ${problem.text}`, "error", 16000);
         send(command) {
             const cmd = command !== undefined ? command : this.input;
             if (this._socket && this._socket.readyState === WebSocket.OPEN) {
+                this._recordHistory(cmd);
+                this.followOutput = true;
+                this._appendOutput(`$ ${cmd}\n`, true);
                 this._socket.send(cmd + "\n");
                 this.input = "";
             }
+        },
+
+        complete() {
+            if (!this._socket || this._socket.readyState !== WebSocket.OPEN) return;
+            const line = this.input;
+            this._socket.send(JSON.stringify({
+                type: "shell_complete",
+                request_id: String(++this._completionSeq),
+                line,
+                cursor: line.length,
+            }));
+        },
+
+        historyMove(direction) {
+            if (!this.history.length) return;
+            if (this.historyIndex === this.history.length) this.historyDraft = this.input;
+            this.historyIndex = Math.max(
+                0,
+                Math.min(this.history.length, this.historyIndex + direction),
+            );
+            this.input = this.historyIndex === this.history.length
+                ? this.historyDraft
+                : this.history[this.historyIndex];
         },
 
         disconnect() {
@@ -1167,9 +1210,71 @@ ${problem.text}`, "error", 16000);
 
         clear() {
             this.output = "";
+            this.followOutput = true;
         },
 
-        _scroll() {
+        onScroll(event) {
+            const el = event && event.currentTarget;
+            if (!el) return;
+            this.followOutput = el.scrollHeight - el.clientHeight - el.scrollTop < 48;
+        },
+
+        jumpToEnd() {
+            this.followOutput = true;
+            this._scroll(true);
+        },
+
+        _historyKey() {
+            return `mucli-shell-history:${this.containerName || "default"}`;
+        },
+
+        _loadHistory() {
+            try {
+                const value = JSON.parse(localStorage.getItem(this._historyKey()) || "[]");
+                this.history = Array.isArray(value) ? value.map(String).slice(-200) : [];
+            } catch (_) {
+                this.history = [];
+            }
+            this.historyIndex = this.history.length;
+            this.historyDraft = "";
+        },
+
+        _recordHistory(command) {
+            const value = String(command || "").trim();
+            if (!value) return;
+            this.history = this.history.filter((item) => item !== value);
+            this.history.push(value);
+            this.history = this.history.slice(-200);
+            this.historyIndex = this.history.length;
+            this.historyDraft = "";
+            try {
+                localStorage.setItem(this._historyKey(), JSON.stringify(this.history));
+            } catch (_) {}
+        },
+
+        _applyCompletion(message) {
+            if (String(message.source || "") !== this.input) return;
+            const start = Math.max(0, Math.min(Number(message.start) || 0, this.input.length));
+            const end = Math.max(start, Math.min(Number(message.end) || this.input.length, this.input.length));
+            const replacement = String(message.replacement || "");
+            const candidates = Array.isArray(message.candidates) ? message.candidates : [];
+            if (replacement) {
+                this.input = this.input.slice(0, start) + replacement + this.input.slice(end);
+                return;
+            }
+            if (candidates.length > 1) {
+                this._appendOutput(`\n${candidates.join("  ")}\n`);
+            }
+        },
+
+        _appendOutput(text, force = false) {
+            if (!text) return;
+            this.output += text;
+            this._scroll(force);
+        },
+
+        _scroll(force = false) {
+            if (!force && !this.followOutput) return;
             this.$nextTick(() => {
                 const el = document.getElementById("shell-output");
                 if (el) el.scrollTop = el.scrollHeight;

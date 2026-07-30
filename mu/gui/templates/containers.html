@@ -102,7 +102,8 @@
 
     <div class="manager-modal" id="shell-modal" hidden>
         <div class="manager-modal-card manager-shell-modal">
-            <header><div><h2 id="shell-title">Shell</h2><p>Commands run directly inside the selected container.</p></div><button id="close-shell">×</button></header>
+            <!-- MUCLI_SHELL_QOL_V1 -->
+            <header><div><h2 id="shell-title">Shell</h2><p>Commands run directly inside the selected container. Tab completes; ↑/↓ cycles history.</p></div><button id="close-shell">×</button></header>
             <pre id="shell-output" class="manager-shell-output"></pre>
             <form id="shell-form" class="manager-shell-input"><span>$</span><input id="shell-command" autocomplete="off" spellcheck="false" autofocus></form>
         </div>

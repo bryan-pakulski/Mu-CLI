@@ -8,7 +8,12 @@
             <span class="label-mono">Shell</span>
             <p>Interactive shell into the attached container.</p>
         </div>
+        <!-- MUCLI_SHELL_QOL_V1 -->
         <div class="shell-panel-actions">
+            <button type="button" class="icon-btn"
+                    x-show="!$store.shell.followOutput"
+                    @click="$store.shell.jumpToEnd()"
+                    title="Jump to latest output" aria-label="Jump to latest output">latest ↓</button>
             <button type="button" class="icon-btn"
                     @click="$store.shell.clear()"
                     title="Clear output" aria-label="Clear output">clr</button>
@@ -31,13 +36,17 @@
               x-text="'· ' + $store.shell.containerName"></span>
     </div>
 
-    <pre id="shell-output" class="shell-output" x-text="$store.shell.output"></pre>
+    <pre id="shell-output" class="shell-output" x-text="$store.shell.output"
+         @scroll="$store.shell.onScroll($event)"></pre>
 
     <form class="shell-input-bar" @submit.prevent="$store.shell.send()">
         <span class="shell-prompt mono">$</span>
         <input type="text"
                class="shell-input"
                x-model="$store.shell.input"
+               @keydown.tab.prevent="$store.shell.complete()"
+               @keydown.arrow-up.prevent="$store.shell.historyMove(-1)"
+               @keydown.arrow-down.prevent="$store.shell.historyMove(1)"
                autocomplete="off"
                spellcheck="false"
                :disabled="!$store.shell.connected"

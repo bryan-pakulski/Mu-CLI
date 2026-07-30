@@ -1,6 +1,8 @@
 (() => {
   const state = {
     containers: [], templates: [], defaults: null, shell: null,
+    shellFollow: true, shellHistory: [], shellHistoryIndex: 0, shellHistoryDraft: '',
+    shellCompletionSeq: 0, shellContainer: '',
     jobTimer: null, lastLogSeq: 0, mounts: [], devices: [], editingName: null,
     hardware: null, // MUCLI_CONTAINER_HARDWARE_V1
   };
@@ -275,13 +277,107 @@
     await api(`/api/containers/${encodeURIComponent(name)}/actions/${encodeURIComponent(actionName)}`, options); await load();
   }
 
+  // MUCLI_SHELL_QOL_V1
+  function shellNearBottom() {
+    const output = $('shell-output');
+    return output.scrollHeight - output.clientHeight - output.scrollTop < 48;
+  }
+
+  function appendShellOutput(text, force = false) {
+    if (!text) return;
+    const shouldFollow = force || state.shellFollow;
+    $('shell-output').textContent += String(text).replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '');
+    if (shouldFollow) {
+      requestAnimationFrame(() => { $('shell-output').scrollTop = $('shell-output').scrollHeight; });
+    }
+  }
+
+  function loadShellHistory(name) {
+    state.shellContainer = name;
+    try {
+      const value = JSON.parse(localStorage.getItem(`mucli-shell-history:${name}`) || '[]');
+      state.shellHistory = Array.isArray(value) ? value.map(String).slice(-200) : [];
+    } catch (_) {
+      state.shellHistory = [];
+    }
+    state.shellHistoryIndex = state.shellHistory.length;
+    state.shellHistoryDraft = '';
+  }
+
+  function recordShellHistory(command) {
+    const value = String(command || '').trim();
+    if (!value) return;
+    state.shellHistory = state.shellHistory.filter(item => item !== value);
+    state.shellHistory.push(value);
+    state.shellHistory = state.shellHistory.slice(-200);
+    state.shellHistoryIndex = state.shellHistory.length;
+    state.shellHistoryDraft = '';
+    try {
+      localStorage.setItem(`mucli-shell-history:${state.shellContainer}`, JSON.stringify(state.shellHistory));
+    } catch (_) {}
+  }
+
+  function moveShellHistory(direction) {
+    if (!state.shellHistory.length) return;
+    const input = $('shell-command');
+    if (state.shellHistoryIndex === state.shellHistory.length) state.shellHistoryDraft = input.value;
+    state.shellHistoryIndex = Math.max(0, Math.min(state.shellHistory.length, state.shellHistoryIndex + direction));
+    input.value = state.shellHistoryIndex === state.shellHistory.length
+      ? state.shellHistoryDraft
+      : state.shellHistory[state.shellHistoryIndex];
+  }
+
+  function applyShellCompletion(message) {
+    const input = $('shell-command');
+    if (String(message.source || '') !== input.value) return;
+    const start = Math.max(0, Math.min(Number(message.start) || 0, input.value.length));
+    const end = Math.max(start, Math.min(Number(message.end) || input.value.length, input.value.length));
+    const replacement = String(message.replacement || '');
+    const candidates = Array.isArray(message.candidates) ? message.candidates : [];
+    if (replacement) {
+      input.value = input.value.slice(0, start) + replacement + input.value.slice(end);
+      return;
+    }
+    if (candidates.length > 1) appendShellOutput(`\n${candidates.join('  ')}\n`);
+  }
+
+  function completeShellInput() {
+    if (!state.shell || state.shell.readyState !== WebSocket.OPEN) return;
+    const line = $('shell-command').value;
+    state.shell.send(JSON.stringify({
+      type: 'shell_complete',
+      request_id: String(++state.shellCompletionSeq),
+      line,
+      cursor: line.length,
+    }));
+  }
+
   function openShell(name) {
-    if (state.shell) state.shell.close(); $('shell-title').textContent = `Shell · ${name}`; $('shell-output').textContent = ''; show('shell-modal');
+    if (state.shell) state.shell.close();
+    $('shell-title').textContent = `Shell · ${name}`;
+    $('shell-output').textContent = '';
+    state.shellFollow = true;
+    loadShellHistory(name);
+    show('shell-modal');
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${location.host}/api/containers/${encodeURIComponent(name)}/shell`); state.shell = socket;
-    socket.onmessage = event => { $('shell-output').textContent += String(event.data).replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, ''); $('shell-output').scrollTop = $('shell-output').scrollHeight; };
-    socket.onclose = () => { $('shell-output').textContent += '\n[shell disconnected]\n'; state.shell = null; };
-    socket.onerror = () => { $('shell-output').textContent += '\n[shell connection failed]\n'; };
+    const socket = new WebSocket(`${protocol}//${location.host}/api/containers/${encodeURIComponent(name)}/shell`);
+    state.shell = socket;
+    socket.onopen = () => appendShellOutput(`Connected to ${name}\n`, true);
+    socket.onmessage = event => {
+      const raw = String(event.data);
+      if (raw.startsWith('{')) {
+        try {
+          const message = JSON.parse(raw);
+          if (message.type === 'shell_completion') {
+            applyShellCompletion(message);
+            return;
+          }
+        } catch (_) {}
+      }
+      appendShellOutput(raw);
+    };
+    socket.onclose = () => { appendShellOutput('\n[shell disconnected]\n'); state.shell = null; };
+    socket.onerror = () => { appendShellOutput('\n[shell connection failed]\n'); };
     setTimeout(() => $('shell-command').focus(), 50);
   }
 
@@ -361,7 +457,23 @@
     try { await api(`/api/containers/${encodeURIComponent($('snapshot-container').value)}/snapshot`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({template_name:$('snapshot-name').value.trim(),description:$('snapshot-description').value.trim()})}); hide('snapshot-modal'); await load(); }
     catch (error) { $('snapshot-error').textContent = String(error.message || error); }
   });
-  $('shell-form').addEventListener('submit', event => { event.preventDefault(); const command=$('shell-command').value; if(state.shell&&state.shell.readyState===WebSocket.OPEN)state.shell.send(command+'\n'); $('shell-command').value=''; });
+  $('shell-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const command = $('shell-command').value;
+    if (state.shell && state.shell.readyState === WebSocket.OPEN) {
+      recordShellHistory(command);
+      state.shellFollow = true;
+      appendShellOutput(`$ ${command}\n`, true);
+      state.shell.send(command + '\n');
+    }
+    $('shell-command').value = '';
+  });
+  $('shell-command').addEventListener('keydown', event => {
+    if (event.key === 'Tab') { event.preventDefault(); completeShellInput(); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); moveShellHistory(-1); }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); moveShellHistory(1); }
+  });
+  $('shell-output').addEventListener('scroll', () => { state.shellFollow = shellNearBottom(); });
   $('close-shell').addEventListener('click', () => { if(state.shell)state.shell.close(); hide('shell-modal'); });
   $('environment-dockerfile').addEventListener('input', updateSummaries);
   $('environment-allow').addEventListener('input', updateSummaries);

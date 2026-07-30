@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   FlatList,
@@ -64,6 +64,12 @@ export function ChatScreen() {
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followOutputRef = useRef(true);
   const completion = useCommandCompletion();
+  // Always clip offscreen cells on Android — disabling removeClippedSubviews
+  // when visualizations are present causes ALL cells to mount simultaneously
+  // on initial history load (80+ turns), exploding the native view tree and
+  // triggering OOM SIGKILL by lmkd. Visualization cards are React.memo'd and
+  // only mount their WebView when expanded, so clipping is safe.
+  const removeClipped = Platform.OS === 'android';
 
   // Throttled auto-scroll: coalesce rapid content-size changes (one per
   // streaming token) into a single non-animated scrollToEnd per ~100ms.
@@ -148,11 +154,54 @@ export function ChatScreen() {
     try { await inspectorApi.setVariable(key, value); } catch { /* ignore */ }
   };
 
-  const copyMessage = (text: string) => {
+  const copyMessage = useCallback((text: string) => {
     Clipboard.setStringAsync(text);
-  };
+  }, []);
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
+  // Cap message text length for non-streaming history messages. Long
+  // assistant messages (tool output, code dumps) explode the Markdown AST
+  // parser and native view tree. Truncate to a render-safe limit; the full
+  // text is still copyable via the copy button.
+  const MAX_MESSAGE_CHARS = 6000;
+
+  const markdownRules = useMemo(
+    () => ({
+      fence: (node: any) => {
+        const code = node.content;
+        const lang = (node.sourceInfo || '').trim();
+        return (
+          <CodeBlock
+            key={node.key}
+            code={code}
+            language={lang}
+            colors={colors}
+          />
+        );
+      },
+      code_block: (node: any) => {
+        const code = node.content;
+        return (
+          <CodeBlock
+            key={node.key}
+            code={code}
+            colors={colors}
+          />
+        );
+      },
+      code_inline: (node: any) => {
+        return (
+          <Text key={node.key} style={{ color: colors.syntax.keyword, fontFamily: 'monospace', fontSize: 13, backgroundColor: colors.bgHover, borderRadius: 4, paddingHorizontal: 4 }}>
+            {node.content}
+          </Text>
+        );
+      },
+    }),
+    [colors],
+  );
+
+  const memoizedMarkdownStyles = useMemo(() => markdownStyles(colors), [colors]);
+
+  const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     if (item.role === 'visualization' && item.artifact && activeSessionName) {
       return (
         <VisualizationCard artifact={item.artifact} sessionName={activeSessionName} />
@@ -161,6 +210,15 @@ export function ChatScreen() {
 
     const isUser = item.role === 'user';
     const isAssistant = item.role === 'assistant';
+
+    // Truncate very long non-streaming messages to avoid OOM from Markdown
+    // AST parsing + native view creation on large tool outputs / code dumps.
+    // The full text remains available via the copy button.
+    const rawText = item.text;
+    const truncated = !item.streaming && rawText.length > MAX_MESSAGE_CHARS;
+    const displayText = truncated
+      ? rawText.slice(0, MAX_MESSAGE_CHARS) + '\n\n_… (truncated — tap copy for full text)_'
+      : rawText;
 
     return (
       <View style={[
@@ -176,47 +234,17 @@ export function ChatScreen() {
           ]}
         >
           {isUser ? (
-            <Text style={{ color: colors.text }}>{item.text}</Text>
+            <Text style={{ color: colors.text }}>{displayText}</Text>
           ) : item.streaming ? (
             <Text style={{ color: colors.text, fontSize: 15, lineHeight: 23 }}>
-              {item.text}
+              {displayText}
             </Text>
           ) : (
             <Markdown
-              style={markdownStyles(colors)}
-              rules={{
-                fence: (node) => {
-                  const code = node.content;
-                  const lang = (node.sourceInfo || '').trim();
-                  return (
-                    <CodeBlock
-                      key={node.key}
-                      code={code}
-                      language={lang}
-                      colors={colors}
-                    />
-                  );
-                },
-                code_block: (node) => {
-                  const code = node.content;
-                  return (
-                    <CodeBlock
-                      key={node.key}
-                      code={code}
-                      colors={colors}
-                    />
-                  );
-                },
-                code_inline: (node) => {
-                  return (
-                    <Text key={node.key} style={{ color: colors.syntax.keyword, fontFamily: 'monospace', fontSize: 13, backgroundColor: colors.bgHover, borderRadius: 4, paddingHorizontal: 4 }}>
-                      {node.content}
-                    </Text>
-                  );
-                },
-              }}
+              style={memoizedMarkdownStyles}
+              rules={markdownRules}
             >
-              {item.text}
+              {displayText}
             </Markdown>
           )}
           {isUser && item.attachments && item.attachments.length > 0 ? (
@@ -229,9 +257,9 @@ export function ChatScreen() {
               ))}
             </View>
           ) : null}
-          {isAssistant && item.text.length > 0 && (
+          {isAssistant && rawText.length > 0 && (
             <TouchableOpacity
-              onPress={() => copyMessage(item.text)}
+              onPress={() => copyMessage(rawText)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.copyButton}
             >
@@ -241,7 +269,7 @@ export function ChatScreen() {
         </View>
       </View>
     );
-  };
+  }, [activeSessionName, colors, copyMessage, markdownRules, memoizedMarkdownStyles]);
 
   return (
     <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -255,11 +283,11 @@ export function ChatScreen() {
           data={messages}
           keyExtractor={item => item.id}
           renderItem={renderMessage}
-          initialNumToRender={8}
-          maxToRenderPerBatch={6}
-          updateCellsBatchingPeriod={50}
-          windowSize={7}
-          removeClippedSubviews={Platform.OS === 'android' && !messages.some(message => message.role === 'visualization')}
+          initialNumToRender={4}
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={80}
+          windowSize={5}
+          removeClippedSubviews={removeClipped}
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,

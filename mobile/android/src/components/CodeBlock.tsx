@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -267,13 +267,23 @@ interface CodeBlockProps {
   colors: { bgHover: string; textSoft: string; textDim: string; syntax: SyntaxColors };
 }
 
-export function CodeBlock({ code, language, colors }: CodeBlockProps) {
+export const CodeBlock = React.memo(function CodeBlock({ code, language, colors }: CodeBlockProps) {
   const langLabel = language ? language.toLowerCase().trim() : '';
-  const tokenizedLines = useMemo(() => tokenize(code, langLabel), [code, langLabel]);
+  const tokenizedLines = useMemo(() => {
+    // Cap lines to prevent OOM on very large code blocks (e.g. full file
+    // dumps in tool results). 200 lines × ~10 tokens/line is the safe
+    // upper bound for native Text nesting depth on Android.
+    const MAX_LINES = 200;
+    const lines = code.split('\n');
+    if (lines.length <= MAX_LINES) return tokenize(code, langLabel);
+    const truncated = lines.slice(0, MAX_LINES);
+    truncated.push(`\n// … ${lines.length - MAX_LINES} more lines truncated (copy for full code)`);
+    return tokenize(truncated.join('\n'), langLabel);
+  }, [code, langLabel]);
 
-  const copy = () => {
+  const copy = useCallback(() => {
     Clipboard.setStringAsync(code);
-  };
+  }, [code]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bgHover }]}>
@@ -310,7 +320,7 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
       ))}
     </View>
   );
-}
+}, (prev, next) => prev.code === next.code && prev.language === next.language && prev.colors === next.colors);
 
 const styles = StyleSheet.create({
   container: {

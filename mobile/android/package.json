@@ -27,7 +27,7 @@
     "@react-navigation/native-stack": "^6.9.26",
     "expo": "~51.0.28",
     "expo-clipboard": "~6.0.3",
-    "expo-document-picker": "~12.0.1",
+    "expo-document-picker": "~12.0.2",
     "expo-font": "~12.0.10",
     "expo-status-bar": "~1.12.1",
     "expo-system-ui": "~3.0.7",

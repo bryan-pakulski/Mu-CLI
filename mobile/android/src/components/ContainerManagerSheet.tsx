@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import {
   ContainerConfiguration,
+  ContainerStats,
   ContainerTemplateSummary,
   ManagedContainer,
   containersApi,
@@ -24,6 +25,7 @@ import {
   ContainerMount,
 } from '../api/sessions';
 import { ContainerHardwareSection } from './ContainerHardwareSection'; // MUCLI_CONTAINER_HARDWARE_V1
+import { ContainerStatsPanel } from './ContainerStatsPanel'; // MUCLI_CONTAINER_MONITOR_V1
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
@@ -42,6 +44,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
   const { colors } = useTheme();
   const [mode, setMode] = useState<ViewMode>('list');
   const [containers, setContainers] = useState<ManagedContainer[]>([]);
+  const [containerStats, setContainerStats] = useState<Record<string, ContainerStats>>({});
   const [templates, setTemplates] = useState<ContainerTemplateSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +101,29 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     setEditor(null);
     load();
   }, [load, visible]);
+
+  useEffect(() => {
+    if (!visible || mode !== 'list') return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const response = await containersApi.stats();
+        if (!active) return;
+        setContainerStats(response.containers || {});
+        timer = setTimeout(poll, Math.max(1500, response.poll_after_ms || 2500));
+      } catch {
+        if (active) timer = setTimeout(poll, 5000);
+      }
+    };
+
+    poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [mode, visible]);
 
   const resetForm = useCallback(async () => {
     setEditingName(null);
@@ -298,6 +324,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
                   </View>
                 </View>
                 <Text variant="xs" dim>{container.attached_sessions?.length ? `Sessions · ${container.attached_sessions.join(', ')}` : 'No attached sessions'}</Text>
+                <ContainerStatsPanel stats={containerStats[container.name]} status={container.status} />
                 <View style={[styles.cardHint, { borderTopColor: colors.border }]}><Text variant="xs" dim>Open configuration</Text><Ionicons name="arrow-forward" size={16} color={colors.textDim} /></View>
               </TouchableOpacity>
             ))}

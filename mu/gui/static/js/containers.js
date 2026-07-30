@@ -4,6 +4,7 @@
     shellFollow: true, shellHistory: [], shellHistoryIndex: 0, shellHistoryDraft: '',
     shellCompletionSeq: 0, shellContainer: '',
     jobTimer: null, lastLogSeq: 0, mounts: [], devices: [], editingName: null,
+    stats: {}, statsTimer: null, // MUCLI_CONTAINER_MONITOR_V1
     hardware: null, // MUCLI_CONTAINER_HARDWARE_V1
   };
   const $ = id => document.getElementById(id);
@@ -25,6 +26,8 @@
     state.defaults = defaults;
     state.hardware = defaults.hardware || null;
     render();
+    renderStats();
+    startStatsPolling();
   }
 
   function render() {
@@ -55,6 +58,9 @@
           </div>
         </div>
         <dl class="manager-meta"><dt>image</dt><dd>${esc(ref.image)}</dd><dt>template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>sessions</dt><dd>${sessions}</dd><dt>network</dt><dd>${esc(ref.network_name || '—')}</dd><dt>worker</dt><dd>${esc(ref.worker_port || '—')}</dd></dl>
+        <section class="manager-monitor" data-stats-name="${esc(ref.name)}" aria-label="Live resource monitor for ${esc(ref.name)}">
+          <div class="manager-monitor-loading">Waiting for resource sample…</div>
+        </section>
         <div class="manager-card-hint"><span>Open configuration</span><span aria-hidden="true">→</span></div>
       </article>`;
     }).join('');
@@ -70,6 +76,81 @@
     $('environment-template').innerHTML = state.templates.map(item => `<option value="${esc(item.name)}">${esc(item.name)}</option>`).join('');
     const option = $('environment-source').querySelector('option[value="template"]');
     if (option) option.disabled = state.templates.length === 0;
+  }
+
+  function formatBytes(value) {
+    let amount = Math.max(0, Number(value) || 0);
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let index = 0;
+    while (amount >= 1000 && index < units.length - 1) { amount /= 1000; index += 1; }
+    return `${amount >= 100 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
+  }
+
+  function formatRate(value) { return `${formatBytes(value)}/s`; }
+
+  function formatDuration(value) {
+    const seconds = Math.max(0, Number(value) || 0);
+    if (!seconds) return '0s';
+    if (seconds < 60) return `${Math.floor(seconds)}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+    return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
+  }
+
+  function metric(label, value, percent = null, detail = '') {
+    const width = percent == null ? '' : `style="width:${Math.max(0, Math.min(100, Number(percent) || 0))}%"`;
+    return `<div class="manager-monitor-metric">
+      <span>${esc(label)}</span><strong>${esc(value)}</strong>
+      ${detail ? `<small>${esc(detail)}</small>` : ''}
+      ${percent == null ? '' : `<i><b ${width}></b></i>`}
+    </div>`;
+  }
+
+  function renderStats() {
+    document.querySelectorAll('[data-stats-name]').forEach(root => {
+      const name = root.dataset.statsName;
+      const value = state.stats[name];
+      const ref = state.containers.find(item => item.name === name);
+      if (!value) {
+        root.innerHTML = '<div class="manager-monitor-loading">Waiting for resource sample…</div>';
+        return;
+      }
+      const running = value.status === 'running';
+      const gpu = value.gpu || {};
+      const gpuValue = gpu.requested
+        ? gpu.utilization_percent == null ? 'N/A' : `${Number(gpu.utilization_percent).toFixed(1)}%`
+        : '—';
+      root.innerHTML = `
+        <div class="manager-monitor-head"><div><strong>Live monitor</strong><small>${running ? `${value.pids || 0} processes · up ${formatDuration(value.uptime_seconds)}${value.restart_count ? ` · ${value.restart_count} restarts` : ''}` : `${esc(value.status || ref?.status || 'stopped')} · retained storage ${formatBytes(value.storage_writable_bytes)}`}</small></div><span class="${running ? 'is-live' : ''}"></span></div>
+        <div class="manager-monitor-grid">
+          ${metric('CPU', running ? `${Number(value.cpu_percent || 0).toFixed(1)}%` : '—', running ? value.cpu_percent : null)}
+          ${metric('Memory', `${formatBytes(value.memory_used_bytes)} / ${formatBytes(value.memory_limit_bytes)}`, running ? value.memory_percent : null)}
+          ${metric('GPU', gpuValue, gpu.utilization_percent, gpu.requested && gpu.memory_total_bytes ? `${formatBytes(gpu.memory_used_bytes)} / ${formatBytes(gpu.memory_total_bytes)}` : '')}
+          ${metric('Network', `↓ ${formatRate(value.network_rx_bytes_per_second)} · ↑ ${formatRate(value.network_tx_bytes_per_second)}`, null, `${formatBytes(value.network_rx_bytes)} received · ${formatBytes(value.network_tx_bytes)} sent`)}
+          ${metric('Storage', formatBytes(value.storage_writable_bytes), null, `Writable layer · rootfs ${formatBytes(value.storage_rootfs_bytes)}`)}
+          ${metric('Block I/O', `R ${formatBytes(value.block_read_bytes)} · W ${formatBytes(value.block_write_bytes)}`)}
+        </div>
+        ${gpu.requested ? '<p>GPU values are totals for the assigned physical device.</p>' : ''}
+        ${value.error ? `<p class="manager-monitor-error">${esc(value.error)}</p>` : ''}
+      `;
+    });
+  }
+
+  async function pollStats() {
+    try {
+      const response = await api('/api/containers/stats');
+      state.stats = response.containers || {};
+      renderStats();
+      state.statsTimer = setTimeout(pollStats, Math.max(1500, response.poll_after_ms || 2500));
+    } catch (_) {
+      state.statsTimer = setTimeout(pollStats, 5000);
+    }
+  }
+
+  function startStatsPolling() {
+    if (state.statsTimer) clearTimeout(state.statsTimer);
+    state.statsTimer = null;
+    pollStats();
   }
 
   function resetForm() {
@@ -479,5 +560,8 @@
   $('environment-allow').addEventListener('input', updateSummaries);
   $('environment-deny').addEventListener('input', updateSummaries);
 
+  window.addEventListener('beforeunload', () => {
+    if (state.statsTimer) clearTimeout(state.statsTimer);
+  });
   load().catch(error => { $('container-empty').textContent = String(error.message || error); });
 })();

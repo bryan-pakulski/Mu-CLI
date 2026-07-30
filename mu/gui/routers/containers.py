@@ -17,6 +17,7 @@ from mu.artifact import ArtifactRegistry
 from mu.container.builder import default_dockerfile
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.network import DEFAULT_EGRESS_ALLOW
+from mu.container.stats import ContainerStatsCollector  # MUCLI_CONTAINER_MONITOR_V1
 from mu.container.shell_qol import CWD_MARKER_PREFIX, CWD_MARKER_SUFFIX, CwdMarkerFilter
 import utils.config as _config
 
@@ -167,6 +168,19 @@ async def list_managed_containers(request: Request):
         "containers": [ref.to_dict(include_secret=False) for ref in refs],
         "templates": [item.to_dict() for item in templates],
     }
+
+
+@router.get("/api/containers/stats")
+async def managed_container_stats(request: Request):
+    """Batch resource telemetry for web and mobile container monitors."""
+    _require_local_client(request)
+    supervisor = request.app.state.container_supervisor
+    collector = getattr(request.app.state, "container_stats_collector", None)
+    if collector is None:
+        collector = ContainerStatsCollector(supervisor.runner)
+        request.app.state.container_stats_collector = collector
+    refs = await asyncio.to_thread(supervisor.list_environments)
+    return await asyncio.to_thread(collector.collect, refs)
 
 
 @router.get("/api/containers/{name}/configuration")

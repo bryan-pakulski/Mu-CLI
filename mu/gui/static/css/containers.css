@@ -41,3 +41,23 @@
   .manager-hardware-grid,.manager-device-add { grid-template-columns:1fr; }
 }
 
+/* MUCLI_CONTAINER_MONITOR_V1: compact live system monitor */
+.manager-monitor{padding-top:12px;border-top:1px solid var(--border)}
+.manager-monitor-loading{padding:13px;border:1px dashed var(--border);border-radius:10px;color:var(--text-dim);font-size:10px;text-align:center}
+.manager-monitor-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+.manager-monitor-head>div{display:flex;flex-direction:column;gap:2px}
+.manager-monitor-head strong{font-size:10.5px}
+.manager-monitor-head small{color:var(--text-dim);font-size:9.5px}
+.manager-monitor-head>span{width:7px;height:7px;border-radius:50%;background:var(--text-dim)}
+.manager-monitor-head>span.is-live{background:var(--accent)}
+.manager-monitor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.manager-monitor-metric{min-width:0;padding:9px;border-radius:10px;background:var(--bg-hover);display:flex;flex-direction:column;gap:3px}
+.manager-monitor-metric>span{color:var(--text-dim);font-size:9px}
+.manager-monitor-metric>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 10.5px/1.3 var(--mono)}
+.manager-monitor-metric>small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-size:8.5px}
+.manager-monitor-metric>i{height:4px;margin-top:4px;border-radius:99px;overflow:hidden;background:var(--border)}
+.manager-monitor-metric>i>b{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.manager-monitor>p{margin:8px 0 0;color:var(--text-dim);font-size:8.8px;line-height:1.4}
+.manager-monitor .manager-monitor-error{color:var(--err)}
+@media(max-width:420px){.manager-monitor-grid{grid-template-columns:1fr}}
+

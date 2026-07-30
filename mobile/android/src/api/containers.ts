@@ -19,6 +19,57 @@ export interface ManagedContainer {
   network_name?: string;
 }
 
+export interface ContainerGpuStats {
+  requested: boolean;
+  scope: 'assigned_device_total';
+  utilization_percent?: number | null;
+  memory_used_bytes: number;
+  memory_total_bytes: number;
+  temperature_c?: number | null;
+  power_watts?: number | null;
+  devices: Array<{
+    index?: string;
+    uuid?: string;
+    name?: string;
+    utilization_percent?: number;
+    memory_used_bytes?: number;
+    memory_total_bytes?: number;
+    temperature_c?: number;
+    power_watts?: number;
+  }>;
+}
+
+export interface ContainerStats {
+  name: string;
+  status: string;
+  sampled_at: number;
+  cpu_percent: number;
+  memory_used_bytes: number;
+  memory_limit_bytes: number;
+  memory_percent: number;
+  network_rx_bytes: number;
+  network_tx_bytes: number;
+  network_rx_bytes_per_second: number;
+  network_tx_bytes_per_second: number;
+  block_read_bytes: number;
+  block_write_bytes: number;
+  pids: number;
+  storage_writable_bytes: number;
+  storage_rootfs_bytes: number;
+  restart_count: number;
+  uptime_seconds?: number | null;
+  gpu: ContainerGpuStats;
+  attached_device_count: number;
+  error?: string | null;
+}
+
+export interface ContainerStatsResponse {
+  sampled_at: number;
+  poll_after_ms: number;
+  containers: Record<string, ContainerStats>;
+}
+
+// MUCLI_CONTAINER_MONITOR_V1
 export interface ContainerTemplateSummary {
   name: string;
   image: string;
@@ -69,6 +120,7 @@ export interface ContainerJob {
 
 export const containersApi = {
   list: () => api.get<ContainerListing>('/api/containers'),
+  stats: () => api.get<ContainerStatsResponse>('/api/containers/stats'),
   configuration: (name: string) =>
     api.get<ContainerConfiguration>(`/api/containers/${encodeURIComponent(name)}/configuration`),
   create: (payload: ContainerEnvironmentPayload) =>

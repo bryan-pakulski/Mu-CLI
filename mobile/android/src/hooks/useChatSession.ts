@@ -7,7 +7,6 @@ import type { AttachmentDescriptor } from '../api/attachments';
 
 const SESSION_POLL_MS = 5000;
 const MOBILE_HISTORY_TURN_LIMIT = 80;
-const MOBILE_HISTORY_ARTIFACT_LIMIT = 8;
 
 export interface ChatMessage {
   id: string;
@@ -31,9 +30,14 @@ function asVisualization(value: unknown): ArtifactDescriptor | null {
     : null;
 }
 
-function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
+export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
+  // MUCLI_MOBILE_VISUALIZATION_HISTORY_V1: tool-result turns can contain durable visualization
+  // descriptors even when their role is `tool`. Preserve those cards while
+  // continuing to render ordinary text only for user/assistant turns.
   return turns.flatMap(turn => {
-    if (turn.role !== 'user' && turn.role !== 'assistant') return [];
+    const messageRole = turn.role === 'user' || turn.role === 'assistant'
+      ? turn.role as 'user' | 'assistant'
+      : null;
     const messages: ChatMessage[] = [];
     let pendingText: string[] = [];
     const pendingAttachments: AttachmentDescriptor[] = [];
@@ -41,23 +45,28 @@ function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
     const flushText = () => {
       const text = pendingText.join('\n\n').trim();
       pendingText = [];
-      if (!text) return;
+      if (!messageRole || !text) return;
       messages.push({
         id: `history-${turn.index}-${partIndex++}`,
-        role: turn.role as 'user' | 'assistant',
+        role: messageRole,
         text,
         streaming: false,
         origin: 'history',
-        attachments: turn.role === 'user' ? [...pendingAttachments] : undefined,
+        attachments: messageRole === 'user' ? [...pendingAttachments] : undefined,
       });
     };
 
     for (const part of turn.parts) {
       if (part.type === 'text' && typeof part.text === 'string') {
-        pendingText.push(String(part.text));
+        if (messageRole) pendingText.push(String(part.text));
         continue;
       }
-      if (part.type === 'attachment' && part.attachment && typeof part.attachment === 'object') {
+      if (
+        messageRole === 'user'
+        && part.type === 'attachment'
+        && part.attachment
+        && typeof part.attachment === 'object'
+      ) {
         pendingAttachments.push(part.attachment as AttachmentDescriptor);
         continue;
       }
@@ -74,7 +83,7 @@ function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
       });
     }
     flushText();
-    if (turn.role === 'user' && pendingAttachments.length > 0 && messages.length === 0) {
+    if (messageRole === 'user' && pendingAttachments.length > 0 && messages.length === 0) {
       messages.push({
         id: `history-${turn.index}-attachments`,
         role: 'user',
@@ -215,7 +224,8 @@ export function useChatSession(activeSessionName: string | null) {
           signal: controller.signal,
           timeoutMs: 15_000,
           limitTurns: MOBILE_HISTORY_TURN_LIMIT,
-          artifactLimit: MOBILE_HISTORY_ARTIFACT_LIMIT,
+          // Visualization cards are collapsed until opened, so hydrate every
+          // durable visualization descriptor for parity with the web client.
         });
         // Yield once before converting/rendering history so a navigation press
         // already queued by React Native is handled first.

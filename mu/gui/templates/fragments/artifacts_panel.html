@@ -2,45 +2,109 @@
        data-mode="artifacts"
        x-show="$store.mode.active === 'artifacts'"
        x-transition.opacity.duration.200ms
-       x-effect="$store.mode.active === 'artifacts' && $store.artifacts.load($store.chat.currentName)">
+       x-effect="$store.mode.active === 'artifacts' && ($store.artifacts.load($store.chat.currentName), $store.attachments.load($store.chat.currentName))">
+    <!-- MUCLI_UNIFIED_REGISTRIES_V1: agent outputs + user inputs share one panel. -->
     <div class="artifacts-panel-head">
         <div>
-            <span class="label-mono">Artifacts</span>
-            <p>Session deliverables published by the agent.</p>
+            <span class="label-mono">Session files</span>
+            <p>Agent outputs and your uploaded source files, kept in separate registries.</p>
         </div>
         <button type="button" class="icon-btn"
-                @click="$store.artifacts.load($store.chat.currentName, true)"
-                :disabled="$store.artifacts.loading"
-                title="Refresh artifacts" aria-label="Refresh artifacts">↻</button>
+                @click="$store.artifacts.load($store.chat.currentName, true); $store.attachments.load($store.chat.currentName)"
+                :disabled="$store.artifacts.loading || $store.attachments.loading || $store.attachments.uploading"
+                title="Refresh session files" aria-label="Refresh session files">↻</button>
     </div>
 
-    <div class="artifacts-panel-status">
-        <span x-show="$store.artifacts.loading">Refreshing…</span>
-        <span x-show="!$store.artifacts.loading"
-              x-text="$store.artifacts.current.length + ($store.artifacts.current.length === 1 ? ' artifact' : ' artifacts')"></span>
-    </div>
-
-    <div class="panel-empty artifacts-panel-empty"
-         x-show="!$store.artifacts.loading && !$store.artifacts.current.length">
-        <h3>No artifacts yet</h3>
-        <p class="muted">When the agent calls <code>upload_artifact</code>, the file appears here immediately.</p>
-    </div>
-
-    <div class="artifacts-list" x-show="$store.artifacts.current.length">
-        <template x-for="a in $store.artifacts.current" :key="a.artifact_id">
-            <div class="artifact-row">
-                <a class="artifact-row-main" :href="a.download_url" download
-                   :title="'Download ' + a.name">
-                    <span class="artifact-row-icon">↓</span>
-                    <span class="artifact-row-copy">
-                        <strong x-text="a.name"></strong>
-                        <span x-text="$store.artifacts.formatSize(a.size) + ' · ' + (a.mime_type || 'file')"></span>
-                    </span>
-                </a>
-                <button type="button" class="artifact-row-delete"
-                        title="Delete artifact" aria-label="Delete artifact"
-                        @click.stop="$store.confirm.ask('Delete artifact \'' + a.name + '\'?', $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})">×</button>
+    <div class="unified-registry-body">
+        <section class="registry-section model-artifacts-registry" aria-labelledby="model-artifacts-title">
+            <div class="registry-section-head">
+                <div>
+                    <strong id="model-artifacts-title">Model artifacts</strong>
+                    <span>Files and visualizations published by the agent.</span>
+                </div>
+                <span class="registry-count"
+                      x-text="$store.artifacts.current.length"></span>
             </div>
-        </template>
+
+            <div class="registry-section-status" x-show="$store.artifacts.loading">Refreshing model artifacts…</div>
+            <div class="registry-section-empty"
+                 x-show="!$store.artifacts.loading && !$store.artifacts.current.length">
+                <strong>No model artifacts</strong>
+                <span>Outputs created with <code>upload_artifact</code> appear here.</span>
+            </div>
+
+            <div class="registry-section-list" x-show="$store.artifacts.current.length">
+                <template x-for="a in $store.artifacts.current" :key="a.artifact_id">
+                    <div class="artifact-row">
+                        <a class="artifact-row-main" :href="a.download_url" download
+                           :title="'Download ' + a.name">
+                            <span class="artifact-row-icon">↓</span>
+                            <span class="artifact-row-copy">
+                                <strong x-text="a.title || a.name"></strong>
+                                <span x-text="$store.artifacts.formatSize(a.size) + ' · ' + (a.kind === 'visualization' ? 'visualization' : (a.mime_type || 'file'))"></span>
+                            </span>
+                        </a>
+                        <a class="artifact-row-download" x-show="a.kind === 'visualization'"
+                           :href="a.view_url" target="_blank" rel="noopener noreferrer"
+                           title="Open visualization" aria-label="Open visualization">↗</a>
+                        <button type="button" class="artifact-row-delete"
+                                title="Delete artifact" aria-label="Delete artifact"
+                                @click.stop="$store.confirm.ask(`Delete artifact '${a.name}'?`, $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})">×</button>
+                    </div>
+                </template>
+            </div>
+        </section>
+
+        <section class="registry-section uploads-registry" aria-labelledby="file-uploads-title">
+            <div class="registry-section-head">
+                <div>
+                    <strong id="file-uploads-title">File uploads</strong>
+                    <span>Select files to include with the next message.</span>
+                </div>
+                <div class="registry-section-actions">
+                    <span class="registry-count" x-text="$store.attachments.items().length"></span>
+                    <label class="registry-upload-button" :class="{ disabled: $store.attachments.uploading }">
+                        <input type="file" multiple hidden
+                               :disabled="$store.attachments.uploading"
+                               @change="$store.attachments.uploadFiles($event.target.files); $event.target.value=''">
+                        <span x-text="$store.attachments.uploading ? 'uploading…' : '+ upload'"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="registry-section-status" x-show="$store.attachments.loading">Refreshing file uploads…</div>
+            <div class="registry-section-status selected-upload-status"
+                 x-show="!$store.attachments.loading && $store.attachments.selectedIds().length"
+                 x-text="$store.attachments.selectedIds().length + ($store.attachments.selectedIds().length === 1 ? ' file selected for the next message' : ' files selected for the next message')"></div>
+            <div class="registry-section-empty"
+                 x-show="!$store.attachments.loading && !$store.attachments.items().length">
+                <strong>No file uploads</strong>
+                <span>Upload documents, archives, images, or datasets for this session.</span>
+            </div>
+
+            <div class="registry-section-list" x-show="$store.attachments.items().length">
+                <template x-for="item in $store.attachments.items()" :key="item.attachment_id">
+                    <div class="artifact-row upload-registry-row"
+                         :class="{ selected: $store.attachments.isSelected(item) }">
+                        <button type="button" class="artifact-row-main upload-row-main"
+                                @click="$store.attachments.toggle(item)"
+                                :aria-pressed="$store.attachments.isSelected(item)"
+                                :title="$store.attachments.isSelected(item) ? 'Remove from next message' : 'Include with next message'">
+                            <span class="artifact-row-icon"
+                                  x-text="$store.attachments.isSelected(item) ? '✓' : '○'"></span>
+                            <span class="artifact-row-copy">
+                                <strong x-text="item.name"></strong>
+                                <span x-text="$store.artifacts.formatSize(item.size) + ' · ' + (item.mime_type || 'file')"></span>
+                            </span>
+                        </button>
+                        <a class="artifact-row-download" :href="item.download_url" download
+                           :title="'Download ' + item.name" aria-label="Download uploaded file">↓</a>
+                        <button type="button" class="artifact-row-delete"
+                                title="Delete uploaded file" aria-label="Delete uploaded file"
+                                @click.stop="$store.confirm.ask(`Delete uploaded file '${item.name}'?`, $event, () => $store.attachments.remove(item), {danger:true})">×</button>
+                    </div>
+                </template>
+            </div>
+        </section>
     </div>
 </aside>

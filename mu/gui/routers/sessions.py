@@ -518,15 +518,19 @@ async def get_history(
         _config.HISTORY_DIR, "sessions", sm.current_session_name
     )
     try:
-        artifacts = ArtifactRegistry(session_dir).list()
-        if artifact_limit is not None:
-            # Registry order is newest-first. Limit before reversing so mobile
-            # does not mount every historical visualization WebView at once.
-            artifacts = artifacts[:artifact_limit]
-        for artifact in reversed(artifacts):
+        # MUCLI_MOBILE_VISUALIZATION_HISTORY_V1: filter first, then apply a visualization limit.
+        # Limiting the mixed artifact registry before filtering allowed ordinary
+        # files to crowd all visualization descriptors out of mobile history.
+        visualizations = []
+        for artifact in ArtifactRegistry(session_dir).list():
             visualization = _visualization_from_tool_result({"artifact": artifact})
-            if visualization is None:
-                continue
+            if visualization is not None:
+                visualizations.append(visualization)
+        if artifact_limit is not None:
+            # Registry order is newest-first. Collapsed mobile cards are cheap,
+            # but callers may still request a bounded visualization history.
+            visualizations = visualizations[:artifact_limit]
+        for visualization in reversed(visualizations):
             artifact_id = str(visualization.get("artifact_id") or "")
             if not artifact_id or artifact_id in seen_visualization_ids:
                 continue

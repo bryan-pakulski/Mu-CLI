@@ -324,9 +324,9 @@
         <p>Type below to start. <code>/help</code> lists commands.</p>
     </div>
 </div>
-<div class="composer" x-data="{ get cc() { return $store.cmdComplete }, modeOpen: false, settingsOpen: false, attachmentsOpen: false }"
-     @click.outside="modeOpen = false; settingsOpen = false; attachmentsOpen = false"
-     @keydown.escape.window="modeOpen = false; settingsOpen = false; attachmentsOpen = false">
+<div class="composer" x-data="{ get cc() { return $store.cmdComplete }, modeOpen: false, settingsOpen: false }"
+     @click.outside="modeOpen = false; settingsOpen = false"
+     @keydown.escape.window="modeOpen = false; settingsOpen = false">
     <!-- Composer toolbar: mode selector (real backend mode) + settings hamburger -->
     <div class="composer-toolbar">
         <!-- Mode selector: changes actual MuCLI backend mode -->
@@ -471,6 +471,7 @@
         </div>
     </div>
 
+    <!-- MUCLI_UNIFIED_REGISTRIES_V1: selection chips remain in the composer; registry lives in the Artifacts panel. -->
     <div class="attachment-selection" x-show="$store.attachments.selectedItems().length">
         <template x-for="item in $store.attachments.selectedItems()" :key="item.attachment_id">
             <span class="attachment-chip">
@@ -478,30 +479,6 @@
                 <button type="button" @click="$store.attachments.removeSelected(item.attachment_id)" title="Remove from next message">×</button>
             </span>
         </template>
-    </div>
-    <div class="attachment-popout" x-show="attachmentsOpen" x-transition.opacity.duration.120ms>
-        <div class="attachment-popout-head">
-            <strong>Session attachments</strong>
-            <label class="attachment-upload">
-                <input type="file" multiple hidden
-                       @change="$store.attachments.uploadFiles($event.target.files); $event.target.value=''">
-                <span x-text="$store.attachments.uploading ? 'uploading…' : '+ upload'"></span>
-            </label>
-        </div>
-        <div class="attachment-list" x-show="!$store.attachments.loading">
-            <div class="attachment-empty" x-show="$store.attachments.items().length === 0">No uploaded documents</div>
-            <template x-for="item in $store.attachments.items()" :key="item.attachment_id">
-                <div class="attachment-row" :class="{ selected: $store.attachments.isSelected(item) }">
-                    <button type="button" class="attachment-select" @click="$store.attachments.toggle(item)">
-                        <span x-text="$store.attachments.isSelected(item) ? '✓' : '○'"></span>
-                        <span class="attachment-name" x-text="item.name"></span>
-                        <span class="attachment-size" x-text="Math.max(1, Math.round((item.size || 0) / 1024)) + ' KB'"></span>
-                    </button>
-                    <a :href="item.download_url" target="_blank" rel="noopener" title="Download">↗</a>
-                    <button type="button" @click="$store.confirm.ask(`Delete attachment '${item.name}'?`, $event, () => $store.attachments.remove(item), {danger:true})" title="Delete">×</button>
-                </div>
-            </template>
-        </div>
     </div>
     <form @submit.prevent="if ($store.chat.canSend($refs.input.value)) { $store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'; cc.close() }">
         <div class="composer-input-wrap">
@@ -549,9 +526,9 @@
             ></textarea>
         </div>
         <button type="button" class="icon-btn attach-btn"
-                @click="attachmentsOpen = !attachmentsOpen; modeOpen = false; settingsOpen = false; if (attachmentsOpen) $store.attachments.load()"
-                :class="{ active: attachmentsOpen || $store.attachments.selectedIds().length > 0 }"
-                title="Upload or attach a document"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6.1 8.9 4.55-4.55a2.25 2.25 0 1 1 3.18 3.18l-5.73 5.73a3.5 3.5 0 1 1-4.95-4.95l5.38-5.38"/></svg></button>
+                @click="$store.mode.setView('artifacts'); $store.layout.panelOpen = true; modeOpen = false; settingsOpen = false; $store.attachments.load($store.chat.currentName)"
+                :class="{ active: $store.attachments.selectedIds().length > 0 }"
+                title="Open model artifacts and file uploads"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6.1 8.9 4.55-4.55a2.25 2.25 0 1 1 3.18 3.18l-5.73 5.73a3.5 3.5 0 1 1-4.95-4.95l5.38-5.38"/></svg></button>
         <!-- STT mic button (only when stt_enabled) -->
         <button type="button" class="icon-btn mic-btn"
                 x-show="$store.stt.enabled"

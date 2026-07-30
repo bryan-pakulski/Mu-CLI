@@ -36,7 +36,7 @@ apk: prebuild
 	@echo "✓ Wrote $(ANDROID_DIR)/local.properties (sdk.dir=$(ANDROID_HOME))"
 	node scripts/patch-manifest.js
 	mkdir -p $(DIST_DIR)
-	cd $(ANDROID_DIR) && JAVA_HOME=$(JAVA_HOME) ANDROID_HOME=$(ANDROID_HOME) ./gradlew assembleRelease
+	cd $(ANDROID_DIR) && NODE_ENV=production JAVA_HOME=$(JAVA_HOME) ANDROID_HOME=$(ANDROID_HOME) ./gradlew assembleRelease
 	cp $(APK_DIR)/app-release.apk $(DIST_DIR)/$(APK_NAME)
 	@echo ""
 	@echo "✓ APK ready: $(DIST_DIR)/$(APK_NAME)"

@@ -66,7 +66,8 @@ export function ModernHeader({
           onPress={onOpenSessions}
           style={[styles.iconButton, { backgroundColor: colors.bgLift }]}
         >
-          <Ionicons name="menu-outline" size={22} color={colors.text} />
+          {/* MUCLI_MOBILE_MU_LOGO_V1: same μ mark as the web GUI favicon. */}
+          <Text style={[styles.brandMark, { color: colors.accent }]}>μ</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -224,6 +225,14 @@ function ToggleRow({ icon, label, detail, value, onValueChange }: ToggleRowProps
 const styles = StyleSheet.create({
   container: { minHeight: 72, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   iconButton: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  brandMark: {
+    fontFamily: 'serif',
+    fontSize: 32,
+    lineHeight: 38,
+    fontWeight: '400',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
   titleBlock: { flex: 1, alignItems: 'center', paddingHorizontal: 12 },
   titleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 7 },
   title: { maxWidth: '92%', fontSize: 15, lineHeight: 20, fontWeight: '600' },

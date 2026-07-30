@@ -1465,6 +1465,17 @@ def run_turn(session, text):
                     logger.debug(f"Assistant text: {part.text[:200]}...")
                     ai_parts_archive.append({"type": "text", "text": part.text})
 
+                elif (
+                    part.type in {"thinking", "reasoning", "thought"}
+                    and part.text
+                ):
+                    # Live thinking is already streamed to the UI. Keep a bounded
+                    # durable copy in normal history so reload can restore it as
+                    # a collapsed trace instead of silently dropping it.
+                    ai_parts_archive.append(
+                        {"type": "thinking", "text": str(part.text)[:8000]}
+                    )
+
                 elif part.type == "image_inline" and part.inline_data:
                     display_image_in_terminal(session.session_manager.current_session_name, part.inline_data, save=True)
                     ai_parts_archive.append(

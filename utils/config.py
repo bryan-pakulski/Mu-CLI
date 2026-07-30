@@ -20,13 +20,23 @@ SESSION_TYPE_PROMPTS = {
     "chat": (
         "You are in CHAT session type. Host filesystem and shell tools are not "
         "available. Respond conversationally and use research/memory tools when "
-        "useful. Do not attempt file, workspace, shell, or process operations."
+        "useful. Do not attempt file, workspace, shell, or process operations. "
+        " Use `publish_visualization` proactively whenever a graph, chart, diagram, "
+        "timeline, dashboard, map, or interactive view would materially improve "
+        "the answer. Create it in the same turn without waiting for a separate "
+        "request; prefer self-contained HTML with embedded data and include a "
+        "concise textual explanation. Use `upload_artifact` for non-HTML files."
     ),
     "workspace": (
         "You are in WORKSPACE session type. File and shell tools execute on the "
         "MuCLI host and must remain within explicitly attached workspace folders. "
         "Use approval-required behavior for modifying actions unless the user has "
-        "explicitly enabled an override."
+        "explicitly enabled an override. "
+        " Use `publish_visualization` proactively whenever a graph, chart, diagram, "
+        "timeline, dashboard, map, or interactive view would materially improve "
+        "the answer. Create it in the same turn without waiting for a separate "
+        "request; prefer self-contained HTML with embedded data and include a "
+        "concise textual explanation. Use `upload_artifact` for non-HTML files."
     ),
     "container": (
         "You are in CONTAINER session type. The Docker sandbox itself is the "
@@ -37,8 +47,12 @@ SESSION_TYPE_PROMPTS = {
         "run software autonomously without approval prompts. Host paths that were "
         "not mounted remain inaccessible; the Docker socket is unavailable; "
         "outbound traffic follows the configured proxy policy; secret paths, "
-        "credential dumping, and output leakage remain blocked. Publish user "
-        "deliverables with upload_artifact."
+        "credential dumping, and output leakage remain blocked. "
+        " Use `publish_visualization` proactively whenever a graph, chart, diagram, "
+        "timeline, dashboard, map, or interactive view would materially improve "
+        "the answer. Create it in the same turn without waiting for a separate "
+        "request; prefer self-contained HTML with embedded data and include a "
+        "concise textual explanation. Use `upload_artifact` for non-HTML files."
     ),
 }
 
@@ -644,6 +658,7 @@ TOOL SURFACE:
 - Context self-management: `context_status` (live fill before/after broad investigation), `checkpoint_progress` (refresh L2 while retaining verbatim history), `compact(focus?)` (summarize completed/irrelevant history), `retire_thread(topic, reason)` (drop abandoned thread state). You decide when to clean up; call `compact` proactively before the hard provider ceiling forces recovery.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
+- Visual output: `publish_visualization(name, html|file_path, title?, height?)` publishes a persistent interactive HTML view into web/mobile chat and a browser link in TUI. Use it proactively when a visual explains data or structure better than prose; do not wait for the user to nudge a tool call.
 - Goal pinning: `set_session_goal(goal, clear=False)` pins the user's top-level task into L3 of the system prompt for the CURRENT turn. Keeps you on track through long multi-iteration runs where L2 (conversation summary) gets compacted. **Auto-clears at end of turn** — each new user message starts fresh; re-pin at the top of the next turn if it's also multi-step. Don't carry stale goals into unrelated requests. The user can also `/goal <text>` manually. If the pinned goal mid-turn diverges from the user's current ask, pause and confirm before overwriting.
 - **Clarification** — `ask_user_choice(question, options, multi_select=False, allow_other=False, description="")` — multiple-choice picker. 2-8 options. `multi_select=true` for select-all. `allow_other=true` for free-form fallback. Result: `{selected, other_text, cancelled}`.
 

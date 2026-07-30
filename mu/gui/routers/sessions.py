@@ -11,6 +11,7 @@ import shutil
 import time
 from typing import Any, Dict, Optional
 
+from mu.artifact import ArtifactRegistry
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.network import DEFAULT_EGRESS_ALLOW
 from mu.tools.capabilities import normalize_session_type
@@ -363,6 +364,20 @@ def _visualization_from_tool_result(value: Any) -> Dict[str, Any] | None:
     return None
 
 
+def _history_preview(value: Any, limit: int = 6000) -> str:
+    """Return a bounded, readable trace preview for durable history replay."""
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n… [history preview truncated]"
+
+
 @router.get("")
 async def list_sessions(request: Request):
     state = request.app.state
@@ -439,6 +454,7 @@ async def get_history(request: Request, session_name: Optional[str] = None):
         return {"name": "", "turns": []}
     sm = session.session_manager
     turns = []
+    seen_visualization_ids: set[str] = set()
     for idx, turn in enumerate(sm.history):
         role = turn.get("role")
         parts_out = []
@@ -446,11 +462,19 @@ async def get_history(request: Request, session_name: Optional[str] = None):
             ptype = part.get("type")
             if ptype == "text":
                 parts_out.append({"type": "text", "text": part.get("text", "")})
+            elif ptype in {"thinking", "reasoning", "thought"}:
+                text = _history_preview(part.get("text", ""), limit=8000)
+                if text:
+                    parts_out.append(
+                        {"type": "thinking", "text": text, "collapsed": True}
+                    )
             elif ptype == "tool_call":
                 parts_out.append(
                     {
                         "type": "tool_call",
                         "tool_name": part.get("tool_name"),
+                        "tool_args": part.get("tool_args"),
+                        "collapsed": True,
                     }
                 )
             elif ptype == "tool_result":
@@ -458,13 +482,55 @@ async def get_history(request: Request, session_name: Optional[str] = None):
                 result_part = {
                     "type": "tool_result",
                     "tool_name": part.get("tool_name"),
-                    "preview": str(raw_result)[:400],
+                    "preview": _history_preview(raw_result),
+                    "collapsed": True,
                 }
                 visualization = _visualization_from_tool_result(raw_result)
                 if visualization is not None:
                     result_part["artifact"] = visualization
+                    artifact_id = str(visualization.get("artifact_id") or "")
+                    if artifact_id:
+                        seen_visualization_ids.add(artifact_id)
                 parts_out.append(result_part)
         turns.append({"index": idx, "role": role, "parts": parts_out})
+
+    # Artifact registry is the durable source of truth. Tool-result history may
+    # be compacted, truncated, or written by an older worker, so replay any
+    # visualization not already represented by a surviving tool result.
+    session_dir = os.path.join(
+        _config.HISTORY_DIR, "sessions", sm.current_session_name
+    )
+    try:
+        artifacts = reversed(ArtifactRegistry(session_dir).list())
+        for artifact in artifacts:
+            visualization = _visualization_from_tool_result({"artifact": artifact})
+            if visualization is None:
+                continue
+            artifact_id = str(visualization.get("artifact_id") or "")
+            if not artifact_id or artifact_id in seen_visualization_ids:
+                continue
+            seen_visualization_ids.add(artifact_id)
+            turns.append(
+                {
+                    "index": len(turns),
+                    "role": "assistant",
+                    "parts": [
+                        {
+                            "type": "tool_result",
+                            "tool_name": "publish_visualization",
+                            "preview": (
+                                "Published visualization: "
+                                f"{visualization.get('title') or visualization.get('name')}"
+                            ),
+                            "artifact": visualization,
+                            "collapsed": True,
+                        }
+                    ],
+                }
+            )
+    except OSError:
+        pass
+
     return {"name": sm.current_session_name, "turns": turns}
 
 

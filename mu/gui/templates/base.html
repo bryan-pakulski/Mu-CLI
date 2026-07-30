@@ -54,6 +54,9 @@
     <script src="/static/vendor/highlight.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/codemirror.min.css">
     <script src="/static/vendor/codemirror.min.js"></script>
+    <!-- Some bundled modes use CodeMirror.defineSimpleMode. Load its addon
+         before the mode bundle so one optional mode cannot abort all GUI JS. -->
+    <script src="/static/vendor/codemirror-simple.js"></script>
     <script src="/static/vendor/codemirror-modes.min.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/vendor/htmx.min.js" defer></script>

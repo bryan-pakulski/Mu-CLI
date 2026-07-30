@@ -597,54 +597,61 @@ document.addEventListener("alpine:init", () => {
                 const dst = this._slot(skey);
                 if (!this.currentName && data.name) this.currentName = data.name;
                 dst.pendingReload = false;
-                dst.turns = [];
-                let traceForTurn = null;
+
+                // Build the complete timeline outside Alpine reactivity, then
+                // replace it once. Incremental clear/push cycles can invalidate
+                // keyed x-for anchors during polling and page restoration.
+                const rebuiltTurns = [];
                 for (const turn of data.turns || []) {
+                    let traceForTurn = null;
+                    let partIndex = 0;
+                    const ensureHistoryTrace = () => {
+                        if (traceForTurn) return traceForTurn;
+                        traceForTurn = {
+                            id: `h-tr-${turn.index}-${partIndex}`,
+                            role: "trace",
+                            events: [],
+                            open: false,
+                            running: false,
+                            startedAt: 0,
+                            elapsed: null,
+                        };
+                        rebuiltTurns.push(traceForTurn);
+                        return traceForTurn;
+                    };
+
                     for (const part of turn.parts || []) {
-                        if (part.type === "text") {
+                        const stablePartIndex = partIndex++;
+                        if (
+                            part.type === "text" &&
+                            (turn.role === "user" || turn.role === "assistant")
+                        ) {
                             traceForTurn = null;
-                            dst.turns.push({
-                                id: `h-${turn.index}-${dst.turns.length}`,
+                            rebuiltTurns.push({
+                                id: `h-${turn.index}-${stablePartIndex}`,
                                 role: turn.role,
                                 text: part.text,
                                 html: renderMarkdown(part.text),
                                 streaming: false,
                             });
+                        } else if (part.type === "thinking") {
+                            ensureHistoryTrace().events.push({
+                                id: `h-ev-${turn.index}-${stablePartIndex}`,
+                                kind: "thinking",
+                                text: String(part.text || ""),
+                                at: 0,
+                            });
                         } else if (part.type === "tool_call") {
-                            if (!traceForTurn) {
-                                traceForTurn = {
-                                    id: this._id("tr"),
-                                    role: "trace",
-                                    events: [],
-                                    open: false,
-                                    running: false,
-                                    startedAt: Date.now(),
-                                    elapsed: null,
-                                };
-                                dst.turns.push(traceForTurn);
-                            }
-                            traceForTurn.events.push({
-                                id: this._id("ev"),
+                            ensureHistoryTrace().events.push({
+                                id: `h-ev-${turn.index}-${stablePartIndex}`,
                                 kind: "tool_call",
                                 name: part.tool_name || "(unknown)",
                                 jsonHtml: renderJSON(part.tool_args),
                                 at: 0,
                             });
                         } else if (part.type === "tool_result") {
-                            if (!traceForTurn) {
-                                traceForTurn = {
-                                    id: this._id("tr"),
-                                    role: "trace",
-                                    events: [],
-                                    open: false,
-                                    running: false,
-                                    startedAt: Date.now(),
-                                    elapsed: null,
-                                };
-                                dst.turns.push(traceForTurn);
-                            }
-                            traceForTurn.events.push({
-                                id: this._id("ev"),
+                            ensureHistoryTrace().events.push({
+                                id: `h-ev-${turn.index}-${stablePartIndex}`,
                                 kind: "tool_result",
                                 name: part.tool_name || "",
                                 jsonHtml: renderJSON(part.preview),
@@ -652,15 +659,16 @@ document.addEventListener("alpine:init", () => {
                                 at: 0,
                             });
                             const visualization = this._visualizationTurn(part.artifact, skey);
-                            if (visualization && !dst.turns.some((item) =>
+                            if (visualization && !rebuiltTurns.some((item) =>
                                 item.role === "visualization" &&
                                 item.artifact?.artifact_id === visualization.artifact.artifact_id
                             )) {
-                                dst.turns.push(visualization);
+                                rebuiltTurns.push(visualization);
                             }
                         }
                     }
                 }
+                dst.turns = rebuiltTurns;
                 if (!name || name === this.currentName) {
                     this.scroll(true);
                     queueMicrotask(highlightAll);

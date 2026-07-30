@@ -49,7 +49,7 @@ async def view_artifact(name: str, artifact_id: str):
     # API responses. Network access remains available for charting CDNs/data.
     headers = {
         "Cache-Control": "no-store, max-age=0",
-+        "Content-Security-Policy": (
+        "Content-Security-Policy": (
             "sandbox allow-scripts allow-forms allow-modals allow-downloads; "
             "default-src 'none'; "
             "script-src 'unsafe-inline' 'unsafe-eval' https: http:; "

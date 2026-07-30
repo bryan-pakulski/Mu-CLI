@@ -101,6 +101,7 @@ document.addEventListener("alpine:init", () => {
                 // tail deltas in a fresh turn ("output disappeared mid
                 // response"). Defer the reload until the turn completes.
                 pendingReload: false,
+                historyHydrated: false,
             };
         },
         _slot(name) {
@@ -362,6 +363,10 @@ document.addEventListener("alpine:init", () => {
             const slot = this._slot(name);
             const turn = this._visualizationTurn(artifact, name);
             if (!turn) return;
+            const historyElement = (!name || name === this.currentName)
+                ? document.querySelector(".chat-history")
+                : null;
+            const shouldFollow = historyElement ? this._atBottom(historyElement) : true;
             const existing = slot.turns.findIndex((item) =>
                 item.role === "visualization" &&
                 item.artifact &&
@@ -370,9 +375,22 @@ document.addEventListener("alpine:init", () => {
             if (existing >= 0) {
                 slot.turns[existing] = turn;
             } else {
-                slot.turns.push(turn);
+                // MUCLI_VISUALIZATION_TIMELINE_V2: split a live assistant at the
+                // artifact boundary so later deltas render after the card.
+                let insertAt = slot.turns.length;
+                for (let index = slot.turns.length - 1; index >= 0; index--) {
+                    const candidate = slot.turns[index];
+                    if (candidate.role === "assistant" && candidate.streaming) {
+                        candidate.streaming = false;
+                        candidate.html = renderMarkdown(candidate.text || "");
+                        candidate.id = `${candidate.id}-segment-${turn.artifact.artifact_id}`;
+                        insertAt = index + 1;
+                        break;
+                    }
+                }
+                slot.turns.splice(insertAt, 0, turn);
             }
-            if (!name || name === this.currentName) this.scroll();
+            if (!name || name === this.currentName) this.scroll(shouldFollow);
         },
 
         addCommandResult(result, name) {
@@ -772,9 +790,21 @@ document.addEventListener("alpine:init", () => {
                         }
                     }
                 }
+                const liveHistoryElement = (!name || name === this.currentName)
+                    ? document.querySelector(".chat-history")
+                    : null;
+                const shouldFollowHistory = !dst.historyHydrated
+                    || (liveHistoryElement ? this._atBottom(liveHistoryElement) : true);
+                const previousScrollTop = liveHistoryElement ? liveHistoryElement.scrollTop : 0;
                 dst.turns = rebuiltTurns;
+                dst.historyHydrated = true;
                 if (!name || name === this.currentName) {
-                    this.scroll(true);
+                    queueMicrotask(() => requestAnimationFrame(() => {
+                        const el = document.querySelector(".chat-history");
+                        if (!el) return;
+                        if (shouldFollowHistory) this.scroll(true);
+                        else el.scrollTop = Math.min(previousScrollTop, Math.max(0, el.scrollHeight - el.clientHeight));
+                    }));
                     queueMicrotask(highlightAll);
                     queueMicrotask(() => typesetMathInScope(".msg.assistant .body"));
                 }

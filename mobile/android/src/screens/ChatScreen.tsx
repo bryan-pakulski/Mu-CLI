@@ -56,18 +56,25 @@ export function ChatScreen() {
   const [varsLoading, setVarsLoading] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [selectedAttachments, setSelectedAttachments] = useState<AttachmentDescriptor[]>([]);
-  const [visualizationGestureActive, setVisualizationGestureActive] = useState(false);
   const activeProvider = useConnectionStore(state => state.activeProvider);
   const activeModel = useConnectionStore(state => state.activeModel);
   const yolo = useConnectionStore(state => state.yolo);
   const connection = { activeProvider, activeModel, yolo };
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followOutputRef = useRef(true);
-  // MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1: inline WebViews temporarily own vertical drags.
+  const initialScrollPendingRef = useRef(true);
+  const userScrollActiveRef = useRef(false);
+  const momentumScrollRef = useRef(false);
+  const lastDistanceFromEndRef = useRef(Number.POSITIVE_INFINITY);
+
+  // MUCLI_VISUALIZATION_TIMELINE_V2: a WebView gesture explicitly pauses chat
+  // following. Releasing the WebView never silently opts the chat back in.
   const onVisualizationInteractionChange = useCallback((active: boolean) => {
-    setVisualizationGestureActive(active);
+    userScrollActiveRef.current = active;
     if (active) followOutputRef.current = false;
+    else if (lastDistanceFromEndRef.current <= 64) followOutputRef.current = true;
   }, []);
   const completion = useCommandCompletion();
   // Always clip offscreen cells on Android — disabling removeClippedSubviews
@@ -77,10 +84,10 @@ export function ChatScreen() {
   // only mount their WebView when expanded, so clipping is safe.
   const removeClipped = Platform.OS === 'android';
 
-  // Throttled auto-scroll: coalesce rapid content-size changes (one per
-  // streaming token) into a single non-animated scrollToEnd per ~100ms.
-  // Animated scroll on every token was a major perf bottleneck on mobile.
+  // Explicit bottom-follow state with hysteresis. A user drag disables
+  // following immediately; only ending a gesture near the bottom re-enables it.
   const scrollToBottom = useCallback((force = false) => {
+    if (force) followOutputRef.current = true;
     if (!force && !followOutputRef.current) return;
     if (scrollThrottleRef.current) return;
     scrollThrottleRef.current = setTimeout(() => {
@@ -88,26 +95,109 @@ export function ChatScreen() {
       if (force || followOutputRef.current) {
         flatListRef.current?.scrollToEnd({ animated: false });
       }
-    }, 100);
+    }, force ? 0 : 100);
+  }, []);
+
+  const updateFollowFromDistance = useCallback((distanceFromEnd: number) => {
+    lastDistanceFromEndRef.current = distanceFromEnd;
+    if (userScrollActiveRef.current || momentumScrollRef.current) {
+      followOutputRef.current = false;
+      return;
+    }
+    if (distanceFromEnd <= 64) followOutputRef.current = true;
+    else if (distanceFromEnd >= 144) followOutputRef.current = false;
   }, []);
 
   const onChatScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    followOutputRef.current = distanceFromEnd < 96;
+    const distanceFromEnd = Math.max(
+      0,
+      contentSize.height - layoutMeasurement.height - contentOffset.y,
+    );
+    updateFollowFromDistance(distanceFromEnd);
+  }, [updateFollowFromDistance]);
+
+  const onChatScrollBeginDrag = useCallback(() => {
+    if (scrollEndTimerRef.current) {
+      clearTimeout(scrollEndTimerRef.current);
+      scrollEndTimerRef.current = null;
+    }
+    userScrollActiveRef.current = true;
+    momentumScrollRef.current = false;
+    followOutputRef.current = false;
   }, []);
 
-  // Clear any pending throttle on unmount
-  useEffect(() => () => { if (scrollThrottleRef.current) clearTimeout(scrollThrottleRef.current); }, []);
+  const finishUserScroll = useCallback(() => {
+    userScrollActiveRef.current = false;
+    momentumScrollRef.current = false;
+    followOutputRef.current = lastDistanceFromEndRef.current <= 64;
+  }, []);
+
+  const onChatScrollEndDrag = useCallback(() => {
+    if (scrollEndTimerRef.current) clearTimeout(scrollEndTimerRef.current);
+    // Momentum begins immediately after end-drag when present. Delay the
+    // no-momentum decision so that event can take ownership first.
+    scrollEndTimerRef.current = setTimeout(() => {
+      scrollEndTimerRef.current = null;
+      if (!momentumScrollRef.current) finishUserScroll();
+    }, 80);
+  }, [finishUserScroll]);
+
+  const onChatMomentumScrollBegin = useCallback(() => {
+    if (scrollEndTimerRef.current) {
+      clearTimeout(scrollEndTimerRef.current);
+      scrollEndTimerRef.current = null;
+    }
+    momentumScrollRef.current = true;
+    userScrollActiveRef.current = true;
+    followOutputRef.current = false;
+  }, []);
+
+  const onChatMomentumScrollEnd = useCallback(() => {
+    finishUserScroll();
+  }, [finishUserScroll]);
+
+  const onChatContentSizeChange = useCallback(() => {
+    if (initialScrollPendingRef.current && messages.length > 0) {
+      initialScrollPendingRef.current = false;
+      scrollToBottom(true);
+      return;
+    }
+    scrollToBottom(false);
+  }, [messages.length, scrollToBottom]);
+
+  const onChatLayout = useCallback(() => {
+    if (initialScrollPendingRef.current && messages.length > 0) {
+      initialScrollPendingRef.current = false;
+      scrollToBottom(true);
+    }
+  }, [messages.length, scrollToBottom]);
+
+  useEffect(() => {
+    initialScrollPendingRef.current = true;
+    followOutputRef.current = true;
+    userScrollActiveRef.current = false;
+    momentumScrollRef.current = false;
+    lastDistanceFromEndRef.current = Number.POSITIVE_INFINITY;
+  }, [activeSessionName]);
+
+  // Clear pending scroll work on unmount.
+  useEffect(() => () => {
+    if (scrollThrottleRef.current) clearTimeout(scrollThrottleRef.current);
+    if (scrollEndTimerRef.current) clearTimeout(scrollEndTimerRef.current);
+  }, []);
 
   const send = async () => {
     const text = input.trim();
     if ((!text && selectedAttachments.length === 0) || streaming) return;
+    followOutputRef.current = true;
+    initialScrollPendingRef.current = false;
     const sent = await sendMessage(text, selectedAttachments);
     if (sent) {
       setInput('');
       setSelectedAttachments([]);
       completion.close();
+      scrollToBottom(true);
     }
   };
 
@@ -298,7 +388,6 @@ export function ChatScreen() {
           updateCellsBatchingPeriod={80}
           windowSize={5}
           removeClippedSubviews={removeClipped}
-          scrollEnabled={!visualizationGestureActive}
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,
@@ -306,9 +395,13 @@ export function ChatScreen() {
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
           onScroll={onChatScroll}
-          scrollEventThrottle={100}
-          onContentSizeChange={() => scrollToBottom(false)}
-          onLayout={() => scrollToBottom(false)}
+          onScrollBeginDrag={onChatScrollBeginDrag}
+          onScrollEndDrag={onChatScrollEndDrag}
+          onMomentumScrollBegin={onChatMomentumScrollBegin}
+          onMomentumScrollEnd={onChatMomentumScrollEnd}
+          scrollEventThrottle={32}
+          onContentSizeChange={onChatContentSizeChange}
+          onLayout={onChatLayout}
           ListHeaderComponent={
             error && messages.length > 0 ? (
               <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>

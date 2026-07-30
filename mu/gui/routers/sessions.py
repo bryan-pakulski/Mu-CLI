@@ -12,6 +12,11 @@ import time
 from typing import Any, Dict, Optional
 
 from mu.artifact import ArtifactRegistry
+from mu.artifact.history import (
+    extract_visualization,
+    match_visualization_reference,
+    merge_registry_descriptor,
+)  # MUCLI_VISUALIZATION_TIMELINE_V2
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.load_errors import describe_container_load_error
 from mu.container.network import DEFAULT_EGRESS_ALLOW
@@ -326,43 +331,8 @@ def _resolve(request: Request, name: Optional[str]):
 
 
 def _visualization_from_tool_result(value: Any) -> Dict[str, Any] | None:
-    payload = value
-    for _ in range(3):
-        if not isinstance(payload, str):
-            break
-        try:
-            payload = json.loads(payload)
-        except (TypeError, ValueError):
-            return None
-    if not isinstance(payload, dict):
-        return None
-
-    candidates = [payload.get("artifact")]
-    data = payload.get("data")
-    if isinstance(data, dict):
-        candidates.append(data.get("artifact"))
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, list):
-        candidates.extend(artifacts)
-
-    for candidate in candidates:
-        if not isinstance(candidate, dict) or candidate.get("kind") != "visualization":
-            continue
-        allowed = {
-            "artifact_id",
-            "name",
-            "title",
-            "size",
-            "mime_type",
-            "created_at",
-            "kind",
-            "display",
-            "height",
-            "view_url",
-            "download_url",
-        }
-        return {key: candidate[key] for key in allowed if key in candidate}
-    return None
+    """Recover a visualization descriptor from arbitrary tool-result wrappers."""
+    return extract_visualization(value)
 
 
 def _history_preview(value: Any, limit: int = 6000) -> str:
@@ -455,6 +425,12 @@ async def get_history(
     limit_turns: Optional[int] = Query(default=None, ge=1, le=500),
     artifact_limit: Optional[int] = Query(default=None, ge=0, le=100),
 ):
+    """Return the durable conversation timeline without relocating artifacts.
+
+    MUCLI_VISUALIZATION_TIMELINE_V2: registry-only visualizations are attached
+    to their surviving publish tool-result slot. They are never fabricated as
+    synthetic turns at the end of the conversation.
+    """
     session = _resolve(request, session_name)
     if session is None:
         return {"name": "", "turns": []}
@@ -466,8 +442,33 @@ async def get_history(
         else 0
     )
     history_window = sm.history[start_index:]
+
+    session_dir = os.path.join(
+        _config.HISTORY_DIR, "sessions", sm.current_session_name
+    )
+    registry_visualizations: list[Dict[str, Any]] = []
+    try:
+        for artifact in ArtifactRegistry(session_dir).list():
+            visualization = extract_visualization({"artifact": artifact})
+            if visualization is not None:
+                registry_visualizations.append(visualization)
+    except OSError:
+        registry_visualizations = []
+
+    # Registry order is newest-first. Apply a caller limit before reversing so
+    # a bounded request still returns the newest visualizations.
+    if artifact_limit is not None:
+        registry_visualizations = registry_visualizations[:artifact_limit]
+    registry_by_id = {
+        str(item.get("artifact_id") or ""): item
+        for item in registry_visualizations
+        if item.get("artifact_id")
+    }
+
     turns = []
     seen_visualization_ids: set[str] = set()
+    publish_slots: list[Dict[str, Any]] = []
+
     for idx, turn in enumerate(history_window, start=start_index):
         role = turn.get("role")
         parts_out = []
@@ -496,65 +497,64 @@ async def get_history(
                 )
             elif ptype == "tool_result":
                 raw_result = part.get("tool_result", "")
-                result_part = {
+                tool_name = str(part.get("tool_name") or "")
+                result_part: Dict[str, Any] = {
                     "type": "tool_result",
-                    "tool_name": part.get("tool_name"),
+                    "tool_name": tool_name,
                     "preview": _history_preview(raw_result),
                     "collapsed": True,
                 }
-                visualization = _visualization_from_tool_result(raw_result)
+
+                visualization = merge_registry_descriptor(
+                    extract_visualization(raw_result),
+                    registry_by_id,
+                )
+                if visualization is None:
+                    visualization = match_visualization_reference(
+                        raw_result,
+                        registry_visualizations,
+                        seen_visualization_ids,
+                    )
+
                 if visualization is not None:
-                    result_part["artifact"] = visualization
                     artifact_id = str(visualization.get("artifact_id") or "")
-                    if artifact_id:
+                    if artifact_id and artifact_id not in seen_visualization_ids:
+                        result_part["artifact"] = visualization
                         seen_visualization_ids.add(artifact_id)
+                elif tool_name.strip().lower() in {
+                    "publish_visualization",
+                    "create_visualization",
+                    "render_visualization",
+                }:
+                    # Keep the exact history location. If an older worker omitted
+                    # the descriptor but retained the publish result, fill this
+                    # slot from the registry in chronological order below.
+                    publish_slots.append(result_part)
+
                 parts_out.append(result_part)
         turns.append({"index": idx, "role": role, "parts": parts_out})
 
-    # Artifact registry is the durable source of truth. Tool-result history may
-    # be compacted, truncated, or written by an older worker, so replay any
-    # visualization not already represented by a surviving tool result.
-    session_dir = os.path.join(
-        _config.HISTORY_DIR, "sessions", sm.current_session_name
+    unplaced = [
+        item
+        for item in reversed(registry_visualizations)
+        if str(item.get("artifact_id") or "") not in seen_visualization_ids
+    ]
+    for slot, visualization in zip(publish_slots, unplaced):
+        artifact_id = str(visualization.get("artifact_id") or "")
+        if not artifact_id or artifact_id in seen_visualization_ids:
+            continue
+        slot["artifact"] = visualization
+        seen_visualization_ids.add(artifact_id)
+
+    # Do not append remaining registry artifacts to the timeline. Their original
+    # turn is outside this history window or no durable anchor exists. They remain
+    # available through the artifact registry/strip without being shown at a false
+    # end-of-conversation position.
+    orphan_count = sum(
+        1
+        for item in registry_visualizations
+        if str(item.get("artifact_id") or "") not in seen_visualization_ids
     )
-    try:
-        # MUCLI_MOBILE_VISUALIZATION_HISTORY_V1: filter first, then apply a visualization limit.
-        # Limiting the mixed artifact registry before filtering allowed ordinary
-        # files to crowd all visualization descriptors out of mobile history.
-        visualizations = []
-        for artifact in ArtifactRegistry(session_dir).list():
-            visualization = _visualization_from_tool_result({"artifact": artifact})
-            if visualization is not None:
-                visualizations.append(visualization)
-        if artifact_limit is not None:
-            # Registry order is newest-first. Collapsed mobile cards are cheap,
-            # but callers may still request a bounded visualization history.
-            visualizations = visualizations[:artifact_limit]
-        for visualization in reversed(visualizations):
-            artifact_id = str(visualization.get("artifact_id") or "")
-            if not artifact_id or artifact_id in seen_visualization_ids:
-                continue
-            seen_visualization_ids.add(artifact_id)
-            turns.append(
-                {
-                    "index": total_turns + len(turns),
-                    "role": "assistant",
-                    "parts": [
-                        {
-                            "type": "tool_result",
-                            "tool_name": "publish_visualization",
-                            "preview": (
-                                "Published visualization: "
-                                f"{visualization.get('title') or visualization.get('name')}"
-                            ),
-                            "artifact": visualization,
-                            "collapsed": True,
-                        }
-                    ],
-                }
-            )
-    except OSError:
-        pass
 
     return {
         "name": sm.current_session_name,
@@ -562,6 +562,7 @@ async def get_history(
         "total_turns": total_turns,
         "start_index": start_index,
         "has_more": start_index > 0,
+        "unplaced_visualizations": orphan_count,
     }
 
 

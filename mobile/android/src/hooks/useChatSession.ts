@@ -451,7 +451,8 @@ export function useChatSession(activeSessionName: string | null) {
       const artifact = asVisualization(event.artifact);
       if (artifact) {
         setMessages(current => {
-          const index = current.findIndex(message =>
+          const updated = [...current];
+          const existing = updated.findIndex(message =>
             message.role === 'visualization'
             && message.artifact?.artifact_id === artifact.artifact_id,
           );
@@ -463,9 +464,29 @@ export function useChatSession(activeSessionName: string | null) {
             origin: 'stream',
             artifact,
           };
-          if (index < 0) return [...current, next];
-          const updated = [...current];
-          updated[index] = next;
+          if (existing >= 0) {
+            updated[existing] = next;
+            return updated;
+          }
+
+          // MUCLI_VISUALIZATION_TIMELINE_V2: close the current assistant segment
+          // at the artifact boundary. Future deltas create a new segment after
+          // the visualization instead of mutating text above it.
+          let insertAt = updated.length;
+          for (let index = updated.length - 1; index >= 0; index -= 1) {
+            const message = updated[index];
+            if (message.role === 'assistant' && message.streaming) {
+              updated[index] = {
+                ...message,
+                id: `${message.id}-segment-${artifact.artifact_id}`,
+                turnId: `${message.turnId || 'active-turn'}-segment-${artifact.artifact_id}`,
+                streaming: false,
+              };
+              insertAt = index + 1;
+              break;
+            }
+          }
+          updated.splice(insertAt, 0, next);
           return updated;
         });
       }

@@ -145,6 +145,8 @@ _COLLATED_TOOL_NAMES = {
     "stackoverflow_search",
     "hackernews_search",
     "read_document",
+    "read_attachment",
+    "search_attachments",
     "get_tasks",
     "get_current_task",
 }

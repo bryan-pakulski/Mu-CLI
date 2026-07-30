@@ -19,7 +19,7 @@ interface Props {
   sessionName: string;
 }
 
-export function VisualizationCard({ artifact, sessionName }: Props) {
+function VisualizationCardImpl({ artifact, sessionName }: Props) {
   const { colors } = useTheme();
   const { height: windowHeight } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
@@ -130,6 +130,18 @@ export function VisualizationCard({ artifact, sessionName }: Props) {
     </View>
   );
 }
+
+
+export const VisualizationCard = React.memo(
+  VisualizationCardImpl,
+  (previous, next) => (
+    previous.sessionName === next.sessionName
+    && previous.artifact.artifact_id === next.artifact.artifact_id
+    && previous.artifact.title === next.artifact.title
+    && previous.artifact.name === next.artifact.name
+    && previous.artifact.height === next.artifact.height
+  ),
+);
 
 const styles = StyleSheet.create({
   card: {

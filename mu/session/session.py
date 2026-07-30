@@ -82,7 +82,8 @@ class Session:
         self.debug = debug
         self.variables = session_manager.variables
         self.agentic = True
-        self.staged_files = []  # list of dicts
+        self.staged_files = []  # legacy provider-native staged parts
+        self.staged_attachments = []  # durable attachment descriptor parts
         self.disabled_tools = []  # list of tool names strings
         self.disabled_skills: list[str] = []  # names of skills to suppress
         self.retrieval_index = _RETRIEVAL_INDEX
@@ -169,6 +170,36 @@ class Session:
             except Exception:
                 pass
 
+    def stage_attachment_ids(self, attachment_ids, *, replace=True):
+        """Validate registry IDs and stage descriptor-only history parts."""
+        registry = getattr(self, "attachment_registry", None)
+        if registry is None:
+            raise ValueError("attachment registry is unavailable for this session")
+        staged = []
+        seen = set()
+        for raw_id in attachment_ids or []:
+            attachment_id = str(raw_id or "").strip()
+            if not attachment_id or attachment_id in seen:
+                continue
+            descriptor = registry.get(attachment_id)
+            if descriptor is None or registry.resolve_path(attachment_id) is None:
+                raise ValueError(f"attachment not found: {attachment_id}")
+            seen.add(attachment_id)
+            staged.append(dict(descriptor))
+        current = [] if replace else list(getattr(self, "staged_attachments", []) or [])
+        by_id = {
+            str(part.get("attachment", {}).get("attachment_id") or ""): part
+            for part in current
+            if isinstance(part, dict)
+        }
+        for descriptor in staged:
+            by_id[descriptor["attachment_id"]] = {
+                "type": "attachment",
+                "attachment": descriptor,
+            }
+        self.staged_attachments = [part for key, part in by_id.items() if key]
+        return staged
+
     def add_file(self, file_path):
         file_path = file_path.strip("'\"")
         file_path = os.path.expanduser(file_path)
@@ -179,6 +210,38 @@ class Session:
             return
 
         safe_mime = get_safe_mime_type(file_path)
+
+        # The durable attachment registry is the canonical path for user inputs.
+        # Keep the old provider-native staging below as a compatibility fallback
+        # for sessions created before runtime-state initialization.
+        registry = getattr(self, "attachment_registry", None)
+        if registry is not None:
+            try:
+                descriptor = registry.add(
+                    os.path.basename(file_path), file_path, safe_mime
+                )
+                self.stage_attachment_ids([descriptor["attachment_id"]], replace=False)
+                if safe_mime.startswith("image/"):
+                    with open(file_path, "rb") as fh:
+                        raw = fh.read()
+                    import base64 as _b64
+                    self.staged_files.append({
+                        "type": "image_input",
+                        "image": {
+                            "data_b64": _b64.b64encode(raw).decode("ascii"),
+                            "mime_type": safe_mime,
+                            "source": descriptor["name"],
+                        },
+                    })
+                if self.ui:
+                    self.ui.show_info(
+                        f"Attached {descriptor['name']} ({descriptor['attachment_id'][:8]})"
+                    )
+                return descriptor
+            except Exception as e:
+                if self.ui:
+                    self.ui.show_error(f"Attachment failed: {e}")
+                return None
 
         # Images route through the vision path (image_input + raw bytes), not
         # the file-ref path — provider.upload_file for OpenAI/Ollama returns a
@@ -234,6 +297,7 @@ class Session:
 
     def clear_files(self):
         self.staged_files = []
+        self.staged_attachments = []
         if self.ui:
             self.ui.show_info("Staged files cleared.")
 
@@ -258,6 +322,16 @@ class Session:
             self.artifact_registry = ArtifactRegistry(session_dir)
         except Exception:
             self.artifact_registry = None
+        try:
+            from mu.attachment import AttachmentRegistry
+            from utils.config import HISTORY_DIR
+
+            session_dir = os.path.join(
+                HISTORY_DIR, "sessions", self.session_manager.current_session_name
+            )
+            self.attachment_registry = AttachmentRegistry(session_dir)
+        except Exception:
+            self.attachment_registry = None
         try:
             from mu.container.registry import ContainerRegistry
 

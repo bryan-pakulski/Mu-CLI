@@ -474,6 +474,10 @@ async def get_history(
             ptype = part.get("type")
             if ptype == "text":
                 parts_out.append({"type": "text", "text": part.get("text", "")})
+            elif ptype == "attachment":
+                attachment = part.get("attachment")
+                if isinstance(attachment, dict) and attachment.get("attachment_id"):
+                    parts_out.append({"type": "attachment", "attachment": attachment})
             elif ptype in {"thinking", "reasoning", "thought"}:
                 text = _history_preview(part.get("text", ""), limit=8000)
                 if text:

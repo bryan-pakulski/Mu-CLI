@@ -34,6 +34,9 @@ CHAT_TOOLS = frozenset(
         "upload_artifact",
         "publish_visualization",
         "list_artifacts",
+        "list_attachments",
+        "read_attachment",
+        "search_attachments",
     }
 )
 

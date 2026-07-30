@@ -3,6 +3,7 @@ import { chatApi } from '../api/chat';
 import { sessionsApi, type SessionHistoryTurn } from '../api/sessions';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import type { ArtifactDescriptor } from '../api/artifacts';
+import type { AttachmentDescriptor } from '../api/attachments';
 
 const SESSION_POLL_MS = 5000;
 const MOBILE_HISTORY_TURN_LIMIT = 80;
@@ -16,6 +17,7 @@ export interface ChatMessage {
   streaming?: boolean;
   origin?: 'history' | 'local' | 'stream';
   artifact?: ArtifactDescriptor;
+  attachments?: AttachmentDescriptor[];
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
@@ -34,6 +36,7 @@ function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
     if (turn.role !== 'user' && turn.role !== 'assistant') return [];
     const messages: ChatMessage[] = [];
     let pendingText: string[] = [];
+    const pendingAttachments: AttachmentDescriptor[] = [];
     let partIndex = 0;
     const flushText = () => {
       const text = pendingText.join('\n\n').trim();
@@ -45,12 +48,17 @@ function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
         text,
         streaming: false,
         origin: 'history',
+        attachments: turn.role === 'user' ? [...pendingAttachments] : undefined,
       });
     };
 
     for (const part of turn.parts) {
       if (part.type === 'text' && typeof part.text === 'string') {
         pendingText.push(String(part.text));
+        continue;
+      }
+      if (part.type === 'attachment' && part.attachment && typeof part.attachment === 'object') {
+        pendingAttachments.push(part.attachment as AttachmentDescriptor);
         continue;
       }
       const artifact = asVisualization(part.artifact);
@@ -66,6 +74,16 @@ function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
       });
     }
     flushText();
+    if (turn.role === 'user' && pendingAttachments.length > 0 && messages.length === 0) {
+      messages.push({
+        id: `history-${turn.index}-attachments`,
+        role: 'user',
+        text: '',
+        streaming: false,
+        origin: 'history',
+        attachments: [...pendingAttachments],
+      });
+    }
     return messages;
   });
 }
@@ -116,7 +134,7 @@ export function useChatSession(activeSessionName: string | null) {
     return `${prefix}-${Date.now().toString(36)}-${messageIdRef.current}`;
   }, []);
 
-  const appendUserMessage = useCallback((text: string, origin: 'local' | 'stream') => {
+  const appendUserMessage = useCallback((text: string, origin: 'local' | 'stream', attachments: AttachmentDescriptor[] = []) => {
     setMessages(current => {
       const last = current[current.length - 1];
       if (origin === 'stream' && last?.role === 'user' && last.text === text && last.origin === 'local') {
@@ -130,6 +148,7 @@ export function useChatSession(activeSessionName: string | null) {
         text,
         streaming: false,
         origin,
+        attachments,
       }];
     });
   }, [nextId]);
@@ -309,7 +328,10 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'user_message') {
-      appendUserMessage(String(event.text || ''), 'stream');
+      const attachments = Array.isArray(event.attachments)
+        ? event.attachments.filter(value => value && typeof value === 'object') as AttachmentDescriptor[]
+        : [];
+      appendUserMessage(String(event.text || ''), 'stream', attachments);
       return;
     }
 
@@ -553,22 +575,25 @@ export function useChatSession(activeSessionName: string | null) {
     };
   }, [activeSessionName, handleEvent, loadHistory, reconnectKey, syncSessionState]);
 
-  const sendMessage = useCallback(async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || !activeSessionName || busyRef.current) return;
+  const sendMessage = useCallback(async (text: string, attachments: AttachmentDescriptor[] = []) => {
+    let trimmed = text.trim();
+    if (!trimmed && attachments.length > 0) trimmed = 'Please review the attached document(s).';
+    if (!trimmed || !activeSessionName || busyRef.current) return false;
 
     setError(null);
     busyRef.current = true;
     setStreaming(true);
     setWaitingForFirstToken(true);
     setActivityLabel(sseConnectedRef.current ? 'Thinking' : 'Connecting');
-    appendUserMessage(trimmed, 'local');
+    appendUserMessage(trimmed, 'local', attachments);
 
     try {
-      await chatApi.send(trimmed, activeSessionName);
+      await chatApi.send(trimmed, activeSessionName, attachments.map(item => item.attachment_id));
+      return true;
     } catch (sendError) {
       setError(String(sendError));
       await syncSessionState();
+      return false;
     }
   }, [activeSessionName, appendUserMessage, syncSessionState]);
 

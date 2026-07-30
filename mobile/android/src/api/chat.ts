@@ -28,8 +28,12 @@ export interface CommandSpec {
 }
 
 export const chatApi = {
-  send: (text: string, sessionName?: string) =>
-    api.post<ChatSendResponse>('/api/chat/send', { text, session_name: sessionName }),
+  send: (text: string, sessionName?: string, attachmentIds: string[] = []) =>
+    api.post<ChatSendResponse>('/api/chat/send', {
+      text,
+      session_name: sessionName,
+      attachment_ids: attachmentIds,
+    }),
   interrupt: (sessionName?: string) =>
     api.post<Record<string, unknown>>('/api/chat/interrupt', { session_name: sessionName }),
   getCommands: () => api.get<{ commands: CommandSpec[] }>('/api/chat/commands'),

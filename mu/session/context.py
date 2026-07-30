@@ -149,6 +149,35 @@ def build_workspace_context_files(session: Any) -> str:
     return "\n\n".join(blocks).strip()
 
 
+def build_attachment_context(session: Any) -> str:
+    """Compact manifest only; document contents are read on demand by tools."""
+    registry = getattr(session, "attachment_registry", None)
+    if registry is None:
+        return ""
+    try:
+        items = registry.list()
+    except Exception:
+        return ""
+    if not items:
+        return ""
+    lines = [
+        "Uploaded documents are durable session inputs. Use list_attachments, "
+        "read_attachment, search_attachments, or download_attachment (workspace/container); do not guess their contents."
+    ]
+    for item in items[:30]:
+        lines.append(
+            "- id={attachment_id} | {name} | {mime_type} | {size} bytes".format(
+                attachment_id=item.get("attachment_id", ""),
+                name=item.get("name", "attachment"),
+                mime_type=item.get("mime_type", "application/octet-stream"),
+                size=int(item.get("size", 0) or 0),
+            )
+        )
+    if len(items) > 30:
+        lines.append(f"- ... {len(items) - 30} more; call list_attachments")
+    return "\n".join(lines)[:6000]
+
+
 def inject_hierarchical_context(
     session: Any,
     system_prompt: str,
@@ -269,6 +298,14 @@ def inject_hierarchical_context(
             + folder_context_block
         )
 
+    attachment_context = build_attachment_context(session)
+    if attachment_context:
+        layers.append(
+            "LAYER 1D — User-uploaded attachment registry (metadata only):\n"
+            "[budget: 6000 chars | contents retrieved on demand]\n"
+            + attachment_context
+        )
+
     skills_block = (
         cached_skills
         if cached_skills is not None
@@ -323,4 +360,4 @@ def inject_hierarchical_context(
     )
 
 
-__all__ = ["build_workspace_context_files", "inject_hierarchical_context"]
+__all__ = ["build_attachment_context", "build_workspace_context_files", "inject_hierarchical_context"]

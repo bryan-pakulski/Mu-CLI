@@ -4853,3 +4853,23 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 .shell-input { flex:1; border:0; background:transparent; color:var(--text); font-family:var(--mono); font-size:12.5px; outline:none; }
 .shell-input::placeholder { color:var(--text-dimmer); }
 .shell-input:disabled { opacity:.45; }
+
+/* Session attachment registry ------------------------------------------------ */
+.composer { position: relative; }
+.message-attachments, .attachment-selection { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.message-attachment, .attachment-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:5px 9px; border-radius:999px; background:var(--bg-hover); color:var(--text-soft); font-size:12px; text-decoration:none; }
+.attachment-chip button { border:0; padding:0 2px; background:transparent; color:var(--text-dim); }
+.attach-btn.active { color:var(--text); background:var(--accent-soft); }
+.attachment-popout { position:absolute; z-index:35; left:10px; right:10px; bottom:72px; max-height:340px; overflow:hidden; padding:12px; border:1px solid var(--border-strong); border-radius:16px; background:var(--bg-lift); box-shadow:0 18px 60px rgba(0,0,0,.28); }
+.attachment-popout-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; }
+.attachment-upload { cursor:pointer; color:var(--text); font-size:12px; padding:6px 9px; border-radius:9px; background:var(--bg-hover); }
+.attachment-list { max-height:270px; overflow:auto; }
+.attachment-empty { padding:18px 6px; color:var(--text-dim); font-size:12px; text-align:center; }
+.attachment-row { display:flex; align-items:center; gap:6px; border-radius:11px; padding:4px; }
+.attachment-row.selected { background:var(--accent-soft); }
+.attachment-row > a, .attachment-row > button { flex:0 0 auto; border:0; background:transparent; color:var(--text-dim); text-decoration:none; padding:7px; }
+.attachment-select { min-width:0; flex:1 !important; display:flex; align-items:center; gap:8px; text-align:left; }
+.attachment-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.attachment-size { color:var(--text-dim); font-size:11px; }
+@media (max-width: 700px) { .attachment-popout { left:4px; right:4px; bottom:68px; } }
+

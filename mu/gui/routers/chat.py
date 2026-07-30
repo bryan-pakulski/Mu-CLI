@@ -224,6 +224,42 @@ async def completions_endpoint(request: Request, kind: str = ""):
     return {"items": []}
 
 
+def _resolve_attachments(session, raw_ids: Any) -> list[dict[str, Any]]:
+    if raw_ids is None:
+        return []
+    if not isinstance(raw_ids, list):
+        raise HTTPException(status_code=400, detail="attachment_ids must be an array")
+    values = []
+    seen = set()
+    registry = getattr(session, "attachment_registry", None)
+    if registry is None:
+        session.sync_runtime_state()
+        registry = getattr(session, "attachment_registry", None)
+    if registry is None:
+        raise HTTPException(status_code=503, detail="attachment registry unavailable")
+    for raw_id in raw_ids[:20]:
+        attachment_id = str(raw_id or "").strip()
+        if not attachment_id or attachment_id in seen:
+            continue
+        descriptor = registry.get(attachment_id)
+        if descriptor is None or registry.resolve_path(attachment_id) is None:
+            raise HTTPException(status_code=404, detail=f"attachment not found: {attachment_id}")
+        seen.add(attachment_id)
+        values.append(dict(descriptor))
+    return values
+
+
+def _attachment_notice(attachments: list[dict[str, Any]]) -> str:
+    if not attachments:
+        return ""
+    lines = ["[Attachments selected for this message; retrieve via attachment tools:]"]
+    for item in attachments:
+        lines.append(
+            f"- id={item.get('attachment_id')} name={item.get('name')} mime={item.get('mime_type')}"
+        )
+    return "\n".join(lines)
+
+
 @router.post("/send")
 async def send_message(request: Request, payload: Dict[str, Any]):
     session_name = (payload.get("session_name") or "").strip() or None
@@ -232,8 +268,14 @@ async def send_message(request: Request, payload: Dict[str, Any]):
 
     busy = request.app.state.session_busy_for(name)
     text = str(payload.get("text") or "").strip()
+    attachments = _resolve_attachments(session, payload.get("attachment_ids"))
+    if not text and not attachments:
+        raise HTTPException(status_code=400, detail="text or attachment_ids is required")
     if not text:
-        raise HTTPException(status_code=400, detail="text is required")
+        text = "Please review the attached document(s)."
+    if text.startswith("/") and attachments:
+        raise HTTPException(status_code=400, detail="attachments cannot be sent with slash commands")
+    session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
 
     # Commands are deliberately permitted while the model works: they are
     # operational controls (for example /status or /interrupt), whereas a
@@ -244,11 +286,16 @@ async def send_message(request: Request, payload: Dict[str, Any]):
             detail=f"Session {name!r} already has a turn in flight.",
         )
 
+    if attachments and session_type != "container":
+        session.stage_attachment_ids(
+            [item["attachment_id"] for item in attachments]
+        )
+
     bus = request.app.state.bus
     # Echo the user's message to the per-session stream so the browser
     # can render it immediately without waiting for the agent loop.
     await bus.publish(
-        {"kind": "user_message", "text": text, "session_name": name}
+        {"kind": "user_message", "text": text, "attachments": attachments, "session_name": name}
     )
 
     if text.startswith("/"):
@@ -266,7 +313,6 @@ async def send_message(request: Request, payload: Dict[str, Any]):
         )
         return {"accepted": True, "kind": "command", "session_name": name}
 
-    session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
     if session_type == "container":
         busy.set()
 
@@ -276,7 +322,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                 response = await asyncio.to_thread(
                     request.app.state.container_supervisor.send_sync,
                     name,
-                    text,
+                    text + (("\n\n" + _attachment_notice(attachments)) if attachments else ""),
                     provider=session.provider.name,
                     model=session.provider.model_name,
                     agent_mode=str(session.variables.get("agent_mode", "default")),

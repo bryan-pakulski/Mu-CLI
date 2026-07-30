@@ -66,6 +66,20 @@ def build_messages_from_history(
                         ),
                     )
                 )
+            elif p_type == "attachment":
+                attachment = p.get("attachment", {}) or {}
+                attachment_id = str(attachment.get("attachment_id") or "")
+                name = str(attachment.get("name") or "attachment")
+                mime_type = str(attachment.get("mime_type") or "application/octet-stream")
+                size = int(attachment.get("size") or 0)
+                parts.append(MessagePart(
+                    type="text",
+                    text=(
+                        "[User-uploaded attachment: "
+                        f"id={attachment_id}; name={name}; mime={mime_type}; size={size} bytes. "
+                        "Use read_attachment/search_attachments for bounded text, or download_attachment in workspace/container mode for a local copy.]"
+                    ),
+                ))
             elif p_type == "image_input":
                 img_data = p.get("image", {}) or {}
                 raw = img_data.get("data_b64") or ""
@@ -173,6 +187,13 @@ def summarize_message_parts(
             fr = part.get("file_ref", {})
             summaries.append(
                 f"file:{fr.get('display_name', fr.get('uri', 'unknown'))}"
+            )
+        elif p_type == "attachment":
+            attachment = part.get("attachment", {}) or {}
+            summaries.append(
+                "attachment:"
+                f"{attachment.get('name', 'unknown')}"
+                f" [id={attachment.get('attachment_id', '')}]"
             )
         elif p_type == "image_input":
             img = part.get("image", {}) or {}

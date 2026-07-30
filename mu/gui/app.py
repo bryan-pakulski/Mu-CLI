@@ -37,6 +37,7 @@ from .memory_snapshot import LIVE_RESOLUTION, build_memory_snapshot
 from .prompts import PromptStore
 from .routers import (
     artifacts as artifacts_router,
+    attachments as attachments_router,
     audio as audio_router,
     chat,
     containers as containers_router,
@@ -279,6 +280,7 @@ def create_app(
 
     app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
     app.include_router(artifacts_router.router, prefix="/api/sessions", tags=["artifacts"])
+    app.include_router(attachments_router.router, prefix="/api/sessions", tags=["attachments"])
     app.include_router(containers_router.router, tags=["containers"])
     app.include_router(providers_router.router, prefix="/api/providers", tags=["providers"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])

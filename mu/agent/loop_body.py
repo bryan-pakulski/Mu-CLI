@@ -792,7 +792,7 @@ def run_turn(session, text):
                 if session.ui and _removed:
                     session.ui.show_info(_notice)
 
-    parts = list(session.staged_files)
+    parts = list(session.staged_files) + list(getattr(session, "staged_attachments", []) or [])
     effective_text = text
     if text and active_mode == "feature":
         effective_text = session._build_feature_mode_prompt(text)
@@ -1121,6 +1121,7 @@ def run_turn(session, text):
     session.session_manager._maybe_protect(turn_start_index, "user", effective_text, is_turn_prompt=True)
     session.session_manager.save_history()
     session.staged_files = []
+    session.staged_attachments = []
 
     max_iterations = session.variables.get("max_iterations", 50)
     iteration = 0

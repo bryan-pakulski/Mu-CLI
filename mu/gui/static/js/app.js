@@ -126,8 +126,12 @@ document.addEventListener("alpine:init", () => {
 
         // ---------- user + assistant turns ---------------------------
 
-        addUser(text, name) {
+        addUser(text, name, attachments = []) {
             const slot = this._slot(name);
+            const previous = this._lastTurn(slot);
+            const incomingIds = (attachments || []).map(item => item.attachment_id).join(",");
+            const previousIds = (previous && previous.attachments || []).map(item => item.attachment_id).join(",");
+            if (previous && previous.role === "user" && previous.text === text && incomingIds === previousIds) return;
             this._closeTrace(slot);
             // Drop a finished sub-agent panel so a new turn starts clean.
             // A panel whose agents are still running (outliving the parent
@@ -143,6 +147,7 @@ document.addEventListener("alpine:init", () => {
                 text,
                 html: renderMarkdown(text),
                 streaming: false,
+                attachments: attachments || [],
             });
             if (!name || name === this.currentName) this.scroll(true);
         },
@@ -510,7 +515,10 @@ document.addEventListener("alpine:init", () => {
             return /^\/[A-Za-z][\w-]*/.test((text || "").trim());
         },
         canSend(text) {
-            return !this.busy || this.isSlashCommand(text);
+            const trimmed = (text || "").trim();
+            const hasAttachments = Alpine.store("attachments").selectedIds(this.currentName).length > 0;
+            if (!trimmed && !hasAttachments) return false;
+            return !this.busy || this.isSlashCommand(trimmed);
         },
         scroll(force = false) {
             if (this._scrollRaf) return;
@@ -525,11 +533,18 @@ document.addEventListener("alpine:init", () => {
         async send(text) {
             text = (text || "").trim();
             const name = this.currentName;
-            if (!text) return;
+            const attachmentStore = Alpine.store("attachments");
+            const selected = attachmentStore.selectedItems(name);
+            if (!text && selected.length === 0) return;
+            if (!text) text = "Please review the attached document(s).";
             const slot = this._slot(name);
             const isCommand = this.isSlashCommand(text);
+            if (isCommand && selected.length) {
+                this.addError("Attachments cannot be sent with slash commands.", name);
+                return false;
+            }
             if (slot.busy && !isCommand) return false;
-            this.addUser(text, name);
+            this.addUser(text, name, selected);
             // A command can be submitted alongside an active turn. Do not
             // toggle the slot's existing busy state; the server handles the
             // command path independently of normal turn submission.
@@ -538,11 +553,17 @@ document.addEventListener("alpine:init", () => {
                 const resp = await fetch("/api/chat/send", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ text, session_name: name }),
+                    body: JSON.stringify({
+                        text,
+                        session_name: name,
+                        attachment_ids: selected.map(item => item.attachment_id),
+                    }),
                 });
                 if (resp.status === 409) {
                     this.addError("A turn is already in flight.", name);
                     if (!isCommand) slot.busy = false;
+                } else if (resp.ok) {
+                    if (!isCommand) attachmentStore.clearSelected(name);
                 } else if (!resp.ok) {
                     const data = await resp.json().catch(() => ({}));
                     this.addError(data.detail || `send failed (${resp.status})`, name);
@@ -633,7 +654,31 @@ document.addEventListener("alpine:init", () => {
                                 text: part.text,
                                 html: renderMarkdown(part.text),
                                 streaming: false,
+                                attachments: [],
                             });
+                        } else if (part.type === "attachment" && turn.role === "user") {
+                            let targetMessage = null;
+                            for (let i = rebuiltTurns.length - 1; i >= 0; i--) {
+                                const candidate = rebuiltTurns[i];
+                                if (candidate.role === "user" && candidate.id.startsWith(`h-${turn.index}-`)) {
+                                    targetMessage = candidate;
+                                    break;
+                                }
+                            }
+                            if (!targetMessage) {
+                                targetMessage = {
+                                    id: `h-${turn.index}-${stablePartIndex}`,
+                                    role: "user",
+                                    text: "",
+                                    html: "",
+                                    streaming: false,
+                                    attachments: [],
+                                };
+                                rebuiltTurns.push(targetMessage);
+                            }
+                            if (part.attachment && part.attachment.attachment_id) {
+                                targetMessage.attachments.push(part.attachment);
+                            }
                         } else if (part.type === "thinking") {
                             ensureHistoryTrace().events.push({
                                 id: `h-ev-${turn.index}-${stablePartIndex}`,
@@ -677,6 +722,85 @@ document.addEventListener("alpine:init", () => {
             } catch (err) {
                 console.error("history", err);
             }
+        },
+    });
+
+
+    Alpine.store("attachments", {
+        itemsBySession: {},
+        selectedBySession: {},
+        loading: false,
+        uploading: false,
+        _name(name) { return name || Alpine.store("chat").currentName || ""; },
+        items(name) { return this.itemsBySession[this._name(name)] || []; },
+        selectedIds(name) { return this.selectedBySession[this._name(name)] || []; },
+        selectedItems(name) {
+            const ids = new Set(this.selectedIds(name));
+            return this.items(name).filter(item => ids.has(item.attachment_id));
+        },
+        async load(name) {
+            const sessionName = this._name(name);
+            if (!sessionName) return;
+            this.loading = true;
+            try {
+                const r = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}/attachments`, { cache: "no-store" });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.detail || `attachments failed (${r.status})`);
+                this.itemsBySession[sessionName] = data.attachments || [];
+                const valid = new Set(this.itemsBySession[sessionName].map(item => item.attachment_id));
+                this.selectedBySession[sessionName] = this.selectedIds(sessionName).filter(id => valid.has(id));
+            } catch (error) {
+                Alpine.store("toast").show(String(error), "error");
+            } finally {
+                this.loading = false;
+            }
+        },
+        toggle(item, name) {
+            const sessionName = this._name(name);
+            const ids = [...this.selectedIds(sessionName)];
+            const index = ids.indexOf(item.attachment_id);
+            if (index >= 0) ids.splice(index, 1); else ids.push(item.attachment_id);
+            this.selectedBySession[sessionName] = ids;
+        },
+        removeSelected(attachmentId, name) {
+            const sessionName = this._name(name);
+            this.selectedBySession[sessionName] = this.selectedIds(sessionName).filter(id => id !== attachmentId);
+        },
+        clearSelected(name) { this.selectedBySession[this._name(name)] = []; },
+        isSelected(item, name) { return this.selectedIds(name).includes(item.attachment_id); },
+        async uploadFiles(fileList, name) {
+            const sessionName = this._name(name);
+            const files = Array.from(fileList || []);
+            if (!sessionName || !files.length) return;
+            this.uploading = true;
+            try {
+                const selected = new Set(this.selectedIds(sessionName));
+                for (const file of files) {
+                    const form = new FormData();
+                    form.append("file", file, file.name);
+                    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}/attachments`, { method: "POST", body: form });
+                    const data = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(data.detail || `upload failed (${r.status})`);
+                    if (data.attachment?.attachment_id) selected.add(data.attachment.attachment_id);
+                }
+                await this.load(sessionName);
+                this.selectedBySession[sessionName] = Array.from(selected);
+            } catch (error) {
+                Alpine.store("toast").show(String(error), "error", 6000);
+            } finally {
+                this.uploading = false;
+            }
+        },
+        async remove(item, name) {
+            const sessionName = this._name(name);
+            const r = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}/attachments/${encodeURIComponent(item.attachment_id)}`, { method: "DELETE" });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                Alpine.store("toast").show(data.detail || `delete failed (${r.status})`, "error");
+                return;
+            }
+            this.removeSelected(item.attachment_id, sessionName);
+            await this.load(sessionName);
         },
     });
 
@@ -4074,7 +4198,11 @@ function routeEvent(ev) {
     const slot = chat._slot(name);
     const isFocused = !name || name === chat.currentName;
     switch (ev.kind) {
-        case "user_message": break;  // echoed locally on send
+        case "user_message": break;  // optimistic local turn; history refresh reconciles other clients
+        case "attachment_created":
+        case "attachment_deleted":
+            if (isFocused) Alpine.store("attachments").load(name);
+            break;
         case "context_snapshot": {
             // Live Memory Map push from the pre_provider_call hook —
             // one per iteration. Only act when the Memory view is the

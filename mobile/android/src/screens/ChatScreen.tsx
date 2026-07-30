@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +23,8 @@ import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
 import { CodeBlock } from '../components/CodeBlock';
 import { VisualizationCard } from '../components/VisualizationCard';
+import { AttachmentSheet } from '../components/AttachmentSheet';
+import type { AttachmentDescriptor } from '../api/attachments';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCompletion';
 import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
@@ -51,23 +54,35 @@ export function ChatScreen() {
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [varGroups, setVarGroups] = useState<InspectorVariableGroup[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [selectedAttachments, setSelectedAttachments] = useState<AttachmentDescriptor[]>([]);
   const activeProvider = useConnectionStore(state => state.activeProvider);
   const activeModel = useConnectionStore(state => state.activeModel);
   const yolo = useConnectionStore(state => state.yolo);
   const connection = { activeProvider, activeModel, yolo };
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followOutputRef = useRef(true);
   const completion = useCommandCompletion();
 
   // Throttled auto-scroll: coalesce rapid content-size changes (one per
   // streaming token) into a single non-animated scrollToEnd per ~100ms.
   // Animated scroll on every token was a major perf bottleneck on mobile.
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((force = false) => {
+    if (!force && !followOutputRef.current) return;
     if (scrollThrottleRef.current) return;
     scrollThrottleRef.current = setTimeout(() => {
       scrollThrottleRef.current = null;
-      flatListRef.current?.scrollToEnd({ animated: false });
+      if (force || followOutputRef.current) {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }
     }, 100);
+  }, []);
+
+  const onChatScroll = useCallback((event: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    followOutputRef.current = distanceFromEnd < 96;
   }, []);
 
   // Clear any pending throttle on unmount
@@ -75,10 +90,13 @@ export function ChatScreen() {
 
   const send = async () => {
     const text = input.trim();
-    if (!text || streaming) return;
-    setInput('');
-    completion.close();
-    await sendMessage(text);
+    if ((!text && selectedAttachments.length === 0) || streaming) return;
+    const sent = await sendMessage(text, selectedAttachments);
+    if (sent) {
+      setInput('');
+      setSelectedAttachments([]);
+      completion.close();
+    }
   };
 
   const onInputChange = (text: string) => {
@@ -201,6 +219,16 @@ export function ChatScreen() {
               {item.text}
             </Markdown>
           )}
+          {isUser && item.attachments && item.attachments.length > 0 ? (
+            <View style={styles.messageAttachments}>
+              {item.attachments.map(attachment => (
+                <View key={attachment.attachment_id} style={[styles.messageAttachment, { backgroundColor: colors.bgLift }]}>
+                  <Ionicons name="document-outline" size={14} color={colors.textDim} />
+                  <Text variant="xs" numberOfLines={1} style={{ color: colors.textSoft, maxWidth: 210 }}>{attachment.name}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
           {isAssistant && item.text.length > 0 && (
             <TouchableOpacity
               onPress={() => copyMessage(item.text)}
@@ -231,15 +259,17 @@ export function ChatScreen() {
           maxToRenderPerBatch={6}
           updateCellsBatchingPeriod={50}
           windowSize={7}
-          removeClippedSubviews={Platform.OS === 'android'}
+          removeClippedSubviews={Platform.OS === 'android' && !messages.some(message => message.role === 'visualization')}
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,
           ]}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
-          onContentSizeChange={scrollToBottom}
-          onLayout={scrollToBottom}
+          onScroll={onChatScroll}
+          scrollEventThrottle={100}
+          onContentSizeChange={() => scrollToBottom(false)}
+          onLayout={() => scrollToBottom(false)}
           ListHeaderComponent={
             error && messages.length > 0 ? (
               <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>
@@ -295,6 +325,16 @@ export function ChatScreen() {
           insets={insets}
           onModePress={() => { loadModes(); setModeSheetOpen(true); }}
           onSettingsPress={() => { loadVariables(); setSettingsSheetOpen(true); }}
+          onAttachmentsPress={() => setAttachmentsOpen(true)}
+          selectedAttachments={selectedAttachments}
+          onRemoveAttachment={(attachmentId) => setSelectedAttachments(current => current.filter(item => item.attachment_id !== attachmentId))}
+        />
+        <AttachmentSheet
+          visible={attachmentsOpen}
+          sessionName={activeSessionName || ''}
+          selected={selectedAttachments}
+          onSelectedChange={setSelectedAttachments}
+          onClose={() => setAttachmentsOpen(false)}
         />
         <ModeBottomSheet
           visible={modeSheetOpen}
@@ -328,11 +368,27 @@ interface ComposerProps {
   insets: { bottom: number };
   onModePress: () => void;
   onSettingsPress: () => void;
+  onAttachmentsPress: () => void;
+  selectedAttachments: AttachmentDescriptor[];
+  onRemoveAttachment: (attachmentId: string) => void;
 }
 
-function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, onModePress }: ComposerProps) {
+function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, onModePress, onAttachmentsPress, selectedAttachments, onRemoveAttachment }: ComposerProps) {
   return (
-    <View
+    <View>
+      {selectedAttachments.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.selectedAttachments}>
+          {selectedAttachments.map(item => (
+            <View key={item.attachment_id} style={[styles.selectedAttachment, { backgroundColor: colors.bgHover }]}>
+              <Text variant="xs" numberOfLines={1} style={{ maxWidth: 180 }}>{item.name}</Text>
+              <TouchableOpacity onPress={() => onRemoveAttachment(item.attachment_id)}>
+                <Ionicons name="close" size={15} color={colors.textDim} />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+      <View
       style={[
         styles.composer,
         {
@@ -342,6 +398,13 @@ function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, 
         },
       ]}
     >
+      <TouchableOpacity
+        onPress={onAttachmentsPress}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={[styles.composerIconButton, { backgroundColor: selectedAttachments.length ? colors.accentSoft : colors.bgHover }]}
+      >
+        <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent : colors.textDim} />
+      </TouchableOpacity>
       <TouchableOpacity
         onPress={onModePress}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -370,13 +433,14 @@ function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, 
       ) : (
         <TouchableOpacity
           onPress={onSend}
-          disabled={!input.trim()}
-          style={[styles.sendBtn, { backgroundColor: input.trim() ? colors.accent : colors.bgHover }]}
+          disabled={!input.trim() && selectedAttachments.length === 0}
+          style={[styles.sendBtn, { backgroundColor: (input.trim() || selectedAttachments.length) ? colors.accent : colors.bgHover }]}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Ionicons name="arrow-up" size={19} color={input.trim() ? colors.accentText : colors.textDim} />
+          <Ionicons name="arrow-up" size={19} color={(input.trim() || selectedAttachments.length) ? colors.accentText : colors.textDim} />
         </TouchableOpacity>
       )}
+      </View>
     </View>
   );
 }
@@ -442,6 +506,10 @@ const styles = StyleSheet.create({
   msgRow: { flexDirection: 'row', marginBottom: 14 },
   msgBubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   copyButton: { alignSelf: 'flex-start', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
+  messageAttachment: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
+  selectedAttachments: { paddingHorizontal: 12, paddingTop: 6, gap: 6 },
+  selectedAttachment: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
   codeBlock: { borderRadius: 10, padding: 12, marginVertical: 5 },
   codeBlockHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 3 },
   inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 14 },

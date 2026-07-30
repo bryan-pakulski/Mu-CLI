@@ -7,7 +7,7 @@ from typing import Any
 
 
 DEFAULT_WORKER_PORT = 30312
-WORKER_PROTOCOL_VERSION = 6
+WORKER_PROTOCOL_VERSION = 7
 
 
 @dataclass(frozen=True)

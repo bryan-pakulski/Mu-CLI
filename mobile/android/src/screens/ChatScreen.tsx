@@ -56,6 +56,7 @@ export function ChatScreen() {
   const [varsLoading, setVarsLoading] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [selectedAttachments, setSelectedAttachments] = useState<AttachmentDescriptor[]>([]);
+  const [visualizationGestureActive, setVisualizationGestureActive] = useState(false);
   const activeProvider = useConnectionStore(state => state.activeProvider);
   const activeModel = useConnectionStore(state => state.activeModel);
   const yolo = useConnectionStore(state => state.yolo);
@@ -63,6 +64,11 @@ export function ChatScreen() {
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followOutputRef = useRef(true);
+  // MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1: inline WebViews temporarily own vertical drags.
+  const onVisualizationInteractionChange = useCallback((active: boolean) => {
+    setVisualizationGestureActive(active);
+    if (active) followOutputRef.current = false;
+  }, []);
   const completion = useCommandCompletion();
   // Always clip offscreen cells on Android — disabling removeClippedSubviews
   // when visualizations are present causes ALL cells to mount simultaneously
@@ -204,7 +210,11 @@ export function ChatScreen() {
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     if (item.role === 'visualization' && item.artifact && activeSessionName) {
       return (
-        <VisualizationCard artifact={item.artifact} sessionName={activeSessionName} />
+        <VisualizationCard
+          artifact={item.artifact}
+          sessionName={activeSessionName}
+          onInteractionChange={onVisualizationInteractionChange}
+        />
       );
     }
 
@@ -269,7 +279,7 @@ export function ChatScreen() {
         </View>
       </View>
     );
-  }, [activeSessionName, colors, copyMessage, markdownRules, memoizedMarkdownStyles]);
+  }, [activeSessionName, colors, copyMessage, markdownRules, memoizedMarkdownStyles, onVisualizationInteractionChange]);
 
   return (
     <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -288,6 +298,7 @@ export function ChatScreen() {
           updateCellsBatchingPeriod={80}
           windowSize={5}
           removeClippedSubviews={removeClipped}
+          scrollEnabled={!visualizationGestureActive}
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,

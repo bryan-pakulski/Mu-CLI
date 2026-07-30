@@ -1,5 +1,9 @@
 import { api } from './client';
-import type { ContainerMount } from './sessions';
+import type {
+  ContainerDevice,
+  ContainerHardwareCapabilities,
+  ContainerMount,
+} from './sessions'; // MUCLI_CONTAINER_HARDWARE_V1
 
 export interface ManagedContainer {
   name: string;
@@ -8,6 +12,8 @@ export interface ManagedContainer {
   template_name?: string | null;
   attached_sessions: string[];
   mounts: ContainerMount[];
+  gpu_request?: string;
+  devices?: ContainerDevice[];
   egress_allow: string[];
   egress_deny: string[];
   network_name?: string;
@@ -33,8 +39,11 @@ export interface ContainerConfiguration {
   dockerfile?: string | null;
   template_name?: string | null;
   mounts: ContainerMount[];
+  gpu_request?: string;
+  devices?: ContainerDevice[];
   egress_allow: string[];
   egress_deny: string[];
+  hardware?: ContainerHardwareCapabilities;
 }
 
 export interface ContainerEnvironmentPayload {
@@ -42,6 +51,8 @@ export interface ContainerEnvironmentPayload {
   dockerfile?: string | null;
   template_name?: string | null;
   mounts?: ContainerMount[];
+  gpu_request?: string;
+  devices?: ContainerDevice[];
   egress_allow?: string[] | null;
   egress_deny?: string[] | null;
   start?: boolean;

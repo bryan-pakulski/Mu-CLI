@@ -49,6 +49,38 @@ export interface ContainerMount {
   mode: 'ro' | 'rw';
 }
 
+export interface ContainerDevice {
+  host_path: string;
+  container_path: string;
+  permissions: 'r' | 'rw' | 'rwm';
+}
+
+export interface HostGpuDevice {
+  id: string;
+  index?: string;
+  name: string;
+  uuid?: string;
+}
+
+export interface HostDeviceCandidate extends ContainerDevice {
+  kind?: string;
+  name?: string;
+}
+
+export interface ContainerHardwareCapabilities {
+  docker_available: boolean;
+  gpu: {
+    supported: boolean;
+    runtime_detected: boolean;
+    docker_runtimes?: string[];
+    devices: HostGpuDevice[];
+    reason: string;
+  };
+  devices: HostDeviceCandidate[];
+  warning: string;
+}
+
+// MUCLI_CONTAINER_HARDWARE_V1
 export interface ContainerCreateOptions {
   source?: 'new' | 'existing';
   existingContainer?: string;
@@ -56,6 +88,8 @@ export interface ContainerCreateOptions {
   templateName?: string;
   dockerfile?: string;
   mounts?: ContainerMount[];
+  gpuRequest?: string;
+  devices?: ContainerDevice[];
   egressAllow?: string[];
   egressDeny?: string[];
 }
@@ -73,6 +107,7 @@ export interface ContainerDefaultsResponse {
   dockerfile: string;
   egress_allow: string[];
   egress_deny: string[];
+  hardware?: ContainerHardwareCapabilities;
 }
 
 // Types
@@ -183,6 +218,8 @@ export const sessionsApi = {
       template_name: options?.container?.templateName,
       dockerfile: options?.container?.dockerfile,
       mounts: options?.container?.mounts,
+      gpu_request: options?.container?.gpuRequest,
+      devices: options?.container?.devices,
       egress_allow: options?.container?.egressAllow,
       egress_deny: options?.container?.egressDeny,
     }),

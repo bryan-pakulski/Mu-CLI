@@ -106,6 +106,8 @@ async def _run_environment_creation(request: Request, job_id: str, payload: dict
             "dockerfile": payload.get("dockerfile"),
             "template_name": str(payload.get("template_name") or "") or None,
             "mounts": [item for item in (payload.get("mounts") or []) if isinstance(item, dict)],
+            "gpu_request": payload.get("gpu_request"),  # MUCLI_CONTAINER_HARDWARE_V1
+            "devices": [item for item in (payload.get("devices") or []) if isinstance(item, dict)],
             "egress_allow": payload.get("egress_allow"),
             "egress_deny": payload.get("egress_deny"),
             "supervisor_url": f"http://host.docker.internal:{request.app.state.port}",
@@ -446,12 +448,16 @@ async def managed_container_shell(websocket: WebSocket, name: str):
 
 
 @router.get("/api/container-defaults")
-async def container_defaults():
-    """Editable defaults shared by the web and mobile creation flows."""
+async def container_defaults(request: Request):
+    """Editable defaults and detected host hardware shared by all creation flows."""
+    hardware = await asyncio.to_thread(
+        request.app.state.container_supervisor.hardware_capabilities
+    )
     return {
         "dockerfile": default_dockerfile(),
         "egress_allow": list(DEFAULT_EGRESS_ALLOW),
         "egress_deny": [],
+        "hardware": hardware,
     }
 
 

@@ -17,7 +17,13 @@ import {
   ManagedContainer,
   containersApi,
 } from '../api/containers';
-import { sessionsApi, ContainerMount } from '../api/sessions';
+import {
+  sessionsApi,
+  ContainerDevice,
+  ContainerHardwareCapabilities,
+  ContainerMount,
+} from '../api/sessions';
+import { ContainerHardwareSection } from './ContainerHardwareSection'; // MUCLI_CONTAINER_HARDWARE_V1
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
@@ -50,6 +56,9 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
   const [mountHost, setMountHost] = useState('');
   const [mountTarget, setMountTarget] = useState('/workspace/project');
   const [mountMode, setMountMode] = useState<'rw' | 'ro'>('rw');
+  const [hardware, setHardware] = useState<ContainerHardwareCapabilities | null>(null);
+  const [gpuRequest, setGpuRequest] = useState('');
+  const [devices, setDevices] = useState<ContainerDevice[]>([]);
   const [editor, setEditor] = useState<EditorMode>(null);
   const [saving, setSaving] = useState(false);
   const [jobMessage, setJobMessage] = useState('');
@@ -69,9 +78,13 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     setJobExpanded(false);
     setJobFailed(false);
     try {
-      const response = await containersApi.list();
+      const [response, defaults] = await Promise.all([
+        containersApi.list(),
+        sessionsApi.getContainerDefaults(),
+      ]);
       setContainers(response.containers || []);
       setTemplates(response.templates || []);
+      setHardware(defaults.hardware || null);
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -95,6 +108,8 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     setMountHost('');
     setMountTarget('/workspace/project');
     setMountMode('rw');
+    setGpuRequest('');
+    setDevices([]);
     setError(null);
     try {
       const defaults = await sessionsApi.getContainerDefaults();
@@ -127,6 +142,8 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     setAllow((config.egress_allow || []).join('\n'));
     setDeny((config.egress_deny || []).join('\n'));
     setMounts(config.mounts || []);
+    setGpuRequest(config.gpu_request || '');
+    setDevices(config.devices || []);
     setError(null);
     setMode('form');
   };
@@ -190,6 +207,8 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
         template_name: source === 'template' ? templateName : null,
         dockerfile: source === 'dockerfile' ? dockerfile : null,
         mounts,
+        gpu_request: gpuRequest,
+        devices,
         egress_allow: source === 'dockerfile' ? splitLines(allow) : null,
         egress_deny: source === 'dockerfile' ? splitLines(deny) : null,
         start: true,
@@ -316,6 +335,14 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             <WorkspacePathField value={mountHost} onChangeText={value => { setMountHost(value); const base = value.split('/').filter(Boolean).pop(); if (base) setMountTarget(`/workspace/${base}`); }} placeholder="Browse a host folder" />
             <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift, marginTop: 8 }]} />
             <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment selected={mountMode === 'rw'} label="RW" onPress={() => setMountMode('rw')} compact /><Segment selected={mountMode === 'ro'} label="RO" onPress={() => setMountMode('ro')} compact /></View><TouchableOpacity onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addButton, { backgroundColor: mountHost.trim() && mountTarget.trim() ? colors.accent : colors.bgHover }]}><Ionicons name="add" size={18} color={mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim} /><Text variant="xs" style={{ color: mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim, fontWeight: '700' }}>Add folder</Text></TouchableOpacity></View>
+
+            <ContainerHardwareSection
+              capabilities={hardware}
+              gpuRequest={gpuRequest}
+              onGpuRequestChange={setGpuRequest}
+              devices={devices}
+              onDevicesChange={setDevices}
+            />
 
             {jobMessage ? (
               <ContainerBuildProgress

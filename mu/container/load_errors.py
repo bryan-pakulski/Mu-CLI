@@ -53,6 +53,29 @@ def describe_container_load_error(
             "Grant the MuCLI user access to the Docker socket, then restart the MuCLI server.",
             "Verify `docker ps` works as the same user and load the session again.",
         ]
+    # MUCLI_CONTAINER_HARDWARE_V1
+    elif any(token in lowered for token in (
+        "gpu passthrough requested but unavailable", "nvidia container toolkit",
+        "could not select device driver", "no compatible gpu", "gpu selection is not present",
+    )):
+        code = "container_gpu_unavailable"
+        title = "GPU passthrough is unavailable"
+        message = "The container requests GPU access that this Docker host cannot currently provide."
+        steps = [
+            "Install/configure NVIDIA Container Toolkit and confirm Docker can run a GPU-enabled test container, or disable GPU access in Hardware settings.",
+            "Recreate or reload the environment after the host GPU runtime is available.",
+        ]
+    elif any(token in lowered for token in (
+        "container device is missing", "container device is not a character or block device",
+        "error gathering device information", "no such device",
+    )):
+        code = "container_device_missing"
+        title = "A requested hardware device is unavailable"
+        message = "A host device configured for passthrough is missing, inaccessible, or no longer a device node."
+        steps = [
+            "Reconnect/restore the host device or remove its mapping in the Hardware section.",
+            "Recreate or load the environment after the device path is valid.",
+        ]
     elif any(token in lowered for token in (
         "host mount is not a directory", "bind source path does not exist",
         "container bind mount is missing", "invalid mount config",

@@ -674,6 +674,8 @@ async def _run_container_creation_job(
                 dockerfile=container_config["dockerfile"],
                 template_name=container_config.get("template_name"),
                 mounts=container_config["mounts"],
+                gpu_request=container_config.get("gpu_request"),  # MUCLI_CONTAINER_HARDWARE_V1
+                devices=container_config.get("devices") or [],
                 egress_allow=container_config["egress_allow"],
                 egress_deny=container_config["egress_deny"],
                 supervisor_url=f"http://host.docker.internal:{request.app.state.port}",
@@ -825,6 +827,8 @@ async def create_session(request: Request, payload: Dict[str, Any]):
                 "dockerfile": payload.get("dockerfile") or None,
                 "template_name": str(payload.get("template_name") or "") or None,
                 "mounts": mounts,
+                "gpu_request": payload.get("gpu_request") or "",
+                "devices": [item for item in (payload.get("devices") or []) if isinstance(item, dict)],
                 "egress_allow": egress_allow,
                 "egress_deny": egress_deny,
             }
@@ -979,6 +983,8 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
                 dockerfile=config.get("dockerfile"),
                 template_name=config.get("template_name"),
                 mounts=config.get("mounts") or [],
+                gpu_request=config.get("gpu_request"),
+                devices=config.get("devices") or [],
                 egress_allow=config.get("egress_allow") or DEFAULT_EGRESS_ALLOW,
                 egress_deny=config.get("egress_deny") or [],
                 supervisor_url=f"http://host.docker.internal:{state.port}",

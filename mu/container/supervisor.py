@@ -13,7 +13,8 @@ import utils.config as _config
 from .builder import build_container, container_slug
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback
 from .network import teardown_network
-from .ref import ContainerRef, DEFAULT_WORKER_PORT, WORKER_PROTOCOL_VERSION
+from .hardware import detect_hardware, normalize_device_specs, normalize_gpu_request, validate_hardware  # MUCLI_CONTAINER_HARDWARE_V1
+from .ref import ContainerRef, DeviceSpec, DEFAULT_WORKER_PORT, WORKER_PROTOCOL_VERSION
 from .registry import ContainerRegistry
 from .templates import ContainerTemplate, TemplateRegistry
 from .runner import attach_session_folder, detach_session_folder, mount_folder
@@ -61,6 +62,8 @@ class ContainerSupervisor:
         *,
         template_name: str | None,
         mounts: list[dict] | None,
+        gpu_request: str | None = None,
+        devices: list[dict] | list[DeviceSpec] | None = None,
         source_path: str | None = None,
     ) -> None:
         """Fail before deleting an old worker when rebuild inputs are invalid."""
@@ -76,6 +79,7 @@ class ContainerSupervisor:
             host_path = str((item or {}).get("host_path") or "").strip()
             if host_path and not os.path.isdir(os.path.abspath(os.path.expanduser(host_path))):
                 raise ContainerRuntimeError(f"container bind mount is missing: {host_path}")
+        validate_hardware(gpu_request, devices, runner=self.runner)
 
     def create_environment(
         self,
@@ -84,6 +88,8 @@ class ContainerSupervisor:
         dockerfile: str | None = None,
         template_name: str | None = None,
         mounts: list[dict] | None = None,
+        gpu_request: str | None = None,
+        devices: list[dict] | list[DeviceSpec] | None = None,
         egress_allow: list[str] | None = None,
         egress_deny: list[str] | None = None,
         supervisor_url: str = "",
@@ -96,6 +102,8 @@ class ContainerSupervisor:
         self._validate_rebuild_inputs(
             template_name=template_name,
             mounts=mounts,
+            gpu_request=gpu_request,
+            devices=devices,
             source_path=source_path,
         )
         existing = self.resolve(container_name)
@@ -117,6 +125,8 @@ class ContainerSupervisor:
             base_image=template.image if template else None,
             template_name=template.name if template else None,
             mounts=mounts,
+            gpu_request=gpu_request,
+            devices=devices,
             egress_allow=(egress_allow if egress_allow is not None else (template.egress_allow if template else None)),
             egress_deny=(egress_deny if egress_deny is not None else (template.egress_deny if template else None)),
             mucli_source_path=source_path,
@@ -136,6 +146,8 @@ class ContainerSupervisor:
         dockerfile: str | None = None,
         template_name: str | None = None,
         mounts: list[dict] | None = None,
+        gpu_request: str | None = None,
+        devices: list[dict] | list[DeviceSpec] | None = None,
         egress_allow: list[str] | None = None,
         egress_deny: list[str] | None = None,
         supervisor_url: str = "",
@@ -149,9 +161,17 @@ class ContainerSupervisor:
             raise ContainerRuntimeError(f"managed container not found: {container_name}")
         attached_sessions = list(ref.attached_sessions)
         standalone = bool(ref.standalone)
+        resolved_gpu = ref.gpu_request if gpu_request is None else gpu_request
+        resolved_devices = (
+            [item.to_dict() for item in ref.devices]
+            if devices is None
+            else devices
+        )
         self._validate_rebuild_inputs(
             template_name=template_name,
             mounts=mounts,
+            gpu_request=resolved_gpu,
+            devices=resolved_devices,
         )
         if progress is not None:
             progress("reconfiguring_container", "Stopping and recreating the managed environment…")
@@ -161,6 +181,8 @@ class ContainerSupervisor:
             dockerfile=dockerfile,
             template_name=template_name,
             mounts=mounts,
+            gpu_request=resolved_gpu,
+            devices=resolved_devices,
             egress_allow=egress_allow,
             egress_deny=egress_deny,
             supervisor_url=supervisor_url,
@@ -182,6 +204,8 @@ class ContainerSupervisor:
         dockerfile: str | None = None,
         template_name: str | None = None,
         mounts: list[dict] | None = None,
+        gpu_request: str | None = None,
+        devices: list[dict] | list[DeviceSpec] | None = None,
         egress_allow: list[str] | None = None,
         egress_deny: list[str] | None = None,
         supervisor_url: str,
@@ -195,6 +219,14 @@ class ContainerSupervisor:
 
         report("resolving_container", "Checking for an existing managed container…")
         existing = self.resolve(container_name)
+        requested_gpu = normalize_gpu_request(
+            existing.gpu_request if existing is not None and gpu_request is None else gpu_request
+        )
+        requested_devices = (
+            list(existing.devices)
+            if existing is not None and devices is None
+            else normalize_device_specs(devices or [])
+        )
         restore_sessions: list[str] = []
         recovery_ref: ContainerRef | None = None
         if existing is not None:
@@ -213,12 +245,16 @@ class ContainerSupervisor:
                 or actual_proxy_ip != existing.proxy_ip
                 or int(existing.worker_protocol or 0) < WORKER_PROTOCOL_VERSION
                 or int(existing.worker_port or 0) < DEFAULT_WORKER_PORT
+                or requested_gpu != existing.gpu_request
+                or requested_devices != existing.devices
             ):
                 restore_sessions = list(existing.attached_sessions)
                 recovery_ref = existing
                 self._validate_rebuild_inputs(
                     template_name=template_name or existing.template_name or None,
                     mounts=mounts if mounts is not None else [item.to_dict() for item in existing.mounts],
+                    gpu_request=requested_gpu,
+                    devices=requested_devices,
                     source_path=source_path,
                 )
                 report(
@@ -238,6 +274,8 @@ class ContainerSupervisor:
                     base_image=template.image if template else None,
                     template_name=template.name if template else None,
                     mounts=mounts,
+                    gpu_request=requested_gpu,
+                    devices=requested_devices,
                     egress_allow=egress_allow,
                     egress_deny=egress_deny,
                     mucli_source_path=source_path,
@@ -787,6 +825,10 @@ class ContainerSupervisor:
             )
         return self.registry.attach_session(ref.name, session_name)
 
+    def hardware_capabilities(self) -> dict[str, Any]:
+        """Return host GPU/device capability information for creation UIs."""
+        return detect_hardware(self.runner)
+
     def configuration(self, container_name: str) -> dict[str, Any]:
         ref = self.resolve(container_name)
         if ref is None:
@@ -806,6 +848,8 @@ class ContainerSupervisor:
             "dockerfile": dockerfile,
             "template_name": ref.template_name or None,
             "mounts": [item.to_dict() for item in ref.mounts],
+            "gpu_request": ref.gpu_request,
+            "devices": [item.to_dict() for item in ref.devices],
             "egress_allow": list(ref.egress_allow),
             "egress_deny": list(ref.egress_deny),
             "network_isolation": "internal-proxy" if ref.proxy_name else "legacy",

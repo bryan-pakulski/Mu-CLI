@@ -213,6 +213,23 @@
                                         </div>
                                     </template>
                                 </div>
+                                <section class="wizard-hardware">
+                                    <div class="wizard-hardware-head"><div><strong>Hardware</strong><small x-text="hardwareSummary()"></small></div><span>⌁</span></div>
+                                    <div class="wizard-hardware-grid">
+                                        <label>GPU access<select x-model="form.gpuMode"><option value="none">None</option><option value="all" :disabled="!gpuSupported()">All detected GPUs</option><option value="selected" :disabled="!gpuSupported()">Selected GPUs</option></select></label>
+                                        <label x-show="form.gpuMode === 'selected'" x-cloak>GPU indexes or UUIDs<input x-model.trim="form.gpuSelection" placeholder="0,1 or GPU-uuid"></label>
+                                    </div>
+                                    <small x-text="gpuReason()"></small>
+                                    <template x-for="(device,index) in form.devices" :key="device.host_path + index"><div class="wizard-device-row"><span>⌁</span><div><strong x-text="device.container_path"></strong><small x-text="`${device.host_path} · ${device.permissions}`"></small></div><button type="button" class="icon-btn" @click="form.devices.splice(index,1)">×</button></div></template>
+                                    <div class="wizard-device-add">
+                                        <input x-model.trim="form.deviceHost" @input="!form.deviceTarget && (form.deviceTarget=form.deviceHost)" placeholder="/dev/video0">
+                                        <input x-model.trim="form.deviceTarget" placeholder="Container device path">
+                                        <select x-model="form.devicePermissions"><option value="r">r</option><option value="rw">rw</option><option value="rwm">rwm</option></select>
+                                        <button type="button" @click="addDevice()" :disabled="!form.deviceHost">add device</button>
+                                    </div>
+                                    <label class="wizard-field" x-show="hardwareDevices().length"><span>Detected devices</span><select x-model="form.devicePreset" @change="addDevicePreset()"><option value="">Choose a detected device…</option><template x-for="item in hardwareDevices()" :key="item.host_path"><option :value="item.host_path" x-text="`${item.name || item.host_path} · ${item.kind || 'device'}`"></option></template></select></label>
+                                    <p class="wizard-hardware-warning">MUCLI_CONTAINER_HARDWARE_V1: Attach only hardware required by this workload.</p>
+                                </section>
                             </div>
                         </div>
                     </template>
@@ -228,6 +245,7 @@
                         <template x-if="form.sessionType === 'workspace'"><div class="review-pair"><dt>Workspace</dt><dd x-text="form.workspace || 'none'"></dd></div></template>
                         <template x-if="form.sessionType === 'container'"><div class="review-pair"><dt>Container</dt><dd x-text="form.containerSource === 'existing' ? `attach · ${form.existingContainer}` : `create · ${form.containerName}`"></dd></div></template>
                         <template x-if="form.sessionType === 'container' && form.containerSource === 'new'"><div class="review-pair"><dt>Mounts</dt><dd x-text="`${form.mounts.length} folder${form.mounts.length === 1 ? '' : 's'}`"></dd></div></template>
+                        <template x-if="form.sessionType === 'container' && form.containerSource === 'new'"><div class="review-pair"><dt>Hardware</dt><dd x-text="hardwareSummary()"></dd></div></template>
                     </dl>
 
                     <div class="container-creation-status" x-show="creationState !== 'idle'" x-cloak role="status" aria-live="polite">
@@ -296,7 +314,8 @@ function welcomeView() {
         resetForm() {
             this.form = {name:'', sessionType:'workspace', provider:'', model:'', workspace:'', ollamaMode:'local', ollamaApiKey:'', ollamaKeySet:false,
                 containerSource:'new', existingContainer:'', containerName:'', templateName:'', dockerfile:(this.defaults && this.defaults.dockerfile)||'',
-                egressAllow:((this.defaults && this.defaults.egress_allow)||[]).join('\n'), egressDeny:((this.defaults && this.defaults.egress_deny)||[]).join('\n'), mounts:[]};
+                egressAllow:((this.defaults && this.defaults.egress_allow)||[]).join('\n'), egressDeny:((this.defaults && this.defaults.egress_deny)||[]).join('\n'), mounts:[],
+                gpuMode:'none', gpuSelection:'', devices:[], deviceHost:'', deviceTarget:'', devicePermissions:'rwm', devicePreset:''};
             this.step=1; this.error=null; this.modelError=null; this.models=[]; this.creationState='idle'; this.creationLogs=[]; this.creationLogSeq=0;
         },
         async load() {
@@ -316,6 +335,13 @@ function welcomeView() {
         openEditor(kind){ this.editorModal=kind; },
         browseWorkspace(){ Alpine.store('fileBrowser').show('folder', p=>{this.form.workspace=p;}); },
         browseMount(){ Alpine.store('fileBrowser').show('folder', p=>{const base=String(p).split('/').filter(Boolean).pop()||'project'; if(!this.form.mounts.some(m=>m.host_path===p)) this.form.mounts.push({host_path:p,container_path:`/workspace/${base}`,mode:'rw'});}); },
+        gpuSupported(){ return !!(this.defaults&&this.defaults.hardware&&this.defaults.hardware.gpu&&this.defaults.hardware.gpu.supported); },
+        gpuReason(){ return (this.defaults&&this.defaults.hardware&&this.defaults.hardware.gpu&&this.defaults.hardware.gpu.reason)||'GPU capability was not detected.'; },
+        hardwareDevices(){ return (this.defaults&&this.defaults.hardware&&this.defaults.hardware.devices)||[]; },
+        gpuRequest(){ return this.form.gpuMode==='all'?'all':(this.form.gpuMode==='selected'&&this.form.gpuSelection?`device=${this.form.gpuSelection}`:''); },
+        hardwareSummary(){ const gpu=this.form.gpuMode==='all'?'all GPUs':this.form.gpuMode==='selected'?`GPU ${this.form.gpuSelection||'selection required'}`:'no GPU'; return `${gpu} · ${this.form.devices.length} device${this.form.devices.length===1?'':'s'}`; },
+        addDevice(){ const host=String(this.form.deviceHost||'').trim(); const target=String(this.form.deviceTarget||host).trim(); if(!host||!target)return; if(this.form.devices.some(x=>x.host_path===host||x.container_path===target))return; this.form.devices.push({host_path:host,container_path:target,permissions:this.form.devicePermissions||'rwm'}); this.form.deviceHost='';this.form.deviceTarget='';this.form.devicePreset=''; },
+        addDevicePreset(){ if(!this.form.devicePreset)return; this.form.deviceHost=this.form.devicePreset;this.form.deviceTarget=this.form.devicePreset;this.addDevice(); },
         async onProviderChange(){ this.form.model=''; if(this.form.provider==='ollama'){this.form.ollamaMode='local';this.form.ollamaApiKey='';} await this.loadModels(); },
         async setOllamaMode(mode){ this.form.ollamaMode=mode; this.form.model=''; await this.loadModels(); },
         async loadModels(){
@@ -349,7 +375,7 @@ ${problem.text}`;
             if(this.form.sessionType==='container'){
                 body.container_source=this.form.containerSource;
                 if(this.form.containerSource==='existing')body.existing_container=this.form.existingContainer;
-                else {body.container_name=this.form.containerName;body.template_name=this.form.templateName||null;body.dockerfile=this.form.templateName?null:this.form.dockerfile;body.mounts=this.form.mounts;body.egress_allow=this.splitLines(this.form.egressAllow);body.egress_deny=this.splitLines(this.form.egressDeny);}
+                else {body.container_name=this.form.containerName;body.template_name=this.form.templateName||null;body.dockerfile=this.form.templateName?null:this.form.dockerfile;body.mounts=this.form.mounts;body.gpu_request=this.gpuRequest();body.devices=this.form.devices;body.egress_allow=this.splitLines(this.form.egressAllow);body.egress_deny=this.splitLines(this.form.egressDeny);}
             }
             try { const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const d=await r.json().catch(()=>({})); if(!r.ok)throw new Error(d.detail||`Create failed (${r.status})`); if(this.form.sessionType==='container'){this.waitForContainerCreation(this.form.name);return;} location.reload(); }
             catch(e){this.error=String(e.message||e);this.creating=false;}

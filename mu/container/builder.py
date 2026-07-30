@@ -16,9 +16,11 @@ from .network import DEFAULT_EGRESS_ALLOW, create_isolated_network, teardown_net
 from .ref import (
     DEFAULT_WORKER_PORT,
     ContainerRef,
+    DeviceSpec,
     MountSpec,
     WORKER_PROTOCOL_VERSION,
 )
+from .hardware import validate_hardware  # MUCLI_CONTAINER_HARDWARE_V1
 from .registry import ContainerRegistry
 
 ProgressCallback = Callable[[str, str], None]
@@ -137,6 +139,13 @@ def build_create_command(
         "--label",
         f"io.mucli.container={ref.name}",
     ]
+    if ref.gpu_request:
+        command += ["--gpus", ref.gpu_request]
+    for device in ref.devices:
+        command += [
+            "--device",
+            f"{device.host_path}:{device.container_path}:{device.permissions}",
+        ]
     if ref.root_volume:
         command += ["-v", f"{ref.root_volume}:{ref.container_volume}:rw"]
     for session_name in ref.attached_sessions:
@@ -176,6 +185,8 @@ def build_create_command(
         "no_proxy": "localhost,127.0.0.1,::1",
         "MUCLI_EGRESS_ALLOW": __import__("json").dumps(ref.egress_allow),
         "MUCLI_EGRESS_DENY": __import__("json").dumps(ref.egress_deny),
+        "MUCLI_GPU_REQUEST": ref.gpu_request,
+        "MUCLI_DEVICES": __import__("json").dumps([item.to_dict() for item in ref.devices]),
         "MUCLI_WORKSPACES": __import__("json").dumps(
             list(dict.fromkeys(["/workspace", *[mount.container_path for mount in ref.mounts]]))
         ),
@@ -195,6 +206,8 @@ def build_container(
     base_image: str | None = None,
     template_name: str | None = None,
     mounts: Iterable[MountSpec | dict] | None = None,
+    gpu_request: str | None = None,
+    devices: Iterable[DeviceSpec | dict] | None = None,
     egress_allow: list[str] | None = None,
     egress_deny: list[str] | None = None,
     mucli_source_path: str | None = None,
@@ -210,6 +223,9 @@ def build_container(
     registry = registry or ContainerRegistry()
     _report(progress, "checking_docker", "Checking Docker and container configuration…")
     docker = runner.require("docker")
+    normalized_gpu, parsed_devices = validate_hardware(
+        gpu_request, devices, runner=runner
+    )
     slug = container_slug(name)
     managed_name = slug if slug.startswith("mucli-") else f"mucli-{slug}"
     source_path = os.path.abspath(mucli_source_path or _default_source_path())
@@ -241,6 +257,8 @@ def build_container(
         image=image,
         dockerfile_hash=dockerfile_hash,
         mounts=parsed_mounts,
+        gpu_request=normalized_gpu,
+        devices=parsed_devices,
         egress_allow=list(dict.fromkeys(egress_allow or DEFAULT_EGRESS_ALLOW)),
         egress_deny=list(dict.fromkeys(egress_deny or [])),
         network_name=network_name,

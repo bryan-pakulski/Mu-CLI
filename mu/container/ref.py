@@ -38,6 +38,43 @@ class MountSpec:
         )
 
 
+@dataclass(frozen=True)
+class DeviceSpec:
+    """One explicit Docker ``--device`` mapping.  MUCLI_CONTAINER_HARDWARE_V1"""
+
+    host_path: str
+    container_path: str = ""
+    permissions: str = "rwm"
+
+    def __post_init__(self):
+        host = str(self.host_path or "").strip()
+        container = str(self.container_path or host).strip()
+        permissions = "".join(ch for ch in "rwm" if ch in str(self.permissions or ""))
+        if not host or not container:
+            raise ValueError("device paths are required")
+        if not permissions or any(ch not in "rwm" for ch in str(self.permissions or "")):
+            raise ValueError("device permissions must contain only r, w, and m")
+        object.__setattr__(self, "host_path", host)
+        object.__setattr__(self, "container_path", container)
+        object.__setattr__(self, "permissions", permissions)
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "host_path": self.host_path,
+            "container_path": self.container_path,
+            "permissions": self.permissions,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "DeviceSpec":
+        host = str(value.get("host_path") or value.get("path") or "")
+        return cls(
+            host_path=host,
+            container_path=str(value.get("container_path") or host),
+            permissions=str(value.get("permissions") or value.get("cgroup_permissions") or "rwm"),
+        )
+
+
 @dataclass
 class ContainerRef:
     container_id: str
@@ -45,6 +82,8 @@ class ContainerRef:
     image: str
     dockerfile_hash: str
     mounts: list[MountSpec] = field(default_factory=list)
+    gpu_request: str = ""
+    devices: list[DeviceSpec] = field(default_factory=list)
     egress_allow: list[str] = field(default_factory=list)
     egress_deny: list[str] = field(default_factory=list)
     network_name: str = ""
@@ -85,5 +124,10 @@ class ContainerRef:
             item if isinstance(item, MountSpec) else MountSpec.from_dict(item)
             for item in data.get("mounts", [])
         ]
+        data["devices"] = [
+            item if isinstance(item, DeviceSpec) else DeviceSpec.from_dict(item)
+            for item in data.get("devices", [])
+        ]
+        data["gpu_request"] = str(data.get("gpu_request") or "")
         allowed = {field.name for field in cls.__dataclass_fields__.values()}
         return cls(**{key: val for key, val in data.items() if key in allowed})

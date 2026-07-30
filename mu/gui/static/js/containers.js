@@ -1,7 +1,8 @@
 (() => {
   const state = {
     containers: [], templates: [], defaults: null, shell: null,
-    jobTimer: null, lastLogSeq: 0, mounts: [], editingName: null,
+    jobTimer: null, lastLogSeq: 0, mounts: [], devices: [], editingName: null,
+    hardware: null, // MUCLI_CONTAINER_HARDWARE_V1
   };
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -20,6 +21,7 @@
     state.containers = listing.containers || [];
     state.templates = listing.templates || [];
     state.defaults = defaults;
+    state.hardware = defaults.hardware || null;
     render();
   }
 
@@ -71,6 +73,7 @@
   function resetForm() {
     state.editingName = null;
     state.mounts = [];
+    state.devices = [];
     $('environment-name').disabled = false;
     $('environment-name').value = '';
     $('environment-source').value = 'dockerfile';
@@ -78,13 +81,18 @@
     $('environment-dockerfile').value = state.defaults?.dockerfile || '';
     $('environment-allow').value = (state.defaults?.egress_allow || []).join('\n');
     $('environment-deny').value = (state.defaults?.egress_deny || []).join('\n');
+    $('environment-gpu-mode').value = 'none';
+    $('environment-gpu-selection').value = '';
+    $('environment-device-host').value = '';
+    $('environment-device-target').value = '';
+    $('environment-device-permissions').value = 'rwm';
     $('environment-start').checked = true;
     $('environment-error').textContent = '';
     $('environment-kicker').textContent = 'New environment';
     $('environment-modal-title').textContent = 'Create environment';
     $('environment-modal-description').textContent = 'Standalone containers are not tied to a session.';
     $('submit-environment').textContent = 'create';
-    syncSource(); renderMounts(); updateSummaries();
+    syncSource(); renderMounts(); renderHardware(); updateSummaries();
   }
 
   function applyConfiguration(config, {editing = false, clone = false} = {}) {
@@ -99,6 +107,10 @@
     $('environment-allow').value = (config.egress_allow || state.defaults?.egress_allow || []).join('\n');
     $('environment-deny').value = (config.egress_deny || []).join('\n');
     state.mounts = (config.mounts || []).map(item => ({...item}));
+    state.devices = (config.devices || []).map(item => ({...item}));
+    const gpuRequest = String(config.gpu_request || '');
+    $('environment-gpu-mode').value = gpuRequest === 'all' ? 'all' : (gpuRequest ? 'selected' : 'none');
+    $('environment-gpu-selection').value = gpuRequest.replace(/^device=/, '');
     if (editing) {
       $('environment-kicker').textContent = 'Managed environment';
       $('environment-modal-title').textContent = `Edit ${sourceName}`;
@@ -109,7 +121,7 @@
       $('environment-modal-title').textContent = `Clone ${sourceName}`;
       $('environment-modal-description').textContent = 'Review the copied configuration and choose a new name.';
     }
-    syncSource(); renderMounts(); updateSummaries(); show('create-modal');
+    syncSource(); renderMounts(); renderHardware(); updateSummaries(); show('create-modal');
   }
 
   function openCreate(templateName = '') {
@@ -160,6 +172,45 @@
     });
   }
 
+  function renderHardware() {
+    const gpu = (state.hardware && state.hardware.gpu) || {};
+    const supported = Boolean(gpu.supported);
+    const mode = $('environment-gpu-mode').value;
+    $('environment-gpu-mode').querySelectorAll('option').forEach(option => {
+      if (option.value !== 'none') option.disabled = !supported;
+    });
+    if (!supported && mode !== 'none') $('environment-gpu-mode').value = 'none';
+    $('environment-gpu-selection-row').hidden = $('environment-gpu-mode').value !== 'selected';
+    $('hardware-capability').textContent = gpu.reason || 'GPU capability was not detected.';
+    const candidates = (state.hardware && state.hardware.devices) || [];
+    $('environment-device-preset').innerHTML = '<option value="">Detected device…</option>' + candidates.map(item =>
+      `<option value="${esc(item.host_path)}">${esc(item.name || item.host_path)} · ${esc(item.kind || 'device')}</option>`
+    ).join('');
+    $('environment-device-list').innerHTML = state.devices.length ? state.devices.map((device, index) =>
+      `<div class="manager-device-row"><span>⌁</span><div><strong>${esc(device.container_path)}</strong><small>${esc(device.host_path)} · ${esc(device.permissions || 'rwm')}</small></div><button data-remove-device="${index}" class="icon-btn">×</button></div>`
+    ).join('') : '<div class="manager-mount-empty">No host devices attached.</div>';
+    updateHardwareSummary();
+  }
+
+  function updateHardwareSummary() {
+    const mode = $('environment-gpu-mode').value;
+    const gpuText = mode === 'all' ? 'all GPUs' : mode === 'selected' ? `GPU ${$('environment-gpu-selection').value || 'selection required'}` : 'no GPU';
+    $('hardware-summary').textContent = `${gpuText} · ${state.devices.length} device${state.devices.length === 1 ? '' : 's'}`;
+  }
+
+  function addDevice() {
+    const preset = $('environment-device-preset').value;
+    const host = ($('environment-device-host').value.trim() || preset).trim();
+    const target = ($('environment-device-target').value.trim() || host).trim();
+    if (!host || !target) return;
+    if (state.devices.some(item => item.host_path === host || item.container_path === target)) return;
+    state.devices.push({host_path: host, container_path: target, permissions: $('environment-device-permissions').value || 'rwm'});
+    $('environment-device-host').value = '';
+    $('environment-device-target').value = '';
+    $('environment-device-preset').value = '';
+    renderHardware();
+  }
+
   function updateSummaries() {
     $('dockerfile-summary').textContent = `${$('environment-dockerfile').value.split('\n').filter(Boolean).length} lines · editable worker image`;
     $('network-summary').textContent = `${splitLines($('environment-allow').value).length} allowed · ${splitLines($('environment-deny').value).length} blocked`;
@@ -172,6 +223,8 @@
       template_name: useTemplate ? $('environment-template').value : null,
       dockerfile: useTemplate ? null : $('environment-dockerfile').value,
       mounts: state.mounts,
+      gpu_request: $('environment-gpu-mode').value === 'all' ? 'all' : ($('environment-gpu-mode').value === 'selected' && $('environment-gpu-selection').value.trim() ? `device=${$('environment-gpu-selection').value.trim()}` : ''),
+      devices: state.devices,
       egress_allow: useTemplate ? null : splitLines($('environment-allow').value),
       egress_deny: useTemplate ? null : splitLines($('environment-deny').value),
       start: $('environment-start').checked,
@@ -237,6 +290,7 @@
   document.addEventListener('click', async event => {
     const close = event.target.closest('[data-close]'); if (close) { hide(close.dataset.close); updateSummaries(); return; }
     const removeMount = event.target.closest('[data-remove-mount]'); if (removeMount) { state.mounts.splice(Number(removeMount.dataset.removeMount), 1); renderMounts(); return; }
+    const removeDevice = event.target.closest('[data-remove-device]'); if (removeDevice) { state.devices.splice(Number(removeDevice.dataset.removeDevice), 1); renderHardware(); return; }
     const button = event.target.closest('[data-action]');
     if (button) {
       const {action: actionName, name, session} = button.dataset;
@@ -288,6 +342,16 @@
   $('refresh-containers').addEventListener('click', load);
   $('environment-source').addEventListener('change', syncSource);
   $('add-environment-mount').addEventListener('click', addMountFromBrowser);
+  $('add-environment-device').addEventListener('click', addDevice);
+  $('environment-gpu-mode').addEventListener('change', renderHardware);
+  $('environment-gpu-selection').addEventListener('input', updateHardwareSummary);
+  $('environment-device-preset').addEventListener('change', event => {
+    const value = event.target.value;
+    if (value) {
+      $('environment-device-host').value = value;
+      $('environment-device-target').value = value;
+    }
+  });
   $('edit-dockerfile').addEventListener('click', () => { $('editor-title').textContent='Dockerfile'; $('dockerfile-editor-panel').hidden=false; $('network-editor-panel').hidden=true; show('editor-modal'); });
   $('edit-network').addEventListener('click', () => { $('editor-title').textContent='Network policy'; $('dockerfile-editor-panel').hidden=true; $('network-editor-panel').hidden=false; show('editor-modal'); });
   $('submit-environment').addEventListener('click', submitEnvironment);

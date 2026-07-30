@@ -162,6 +162,115 @@ def _prompt_mounts(current: list[dict[str, str]]) -> list[dict[str, str]]:
     return mounts
 
 
+# MUCLI_CONTAINER_HARDWARE_V1
+def _prompt_hardware(
+    supervisor: ContainerSupervisor,
+    current: dict[str, Any] | None = None,
+) -> tuple[str, list[dict[str, str]]]:
+    """Interactive hardware configuration shared by session and host managers."""
+    current = dict(current or {})
+    capability = supervisor.hardware_capabilities()
+    gpu = dict(capability.get("gpu") or {})
+    existing_gpu = str(current.get("gpu_request") or "")
+    console.print("\n[bold cyan]Hardware[/bold cyan]")
+    console.print(f"[dim]GPU → {gpu.get('reason') or 'not detected'}[/dim]")
+
+    gpu_options = [("none", "No GPU", "Do not attach host GPUs")]
+    if gpu.get("supported"):
+        gpu_options.extend([
+            ("all", "All GPUs", "Expose every detected NVIDIA GPU"),
+            ("selected", "Selected GPUs", "Choose indexes or UUIDs"),
+        ])
+    default_gpu = "all" if existing_gpu == "all" and gpu.get("supported") else (
+        "selected" if existing_gpu and gpu.get("supported") else "none"
+    )
+    gpu_mode = prompt_choice("GPU access", gpu_options, default=default_gpu)
+    if gpu_mode == "all":
+        gpu_request = "all"
+    elif gpu_mode == "selected":
+        inventory = gpu.get("devices") or []
+        for item in inventory:
+            console.print(
+                f"  {item.get('index')} · {item.get('name')} · {item.get('uuid')}",
+                markup=False,
+            )
+        previous = existing_gpu.replace("device=", "")
+        selected = Prompt.ask("GPU indexes or UUIDs (comma-separated)", default=previous).strip()
+        gpu_request = f"device={selected}" if selected else ""
+    else:
+        gpu_request = ""
+
+    devices = [dict(item) for item in (current.get("devices") or [])]
+    if devices:
+        console.print("[dim]Current device mappings:[/dim]")
+        for item in devices:
+            console.print(
+                f"  {item.get('host_path')} → {item.get('container_path')} "
+                f"({item.get('permissions', 'rwm')})",
+                markup=False,
+            )
+        action = prompt_choice(
+            "Device mappings",
+            [
+                ("keep", "Keep devices", "Leave current device mappings unchanged"),
+                ("add", "Add device", "Attach another host device"),
+                ("clear", "Clear devices", "Remove all device mappings"),
+            ],
+            default="keep",
+        )
+        if action == "keep":
+            return gpu_request, devices
+        if action == "clear":
+            devices = []
+            if not prompt_confirm("Add a device now?", default=False):
+                return gpu_request, devices
+    elif not prompt_confirm("Attach a host device?", default=False):
+        return gpu_request, devices
+
+    discovered = capability.get("devices") or []
+    while True:
+        choices = [
+            (
+                str(item.get("host_path")),
+                str(item.get("name") or item.get("host_path")),
+                str(item.get("kind") or "device"),
+            )
+            for item in discovered
+        ]
+        choices.extend([
+            ("__custom__", "Custom path", "Enter another /dev path"),
+            ("__done__", "Done", "Finish hardware configuration"),
+        ])
+        selected = prompt_choice("Host device", choices, default="__done__")
+        if selected == "__done__":
+            break
+        host_path = (
+            Prompt.ask("Host device path", default="/dev/video0").strip()
+            if selected == "__custom__"
+            else selected
+        )
+        if not host_path:
+            continue
+        container_path = Prompt.ask("Container device path", default=host_path).strip()
+        permissions = prompt_choice(
+            "Device permissions",
+            [
+                ("r", "Read", "Read only"),
+                ("rw", "Read/write", "Read and write"),
+                ("rwm", "Read/write/mknod", "Full Docker device permissions"),
+            ],
+            default="rwm",
+        )
+        devices.append({
+            "host_path": host_path,
+            "container_path": container_path or host_path,
+            "permissions": permissions,
+        })
+        if not prompt_confirm("Attach another device?", default=False):
+            break
+    return gpu_request, devices
+
+
 def _select_existing_container(supervisor: ContainerSupervisor):
     refs = supervisor.registry.list_containers()
     if not refs:
@@ -230,6 +339,7 @@ def configure_tui_container(
             "egress_allow": list(template.egress_allow if template else DEFAULT_EGRESS_ALLOW),
             "egress_deny": list(template.egress_deny if template else []),
         }
+        config["gpu_request"], config["devices"] = _prompt_hardware(supervisor, config)
 
     if source == "existing":
         ref = _select_existing_container(supervisor)
@@ -241,6 +351,8 @@ def configure_tui_container(
                 "dockerfile": None,
                 "template_name": ref.template_name or None,
                 "mounts": [mount.to_dict() for mount in ref.mounts],
+                "gpu_request": ref.gpu_request,
+                "devices": [item.to_dict() for item in ref.devices],
                 "egress_allow": list(ref.egress_allow),
                 "egress_deny": list(ref.egress_deny),
             }
@@ -256,6 +368,7 @@ def configure_tui_container(
         config["dockerfile"] = dockerfile
 
         config["mounts"] = _prompt_mounts(list(config.get("mounts") or []))
+        config["gpu_request"], config["devices"] = _prompt_hardware(supervisor, config)
 
         allow = _domain_list(config.get("egress_allow"), DEFAULT_EGRESS_ALLOW)
         console.print(f"[dim]egress allowlist → {', '.join(allow) or 'empty'}[/dim]")
@@ -330,6 +443,7 @@ def _prompt_environment_config(
     source = prompt_choice("Environment base", source_options, default=source_default)
     name = Prompt.ask("Environment name", default=default_name or current.get("container_name") or "sandbox").strip()
     result: dict[str, Any] = {"container_name": name, "mounts": _prompt_mounts(list(current.get("mounts") or []))}
+    result["gpu_request"], result["devices"] = _prompt_hardware(supervisor, current)
     if source == "template":
         names = [item.name for item in templates]
         template_name = prompt_choice(
@@ -380,6 +494,8 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
                     dockerfile=config.get("dockerfile"),
                     template_name=config.get("template_name"),
                     mounts=config.get("mounts"),
+                    gpu_request=config.get("gpu_request"),
+                    devices=config.get("devices"),
                     egress_allow=config.get("egress_allow"),
                     egress_deny=config.get("egress_deny"),
                     start=True,
@@ -461,13 +577,15 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
                     supervisor.reconfigure_environment(
                         ref.name,
                         dockerfile=updated.get("dockerfile"), template_name=updated.get("template_name"),
-                        mounts=updated.get("mounts"), egress_allow=updated.get("egress_allow"),
+                        mounts=updated.get("mounts"), gpu_request=updated.get("gpu_request"),
+                        devices=updated.get("devices"), egress_allow=updated.get("egress_allow"),
                         egress_deny=updated.get("egress_deny"), start=True, progress=_progress,
                     )
                 else:
                     supervisor.create_environment(
                         container_name=updated["container_name"], dockerfile=updated.get("dockerfile"),
                         template_name=updated.get("template_name"), mounts=updated.get("mounts"),
+                        gpu_request=updated.get("gpu_request"), devices=updated.get("devices"),
                         egress_allow=updated.get("egress_allow"), egress_deny=updated.get("egress_deny"),
                         start=True, progress=_progress,
                     )
@@ -514,6 +632,8 @@ def ensure_tui_container(session: Any) -> Any:
         dockerfile=config.get("dockerfile"),
         template_name=config.get("template_name"),
         mounts=list(config.get("mounts") or []),
+        gpu_request=config.get("gpu_request"),
+        devices=list(config.get("devices") or []),
         egress_allow=list(config.get("egress_allow") or DEFAULT_EGRESS_ALLOW),
         egress_deny=list(config.get("egress_deny") or []),
         supervisor_url="",
@@ -526,6 +646,8 @@ def ensure_tui_container(session: Any) -> Any:
                 "dockerfile": config.get("dockerfile"),
                 "template_name": ref.template_name or config.get("template_name"),
                 "mounts": [m.to_dict() for m in ref.mounts],
+                "gpu_request": ref.gpu_request,
+                "devices": [item.to_dict() for item in ref.devices],
                 "egress_allow": list(ref.egress_allow),
                 "egress_deny": list(ref.egress_deny),
             }

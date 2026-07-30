@@ -39,6 +39,25 @@
                     <div class="manager-mounts-head"><div><strong>Folder mounts</strong><small>Choose host folders with the MuCLI browser.</small></div><button type="button" id="add-environment-mount">add folder</button></div>
                     <div id="environment-mount-list" class="manager-mount-list"></div>
                 </div>
+                <section class="manager-hardware" aria-labelledby="hardware-title">
+                    <div class="manager-mounts-head"><div><strong id="hardware-title">Hardware</strong><small id="hardware-summary">No GPU or host devices attached.</small></div><span aria-hidden="true">⌁</span></div>
+                    <div class="manager-hardware-grid">
+                        <label>GPU access
+                            <select id="environment-gpu-mode"><option value="none">None</option><option value="all">All detected GPUs</option><option value="selected">Selected GPUs</option></select>
+                        </label>
+                        <label id="environment-gpu-selection-row" hidden>GPU indexes or UUIDs<input id="environment-gpu-selection" placeholder="0,1 or GPU-uuid"></label>
+                    </div>
+                    <p class="manager-hardware-capability" id="hardware-capability"></p>
+                    <div id="environment-device-list" class="manager-device-list"></div>
+                    <div class="manager-device-add">
+                        <select id="environment-device-preset"><option value="">Detected device…</option></select>
+                        <input id="environment-device-host" placeholder="/dev/video0">
+                        <input id="environment-device-target" placeholder="Container path">
+                        <select id="environment-device-permissions"><option value="r">r</option><option value="rw">rw</option><option value="rwm" selected>rwm</option></select>
+                        <button type="button" id="add-environment-device">add device</button>
+                    </div>
+                    <p class="manager-hardware-warning">MUCLI_CONTAINER_HARDWARE_V1: Device passthrough grants direct access to selected host hardware.</p>
+                </section>
                 <button id="edit-network" class="manager-expand-card"><span><strong>Network policy</strong><small id="network-summary">default allowlist · empty blocklist</small></span><span>edit ↗</span></button>
                 <label class="manager-check"><input type="checkbox" id="environment-start" checked> Start after creation</label>
                 <div id="environment-error" class="manager-error"></div>

@@ -12,7 +12,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { ProviderInfo, providersApi } from '../api/providers';
 import { containersApi, ManagedContainer, ContainerTemplateSummary } from '../api/containers';
-import { ContainerMount, SessionType, sessionsApi } from '../api/sessions';
+import {
+  ContainerDevice,
+  ContainerHardwareCapabilities,
+  ContainerMount,
+  SessionType,
+  sessionsApi,
+} from '../api/sessions';
+import { ContainerHardwareSection } from './ContainerHardwareSection'; // MUCLI_CONTAINER_HARDWARE_V1
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
@@ -61,6 +68,9 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const [mountHost, setMountHost] = useState('');
   const [mountTarget, setMountTarget] = useState('/workspace/project');
   const [mountMode, setMountMode] = useState<'rw' | 'ro'>('rw');
+  const [hardware, setHardware] = useState<ContainerHardwareCapabilities | null>(null);
+  const [gpuRequest, setGpuRequest] = useState('');
+  const [devices, setDevices] = useState<ContainerDevice[]>([]);
   const [containerEditor, setContainerEditor] = useState<EditorMode>(null);
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState('');
@@ -72,7 +82,8 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const reset = useCallback(() => {
     setStep(1); setSessionType('workspace'); setName(''); setWorkspace(''); setProvider(''); setModels([]); setModel('');
     setOllamaMode('local'); setOllamaApiKey(''); setContainerSource('new'); setExistingContainer(''); setContainerName('');
-    setTemplateName(''); setMounts([]); setMountHost(''); setMountTarget('/workspace/project'); setMountMode('rw'); setContainerEditor(null);
+    setTemplateName(''); setMounts([]); setMountHost(''); setMountTarget('/workspace/project'); setMountMode('rw');
+    setHardware(null); setGpuRequest(''); setDevices([]); setContainerEditor(null);
     setCreating(false); setProgress(''); setProgressLogs([]); setProgressExpanded(false); setProgressFailed(false); setError(null);
   }, []);
 
@@ -92,6 +103,7 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
       setDockerfile(defaults.dockerfile || '');
       setEgressAllow((defaults.egress_allow || []).join('\n'));
       setEgressDeny((defaults.egress_deny || []).join('\n'));
+      setHardware(defaults.hardware || null);
     } catch (cause) {
       setError(`Could not load session options: ${String(cause)}`);
     }
@@ -173,6 +185,8 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
           templateName: templateName || undefined,
           dockerfile: templateName ? undefined : dockerfile,
           mounts,
+          gpuRequest,
+          devices,
           egressAllow: splitLines(egressAllow),
           egressDeny: splitLines(egressDeny),
         } : undefined,
@@ -235,13 +249,14 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
                 <WorkspacePathField value={mountHost} onChangeText={value => { setMountHost(value); const base=value.split('/').filter(Boolean).pop(); if(base)setMountTarget(`/workspace/${base}`); }} placeholder="Browse a host folder" />
                 <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.textDim} style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift, marginTop: 8 }]} />
                 <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment label="RW" selected={mountMode === 'rw'} onPress={() => setMountMode('rw')} compact /><Segment label="RO" selected={mountMode === 'ro'} onPress={() => setMountMode('ro')} compact /></View><TouchableOpacity onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addMount, { backgroundColor: mountHost.trim() && mountTarget.trim() ? colors.accent : colors.bgHover }]}><Ionicons name="add" size={18} color={mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim} /><Text variant="xs" style={{ color: mountHost.trim() && mountTarget.trim() ? colors.accentText : colors.textDim, fontWeight: '700' }}>Add folder</Text></TouchableOpacity></View>
+                <ContainerHardwareSection capabilities={hardware} gpuRequest={gpuRequest} onGpuRequestChange={setGpuRequest} devices={devices} onDevicesChange={setDevices} />
               </>}
             </> : null}
           </> : null}
 
           {step === 4 ? <>
             <Text variant="sm" dim style={styles.intro}>Review the configuration before MuCLI creates and loads the session.</Text>
-            <View style={[styles.review, { borderColor: colors.border }]}><Review label="Session" value={name} /><Review label="Type" value={sessionType} /><Review label="Provider" value={`${provider} · ${model}`} />{sessionType === 'workspace' ? <Review label="Workspace" value={workspace || 'none'} /> : null}{sessionType === 'container' ? <Review label="Container" value={containerSource === 'existing' ? `Attach · ${existingContainer}` : `Create · ${containerName}`} /> : null}</View>
+            <View style={[styles.review, { borderColor: colors.border }]}><Review label="Session" value={name} /><Review label="Type" value={sessionType} /><Review label="Provider" value={`${provider} · ${model}`} />{sessionType === 'workspace' ? <Review label="Workspace" value={workspace || 'none'} /> : null}{sessionType === 'container' ? <Review label="Container" value={containerSource === 'existing' ? `Attach · ${existingContainer}` : `Create · ${containerName}`} /> : null}{sessionType === 'container' && containerSource === 'new' ? <Review label="Hardware" value={`${gpuRequest ? `GPU ${gpuRequest}` : 'No GPU'} · ${devices.length} device${devices.length === 1 ? '' : 's'}`} /> : null}</View>
             {(creating || progressFailed) && sessionType === 'container' ? (
               <ContainerBuildProgress
                 message={progress}

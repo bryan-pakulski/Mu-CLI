@@ -90,7 +90,10 @@ const PANEL_SCREENS: {
 ];
 
 function ChatScreenWithChrome() {
-  const { isConnected, activeSessionName, setActiveSession } = useConnectionStore();
+  const isConnected = useConnectionStore(state => state.isConnected);
+  const baseUrl = useConnectionStore(state => state.baseUrl);
+  const activeSessionName = useConnectionStore(state => state.activeSessionName);
+  const setActiveSession = useConnectionStore(state => state.setActiveSession);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [containersOpen, setContainersOpen] = useState(false);
@@ -107,20 +110,25 @@ function ChatScreenWithChrome() {
 
   useEffect(() => {
     if (!isConnected) return;
-    let cancelled = false;
-    sessionsApi.list()
+    const controller = new AbortController();
+    sessionsApi.list({ signal: controller.signal, timeoutMs: 8_000 })
       .then(response => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
+        const selected = useConnectionStore.getState().activeSessionName;
+        // Keep a valid user-selected session. Bootstrap from server focus only
+        // when mobile has no usable selection; do not run a focus tug-of-war.
+        if (selected && response.loaded.includes(selected)) return;
         const current = response.current && response.loaded.includes(response.current)
           ? response.current
-          : null;
-        if (current !== activeSessionName) setActiveSession(current);
+          : response.loaded[0] || null;
+        setActiveSession(current);
       })
       .catch(() => {
-        // The connection screen owns transport errors.
+        // The connection screen owns transport errors. A timeout must not
+        // replace the navigator or clear a previously usable session.
       });
-    return () => { cancelled = true; };
-  }, [activeSessionName, isConnected, setActiveSession]);
+    return () => controller.abort();
+  }, [baseUrl, isConnected, setActiveSession]);
 
   return (
     <EdgeSwipeView onSwipeFromLeft={openSessions} onSwipeFromRight={openMode}>

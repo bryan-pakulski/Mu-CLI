@@ -4,7 +4,9 @@ import { sessionsApi, type SessionHistoryTurn } from '../api/sessions';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import type { ArtifactDescriptor } from '../api/artifacts';
 
-const SESSION_POLL_MS = 2500;
+const SESSION_POLL_MS = 5000;
+const MOBILE_HISTORY_TURN_LIMIT = 80;
+const MOBILE_HISTORY_ARTIFACT_LIMIT = 8;
 
 export interface ChatMessage {
   id: string;
@@ -92,6 +94,8 @@ export function useChatSession(activeSessionName: string | null) {
   const lastSessionRef = useRef<string | null>(null);
   const historyHydratedRef = useRef<string | null>(null);
   const historyRequestRef = useRef<{ sessionName: string; promise: Promise<void> } | null>(null);
+  const historyAbortRef = useRef<AbortController | null>(null);
+  const stateAbortRef = useRef<AbortController | null>(null);
   const externalWriteAtRef = useRef(0);
   const completionProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Fallback: if history_refresh doesn't arrive within 3s after
@@ -166,6 +170,8 @@ export function useChatSession(activeSessionName: string | null) {
 
   const loadHistory = useCallback(async (preserveLive = true) => {
     if (!activeSessionName) {
+      historyAbortRef.current?.abort();
+      historyAbortRef.current = null;
       historyHydratedRef.current = null;
       setMessages([]);
       setHistoryLoading(false);
@@ -181,10 +187,21 @@ export function useChatSession(activeSessionName: string | null) {
     const initialLoad = historyHydratedRef.current !== activeSessionName;
     if (initialLoad) setHistoryLoading(true);
 
+    historyAbortRef.current?.abort();
+    const controller = new AbortController();
+    historyAbortRef.current = controller;
     const request = (async () => {
       try {
-        const response = await sessionsApi.getHistory(activeSessionName);
-        if (lastSessionRef.current !== activeSessionName) return;
+        const response = await sessionsApi.getHistory(activeSessionName, {
+          signal: controller.signal,
+          timeoutMs: 15_000,
+          limitTurns: MOBILE_HISTORY_TURN_LIMIT,
+          artifactLimit: MOBILE_HISTORY_ARTIFACT_LIMIT,
+        });
+        // Yield once before converting/rendering history so a navigation press
+        // already queued by React Native is handled first.
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        if (controller.signal.aborted || lastSessionRef.current !== activeSessionName) return;
         const historyMessages = historyToMessages(response.turns || []);
         setMessages(current => {
           const hasLiveContent = current.some(message => message.origin !== 'history' || message.streaming);
@@ -208,11 +225,15 @@ export function useChatSession(activeSessionName: string | null) {
         historyHydratedRef.current = activeSessionName;
         setError(null);
       } catch (historyError) {
+        if (controller.signal.aborted) return;
         if (messagesRef.current.length === 0) {
           setError(`Could not load conversation: ${String(historyError)}`);
         }
       } finally {
-        if (initialLoad) setHistoryLoading(false);
+        if (historyAbortRef.current === controller) historyAbortRef.current = null;
+        if (initialLoad && lastSessionRef.current === activeSessionName) {
+          setHistoryLoading(false);
+        }
       }
     })();
 
@@ -226,8 +247,15 @@ export function useChatSession(activeSessionName: string | null) {
 
   const syncSessionState = useCallback(async () => {
     if (!activeSessionName) return;
+    stateAbortRef.current?.abort();
+    const controller = new AbortController();
+    stateAbortRef.current = controller;
     try {
-      const response = await sessionsApi.getActive(activeSessionName) as ActiveSessionState;
+      const response = await sessionsApi.getActive(activeSessionName, {
+        signal: controller.signal,
+        timeoutMs: 8_000,
+      }) as ActiveSessionState;
+      if (controller.signal.aborted || lastSessionRef.current !== activeSessionName) return;
       // `external_active` is a short cross-process write pulse, not evidence
       // that an agent turn is still running. Only the server-owned busy event
       // controls the mobile generating state.
@@ -248,12 +276,6 @@ export function useChatSession(activeSessionName: string | null) {
       } else {
         setWaitingForFirstToken(false);
         setActivityLabel('Thinking');
-        // When SSE is connected, skip loadHistory on busy→not-busy
-        // transitions. The server emits a `history_refresh` SSE event
-        // after persisting the session, which triggers the reload at
-        // the right time. Calling loadHistory here races the server
-        // save and replaces live messages with stale history — the
-        // view-flash / missing-final-output bug.
         if (wasBusy && sseConnectedRef.current) {
           // SSE will deliver history_refresh; skip.
         } else if (sawExternalWrite || historyHydratedRef.current !== activeSessionName) {
@@ -261,11 +283,14 @@ export function useChatSession(activeSessionName: string | null) {
         }
       }
     } catch {
+      if (controller.signal.aborted) return;
       if (busyRef.current) {
         setStreaming(true);
         setWaitingForFirstToken(true);
         setActivityLabel('Reconnecting');
       }
+    } finally {
+      if (stateAbortRef.current === controller) stateAbortRef.current = null;
     }
   }, [activeSessionName, loadHistory]);
 
@@ -449,6 +474,11 @@ export function useChatSession(activeSessionName: string | null) {
   useEffect(() => {
     subscriptionRef.current?.close();
     subscriptionRef.current = null;
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = null;
+    historyRequestRef.current = null;
+    stateAbortRef.current?.abort();
+    stateAbortRef.current = null;
     const sessionChanged = lastSessionRef.current !== activeSessionName;
     lastSessionRef.current = activeSessionName;
     if (sessionChanged) {
@@ -493,14 +523,14 @@ export function useChatSession(activeSessionName: string | null) {
         }
       },
       onClose: () => setSseConnected(false),
-    });
+    }, { sessionName: activeSessionName });
 
     void syncSessionState();
     const poll = setInterval(() => {
-      // Skip polling while SSE is connected and streaming — the event stream
-      // already drives state updates. Polling during active streaming causes
-      // unnecessary network calls and can trigger redundant history loads.
-      if (sseConnectedRef.current && busyRef.current) return;
+      // A connected event stream already carries busy, completion, prompt,
+      // artifact, and external session updates. Poll only as a disconnected
+      // recovery path so mobile does not hammer the host while an agent runs.
+      if (sseConnectedRef.current) return;
       void syncSessionState();
     }, SESSION_POLL_MS);
 
@@ -516,6 +546,10 @@ export function useChatSession(activeSessionName: string | null) {
       }
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
+      historyAbortRef.current?.abort();
+      historyAbortRef.current = null;
+      stateAbortRef.current?.abort();
+      stateAbortRef.current = null;
     };
   }, [activeSessionName, handleEvent, loadHistory, reconnectKey, syncSessionState]);
 

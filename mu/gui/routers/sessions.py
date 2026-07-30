@@ -448,14 +448,26 @@ async def container_creation_status(
 
 
 @router.get("/current/history")
-async def get_history(request: Request, session_name: Optional[str] = None):
+async def get_history(
+    request: Request,
+    session_name: Optional[str] = None,
+    limit_turns: Optional[int] = Query(default=None, ge=1, le=500),
+    artifact_limit: Optional[int] = Query(default=None, ge=0, le=100),
+):
     session = _resolve(request, session_name)
     if session is None:
         return {"name": "", "turns": []}
     sm = session.session_manager
+    total_turns = len(sm.history)
+    start_index = (
+        max(0, total_turns - limit_turns)
+        if limit_turns is not None
+        else 0
+    )
+    history_window = sm.history[start_index:]
     turns = []
     seen_visualization_ids: set[str] = set()
-    for idx, turn in enumerate(sm.history):
+    for idx, turn in enumerate(history_window, start=start_index):
         role = turn.get("role")
         parts_out = []
         for part in turn.get("parts", []):
@@ -501,8 +513,12 @@ async def get_history(request: Request, session_name: Optional[str] = None):
         _config.HISTORY_DIR, "sessions", sm.current_session_name
     )
     try:
-        artifacts = reversed(ArtifactRegistry(session_dir).list())
-        for artifact in artifacts:
+        artifacts = ArtifactRegistry(session_dir).list()
+        if artifact_limit is not None:
+            # Registry order is newest-first. Limit before reversing so mobile
+            # does not mount every historical visualization WebView at once.
+            artifacts = artifacts[:artifact_limit]
+        for artifact in reversed(artifacts):
             visualization = _visualization_from_tool_result({"artifact": artifact})
             if visualization is None:
                 continue
@@ -512,7 +528,7 @@ async def get_history(request: Request, session_name: Optional[str] = None):
             seen_visualization_ids.add(artifact_id)
             turns.append(
                 {
-                    "index": len(turns),
+                    "index": total_turns + len(turns),
                     "role": "assistant",
                     "parts": [
                         {
@@ -531,7 +547,13 @@ async def get_history(request: Request, session_name: Optional[str] = None):
     except OSError:
         pass
 
-    return {"name": sm.current_session_name, "turns": turns}
+    return {
+        "name": sm.current_session_name,
+        "turns": turns,
+        "total_turns": total_turns,
+        "start_index": start_index,
+        "has_more": start_index > 0,
+    }
 
 
 @router.get("/workspaces/suggest")

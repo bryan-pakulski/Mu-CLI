@@ -21,12 +21,11 @@ import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { SafeAreaModal } from './SafeAreaModal';
 
-const RECOVERY_POLL_MS = 2000;
-
 // ---------- helpers ------------------------------------------------------
 
 function promptMatchesSession(prompt: PendingPrompt, activeSessionName: string | null): boolean {
-  return !prompt.session_name || !activeSessionName || prompt.session_name === activeSessionName;
+  if (!activeSessionName) return false;
+  return !prompt.session_name || prompt.session_name === activeSessionName;
 }
 
 function asPendingPrompt(event: { [key: string]: unknown }): PendingPrompt | null {
@@ -91,6 +90,7 @@ export function PromptHost() {
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const [queue, setQueue] = useState<PendingPrompt[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const subscriptionRef = useRef<SSESubscription | null>(null);
 
   const mergeQueue = useCallback((incoming: PendingPrompt[]) => {
@@ -108,7 +108,7 @@ export function PromptHost() {
   }, []);
 
   const recoverPending = useCallback(async () => {
-    if (!isConnected) return;
+    if (!isConnected || !activeSessionName) return;
     try {
       const response = await promptsApi.listPending();
       const relevant = (response.pending || []).filter(
@@ -121,14 +121,16 @@ export function PromptHost() {
   }, [activeSessionName, isConnected]);
 
   useEffect(() => {
-    if (!isConnected) {
+    if (!isConnected || !activeSessionName) {
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
       setQueue([]);
+      setReviewOpen(false);
       return;
     }
 
     setQueue([]);
+    setReviewOpen(false);
     recoverPending();
     subscriptionRef.current?.close();
     subscriptionRef.current = subscribeToEvents({
@@ -143,11 +145,9 @@ export function PromptHost() {
         }
       },
       onOpen: recoverPending,
-    });
+    }, { sessionName: activeSessionName });
 
-    const poll = setInterval(recoverPending, RECOVERY_POLL_MS);
     return () => {
-      clearInterval(poll);
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
     };
@@ -155,12 +155,17 @@ export function PromptHost() {
 
   const activePrompt = queue[0] || null;
 
+  useEffect(() => {
+    setReviewOpen(false);
+  }, [activePrompt?.id]);
+
   const submit = useCallback(async (payload: Record<string, unknown>) => {
     if (!activePrompt || submitting) return;
     setSubmitting(true);
     try {
       await promptsApi.answer(activePrompt.id, payload);
       removePrompt(activePrompt.id);
+      setReviewOpen(false);
     } catch (error) {
       Alert.alert('Could not submit answer', String(error));
       recoverPending();
@@ -175,6 +180,7 @@ export function PromptHost() {
     try {
       await promptsApi.cancel(activePrompt.id);
       removePrompt(activePrompt.id);
+      setReviewOpen(false);
     } catch (error) {
       Alert.alert('Could not cancel prompt', String(error));
       recoverPending();
@@ -185,15 +191,47 @@ export function PromptHost() {
 
   if (!activePrompt) return null;
 
+  if (!reviewOpen) {
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Review pending agent input"
+        activeOpacity={0.86}
+        onPress={() => setReviewOpen(true)}
+        style={[styles.pendingBanner, { backgroundColor: colors.bgLift, borderColor: colors.border }]}
+      >
+        <View style={[styles.pendingIcon, { backgroundColor: colors.accentSoft }]}>
+          <Ionicons name="help-circle-outline" size={20} color={colors.accent} />
+        </View>
+        <View style={styles.pendingCopy}>
+          <Text variant="sm" style={{ color: colors.text, fontWeight: '700' }}>Input required</Text>
+          <Text variant="xs" dim numberOfLines={1}>Agent is waiting · tap to review</Text>
+        </View>
+        {queue.length > 1 ? (
+          <Text variant="xs" dim>{queue.length} pending</Text>
+        ) : null}
+        <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <SafeAreaModal
       visible
       transparent
       animationType="fade"
-      onRequestClose={cancel}
+      onRequestClose={() => setReviewOpen(false)}
     >
       <View style={styles.backdrop}>
         <View style={[styles.dialog, { backgroundColor: colors.bg, borderColor: colors.border }]}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Minimize pending input"
+            onPress={() => setReviewOpen(false)}
+            style={[styles.minimizeButton, { backgroundColor: colors.bgHover }]}
+          >
+            <Ionicons name="remove-outline" size={20} color={colors.textDim} />
+          </TouchableOpacity>
           <PromptBody
             prompt={activePrompt}
             submitting={submitting}
@@ -717,6 +755,37 @@ function InputBody({
 // ---------- styles -------------------------------------------------------
 
 const styles = StyleSheet.create({
+  pendingBanner: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 18,
+    zIndex: 1000,
+    elevation: 14,
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  pendingIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  pendingCopy: { flex: 1, marginHorizontal: 11 },
+  minimizeButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 2,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   backdrop: {
     flex: 1,
     justifyContent: 'center',

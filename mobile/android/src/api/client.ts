@@ -1,5 +1,7 @@
 import { useConnectionStore } from '../store/connection';
 
+export const DEFAULT_REQUEST_TIMEOUT_MS = 12_000;
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -15,34 +17,44 @@ export function baseUrl(): string {
   return useConnectionStore.getState().baseUrl;
 }
 
-function sessionParam(): string {
-  const name = useConnectionStore.getState().activeSessionName;
-  return name ? `?session_name=${encodeURIComponent(name)}` : '';
+type QueryValue = string | number | boolean | undefined;
+
+export interface RequestOptions {
+  body?: Record<string, unknown>;
+  signal?: AbortSignal;
+  query?: Record<string, QueryValue>;
+  timeoutMs?: number;
+}
+
+function timeoutMessage(timeoutMs: number): string {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  return `Request timed out after ${seconds}s`;
 }
 
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
-  opts?: {
-    body?: Record<string, unknown>;
-    signal?: AbortSignal;
-    query?: Record<string, string | number | boolean | undefined>;
-  },
+  opts?: RequestOptions,
 ): Promise<T> {
   const base = baseUrl();
   let url = `${base}${path}`;
 
-  // Append session_name query param for session-scoped endpoints
+  // Append the active session only when the caller did not provide an
+  // explicit session. This prevents stale store state from competing
+  // with session-switch and history requests.
   if (method === 'GET' || method === 'DELETE') {
     const sep = url.includes('?') ? '&' : '?';
     const sn = useConnectionStore.getState().activeSessionName;
-    if (sn && !path.includes('session_name')) {
+    const explicitSession = Object.prototype.hasOwnProperty.call(
+      opts?.query || {},
+      'session_name',
+    );
+    if (sn && !path.includes('session_name') && !explicitSession) {
       url += `${sep}session_name=${encodeURIComponent(sn)}`;
     }
   }
 
-  // Append extra query params
- if (opts?.query) {
+  if (opts?.query) {
     for (const [key, value] of Object.entries(opts.query)) {
       if (value !== undefined) {
         const sep = url.includes('?') ? '&' : '?';
@@ -58,65 +70,88 @@ async function request<T>(
     bodyStr = JSON.stringify(opts.body);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: bodyStr,
-    signal: opts?.signal,
-  });
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timedOut = false;
+  const forwardAbort = () => controller.abort();
+  if (opts?.signal?.aborted) controller.abort();
+  else opts?.signal?.addEventListener('abort', forwardAbort, { once: true });
+  const timeout = timeoutMs > 0
+    ? setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs)
+    : null;
 
-  if (!response.ok) {
-    let errorBody: unknown;
-    let errorMsg = `HTTP ${response.status}`;
-    try {
-      errorBody = await response.json();
-      if (errorBody && typeof errorBody === 'object' && 'detail' in errorBody) {
-        errorMsg = String((errorBody as Record<string, unknown>).detail);
-      }
-    } catch {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: bodyStr,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      let errorBody: unknown;
+      let errorMsg = `HTTP ${response.status}`;
       try {
-        errorBody = await response.text();
+        errorBody = await response.json();
+        if (errorBody && typeof errorBody === 'object' && 'detail' in errorBody) {
+          errorMsg = String((errorBody as Record<string, unknown>).detail);
+        }
       } catch {
-        // ignore
+        try {
+          errorBody = await response.text();
+        } catch {
+          // ignore
+        }
       }
+      throw new ApiError(response.status, errorMsg, errorBody);
     }
-    throw new ApiError(response.status, errorMsg, errorBody);
-  }
 
-  // Handle 204 No Content
-  if (response.status === 204) {
-    return undefined as T;
-  }
+    if (response.status === 204) return undefined as T;
 
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    return response.json() as Promise<T>;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return response.json() as Promise<T>;
+    }
+    return (await response.text()) as unknown as T;
+  } catch (error) {
+    if (timedOut) {
+      throw new ApiError(0, timeoutMessage(timeoutMs), { timeout: true, url });
+    }
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    opts?.signal?.removeEventListener('abort', forwardAbort);
   }
-  return (await response.text()) as unknown as T;
 }
 
 export const api = {
-  get<T>(path: string, opts?: { signal?: AbortSignal; query?: Record<string, string | number | boolean | undefined> }): Promise<T> {
+  get<T>(path: string, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('GET', path, opts);
   },
-  post<T>(path: string, body?: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<T> {
-    return request<T>('POST', path, { body, signal: opts?.signal });
+  post<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body' | 'query'>): Promise<T> {
+    return request<T>('POST', path, { ...opts, body });
   },
-  put<T>(path: string, body?: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<T> {
-    return request<T>('PUT', path, { body, signal: opts?.signal });
+  put<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body' | 'query'>): Promise<T> {
+    return request<T>('PUT', path, { ...opts, body });
   },
-  delete<T>(path: string, opts?: { signal?: AbortSignal; query?: Record<string, string | number | boolean | undefined> }): Promise<T> {
+  delete<T>(path: string, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('DELETE', path, opts);
   },
 };
 
-// Health check helper
-export async function checkHealth(baseUrl?: string): Promise<boolean> {
-  const url = (baseUrl || useConnectionStore.getState().baseUrl) + '/healthz';
+export async function checkHealth(targetBaseUrl?: string): Promise<boolean> {
+  const url = (targetBaseUrl || useConnectionStore.getState().baseUrl) + '/healthz';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
-    const resp = await fetch(url, { method: 'GET' });
+    const resp = await fetch(url, { method: 'GET', signal: controller.signal });
     return resp.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }

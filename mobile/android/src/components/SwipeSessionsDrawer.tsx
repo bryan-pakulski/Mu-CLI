@@ -29,6 +29,8 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [switchingName, setSwitchingName] = useState<string | null>(null);
 
   const swipeResponder = useMemo(
     () =>
@@ -45,10 +47,11 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await sessionsApi.list();
+      const response = await sessionsApi.list({ timeoutMs: 8_000 });
       setSessions(response.sessions);
-    } catch {
-      // The disconnected prompt handles connection failures.
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(String(error));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -64,13 +67,22 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   }, [createRequestToken]);
 
   const switchSession = async (session: SessionSummary) => {
+    if (switchingName) return;
+    setSwitchingName(session.name);
+    // Release the native modal immediately. Loading/focusing continues in the
+    // background and cannot hold the navigation surface hostage.
+    onClose();
     try {
-      if (!session.is_loaded) await sessionsApi.load(session.name);
-      else await sessionsApi.focus(session.name);
+      if (!session.is_loaded) {
+        await sessionsApi.load(session.name, undefined, undefined, { timeoutMs: 30_000 });
+      } else {
+        await sessionsApi.focus(session.name, { timeoutMs: 8_000 });
+      }
       setActiveSession(session.name);
-      onClose();
     } catch (error) {
       Alert.alert('Could not open session', String(error));
+    } finally {
+      setSwitchingName(null);
     }
   };
 
@@ -161,7 +173,12 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
             ListEmptyComponent={
               loading ? null : (
                 <View style={styles.empty}>
-                  <Text variant="sm" dim>No saved sessions</Text>
+                  <Text variant="sm" dim>{loadError || 'No saved sessions'}</Text>
+                  {loadError ? (
+                    <TouchableOpacity onPress={load} style={{ marginTop: 12 }}>
+                      <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               )
             }
@@ -179,7 +196,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 </View>
                 <View style={styles.rowCopy}>
                   <Text variant="sm" style={styles.rowName} numberOfLines={1}>{item.name}</Text>
-                  <Text variant="xs" dim>{item.is_busy ? 'Running' : item.is_loaded ? 'Loaded' : 'Saved'}{item.session_type ? ` · ${item.session_type}` : ''}</Text>
+                  <Text variant="xs" dim>{switchingName === item.name ? 'Opening…' : item.is_busy ? 'Running' : item.is_loaded ? 'Loaded' : 'Saved'}{item.session_type ? ` · ${item.session_type}` : ''}</Text>
                 </View>
                 <TouchableOpacity onPress={() => unloadSession(item)} style={styles.rowAction}>
                   <Ionicons name="remove-circle-outline" size={19} color={colors.textDim} />

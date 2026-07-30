@@ -22,6 +22,7 @@ interface Props {
 export function VisualizationCard({ artifact, sessionName }: Props) {
   const { colors } = useTheme();
   const { height: windowHeight } = useWindowDimensions();
+  const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const uri = useMemo(
@@ -36,6 +37,17 @@ export function VisualizationCard({ artifact, sessionName }: Props) {
   const openExternal = (target: string = uri) => {
     if (!/^https?:\/\//i.test(target)) return;
     void Linking.openURL(target).catch(() => setFailed(true));
+  };
+
+  const togglePreview = () => {
+    setExpanded(current => {
+      const next = !current;
+      if (next) {
+        setFailed(false);
+        setLoading(true);
+      }
+      return next;
+    });
   };
 
   return (
@@ -57,49 +69,64 @@ export function VisualizationCard({ artifact, sessionName }: Props) {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.frame, { height: frameHeight, borderColor: colors.border }]}>
-        {failed ? (
-          <View style={styles.fallback}>
-            <Ionicons name="warning-outline" size={20} color={colors.error} />
-            <Text variant="sm" dim style={styles.fallbackText}>Inline preview failed.</Text>
-            <TouchableOpacity onPress={() => openExternal()}>
-              <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Open in browser</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            <WebView
-              source={{ uri }}
-              style={styles.webview}
-              originWhitelist={['http://*', 'https://*']}
-              javaScriptEnabled
-              domStorageEnabled
-              cacheEnabled={false}
-              incognito
-              sharedCookiesEnabled={false}
-              thirdPartyCookiesEnabled={false}
-              allowFileAccess={false}
-              allowUniversalAccessFromFileURLs={false}
-              javaScriptCanOpenWindowsAutomatically={false}
-              setSupportMultipleWindows={false}
-              mixedContentMode="never"
-              onLoadEnd={() => setLoading(false)}
-              onError={() => { setLoading(false); setFailed(true); }}
-              onHttpError={() => { setLoading(false); setFailed(true); }}
-              onShouldStartLoadWithRequest={(request) => {
-                if (request.url === uri || request.url === 'about:blank') return true;
-                openExternal(request.url);
-                return false;
-              }}
-            />
-            {loading ? (
-              <View style={[styles.loading, { backgroundColor: colors.bgLift }]}>
-                <ActivityIndicator color={colors.accent} />
-              </View>
-            ) : null}
-          </>
-        )}
-      </View>
+      {!expanded ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Show interactive visualization preview"
+          onPress={togglePreview}
+          style={[styles.previewPrompt, { borderColor: colors.border }]}
+        >
+          <Ionicons name="eye-outline" size={18} color={colors.accent} />
+          <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Show interactive preview</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={[styles.frame, { height: frameHeight, borderColor: colors.border }]}>
+          {failed ? (
+            <View style={styles.fallback}>
+              <Ionicons name="warning-outline" size={20} color={colors.error} />
+              <Text variant="sm" dim style={styles.fallbackText}>Inline preview failed.</Text>
+              <TouchableOpacity onPress={() => openExternal()}>
+                <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Open in browser</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={togglePreview} style={{ marginTop: 12 }}>
+                <Text variant="sm" dim>Collapse preview</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <WebView
+                source={{ uri }}
+                style={styles.webview}
+                originWhitelist={['http://*', 'https://*']}
+                javaScriptEnabled
+                domStorageEnabled
+                cacheEnabled={false}
+                incognito
+                sharedCookiesEnabled={false}
+                thirdPartyCookiesEnabled={false}
+                allowFileAccess={false}
+                allowUniversalAccessFromFileURLs={false}
+                javaScriptCanOpenWindowsAutomatically={false}
+                setSupportMultipleWindows={false}
+                mixedContentMode="never"
+                onLoadEnd={() => setLoading(false)}
+                onError={() => { setLoading(false); setFailed(true); }}
+                onHttpError={() => { setLoading(false); setFailed(true); }}
+                onShouldStartLoadWithRequest={(request) => {
+                  if (request.url === uri || request.url === 'about:blank') return true;
+                  openExternal(request.url);
+                  return false;
+                }}
+              />
+              {loading ? (
+                <View style={[styles.loading, { backgroundColor: colors.bgLift }]}>
+                  <ActivityIndicator color={colors.accent} />
+                </View>
+              ) : null}
+            </>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -128,6 +155,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  previewPrompt: {
+    minHeight: 52,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   frame: { borderTopWidth: StyleSheet.hairlineWidth, position: 'relative' },
   webview: { flex: 1, backgroundColor: '#ffffff' },

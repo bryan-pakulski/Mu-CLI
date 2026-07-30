@@ -63,6 +63,19 @@ export interface SessionHistoryTurn {
 export interface SessionHistoryResponse {
   name: string;
   turns: SessionHistoryTurn[];
+  total_turns?: number;
+  start_index?: number;
+  has_more?: boolean;
+}
+
+export interface SessionRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface SessionHistoryOptions extends SessionRequestOptions {
+  limitTurns?: number;
+  artifactLimit?: number;
 }
 
 export interface CreateSessionOptions {
@@ -88,11 +101,23 @@ export interface WorkspaceDetailsResponse {
 // API
 export const sessionsApi = {
   getContainerDefaults: () => api.get<ContainerDefaultsResponse>('/api/container-defaults'),
-  list: () => api.get<SessionListResponse>('/api/sessions'),
-  getActive: (sessionName?: string) =>
-    api.get<Record<string, unknown>>('/api/sessions/active', { query: { session_name: sessionName } }),
-  getHistory: (sessionName?: string) =>
-    api.get<SessionHistoryResponse>('/api/sessions/current/history', { query: { session_name: sessionName } }),
+  list: (options?: SessionRequestOptions) =>
+    api.get<SessionListResponse>('/api/sessions', options),
+  getActive: (sessionName?: string, options?: SessionRequestOptions) =>
+    api.get<Record<string, unknown>>('/api/sessions/active', {
+      ...options,
+      query: { session_name: sessionName },
+    }),
+  getHistory: (sessionName?: string, options?: SessionHistoryOptions) =>
+    api.get<SessionHistoryResponse>('/api/sessions/current/history', {
+      signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
+      query: {
+        session_name: sessionName,
+        limit_turns: options?.limitTurns,
+        artifact_limit: options?.artifactLimit,
+      },
+    }),
   suggestWorkspaces: (path: string, limit: number = 12) =>
     api.get<WorkspaceSuggestionResponse>('/api/sessions/workspaces/suggest', { query: { path, limit } }),
   getWorkspace: (name: string) =>
@@ -122,10 +147,18 @@ export const sessionsApi = {
     }),
   getContainerCreationStatus: (name: string, after: number = 0) =>
     api.get<ContainerCreationStatus>(`/api/sessions/creation-status/${encodeURIComponent(name)}`, { query: { after } }),
-  load: (name: string, provider?: string, model?: string) =>
-    api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/load`, { provider, model }),
-  focus: (name: string) =>
-    api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/focus`),
+  load: (name: string, provider?: string, model?: string, options?: SessionRequestOptions) =>
+    api.post<Record<string, unknown>>(
+      `/api/sessions/${encodeURIComponent(name)}/load`,
+      { provider, model },
+      options,
+    ),
+  focus: (name: string, options?: SessionRequestOptions) =>
+    api.post<Record<string, unknown>>(
+      `/api/sessions/${encodeURIComponent(name)}/focus`,
+      undefined,
+      options,
+    ),
   unloadActive: () => api.delete<void>('/api/sessions/active'),
   detachActive: () => api.post<Record<string, unknown>>('/api/sessions/active/detach'),
   unload: (name: string) => api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/unload`),

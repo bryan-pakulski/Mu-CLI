@@ -21,6 +21,13 @@ DEFAULT_EGRESS_ALLOW = [
     "generativelanguage.googleapis.com",
     "ollama.com",
     "openaipublic.blob.core.windows.net",
+    "pypi.org",
+    "files.pythonhosted.org",
+    "pythonhosted.org",
+    "github.com",
+    "gitlab.com",
+    "*ubuntu.com",
+    "*.launchpad.net"
 ]
 DEFAULT_PROXY_PORT = 3128
 

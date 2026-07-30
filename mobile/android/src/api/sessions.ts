@@ -1,6 +1,47 @@
-import { api } from './client';
+import { api, ApiError } from './client';
 
 export type SessionType = 'chat' | 'workspace' | 'container';
+
+export interface SessionLoadProblem {
+  code: string;
+  title: string;
+  message: string;
+  resolutionSteps: string[];
+  technicalDetail: string;
+}
+
+export function describeSessionLoadError(error: unknown): SessionLoadProblem {
+  let detail: unknown = error;
+  if (error instanceof ApiError && error.body && typeof error.body === 'object') {
+    detail = (error.body as Record<string, unknown>).detail ?? error.body;
+  }
+  if (detail && typeof detail === 'object') {
+    const value = detail as Record<string, unknown>;
+    return {
+      code: String(value.code || 'session_load_failed'),
+      title: String(value.title || 'Session could not be loaded'),
+      message: String(value.message || (error instanceof Error ? error.message : 'The session could not be loaded.')),
+      resolutionSteps: Array.isArray(value.resolution_steps) ? value.resolution_steps.map(String) : [],
+      technicalDetail: String(value.technical_detail || ''),
+    };
+  }
+  return {
+    code: 'session_load_failed',
+    title: 'Session could not be loaded',
+    message: error instanceof Error ? error.message : String(error || 'Unknown session load error'),
+    resolutionSteps: [],
+    technicalDetail: '',
+  };
+}
+
+export function formatSessionLoadProblem(problem: SessionLoadProblem): string {
+  const lines = [problem.message];
+  if (problem.resolutionSteps.length) {
+    lines.push('', 'Resolution:', ...problem.resolutionSteps.map((step, index) => `${index + 1}. ${step}`));
+  }
+  if (problem.technicalDetail) lines.push('', `Technical detail: ${problem.technicalDetail}`);
+  return lines.join('\n');
+}
 
 export interface ContainerMount {
   host_path: string;

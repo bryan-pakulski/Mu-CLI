@@ -43,15 +43,23 @@ def mount_folder(
         snapshot_image = f"{ref.image}-mount-{int(time.time())}"
         runner.run([docker, "commit", ref.name, snapshot_image])
         ref.image = snapshot_image
-    runner.run([docker, "stop", "-t", "20", ref.name], check=False)
-    runner.run([docker, "rm", ref.name])
     ref.mounts.append(mount)
-    create_cmd = build_create_command(ref, environment=provider_environment())
-    create_cmd[0] = docker
-    result = runner.run(create_cmd)
-    ref.container_id = result.stdout.strip() or ref.container_id
-    runner.run([docker, "start", ref.name])
-    ref.status = "running"
+    # MUCLI_RECREATE_RECOVERY_STATE: persist enough state to rebuild if Docker
+    # fails after the old worker has been removed.
+    registry.upsert(ref)
+    try:
+        runner.run([docker, "stop", "-t", "20", ref.name], check=False)
+        runner.run([docker, "rm", ref.name])
+        create_cmd = build_create_command(ref, environment=provider_environment())
+        create_cmd[0] = docker
+        result = runner.run(create_cmd)
+        ref.container_id = result.stdout.strip() or ref.container_id
+        runner.run([docker, "start", ref.name])
+        ref.status = "running"
+    except Exception:
+        ref.status = "error"
+        registry.upsert(ref)
+        raise
     registry.upsert(ref)
     return ref
 
@@ -84,15 +92,21 @@ def attach_session_folder(
         snapshot_image = f"{ref.image}-session-{int(time.time())}"
         runner.run([docker, "commit", ref.name, snapshot_image])
         ref.image = snapshot_image
-    runner.run([docker, "stop", "-t", "20", ref.name], check=False)
-    runner.run([docker, "rm", ref.name])
     ref.attached_sessions.append(session_name)
-    create_cmd = build_create_command(ref, environment=provider_environment())
-    create_cmd[0] = docker
-    result = runner.run(create_cmd)
-    ref.container_id = result.stdout.strip() or ref.container_id
-    runner.run([docker, "start", ref.name])
-    ref.status = "running"
+    registry.upsert(ref)
+    try:
+        runner.run([docker, "stop", "-t", "20", ref.name], check=False)
+        runner.run([docker, "rm", ref.name])
+        create_cmd = build_create_command(ref, environment=provider_environment())
+        create_cmd[0] = docker
+        result = runner.run(create_cmd)
+        ref.container_id = result.stdout.strip() or ref.container_id
+        runner.run([docker, "start", ref.name])
+        ref.status = "running"
+    except Exception:
+        ref.status = "error"
+        registry.upsert(ref)
+        raise
     return registry.upsert(ref)
 
 def detach_session_folder(
@@ -128,14 +142,20 @@ def detach_session_folder(
         snapshot_image = f"{ref.image}-detach-{int(time.time())}"
         runner.run([docker, "commit", ref.name, snapshot_image])
         ref.image = snapshot_image
-    runner.run([docker, "stop", "-t", "20", ref.name], check=False)
-    runner.run([docker, "rm", ref.name])
     ref.attached_sessions = remaining
-    create_cmd = build_create_command(ref, environment=provider_environment())
-    create_cmd[0] = docker
-    result = runner.run(create_cmd)
-    ref.container_id = result.stdout.strip() or ref.container_id
-    runner.run([docker, "start", ref.name])
-    ref.status = "running"
+    registry.upsert(ref)
+    try:
+        runner.run([docker, "stop", "-t", "20", ref.name], check=False)
+        runner.run([docker, "rm", ref.name])
+        create_cmd = build_create_command(ref, environment=provider_environment())
+        create_cmd[0] = docker
+        result = runner.run(create_cmd)
+        ref.container_id = result.stdout.strip() or ref.container_id
+        runner.run([docker, "start", ref.name])
+        ref.status = "running"
+    except Exception:
+        ref.status = "error"
+        registry.upsert(ref)
+        raise
     return registry.upsert(ref)
 

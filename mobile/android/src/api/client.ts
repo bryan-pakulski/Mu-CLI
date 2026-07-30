@@ -97,7 +97,13 @@ async function request<T>(
       try {
         errorBody = await response.json();
         if (errorBody && typeof errorBody === 'object' && 'detail' in errorBody) {
-          errorMsg = String((errorBody as Record<string, unknown>).detail);
+          const structuredDetail = (errorBody as Record<string, unknown>).detail;
+          if (typeof structuredDetail === 'string') {
+            errorMsg = structuredDetail;
+          } else if (structuredDetail && typeof structuredDetail === 'object') {
+            const record = structuredDetail as Record<string, unknown>;
+            errorMsg = String(record.message || record.title || errorMsg);
+          }
         }
       } catch {
         try {

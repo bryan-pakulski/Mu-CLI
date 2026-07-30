@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 
 from mu.artifact import ArtifactRegistry
 from mu.container.docker_cli import ContainerRuntimeError
+from mu.container.load_errors import describe_container_load_error
 from mu.container.network import DEFAULT_EGRESS_ALLOW
 from mu.tools.capabilities import normalize_session_type
 
@@ -979,7 +980,12 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
                 supervisor_url=f"http://host.docker.internal:{state.port}",
             )
         except (ContainerRuntimeError, OSError, ValueError, RuntimeError) as exc:
-            raise HTTPException(status_code=500, detail=f"Container load failed: {exc}") from exc
+            failure = describe_container_load_error(
+                exc,
+                session_name=name,
+                container_name=str(config.get("container_name") or f"mucli-{name}"),
+            )
+            raise HTTPException(status_code=503, detail=failure) from exc
 
     try:
         await asyncio.to_thread(state.load_session, name=name, provider=provider, model=model)
@@ -1047,7 +1053,8 @@ async def unload_active_session(request: Request):
             )
         with state.session_lock_for(cur):
             state.unload_session(name=cur)
-        state.container_supervisor.detach(cur, stop_if_idle=True)
+        # MUCLI_CONTAINER_PERSISTENCE_V1: unloading is host-memory only.
+        # Container attachment/lifecycle changes require an explicit action.
     return {"ok": True, "active": False}
 
 
@@ -1080,7 +1087,7 @@ async def unload_named_session(name: str, request: Request):
         )
     with state.session_lock_for(name):
         state.unload_session(name=name)
-    state.container_supervisor.detach(name, stop_if_idle=True)
+    # Keep the managed container attached and available for later reload.
     return {"ok": True, "unloaded": name}
 
 

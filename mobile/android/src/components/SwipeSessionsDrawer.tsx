@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { sessionsApi, SessionSummary } from '../api/sessions';
+import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi, SessionSummary } from '../api/sessions';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
@@ -80,7 +80,8 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
       }
       setActiveSession(session.name);
     } catch (error) {
-      Alert.alert('Could not open session', String(error));
+      const problem = describeSessionLoadError(error);
+      Alert.alert(problem.title, formatSessionLoadProblem(problem));
     } finally {
       setSwitchingName(null);
     }

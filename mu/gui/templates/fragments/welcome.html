@@ -26,7 +26,7 @@
             <span class="welcome-entry-arrow">→</span>
         </button>
         <a class="welcome-entry" href="/containers">
-            <span class="welcome-entry-icon">◇</span>
+            <span class="welcome-entry-icon session-type-icon" x-html="sessionIcon('container')" aria-hidden="true"></span>
             <span class="welcome-entry-copy">
                 <strong>Container management</strong>
                 <small x-text="`${containers.length} environments · ${templates.length} templates`"></small>
@@ -52,6 +52,10 @@
                 <button class="icon-btn" @click="closeModal()" aria-label="Close">×</button>
             </header>
             <div class="welcome-modal-body session-modal-body">
+                <div class="welcome-session-load-error" x-show="error" x-cloak role="alert" aria-live="assertive">
+                    <strong>Session could not be loaded</strong>
+                    <pre x-text="error"></pre>
+                </div>
                 <template x-if="!sessions.length">
                     <div class="welcome-empty"><strong>No saved sessions</strong><span>Create one to begin.</span></div>
                 </template>
@@ -61,7 +65,7 @@
                              @keydown.enter.prevent="loadSession(s.name)"
                              @keydown.space.prevent="loadSession(s.name)"
                              :aria-label="`Open session ${s.name}`">
-                        <span class="session-kind" x-text="sessionGlyph(s.session_type)"></span>
+                        <span class="session-kind" x-html="sessionIcon(s.session_type)" aria-hidden="true"></span>
                         <div class="welcome-session-copy">
                             <strong x-text="s.name"></strong>
                             <small x-text="`${s.session_type || 'workspace'} · ${formatDate(s.modified_at)}`"></small>
@@ -112,7 +116,7 @@
                         <template x-for="option in sessionTypes" :key="option.value">
                             <button type="button" class="wizard-choice" :class="{selected: form.sessionType === option.value}"
                                     @click="form.sessionType = option.value">
-                                <span class="wizard-choice-icon" x-text="option.icon"></span>
+                                <span class="wizard-choice-icon session-type-icon" x-html="sessionIcon(option.value)" aria-hidden="true"></span>
                                 <strong x-text="option.label"></strong>
                                 <small x-text="option.detail"></small>
                             </button>
@@ -154,13 +158,13 @@
                 <!-- Step 3 -->
                 <div x-show="step === 3" x-transition.opacity.duration.180ms>
                     <template x-if="form.sessionType === 'chat'">
-                        <div class="wizard-summary-card"><span class="wizard-choice-icon">○</span><div><strong>Chat boundary</strong><p>No host filesystem or shell access. Research, memory, and artifacts remain available.</p></div></div>
+                        <div class="wizard-summary-card"><span class="wizard-choice-icon session-type-icon" x-html="sessionIcon('chat')" aria-hidden="true"></span><div><strong>Chat boundary</strong><p>No host filesystem or shell access. Research, memory, and artifacts remain available.</p></div></div>
                     </template>
                     <template x-if="form.sessionType === 'workspace'">
                         <div>
                             <p class="wizard-intro">Attach a host folder. Leave it empty for a tool-limited workspace session.</p>
                             <button type="button" class="folder-picker-button" @click="browseWorkspace()">
-                                <span>▱</span><div><strong x-text="form.workspace || 'Choose workspace folder'"></strong><small>Browse folders on the MuCLI host</small></div><span>browse</span>
+                                <span class="folder-picker-icon session-type-icon" x-html="sessionIcon('workspace')" aria-hidden="true"></span><div><strong x-text="form.workspace || 'Choose workspace folder'"></strong><small>Browse folders on the MuCLI host</small></div><span>browse</span>
                             </button>
                             <button class="subtle compact-clear" x-show="form.workspace" @click="form.workspace = ''">clear selection</button>
                         </div>
@@ -276,9 +280,9 @@ function welcomeView() {
         creationState: 'idle', creationStatus: '', creationStartedAt: 0, creationElapsed: 0,
         creationTimer: null, creationPoll: null, creationLogs: [], creationLogSeq: 0, creationLogsOpen: false,
         sessionTypes: [
-            {value:'chat', label:'Chat', icon:'○', detail:'Conversation and research without local execution.'},
-            {value:'workspace', label:'Workspace', icon:'▱', detail:'Host tools scoped to an attached folder.'},
-            {value:'container', label:'Container', icon:'◇', detail:'Isolated Docker tools with controlled egress.'},
+            {value:'chat', label:'Chat', icon:'chatbubble-ellipses-outline', detail:'Conversation and research without local execution.'},
+            {value:'workspace', label:'Workspace', icon:'folder-open-outline', detail:'Host tools scoped to an attached folder.'},
+            {value:'container', label:'Container', icon:'cube-outline', detail:'Isolated Docker tools with controlled egress.'},
         ],
         form: {},
         get stepTitle() { return ['','Choose a boundary','Select a provider','Configure access','Review and create'][this.step]; },
@@ -305,7 +309,7 @@ function welcomeView() {
         openCreate(){ this.resetForm(); const ollama=this.providers.find(x=>x.name==='ollama'); this.form.ollamaKeySet=!!(ollama&&ollama.cloud_key_set); this.modal='create'; },
         closeModal(){ if(this.creating)return; this.modal=null; },
         nextStep(){ this.error=null; if(!this.canContinue){this.error='Complete the required fields before continuing.';return;} this.step=Math.min(4,this.step+1); },
-        sessionGlyph(type){ return type==='container'?'◇':type==='chat'?'○':'▱'; },
+        sessionIcon(type){ return sessionTypeIconMarkup(type, 'session-type-svg'); },
         formatDate(value){ if(!value)return 'unknown'; try{return new Date(value).toLocaleString();}catch{return value;} },
         syncContainerName(){ if(!this.form.containerName || this.form.containerName.startsWith('mucli-')) this.form.containerName=`mucli-${this.form.name||'session'}`; },
         lineCount(value){ return String(value||'').split(/\r?\n/).filter(x=>x.trim()).length; },
@@ -321,7 +325,19 @@ function welcomeView() {
             try { let url=`/api/providers/${encodeURIComponent(this.form.provider)}/models`; if(this.form.provider==='ollama'){const q=new URLSearchParams({ollama_mode:this.form.ollamaMode}); if(this.form.ollamaApiKey)q.set('ollama_api_key',this.form.ollamaApiKey); url+=`?${q}`;} const r=await fetch(url); const d=await r.json(); this.models=d.models||[]; this.modelError=d.error||null; if(this.models.length)this.form.model=this.models[0]; }
             catch(e){this.modelError=String(e);} finally{this.loadingModels=false;}
         },
-        async loadSession(name){ this.error=null; const r=await fetch(`/api/sessions/${encodeURIComponent(name)}/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); if(!r.ok){const d=await r.json().catch(()=>({}));this.error=d.detail||`Load failed (${r.status})`;return;} location.reload(); },
+        async loadSession(name){
+            this.error=null;
+            const r=await fetch(`/api/sessions/${encodeURIComponent(name)}/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+            if(!r.ok){
+                const d=await r.json().catch(()=>({}));
+                const problem=window.describeSessionLoadError(d,`Load failed (${r.status})`);
+                this.error=`${problem.title}
+
+${problem.text}`;
+                return;
+            }
+            location.reload();
+        },
         async removeSession(name){ const r=await fetch(`/api/sessions/${encodeURIComponent(name)}`,{method:'DELETE'}); if(!r.ok){const d=await r.json().catch(()=>({}));this.error=d.detail||'Delete failed';return;} await this.load(); this.modal='sessions'; },
         splitLines(value){ return String(value||'').split(/[\n,]/).map(x=>x.trim()).filter(Boolean); },
         async createSession(){

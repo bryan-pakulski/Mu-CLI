@@ -20,6 +20,7 @@ from mu.ui.choice_picker import prompt_choice, prompt_confirm
 
 from .builder import default_dockerfile
 from .docker_cli import ContainerRuntimeError
+from .load_errors import describe_container_load_error, format_container_load_error
 from .network import DEFAULT_EGRESS_ALLOW
 from .supervisor import ContainerSupervisor
 
@@ -539,8 +540,8 @@ def ensure_tui_container(session: Any) -> Any:
 def send_tui_container_message(session: Any, text: str) -> dict[str, Any]:
     supervisor = getattr(session, "_container_supervisor", None) or ContainerSupervisor()
     session._container_supervisor = supervisor
-    ensure_tui_container(session)
     try:
+        ensure_tui_container(session)
         response = supervisor.send_sync(
             session.session_manager.current_session_name,
             text,
@@ -549,12 +550,18 @@ def send_tui_container_message(session: Any, text: str) -> dict[str, Any]:
             agent_mode=str(session.variables.get("agent_mode", "default")),
             system_instruction=session.system_instruction,
         )
-    except (ContainerRuntimeError, RuntimeError, ValueError) as exc:
+    except (ContainerRuntimeError, OSError, RuntimeError, ValueError) as exc:
+        failure = describe_container_load_error(
+            exc,
+            session_name=session.session_manager.current_session_name,
+            container_name=str((getattr(session.session_manager, "container_config", {}) or {}).get("container_name") or ""),
+        )
+        rendered = format_container_load_error(failure)
         if session.ui:
-            session.ui.show_error(str(exc))
+            session.ui.show_error(rendered)
         else:
-            console.print(f"[red]{exc}[/red]")
-        return {"status": "error", "error": str(exc)}
+            console.print(f"[red]{rendered}[/red]")
+        return {"status": "error", "error": failure.get("message"), "failure": failure}
     assistant_text = str(response.get("assistant_text") or "")
     if assistant_text and session.ui:
         session.ui.render_message("assistant", assistant_text, session.provider.model_name)

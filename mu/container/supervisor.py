@@ -56,6 +56,27 @@ class ContainerSupervisor:
                 pass
         return refs
 
+    def _validate_rebuild_inputs(
+        self,
+        *,
+        template_name: str | None,
+        mounts: list[dict] | None,
+        source_path: str | None = None,
+    ) -> None:
+        """Fail before deleting an old worker when rebuild inputs are invalid."""
+        if source_path:
+            resolved_source = os.path.abspath(os.path.expanduser(source_path))
+            if not os.path.isdir(resolved_source):
+                raise ContainerRuntimeError(
+                    f"MuCLI source directory does not exist: {resolved_source}"
+                )
+        if template_name and self.template_registry.get(template_name) is None:
+            raise ContainerRuntimeError(f"container template not found: {template_name}")
+        for item in mounts or []:
+            host_path = str((item or {}).get("host_path") or "").strip()
+            if host_path and not os.path.isdir(os.path.abspath(os.path.expanduser(host_path))):
+                raise ContainerRuntimeError(f"container bind mount is missing: {host_path}")
+
     def create_environment(
         self,
         *,
@@ -72,6 +93,11 @@ class ContainerSupervisor:
         output: OutputCallback | None = None,
     ) -> ContainerRef:
         """Create a managed environment without creating or attaching a session."""
+        self._validate_rebuild_inputs(
+            template_name=template_name,
+            mounts=mounts,
+            source_path=source_path,
+        )
         existing = self.resolve(container_name)
         if existing is not None:
             exists, _running = self._container_state(existing.name)
@@ -123,6 +149,10 @@ class ContainerSupervisor:
             raise ContainerRuntimeError(f"managed container not found: {container_name}")
         attached_sessions = list(ref.attached_sessions)
         standalone = bool(ref.standalone)
+        self._validate_rebuild_inputs(
+            template_name=template_name,
+            mounts=mounts,
+        )
         if progress is not None:
             progress("reconfiguring_container", "Stopping and recreating the managed environment…")
         self._discard_stale_registration(ref)
@@ -166,6 +196,7 @@ class ContainerSupervisor:
         report("resolving_container", "Checking for an existing managed container…")
         existing = self.resolve(container_name)
         restore_sessions: list[str] = []
+        recovery_ref: ContainerRef | None = None
         if existing is not None:
             exists, _running = self._container_state(existing.name)
             actual_proxy_ip = (
@@ -184,6 +215,12 @@ class ContainerSupervisor:
                 or int(existing.worker_port or 0) < DEFAULT_WORKER_PORT
             ):
                 restore_sessions = list(existing.attached_sessions)
+                recovery_ref = existing
+                self._validate_rebuild_inputs(
+                    template_name=template_name or existing.template_name or None,
+                    mounts=mounts if mounts is not None else [item.to_dict() for item in existing.mounts],
+                    source_path=source_path,
+                )
                 report(
                     "recovering_container",
                     "Migrating the container worker runtime and rebuilding without host privileges…",
@@ -194,22 +231,28 @@ class ContainerSupervisor:
             template = self.template_registry.get(template_name) if template_name else None
             if template_name and template is None:
                 raise ContainerRuntimeError(f"container template not found: {template_name}")
-            ref = build_container(
-                container_name,
-                dockerfile,
-                base_image=template.image if template else None,
-                template_name=template.name if template else None,
-                mounts=mounts,
-                egress_allow=egress_allow,
-                egress_deny=egress_deny,
-                mucli_source_path=source_path,
-                supervisor_url=supervisor_url,
-                session_name=session_name,
-                registry=self.registry,
-                runner=self.runner,
-                progress=progress,
-                output=output,
-            )
+            try:
+                ref = build_container(
+                    container_name,
+                    dockerfile,
+                    base_image=template.image if template else None,
+                    template_name=template.name if template else None,
+                    mounts=mounts,
+                    egress_allow=egress_allow,
+                    egress_deny=egress_deny,
+                    mucli_source_path=source_path,
+                    supervisor_url=supervisor_url,
+                    session_name=session_name,
+                    registry=self.registry,
+                    runner=self.runner,
+                    progress=progress,
+                    output=output,
+                )
+            except Exception:
+                if recovery_ref is not None:
+                    recovery_ref.status = "error"
+                    self.registry.upsert(recovery_ref)
+                raise
             for attached_name in restore_sessions:
                 if attached_name == session_name or attached_name in ref.attached_sessions:
                     continue
@@ -301,7 +344,11 @@ class ContainerSupervisor:
                 egress_network_name=ref.egress_network_name,
                 runner=self.runner,
             )
-        self.registry.remove(ref.name, force=True)
+        # MUCLI_CONTAINER_PERSISTENCE_V1: keep the durable registry
+        # record during repair. A replacement build will overwrite it; a failed
+        # build leaves enough metadata to retry without recreating the session.
+        ref.status = "rebuilding"
+        self.registry.upsert(ref)
 
     def _ensure_proxy_running(self, ref: ContainerRef) -> None:
         if not ref.proxy_name:
@@ -849,12 +896,10 @@ class ContainerSupervisor:
         return bool(ref and token and __import__("hmac").compare_digest(ref.worker_token, token))
 
     def shutdown(self) -> None:
-        # Containers are intentionally not removed.  Stop only idle workers.
-        for ref in self.registry.list_containers():
-            if not ref.attached_sessions and not ref.standalone and ref.status == "running":
-                docker = self.runner.require("docker")
-                self.runner.run([docker, "stop", "-t", "20", ref.name], check=False)
-                if ref.proxy_name:
-                    self.runner.run([docker, "stop", "-t", "10", ref.proxy_name], check=False)
-                ref.status = "stopped"
-                self.registry.upsert(ref)
+        """Leave managed Docker environments untouched on MuCLI shutdown.
+
+        Server restarts and UI lifecycle changes are not container-management
+        operations. Containers are stopped or removed only through explicit
+        container actions or session deletion.
+        """
+        return None

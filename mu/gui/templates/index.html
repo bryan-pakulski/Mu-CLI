@@ -165,12 +165,13 @@
                     + (s.modified_at ? ' — last modified ' + s.modified_at : '')
                     + ($store.sessions.isBusy(s.name) ? ' · turn in flight' : '')
                     + ($store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName ? ' · loaded' : '')">
-                <!-- Status dot: busy → pulsing accent; loaded → solid muted; cold → empty. -->
-                <span class="dot"
+                <!-- Session boundary icon mirrors the mobile app; color carries runtime status. -->
+                <span class="sidebar-session-type"
                       :class="{
                         busy: $store.sessions.isBusy(s.name),
                         loaded: $store.sessions.isLoaded(s.name) && !$store.sessions.isBusy(s.name)
                       }"
+                      x-html="sessionTypeIconMarkup(s.session_type, 'session-type-svg')"
                       aria-hidden="true"></span>
                 <span class="name" x-text="s.name"></span>
                 <span class="prompt-badge"

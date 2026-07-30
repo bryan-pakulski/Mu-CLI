@@ -344,9 +344,9 @@ def build_container(
         ref.status = "error"
         registry.upsert(ref)
         try:
+            # MUCLI_PRESERVE_CONTAINER_VOLUMES_ON_FAILURE: a failed worker/image
+            # rebuild must never destroy the user's durable home/workspace data.
             runner.run([docker, "rm", "-f", managed_name], check=False)
-            runner.run([docker, "volume", "rm", workspace_volume], check=False)
-            runner.run([docker, "volume", "rm", root_volume], check=False)
         except Exception:
             pass
         if policy is not None:

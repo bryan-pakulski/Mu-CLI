@@ -14,6 +14,7 @@ from typing import Any
 import shlex
 
 from mu.tools.capabilities import normalize_session_type
+from mu.container.load_errors import describe_container_load_error, format_container_load_error
 
 from . import CommandResult, command
 
@@ -52,6 +53,10 @@ def _load_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
     session.session_manager.switch_session(name)
     session.staged_files = []
     session.sync_runtime_state()
+    if normalize_session_type(session.variables.get("session_type")) == "container":
+        from mu.container.tui import ensure_tui_container
+
+        ensure_tui_container(session)
 
     ui = getattr(session, "ui", None)
     if ui is not None and hasattr(ui, "set_variables"):
@@ -257,7 +262,17 @@ def session_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comman
     if sub == "list":
         return _list_sessions(session, allow_prompt)
     if sub == "load":
-        return _load_session(session, rest, allow_prompt)
+        try:
+            return _load_session(session, rest, allow_prompt)
+        except Exception as exc:
+            failure = describe_container_load_error(
+                exc,
+                session_name=rest,
+                container_name=str((getattr(session.session_manager, "container_config", {}) or {}).get("container_name") or ""),
+            )
+            message = format_container_load_error(failure)
+            _emit_error(session, message, allow_prompt)
+            return CommandResult(ok=False, message=message, data={"error": failure})
     if sub == "new":
         return _new_session(session, rest, allow_prompt)
     if sub == "delete":

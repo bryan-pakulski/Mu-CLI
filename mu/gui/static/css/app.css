@@ -4873,3 +4873,83 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 .attachment-size { color:var(--text-dim); font-size:11px; }
 @media (max-width: 700px) { .attachment-popout { left:4px; right:4px; bottom:68px; } }
 
+/* Session type icons — parity with the mobile app. */
+.session-type-svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    overflow: visible;
+}
+
+.sidebar-session-type {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-right: var(--space-2);
+    border-radius: 9px;
+    color: var(--text-dimmer);
+    background: var(--bg-lift);
+    flex: 0 0 auto;
+    transition: color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+.sidebar-session-type .session-type-svg { width: 16px; height: 16px; }
+.nav-item:hover .sidebar-session-type,
+.nav-item.active .sidebar-session-type {
+    color: var(--accent);
+    background: var(--bg-hover);
+}
+.sidebar-session-type.loaded { color: var(--text-soft); }
+.sidebar-session-type.busy {
+    color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-soft);
+    animation: sessionTypeIconPulse 1.4s ease-in-out infinite;
+}
+@keyframes sessionTypeIconPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .48; }
+}
+
+.session-kind .session-type-svg,
+.wizard-choice-icon .session-type-svg {
+    width: 17px;
+    height: 17px;
+}
+.welcome-entry-icon.session-type-icon .session-type-svg {
+    width: 22px;
+    height: 22px;
+}
+.folder-picker-icon {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    color: var(--accent);
+}
+.folder-picker-icon .session-type-svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* MUCLI_CONTAINER_LOAD_ERROR_STYLE — persistent, actionable load failure. */
+.welcome-session-load-error {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    border: 1px solid color-mix(in srgb, var(--err) 45%, var(--border));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--err) 8%, var(--bg-lift));
+    color: var(--text);
+}
+.welcome-session-load-error strong { color: var(--err); font-size: 13px; }
+.welcome-session-load-error pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-soft);
+    font: 11px/1.55 var(--mono);
+}
+

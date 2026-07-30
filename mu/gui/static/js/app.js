@@ -10,6 +10,65 @@
 //
 // Bootstrap order is in DOMContentLoaded at the bottom.
 
+// MuCLI session type icons — same Ionicons used by the mobile app.
+// Kept as local inline SVG so the web GUI has no CDN or icon-font dependency.
+const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({
+    workspace: "folder-open-outline",
+    container: "cube-outline",
+    chat: "chatbubble-ellipses-outline",
+});
+
+const MUCLI_SESSION_TYPE_ICON_CONTENT = Object.freeze({
+    workspace: [
+        '<path d="M64,192V120a40,40,0,0,1,40-40h75.89a40,40,0,0,1,22.19,6.72l27.84,18.56A40,40,0,0,0,252.11,112H408a40,40,0,0,1,40,40v40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
+        '<path d="M479.9,226.55,463.68,392a40,40,0,0,1-39.93,40H88.25a40,40,0,0,1-39.93-40L32.1,226.55A32,32,0,0,1,64,192h384.1A32,32,0,0,1,479.9,226.55Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
+    ].join(""),
+    container: [
+        '<path d="M448,341.37V170.61A32,32,0,0,0,432.11,143l-152-88.46a47.94,47.94,0,0,0-48.24,0L79.89,143A32,32,0,0,0,64,170.61V341.37A32,32,0,0,0,79.89,369l152,88.46a48,48,0,0,0,48.24,0l152-88.46A32,32,0,0,0,448,341.37Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
+        '<polyline points="69 153.99 256 263.99 443 153.99" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
+        '<line x1="256" y1="463.99" x2="256" y2="263.99" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
+    ].join(""),
+    chat: [
+        '<path d="M87.48,380c1.2-4.38-1.43-10.47-3.94-14.86A42.63,42.63,0,0,0,81,361.34a199.81,199.81,0,0,1-33-110C47.64,139.09,140.72,48,255.82,48,356.2,48,440,117.54,459.57,209.85A199,199,0,0,1,464,251.49c0,112.41-89.49,204.93-204.59,204.93-18.31,0-43-4.6-56.47-8.37s-26.92-8.77-30.39-10.11a31.14,31.14,0,0,0-11.13-2.07,30.7,30.7,0,0,0-12.08,2.43L81.5,462.78A15.92,15.92,0,0,1,76.84,464a9.61,9.61,0,0,1-9.58-9.74,15.85,15.85,0,0,1,.6-3.29Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="32"/>',
+        '<circle cx="160" cy="256" r="32" fill="currentColor"/>',
+        '<circle cx="256" cy="256" r="32" fill="currentColor"/>',
+        '<circle cx="352" cy="256" r="32" fill="currentColor"/>',
+    ].join(""),
+});
+
+window.sessionTypeIconName = function sessionTypeIconName(type) {
+    const normalized = type === "container" || type === "chat" ? type : "workspace";
+    return MUCLI_SESSION_TYPE_ICON_NAMES[normalized];
+};
+
+window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = "session-type-svg") {
+    const normalized = type === "container" || type === "chat" ? type : "workspace";
+    const safeClass = String(className || "session-type-svg").replace(/[^A-Za-z0-9 _-]/g, "");
+    return `<svg class="${safeClass}" viewBox="0 0 512 512" aria-hidden="true" focusable="false">${MUCLI_SESSION_TYPE_ICON_CONTENT[normalized]}</svg>`;
+};
+
+// MUCLI_CONTAINER_PERSISTENCE_V1 — actionable session-load errors.
+window.describeSessionLoadError = function describeSessionLoadError(payload, fallbackTitle = "Session could not be loaded") {
+    const root = payload && typeof payload === "object" ? payload : {};
+    const detail = root.detail !== undefined ? root.detail : payload;
+    if (detail && typeof detail === "object") {
+        const title = String(detail.title || fallbackTitle);
+        const message = String(detail.message || "The session could not be loaded.");
+        const steps = Array.isArray(detail.resolution_steps) ? detail.resolution_steps : [];
+        const technical = String(detail.technical_detail || "").trim();
+        const lines = [message];
+        if (steps.length) {
+            lines.push("", "Resolution:", ...steps.map((step, index) => `${index + 1}. ${step}`));
+        }
+        if (technical) lines.push("", `Technical detail: ${technical}`);
+        return { title, text: lines.join("\n"), code: String(detail.code || "session_load_failed") };
+    }
+    const text = typeof detail === "string" && detail.trim()
+        ? detail.trim()
+        : fallbackTitle;
+    return { title: fallbackTitle, text, code: "session_load_failed" };
+};
+
 document.addEventListener("alpine:init", () => {
     Alpine.store("chat", {
         // Multi-session: each session has its own slot in `chats`. The
@@ -848,7 +907,9 @@ document.addEventListener("alpine:init", () => {
                     });
                     if (!r.ok) {
                         const d = await r.json().catch(() => ({}));
-                        Alpine.store("toast").show(d.detail || `Could not switch sessions (${r.status})`, "error");
+                        const problem = describeSessionLoadError(d, `Could not switch sessions (${r.status})`);
+                        Alpine.store("toast").show(`${problem.title}
+${problem.text}`, "error", 14000);
                         return;
                     }
                 } catch (e) {
@@ -876,7 +937,9 @@ document.addEventListener("alpine:init", () => {
             });
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}));
-                alert(d.detail || `Load failed (${r.status})`);
+                const problem = describeSessionLoadError(d, `Load failed (${r.status})`);
+                Alpine.store("toast").show(`${problem.title}
+${problem.text}`, "error", 16000);
                 return;
             }
             await this.load();

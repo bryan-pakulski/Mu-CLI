@@ -62,3 +62,21 @@ def test_docx_extraction_without_external_dependency(tmp_path):
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
     assert "Attachment registry works" in result["text"]
+
+
+def test_registry_has_no_upload_size_cap(tmp_path):
+    # MUCLI_UNBOUNDED_ATTACHMENT_UPLOADS_V1
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    source = tmp_path / "large.bin"
+    source.write_bytes(b"larger than the legacy explicit limit")
+
+    # The compatibility argument is deliberately ignored: file-registry
+    # storage is no longer capped by MuCLI.
+    registry = AttachmentRegistry(str(session_dir), max_bytes=1)
+    item = registry.add("large.bin", str(source), "application/octet-stream")
+
+    assert registry.max_bytes is None
+    assert item["size"] == source.stat().st_size
+    assert os.path.isfile(registry.resolve_path(item["attachment_id"]))
+

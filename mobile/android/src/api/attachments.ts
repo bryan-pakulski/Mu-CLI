@@ -1,5 +1,5 @@
 
-import { ApiError, DEFAULT_REQUEST_TIMEOUT_MS, api, baseUrl } from './client';
+import { ApiError, api, baseUrl } from './client';
 
 export interface AttachmentDescriptor {
   attachment_id: string;
@@ -36,29 +36,21 @@ export const attachmentsApi = {
     `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/attachments/${encodeURIComponent(attachmentId)}/download`,
 
   upload: async (sessionName: string, document: PickedDocument): Promise<AttachmentDescriptor> => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.max(DEFAULT_REQUEST_TIMEOUT_MS, 60_000));
+    // MUCLI_UNBOUNDED_ATTACHMENT_UPLOADS_V1: large uploads must not be aborted by a fixed client timeout.
     const form = new FormData();
     form.append('file', {
       uri: document.uri,
       name: document.name || 'attachment',
       type: document.mimeType || 'application/octet-stream',
     } as unknown as Blob);
-    try {
-      const response = await fetch(
-        `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/attachments`,
-        { method: 'POST', body: form, signal: controller.signal },
-      );
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new ApiError(response.status, String(body.detail || `Upload failed (${response.status})`), body);
-      }
-      return body.attachment as AttachmentDescriptor;
-    } catch (error) {
-      if (controller.signal.aborted) throw new ApiError(0, 'Attachment upload timed out');
-      throw error;
-    } finally {
-      clearTimeout(timeout);
+    const response = await fetch(
+      `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/attachments`,
+      { method: 'POST', body: form },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new ApiError(response.status, String(body.detail || `Upload failed (${response.status})`), body);
     }
+    return body.attachment as AttachmentDescriptor;
   },
 };

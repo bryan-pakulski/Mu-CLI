@@ -35,25 +35,25 @@ async def list_attachments(name: str, response: Response):
 async def upload_attachment(name: str, request: Request, file: UploadFile = File(...)):
     registry = _registry(name)
     suffix = os.path.splitext(file.filename or "attachment")[1][:20]
-    fd, temp_path = tempfile.mkstemp(prefix="mucli-upload-", suffix=suffix)
-    size = 0
+    # MUCLI_UNBOUNDED_ATTACHMENT_UPLOADS_V1: spool beside the registry so the completed upload can
+    # be atomically moved into place without retaining a second full-size copy.
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".mucli-upload-",
+        suffix=suffix,
+        dir=registry.attachments_dir,
+    )
     try:
         with os.fdopen(fd, "wb") as handle:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
-                size += len(chunk)
-                if size > registry.max_bytes:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"attachment exceeds {registry.max_bytes} bytes",
-                    )
                 handle.write(chunk)
         descriptor = registry.add(
             name=file.filename or "attachment",
             source_path=temp_path,
             mime_type=file.content_type or "application/octet-stream",
+            move_source=True,
         )
     except AttachmentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

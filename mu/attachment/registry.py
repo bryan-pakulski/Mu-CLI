@@ -48,11 +48,12 @@ class AttachmentRegistry:
         self.session_dir = os.path.abspath(os.path.expanduser(session_dir))
         self.attachments_dir = os.path.join(self.session_dir, "attachments")
         self.registry_path = os.path.join(self.attachments_dir, "registry.json")
-        self.max_bytes = int(
-            max_bytes
-            if max_bytes is not None
-            else os.getenv("MUCLI_ATTACHMENT_MAX_BYTES", 50 * 1024 * 1024)
-        )
+        # MUCLI_UNBOUNDED_ATTACHMENT_UPLOADS_V1
+        # ``max_bytes`` remains accepted for source compatibility with older
+        # callers, but user-file registry uploads are intentionally unbounded.
+        # Available storage and any external reverse-proxy limits are the only
+        # remaining constraints.
+        self.max_bytes: int | None = None
         self._lock = threading.RLock()
         os.makedirs(self.attachments_dir, exist_ok=True)
 
@@ -106,16 +107,19 @@ class AttachmentRegistry:
             ),
         }
 
-    def add(self, name: str, source_path: str, mime_type: str = "") -> dict[str, Any]:
+    def add(
+        self,
+        name: str,
+        source_path: str,
+        mime_type: str = "",
+        *,
+        move_source: bool = False,
+    ) -> dict[str, Any]:
         safe_name = _safe_name(name)
         source = os.path.realpath(os.path.abspath(os.path.expanduser(source_path)))
         if not os.path.isfile(source):
             raise AttachmentError(f"attachment source is not a file: {source}")
         size = os.path.getsize(source)
-        if size > self.max_bytes:
-            raise AttachmentError(
-                f"attachment is {size} bytes; maximum is {self.max_bytes} bytes"
-            )
         digest = _sha256(source)
         resolved_mime = (
             str(mime_type or "").split(";", 1)[0].strip().lower()
@@ -138,7 +142,10 @@ class AttachmentRegistry:
             target_path = os.path.join(target_dir, safe_name)
             os.makedirs(target_dir, exist_ok=False)
             try:
-                shutil.copy2(source, target_path)
+                if move_source:
+                    os.replace(source, target_path)
+                else:
+                    shutil.copy2(source, target_path)
                 descriptor = self._descriptor(
                     attachment_id,
                     safe_name,

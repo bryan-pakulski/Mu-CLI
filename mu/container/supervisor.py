@@ -457,8 +457,20 @@ class ContainerSupervisor:
                         headers={"X-MuCLI-Worker-Token": ref.worker_token},
                     )
                 if response.status_code == 200:
-                    return
-                last_error = f"HTTP {response.status_code}: {self._response_detail(response)}"
+                    payload = response.json()
+                    actual_protocol = int(
+                        payload.get("worker_protocol") or 0
+                        if isinstance(payload, dict)
+                        else 0
+                    )
+                    if actual_protocol == WORKER_PROTOCOL_VERSION:
+                        return
+                    last_error = (
+                        f"worker protocol {actual_protocol} does not match "
+                        f"required protocol {WORKER_PROTOCOL_VERSION}"
+                    )
+                else:
+                    last_error = f"HTTP {response.status_code}: {self._response_detail(response)}"
             except Exception as exc:
                 last_error = str(exc)
             time.sleep(max(0.05, float(interval)))

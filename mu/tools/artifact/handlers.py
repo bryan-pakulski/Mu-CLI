@@ -217,9 +217,12 @@ def publish_visualization_tool(args: dict[str, Any], context) -> str:
         title = str(args.get("title") or name)
         height = max(180, min(1200, int(args.get("height") or 480)))
         host_published = (
-            session_type == "container"
-            and ui is not None
+            ui is not None
             and hasattr(ui, "publish_artifact")
+            and (
+                session_type == "container"
+                or os.getenv("MUCLI_CONTAINER_MODE") == "1"
+            )
         )
 
         registry = None

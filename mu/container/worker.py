@@ -18,6 +18,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
+from mu.container.ref import WORKER_PROTOCOL_VERSION
 from mu.ui.base import BaseUI
 
 
@@ -89,12 +90,13 @@ class WorkerBridgeUI(BaseUI):
             raise RuntimeError("container supervisor URL is unavailable")
         if (source_path is None) == (content is None):
             raise RuntimeError("provide exactly one of source_path or content")
+        requested_kind = str(kind or "file").strip().lower()
         params = {
             "session_name": self.session_name,
             "container_name": self.container_name,
             "name": str(name or ""),
             "mime_type": str(mime_type or "application/octet-stream"),
-            "kind": str(kind or "file"),
+            "kind": requested_kind,
             "display": str(display or "download"),
         }
         if title:
@@ -130,6 +132,15 @@ class WorkerBridgeUI(BaseUI):
         artifact = data.get("artifact") if isinstance(data, dict) else None
         if not isinstance(artifact, dict) or not artifact.get("artifact_id"):
             raise RuntimeError("container supervisor returned an invalid artifact descriptor")
+        if requested_kind == "visualization" and (
+            artifact.get("kind") != "visualization"
+            or artifact.get("display") != "inline"
+            or not artifact.get("view_url")
+        ):
+            raise RuntimeError(
+                "container supervisor did not preserve visualization metadata; "
+                "reload the container session to upgrade its worker bridge"
+            )
         return artifact
 
     def list_artifacts(self) -> list[dict[str, Any]]:
@@ -422,6 +433,7 @@ def health(x_mucli_worker_token: str | None = Header(default=None)):
         raise HTTPException(status_code=503, detail=f"egress proxy unavailable: {proxy_detail}")
     return {
         "ok": True,
+        "worker_protocol": WORKER_PROTOCOL_VERSION,
         "container_name": os.getenv("MUCLI_CONTAINER_NAME", ""),
         "sessions": sorted(_sessions),
         "busy": sorted(name for name, event in _busy.items() if event.is_set()),

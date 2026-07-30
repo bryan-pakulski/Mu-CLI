@@ -101,3 +101,73 @@ def test_tui_prints_clickable_browser_wrapper():
     assert "def render_visualization" in source
     assert "Path(local_path).resolve().as_uri()" in source
     assert "link {url}" in source
+
+
+def test_container_worker_forwards_visualization_metadata():
+    from mu.container.worker import WorkerBridgeUI
+
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "ok": True,
+                "artifact": {
+                    "artifact_id": "viz-1",
+                    "name": "chart.html",
+                    "kind": "visualization",
+                    "display": "inline",
+                    "view_url": "/api/sessions/demo/artifacts/viz-1/view",
+                },
+            }
+
+    class Client:
+        def post(self, url, *, params, content, headers, timeout):
+            captured.update(
+                url=url,
+                params=dict(params),
+                content=content,
+                headers=dict(headers),
+                timeout=timeout,
+            )
+            return Response()
+
+    ui = WorkerBridgeUI("demo")
+    ui._client.close()
+    ui._client = Client()
+    ui.supervisor_url = "http://host.docker.internal:30311"
+    ui.container_name = "mucli-demo"
+    ui.token = "worker-token"
+
+    artifact = ui.publish_artifact(
+        name="chart.html",
+        content="<!doctype html><h1>chart</h1>",
+        mime_type="text/html",
+        kind="visualization",
+        display="inline",
+        title="Container chart",
+        height=560,
+    )
+
+    assert artifact["kind"] == "visualization"
+    assert artifact["view_url"].endswith("/viz-1/view")
+    assert captured["params"]["kind"] == "visualization"
+    assert captured["params"]["display"] == "inline"
+    assert captured["params"]["title"] == "Container chart"
+    assert captured["params"]["height"] == "560"
+    assert captured["content"].startswith(b"<!doctype html>")
+
+
+def test_container_protocol_requires_visualization_bridge_upgrade():
+    worker = read("mu/container/worker.py")
+    supervisor = read("mu/container/supervisor.py")
+    endpoint = read("mu/gui/routers/containers.py")
+    assert "WORKER_PROTOCOL_VERSION = 6" in read("mu/container/ref.py")
+    assert '"worker_protocol": WORKER_PROTOCOL_VERSION' in worker
+    assert "did not preserve visualization metadata" in worker
+    assert "actual_protocol == WORKER_PROTOCOL_VERSION" in supervisor
+    assert 'kind: str = "file"' in endpoint
+    assert "kind=kind" in endpoint

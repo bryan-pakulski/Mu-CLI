@@ -8,6 +8,22 @@ each client:
 - Mobile: sandboxed server document rendered in a native WebView card.
 - Terminal: compact Rich panel containing a clickable browser link.
 
+## Container sessions
+
+Container workers send visualization bytes and metadata to the host over the
+existing authenticated artifact control plane. The host writes the artifact to
+the authoritative session registry and emits the same `artifact_created` event
+used by non-container sessions, so web and mobile clients render it immediately.
+
+The worker protocol is versioned. Applying this change increments that version,
+so reopening or reloading a container-backed session rebuilds an older worker
+image before it can run visualization tools. The worker health check also
+verifies the protocol reported by the image rather than trusting registry state.
+
+Visualization HTML should remain self-contained. A `localhost` URL created
+inside the container refers to the container itself and is not exposed to the
+browser; publish the generated HTML file or inline HTML instead.
+
 ## Tool contract
 
 Provide exactly one of `html` or `file_path`:

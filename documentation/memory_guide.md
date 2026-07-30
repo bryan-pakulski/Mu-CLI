@@ -413,7 +413,7 @@ When `query` is empty this reproduces the original recency-only ordering exactly
 | `tool_result_cache_bytes` | `524288` | Max bytes in the tool-result sidecar cache. Mode-aware: loop/feature raise to ≥2 MB. |
 | `progress_checkpoint_every` | `0` | Fold recent history into the structured L2 summary every N iters without compacting. Loop/feature default 12; `0` disables. |
 | `recoverage_stall_threshold` | `4` | Consecutive re-coverage iterations (no concrete change) before a re-orient nudge. `0` disables. |
-| `context_token_limit` | `900000` | Token budget used for runtime context/history trimming |
+| `context_token_limit` | `480000` | Token budget used for runtime context/history trimming |
 | `context_trim_threshold` | `0.85` | Begin summarizing once runtime context reaches this fraction of the token budget |
 
 ---

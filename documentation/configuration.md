@@ -122,7 +122,7 @@ skills will trigger compaction sooner.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `context_token_limit` | int | `900000` | **Global** token cap (sum of all 7 layers + response reserve). Capped further by the provider's real context window if smaller. Changing this reratios the per-layer char budgets proportionally (see [Per-layer budgets](#per-layer-budgets)). |
+| `context_token_limit` | int | `480000` | **Global** token cap (sum of all 7 layers + response reserve). Capped further by the provider's real context window if smaller. Changing this reratios the per-layer char budgets proportionally (see [Per-layer budgets](#per-layer-budgets)). |
 | `context_trim_threshold` | float | `0.85` | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | int | `4096` | Tokens reserved for the model's reply. Tune down for small-context models (Ollama 8k). |
 | `auto_compaction_enabled` | bool | `false` | Opt in to proactive automatic history compaction. Default is model-directed cleanup with `context_status`, `checkpoint_progress`, and `compact`; provider-overflow recovery always remains enabled. |
@@ -160,10 +160,10 @@ included on a turn. All are settable via `/set` and visible in
 
 The five char-budget variables below **scale proportionally with
 `context_token_limit`** (`utils/config.py:compute_layer_char_budgets`):
-at the reference limit of `900000` each lands on its target token
+at the reference limit of `480000` each lands on its target token
 budget × 4 chars, and it never drops below an absolute floor (the
 historical minimum). So the "default" column is the value at the
-default `context_token_limit = 900000`; lowering the global cap
+default `context_token_limit = 480000`; lowering the global cap
 shrinks these toward their floors, and raising it grows them.
 
 | Variable | Type | Default | Floor | Layer | Description |

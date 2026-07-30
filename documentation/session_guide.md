@@ -43,7 +43,7 @@ is told the verbatim text is not in context.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `context_token_limit` | 900000 | Global token cap (sum of all 7 layers + response reserve). |
+| `context_token_limit` | 480000 | Global token cap (sum of all 7 layers + response reserve). |
 | `context_trim_threshold` | 0.85 | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | 4096 | Tokens reserved for the model's reply. |
 | `auto_compaction_enabled` | false | Opt in to proactive automatic compaction. Default is model-directed cleanup; hard provider-overflow recovery remains enabled. |
@@ -58,7 +58,7 @@ is told the verbatim text is not in context.
 The four char-budget variables scale proportionally with
 `context_token_limit` (`utils/config.py:compute_layer_char_budgets`);
 the "Default" column is the value at the default `context_token_limit =
-900000`, and each never drops below its floor. See
+480000`, and each never drops below its floor. See
 [configuration.md](configuration.md#per-layer-budgets) for the full table.
 
 ## Task memory and scratchpad

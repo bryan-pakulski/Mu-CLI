@@ -68,7 +68,7 @@ if not os.path.exists(LOG_DIR):
 # (the historical defaults), so smaller context windows keep usable budgets.
 TOKEN_TO_CHAR_RATIO = 4
 
-_REFERENCE_TOKEN_LIMIT = 900000
+_REFERENCE_TOKEN_LIMIT = 480000
 
 # Target token budgets at the reference limit (in tokens, not chars).
 _LAYER_TOKEN_TARGETS = {
@@ -119,7 +119,7 @@ def reratio_layer_budgets(session):
         session.variables[var_name] = chars
 
 
-_DEFAULT_CONTEXT_TOKEN_LIMIT = 900000
+_DEFAULT_CONTEXT_TOKEN_LIMIT = 480000
 _LAYER_CHAR_DEFAULTS = compute_layer_char_budgets(_DEFAULT_CONTEXT_TOKEN_LIMIT)
 
 # --- Variable Schema & Defaults ---

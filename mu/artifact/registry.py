@@ -37,7 +37,7 @@ class ArtifactRegistry:
         self.max_bytes = int(
             max_bytes
             if max_bytes is not None
-            else os.getenv("MUCLI_ARTIFACT_MAX_BYTES", 100 * 1024 * 1024)
+            else os.getenv("MUCLI_ARTIFACT_MAX_BYTES", 2000 * 1024 * 1024)
         )
         self._lock = threading.RLock()
         os.makedirs(self.artifacts_dir, exist_ok=True)

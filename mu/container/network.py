@@ -25,9 +25,12 @@ DEFAULT_EGRESS_ALLOW = [
     "files.pythonhosted.org",
     "pythonhosted.org",
     "github.com",
+    "objects.githubusercontent.com",
     "gitlab.com",
-    "*ubuntu.com",
-    "*.launchpad.net"
+    "*.ubuntu.com",
+    "*.launchpad.net",
+    "*.hf.co",
+    "*.huggingface.co",
 ]
 DEFAULT_PROXY_PORT = 3128
 

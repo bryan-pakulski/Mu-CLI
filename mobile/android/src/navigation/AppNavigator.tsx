@@ -36,6 +36,7 @@ import { LoopScreen } from '../screens/LoopScreen';
 import { DebugScreen } from '../screens/DebugScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { ShellScreen } from '../screens/ShellScreen';
+import { ArtifactsScreen } from '../screens/ArtifactsScreen';
 
 export type RootStackParamList = {
   Chat: undefined;
@@ -59,6 +60,7 @@ export type RootStackParamList = {
   Modes: undefined;
   Prompts: undefined;
   Shell: undefined;
+  Artifacts: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -87,6 +89,7 @@ const PANEL_SCREENS: {
   { name: 'Modes', title: 'Modes', component: ModesScreen },
   { name: 'Prompts', title: 'Pending prompts', component: PromptsScreen },
   { name: 'Shell', title: 'Shell', component: ShellScreen },
+  { name: 'Artifacts', title: 'Session files', component: ArtifactsScreen },
 ];
 
 function ChatScreenWithChrome() {
@@ -140,6 +143,7 @@ function ChatScreenWithChrome() {
           onOpenConnection={() => navRef.current?.navigate('Connection')}
           onOpenModes={() => activeSessionName ? navRef.current?.navigate('Modes') : openSessions()}
           onOpenProviders={() => navRef.current?.navigate('Providers')}
+          onOpenArtifacts={() => activeSessionName ? navRef.current?.navigate('Artifacts') : openSessions()}
         />
         {!isConnected ? (
           <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />

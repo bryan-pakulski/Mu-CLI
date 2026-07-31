@@ -299,6 +299,7 @@ export const CodeBlock = React.memo(function CodeBlock({ code, language, colors 
   }
 
   const onScroll = useCallback((e: any) => {
+    if (!e?.nativeEvent?.contentOffset) return;
     if (!needsWindowing) return;
     setScrollY(e.nativeEvent.contentOffset.y);
   }, [needsWindowing]);

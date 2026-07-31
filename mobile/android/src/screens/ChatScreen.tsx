@@ -36,6 +36,7 @@ export function ChatScreen() {
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const {
     messages,
+    setMessages,
     streaming,
     waitingForFirstToken,
     historyLoading,
@@ -116,6 +117,7 @@ export function ChatScreen() {
   }, []);
 
   const onChatScroll = useCallback((event: any) => {
+    if (!event?.nativeEvent) return;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     scrollOffsetRef.current = contentOffset.y;
     const distanceFromEnd = Math.max(
@@ -126,21 +128,29 @@ export function ChatScreen() {
 
     // MUCLI_SLIDING_WINDOW_V1: trigger backward pagination when the user
     // scrolls near the top. Only fire once per page — the guard ref prevents
-    // re-entry while the request is in flight. The hook also guards, but
-    // this avoids an extra render cycle.
+    // re-entry while the request is in flight AND while the scroll adjustment
+    // is pending. The guard is NOT cleared here — it's cleared in
+    // onChatContentSizeChange after the scroll offset has been applied.
+    // Clearing it in .finally() was too early: React re-renders with the
+    // prepended messages AFTER the promise resolves, and FlatList fires
+    // onScroll with offset~0 (content grew at top) → guard already false →
+    // hasMore still true → re-triggers → infinite scroll loop.
     const distanceFromTop = contentOffset.y;
     if (
       distanceFromTop < 120 &&
       hasMore &&
       !loadingOlder &&
-      !loadingOlderTriggeredRef.current
+      !loadingOlderTriggeredRef.current &&
+      prevContentHeightRef.current === 0
     ) {
       loadingOlderTriggeredRef.current = true;
       // Snapshot content height before prepend so onContentSizeChange can
       // offset the scroll position to keep the user's visual position stable.
       prevContentHeightRef.current = contentSize.height;
-      void loadOlderHistory().finally(() => {
+      void loadOlderHistory().catch(() => {
+        // On error, clear both guards so user can retry
         loadingOlderTriggeredRef.current = false;
+        prevContentHeightRef.current = 0;
       });
     }
   }, [hasMore, loadingOlder, loadOlderHistory, updateFollowFromDistance]);
@@ -186,29 +196,61 @@ export function ChatScreen() {
   }, [finishUserScroll]);
 
   const onChatContentSizeChange = useCallback((event: any) => {
+    if (!event?.nativeEvent?.contentSize) return;
     const newHeight = event.nativeEvent.contentSize.height;
 
     // MUCLI_SLIDING_WINDOW_V1: if older messages were prepended, the content
     // height grew at the TOP. Offset the scroll position by the height delta
     // so the user's visual position stays stable (no jump to a different
     // message). This fires before the streaming auto-follow below.
+    // IMPORTANT: clear loadingOlderTriggeredRef HERE (not in .finally of
+    // loadOlderHistory) because the guard must stay active until the scroll
+    // offset is applied. Clearing earlier caused infinite scroll loop.
     if (prevContentHeightRef.current > 0 && newHeight > prevContentHeightRef.current) {
       const delta = newHeight - prevContentHeightRef.current;
       prevContentHeightRef.current = 0;
-      // Use requestAnimationFrame-style delay so FlatList has laid out the
-      // new cells before we offset.
+      // Use setTimeout so FlatList has laid out the new cells before we offset.
       setTimeout(() => {
         flatListRef.current?.scrollToOffset({
           offset: scrollOffsetRef.current + delta,
           animated: false,
         });
+        // NOW safe to clear — scroll offset applied, next onScroll won't
+        // re-trigger pagination (offset is no longer near top).
+        loadingOlderTriggeredRef.current = false;
       }, 0);
+      return;
+    }
+    // Edge case: loadOlderHistory returned 0 new messages (server returned
+    // empty page). Clear guards so user can retry / know it's done.
+    if (prevContentHeightRef.current > 0 && newHeight === prevContentHeightRef.current) {
+      prevContentHeightRef.current = 0;
+      loadingOlderTriggeredRef.current = false;
       return;
     }
 
     if (initialScrollPendingRef.current && messages.length > 0) {
-      initialScrollPendingRef.current = false;
+      // Scroll to bottom immediately. Keep flag TRUE so subsequent
+      // onContentSizeChange events (from more cells mounting in later
+      // virtualization batches) keep re-scrolling to bottom until we
+      // explicitly clear it. Use a longer delay (300ms) + repeat to
+      // catch all batch mounts — FlatList with windowSize=5 mounts
+      // cells across multiple frames.
       scrollToBottom(true);
+      // Keep re-scrolling for 600ms to catch all virtualization batches.
+      // Clear the flag on the last iteration.
+      let scrollAttempts = 0;
+      const maxAttempts = 4;
+      const attemptScroll = () => {
+        scrollAttempts++;
+        scrollToBottom(true);
+        if (scrollAttempts < maxAttempts) {
+          setTimeout(attemptScroll, 150);
+        } else {
+          initialScrollPendingRef.current = false;
+        }
+      };
+      setTimeout(attemptScroll, 150);
       return;
     }
     // Only auto-follow when content is actively growing (agent streaming)
@@ -220,12 +262,17 @@ export function ChatScreen() {
     scrollToBottom(false);
   }, [messages.length, scrollToBottom]);
 
+  // MUCLI_SCROLL_LOCK_V1: onChatLayout previously cleared
+  // initialScrollPendingRef here — but FlatList fires onLayout before all
+  // cells have mounted (virtualization mounts them in batches). Clearing
+  // the flag here meant onContentSizeChange's initial-scroll branch was
+  // already skipped → the list stayed at the top instead of scrolling to
+  // the bottom on session entry. Now we only clear it in
+  // onContentSizeChange after the scroll has actually happened.
   const onChatLayout = useCallback(() => {
-    if (initialScrollPendingRef.current && messages.length > 0) {
-      initialScrollPendingRef.current = false;
-      scrollToBottom(true);
-    }
-  }, [messages.length, scrollToBottom]);
+    // No-op — initial scroll is handled by onContentSizeChange which fires
+    // after content has actually been laid out.
+  }, []);
 
   useEffect(() => {
     initialScrollPendingRef.current = true;
@@ -360,6 +407,29 @@ export function ChatScreen() {
           sessionName={activeSessionName}
           onInteractionChange={onVisualizationInteractionChange}
         />
+      );
+    }
+
+    // Collapsible heading for intermediate agent responses
+    if (item.role === 'collapse') {
+      const count = item.collapseCount || (item.childTurns?.length || 0);
+      return (
+        <TouchableOpacity
+          onPress={() => setMessages(current => current.map(m =>
+            m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m,
+          ))}
+          style={[styles.collapseHeader, { backgroundColor: colors.bgHover, borderColor: colors.border }]}
+          activeOpacity={0.7}
+        >
+          <Text style={{ fontSize: 12, color: colors.textDim }}>
+            {item.collapseOpen ? '▾' : '▸'}
+          </Text>
+          <Text style={{ fontSize: 13, color: colors.textSoft, fontFamily: 'monospace' }}>
+            {count} response{count !== 1 ? 's' : ''}
+            {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
+            {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
+          </Text>
+        </TouchableOpacity>
       );
     }
 
@@ -693,6 +763,16 @@ const styles = StyleSheet.create({
   messageListEmpty: { flexGrow: 1 },
   msgRow: { flexDirection: 'row', marginBottom: 14 },
   msgBubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  collapseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginVertical: 6,
+  },
   copyButton: { alignSelf: 'flex-start', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
   messageAttachment: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },

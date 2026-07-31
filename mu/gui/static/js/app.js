@@ -113,7 +113,14 @@ document.addEventListener("alpine:init", () => {
         focus(name) {
             this.currentName = name || null;
             this._slot(name);   // ensure created
-            this.scroll(true);
+            this.followOutput = true;
+            // Double-RAF: first frame lets Alpine swap the x-for turns to the
+            // new session, second frame lets the DOM layout with the new
+            // content. A single RAF fires before Alpine renders → scrollHeight
+            // is stale → we land mid-content instead of at the bottom.
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this.scroll(true));
+            });
         },
 
         // Back-compat top-level getters: legacy templates read e.g.
@@ -175,6 +182,94 @@ document.addEventListener("alpine:init", () => {
                 t.running = false;
                 t.elapsed = ((Date.now() - t.startedAt) / 1000).toFixed(1);
             }
+        },
+
+        // ---------- collapse intermediate turns ----------------------
+        // Group intermediate assistant + trace turns between a user msg
+        // and the final assistant response into a collapsible heading.
+        // Visualizations stay inline (trickle up, not contained).
+        // Called on turn_complete (finishTurn) and loadHistory.
+        _groupIntermediateTurns(slot) {
+            const turns = slot.turns;
+            if (turns.length < 3) return; // need user + intermediate + final
+
+            // Find the last user turn index
+            let lastUserIdx = -1;
+            for (let i = turns.length - 1; i >= 0; i--) {
+                if (turns[i].role === "user") { lastUserIdx = i; break; }
+            }
+            if (lastUserIdx < 0) return;
+
+            // Find the last assistant turn index after the user
+            let lastAssistantIdx = -1;
+            for (let i = turns.length - 1; i > lastUserIdx; i--) {
+                if (turns[i].role === "assistant" && !turns[i].streaming) {
+                    lastAssistantIdx = i; break;
+                }
+            }
+            if (lastAssistantIdx < 0 || lastAssistantIdx === lastUserIdx + 1) return;
+
+            // Check if there are intermediate turns to collapse (excl visualizations)
+            // Roles to collapse: assistant, trace, subagent_panel, info, command, error
+            const COLLAPSIBLE_ROLES = new Set(["assistant", "trace", "subagent_panel", "info", "command", "error", "prompt_resolved"]);
+            let hasIntermediate = false;
+            for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
+                if (COLLAPSIBLE_ROLES.has(turns[i].role)) { hasIntermediate = true; break; }
+            }
+            if (!hasIntermediate) return;
+
+            // Don't re-group if already grouped (idempotent)
+            if (turns[lastUserIdx + 1] && turns[lastUserIdx + 1].role === "collapse") return;
+
+            // Collect child turns (exclude visualizations — they trickle up)
+            const childTurns = [];
+            const visualizationsToKeep = [];
+            for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
+                if (turns[i].role === "visualization") {
+                    visualizationsToKeep.push(turns[i]);
+                } else {
+                    childTurns.push(turns[i]);
+                }
+            }
+
+            // Compute aggregate stats
+            let totalElapsed = 0;
+            let totalTokens = 0;
+            let responseCount = 0;
+            for (const t of childTurns) {
+                if (t.role === "assistant") responseCount++;
+                if (t.elapsed) totalElapsed += parseFloat(t.elapsed) || 0;
+                if (t.tokens) totalTokens += t.tokens;
+            }
+            // If no elapsed captured, estimate from trace startedAt
+            if (totalElapsed === 0 && childTurns.length > 0) {
+                const first = childTurns[0];
+                const last = childTurns[childTurns.length - 1];
+                if (first.startedAt && last.at) {
+                    totalElapsed = ((last.at - first.startedAt) / 1000);
+                }
+            }
+
+            const collapseTurn = {
+                id: `collapse-${this._id("c")}`,
+                role: "collapse",
+                childTurns,
+                count: responseCount || childTurns.length,
+                elapsed: totalElapsed > 0 ? totalElapsed.toFixed(1) + "s" : "",
+                tokens: totalTokens > 0 ? (totalTokens >= 1000 ? (totalTokens / 1000).toFixed(1) + "k" : String(totalTokens)) : "",
+                open: false,
+            };
+
+            // Rebuild: user + collapse + visualizations + final assistant
+            const newTurns = turns.slice(0, lastUserIdx + 1);
+            newTurns.push(collapseTurn);
+            for (const v of visualizationsToKeep) newTurns.push(v);
+            newTurns.push(turns[lastAssistantIdx]);
+            // Append any turns after the final assistant (shouldn't be any, but safe)
+            if (lastAssistantIdx + 1 < turns.length) {
+                newTurns.push(...turns.slice(lastAssistantIdx + 1));
+            }
+            slot.turns = newTurns;
         },
         _findById(slot, id) { return slot.turns.find((t) => t.id === id); },
         _lastByRole(slot, role) {
@@ -563,6 +658,10 @@ document.addEventListener("alpine:init", () => {
         finishTurn(name) {
             const slot = this._slot(name);
             this._closeTrace(slot);
+            // Group intermediate assistant + trace turns into a collapsible
+            // heading so the conversation flow reads:
+            //   User → Q, ... <collapsible N responses>, Agent → Final
+            this._groupIntermediateTurns(slot);
             // If a history reload was deferred while this turn was streaming
             // (SSE reconnect / session_updated from another process), the
             // turn is now saved server-side — flush it so the view shows the
@@ -585,8 +684,14 @@ document.addEventListener("alpine:init", () => {
         // them there — don't yank them back down on every streaming delta.
         // Threshold is generous so minor layout reflows near the tail
         // (markdown re-render, code block resize) don't disable follow.
+        followOutput: true,
         _atBottom(el, threshold = 120) {
             return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+        },
+        onScroll(event) {
+            const el = event && event.currentTarget;
+            if (!el) return;
+            this.followOutput = this._atBottom(el);
         },
         isSlashCommand(text) {
             return /^\/[A-Za-z][\w-]*/.test((text || "").trim());
@@ -603,7 +708,9 @@ document.addEventListener("alpine:init", () => {
                 this._scrollRaf = 0;
                 const el = document.querySelector(".chat-history");
                 if (!el) return;
-                if (!force && !this._atBottom(el)) return;
+                // followOutput is the persistent scroll-lock state, updated
+                // by onScroll. force bypasses it (send, session switch, etc.).
+                if (!force && !this.followOutput) return;
                 el.scrollTop = el.scrollHeight;
             });
         },
@@ -621,6 +728,7 @@ document.addEventListener("alpine:init", () => {
                 return false;
             }
             if (slot.busy && !isCommand) return false;
+            this.followOutput = true;   // user sent → re-engage scroll-lock
             this.addUser(text, name, selected);
             // A command can be submitted alongside an active turn. Do not
             // toggle the slot's existing busy state; the server handles the
@@ -800,10 +908,12 @@ document.addEventListener("alpine:init", () => {
                 dst.historyHydrated = true;
                 if (!name || name === this.currentName) {
                     queueMicrotask(() => requestAnimationFrame(() => {
-                        const el = document.querySelector(".chat-history");
-                        if (!el) return;
-                        if (shouldFollowHistory) this.scroll(true);
-                        else el.scrollTop = Math.min(previousScrollTop, Math.max(0, el.scrollHeight - el.clientHeight));
+                        requestAnimationFrame(() => {
+                            const el = document.querySelector(".chat-history");
+                            if (!el) return;
+                            if (shouldFollowHistory) this.scroll(true);
+                            else el.scrollTop = Math.min(previousScrollTop, Math.max(0, el.scrollHeight - el.clientHeight));
+                        });
                     }));
                     queueMicrotask(highlightAll);
                     queueMicrotask(() => typesetMathInScope(".msg.assistant .body"));

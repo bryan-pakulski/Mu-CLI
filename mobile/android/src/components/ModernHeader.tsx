@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { AdvancedSettingsSheet } from './AdvancedSettingsSheet';
-import { ArtifactsSheet } from './ArtifactsSheet';
 import { ModernBottomSheet } from './ModernBottomSheet';
 import { Text } from './Text';
 
@@ -16,6 +15,7 @@ export type ModernHeaderProps = {
   onOpenConnection: () => void;
   onOpenModes: () => void;
   onOpenProviders: () => void;
+  onOpenArtifacts: () => void;
 };
 
 export function ModernHeader({
@@ -25,6 +25,7 @@ export function ModernHeader({
   onOpenConnection,
   onOpenModes,
   onOpenProviders,
+  onOpenArtifacts,
 }: ModernHeaderProps) {
   const insets = useSafeAreaInsets();
   const { colors, isDark, toggleTheme } = useTheme();
@@ -38,7 +39,6 @@ export function ModernHeader({
   } = useConnectionStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [artifactsOpen, setArtifactsOpen] = useState(false);
 
   const sessionTitle = activeSessionName || 'New session';
   const sessionMeta = [activeProvider, activeModel].filter(Boolean).join(' · ') || (isConnected ? 'Connected' : 'Connect to MuCLI');
@@ -123,8 +123,8 @@ export function ModernHeader({
           <MenuRow
             icon="download-outline"
             label="Artifacts"
-            detail={activeSessionName ? 'Download or remove session deliverables' : 'Load a session to view artifacts'}
-            onPress={() => openFromMenu(() => setArtifactsOpen(true))}
+            detail={activeSessionName ? 'Visualizations, model artifacts, and uploads' : 'Load a session to view artifacts'}
+            onPress={() => openFromMenu(onOpenArtifacts)}
           />
         </SettingsSection>
 
@@ -158,7 +158,6 @@ export function ModernHeader({
 
       </ModernBottomSheet>
       <AdvancedSettingsSheet visible={advancedOpen} onClose={() => setAdvancedOpen(false)} />
-      <ArtifactsSheet visible={artifactsOpen} onClose={() => setArtifactsOpen(false)} />
     </>
   );
 }

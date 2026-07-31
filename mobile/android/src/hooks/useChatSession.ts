@@ -18,13 +18,18 @@ const MOBILE_HISTORY_PAGE_SIZE = 20;
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'visualization';
+  role: 'user' | 'assistant' | 'visualization' | 'collapse';
   text: string;
   turnId?: string;
   streaming?: boolean;
   origin?: 'history' | 'local' | 'stream';
   artifact?: ArtifactDescriptor;
   attachments?: AttachmentDescriptor[];
+  childTurns?: ChatMessage[];
+  collapseCount?: number;
+  collapseElapsed?: string;
+  collapseTokens?: string;
+  collapseOpen?: boolean;
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
@@ -108,6 +113,74 @@ export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
 function eventBelongsToSession(event: StreamEvent, activeSessionName: string | null): boolean {
   const eventSession = typeof event.session_name === 'string' ? event.session_name : null;
   return !eventSession || !activeSessionName || eventSession === activeSessionName;
+}
+
+// Group intermediate assistant turns between a user msg and the final
+// assistant response into a collapsible heading. Visualizations stay
+// inline (trickle up). Called on turn_complete + loadHistory.
+const COLLAPSIBLE_ROLES = new Set(['assistant', 'trace', 'subagent_panel', 'info', 'command', 'error', 'prompt_resolved']);
+
+function groupIntermediateTurns(messages: ChatMessage[]): ChatMessage[] {
+  if (messages.length < 3) return messages;
+
+  // Find last user message
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') { lastUserIdx = i; break; }
+  }
+  if (lastUserIdx < 0) return messages;
+
+  // Find last non-streaming assistant after user
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i > lastUserIdx; i--) {
+    if (messages[i].role === 'assistant' && !messages[i].streaming) {
+      lastAssistantIdx = i; break;
+    }
+  }
+  if (lastAssistantIdx < 0 || lastAssistantIdx === lastUserIdx + 1) return messages;
+
+  // Check if intermediate turns are collapsible
+  let hasIntermediate = false;
+  for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
+    if (COLLAPSIBLE_ROLES.has(messages[i].role)) { hasIntermediate = true; break; }
+  }
+  if (!hasIntermediate) return messages;
+
+  // Already grouped?
+  if (messages[lastUserIdx + 1]?.role === 'collapse') return messages;
+
+  // Collect children (exclude visualizations)
+  const childTurns: ChatMessage[] = [];
+  const visualizationsToKeep: ChatMessage[] = [];
+  for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
+    if (messages[i].role === 'visualization') {
+      visualizationsToKeep.push(messages[i]);
+    } else {
+      childTurns.push(messages[i]);
+    }
+  }
+
+  const responseCount = childTurns.filter(m => m.role === 'assistant').length || childTurns.length;
+
+  const collapseMsg: ChatMessage = {
+    id: `collapse-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    role: 'collapse',
+    text: '',
+    childTurns,
+    collapseCount: responseCount,
+    collapseElapsed: '',
+    collapseTokens: '',
+    collapseOpen: false,
+  };
+
+  const result = messages.slice(0, lastUserIdx + 1);
+  result.push(collapseMsg);
+  for (const v of visualizationsToKeep) result.push(v);
+  result.push(messages[lastAssistantIdx]);
+  if (lastAssistantIdx + 1 < messages.length) {
+    result.push(...messages.slice(lastAssistantIdx + 1));
+  }
+  return result;
 }
 
 export function useChatSession(activeSessionName: string | null) {
@@ -282,7 +355,7 @@ export function useChatSession(activeSessionName: string | null) {
                 && message.role === next.role
                 && message.text === next.text;
             });
-          return unchanged ? current : merged;
+          return unchanged ? current : groupIntermediateTurns(merged);
         });
         historyHydratedRef.current = activeSessionName;
         setError(null);
@@ -721,6 +794,7 @@ export function useChatSession(activeSessionName: string | null) {
 
   return {
     messages,
+    setMessages,
     streaming,
     waitingForFirstToken,
     historyLoading,

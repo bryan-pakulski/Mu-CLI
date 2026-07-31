@@ -43,9 +43,12 @@ export function ChatScreen() {
     sseConnected,
     error,
     artifactRevision,
+    hasMore,
+    loadingOlder,
     sendMessage,
     stop,
     retry,
+    loadOlderHistory,
   } = useChatSession(activeSessionName);
   const [input, setInput] = useState('');
   const [modeSheetOpen, setModeSheetOpen] = useState(false);
@@ -68,6 +71,13 @@ export function ChatScreen() {
   const userScrollActiveRef = useRef(false);
   const momentumScrollRef = useRef(false);
   const lastDistanceFromEndRef = useRef(Number.POSITIVE_INFINITY);
+  const streamingRef = useRef(false);
+  // MUCLI_SLIDING_WINDOW_V1: track scroll offset + content height so we can
+  // (1) detect near-top to trigger loadOlderHistory, and (2) preserve the
+  // visual scroll position when older messages are prepended.
+  const prevContentHeightRef = useRef(0);
+  const scrollOffsetRef = useRef(0);
+  const loadingOlderTriggeredRef = useRef(false);
 
   // MUCLI_VISUALIZATION_TIMELINE_V2: a WebView gesture explicitly pauses chat
   // following. Releasing the WebView never silently opts the chat back in.
@@ -77,12 +87,9 @@ export function ChatScreen() {
     else if (lastDistanceFromEndRef.current <= 64) followOutputRef.current = true;
   }, []);
   const completion = useCommandCompletion();
-  // Always clip offscreen cells on Android — disabling removeClippedSubviews
-  // when visualizations are present causes ALL cells to mount simultaneously
-  // on initial history load (80+ turns), exploding the native view tree and
-  // triggering OOM SIGKILL by lmkd. Visualization cards are React.memo'd and
-  // only mount their WebView when expanded, so clipping is safe.
-  const removeClipped = Platform.OS === 'android';
+  // Keep a ref mirror of the streaming state so onContentSizeChange can decide
+  // whether to auto-follow without re-creating its callback identity.
+  useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
   // Explicit bottom-follow state with hysteresis. A user drag disables
   // following immediately; only ending a gesture near the bottom re-enables it.
@@ -110,12 +117,33 @@ export function ChatScreen() {
 
   const onChatScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    scrollOffsetRef.current = contentOffset.y;
     const distanceFromEnd = Math.max(
       0,
       contentSize.height - layoutMeasurement.height - contentOffset.y,
     );
     updateFollowFromDistance(distanceFromEnd);
-  }, [updateFollowFromDistance]);
+
+    // MUCLI_SLIDING_WINDOW_V1: trigger backward pagination when the user
+    // scrolls near the top. Only fire once per page — the guard ref prevents
+    // re-entry while the request is in flight. The hook also guards, but
+    // this avoids an extra render cycle.
+    const distanceFromTop = contentOffset.y;
+    if (
+      distanceFromTop < 120 &&
+      hasMore &&
+      !loadingOlder &&
+      !loadingOlderTriggeredRef.current
+    ) {
+      loadingOlderTriggeredRef.current = true;
+      // Snapshot content height before prepend so onContentSizeChange can
+      // offset the scroll position to keep the user's visual position stable.
+      prevContentHeightRef.current = contentSize.height;
+      void loadOlderHistory().finally(() => {
+        loadingOlderTriggeredRef.current = false;
+      });
+    }
+  }, [hasMore, loadingOlder, loadOlderHistory, updateFollowFromDistance]);
 
   const onChatScrollBeginDrag = useCallback(() => {
     if (scrollEndTimerRef.current) {
@@ -157,12 +185,38 @@ export function ChatScreen() {
     finishUserScroll();
   }, [finishUserScroll]);
 
-  const onChatContentSizeChange = useCallback(() => {
+  const onChatContentSizeChange = useCallback((event: any) => {
+    const newHeight = event.nativeEvent.contentSize.height;
+
+    // MUCLI_SLIDING_WINDOW_V1: if older messages were prepended, the content
+    // height grew at the TOP. Offset the scroll position by the height delta
+    // so the user's visual position stays stable (no jump to a different
+    // message). This fires before the streaming auto-follow below.
+    if (prevContentHeightRef.current > 0 && newHeight > prevContentHeightRef.current) {
+      const delta = newHeight - prevContentHeightRef.current;
+      prevContentHeightRef.current = 0;
+      // Use requestAnimationFrame-style delay so FlatList has laid out the
+      // new cells before we offset.
+      setTimeout(() => {
+        flatListRef.current?.scrollToOffset({
+          offset: scrollOffsetRef.current + delta,
+          animated: false,
+        });
+      }, 0);
+      return;
+    }
+
     if (initialScrollPendingRef.current && messages.length > 0) {
       initialScrollPendingRef.current = false;
       scrollToBottom(true);
       return;
     }
+    // Only auto-follow when content is actively growing (agent streaming)
+    // AND the user hasn't scrolled away. Without this gate, virtualization
+    // mount/unmount of variable-height cells fires contentSizeChange during
+    // idle scrolling, causing the list to snap back to bottom — the
+    // "jumping up and down" effect while navigating history.
+    if (!streamingRef.current || !followOutputRef.current) return;
     scrollToBottom(false);
   }, [messages.length, scrollToBottom]);
 
@@ -179,6 +233,9 @@ export function ChatScreen() {
     userScrollActiveRef.current = false;
     momentumScrollRef.current = false;
     lastDistanceFromEndRef.current = Number.POSITIVE_INFINITY;
+    prevContentHeightRef.current = 0;
+    scrollOffsetRef.current = 0;
+    loadingOlderTriggeredRef.current = false;
   }, [activeSessionName]);
 
   // Clear pending scroll work on unmount.
@@ -254,11 +311,9 @@ export function ChatScreen() {
     Clipboard.setStringAsync(text);
   }, []);
 
-  // Cap message text length for non-streaming history messages. Long
-  // assistant messages (tool output, code dumps) explode the Markdown AST
-  // parser and native view tree. Truncate to a render-safe limit; the full
-  // text is still copyable via the copy button.
-  const MAX_MESSAGE_CHARS = 6000;
+  // Messages render at full length — CodeBlock handles long code via
+  // internal ScrollView with maxHeight, and Markdown handles long text
+  // natively. No message-level truncation needed.
 
   const markdownRules = useMemo(
     () => ({
@@ -311,14 +366,9 @@ export function ChatScreen() {
     const isUser = item.role === 'user';
     const isAssistant = item.role === 'assistant';
 
-    // Truncate very long non-streaming messages to avoid OOM from Markdown
-    // AST parsing + native view creation on large tool outputs / code dumps.
-    // The full text remains available via the copy button.
-    const rawText = item.text;
-    const truncated = !item.streaming && rawText.length > MAX_MESSAGE_CHARS;
-    const displayText = truncated
-      ? rawText.slice(0, MAX_MESSAGE_CHARS) + '\n\n_… (truncated — tap copy for full text)_'
-      : rawText;
+    // Full text — no truncation. CodeBlock scrolls internally; Markdown
+    // wraps naturally. Copy button preserves the raw text either way.
+    const displayText = item.text;
 
     return (
       <View style={[
@@ -357,9 +407,9 @@ export function ChatScreen() {
               ))}
             </View>
           ) : null}
-          {isAssistant && rawText.length > 0 && (
+          {isAssistant && item.text.length > 0 && (
             <TouchableOpacity
-              onPress={() => copyMessage(rawText)}
+              onPress={() => copyMessage(item.text)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.copyButton}
             >
@@ -387,7 +437,6 @@ export function ChatScreen() {
           maxToRenderPerBatch={3}
           updateCellsBatchingPeriod={80}
           windowSize={5}
-          removeClippedSubviews={removeClipped}
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,
@@ -403,15 +452,22 @@ export function ChatScreen() {
           onContentSizeChange={onChatContentSizeChange}
           onLayout={onChatLayout}
           ListHeaderComponent={
-            error && messages.length > 0 ? (
-              <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>
-                <Ionicons name="warning-outline" size={15} color={colors.error} />
-                <Text variant="xs" style={{ color: colors.textSoft, flex: 1 }}>{error}</Text>
-                <TouchableOpacity onPress={retry} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text variant="xs" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null
+            <View>
+              {loadingOlder ? (
+                <View style={styles.loadingOlderIndicator}>
+                  <GeneratingIndicator label="Loading older messages" />
+                </View>
+              ) : null}
+              {error && messages.length > 0 ? (
+                <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>
+                  <Ionicons name="warning-outline" size={15} color={colors.error} />
+                  <Text variant="xs" style={{ color: colors.textSoft, flex: 1 }}>{error}</Text>
+                  <TouchableOpacity onPress={retry} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text variant="xs" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
           }
           ListEmptyComponent={
             historyLoading ? (
@@ -646,6 +702,7 @@ const styles = StyleSheet.create({
   codeBlockHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 3 },
   inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 14 },
   historyLoading: { paddingTop: 22, paddingHorizontal: 4 },
+  loadingOlderIndicator: { paddingVertical: 10, alignItems: 'center' },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

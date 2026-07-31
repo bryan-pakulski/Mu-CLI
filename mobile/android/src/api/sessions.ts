@@ -142,6 +142,7 @@ export interface SessionHistoryResponse {
   total_turns?: number;
   start_index?: number;
   has_more?: boolean;
+  window_end?: number;
 }
 
 export interface SessionRequestOptions {
@@ -152,6 +153,7 @@ export interface SessionRequestOptions {
 export interface SessionHistoryOptions extends SessionRequestOptions {
   limitTurns?: number;
   artifactLimit?: number;
+  beforeIndex?: number;
 }
 
 export interface CreateSessionOptions {
@@ -192,6 +194,7 @@ export const sessionsApi = {
         session_name: sessionName,
         limit_turns: options?.limitTurns,
         artifact_limit: options?.artifactLimit,
+        before_index: options?.beforeIndex,
       },
     }),
   suggestWorkspaces: (path: string, limit: number = 12) =>

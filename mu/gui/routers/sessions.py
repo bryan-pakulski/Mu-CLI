@@ -424,24 +424,34 @@ async def get_history(
     session_name: Optional[str] = None,
     limit_turns: Optional[int] = Query(default=None, ge=1, le=500),
     artifact_limit: Optional[int] = Query(default=None, ge=0, le=100),
+    before_index: Optional[int] = Query(default=None, ge=0),
 ):
     """Return the durable conversation timeline without relocating artifacts.
 
     MUCLI_VISUALIZATION_TIMELINE_V2: registry-only visualizations are attached
     to their surviving publish tool-result slot. They are never fabricated as
     synthetic turns at the end of the conversation.
+
+    MUCLI_SLIDING_WINDOW_V1: ``before_index`` enables backward pagination.
+    When supplied, the window ends at ``before_index`` (exclusive) instead of
+    the latest turn. Mobile clients use this to load older turns on scroll-up.
     """
     session = _resolve(request, session_name)
     if session is None:
         return {"name": "", "turns": []}
     sm = session.session_manager
     total_turns = len(sm.history)
-    start_index = (
-        max(0, total_turns - limit_turns)
-        if limit_turns is not None
-        else 0
-    )
-    history_window = sm.history[start_index:]
+    # MUCLI_SLIDING_WINDOW_V1: when before_index is supplied, return the
+    # window of turns *before* that index (exclusive). This enables backward
+    # pagination — mobile scrolls to top, requests older turns ending at the
+    # oldest currently-loaded index. When before_index is None, return the
+    # latest turns (existing behavior).
+    window_end = min(before_index, total_turns) if before_index is not None else total_turns
+    if limit_turns is not None:
+        start_index = max(0, window_end - limit_turns)
+    else:
+        start_index = 0
+    history_window = sm.history[start_index:window_end]
 
     session_dir = os.path.join(
         _config.HISTORY_DIR, "sessions", sm.current_session_name
@@ -562,6 +572,7 @@ async def get_history(
         "total_turns": total_turns,
         "start_index": start_index,
         "has_more": start_index > 0,
+        "window_end": window_end,
         "unplaced_visualizations": orphan_count,
     }
 

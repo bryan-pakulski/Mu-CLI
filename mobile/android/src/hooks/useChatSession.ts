@@ -6,7 +6,15 @@ import type { ArtifactDescriptor } from '../api/artifacts';
 import type { AttachmentDescriptor } from '../api/attachments';
 
 const SESSION_POLL_MS = 5000;
-const MOBILE_HISTORY_TURN_LIMIT = 80;
+// Initial window size — the latest N turns to load on session open.
+// Older turns are loaded on demand via loadOlderHistory() when the user
+// scrolls near the top (sliding window). FlatList virtualization keeps
+// only a few cells mounted, so the array can grow without OOM.
+// Initial window size — the latest N turns to load on session open.
+// Kept small to avoid OOM on mid-range Android; older turns load on demand
+// via loadOlderHistory() (sliding window) when the user scrolls up.
+const MOBILE_HISTORY_TURN_LIMIT = 20;
+const MOBILE_HISTORY_PAGE_SIZE = 20;
 
 export interface ChatMessage {
   id: string;
@@ -112,6 +120,11 @@ export function useChatSession(activeSessionName: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
   const [artifactRevision, setArtifactRevision] = useState(0);
+  // MUCLI_SLIDING_WINDOW_V1: track whether older turns exist on the server
+  // and whether a backward-pagination request is in flight. Mobile ChatScreen
+  // triggers loadOlderHistory when the user scrolls near the top.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   const subscriptionRef = useRef<SSESubscription | null>(null);
   const messageIdRef = useRef(0);
@@ -129,6 +142,11 @@ export function useChatSession(activeSessionName: string | null) {
   // turn_complete, force a history reload. Safety net for server
   // bugs or network issues that drop the event.
   const historyFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // MUCLI_SLIDING_WINDOW_V1: the absolute server index of the oldest turn
+  // currently in the messages array. Used as the `before_index` cursor for
+  // backward pagination. Reset on session change / full reload.
+  const oldestLoadedIndexRef = useRef<number | null>(null);
+  const loadingOlderRef = useRef(false);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -232,24 +250,39 @@ export function useChatSession(activeSessionName: string | null) {
         await new Promise<void>(resolve => setTimeout(resolve, 0));
         if (controller.signal.aborted || lastSessionRef.current !== activeSessionName) return;
         const historyMessages = historyToMessages(response.turns || []);
+        // Track the oldest loaded turn index for backward pagination.
+        const oldestIdx = response.start_index ?? null;
+        oldestLoadedIndexRef.current = oldestIdx;
+        setHasMore(response.has_more ?? false);
         setMessages(current => {
           const hasLiveContent = current.some(message => message.origin !== 'history' || message.streaming);
           if (preserveLive && busyRef.current && hasLiveContent) return current;
-          const unchanged = current.length === historyMessages.length
+          // Preserve existing message IDs where content matches so FlatList
+          // keyExtractor returns stable keys → no cell remount → no scroll
+          // jump. When a history_refresh arrives after a turn, the live
+          // messages (origin: 'stream', id: 'assistant-xxx') are replaced by
+          // history messages (id: 'history-N-N'). Without ID reuse, every
+          // key changes → FlatList unmounts/remounts all cells → visible
+          // "jumping up and down" effect.
+          const merged = historyMessages.map((next, index) => {
+            const prev = current[index];
+            if (!prev) return next;
+            const contentMatches = prev.role === next.role
+              && prev.text === next.text
+              && (next.role === 'visualization'
+                ? prev.artifact?.artifact_id === next.artifact?.artifact_id
+                : true);
+            if (contentMatches) return { ...next, id: prev.id };
+            return next;
+          });
+          const unchanged = current.length === merged.length
             && current.every((message, index) => {
-              const next = historyMessages[index];
-              if (message.role === 'visualization' || next.role === 'visualization') {
-                return message.role === next.role
-                  && message.artifact?.artifact_id === next.artifact?.artifact_id
-                  && message.artifact?.height === next.artifact?.height
-                  && message.origin === 'history';
-              }
-              return message.role === next.role
-                && message.text === next.text
-                && !message.streaming
-                && message.origin === 'history';
+              const next = merged[index];
+              return message.id === next.id
+                && message.role === next.role
+                && message.text === next.text;
             });
-          return unchanged ? current : historyMessages;
+          return unchanged ? current : merged;
         });
         historyHydratedRef.current = activeSessionName;
         setError(null);
@@ -273,6 +306,42 @@ export function useChatSession(activeSessionName: string | null) {
       if (historyRequestRef.current?.promise === request) historyRequestRef.current = null;
     }
   }, [activeSessionName]);
+
+  // MUCLI_SLIDING_WINDOW_V1: load older turns and prepend them to the
+  // messages array. Called by ChatScreen when the user scrolls near the top.
+  // Uses `before_index` = oldestLoadedIndexRef to request the page of turns
+  // immediately older than what's currently loaded. The server returns
+  // has_more + start_index so we can update the cursor.
+  const loadOlderHistory = useCallback(async (): Promise<number> => {
+    if (!activeSessionName || loadingOlderRef.current) return 0;
+    const cursor = oldestLoadedIndexRef.current;
+    if (cursor === null || cursor <= 0 || !hasMore) return 0;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const response = await sessionsApi.getHistory(activeSessionName, {
+        timeoutMs: 15_000,
+        limitTurns: MOBILE_HISTORY_PAGE_SIZE,
+        beforeIndex: cursor,
+      });
+      if (lastSessionRef.current !== activeSessionName) return 0;
+      const olderMessages = historyToMessages(response.turns || []);
+      const olderCount = olderMessages.length;
+      const newOldest = response.start_index ?? null;
+      oldestLoadedIndexRef.current = newOldest;
+      setHasMore(response.has_more ?? false);
+      if (olderCount > 0) {
+        setMessages(current => [...olderMessages, ...current]);
+      }
+      return olderCount;
+    } catch {
+      return 0;
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [activeSessionName, hasMore]);
 
   const syncSessionState = useCallback(async () => {
     if (!activeSessionName) return;
@@ -541,6 +610,10 @@ export function useChatSession(activeSessionName: string | null) {
       busyRef.current = false;
       historyHydratedRef.current = null;
       externalWriteAtRef.current = 0;
+      oldestLoadedIndexRef.current = null;
+      loadingOlderRef.current = false;
+      setHasMore(false);
+      setLoadingOlder(false);
       setArtifactRevision(value => value + 1);
       if (completionProbeRef.current) {
         clearTimeout(completionProbeRef.current);
@@ -655,8 +728,11 @@ export function useChatSession(activeSessionName: string | null) {
     sseConnected,
     error,
     artifactRevision,
+    hasMore,
+    loadingOlder,
     sendMessage,
     stop,
     retry,
+    loadOlderHistory,
   };
 }

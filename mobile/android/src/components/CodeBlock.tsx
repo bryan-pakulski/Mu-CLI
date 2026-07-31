@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import type { SyntaxColors } from '../theme/tokens';
@@ -267,23 +267,41 @@ interface CodeBlockProps {
   colors: { bgHover: string; textSoft: string; textDim: string; syntax: SyntaxColors };
 }
 
+const LINE_HEIGHT = 19;
+const VISIBLE_LINES = 25;
+const OVERSCAN = 8;
+
 export const CodeBlock = React.memo(function CodeBlock({ code, language, colors }: CodeBlockProps) {
   const langLabel = language ? language.toLowerCase().trim() : '';
-  const tokenizedLines = useMemo(() => {
-    // Cap lines to prevent OOM on very large code blocks (e.g. full file
-    // dumps in tool results). 200 lines × ~10 tokens/line is the safe
-    // upper bound for native Text nesting depth on Android.
-    const MAX_LINES = 200;
-    const lines = code.split('\n');
-    if (lines.length <= MAX_LINES) return tokenize(code, langLabel);
-    const truncated = lines.slice(0, MAX_LINES);
-    truncated.push(`\n// … ${lines.length - MAX_LINES} more lines truncated (copy for full code)`);
-    return tokenize(truncated.join('\n'), langLabel);
-  }, [code, langLabel]);
+  const tokenizedLines = useMemo(() => tokenize(code, langLabel), [code, langLabel]);
+  const totalLines = tokenizedLines.length;
+  const needsWindowing = totalLines > VISIBLE_LINES + OVERSCAN * 2;
+  const [scrollY, setScrollY] = useState(0);
 
   const copy = useCallback(() => {
     Clipboard.setStringAsync(code);
   }, [code]);
+
+  // Visible window: render only lines within [start, end) + overscan.
+  // Spacer Views above/below maintain total scroll height so the scrollbar
+  // and scroll position reflect the full content without mounting thousands
+  // of native <Text> nodes for large code dumps.
+  let startIdx = 0;
+  let endIdx = totalLines;
+  let topSpacerHeight = 0;
+  let bottomSpacerHeight = 0;
+  if (needsWindowing) {
+    const firstVisible = Math.floor(scrollY / LINE_HEIGHT);
+    startIdx = Math.max(0, firstVisible - OVERSCAN);
+    endIdx = Math.min(totalLines, startIdx + VISIBLE_LINES + OVERSCAN * 2);
+    topSpacerHeight = startIdx * LINE_HEIGHT;
+    bottomSpacerHeight = (totalLines - endIdx) * LINE_HEIGHT;
+  }
+
+  const onScroll = useCallback((e: any) => {
+    if (!needsWindowing) return;
+    setScrollY(e.nativeEvent.contentOffset.y);
+  }, [needsWindowing]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bgHover }]}>
@@ -297,27 +315,41 @@ export const CodeBlock = React.memo(function CodeBlock({ code, language, colors 
           <Ionicons name="copy-outline" size={15} color={colors.textDim} />
         </TouchableOpacity>
       </View>
-      {tokenizedLines.map((tokens, lineIdx) => (
-        <Text
-          key={lineIdx}
-          style={styles.line}
-        >
-          {tokens.map((tok, tokIdx) => (
-            <Text
-              key={tokIdx}
-              style={{
-                color: colors.syntax[tok.type],
-                fontFamily: 'monospace',
-                fontSize: 13,
-                lineHeight: 19,
-              }}
-            >
-              {tok.text}
-            </Text>
-          ))}
-          {'\n'}
-        </Text>
-      ))}
+      <ScrollView
+        style={styles.codeScroll}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={totalLines > 30}
+        scrollEventThrottle={32}
+        onScroll={onScroll}
+      >
+        {needsWindowing && topSpacerHeight > 0 ? (
+          <View style={{ height: topSpacerHeight }} />
+        ) : null}
+        {tokenizedLines.slice(startIdx, endIdx).map((tokens, lineIdx) => (
+          <Text
+            key={startIdx + lineIdx}
+            style={styles.line}
+          >
+            {tokens.map((tok, tokIdx) => (
+              <Text
+                key={tokIdx}
+                style={{
+                  color: colors.syntax[tok.type],
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  lineHeight: LINE_HEIGHT,
+                }}
+              >
+                {tok.text}
+              </Text>
+            ))}
+            {'\n'}
+          </Text>
+        ))}
+        {needsWindowing && bottomSpacerHeight > 0 ? (
+          <View style={{ height: bottomSpacerHeight }} />
+        ) : null}
+      </ScrollView>
     </View>
   );
 }, (prev, next) => prev.code === next.code && prev.language === next.language && prev.colors === next.colors);
@@ -346,5 +378,8 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 13,
     lineHeight: 19,
+  },
+  codeScroll: {
+    maxHeight: 400,
   },
 });

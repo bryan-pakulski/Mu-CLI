@@ -32,21 +32,30 @@ export function ConnectionScreen() {
   const testConnection = async () => {
     if (testing) return;
     setTesting(true);
-    try {
-      setBaseUrl(url);
-      const res = await api.get<{ ok: boolean }>('/healthz', { timeoutMs: 5_000 });
-      if (!res.ok) throw new Error('MuCLI health check did not return ok');
-      setConnected(true);
-      // Do not leave a success Alert/modal above the navigator. Return
-      // directly to chat, where session bootstrap continues independently.
-      if (navigation.canGoBack()) navigation.goBack();
-      else navigation.navigate('Chat');
-    } catch (error) {
-      setConnected(false);
-      Alert.alert('Connection failed', String(error));
-    } finally {
-      setTesting(false);
+    setBaseUrl(url);
+    // Retry with backoff: the host may be busy running an agent turn
+    // and a single 5s probe can race a transient slow response.
+    const MAX_ATTEMPTS = 3;
+    const BACKOFF_MS = 1_500;
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await api.get<{ ok: boolean }>('/healthz', { timeoutMs: 10_000 });
+        if (!res.ok) throw new Error('MuCLI health check did not return ok');
+        setConnected(true);
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.navigate('Chat');
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, BACKOFF_MS * attempt));
+        }
+      }
     }
+    setConnected(false);
+    Alert.alert('Connection failed', String(lastError));
+    setTesting(false);
   };
 
   return (

@@ -31,6 +31,8 @@ export interface ChatMessage {
   collapseTokens?: string;
   collapseOpen?: boolean;
   collapseGroupKey?: string;
+  collapseLive?: boolean;
+  collapseUserId?: string;
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
@@ -143,9 +145,13 @@ function groupIntermediateTurns(
   if (source.length < 3) return source;
 
   const previousOpen = new Map<string, boolean>();
+  const previousLiveOpen = new Map<string, boolean>();
   for (const message of previous) {
     if (message.role === 'collapse' && message.collapseGroupKey) {
       previousOpen.set(message.collapseGroupKey, Boolean(message.collapseOpen));
+    }
+    if (message.role === 'collapse' && message.collapseLive && message.collapseUserId) {
+      previousLiveOpen.set(message.collapseUserId, Boolean(message.collapseOpen));
     }
   }
 
@@ -187,8 +193,13 @@ function groupIntermediateTurns(
         collapseCount: childTurns.length,
         collapseElapsed: '',
         collapseTokens: '',
-        collapseOpen: previousOpen.get(groupKey) || false,
+        collapseOpen:
+          previousOpen.get(groupKey)
+          ?? previousLiveOpen.get(userMessage.id)
+          ?? false,
         collapseGroupKey: groupKey,
+        collapseLive: false,
+        collapseUserId: userMessage.id,
       });
       grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
     } else {
@@ -198,6 +209,76 @@ function groupIntermediateTurns(
     index = nextUserIndex;
   }
   return grouped;
+}
+
+// MUCLI_SINGLE_TRACE_LIVE_INTERIM_V1: dynamically collect completed phases while the turn is still live.
+// A completed assistant segment is not classified as interim merely because it
+// ended. It becomes interim only when a later event proves the turn continues.
+function isLiveTimelineMessage(message: ChatMessage): boolean {
+  return message.role === 'assistant' && Boolean(message.streaming);
+}
+
+function foldLiveInterim(messages: ChatMessage[]): ChatMessage[] {
+  let userIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === 'user') {
+      userIndex = index;
+      break;
+    }
+  }
+  if (userIndex < 0) return messages;
+
+  const userMessage = messages[userIndex];
+  const tail = messages.slice(userIndex + 1);
+  const existing = tail.find(message =>
+    message.role === 'collapse'
+    && message.collapseLive
+    && message.collapseUserId === userMessage.id
+  );
+
+  const movable: ChatMessage[] = [];
+  const retained: ChatMessage[] = [];
+  for (const message of tail) {
+    if (message === existing) continue;
+    if (isLiveTimelineMessage(message)) retained.push(message);
+    else movable.push(message);
+  }
+  if (movable.length === 0) return messages;
+
+  const childTurns = [...(existing?.childTurns || []), ...movable];
+  const collapse: ChatMessage = {
+    id: existing?.id || `live-collapse-${userMessage.id}`,
+    role: 'collapse',
+    text: '',
+    childTurns,
+    collapseCount: childTurns.length,
+    collapseElapsed: '',
+    collapseTokens: '',
+    collapseOpen: existing?.collapseOpen || false,
+    collapseGroupKey: `live:${userMessage.id}`,
+    collapseLive: true,
+    collapseUserId: userMessage.id,
+  };
+
+  return [
+    ...messages.slice(0, userIndex + 1),
+    collapse,
+    ...retained,
+  ];
+}
+
+function prepareForAssistantTurn(
+  messages: ChatMessage[],
+  turnId: string,
+): ChatMessage[] {
+  const retired = messages.map(message =>
+    message.role === 'assistant'
+    && message.streaming
+    && message.turnId !== turnId
+      ? { ...message, streaming: false }
+      : message
+  );
+  return foldLiveInterim(retired);
 }
 
 export function useChatSession(activeSessionName: string | null) {
@@ -274,9 +355,12 @@ export function useChatSession(activeSessionName: string | null) {
     if (!delta) return;
     const safeTurnId = turnId || 'active-turn';
     setMessages(current => {
-      const index = current.findIndex(message => message.role === 'assistant' && message.turnId === safeTurnId);
+      const prepared = prepareForAssistantTurn(current, safeTurnId);
+      const index = prepared.findIndex(
+        message => message.role === 'assistant' && message.turnId === safeTurnId,
+      );
       if (index >= 0) {
-        const updated = [...current];
+        const updated = [...prepared];
         updated[index] = {
           ...updated[index],
           text: updated[index].text + delta,
@@ -285,7 +369,7 @@ export function useChatSession(activeSessionName: string | null) {
         };
         return updated;
       }
-      return [...current, {
+      return [...prepared, {
         id: nextId('assistant'),
         role: 'assistant',
         text: delta,
@@ -505,6 +589,8 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'assistant_start') {
+      const turnId = String(event.turn_id || 'active-turn');
+      setMessages(current => prepareForAssistantTurn(current, turnId));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -522,6 +608,7 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'thinking_delta') {
+      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -530,6 +617,7 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'tool_call') {
+      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -539,6 +627,7 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'tool_result') {
+      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -560,6 +649,7 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'prompt') {
+      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -590,7 +680,14 @@ export function useChatSession(activeSessionName: string | null) {
       if (result?.status === 'error' && result.error) {
         setError(String(result.error));
       }
-      setMessages(current => groupIntermediateTurns(current, current));
+      setMessages(current => {
+        const retired = current.map(message =>
+          message.role === 'assistant' && message.streaming
+            ? { ...message, streaming: false }
+            : message
+        );
+        return groupIntermediateTurns(retired, current);
+      });
       setArtifactRevision(value => value + 1);
       // Do NOT call loadHistory here. The server may not have persisted
       // the final assistant message yet, so loadHistory would replace
@@ -626,7 +723,7 @@ export function useChatSession(activeSessionName: string | null) {
           };
           if (existing >= 0) {
             updated[existing] = next;
-            return updated;
+            return foldLiveInterim(updated);
           }
 
           // MUCLI_VISUALIZATION_TIMELINE_V2: close the current assistant segment
@@ -647,7 +744,7 @@ export function useChatSession(activeSessionName: string | null) {
             }
           }
           updated.splice(insertAt, 0, next);
-          return updated;
+          return foldLiveInterim(updated);
         });
       }
       setArtifactRevision(value => value + 1);
@@ -677,6 +774,11 @@ export function useChatSession(activeSessionName: string | null) {
       busyRef.current = false;
       setStreaming(false);
       setWaitingForFirstToken(false);
+      setMessages(current => current.map(message =>
+        message.role === 'assistant' && message.streaming
+          ? { ...message, streaming: false }
+          : message
+      ));
       setError(String(event.text || 'Agent error'));
       // Same as turn_complete: skip loadHistory when SSE connected.
       // The server will emit history_refresh after persisting.

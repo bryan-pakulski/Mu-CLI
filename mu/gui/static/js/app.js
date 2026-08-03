@@ -151,37 +151,152 @@ document.addEventListener("alpine:init", () => {
             const turns = slot.turns;
             return turns.length ? turns[turns.length - 1] : null;
         },
+        // MUCLI_SINGLE_TRACE_LIVE_INTERIM_V1: one authoritative running trace per session.
         _currentTrace(slot) {
-            const t = this._lastTurn(slot);
-            return (t && t.role === "trace") ? t : null;
+            for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
+                const turn = slot.turns[index];
+                if (turn.role === "trace") return turn;
+            }
+            return null;
+        },
+        _activeTrace(slot) {
+            let active = null;
+            for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
+                const turn = slot.turns[index];
+                if (turn.role !== "trace" || !turn.running) continue;
+                if (active === null) {
+                    active = turn;
+                    continue;
+                }
+                // Retire stale duplicate flags left by reconnect/order races.
+                turn.running = false;
+                turn.elapsed = turn.elapsed || (
+                    turn.startedAt
+                        ? ((Date.now() - turn.startedAt) / 1000).toFixed(1)
+                        : null
+                );
+            }
+            return active;
+        },
+        isActiveTrace(turn) {
+            if (!turn || turn.role !== "trace" || !turn.running) return false;
+            const active = this._activeTrace(this.current());
+            return Boolean(active && active.id === turn.id);
+        },
+        _hasStreamingAssistant(slot) {
+            return slot.turns.some(turn =>
+                turn.role === "assistant" && turn.streaming
+            );
+        },
+        _closeStreamingAssistants(slot, exceptId = null) {
+            for (const turn of slot.turns) {
+                if (
+                    turn.role === "assistant"
+                    && turn.streaming
+                    && (!exceptId || turn.id !== exceptId)
+                ) {
+                    turn.streaming = false;
+                    turn.html = renderMarkdown(turn.text || "");
+                }
+            }
         },
         _ensureTrace(slot) {
-            let t = this._currentTrace(slot);
-            // Don't resurrect a completed trace (running === false). That
-            // happens when history reload built the previous turn's trace
-            // and a live event now arrives for a NEW in-flight turn —
-            // pushing a fresh running trace keeps the elapsed honest and
-            // avoids marking an old turn as "thinking".
-            if (!t || !t.running) {
-                t = {
-                    id: this._id("tr"),
-                    role: "trace",
-                    events: [],
-                    open: false,
-                    running: true,
-                    startedAt: Date.now(),
-                    elapsed: null,
-                };
-                slot.turns.push(t);
-            }
-            return t;
+            let trace = this._activeTrace(slot);
+            if (trace) return trace;
+            trace = {
+                id: this._id("tr"),
+                role: "trace",
+                events: [],
+                open: false,
+                running: true,
+                startedAt: Date.now(),
+                elapsed: null,
+            };
+            slot.turns.push(trace);
+            return trace;
+        },
+        _ensureBusyTrace(slot) {
+            // Poll/hello recovery must not create a second "thinking" row
+            // while assistant text is actively streaming.
+            if (this._hasStreamingAssistant(slot)) return this._activeTrace(slot);
+            return this._ensureTrace(slot);
         },
         _closeTrace(slot) {
-            const t = this._currentTrace(slot);
-            if (t && t.running) {
-                t.running = false;
-                t.elapsed = ((Date.now() - t.startedAt) / 1000).toFixed(1);
+            for (const trace of slot.turns) {
+                if (trace.role !== "trace" || !trace.running) continue;
+                trace.running = false;
+                trace.elapsed = trace.elapsed || (
+                    trace.startedAt
+                        ? ((Date.now() - trace.startedAt) / 1000).toFixed(1)
+                        : null
+                );
             }
+        },
+        _isLiveTimelineTurn(turn) {
+            return (
+                (turn.role === "assistant" && turn.streaming)
+                || (turn.role === "trace" && turn.running)
+                || (turn.role === "subagent_panel" && turn.running)
+            );
+        },
+        _foldLiveInterim(slot) {
+            let userIndex = -1;
+            for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
+                if (slot.turns[index].role === "user") {
+                    userIndex = index;
+                    break;
+                }
+            }
+            if (userIndex < 0) return;
+
+            const userTurn = slot.turns[userIndex];
+            const tail = slot.turns.slice(userIndex + 1);
+            const existing = tail.find(turn =>
+                turn.role === "collapse"
+                && turn.live
+                && turn.userId === userTurn.id
+            );
+            const movable = [];
+            const retained = [];
+            for (const turn of tail) {
+                if (turn === existing) continue;
+                if (this._isLiveTimelineTurn(turn)) retained.push(turn);
+                else movable.push(turn);
+            }
+            if (!movable.length) return;
+
+            const childTurns = [
+                ...((existing && existing.childTurns) || []),
+                ...movable,
+            ];
+            let totalElapsed = 0;
+            let totalTokens = 0;
+            for (const child of childTurns) {
+                if (child.elapsed) totalElapsed += parseFloat(child.elapsed) || 0;
+                if (child.tokens) totalTokens += Number(child.tokens) || 0;
+            }
+            const collapse = {
+                id: (existing && existing.id) || `live-collapse-${userTurn.id}`,
+                role: "collapse",
+                groupKey: `live:${userTurn.id}`,
+                userId: userTurn.id,
+                live: true,
+                childTurns,
+                count: childTurns.length,
+                elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
+                tokens: totalTokens > 0
+                    ? (totalTokens >= 1000
+                        ? `${(totalTokens / 1000).toFixed(1)}k`
+                        : String(totalTokens))
+                    : "",
+                open: Boolean(existing && existing.open),
+            };
+            slot.turns.splice(
+                userIndex + 1,
+                tail.length,
+                collapse,
+                ...retained,
+            );
         },
 
         // ---------- collapse intermediate turns ----------------------
@@ -192,9 +307,13 @@ document.addEventListener("alpine:init", () => {
         _groupIntermediateTurns(slot, previousTurns = slot.turns) {
             const previous = Array.isArray(previousTurns) ? previousTurns : [];
             const previousOpen = new Map();
+            const previousLiveOpen = new Map();
             for (const turn of previous) {
                 if (turn.role === "collapse" && turn.groupKey) {
                     previousOpen.set(turn.groupKey, Boolean(turn.open));
+                }
+                if (turn.role === "collapse" && turn.live && turn.userId) {
+                    previousLiveOpen.set(turn.userId, Boolean(turn.open));
                 }
             }
 
@@ -252,7 +371,12 @@ document.addEventListener("alpine:init", () => {
                         count: childTurns.length,
                         elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
                         tokens: totalTokens > 0 ? (totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : String(totalTokens)) : "",
-                        open: previousOpen.get(groupKey) || false,
+                        open:
+                            previousOpen.get(groupKey)
+                            ?? previousLiveOpen.get(userTurn.id)
+                            ?? false,
+                        live: false,
+                        userId: userTurn.id,
                     });
                     grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
                 } else {
@@ -297,14 +421,22 @@ document.addEventListener("alpine:init", () => {
         },
         startAssistant(turn_id, name) {
             const slot = this._slot(name);
+            const id = turn_id || this._id("a");
+            const existing = this._findById(slot, id);
+            this._closeStreamingAssistants(slot, id);
             this._closeTrace(slot);
-            slot.turns.push({
-                id: turn_id || this._id("a"),
-                role: "assistant",
-                text: "",
-                html: "",
-                streaming: true,
-            });
+            this._foldLiveInterim(slot);
+            if (existing && existing.role === "assistant") {
+                existing.streaming = true;
+            } else {
+                slot.turns.push({
+                    id,
+                    role: "assistant",
+                    text: "",
+                    html: "",
+                    streaming: true,
+                });
+            }
             if (!name || name === this.currentName) this.scroll();
         },
         appendDelta(turn_id, text, name) {
@@ -318,6 +450,8 @@ document.addEventListener("alpine:init", () => {
                 }
             }
             if (!t) return;
+            this._closeStreamingAssistants(slot, t.id);
+            t.streaming = true;
             t.text += text;
             if (this._renderRaf) cancelAnimationFrame(this._renderRaf);
             const turnRef = t;
@@ -349,6 +483,8 @@ document.addEventListener("alpine:init", () => {
 
         addToolCall(toolName, args, name) {
             const slot = this._slot(name);
+            this._closeStreamingAssistants(slot);
+            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             t.events.push({
                 id: this._id("ev"),
@@ -361,6 +497,8 @@ document.addEventListener("alpine:init", () => {
         },
         addToolResult(toolName, text, name) {
             const slot = this._slot(name);
+            this._closeStreamingAssistants(slot);
+            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             t.events.push({
                 id: this._id("ev"),
@@ -375,6 +513,8 @@ document.addEventListener("alpine:init", () => {
         addThinking(text, name) {
             if (!text) return;
             const slot = this._slot(name);
+            this._closeStreamingAssistants(slot);
+            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             const last = t.events[t.events.length - 1];
             if (last && last.kind === "thinking") {
@@ -401,6 +541,8 @@ document.addEventListener("alpine:init", () => {
                 if (!name || name === this.currentName) this.scroll();
                 return;
             }
+            this._closeStreamingAssistants(slot);
+            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             t.events.push({
                 id: this._id("ev"),
@@ -474,6 +616,7 @@ document.addEventListener("alpine:init", () => {
                 }
                 slot.turns.splice(insertAt, 0, turn);
             }
+            this._foldLiveInterim(slot);
             if (!name || name === this.currentName) this.scroll(shouldFollow);
         },
 
@@ -660,6 +803,7 @@ document.addEventListener("alpine:init", () => {
 
         finishTurn(name) {
             const slot = this._slot(name);
+            this._closeStreamingAssistants(slot);
             this._closeTrace(slot);
             slot.turns = slot.turns.filter(
                 turn => turn.role !== "subagent_panel" || this._panelRunning(turn)
@@ -1031,7 +1175,7 @@ document.addEventListener("alpine:init", () => {
                 slot.busy = true;
                 // Ensure a live trace exists so the "thinking" header and
                 // elapsed timer render immediately on refresh mid-turn.
-                chat._ensureTrace(slot);
+                chat._ensureBusyTrace(slot);
             }
             // First load — sync the chat store's focus pointer.
             if (!chat.currentName && this.current) chat.focus(this.current);
@@ -4467,7 +4611,7 @@ function bootSSE() {
                     // traces). Ensure a running trace so the "thinking" header
                     // + elapsed show immediately instead of waiting for the
                     // next tool event.
-                    chat._ensureTrace(slot);
+                    chat._ensureBusyTrace(slot);
                 }
                 return;
             }

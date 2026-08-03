@@ -117,8 +117,9 @@
                                         <div class="body" x-html="ct.html"></div>
                                     </div>
                                 </template>
+                                <!-- MUCLI_SINGLE_TRACE_LIVE_INTERIM_V1: historical/interim traces never animate. -->
                                 <template x-if="ct.role === 'trace'">
-                                    <div class="trace" :class="{ open: ct.open, running: ct.running }">
+                                    <div class="trace" :class="{ open: ct.open }">
                                         <div class="trace-header"
                                              @click="ct.open = !ct.open"
                                              :aria-expanded="ct.open"
@@ -126,7 +127,7 @@
                                              @keydown.enter.prevent="ct.open = !ct.open"
                                              @keydown.space.prevent="ct.open = !ct.open">
                                             <span class="caret">›</span>
-                                            <span class="label" x-text="ct.running ? 'thinking' : 'trace'"></span>
+                                            <span class="label">trace</span>
                                             <span class="summary" x-text="summarizeTrace(ct, $store.chat.clock)"></span>
                                         </div>
                                         <div class="trace-events" x-show="ct.open" x-transition.opacity.duration.180ms>
@@ -214,7 +215,7 @@
 
             <!-- collapsed trace block: tool calls, thinking, results -->
             <template x-if="t.role === 'trace'">
-                <div class="trace" :class="{ open: t.open, running: t.running }">
+                <div class="trace" :class="{ open: t.open, running: $store.chat.isActiveTrace(t) }">
                     <div class="trace-header"
                          @click="t.open = !t.open"
                          :aria-expanded="t.open"
@@ -223,9 +224,9 @@
                          @keydown.enter.prevent="t.open = !t.open"
                          @keydown.space.prevent="t.open = !t.open">
                         <span class="caret">›</span>
-                        <span class="label" x-text="t.running ? 'thinking' : 'trace'"></span>
+                        <span class="label" x-text="$store.chat.isActiveTrace(t) ? 'thinking' : 'trace'"></span>
                         <span class="summary" x-text="summarizeTrace(t, $store.chat.clock)"></span>
-                        <span x-show="t.running" class="thinking-dots" aria-hidden="true">
+                        <span x-show="$store.chat.isActiveTrace(t)" class="thinking-dots" aria-hidden="true">
                             <span></span><span></span><span></span>
                         </span>
                     </div>

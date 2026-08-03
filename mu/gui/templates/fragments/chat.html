@@ -65,8 +65,8 @@
 
             <!-- collapsed intermediate turns: groups intermediate assistant +
                  trace + tool events between a user msg and the final response.
-                 Shows "N responses · Xs · Yk tokens" heading. Expanded shows
-                 child turns inline. Visualizations trickle up (not contained). -->
+                 Shows "N interim updates · Xs · Yk tokens" heading. Expanded shows
+                 child turns inline, including visualizations. -->
             <template x-if="t.role === 'collapse'">
                 <div class="collapse-group" :class="{ open: t.open }">
                     <div class="collapse-header"
@@ -78,7 +78,7 @@
                          @keydown.space.prevent="t.open = !t.open">
                         <span class="caret" x-text="t.open ? '▾' : '▸'"></span>
                         <span class="collapse-summary">
-                            <span x-text="t.count"></span> response<span x-show="t.count !== 1">s</span>
+                            <span x-text="t.count"></span> interim update<span x-show="t.count !== 1">s</span>
                             <span x-show="t.elapsed" class="muted"> · </span>
                             <span x-show="t.elapsed" class="muted" x-text="t.elapsed"></span>
                             <span x-show="t.tokens" class="muted"> · </span>
@@ -90,6 +90,27 @@
                          x-transition.opacity.duration.180ms>
                         <template x-for="ct in t.childTurns" :key="ct.id">
                             <div class="turn-wrap">
+                                <template x-if="ct.role === 'visualization'">
+                                    <section class="msg visualization collapsed-child">
+                                        <div class="visualization-head">
+                                            <div>
+                                                <div class="role">visualization</div>
+                                                <strong x-text="ct.artifact.title || ct.artifact.name"></strong>
+                                            </div>
+                                            <div class="visualization-actions">
+                                                <a :href="ct.artifact.view_url" target="_blank" rel="noopener noreferrer">Open</a>
+                                                <a :href="ct.artifact.download_url" download>Download</a>
+                                            </div>
+                                        </div>
+                                        <iframe class="visualization-frame"
+                                                :src="ct.artifact.view_url"
+                                                :title="ct.artifact.title || ct.artifact.name || 'Interactive visualization'"
+                                                :style="'height:' + (ct.height || 420) + 'px'"
+                                                loading="lazy"
+                                                referrerpolicy="no-referrer"
+                                                sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
+                                    </section>
+                                </template>
                                 <template x-if="ct.role === 'assistant'">
                                     <div class="msg assistant collapsed-child">
                                         <div class="role">assistant</div>

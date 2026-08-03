@@ -67,6 +67,8 @@ export function ChatScreen() {
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentAdjustTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followOutputRef = useRef(true);
   const initialScrollPendingRef = useRef(true);
   const userScrollActiveRef = useRef(false);
@@ -92,18 +94,32 @@ export function ChatScreen() {
   // whether to auto-follow without re-creating its callback identity.
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
-  // Explicit bottom-follow state with hysteresis. A user drag disables
-  // following immediately; only ending a gesture near the bottom re-enables it.
+  // Follow streaming output only while the user remains parked near the
+  // bottom. Coalesced scroll requests avoid fighting FlatList layout.
   const scrollToBottom = useCallback((force = false) => {
     if (force) followOutputRef.current = true;
-    if (!force && !followOutputRef.current) return;
+    if (
+      !force
+      && (!followOutputRef.current || userScrollActiveRef.current || momentumScrollRef.current)
+    ) return;
     if (scrollThrottleRef.current) return;
     scrollThrottleRef.current = setTimeout(() => {
       scrollThrottleRef.current = null;
-      if (force || followOutputRef.current) {
+      if (
+        force
+        || (followOutputRef.current && !userScrollActiveRef.current && !momentumScrollRef.current)
+      ) {
         flatListRef.current?.scrollToEnd({ animated: false });
       }
-    }, force ? 0 : 100);
+    }, force ? 0 : 32);
+  }, []);
+
+  const cancelInitialScroll = useCallback(() => {
+    if (initialScrollTimerRef.current) {
+      clearTimeout(initialScrollTimerRef.current);
+      initialScrollTimerRef.current = null;
+    }
+    initialScrollPendingRef.current = false;
   }, []);
 
   const updateFollowFromDistance = useCallback((distanceFromEnd: number) => {
@@ -156,6 +172,7 @@ export function ChatScreen() {
   }, [hasMore, loadingOlder, loadOlderHistory, updateFollowFromDistance]);
 
   const onChatScrollBeginDrag = useCallback(() => {
+    cancelInitialScroll();
     if (scrollEndTimerRef.current) {
       clearTimeout(scrollEndTimerRef.current);
       scrollEndTimerRef.current = null;
@@ -163,7 +180,7 @@ export function ChatScreen() {
     userScrollActiveRef.current = true;
     momentumScrollRef.current = false;
     followOutputRef.current = false;
-  }, []);
+  }, [cancelInitialScroll]);
 
   const finishUserScroll = useCallback(() => {
     userScrollActiveRef.current = false;
@@ -195,69 +212,49 @@ export function ChatScreen() {
     finishUserScroll();
   }, [finishUserScroll]);
 
-  const onChatContentSizeChange = useCallback((event: any) => {
-    if (!event?.nativeEvent?.contentSize) return;
-    const newHeight = event.nativeEvent.contentSize.height;
+  const onChatContentSizeChange = useCallback((_width: number, newHeight: number) => {
+    if (!Number.isFinite(newHeight)) return;
 
-    // MUCLI_SLIDING_WINDOW_V1: if older messages were prepended, the content
-    // height grew at the TOP. Offset the scroll position by the height delta
-    // so the user's visual position stays stable (no jump to a different
-    // message). This fires before the streaming auto-follow below.
-    // IMPORTANT: clear loadingOlderTriggeredRef HERE (not in .finally of
-    // loadOlderHistory) because the guard must stay active until the scroll
-    // offset is applied. Clearing earlier caused infinite scroll loop.
+    // Older messages were prepended at the top. Preserve the visible anchor by
+    // offsetting by exactly the content-height delta after layout settles.
     if (prevContentHeightRef.current > 0 && newHeight > prevContentHeightRef.current) {
       const delta = newHeight - prevContentHeightRef.current;
       prevContentHeightRef.current = 0;
-      // Use setTimeout so FlatList has laid out the new cells before we offset.
-      setTimeout(() => {
+      if (contentAdjustTimerRef.current) clearTimeout(contentAdjustTimerRef.current);
+      contentAdjustTimerRef.current = setTimeout(() => {
+        contentAdjustTimerRef.current = null;
         flatListRef.current?.scrollToOffset({
           offset: scrollOffsetRef.current + delta,
           animated: false,
         });
-        // NOW safe to clear — scroll offset applied, next onScroll won't
-        // re-trigger pagination (offset is no longer near top).
         loadingOlderTriggeredRef.current = false;
       }, 0);
       return;
     }
-    // Edge case: loadOlderHistory returned 0 new messages (server returned
-    // empty page). Clear guards so user can retry / know it's done.
     if (prevContentHeightRef.current > 0 && newHeight === prevContentHeightRef.current) {
       prevContentHeightRef.current = 0;
       loadingOlderTriggeredRef.current = false;
       return;
     }
 
-    if (initialScrollPendingRef.current && messages.length > 0) {
-      // Scroll to bottom immediately. Keep flag TRUE so subsequent
-      // onContentSizeChange events (from more cells mounting in later
-      // virtualization batches) keep re-scrolling to bottom until we
-      // explicitly clear it. Use a longer delay (300ms) + repeat to
-      // catch all batch mounts — FlatList with windowSize=5 mounts
-      // cells across multiple frames.
-      scrollToBottom(true);
-      // Keep re-scrolling for 600ms to catch all virtualization batches.
-      // Clear the flag on the last iteration.
-      let scrollAttempts = 0;
-      const maxAttempts = 4;
-      const attemptScroll = () => {
-        scrollAttempts++;
-        scrollToBottom(true);
-        if (scrollAttempts < maxAttempts) {
-          setTimeout(attemptScroll, 150);
-        } else {
-          initialScrollPendingRef.current = false;
-        }
-      };
-      setTimeout(attemptScroll, 150);
+    // Debounce the initial jump to the bottom until the current virtualization
+    // batch has stopped changing size. A drag cancels this timer permanently.
+    if (
+      initialScrollPendingRef.current
+      && messages.length > 0
+      && !userScrollActiveRef.current
+      && !momentumScrollRef.current
+    ) {
+      if (initialScrollTimerRef.current) clearTimeout(initialScrollTimerRef.current);
+      initialScrollTimerRef.current = setTimeout(() => {
+        initialScrollTimerRef.current = null;
+        if (userScrollActiveRef.current || momentumScrollRef.current) return;
+        flatListRef.current?.scrollToEnd({ animated: false });
+        initialScrollPendingRef.current = false;
+      }, 80);
       return;
     }
-    // Only auto-follow when content is actively growing (agent streaming)
-    // AND the user hasn't scrolled away. Without this gate, virtualization
-    // mount/unmount of variable-height cells fires contentSizeChange during
-    // idle scrolling, causing the list to snap back to bottom — the
-    // "jumping up and down" effect while navigating history.
+
     if (!streamingRef.current || !followOutputRef.current) return;
     scrollToBottom(false);
   }, [messages.length, scrollToBottom]);
@@ -275,6 +272,8 @@ export function ChatScreen() {
   }, []);
 
   useEffect(() => {
+    if (initialScrollTimerRef.current) clearTimeout(initialScrollTimerRef.current);
+    if (contentAdjustTimerRef.current) clearTimeout(contentAdjustTimerRef.current);
     initialScrollPendingRef.current = true;
     followOutputRef.current = true;
     userScrollActiveRef.current = false;
@@ -289,9 +288,12 @@ export function ChatScreen() {
   useEffect(() => () => {
     if (scrollThrottleRef.current) clearTimeout(scrollThrottleRef.current);
     if (scrollEndTimerRef.current) clearTimeout(scrollEndTimerRef.current);
+    if (initialScrollTimerRef.current) clearTimeout(initialScrollTimerRef.current);
+    if (contentAdjustTimerRef.current) clearTimeout(contentAdjustTimerRef.current);
   }, []);
 
   const send = async () => {
+    cancelInitialScroll();
     const text = input.trim();
     if ((!text && selectedAttachments.length === 0) || streaming) return;
     followOutputRef.current = true;
@@ -410,26 +412,69 @@ export function ChatScreen() {
       );
     }
 
-    // Collapsible heading for intermediate agent responses
+    // Collapsible heading for all interim agent output.
     if (item.role === 'collapse') {
       const count = item.collapseCount || (item.childTurns?.length || 0);
       return (
-        <TouchableOpacity
-          onPress={() => setMessages(current => current.map(m =>
-            m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m,
-          ))}
-          style={[styles.collapseHeader, { backgroundColor: colors.bgHover, borderColor: colors.border }]}
-          activeOpacity={0.7}
-        >
-          <Text style={{ fontSize: 12, color: colors.textDim }}>
-            {item.collapseOpen ? '▾' : '▸'}
-          </Text>
-          <Text style={{ fontSize: 13, color: colors.textSoft, fontFamily: 'monospace' }}>
-            {count} response{count !== 1 ? 's' : ''}
-            {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
-            {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
-          </Text>
-        </TouchableOpacity>
+        <View>
+          <TouchableOpacity
+            onPress={() => setMessages(current => current.map(m =>
+              m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m,
+            ))}
+            style={[styles.collapseHeader, { backgroundColor: colors.bgHover, borderColor: colors.border }]}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 12, color: colors.textDim }}>
+              {item.collapseOpen ? '▾' : '▸'}
+            </Text>
+            <Text style={{ fontSize: 13, color: colors.textSoft, fontFamily: 'monospace' }}>
+              {count} interim update{count !== 1 ? 's' : ''}
+              {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
+              {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
+            </Text>
+          </TouchableOpacity>
+          {item.collapseOpen ? (
+            <View style={{ paddingLeft: 8 }}>
+              {item.childTurns?.map(child => {
+                if (child.role === 'visualization' && child.artifact && activeSessionName) {
+                  return (
+                    <VisualizationCard
+                      key={child.id}
+                      artifact={child.artifact}
+                      sessionName={activeSessionName}
+                      onInteractionChange={onVisualizationInteractionChange}
+                    />
+                  );
+                }
+                if (child.role !== 'assistant') return null;
+                return (
+                  <View key={child.id} style={[styles.msgRow, { justifyContent: 'flex-start' }]}>
+                    <View style={[styles.msgBubble, { backgroundColor: 'transparent', maxWidth: '100%', paddingHorizontal: 0 }]}>
+                      {child.streaming ? (
+                        <Text style={{ color: colors.text, fontSize: 15, lineHeight: 23 }}>
+                          {child.text}
+                        </Text>
+                      ) : (
+                        <Markdown style={memoizedMarkdownStyles} rules={markdownRules}>
+                          {child.text}
+                        </Markdown>
+                      )}
+                      {child.text.length > 0 ? (
+                        <TouchableOpacity
+                          onPress={() => copyMessage(child.text)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.copyButton}
+                        >
+                          <Ionicons name="copy-outline" size={14} color={colors.textDim} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
       );
     }
 
@@ -503,10 +548,11 @@ export function ChatScreen() {
           data={messages}
           keyExtractor={item => item.id}
           renderItem={renderMessage}
-          initialNumToRender={4}
-          maxToRenderPerBatch={3}
-          updateCellsBatchingPeriod={80}
-          windowSize={5}
+          initialNumToRender={20}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={32}
+          windowSize={9}
+          removeClippedSubviews={false}
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,
@@ -518,7 +564,7 @@ export function ChatScreen() {
           onScrollEndDrag={onChatScrollEndDrag}
           onMomentumScrollBegin={onChatMomentumScrollBegin}
           onMomentumScrollEnd={onChatMomentumScrollEnd}
-          scrollEventThrottle={32}
+          scrollEventThrottle={16}
           onContentSizeChange={onChatContentSizeChange}
           onLayout={onChatLayout}
           ListHeaderComponent={

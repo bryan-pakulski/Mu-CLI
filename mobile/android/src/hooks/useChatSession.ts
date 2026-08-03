@@ -30,6 +30,7 @@ export interface ChatMessage {
   collapseElapsed?: string;
   collapseTokens?: string;
   collapseOpen?: boolean;
+  collapseGroupKey?: string;
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
@@ -115,72 +116,88 @@ function eventBelongsToSession(event: StreamEvent, activeSessionName: string | n
   return !eventSession || !activeSessionName || eventSession === activeSessionName;
 }
 
-// Group intermediate assistant turns between a user msg and the final
-// assistant response into a collapsible heading. Visualizations stay
-// inline (trickle up). Called on turn_complete + loadHistory.
-const COLLAPSIBLE_ROLES = new Set(['assistant', 'trace', 'subagent_panel', 'info', 'command', 'error', 'prompt_resolved']);
-
-function groupIntermediateTurns(messages: ChatMessage[]): ChatMessage[] {
-  if (messages.length < 3) return messages;
-
-  // Find last user message
-  let lastUserIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'user') { lastUserIdx = i; break; }
-  }
-  if (lastUserIdx < 0) return messages;
-
-  // Find last non-streaming assistant after user
-  let lastAssistantIdx = -1;
-  for (let i = messages.length - 1; i > lastUserIdx; i--) {
-    if (messages[i].role === 'assistant' && !messages[i].streaming) {
-      lastAssistantIdx = i; break;
-    }
-  }
-  if (lastAssistantIdx < 0 || lastAssistantIdx === lastUserIdx + 1) return messages;
-
-  // Check if intermediate turns are collapsible
-  let hasIntermediate = false;
-  for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
-    if (COLLAPSIBLE_ROLES.has(messages[i].role)) { hasIntermediate = true; break; }
-  }
-  if (!hasIntermediate) return messages;
-
-  // Already grouped?
-  if (messages[lastUserIdx + 1]?.role === 'collapse') return messages;
-
-  // Collect children (exclude visualizations)
-  const childTurns: ChatMessage[] = [];
-  const visualizationsToKeep: ChatMessage[] = [];
-  for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
-    if (messages[i].role === 'visualization') {
-      visualizationsToKeep.push(messages[i]);
+// Collapse every completed exchange independently. Everything after the user
+// message and before the final non-streaming assistant response belongs to
+// the compact interim section, including visualization cards.
+function flattenCollapsedMessages(messages: ChatMessage[]): ChatMessage[] {
+  const flattened: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.role === 'collapse') {
+      flattened.push(...flattenCollapsedMessages(message.childTurns || []));
     } else {
-      childTurns.push(messages[i]);
+      flattened.push(message);
+    }
+  }
+  return flattened;
+}
+
+function collapseGroupKey(user: ChatMessage, finalResponse: ChatMessage): string {
+  return JSON.stringify([user.text, finalResponse.text]);
+}
+
+function groupIntermediateTurns(
+  messages: ChatMessage[],
+  previous: ChatMessage[] = messages,
+): ChatMessage[] {
+  const source = flattenCollapsedMessages(messages);
+  if (source.length < 3) return source;
+
+  const previousOpen = new Map<string, boolean>();
+  for (const message of previous) {
+    if (message.role === 'collapse' && message.collapseGroupKey) {
+      previousOpen.set(message.collapseGroupKey, Boolean(message.collapseOpen));
     }
   }
 
-  const responseCount = childTurns.filter(m => m.role === 'assistant').length || childTurns.length;
+  const grouped: ChatMessage[] = [];
+  let index = 0;
+  while (index < source.length) {
+    const userMessage = source[index];
+    if (userMessage.role !== 'user') {
+      grouped.push(userMessage);
+      index += 1;
+      continue;
+    }
 
-  const collapseMsg: ChatMessage = {
-    id: `collapse-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    role: 'collapse',
-    text: '',
-    childTurns,
-    collapseCount: responseCount,
-    collapseElapsed: '',
-    collapseTokens: '',
-    collapseOpen: false,
-  };
+    grouped.push(userMessage);
+    let nextUserIndex = index + 1;
+    while (nextUserIndex < source.length && source[nextUserIndex].role !== 'user') {
+      nextUserIndex += 1;
+    }
 
-  const result = messages.slice(0, lastUserIdx + 1);
-  result.push(collapseMsg);
-  for (const v of visualizationsToKeep) result.push(v);
-  result.push(messages[lastAssistantIdx]);
-  if (lastAssistantIdx + 1 < messages.length) {
-    result.push(...messages.slice(lastAssistantIdx + 1));
+    const exchange = source.slice(index + 1, nextUserIndex);
+    let finalOffset = -1;
+    for (let offset = exchange.length - 1; offset >= 0; offset -= 1) {
+      const candidate = exchange[offset];
+      if (candidate.role === 'assistant' && !candidate.streaming) {
+        finalOffset = offset;
+        break;
+      }
+    }
+
+    if (finalOffset > 0) {
+      const childTurns = exchange.slice(0, finalOffset);
+      const finalResponse = exchange[finalOffset];
+      const groupKey = collapseGroupKey(userMessage, finalResponse);
+      grouped.push({
+        id: `collapse-${userMessage.id}-${finalResponse.id}`,
+        role: 'collapse',
+        text: '',
+        childTurns,
+        collapseCount: childTurns.length,
+        collapseElapsed: '',
+        collapseTokens: '',
+        collapseOpen: previousOpen.get(groupKey) || false,
+        collapseGroupKey: groupKey,
+      });
+      grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
+    } else {
+      grouped.push(...exchange);
+    }
+
+    index = nextUserIndex;
   }
-  return result;
+  return grouped;
 }
 
 export function useChatSession(activeSessionName: string | null) {
@@ -337,8 +354,9 @@ export function useChatSession(activeSessionName: string | null) {
           // history messages (id: 'history-N-N'). Without ID reuse, every
           // key changes → FlatList unmounts/remounts all cells → visible
           // "jumping up and down" effect.
+          const currentFlat = flattenCollapsedMessages(current);
           const merged = historyMessages.map((next, index) => {
-            const prev = current[index];
+            const prev = currentFlat[index];
             if (!prev) return next;
             const contentMatches = prev.role === next.role
               && prev.text === next.text
@@ -348,14 +366,7 @@ export function useChatSession(activeSessionName: string | null) {
             if (contentMatches) return { ...next, id: prev.id };
             return next;
           });
-          const unchanged = current.length === merged.length
-            && current.every((message, index) => {
-              const next = merged[index];
-              return message.id === next.id
-                && message.role === next.role
-                && message.text === next.text;
-            });
-          return unchanged ? current : groupIntermediateTurns(merged);
+          return groupIntermediateTurns(merged, current);
         });
         historyHydratedRef.current = activeSessionName;
         setError(null);
@@ -405,7 +416,10 @@ export function useChatSession(activeSessionName: string | null) {
       oldestLoadedIndexRef.current = newOldest;
       setHasMore(response.has_more ?? false);
       if (olderCount > 0) {
-        setMessages(current => [...olderMessages, ...current]);
+        setMessages(current => groupIntermediateTurns(
+          [...olderMessages, ...flattenCollapsedMessages(current)],
+          current,
+        ));
       }
       return olderCount;
     } catch {
@@ -573,6 +587,7 @@ export function useChatSession(activeSessionName: string | null) {
       if (result?.status === 'error' && result.error) {
         setError(String(result.error));
       }
+      setMessages(current => groupIntermediateTurns(current, current));
       setArtifactRevision(value => value + 1);
       // Do NOT call loadHistory here. The server may not have persisted
       // the final assistant message yet, so loadHistory would replace

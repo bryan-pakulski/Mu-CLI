@@ -189,87 +189,78 @@ document.addEventListener("alpine:init", () => {
         // and the final assistant response into a collapsible heading.
         // Visualizations stay inline (trickle up, not contained).
         // Called on turn_complete (finishTurn) and loadHistory.
-        _groupIntermediateTurns(slot) {
-            const turns = slot.turns;
-            if (turns.length < 3) return; // need user + intermediate + final
-
-            // Find the last user turn index
-            let lastUserIdx = -1;
-            for (let i = turns.length - 1; i >= 0; i--) {
-                if (turns[i].role === "user") { lastUserIdx = i; break; }
-            }
-            if (lastUserIdx < 0) return;
-
-            // Find the last assistant turn index after the user
-            let lastAssistantIdx = -1;
-            for (let i = turns.length - 1; i > lastUserIdx; i--) {
-                if (turns[i].role === "assistant" && !turns[i].streaming) {
-                    lastAssistantIdx = i; break;
-                }
-            }
-            if (lastAssistantIdx < 0 || lastAssistantIdx === lastUserIdx + 1) return;
-
-            // Check if there are intermediate turns to collapse (excl visualizations)
-            // Roles to collapse: assistant, trace, subagent_panel, info, command, error
-            const COLLAPSIBLE_ROLES = new Set(["assistant", "trace", "subagent_panel", "info", "command", "error", "prompt_resolved"]);
-            let hasIntermediate = false;
-            for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
-                if (COLLAPSIBLE_ROLES.has(turns[i].role)) { hasIntermediate = true; break; }
-            }
-            if (!hasIntermediate) return;
-
-            // Don't re-group if already grouped (idempotent)
-            if (turns[lastUserIdx + 1] && turns[lastUserIdx + 1].role === "collapse") return;
-
-            // Collect child turns (exclude visualizations — they trickle up)
-            const childTurns = [];
-            const visualizationsToKeep = [];
-            for (let i = lastUserIdx + 1; i < lastAssistantIdx; i++) {
-                if (turns[i].role === "visualization") {
-                    visualizationsToKeep.push(turns[i]);
-                } else {
-                    childTurns.push(turns[i]);
+        _groupIntermediateTurns(slot, previousTurns = slot.turns) {
+            const previous = Array.isArray(previousTurns) ? previousTurns : [];
+            const previousOpen = new Map();
+            for (const turn of previous) {
+                if (turn.role === "collapse" && turn.groupKey) {
+                    previousOpen.set(turn.groupKey, Boolean(turn.open));
                 }
             }
 
-            // Compute aggregate stats
-            let totalElapsed = 0;
-            let totalTokens = 0;
-            let responseCount = 0;
-            for (const t of childTurns) {
-                if (t.role === "assistant") responseCount++;
-                if (t.elapsed) totalElapsed += parseFloat(t.elapsed) || 0;
-                if (t.tokens) totalTokens += t.tokens;
-            }
-            // If no elapsed captured, estimate from trace startedAt
-            if (totalElapsed === 0 && childTurns.length > 0) {
-                const first = childTurns[0];
-                const last = childTurns[childTurns.length - 1];
-                if (first.startedAt && last.at) {
-                    totalElapsed = ((last.at - first.startedAt) / 1000);
+            const flatten = (items) => {
+                const result = [];
+                for (const item of items) {
+                    if (item.role === "collapse") result.push(...flatten(item.childTurns || []));
+                    else result.push(item);
                 }
-            }
-
-            const collapseTurn = {
-                id: `collapse-${this._id("c")}`,
-                role: "collapse",
-                childTurns,
-                count: responseCount || childTurns.length,
-                elapsed: totalElapsed > 0 ? totalElapsed.toFixed(1) + "s" : "",
-                tokens: totalTokens > 0 ? (totalTokens >= 1000 ? (totalTokens / 1000).toFixed(1) + "k" : String(totalTokens)) : "",
-                open: false,
+                return result;
             };
 
-            // Rebuild: user + collapse + visualizations + final assistant
-            const newTurns = turns.slice(0, lastUserIdx + 1);
-            newTurns.push(collapseTurn);
-            for (const v of visualizationsToKeep) newTurns.push(v);
-            newTurns.push(turns[lastAssistantIdx]);
-            // Append any turns after the final assistant (shouldn't be any, but safe)
-            if (lastAssistantIdx + 1 < turns.length) {
-                newTurns.push(...turns.slice(lastAssistantIdx + 1));
+            const turns = flatten(previous);
+            const grouped = [];
+            let index = 0;
+            while (index < turns.length) {
+                const userTurn = turns[index];
+                if (userTurn.role !== "user") {
+                    grouped.push(userTurn);
+                    index += 1;
+                    continue;
+                }
+
+                grouped.push(userTurn);
+                let nextUserIndex = index + 1;
+                while (nextUserIndex < turns.length && turns[nextUserIndex].role !== "user") {
+                    nextUserIndex += 1;
+                }
+
+                const exchange = turns.slice(index + 1, nextUserIndex);
+                let finalOffset = -1;
+                for (let offset = exchange.length - 1; offset >= 0; offset -= 1) {
+                    const candidate = exchange[offset];
+                    if (candidate.role === "assistant" && !candidate.streaming) {
+                        finalOffset = offset;
+                        break;
+                    }
+                }
+
+                if (finalOffset > 0) {
+                    const childTurns = exchange.slice(0, finalOffset);
+                    const finalResponse = exchange[finalOffset];
+                    const groupKey = JSON.stringify([userTurn.text || "", finalResponse.text || ""]);
+                    let totalElapsed = 0;
+                    let totalTokens = 0;
+                    for (const child of childTurns) {
+                        if (child.elapsed) totalElapsed += parseFloat(child.elapsed) || 0;
+                        if (child.tokens) totalTokens += Number(child.tokens) || 0;
+                    }
+                    grouped.push({
+                        id: `collapse-${userTurn.id}-${finalResponse.id}`,
+                        role: "collapse",
+                        groupKey,
+                        childTurns,
+                        count: childTurns.length,
+                        elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
+                        tokens: totalTokens > 0 ? (totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : String(totalTokens)) : "",
+                        open: previousOpen.get(groupKey) || false,
+                    });
+                    grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
+                } else {
+                    grouped.push(...exchange);
+                }
+                index = nextUserIndex;
             }
-            slot.turns = newTurns;
+            slot.turns = grouped;
         },
         _findById(slot, id) { return slot.turns.find((t) => t.id === id); },
         _lastByRole(slot, role) {
@@ -904,7 +895,9 @@ document.addEventListener("alpine:init", () => {
                 const shouldFollowHistory = !dst.historyHydrated
                     || (liveHistoryElement ? this._atBottom(liveHistoryElement) : true);
                 const previousScrollTop = liveHistoryElement ? liveHistoryElement.scrollTop : 0;
+                const previousTurns = dst.turns;
                 dst.turns = rebuiltTurns;
+                this._groupIntermediateTurns(dst, previousTurns);
                 dst.historyHydrated = true;
                 if (!name || name === this.currentName) {
                     queueMicrotask(() => requestAnimationFrame(() => {

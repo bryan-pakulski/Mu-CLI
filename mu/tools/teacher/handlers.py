@@ -343,6 +343,7 @@ def _write_report_card(course: Course) -> str:
         "required": ["subject"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def create_course_tool(args: dict[str, Any], context) -> str:
     try:
@@ -431,6 +432,7 @@ def create_course_tool(args: dict[str, Any], context) -> str:
         },
     },
     requires_approval=False,
+    phase="teacher",
 )
 def record_diagnostic_tool(args: dict[str, Any], context) -> str:
     try:
@@ -507,6 +509,7 @@ def record_diagnostic_tool(args: dict[str, Any], context) -> str:
         "required": ["observation"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def update_learner_profile_tool(args: dict[str, Any], context) -> str:
     try:
@@ -645,6 +648,7 @@ def update_learner_profile_tool(args: dict[str, Any], context) -> str:
         "required": ["modules"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def propose_curriculum_tool(args: dict[str, Any], context) -> str:
     try:
@@ -722,6 +726,7 @@ def propose_curriculum_tool(args: dict[str, Any], context) -> str:
         "properties": {"course_id": {"type": "string"}},
     },
     requires_approval=True,
+    phase="teacher",
 )
 def approve_curriculum_tool(args: dict[str, Any], context) -> str:
     try:
@@ -769,6 +774,7 @@ def approve_curriculum_tool(args: dict[str, Any], context) -> str:
         "required": ["lesson_id"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def start_lesson_tool(args: dict[str, Any], context) -> str:
     try:
@@ -885,6 +891,7 @@ def start_lesson_tool(args: dict[str, Any], context) -> str:
         "required": ["lesson_id", "kind", "prompt"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def assign_exercise_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1093,6 +1100,7 @@ def _default_method(kind: str) -> str:
         "required": ["assignment_id"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def submit_assignment_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1154,6 +1162,7 @@ def submit_assignment_tool(args: dict[str, Any], context) -> str:
         "required": ["assignment_id"],
     },
     requires_approval=True,
+    phase="teacher",
 )
 def grade_assignment_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1246,6 +1255,7 @@ def grade_assignment_tool(args: dict[str, Any], context) -> str:
         "required": ["lesson_id", "action"],
     },
     requires_approval=True,
+    phase="teacher",
 )
 def decide_next_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1294,6 +1304,7 @@ def decide_next_tool(args: dict[str, Any], context) -> str:
         "required": ["assignment_id", "role", "content"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def record_dialog_turn_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1334,6 +1345,7 @@ def record_dialog_turn_tool(args: dict[str, Any], context) -> str:
         "required": ["assignment_id", "mastery_pct", "summary"],
     },
     requires_approval=True,
+    phase="teacher",
 )
 def close_dialog_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1377,6 +1389,7 @@ def close_dialog_tool(args: dict[str, Any], context) -> str:
         "properties": {"course_id": {"type": "string"}},
     },
     requires_approval=False,
+    phase="teacher",
 )
 def get_course_state_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1424,6 +1437,7 @@ def get_course_state_tool(args: dict[str, Any], context) -> str:
         "required": ["module_id"],
     },
     requires_approval=True,
+    phase="teacher",
 )
 def complete_module_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1485,6 +1499,7 @@ def complete_module_tool(args: dict[str, Any], context) -> str:
         "properties": {"course_id": {"type": "string"}},
     },
     requires_approval=True,
+    phase="teacher",
 )
 def finalize_course_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1539,6 +1554,7 @@ def finalize_course_tool(args: dict[str, Any], context) -> str:
         "required": ["summary"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def raise_teacher_blocker_tool(args: dict[str, Any], context) -> str:
     payload = {
@@ -1595,6 +1611,7 @@ def raise_teacher_blocker_tool(args: dict[str, Any], context) -> str:
         "required": ["source_lesson_id", "after_n_lessons"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def schedule_review_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1635,6 +1652,7 @@ def schedule_review_tool(args: dict[str, Any], context) -> str:
         "properties": {},
     },
     requires_approval=False,
+    phase="teacher",
     execution_kind="read",
 )
 def get_due_reviews_tool(args: dict[str, Any], context) -> str:
@@ -1690,6 +1708,7 @@ def get_due_reviews_tool(args: dict[str, Any], context) -> str:
         "required": ["review_id", "score_pct"],
     },
     requires_approval=True,
+    phase="teacher",
 )
 def complete_review_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1740,6 +1759,7 @@ def complete_review_tool(args: dict[str, Any], context) -> str:
         "required": ["lesson_id", "content"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def write_lecture_transcript_tool(args: dict[str, Any], context) -> str:
     try:
@@ -1801,6 +1821,7 @@ def write_lecture_transcript_tool(args: dict[str, Any], context) -> str:
         "required": ["lesson_id", "path", "content"],
     },
     requires_approval=False,
+    phase="teacher",
 )
 def register_exercise_file_tool(args: dict[str, Any], context) -> str:
     try:

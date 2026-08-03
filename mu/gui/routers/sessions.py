@@ -793,7 +793,6 @@ async def create_session(request: Request, payload: Dict[str, Any]):
                 "yolo": True,
                 "strict_mode": False,
                 "plan_mode": False,
-                "lazy_tools_enabled": False,
                 "security_allow_secret_paths": False,
             }
         )
@@ -1027,8 +1026,7 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
                     "yolo": True,
                     "strict_mode": False,
                     "plan_mode": False,
-                    "lazy_tools_enabled": False,
-                    "security_allow_secret_paths": False,
+                        "security_allow_secret_paths": False,
                 }
             )
             session.container_ref = container_ref

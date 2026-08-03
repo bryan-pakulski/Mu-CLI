@@ -322,9 +322,10 @@ VARIABLE_SCHEMA = {
         # Spec #9: phased tool exposure. When True, only tools whose `phase`
         # is in `active_tool_phases` (plus any the model loaded via
         # `load_tools`) appear in the schema — shrinking per-request
-        # schema bytes. Default False → all tools exposed (current behavior).
+        # schema bytes. Default True → only core-phase tools exposed;
+        # specialist phases loaded on demand via `load_tools`.
         "type": bool,
-        "default": False,
+        "default": True,
     },
     "active_tool_phases": {
         # Spec #9: phases always exposed when `lazy_tools_enabled` is True.

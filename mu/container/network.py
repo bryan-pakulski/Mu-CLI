@@ -31,6 +31,9 @@ DEFAULT_EGRESS_ALLOW = [
     "*.launchpad.net",
     "*.hf.co",
     "*.huggingface.co",
+    # Research tool endpoints
+    "arxiv.org",
+    "export.arxiv.org",
 ]
 DEFAULT_PROXY_PORT = 3128
 

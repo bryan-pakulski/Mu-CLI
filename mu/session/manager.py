@@ -737,7 +737,6 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             self.variables["yolo"] = True
             self.variables["strict_mode"] = False
             self.variables["plan_mode"] = False
-            self.variables["lazy_tools_enabled"] = False
             self.variables["security_allow_secret_paths"] = False
         self.save_history()
         if self.ui:

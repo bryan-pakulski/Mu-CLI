@@ -1041,6 +1041,7 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
         "required": ["feature_name", "feature_request"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def create_feature(args: Dict[str, Any], context) -> str:
     return _handle_create_feature(args, context)
@@ -1075,6 +1076,7 @@ def create_feature(args: Dict[str, Any], context) -> str:
         "required": ["phases"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def create_phases(args: Dict[str, Any], context) -> str:
     return _handle_create_phases(args, context)
@@ -1100,6 +1102,7 @@ def create_phases(args: Dict[str, Any], context) -> str:
         "required": ["title", "exit_criteria"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def create_task(args: Dict[str, Any], context) -> str:
     return _handle_create_task(args, context)
@@ -1116,6 +1119,7 @@ def create_task(args: Dict[str, Any], context) -> str:
         "properties": {"feature_id": {"type": "string"}},
     },
     requires_approval=False,
+    phase="feature",
 )
 def get_execution_state(args: Dict[str, Any], context) -> str:
     return _handle_get_execution_state(args, context)
@@ -1141,6 +1145,7 @@ def get_execution_state(args: Dict[str, Any], context) -> str:
         "required": ["task_id", "reason"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def block_task(args: Dict[str, Any], context) -> str:
     return _handle_block_task(args, context)
@@ -1162,6 +1167,7 @@ def block_task(args: Dict[str, Any], context) -> str:
         "required": ["task_id"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def resume_task(args: Dict[str, Any], context) -> str:
     return _handle_resume_task(args, context)
@@ -1182,6 +1188,7 @@ def resume_task(args: Dict[str, Any], context) -> str:
         "required": ["task_id"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def archive_task(args: Dict[str, Any], context) -> str:
     return _handle_archive_task(args, context)
@@ -1224,6 +1231,7 @@ def archive_task(args: Dict[str, Any], context) -> str:
         "required": ["task_id", "status"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def update_task_status(args: Dict[str, Any], context) -> str:
     return _handle_update_task_status(args, context)
@@ -1265,6 +1273,7 @@ def update_task_status(args: Dict[str, Any], context) -> str:
         "required": ["task_id", "summary"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def review_completed_tasks(args: Dict[str, Any], context) -> str:
     return _handle_review_completed_tasks(args, context)
@@ -1281,6 +1290,7 @@ def review_completed_tasks(args: Dict[str, Any], context) -> str:
         "properties": {"feature_id": {"type": "string"}},
     },
     requires_approval=False,
+    phase="feature",
 )
 def review_all_completed_tasks(args: Dict[str, Any], context) -> str:
     return _handle_review_all_completed_tasks(args, context)
@@ -1303,6 +1313,7 @@ def review_all_completed_tasks(args: Dict[str, Any], context) -> str:
         "required": ["review_id", "issue_id", "diff"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def propose_task_diff(args: Dict[str, Any], context) -> str:
     return _handle_propose_task_diff(args, context)
@@ -1322,6 +1333,7 @@ def propose_task_diff(args: Dict[str, Any], context) -> str:
         "required": ["proposal_id", "decision"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def decide_task_diff(args: Dict[str, Any], context) -> str:
     return _handle_decide_task_diff(args, context)
@@ -1381,6 +1393,7 @@ def decide_task_diff(args: Dict[str, Any], context) -> str:
         "required": ["feature_name", "feature_request", "tasks"],
     },
     requires_approval=False,
+    phase="feature",
 )
 def create_feature_task(args: Dict[str, Any], context) -> str:
     return _handle_create_feature_task(args, context)
@@ -1401,6 +1414,7 @@ def create_feature_task(args: Dict[str, Any], context) -> str:
         "required": ["task_id"],
     },
     requires_approval=True,
+    phase="feature",
 )
 def update_feature_task(args: Dict[str, Any], context) -> str:
     return _handle_update_feature_task(args, context)
@@ -1416,6 +1430,7 @@ def update_feature_task(args: Dict[str, Any], context) -> str:
         },
     },
     requires_approval=True,
+    phase="feature",
 )
 def approve_feature_task(args: Dict[str, Any], context) -> str:
     return _handle_approve_feature_task(args, context)
@@ -1426,6 +1441,7 @@ def approve_feature_task(args: Dict[str, Any], context) -> str:
     description="Retrieves the currently active task in the feature plan.",
     parameters={"type": "object", "properties": {}},
     requires_approval=False,
+    phase="feature",
     execution_kind="read",
     preview_policy="none",
     result_mode="structured+collated",
@@ -1442,6 +1458,7 @@ def get_current_task(args: Dict[str, Any], context) -> str:
     ),
     parameters={"type": "object", "properties": {}},
     requires_approval=False,
+    phase="feature",
     execution_kind="read",
     preview_policy="none",
     result_mode="structured+collated",
@@ -1488,6 +1505,7 @@ def get_tasks(args: Dict[str, Any], context) -> str:
         "required": ["summary", "requested_input"],
     },
     requires_approval=False,
+    phase="feature",
     execution_kind="control",
     preview_policy="none",
     result_mode="structured",

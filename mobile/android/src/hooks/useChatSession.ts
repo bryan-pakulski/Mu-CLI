@@ -489,7 +489,10 @@ export function useChatSession(activeSessionName: string | null) {
       busyRef.current = busy;
       setStreaming(busy);
       setWaitingForFirstToken(busy);
-      if (!busy && historyHydratedRef.current !== activeSessionName) void loadHistory(false);
+      // MUCLI_MOBILE_RECONNECT_YOLO_V1: reconnect history recovery. If
+      // the phone missed turn_complete/history_refresh while suspended, a new
+      // hello with this session no longer busy must reconcile from history.
+      if (!busy) void loadHistory(false);
       return;
     }
 
@@ -735,8 +738,12 @@ export function useChatSession(activeSessionName: string | null) {
           setWaitingForFirstToken(true);
           setActivityLabel('Reconnecting');
         }
+        void syncSessionState();
       },
-      onClose: () => setSseConnected(false),
+      onClose: () => {
+        setSseConnected(false);
+        void syncSessionState();
+      },
     }, { sessionName: activeSessionName });
 
     void syncSessionState();

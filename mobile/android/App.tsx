@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from './src/theme/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
@@ -10,15 +11,25 @@ export default function App() {
   const autoReconnect = useConnectionStore((s) => s.autoReconnect);
 
   React.useEffect(() => {
-    (async () => {
+    // MUCLI_MOBILE_RECONNECT_YOLO_V1: foreground health recovery. Android may
+    // resume after Wi-Fi/VPN is available without remounting the application.
+    let disposed = false;
+    let hydrated = false;
+
+    void (async () => {
       await loadFromStorage();
-      // After restoring persisted state, verify the server is still
-      // reachable. If Android killed the app mid-agent and the host is
-      // gone, clear isConnected so the user gets ConnectionPrompt.
-      // If the host is still up, isConnected stays true and the app
-      // drops straight into chat — no manual reconnect needed.
-      await autoReconnect();
+      hydrated = true;
+      if (!disposed) await autoReconnect();
     })();
+
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active' && hydrated && !disposed) void autoReconnect();
+    });
+
+    return () => {
+      disposed = true;
+      subscription.remove();
+    };
   }, [loadFromStorage, autoReconnect]);
 
   return (

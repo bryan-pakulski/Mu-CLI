@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@mucli/connection';
+let reconnectInFlight: Promise<void> | null = null;
+let storageWriteQueue: Promise<void> = Promise.resolve();
 
 export interface ConnectionState {
   baseUrl: string;
@@ -74,55 +76,72 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
 
   saveToStorage: async () => {
+    // MUCLI_MOBILE_RECONNECT_YOLO_V1: serialize snapshots so rapid toggles and
+    // connection changes cannot finish AsyncStorage writes out of order.
+    const state = get();
+    const snapshot = JSON.stringify({
+      baseUrl: state.baseUrl,
+      activeSessionName: state.activeSessionName,
+      activeProvider: state.activeProvider,
+      activeModel: state.activeModel,
+      isConnected: state.isConnected,
+      yolo: state.yolo,
+    });
+    storageWriteQueue = storageWriteQueue
+      .catch(() => undefined)
+      .then(() => AsyncStorage.setItem(STORAGE_KEY, snapshot));
     try {
-      const state = get();
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          baseUrl: state.baseUrl,
-          activeSessionName: state.activeSessionName,
-          activeProvider: state.activeProvider,
-          activeModel: state.activeModel,
-          isConnected: state.isConnected,
-          yolo: state.yolo,
-        }),
-      );
+      await storageWriteQueue;
     } catch {
-      // Silently fail — persistence is best-effort
+      // Persistence is best-effort. Keep the in-memory connection usable.
     }
   },
 
   autoReconnect: async () => {
-    // Cold-start recovery: Android kills the app under memory pressure
-    // while an agent runs. isConnected is persisted so the UI does not
-    // bounce to ConnectionPrompt every restart. Verify the server is
-    // still reachable with retries; clear the flag if it is gone.
-    const state = get();
-    if (!state.isConnected) return;
+    // MUCLI_MOBILE_RECONNECT_YOLO_V1: non-destructive reconnect. A temporary
+    // Wi-Fi/VPN/background outage must not erase a known-good remote host or
+    // eject the user from a server-side session that is still running.
+    if (reconnectInFlight) return reconnectInFlight;
 
-    const url = state.baseUrl + '/healthz';
-    const MAX_ATTEMPTS = 3;
-    const BACKOFF_MS = 1_500;
+    const task = (async () => {
+      const state = get();
+      const baseUrl = state.baseUrl.replace(/\/$/, '');
+      if (!baseUrl) return;
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-      try {
-        const resp = await fetch(url, { method: 'GET', signal: controller.signal });
-        if (resp.ok) return; // server reachable — keep isConnected
-      } catch {
-        // try again
-      } finally {
-        clearTimeout(timeout);
+      const url = baseUrl + '/healthz';
+      const MAX_ATTEMPTS = 3;
+      const BACKOFF_MS = 1_500;
+
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
+        try {
+          const resp = await fetch(url, { method: 'GET', signal: controller.signal });
+          if (resp.ok) {
+            if (!get().isConnected) {
+              set({ isConnected: true });
+              await get().saveToStorage();
+            }
+            return;
+          }
+        } catch {
+          // Retry. Existing connection state remains intact on failure.
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, BACKOFF_MS * attempt));
+        }
       }
-      if (attempt < MAX_ATTEMPTS) {
-        await new Promise(resolve => setTimeout(resolve, BACKOFF_MS * attempt));
-      }
+      // Keep last-known connection state. SSE and foreground health probes will
+      // recover automatically when the network becomes reachable again.
+    })();
+
+    reconnectInFlight = task;
+    try {
+      await task;
+    } finally {
+      if (reconnectInFlight === task) reconnectInFlight = null;
     }
-
-    // All attempts failed — server unreachable. Clear flag so the user
-    // sees the ConnectionPrompt and can reconfigure if the host moved.
-    set({ isConnected: false });
-    get().saveToStorage();
   },
 }));

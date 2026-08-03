@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { Text, Input, Button, Card } from '../components';
-import { api } from '../api/client';
+import { checkHealth } from '../api/client';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { spacing } from '../theme/tokens';
 
@@ -31,31 +31,44 @@ export function ConnectionScreen() {
 
   const testConnection = async () => {
     if (testing) return;
+    const candidate = url.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(candidate)) {
+      Alert.alert('Invalid server URL', 'Use an http:// or https:// URL.');
+      return;
+    }
+
+    // MUCLI_MOBILE_RECONNECT_YOLO_V1: transactional host test. Do not replace
+    // the persisted working host until the candidate has answered healthz.
     setTesting(true);
-    setBaseUrl(url);
-    // Retry with backoff: the host may be busy running an agent turn
-    // and a single 5s probe can race a transient slow response.
     const MAX_ATTEMPTS = 3;
     const BACKOFF_MS = 1_500;
-    let lastError: unknown = null;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const res = await api.get<{ ok: boolean }>('/healthz', { timeoutMs: 10_000 });
-        if (!res.ok) throw new Error('MuCLI health check did not return ok');
-        setConnected(true);
-        if (navigation.canGoBack()) navigation.goBack();
-        else navigation.navigate('Chat');
-        return;
-      } catch (error) {
-        lastError = error;
+    let reachable = false;
+    try {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        if (await checkHealth(candidate)) {
+          reachable = true;
+          break;
+        }
         if (attempt < MAX_ATTEMPTS) {
           await new Promise(resolve => setTimeout(resolve, BACKOFF_MS * attempt));
         }
       }
+
+      if (!reachable) {
+        Alert.alert(
+          'Connection failed',
+          `Could not reach ${candidate}. The previous saved host was not changed.`,
+        );
+        return;
+      }
+
+      setBaseUrl(candidate);
+      setConnected(true);
+      if (navigation.canGoBack()) navigation.goBack();
+      else navigation.navigate('Chat');
+    } finally {
+      setTesting(false);
     }
-    setConnected(false);
-    Alert.alert('Connection failed', String(lastError));
-    setTesting(false);
   };
 
   return (

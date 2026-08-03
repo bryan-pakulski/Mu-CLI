@@ -88,10 +88,12 @@ export function PromptHost() {
   const { colors } = useTheme();
   const isConnected = useConnectionStore(state => state.isConnected);
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
+  const yolo = useConnectionStore(state => state.yolo);
   const [queue, setQueue] = useState<PendingPrompt[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const subscriptionRef = useRef<SSESubscription | null>(null);
+  const autoApprovingRef = useRef(new Set<string>());
 
   const mergeQueue = useCallback((incoming: PendingPrompt[]) => {
     const relevant = incoming.filter(prompt => promptMatchesSession(prompt, activeSessionName));
@@ -119,6 +121,25 @@ export function PromptHost() {
       // Preserve the current queue during transient network failures.
     }
   }, [activeSessionName, isConnected]);
+
+  // MUCLI_MOBILE_RECONNECT_YOLO_V1: approve queued tool prompts when
+  // YOLO is enabled. This mirrors the web GUI and also releases a prompt that
+  // was already waiting when the user toggled YOLO on.
+  useEffect(() => {
+    if (!yolo || !isConnected || !activeSessionName) return;
+    const approvals = queue.filter(prompt =>
+      prompt.shape === 'tool_approval'
+      && promptMatchesSession(prompt, activeSessionName)
+      && !autoApprovingRef.current.has(prompt.id),
+    );
+    for (const prompt of approvals) {
+      autoApprovingRef.current.add(prompt.id);
+      void promptsApi.answer(prompt.id, { approved: true, remember: false })
+        .then(() => removePrompt(prompt.id))
+        .catch(() => recoverPending())
+        .finally(() => autoApprovingRef.current.delete(prompt.id));
+    }
+  }, [activeSessionName, isConnected, queue, recoverPending, removePrompt, yolo]);
 
   useEffect(() => {
     if (!isConnected || !activeSessionName) {

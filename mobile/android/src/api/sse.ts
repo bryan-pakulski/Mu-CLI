@@ -1,3 +1,4 @@
+import { AppState, type AppStateStatus } from 'react-native';
 import EventSource from 'react-native-sse';
 
 export const DEFAULT_RECONNECT_DELAY_MS = 2_500;
@@ -22,59 +23,132 @@ export function subscribeToEvents(
   handlers: SSEHandlers,
   options: SSEOptions = {},
 ): SSESubscription {
-  // Import connection store lazily to avoid circular deps.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const connection = require('../store/connection').useConnectionStore.getState();
+  // MUCLI_MOBILE_RECONNECT_YOLO_V1: explicit lifecycle reconnect. Android can
+  // suspend the native socket without react-native-sse recreating it when the
+  // app returns to the foreground. Own the reconnect loop and rebuild the
+  // EventSource with the latest configured host on every attempt.
   const sessionName = options.sessionName === undefined
-    ? connection.activeSessionName
+    ? require('../store/connection').useConnectionStore.getState().activeSessionName
     : options.sessionName;
-
-  let url = `${connection.baseUrl}/api/events`;
-  if (sessionName) {
-    url += `?session_name=${encodeURIComponent(sessionName)}`;
-  }
-
   const reconnectDelayMs = Math.max(
     1_000,
     options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS,
   );
+
   let closed = false;
-  const es = new EventSource(url, {
-    headers: { Accept: 'text/event-stream' },
-    // react-native-sse defines pollingInterval as the delay before it
-    // reconnects after a drop. Zero disables reconnection entirely.
-    pollingInterval: reconnectDelayMs,
-  });
+  let source: EventSource | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempt = 0;
+  let appState: AppStateStatus = AppState.currentState;
 
-  es.addEventListener('open', () => {
-    if (!closed) handlers.onOpen?.();
-  });
+  const isForeground = () => appState !== 'background' && appState !== 'inactive';
 
-  es.addEventListener('message', (event) => {
-    if (closed || !event.data) return;
-    try {
-      handlers.onMessage?.(JSON.parse(event.data));
-    } catch {
-      // Non-JSON message — ignore.
+  const buildUrl = () => {
+    // Import lazily to avoid circular deps and read the newest base URL after
+    // the user edits connection settings.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const connection = require('../store/connection').useConnectionStore.getState();
+    let url = `${connection.baseUrl}/api/events`;
+    if (sessionName) url += `?session_name=${encodeURIComponent(sessionName)}`;
+    return url;
+  };
+
+  const clearReconnect = () => {
+    if (!reconnectTimer) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  };
+
+  const destroySource = () => {
+    const current = source;
+    source = null;
+    if (!current) return;
+    current.removeAllEventListeners();
+    current.close();
+  };
+
+  let connect: () => void;
+
+  const scheduleReconnect = (immediate = false) => {
+    if (closed || !isForeground() || reconnectTimer) return;
+    const delay = immediate
+      ? 0
+      : Math.min(15_000, reconnectDelayMs * (2 ** Math.min(reconnectAttempt, 3)));
+    reconnectAttempt += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+  };
+
+  connect = () => {
+    if (closed || !isForeground()) return;
+    clearReconnect();
+    destroySource();
+
+    const next = new EventSource(buildUrl(), {
+      headers: { Accept: 'text/event-stream' },
+      // Disable the library's hidden retry loop. We recreate the source so a
+      // foreground resume or changed base URL cannot remain attached to a
+      // dead native connection.
+      pollingInterval: 0,
+    });
+    source = next;
+
+    next.addEventListener('open', () => {
+      if (closed || source !== next) return;
+      reconnectAttempt = 0;
+      handlers.onOpen?.();
+    });
+
+    next.addEventListener('message', (event) => {
+      if (closed || source !== next || !event.data) return;
+      try {
+        handlers.onMessage?.(JSON.parse(event.data));
+      } catch {
+        // Non-JSON message — ignore.
+      }
+    });
+
+    next.addEventListener('error', (event) => {
+      if (closed || source !== next) return;
+      const msg = (event as unknown as { message?: string })?.message || 'SSE error';
+      handlers.onError?.(new Error(msg));
+      destroySource();
+      scheduleReconnect();
+    });
+
+    next.addEventListener('close', () => {
+      if (closed || source !== next) return;
+      handlers.onClose?.();
+      destroySource();
+      scheduleReconnect();
+    });
+  };
+
+  const appStateSubscription = AppState.addEventListener('change', nextState => {
+    const wasForeground = isForeground();
+    appState = nextState;
+    if (!isForeground()) {
+      clearReconnect();
+      destroySource();
+      return;
+    }
+    if (!wasForeground) {
+      reconnectAttempt = 0;
+      scheduleReconnect(true);
     }
   });
 
-  es.addEventListener('error', (event) => {
-    if (closed) return;
-    const msg = (event as unknown as { message?: string })?.message || 'SSE error';
-    handlers.onError?.(new Error(msg));
-  });
-
-  es.addEventListener('close', () => {
-    if (!closed) handlers.onClose?.();
-  });
+  connect();
 
   return {
     close: () => {
       if (closed) return;
       closed = true;
-      es.removeAllEventListeners();
-      es.close();
+      clearReconnect();
+      appStateSubscription.remove();
+      destroySource();
     },
   };
 }

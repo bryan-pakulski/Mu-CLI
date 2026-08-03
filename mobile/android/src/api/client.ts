@@ -137,10 +137,12 @@ export const api = {
   get<T>(path: string, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('GET', path, opts);
   },
-  post<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body' | 'query'>): Promise<T> {
+  // MUCLI_MOBILE_RECONNECT_YOLO_V1: POST query support lets mutating
+  // inspector routes target the mobile-selected session explicitly.
+  post<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('POST', path, { ...opts, body });
   },
-  put<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body' | 'query'>): Promise<T> {
+  put<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('PUT', path, { ...opts, body });
   },
   delete<T>(path: string, opts?: Omit<RequestOptions, 'body'>): Promise<T> {

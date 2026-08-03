@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
+import { inspectorApi } from '../api/inspector';
 import { AdvancedSettingsSheet } from './AdvancedSettingsSheet';
 import { ModernBottomSheet } from './ModernBottomSheet';
 import { Text } from './Text';
@@ -41,6 +42,45 @@ export function ModernHeader({
   } = useConnectionStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [yoloSyncing, setYoloSyncing] = useState(false);
+
+  // MUCLI_MOBILE_RECONNECT_YOLO_V1: server-backed YOLO. The previous switch
+  // only changed local Zustand state, so the running Session kept prompting.
+  const refreshYolo = useCallback(async () => {
+    if (!isConnected || !activeSessionName) return;
+    try {
+      const response = await inspectorApi.getVariables(activeSessionName);
+      for (const group of response.groups || []) {
+        const variable = (group.variables || []).find(item => item.key === 'yolo');
+        if (variable) {
+          setYolo(Boolean(variable.value));
+          return;
+        }
+      }
+    } catch {
+      // Preserve the last known value during a transient disconnect.
+    }
+  }, [activeSessionName, isConnected, setYolo]);
+
+  useEffect(() => {
+    void refreshYolo();
+  }, [refreshYolo, menuOpen]);
+
+  const updateYolo = useCallback(async (next: boolean) => {
+    if (!isConnected || !activeSessionName || yoloSyncing) return;
+    const previous = yolo;
+    setYolo(next);
+    setYoloSyncing(true);
+    try {
+      const response = await inspectorApi.setVariable('yolo', next, activeSessionName);
+      setYolo(Boolean(response.value));
+    } catch (error) {
+      setYolo(previous);
+      Alert.alert('Could not update YOLO mode', String(error));
+    } finally {
+      setYoloSyncing(false);
+    }
+  }, [activeSessionName, isConnected, setYolo, yolo, yoloSyncing]);
 
   const sessionTitle = activeSessionName || 'New session';
   const sessionMeta = [activeProvider, activeModel].filter(Boolean).join(' · ') || (isConnected ? 'Connected' : 'Connect to MuCLI');
@@ -141,7 +181,14 @@ export function ModernHeader({
         </SettingsSection>
 
         <SettingsSection title="BEHAVIOUR">
-          <ToggleRow icon="flash-outline" label="Auto-approve writes" detail="YOLO mode" value={yolo} onValueChange={setYolo} />
+          <ToggleRow
+            icon="flash-outline"
+            label="Auto-approve writes"
+            detail={yoloSyncing ? 'Updating session…' : 'YOLO mode · server session setting'}
+            value={yolo}
+            onValueChange={updateYolo}
+            disabled={!isConnected || !activeSessionName || yoloSyncing}
+          />
           <MenuRow icon="grid-outline" label="Workspace tools" detail="Context, workflows, and runtime controls" onPress={() => openFromMenu(onOpenWorkspace)} />
         </SettingsSection>
 
@@ -210,9 +257,10 @@ function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
 type ToggleRowProps = Omit<MenuRowProps, 'onPress'> & {
   value: boolean;
   onValueChange: (value: boolean) => void;
+  disabled?: boolean;
 };
 
-function ToggleRow({ icon, label, detail, value, onValueChange }: ToggleRowProps) {
+function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false }: ToggleRowProps) {
   const { colors } = useTheme();
   return (
     <View style={styles.menuRow}>
@@ -226,6 +274,7 @@ function ToggleRow({ icon, label, detail, value, onValueChange }: ToggleRowProps
       <Switch
         value={value}
         onValueChange={onValueChange}
+        disabled={disabled}
         trackColor={{ false: colors.borderStrong, true: colors.accent }}
         thumbColor={colors.bgLift}
       />

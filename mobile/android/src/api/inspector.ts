@@ -1,4 +1,5 @@
 import { api } from './client';
+import { useConnectionStore } from '../store/connection';
 
 export interface InspectorWorkspace {
   folders: string[];
@@ -77,7 +78,26 @@ export const inspectorApi = {
   deleteMemory: (entryId: number) => api.delete<{ ok: boolean; removed: number }>(`/api/memory/${entryId}`),
   clearMemory: () => api.post<{ ok: boolean }>('/api/memory/clear'),
   getStats: () => api.get<InspectorStats>('/api/stats'),
-  getVariables: () => api.get<{ groups: InspectorVariableGroup[] }>('/api/variables'),
-  setVariable: (key: string, value: unknown) => api.post<{ ok: boolean; key: string; value: unknown }>(`/api/variables/${encodeURIComponent(key)}`, { value }),
-  unsetVariable: (key: string) => api.delete<{ ok: boolean; key: string; value: unknown }>(`/api/variables/${encodeURIComponent(key)}`),
+  // MUCLI_MOBILE_RECONNECT_YOLO_V1: session-scoped variables. POST
+  // requests previously mutated whichever session the web daemon had focused.
+  getVariables: (sessionName: string | undefined = useConnectionStore.getState().activeSessionName || undefined) =>
+    api.get<{ groups: InspectorVariableGroup[] }>('/api/variables', {
+      query: { session_name: sessionName },
+    }),
+  setVariable: (
+    key: string,
+    value: unknown,
+    sessionName: string | undefined = useConnectionStore.getState().activeSessionName || undefined,
+  ) => api.post<{ ok: boolean; key: string; value: unknown }>(
+    `/api/variables/${encodeURIComponent(key)}`,
+    { value },
+    { query: { session_name: sessionName } },
+  ),
+  unsetVariable: (
+    key: string,
+    sessionName: string | undefined = useConnectionStore.getState().activeSessionName || undefined,
+  ) => api.delete<{ ok: boolean; key: string; value: unknown }>(
+    `/api/variables/${encodeURIComponent(key)}`,
+    { query: { session_name: sessionName } },
+  ),
 };

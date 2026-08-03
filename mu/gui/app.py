@@ -143,11 +143,10 @@ def _register_subagent_snapshot_hook() -> None:
         if registry is None:
             return None
         try:
-            children = registry.snapshot_all()
+            # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: active-only live reconciliation.
+            children = registry.snapshot_active()
         except Exception as exc:  # defensive — must never break a turn
             _logger.warning("subagent snapshot hook failed: %s", exc)
-            return None
-        if not children:
             return None
         active = sum(1 for c in children if c.get("status") == "running")
         stuck = sum(1 for c in children if c.get("stuck"))
@@ -159,6 +158,7 @@ def _register_subagent_snapshot_hook() -> None:
                 "active": active,
                 "stuck": stuck,
                 "stall": stall,
+                "batch_id": registry.active_batch_id(),
             }
         )
         return None

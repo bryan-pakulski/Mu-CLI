@@ -51,13 +51,14 @@ DEFAULT_TIMEOUT = 120.0
 _TERMINAL = ("done", "killed", "error")
 
 
-def _envelope(*, ok: bool, message: str, error_code=None, data=None) -> Dict[str, Any]:
+def _envelope(*, ok: bool, message: str, error_code=None, data=None, artifacts=None) -> Dict[str, Any]:
+    # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: await_subagent
     return {
         "ok": ok,
         "error_code": error_code,
         "message": message,
         "data": data or {},
-        "artifacts": [],
+        "artifacts": artifacts or [],
         "telemetry": {"tool_name": "await_subagent"},
     }
 
@@ -155,6 +156,7 @@ def await_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
             error_code="not_found",
             message=f"No sub-agent with task_id={task_id}.",
             data=snap,
+            artifacts=[snap["artifact"]] if isinstance(snap.get("artifact"), dict) else [],
         )
 
     if status in _TERMINAL:
@@ -167,6 +169,7 @@ def await_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
             message=message,
             error_code=None if ok else ("subagent_" + status if status != "done" else None),
             data=snap,
+            artifacts=[snap["artifact"]] if isinstance(snap.get("artifact"), dict) else [],
         )
 
     # Still running — block on the per-child done_event until finish or
@@ -203,6 +206,7 @@ def await_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
                 "other work."
             ),
             data=snap,
+            artifacts=[snap["artifact"]] if isinstance(snap.get("artifact"), dict) else [],
         )
 
     ok = status in ("done", "killed")
@@ -214,6 +218,7 @@ def await_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
         message=message,
         error_code=None if ok else ("subagent_" + status if status != "done" else None),
         data=snap,
+        artifacts=[snap["artifact"]] if isinstance(snap.get("artifact"), dict) else [],
     )
 
 

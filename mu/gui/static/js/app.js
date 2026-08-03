@@ -282,11 +282,9 @@ document.addEventListener("alpine:init", () => {
             // Drop a finished sub-agent panel so a new turn starts clean.
             // A panel whose agents are still running (outliving the parent
             // turn) is kept until they finish.
-            const oldPanel = this._lastByRole(slot, "subagent_panel");
-            if (oldPanel && !this._panelRunning(oldPanel)) {
-                const idx = slot.turns.indexOf(oldPanel);
-                if (idx >= 0) slot.turns.splice(idx, 1);
-            }
+            slot.turns = slot.turns.filter(
+                turn => turn.role !== "subagent_panel" || this._panelRunning(turn)
+            );
             slot.turns.push({
                 id: this._id("u"),
                 role: "user",
@@ -571,28 +569,43 @@ document.addEventListener("alpine:init", () => {
                 summary: "", kill_reason: null, error: null,
             };
         },
-        _ensurePanel(slot) {
-            let p = this._lastByRole(slot, "subagent_panel");
+        // MUCLI_SUBAGENT_DURABLE_RESULTS_V1: live panel is an exact view of the current
+        // delegation window. Completed history remains in durable artifacts.
+        _findPanel(slot, batchId = "") {
+            for (let i = slot.turns.length - 1; i >= 0; i--) {
+                const turn = slot.turns[i];
+                if (turn.role === "subagent_panel" && (!batchId || turn.batch_id === batchId)) return turn;
+            }
+            return null;
+        },
+        _ensurePanel(slot, batchId = "") {
+            let p = this._findPanel(slot, batchId);
             if (!p) {
                 p = {
                     id: this._id("sap"),
                     role: "subagent_panel",
+                    batch_id: batchId || "",
                     agents: [],
                     running: false,
                     open: true,
+                    ephemeral: true,
                 };
                 slot.turns.push(p);
             }
             return p;
         },
         _panelRunning(p) {
-            return p.agents.some(a => a.status === "running" || a.status === "stuck");
+            return p.agents.some(a => a.status === "running" || a.status === "stuck" || a.status === "stall");
         },
         upsertSubagent(name, agent) {
             const tid = agent && agent.task_id;
             if (!tid) return;
             const slot = this._slot(name);
-            const p = this._ensurePanel(slot);
+            const batchId = agent.batch_id || "";
+            const terminal = ["done", "killed", "error"].includes(agent.status);
+            let p = this._findPanel(slot, batchId);
+            if (!p && terminal) return;
+            if (!p) p = this._ensurePanel(slot, batchId);
             let row = p.agents.find(a => a.task_id === tid);
             if (!row) {
                 row = this._newAgentRow(tid);
@@ -603,39 +616,35 @@ document.addEventListener("alpine:init", () => {
             if (p.running) p.open = true;
             if (!name || name === this.currentName) this.scroll();
         },
-        replaceSubagentSnapshot(name, children) {
-            if (!children || !children.length) return;
+        replaceSubagentSnapshot(name, children, batchId = "") {
             const slot = this._slot(name);
-            const p = this._ensurePanel(slot);
-            for (const c of children) {
-                const tid = c.task_id;
-                if (!tid) continue;
-                let row = p.agents.find(a => a.task_id === tid);
-                if (!row) {
-                    row = this._newAgentRow(tid);
-                    p.agents.push(row);
-                }
-                Object.assign(row, {
-                    task: c.task || row.task,
-                    depth: c.depth || row.depth,
-                    status: c.status || row.status,
-                    tool_count: c.tool_count ?? row.tool_count,
-                    last_tool: c.last_tool ?? row.last_tool,
-                    stuck: !!c.stuck,
-                    stall: !!c.stall,
-                    repeat_count: c.consecutive_repeats ?? row.repeat_count,
-                    elapsed: c.elapsed ?? row.elapsed,
-                    context_pct: c.context_pct ?? row.context_pct,
-                    iter: c.iter ?? row.iter,
-                    max_iter: c.max_iter ?? row.max_iter,
-                    tokens_in: c.tokens_in ?? row.tokens_in,
-                    summary: c.summary || row.summary,
-                    kill_reason: c.kill_reason ?? row.kill_reason,
-                    error: c.error ?? row.error,
-                });
-            }
-            p.running = this._panelRunning(p);
-            if (!p.running) p.open = false;
+            const active = (children || []).filter(child => child && child.task_id && (child.status === "running" || child.status === "stuck" || child.status === "stall"));
+            slot.turns = slot.turns.filter(turn => {
+                if (turn.role !== "subagent_panel") return true;
+                if (!active.length) return false;
+                return !batchId || turn.batch_id === batchId;
+            });
+            if (!active.length) return;
+            const p = this._ensurePanel(slot, batchId);
+            p.agents = active.map(c => Object.assign(this._newAgentRow(c.task_id), {
+                task: c.task || "",
+                depth: c.depth || 1,
+                model: c.model || "",
+                batch_id: c.batch_id || batchId,
+                status: c.status || "running",
+                tool_count: c.tool_count ?? 0,
+                last_tool: c.last_tool ?? null,
+                stuck: !!c.stuck,
+                stall: !!c.stall,
+                repeat_count: c.consecutive_repeats ?? 0,
+                elapsed: c.elapsed ?? 0,
+                context_pct: c.context_pct ?? 0,
+                iter: c.iter ?? 0,
+                max_iter: c.max_iter ?? 0,
+                tokens_in: c.tokens_in ?? 0,
+            }));
+            p.running = true;
+            p.open = true;
             if (!name || name === this.currentName) this.scroll();
         },
         finishSubagents(name) {
@@ -643,12 +652,18 @@ document.addEventListener("alpine:init", () => {
             const p = this._lastByRole(slot, "subagent_panel");
             if (!p) return;
             p.running = this._panelRunning(p);
-            if (!p.running) p.open = false;
+            if (!p.running) {
+                const index = slot.turns.indexOf(p);
+                if (index >= 0) slot.turns.splice(index, 1);
+            }
         },
 
         finishTurn(name) {
             const slot = this._slot(name);
             this._closeTrace(slot);
+            slot.turns = slot.turns.filter(
+                turn => turn.role !== "subagent_panel" || this._panelRunning(turn)
+            );
             // Group intermediate assistant + trace turns into a collapsible
             // heading so the conversation flow reads:
             //   User → Q, ... <collapsible N responses>, Agent → Final
@@ -4526,6 +4541,7 @@ function routeEvent(ev) {
             chat.upsertSubagent(name, {
                 task_id: ev.task_id, task: ev.task || "", depth: ev.depth || 1,
                 model: ev.model || "", status: "running",
+                batch_id: ev.batch_id || "",
             });
             break;
         case "subagent_progress":
@@ -4539,6 +4555,7 @@ function routeEvent(ev) {
                 stall: ev.stall,
                 repeat_count: ev.repeat_count,
                 elapsed: ev.elapsed,
+                batch_id: ev.batch_id || "",
             });
             break;
         case "subagent_end":
@@ -4550,12 +4567,14 @@ function routeEvent(ev) {
                 error: ev.error || null,
                 elapsed: ev.elapsed,
                 tokens_in: ev.tokens && ev.tokens.in ? ev.tokens.in : undefined,
+                batch_id: ev.batch_id || "",
+                artifact: ev.artifact || null,
             });
             chat.finishSubagents(name);
             break;
         case "subagent_snapshot":
             // Authoritative reconciliation from the registry each parent iter.
-            chat.replaceSubagentSnapshot(name, ev.children || []);
+            chat.replaceSubagentSnapshot(name, ev.children || [], ev.batch_id || "");
             break;
         case "thinking_delta": chat.addThinking(ev.text || "", name); break;
         case "tool_result":

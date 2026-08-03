@@ -381,6 +381,8 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     from mu.ui.subagent import SubagentUI
 
     registry = parent._subagent_registry
+    # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: spawn uses the parent session's durable result store.
+    registry.bind_parent(parent)
     # Wire the GUI live-push callback onto the registry (and its tracker) so
     # subagent_start/progress/end events reach the chat-feed status panel.
     # CLI/TUI UIs have no ``_publish`` → the registry stays silent (no
@@ -533,7 +535,12 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
 
     # Announce the dispatch on the parent UI.
     task_preview = task if len(task) <= 100 else task[:97] + "..."
-    if parent.ui is not None and hasattr(parent.ui, "show_info"):
+    # WebUI already receives subagent_start; avoid a duplicate chat trace.
+    if (
+        parent.ui is not None
+        and hasattr(parent.ui, "show_info")
+        and not (_root_ui is not None and hasattr(_root_ui, "_publish"))
+    ):
         try:
             parent.ui.show_info(
                 f"🤖 [bold]Spawning subagent[/bold] (d={child_depth}, "
@@ -561,6 +568,9 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
             "status": "running",
             "depth": child_depth,
             "task": task,
+            "batch_id": record.batch_id,
+            "state_path": registry.snapshot(record.task_id).get("state_path"),
+            "result_path": registry.snapshot(record.task_id).get("result_path"),
         },
     )
 

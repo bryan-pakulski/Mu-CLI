@@ -322,6 +322,11 @@ class Session:
             self.artifact_registry = ArtifactRegistry(session_dir)
         except Exception:
             self.artifact_registry = None
+        # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: bind after every session load/reload.
+        try:
+            self._subagent_registry.bind_parent(self)
+        except Exception:
+            pass
         try:
             from mu.attachment import AttachmentRegistry
             from utils.config import HISTORY_DIR

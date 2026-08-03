@@ -14,13 +14,14 @@ from typing import Any, Dict
 from mu.tools import tool
 
 
-def _envelope(*, ok: bool, message: str, error_code=None, data=None) -> Dict[str, Any]:
+def _envelope(*, ok: bool, message: str, error_code=None, data=None, artifacts=None) -> Dict[str, Any]:
+    # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: kill_subagent
     return {
         "ok": ok,
         "error_code": error_code,
         "message": message,
         "data": data or {},
-        "artifacts": [],
+        "artifacts": artifacts or [],
         "telemetry": {"tool_name": "kill_subagent"},
     }
 
@@ -80,6 +81,7 @@ def kill_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
             error_code="not_found",
             message=f"No sub-agent with task_id={task_id}.",
             data=snap,
+            artifacts=[snap["artifact"]] if isinstance(snap.get("artifact"), dict) else [],
         )
 
     summary = snap.get("summary") or "(no partial findings recovered)"
@@ -87,6 +89,7 @@ def kill_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
         ok=True,
         message=f"Sub-agent {task_id} killed (status={status}). Partial findings: {summary}",
         data=snap,
+        artifacts=[snap["artifact"]] if isinstance(snap.get("artifact"), dict) else [],
     )
 
 

@@ -1387,6 +1387,18 @@ def run_turn(session, text):
                         + "\n- ".join(_scratch_evictions)
                     )
 
+            # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: parent context. Running delegations refresh every
+            # provider iteration; terminal results inject once and enter memory.
+            try:
+                _subagent_context = session._subagent_registry.context_block(session)
+            except Exception:
+                _subagent_context = ""
+            if _subagent_context:
+                dynamic_system_prompt += (
+                    "\n\nLAYER 3B — Authoritative delegated work:\n"
+                    + _subagent_context
+                )
+
             dynamic_system_prompt, messages = _preflight_context_check(
                 session, dynamic_system_prompt, messages,
                 turn_start_index=turn_start_index,

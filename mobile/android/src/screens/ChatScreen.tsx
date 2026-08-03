@@ -68,18 +68,16 @@ export function ChatScreen() {
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentAdjustTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // MUCLI_MOBILE_SCROLL_BOUNDARY_V2: FlatList owns prepend anchoring; do not continuously
+  // rewrite offsets from incremental content-size measurements.
   const followOutputRef = useRef(true);
   const initialScrollPendingRef = useRef(true);
   const userScrollActiveRef = useRef(false);
   const momentumScrollRef = useRef(false);
   const lastDistanceFromEndRef = useRef(Number.POSITIVE_INFINITY);
   const streamingRef = useRef(false);
-  // MUCLI_SLIDING_WINDOW_V1: track scroll offset + content height so we can
-  // (1) detect near-top to trigger loadOlderHistory, and (2) preserve the
-  // visual scroll position when older messages are prepended.
-  const prevContentHeightRef = useRef(0);
-  const scrollOffsetRef = useRef(0);
+  // MUCLI_SLIDING_WINDOW_V1: guard backward pagination while FlatList's
+  // maintainVisibleContentPosition preserves the currently visible message.
   const loadingOlderTriggeredRef = useRef(false);
 
   // MUCLI_VISUALIZATION_TIMELINE_V2: a WebView gesture explicitly pauses chat
@@ -135,7 +133,6 @@ export function ChatScreen() {
   const onChatScroll = useCallback((event: any) => {
     if (!event?.nativeEvent) return;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    scrollOffsetRef.current = contentOffset.y;
     const distanceFromEnd = Math.max(
       0,
       contentSize.height - layoutMeasurement.height - contentOffset.y,
@@ -156,17 +153,13 @@ export function ChatScreen() {
       distanceFromTop < 120 &&
       hasMore &&
       !loadingOlder &&
-      !loadingOlderTriggeredRef.current &&
-      prevContentHeightRef.current === 0
+      !loadingOlderTriggeredRef.current
     ) {
       loadingOlderTriggeredRef.current = true;
-      // Snapshot content height before prepend so onContentSizeChange can
-      // offset the scroll position to keep the user's visual position stable.
-      prevContentHeightRef.current = contentSize.height;
-      void loadOlderHistory().catch(() => {
-        // On error, clear both guards so user can retry
+      // FlatList preserves the first visible row while older messages prepend.
+      // Clear the request guard only after the page request has settled.
+      void loadOlderHistory().finally(() => {
         loadingOlderTriggeredRef.current = false;
-        prevContentHeightRef.current = 0;
       });
     }
   }, [hasMore, loadingOlder, loadOlderHistory, updateFollowFromDistance]);
@@ -215,28 +208,6 @@ export function ChatScreen() {
   const onChatContentSizeChange = useCallback((_width: number, newHeight: number) => {
     if (!Number.isFinite(newHeight)) return;
 
-    // Older messages were prepended at the top. Preserve the visible anchor by
-    // offsetting by exactly the content-height delta after layout settles.
-    if (prevContentHeightRef.current > 0 && newHeight > prevContentHeightRef.current) {
-      const delta = newHeight - prevContentHeightRef.current;
-      prevContentHeightRef.current = 0;
-      if (contentAdjustTimerRef.current) clearTimeout(contentAdjustTimerRef.current);
-      contentAdjustTimerRef.current = setTimeout(() => {
-        contentAdjustTimerRef.current = null;
-        flatListRef.current?.scrollToOffset({
-          offset: scrollOffsetRef.current + delta,
-          animated: false,
-        });
-        loadingOlderTriggeredRef.current = false;
-      }, 0);
-      return;
-    }
-    if (prevContentHeightRef.current > 0 && newHeight === prevContentHeightRef.current) {
-      prevContentHeightRef.current = 0;
-      loadingOlderTriggeredRef.current = false;
-      return;
-    }
-
     // Debounce the initial jump to the bottom until the current virtualization
     // batch has stopped changing size. A drag cancels this timer permanently.
     if (
@@ -273,14 +244,11 @@ export function ChatScreen() {
 
   useEffect(() => {
     if (initialScrollTimerRef.current) clearTimeout(initialScrollTimerRef.current);
-    if (contentAdjustTimerRef.current) clearTimeout(contentAdjustTimerRef.current);
     initialScrollPendingRef.current = true;
     followOutputRef.current = true;
     userScrollActiveRef.current = false;
     momentumScrollRef.current = false;
     lastDistanceFromEndRef.current = Number.POSITIVE_INFINITY;
-    prevContentHeightRef.current = 0;
-    scrollOffsetRef.current = 0;
     loadingOlderTriggeredRef.current = false;
   }, [activeSessionName]);
 
@@ -289,7 +257,6 @@ export function ChatScreen() {
     if (scrollThrottleRef.current) clearTimeout(scrollThrottleRef.current);
     if (scrollEndTimerRef.current) clearTimeout(scrollEndTimerRef.current);
     if (initialScrollTimerRef.current) clearTimeout(initialScrollTimerRef.current);
-    if (contentAdjustTimerRef.current) clearTimeout(contentAdjustTimerRef.current);
   }, []);
 
   const send = async () => {
@@ -416,14 +383,21 @@ export function ChatScreen() {
     if (item.role === 'collapse') {
       const count = item.collapseCount || (item.childTurns?.length || 0);
       return (
-        <View>
+        <View
+          // MUCLI_INTERIM_VISUAL_STYLE_V1: interim output uses an accent-tinted surface.
+          style={[
+            styles.interimGroup,
+            { backgroundColor: colors.accentSoft, borderColor: colors.border },
+          ]}
+        >
           <TouchableOpacity
             onPress={() => setMessages(current => current.map(m =>
               m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m,
             ))}
-            style={[styles.collapseHeader, { backgroundColor: colors.bgHover, borderColor: colors.border }]}
+            style={[styles.collapseHeader, { backgroundColor: colors.bgLift, borderColor: colors.border }]}
             activeOpacity={0.7}
           >
+            <View style={[styles.interimAccent, { backgroundColor: colors.accent }]} />
             <Text style={{ fontSize: 12, color: colors.textDim }}>
               {item.collapseOpen ? '▾' : '▸'}
             </Text>
@@ -434,7 +408,7 @@ export function ChatScreen() {
             </Text>
           </TouchableOpacity>
           {item.collapseOpen ? (
-            <View style={{ paddingLeft: 8 }}>
+            <View style={styles.interimBody}>
               {item.childTurns?.map(child => {
                 if (child.role === 'visualization' && child.artifact && activeSessionName) {
                   return (
@@ -449,7 +423,13 @@ export function ChatScreen() {
                 if (child.role !== 'assistant') return null;
                 return (
                   <View key={child.id} style={[styles.msgRow, { justifyContent: 'flex-start' }]}>
-                    <View style={[styles.msgBubble, { backgroundColor: 'transparent', maxWidth: '100%', paddingHorizontal: 0 }]}>
+                    <View
+                      style={[
+                        styles.msgBubble,
+                        styles.interimMessage,
+                        { backgroundColor: colors.bgLift, borderColor: colors.border, maxWidth: '100%' },
+                      ]}
+                    >
                       {child.streaming ? (
                         <Text style={{ color: colors.text, fontSize: 15, lineHeight: 23 }}>
                           {child.text}
@@ -553,6 +533,11 @@ export function ChatScreen() {
           updateCellsBatchingPeriod={32}
           windowSize={9}
           removeClippedSubviews={false}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          bounces={false}
+          alwaysBounceVertical={false}
+          overScrollMode="never"
+          contentInsetAdjustmentBehavior="never"
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 ? styles.messageListEmpty : null,
@@ -605,10 +590,12 @@ export function ChatScreen() {
             )
           }
           ListFooterComponent={
-            <View>
+            <View style={styles.listFooter}>
               {streaming && waitingForFirstToken ? (
                 <GeneratingIndicator label={sseConnected ? activityLabel : 'Reconnecting to session'} />
-              ) : null}
+              ) : (
+                <View style={styles.listEndMarker} />
+              )}
             </View>
           }
         />
@@ -805,19 +792,36 @@ function markdownStyles(colors: any) {
 }
 
 const styles = StyleSheet.create({
-  messageList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 96 },
+  messageList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
   messageListEmpty: { flexGrow: 1 },
+  listFooter: { minHeight: 10, paddingTop: 2 },
+  listEndMarker: { height: 8 },
   msgRow: { flexDirection: 'row', marginBottom: 14 },
   msgBubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  interimGroup: {
+    marginVertical: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 13,
+    padding: 4,
+    overflow: 'hidden',
+  },
+  interimAccent: { width: 3, height: 22, borderRadius: 2 },
+  interimBody: { paddingHorizontal: 5, paddingTop: 5 },
+  interimMessage: {
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 11,
+  },
   collapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    marginVertical: 6,
+    marginVertical: 0,
   },
   copyButton: { alignSelf: 'flex-start', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },

@@ -16,6 +16,7 @@ export type ModernHeaderProps = {
   onOpenModes: () => void;
   onOpenProviders: () => void;
   onOpenArtifacts: () => void;
+  onOpenContainers: () => void;
 };
 
 export function ModernHeader({
@@ -26,6 +27,7 @@ export function ModernHeader({
   onOpenModes,
   onOpenProviders,
   onOpenArtifacts,
+  onOpenContainers,
 }: ModernHeaderProps) {
   const insets = useSafeAreaInsets();
   const { colors, isDark, toggleTheme } = useTheme();
@@ -125,6 +127,16 @@ export function ModernHeader({
             label="Artifacts"
             detail={activeSessionName ? 'Visualizations, model artifacts, and uploads' : 'Load a session to view artifacts'}
             onPress={() => openFromMenu(onOpenArtifacts)}
+          />
+        </SettingsSection>
+
+        {/* MUCLI_MOBILE_CONTAINER_MENU_V1: keep container controls reachable from an active session. */}
+        <SettingsSection title="CONTAINERS">
+          <MenuRow
+            icon="cube-outline"
+            label="Container management"
+            detail="Create, inspect, start, stop, and remove containers"
+            onPress={() => openFromMenu(onOpenContainers)}
           />
         </SettingsSection>
 

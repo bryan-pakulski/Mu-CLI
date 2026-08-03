@@ -144,6 +144,7 @@ function ChatScreenWithChrome() {
           onOpenModes={() => activeSessionName ? navRef.current?.navigate('Modes') : openSessions()}
           onOpenProviders={() => navRef.current?.navigate('Providers')}
           onOpenArtifacts={() => activeSessionName ? navRef.current?.navigate('Artifacts') : openSessions()}
+          onOpenContainers={() => { /* MUCLI_MOBILE_CONTAINER_MENU_V1: active-session access. */ setContainersOpen(true); }}
         />
         {!isConnected ? (
           <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />

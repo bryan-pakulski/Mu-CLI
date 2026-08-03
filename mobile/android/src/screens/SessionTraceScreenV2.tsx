@@ -41,6 +41,9 @@ type BarMode = 'grouped' | 'stacked' | 'single';
 
 const PLOT_HEIGHT = 112;
 const AXIS_HEIGHT = 20;
+// MUCLI_MOBILE_TRACE_Y_AXIS_V1: reserve a fixed lane so Y values remain visible while the plot scrolls.
+const Y_AXIS_WIDTH = 56;
+const Y_AXIS_TARGET_TICKS = 4;
 const MAX_VISIBLE_POINTS = 72;
 
 export function SessionTraceScreenV2() {
@@ -189,6 +192,8 @@ export function SessionTraceScreenV2() {
           <FixedBarChart
             points={context}
             mode="grouped"
+            yAxisLabel="tokens"
+            valueFormatter={formatTokens}
             series={[
               { key: 'total_est', label: 'Estimated', color: colors.textDim },
               { key: 'real', label: 'Provider / corrected', color: colors.accent },
@@ -200,6 +205,8 @@ export function SessionTraceScreenV2() {
           <FixedBarChart
             points={attribution}
             mode="stacked"
+            yAxisLabel="tokens"
+            valueFormatter={formatTokens}
             series={[
               { key: 'system', label: 'System', color: colors.textDim },
               { key: 'user', label: 'User', color: colors.info },
@@ -215,6 +222,8 @@ export function SessionTraceScreenV2() {
           <FixedBarChart
             points={tokens}
             mode="stacked"
+            yAxisLabel="tokens"
+            valueFormatter={formatTokens}
             series={[
               { key: 'in', label: 'Input', color: colors.accent },
               { key: 'out', label: 'Output', color: colors.info },
@@ -229,6 +238,8 @@ export function SessionTraceScreenV2() {
           <FixedBarChart
             points={latency}
             mode="single"
+            yAxisLabel="latency"
+            valueFormatter={formatDuration}
             series={[{ key: 'wall_ms', label: 'Wall time', color: colors.accent }]}
           />
         </ChartCard>
@@ -237,6 +248,8 @@ export function SessionTraceScreenV2() {
           <FixedBarChart
             points={efficiency}
             mode="grouped"
+            yAxisLabel="tokens"
+            valueFormatter={formatTokens}
             series={[
               { key: 'raw_tokens', label: 'Raw', color: colors.textDim },
               { key: 'injected_tokens', label: 'Injected', color: colors.success },
@@ -264,6 +277,9 @@ export function SessionTraceScreenV2() {
           <FixedBarChart
             points={mergeByIteration(memory, subagents)}
             mode="stacked"
+            yAxisLabel="items"
+            valueFormatter={formatInteger}
+            axisMinStep={1}
             series={[
               { key: 'task_memory_count', label: 'Task memory', color: colors.accent },
               { key: 'scratchpad_count', label: 'Scratchpad', color: colors.info },
@@ -356,11 +372,25 @@ function Legend({ series }: { series: ChartSeries[] }) {
 }
 
 /**
- * Bar columns have two rigid lanes: a PLOT_HEIGHT lane and an AXIS_HEIGHT
- * label lane. Labels never participate in plot layout, so showing an x-axis
- * value cannot shorten or vertically shift any bar.
+ * The Y-axis is outside the horizontal ScrollView, so its values remain
+ * visible while the user pans through long traces. Grid lines scroll with the
+ * columns and use the same scale as the fixed labels.
  */
-function FixedBarChart({ points, series, mode }: { points: NumericPoint[]; series: ChartSeries[]; mode: BarMode }) {
+function FixedBarChart({
+  points,
+  series,
+  mode,
+  yAxisLabel,
+  valueFormatter = formatInteger,
+  axisMinStep = 0,
+}: {
+  points: NumericPoint[];
+  series: ChartSeries[];
+  mode: BarMode;
+  yAxisLabel: string;
+  valueFormatter?: (value: number) => string;
+  axisMinStep?: number;
+}) {
   const { colors } = useTheme();
   const visible = points.slice(-MAX_VISIBLE_POINTS);
   if (!visible.length) return <Text variant="sm" dim style={styles.emptyChart}>No data recorded.</Text>;
@@ -370,53 +400,97 @@ function FixedBarChart({ points, series, mode }: { points: NumericPoint[]; serie
       ? series.reduce((sum, item) => sum + numberValue(point[item.key]), 0)
       : Math.max(...series.map(item => numberValue(point[item.key])), 0)
   ));
-  const max = Math.max(1, ...totals);
+  const scale = buildAxisScale(Math.max(0, ...totals), axisMinStep);
   const labelEvery = Math.max(1, Math.ceil(visible.length / 9));
   const columnWidth = mode === 'grouped' ? Math.max(18, series.length * 8 + 6) : 14;
 
   return (
     <View>
       <Legend series={series} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chartScroll}>
-        {visible.map((point, index) => {
-          const showLabel = index % labelEvery === 0 || index === visible.length - 1;
-          return (
-            <View key={`${String(point.iter)}-${index}`} style={[styles.chartColumn, { width: columnWidth }]}>
-              <View style={[styles.plotLane, { borderBottomColor: colors.borderStrong }]}>
-                {mode === 'stacked' ? (
-                  <View style={styles.stackedBar}>
-                    {series.map(item => {
-                      const height = (numberValue(point[item.key]) / max) * PLOT_HEIGHT;
-                      return height > 0 ? (
-                        <View key={item.key} style={{ width: 9, height: Math.max(1, height), backgroundColor: item.color }} />
-                      ) : null;
-                    })}
-                  </View>
-                ) : (
-                  <View style={styles.groupedBars}>
-                    {series.map(item => (
-                      <View
-                        key={item.key}
-                        style={[
-                          styles.verticalBar,
-                          {
-                            width: mode === 'single' ? 8 : 6,
-                            backgroundColor: item.color,
-                            height: Math.max(2, (numberValue(point[item.key]) / max) * PLOT_HEIGHT),
-                          },
-                        ]}
-                      />
-                    ))}
-                  </View>
-                )}
+      <View style={styles.chartFrame}>
+        <View style={[styles.yAxis, { width: Y_AXIS_WIDTH }]}>
+          <View style={styles.yAxisTicks}>
+            {scale.ticks.map(value => (
+              <Text
+                key={`axis-${value}`}
+                style={[styles.yAxisTick, { color: colors.textDim }]}
+                numberOfLines={1}
+              >
+                {valueFormatter(value)}
+              </Text>
+            ))}
+          </View>
+          <View style={styles.yAxisUnitLane}>
+            <Text style={[styles.yAxisUnit, { color: colors.textDim }]} numberOfLines={1}>
+              {yAxisLabel}
+            </Text>
+          </View>
+        </View>
+
+        <ScrollView
+          horizontal
+          style={styles.chartViewport}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chartScroll}
+        >
+          <View pointerEvents="none" style={styles.gridOverlay}>
+            {scale.ticks.map(value => (
+              <View
+                key={`grid-${value}`}
+                style={[
+                  styles.gridLine,
+                  {
+                    top: Math.min(
+                      PLOT_HEIGHT - StyleSheet.hairlineWidth,
+                      Math.max(0, (1 - value / scale.max) * PLOT_HEIGHT),
+                    ),
+                    borderTopColor: colors.border,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          {visible.map((point, index) => {
+            const showLabel = index % labelEvery === 0 || index === visible.length - 1;
+            return (
+              <View key={`${String(point.iter)}-${index}`} style={[styles.chartColumn, { width: columnWidth }]}>
+                <View style={[styles.plotLane, { borderBottomColor: colors.borderStrong }]}>
+                  {mode === 'stacked' ? (
+                    <View style={styles.stackedBar}>
+                      {series.map(item => {
+                        const height = (numberValue(point[item.key]) / scale.max) * PLOT_HEIGHT;
+                        return height > 0 ? (
+                          <View key={item.key} style={{ width: 9, height: Math.max(1, height), backgroundColor: item.color }} />
+                        ) : null;
+                      })}
+                    </View>
+                  ) : (
+                    <View style={styles.groupedBars}>
+                      {series.map(item => (
+                        <View
+                          key={item.key}
+                          style={[
+                            styles.verticalBar,
+                            {
+                              width: mode === 'single' ? 8 : 6,
+                              backgroundColor: item.color,
+                              height: Math.max(2, (numberValue(point[item.key]) / scale.max) * PLOT_HEIGHT),
+                            },
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <View style={styles.axisLane}>
+                  {showLabel ? <Text style={[styles.axisLabel, { color: colors.textDim }]}>{formatInteger(numberValue(point.iter))}</Text> : null}
+                </View>
               </View>
-              <View style={styles.axisLane}>
-                {showLabel ? <Text style={[styles.axisLabel, { color: colors.textDim }]}>{formatInteger(numberValue(point.iter))}</Text> : null}
-              </View>
-            </View>
-          );
-        })}
-      </ScrollView>
+            );
+          })}
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -522,6 +596,38 @@ function mergeByIteration(primary: NumericPoint[], secondary: NumericPoint[]): N
   return [...merged.values()].sort((a, b) => numberValue(a.iter) - numberValue(b.iter));
 }
 
+type AxisScale = { max: number; ticks: number[] };
+
+function buildAxisScale(maxValue: number, minimumStep = 0): AxisScale {
+  const safeMax = Math.max(0, Number.isFinite(maxValue) ? maxValue : 0);
+  if (safeMax === 0) {
+    const fallback = Math.max(1, minimumStep);
+    return { max: fallback, ticks: [fallback, 0] };
+  }
+
+  const rawStep = safeMax / Y_AXIS_TARGET_TICKS;
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawStep, Number.EPSILON)));
+  const normalized = rawStep / magnitude;
+  const niceFraction = normalized <= 1
+    ? 1
+    : normalized <= 2
+      ? 2
+      : normalized <= 2.5
+        ? 2.5
+        : normalized <= 5
+          ? 5
+          : 10;
+  const step = Math.max(minimumStep, niceFraction * magnitude);
+  const axisMax = Math.max(step, Math.ceil(safeMax / step) * step);
+  const tickCount = Math.max(1, Math.round(axisMax / step));
+  const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
+    const value = axisMax - index * step;
+    return Math.abs(value) < step / 1000 ? 0 : value;
+  });
+
+  return { max: axisMax, ticks };
+}
+
 function numberValue(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -573,7 +679,16 @@ const styles = StyleSheet.create({
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 10 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   legendDot: { width: 7, height: 7, borderRadius: 4 },
-  chartScroll: { minWidth: '100%', alignItems: 'flex-start', paddingTop: 4, gap: 4 },
+  chartFrame: { width: '100%', flexDirection: 'row', alignItems: 'flex-start' },
+  yAxis: { height: PLOT_HEIGHT + AXIS_HEIGHT, paddingRight: 7 },
+  yAxisTicks: { height: PLOT_HEIGHT, justifyContent: 'space-between', alignItems: 'flex-end' },
+  yAxisTick: { maxWidth: Y_AXIS_WIDTH - 7, fontSize: 9, lineHeight: 11, fontVariant: ['tabular-nums'], textAlign: 'right' },
+  yAxisUnitLane: { height: AXIS_HEIGHT, alignItems: 'flex-end', justifyContent: 'flex-start', paddingTop: 3 },
+  yAxisUnit: { fontSize: 8, lineHeight: 11, letterSpacing: 0.5, textTransform: 'uppercase' },
+  chartViewport: { flex: 1 },
+  chartScroll: { minWidth: '100%', alignItems: 'flex-start', gap: 4, position: 'relative' },
+  gridOverlay: { position: 'absolute', left: 0, right: 0, top: 0, height: PLOT_HEIGHT },
+  gridLine: { position: 'absolute', left: 0, right: 0, borderTopWidth: StyleSheet.hairlineWidth },
   chartColumn: { height: PLOT_HEIGHT + AXIS_HEIGHT },
   plotLane: { height: PLOT_HEIGHT, justifyContent: 'flex-end', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   axisLane: { height: AXIS_HEIGHT, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 3 },

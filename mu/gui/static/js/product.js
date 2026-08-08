@@ -55,6 +55,19 @@
         }
     }
 
+    function refineComposerGeometry() {
+        const composer = document.querySelector('.composer');
+        const toolbar = document.querySelector('.composer-toolbar');
+        if (!composer || !toolbar) return;
+        // The legacy toolbar sat on top of the textarea. Keep it in the
+        // composer hierarchy, but give it its own quiet line above input.
+        composer.style.paddingTop = '58px';
+        toolbar.style.bottom = '96px';
+        toolbar.style.gap = '2px';
+        const value = toolbar.querySelector('.composer-mode-pill .value');
+        if (value) value.style.textTransform = 'capitalize';
+    }
+
     function isVisible(node) {
         if (!node || node.hidden) return false;
         const style = window.getComputedStyle(node);
@@ -131,8 +144,6 @@
         const stage = document.querySelector('.panel-stage');
         if (!stage) return;
         const main = stage.closest('.main');
-        // Legacy app.css stacks panels below chat at <=880px. The product
-        // panel stage owns responsive behavior now and must never reflow chat.
         if (main) main.style.flexDirection = 'row';
 
         const panels = Array.from(stage.querySelectorAll('.mode-panel'));
@@ -154,6 +165,7 @@
         document.documentElement.classList.add('mucli-product-ui');
         polishWelcomeCopy();
         preserveOverlayGeometry();
+        refineComposerGeometry();
         installComposerFloatingLayers();
         installPanelTransitions();
     });

@@ -3,28 +3,32 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "mu" / "gui" / "templates" / "index.html"
+PANEL_TABS = ROOT / "mu" / "gui" / "templates" / "fragments" / "panel_tabs.html"
 CONTAINERS = ROOT / "mu" / "gui" / "templates" / "containers.html"
 PRODUCT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "product.css"
 CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "crystal.css"
+CLARITY_CSS = ROOT / "mu" / "gui" / "static" / "css" / "clarity.css"
 ROUTE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "route-product.css"
 TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "trace.css"
 CONTAINER_CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css"
 PRODUCT_JS = ROOT / "mu" / "gui" / "static" / "js" / "product.js"
+WEB_SHELL_JS = ROOT / "mu" / "gui" / "static" / "js" / "web_shell.js"
 
 
 def test_product_assets_are_loaded_by_main_web_shell():
     text = INDEX.read_text(encoding="utf-8")
     assert '/static/css/product.css' in text
     assert '/static/css/crystal.css' in text
+    assert '/static/css/clarity.css' in text
     assert '/static/js/product.js' in text
+    assert '/static/js/web_shell.js' in text
     assert 'class="app product-app"' in text
     assert 'class="panel-stage"' in text
+    assert 'fragments/panel_tabs.html' in text
 
 
 def test_product_shell_keeps_core_navigation_contracts():
     text = INDEX.read_text(encoding="utf-8")
-    # View switching must remain presentation-only; backend mode is still
-    # selected from the chat composer fragment.
     assert '$store.mode.setView(m.name)' in text
     assert '$store.mode.setView(v.name)' in text
     assert '$store.sessions.switchTo(s.name)' in text
@@ -33,9 +37,20 @@ def test_product_shell_keeps_core_navigation_contracts():
     assert '$store.layout.togglePanel()' in text
 
 
+def test_rhs_panel_has_its_own_view_tabs():
+    text = PANEL_TABS.read_text(encoding="utf-8")
+    assert 'role="tablist"' in text
+    assert '$store.mode.panelModes.includes(item.name)' in text
+    assert '$store.mode.setView(m.name)' in text
+    assert '$store.mode.setView(v.name)' in text
+    assert '$store.layout.panelOpen = false' in text
+
+
 def test_product_css_covers_primary_web_surfaces():
     legacy_product = PRODUCT_CSS.read_text(encoding="utf-8")
     crystal = CRYSTAL_CSS.read_text(encoding="utf-8")
+    clarity = CLARITY_CSS.read_text(encoding="utf-8")
+    combined = legacy_product + crystal + clarity
     for selector in (
         '.product-header',
         '.product-sidebar',
@@ -43,14 +58,15 @@ def test_product_css_covers_primary_web_surfaces():
         '.msg.user',
         '.composer',
         '.panel-stage',
+        '.panel-tabs',
         '.inspector',
         '.welcome-entry',
         '.prompt-body .options label',
     ):
-        assert selector in crystal or selector in legacy_product
-    assert 'backdrop-filter' in crystal
-    assert '@media (max-width: 760px)' in crystal
-    assert '@media (prefers-reduced-motion: reduce)' in crystal
+        assert selector in combined
+    assert 'backdrop-filter' in combined
+    assert '@media (max-width: 760px)' in combined
+    assert '@media (prefers-reduced-motion: reduce)' in combined
 
 
 def test_product_javascript_positions_overlays_and_is_presentation_only():
@@ -67,9 +83,21 @@ def test_product_javascript_positions_overlays_and_is_presentation_only():
     assert "main.style.flexDirection = 'row'" in js
     assert "node.style.position = 'fixed'" in js
     assert "event.key.toLowerCase() === 'k'" in js
-    # Product JS must not own API requests or mutate agent-mode state.
     assert 'fetch(' not in js
     assert 'Alpine.store(' not in js
+
+
+def test_session_history_hydrates_after_authoritative_focus():
+    js = WEB_SHELL_JS.read_text(encoding="utf-8")
+    assert 'sessions.load = async function' in js
+    assert 'sessions.switchTo = async function' in js
+    assert 'slot.historyHydrated' in js
+    assert 'chat.focus(current)' in js
+    assert 'chat.loadHistory(current, { force: true })' in js
+    assert 'chat.loadHistory(name, { force: true })' in js
+    assert 'slot.pendingReload = true' in js
+    # Reuse existing stores/endpoints rather than introducing a second API path.
+    assert 'fetch(' not in js
 
 
 def test_choice_picker_is_flat_not_card_based():
@@ -78,6 +106,24 @@ def test_choice_picker_is_flat_not_card_based():
     assert '.prompt-body .options label' in css
     assert 'border-bottom:1pxsolidvar(--hairline)' in compact
     assert 'appearance: none' in css
+
+
+def test_settings_drawer_is_wide_with_vertical_tabs():
+    css = CLARITY_CSS.read_text(encoding="utf-8")
+    assert 'width: min(980px, 94vw)' in css
+    assert 'grid-template-columns: 172px minmax(0, 1fr)' in css
+    assert '.inspector-tabs' in css and 'flex-direction: column' in css
+    assert 'grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px)' in css
+
+
+def test_clarity_palette_is_restrained_cold_blue_not_teal_brand_wash():
+    css = CLARITY_CSS.read_text(encoding="utf-8")
+    route = ROUTE_CSS.read_text(encoding="utf-8")
+    assert '--accent: #7f9db8' in css
+    assert '--accent:#7f9db8' in route
+    assert '#79c2cb' not in css
+    assert '#79c2cb' not in route
+    assert '--mist-a: rgba(118,153,184,.042)' in css
 
 
 def test_trace_analyzer_uses_current_product_foundation_and_flat_sections():

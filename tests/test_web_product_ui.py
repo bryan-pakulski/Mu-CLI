@@ -150,17 +150,23 @@ def test_settings_drawer_is_spacious_with_vertical_tabs():
     assert 'aria-label="Settings sections"' in template
 
 
-def test_trace_analyzer_uses_same_neutral_product_foundation():
+def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
     css = TRACE_CSS.read_text(encoding="utf-8")
     route = ROUTE_CSS.read_text(encoding="utf-8")
     assert '@import url("/static/css/route-product.css")' in css
-    assert '.trace-section{padding:0;background:transparent;border:0;border-radius:0}' in css
-    assert '.trace-cards' in css
-    assert 'border-top:1px solid var(--hairline)' in css
-    assert '.trace-info-popout' in css and 'var(--glass-strong)' in css
+    assert '.trace-section {' in css
+    assert 'border-radius: 22px' in css
+    assert 'background: color-mix(in srgb, var(--glass) 82%, transparent)' in css
+    assert 'backdrop-filter: blur(30px) saturate(108%)' in css
+    assert '.trace-canvas-wrap {' in css
+    assert 'border-radius: 16px' in css
+    assert 'filter: saturate(.44) contrast(.96) brightness(.98)' in css
+    assert 'html[data-theme="light"] .trace-canvas' in css
+    assert '.trace-card {' in css
+    assert 'background: transparent' in css
+    assert '.trace-info-popout' in css
     assert '--accent:#8ba9c6' in route
     assert '#79c2cb' not in route
-    assert '.trace-canvas{filter:saturate(.48) contrast(.98)}' in route
     assert '.trace-mu{color:var(--text-soft)!important}' in route
 
 

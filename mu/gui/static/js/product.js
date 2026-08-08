@@ -41,6 +41,20 @@
         return true;
     }
 
+    function preserveOverlayGeometry() {
+        const overlays = [
+            ['.product-app > .inspector-backdrop', 120],
+            ['.product-app > .file-browser-backdrop', 220],
+            ['.product-app > .modal-backdrop', 240],
+        ];
+        for (const [selector, zIndex] of overlays) {
+            document.querySelectorAll(selector).forEach(node => {
+                node.style.position = 'fixed';
+                node.style.zIndex = String(zIndex);
+            });
+        }
+    }
+
     function isVisible(node) {
         if (!node || node.hidden) return false;
         const style = window.getComputedStyle(node);
@@ -139,6 +153,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.classList.add('mucli-product-ui');
         polishWelcomeCopy();
+        preserveOverlayGeometry();
         installComposerFloatingLayers();
         installPanelTransitions();
     });

@@ -3,7 +3,9 @@
 {% block body %}
 <link rel="stylesheet" href="/static/css/product.css">
 <link rel="stylesheet" href="/static/css/crystal.css">
+<link rel="stylesheet" href="/static/css/clarity.css">
 <script src="/static/js/product.js"></script>
+<script src="/static/js/web_shell.js"></script>
 
 {% if not session_active %}
 <div class="welcome-shell" x-data>
@@ -203,6 +205,7 @@
              x-show="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen"
              @mousedown="$store.layout.startDrag('panel', $event)"></div>
         <div class="panel-stage" aria-label="Workspace detail panel">
+            {% include "fragments/panel_tabs.html" %}
             {% include "fragments/teacher_panel.html" %}
             {% include "fragments/feature_panel.html" %}
             {% include "fragments/research_panel.html" %}

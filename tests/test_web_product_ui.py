@@ -78,14 +78,25 @@ def test_product_css_covers_primary_web_surfaces():
     assert '@media (prefers-reduced-motion: reduce)' in combined
 
 
-def test_alpine_sunrise_is_environmental_not_control_colour():
+def test_alpine_sunrise_is_atmospheric_not_css_scenery():
     css = CLARITY_CSS.read_text(encoding="utf-8")
     route = ROUTE_CSS.read_text(encoding="utf-8")
-    for token in ('--sky-blue', '--glacier-blue', '--sunrise-pink', '--alpine-green', '--mountain-near'):
+    for token in (
+        '--sky-blue', '--glacier-blue', '--sunrise-pink', '--sunrise-peach',
+        '--alpine-green', '--snow-glow',
+    ):
         assert token in css
         assert token in route
-    assert 'radial-gradient(ellipse 42% 34% at 72% 4%, var(--sunrise-pink)' in css
-    assert 'clip-path: polygon(' in css
+    assert 'radial-gradient' in css
+    assert 'radial-gradient' in route
+    assert 'clip-path' not in css
+    assert 'clip-path' not in route
+    assert '--mountain-near' not in css
+    assert '--mountain-far' not in css
+    assert '--mountain-near' not in route
+    assert '--mountain-far' not in route
+    assert '.product-app::after' not in css
+    assert 'body::after' not in route
     assert '.product-icon-button' in css
     assert 'color: var(--text-dim)' in css
 

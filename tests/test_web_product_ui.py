@@ -133,12 +133,29 @@ def test_product_javascript_positions_overlays_and_is_presentation_only():
     assert 'installPanelTransitions' in js
     assert "dataset.placement = preferAbove ? 'top' : 'bottom'" in js
     assert "dataset.alignment = profile.align" in js
-    assert "toolbar.style.bottom = '96px'" in js
+    assert "toolbar.style.removeProperty('bottom')" in js
+    assert "toolbar.style.bottom = '96px'" not in js
+    assert "composer.style.removeProperty('padding-top')" in js
     assert "main.style.flexDirection = 'row'" in js
     assert "node.style.position = 'fixed'" in js
     assert "event.key.toLowerCase() === 'k'" in js
     assert 'fetch(' not in js
     assert 'Alpine.store(' not in js
+
+
+def test_composer_is_single_pane_with_controls_outside_typing_surface():
+    css = REFINEMENT_CSS.read_text(encoding="utf-8")
+    assert '.composer::before' in css
+    assert 'content: none !important' in css
+    assert '.composer-toolbar {' in css
+    assert 'position: static !important' in css
+    assert 'margin: 0 0 16px' in css
+    assert 'justify-content: flex-end' in css
+    assert '.composer form {' in css
+    assert 'background: color-mix(in srgb, var(--glass-strong) 72%, transparent) !important' in css
+    assert '.composer .hint {' in css
+    assert 'min-height: 0 !important' in css
+    assert 'background: transparent !important' in css
 
 
 def test_composer_feature_and_provider_popouts_fit_content_cleanly():

@@ -1,0 +1,44 @@
+<nav class="panel-tabs" role="tablist" aria-label="Workspace views">
+    <div class="panel-tabs-head">
+        <span>Views</span>
+        <button type="button"
+                class="panel-tabs-close"
+                @click="$store.layout.panelOpen = false"
+                title="Close panel"
+                aria-label="Close panel">×</button>
+    </div>
+
+    <div class="panel-tabs-scroll">
+        <div class="panel-tab-group">
+            <span class="panel-tab-label">Work</span>
+            <template x-for="m in $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name))" :key="'panel-mode-' + m.name">
+                <button type="button"
+                        class="panel-tab"
+                        role="tab"
+                        :aria-selected="$store.mode.active === m.name"
+                        :class="{ active: $store.mode.active === m.name, disabled: m.disabled }"
+                        :disabled="m.disabled"
+                        @click="!m.disabled && $store.mode.setView(m.name)"
+                        :title="m.description || m.display_name">
+                    <span x-text="m.display_name"></span>
+                </button>
+            </template>
+        </div>
+
+        <div class="panel-tab-group">
+            <span class="panel-tab-label">Tools</span>
+            <template x-for="v in $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name))" :key="'panel-view-' + v.name">
+                <button type="button"
+                        class="panel-tab"
+                        role="tab"
+                        :aria-selected="$store.mode.active === v.name"
+                        :class="{ active: $store.mode.active === v.name, disabled: v.disabled }"
+                        :disabled="v.disabled"
+                        @click="!v.disabled && $store.mode.setView(v.name)"
+                        :title="v.description || v.display_name">
+                    <span x-text="v.display_name"></span>
+                </button>
+            </template>
+        </div>
+    </div>
+</nav>

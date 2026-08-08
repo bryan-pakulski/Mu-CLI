@@ -167,6 +167,7 @@ def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
     assert '.trace-info-popout' in css
     assert '--accent:#8ba9c6' in route
     assert '#79c2cb' not in route
+    assert '#e0a040' not in route
     assert '.trace-mu{color:var(--text-soft)!important}' in route
 
 

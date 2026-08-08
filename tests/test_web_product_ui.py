@@ -28,48 +28,66 @@ def test_product_assets_are_loaded_by_main_web_shell():
     assert 'fragments/panel_tabs.html' in text
 
 
+def test_left_navigation_is_sessions_only():
+    text = INDEX.read_text(encoding="utf-8")
+    sidebar = text.split('<aside class="sidebar product-sidebar"', 1)[1].split('</aside>', 1)[0]
+    assert '<span>Sessions</span>' in sidebar
+    assert '$store.sessions.switchTo(s.name)' in sidebar
+    assert 'New session' in sidebar
+    assert '<span>Work</span>' not in sidebar
+    assert '<span>Workspace</span>' not in sidebar
+    assert '$store.mode.setView(m.name)' not in sidebar
+    assert '$store.mode.setView(v.name)' not in sidebar
+
+
 def test_product_shell_keeps_core_navigation_contracts():
     text = INDEX.read_text(encoding="utf-8")
-    assert '$store.mode.setView(m.name)' in text
-    assert '$store.mode.setView(v.name)' in text
     assert '$store.sessions.switchTo(s.name)' in text
     assert '$store.inspector.openDrawer()' in text
     assert '$store.yolo.toggle()' in text
-    assert '$store.layout.togglePanel()' in text
     assert "$store.mode.setView('memory'); $store.layout.panelOpen = true" in text
     assert 'aria-label="Toggle workspace panel"' in text
+    assert 'href="/containers"' in text
 
 
-def test_rhs_panel_has_its_own_view_tabs():
+def test_rhs_panel_has_top_tabs_and_dropdown_without_eating_body_width():
     text = PANEL_TABS.read_text(encoding="utf-8")
+    css = CLARITY_CSS.read_text(encoding="utf-8")
     assert 'role="tablist"' in text
-    assert '$store.mode.panelModes.includes(item.name)' in text
+    assert 'class="panel-tabs-strip"' in text
+    assert 'class="panel-view-select"' in text
     assert '$store.mode.setView(m.name)' in text
     assert '$store.mode.setView(v.name)' in text
+    assert '$store.mode.setView($event.target.value)' in text
     assert '$store.layout.panelOpen = false' in text
+    assert '--panel-tabs-h: 55px' in css
+    assert 'inset: var(--panel-tabs-h) 0 0 0 !important' in css
+    assert '--panel-tabs-w' not in css
 
 
 def test_product_css_covers_primary_web_surfaces():
-    legacy_product = PRODUCT_CSS.read_text(encoding="utf-8")
-    crystal = CRYSTAL_CSS.read_text(encoding="utf-8")
-    clarity = CLARITY_CSS.read_text(encoding="utf-8")
-    combined = legacy_product + crystal + clarity
+    combined = ''.join(path.read_text(encoding="utf-8") for path in (PRODUCT_CSS, CRYSTAL_CSS, CLARITY_CSS))
     for selector in (
-        '.product-header',
-        '.product-sidebar',
-        '.chat-history',
-        '.msg.user',
-        '.composer',
-        '.panel-stage',
-        '.panel-tabs',
-        '.inspector',
-        '.welcome-entry',
-        '.prompt-body .options label',
+        '.product-header', '.product-sidebar', '.chat-history', '.msg.user',
+        '.composer', '.panel-stage', '.panel-tabs', '.inspector',
+        '.welcome-entry', '.prompt-body .options label',
     ):
         assert selector in combined
     assert 'backdrop-filter' in combined
     assert '@media (max-width: 760px)' in combined
     assert '@media (prefers-reduced-motion: reduce)' in combined
+
+
+def test_alpine_sunrise_is_environmental_not_control_colour():
+    css = CLARITY_CSS.read_text(encoding="utf-8")
+    route = ROUTE_CSS.read_text(encoding="utf-8")
+    for token in ('--sky-blue', '--glacier-blue', '--sunrise-pink', '--alpine-green', '--mountain-near'):
+        assert token in css
+        assert token in route
+    assert 'radial-gradient(ellipse 42% 34% at 72% 4%, var(--sunrise-pink)' in css
+    assert 'clip-path: polygon(' in css
+    assert '.product-icon-button' in css
+    assert 'color: var(--text-dim)' in css
 
 
 def test_product_javascript_positions_overlays_and_is_presentation_only():
@@ -110,35 +128,27 @@ def test_choice_picker_is_flat_not_card_based():
     assert 'appearance: none' in css
 
 
-def test_settings_drawer_is_wide_with_vertical_tabs():
+def test_settings_drawer_is_spacious_with_vertical_tabs():
     css = CLARITY_CSS.read_text(encoding="utf-8")
     template = INSPECTOR.read_text(encoding="utf-8")
-    assert 'width: min(980px, 94vw)' in css
-    assert 'grid-template-columns: 172px minmax(0, 1fr)' in css
+    assert 'width: min(1040px, 94vw)' in css
+    assert 'grid-template-columns: 176px minmax(0, 1fr)' in css
     assert '.inspector-tabs' in css and 'flex-direction: column' in css
-    assert 'grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px)' in css
+    assert 'grid-template-columns: minmax(250px, 1fr) minmax(260px, 340px)' in css
     assert 'aria-orientation="vertical"' in template
     assert 'aria-label="Settings sections"' in template
 
 
-def test_clarity_palette_is_restrained_cold_blue_not_teal_brand_wash():
-    css = CLARITY_CSS.read_text(encoding="utf-8")
-    route = ROUTE_CSS.read_text(encoding="utf-8")
-    assert '--accent: #7f9db8' in css
-    assert '--accent:#7f9db8' in route
-    assert '#79c2cb' not in css
-    assert '#79c2cb' not in route
-    assert '--mist-a: rgba(118,153,184,.042)' in css
-
-
-def test_trace_analyzer_uses_current_product_foundation_and_flat_sections():
+def test_trace_analyzer_uses_same_neutral_product_foundation():
     css = TRACE_CSS.read_text(encoding="utf-8")
+    route = ROUTE_CSS.read_text(encoding="utf-8")
     assert '@import url("/static/css/route-product.css")' in css
     assert '.trace-section{padding:0;background:transparent;border:0;border-radius:0}' in css
     assert '.trace-cards' in css
     assert 'border-top:1px solid var(--hairline)' in css
     assert '.trace-info-popout' in css and 'var(--glass-strong)' in css
-    assert ROUTE_CSS.exists()
+    assert '--accent:#8ba9c6' in route
+    assert '#79c2cb' not in route
 
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():
@@ -146,13 +156,8 @@ def test_container_management_uses_current_product_surface_without_breaking_ids(
     assert '/static/css/route-product.css' in template
     assert '/static/css/containers-crystal.css' in template
     for dom_id in (
-        'container-list',
-        'template-list',
-        'create-environment-button',
-        'create-modal',
-        'environment-name',
-        'shell-modal',
-        'shell-command',
+        'container-list', 'template-list', 'create-environment-button',
+        'create-modal', 'environment-name', 'shell-modal', 'shell-command',
     ):
         assert f'id="{dom_id}"' in template
 

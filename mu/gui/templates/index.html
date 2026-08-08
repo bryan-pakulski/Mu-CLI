@@ -2,6 +2,7 @@
 {% block title %}MuCLI{% if session_active %} — {{ session_name }}{% endif %}{% endblock %}
 {% block body %}
 <link rel="stylesheet" href="/static/css/product.css">
+<link rel="stylesheet" href="/static/css/crystal.css">
 <script src="/static/js/product.js"></script>
 
 {% if not session_active %}
@@ -201,18 +202,20 @@
         <div class="resize-handle"
              x-show="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen"
              @mousedown="$store.layout.startDrag('panel', $event)"></div>
-        {% include "fragments/teacher_panel.html" %}
-        {% include "fragments/feature_panel.html" %}
-        {% include "fragments/research_panel.html" %}
-        {% include "fragments/security_panel.html" %}
-        {% include "fragments/loop_panel.html" %}
-        {% include "fragments/debug_panel.html" %}
-        {% include "fragments/history_panel.html" %}
-        {% include "fragments/memory_panel.html" %}
-        {% include "fragments/system_prompts_panel.html" %}
-        {% include "fragments/files_panel.html" %}
-        {% include "fragments/artifacts_panel.html" %}
-        {% include "fragments/shell_panel.html" %}
+        <div class="panel-stage" aria-label="Workspace detail panel">
+            {% include "fragments/teacher_panel.html" %}
+            {% include "fragments/feature_panel.html" %}
+            {% include "fragments/research_panel.html" %}
+            {% include "fragments/security_panel.html" %}
+            {% include "fragments/loop_panel.html" %}
+            {% include "fragments/debug_panel.html" %}
+            {% include "fragments/history_panel.html" %}
+            {% include "fragments/memory_panel.html" %}
+            {% include "fragments/system_prompts_panel.html" %}
+            {% include "fragments/files_panel.html" %}
+            {% include "fragments/artifacts_panel.html" %}
+            {% include "fragments/shell_panel.html" %}
+        </div>
     </main>
 
     {% include "fragments/inspector.html" %}

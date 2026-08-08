@@ -47,7 +47,7 @@ class SpecialistRecord:
     model: str
     provider_key: str = ""
     disabled_tools: tuple[str, ...] = ()
-    status: str = "busy"  # busy | idle | failed | stopped
+    status: str = "busy"
     created_at: float = field(default_factory=time.time)
     last_active_at: float = field(default_factory=time.time)
     delegation_count: int = 1
@@ -104,7 +104,6 @@ class SubagentRegistry:
         self._mailbox_seq = 0
         self._durable_mailbox_seen: set[str] = set()
 
-    # ----- parent + durable recovery
     def bind_parent(self, parent: Any) -> None:
         try:
             self._parent_ref = weakref.ref(parent)
@@ -123,17 +122,11 @@ class SubagentRegistry:
                     if str(state.get("status") or "") == "running":
                         task_id = str(state.get("task_id") or "")
                         if task_id:
-                            self._artifact_store.record_event(
-                                task_id,
-                                {"kind": "subagent_recovered", "status": "error"},
-                                state_patch={
-                                    "status": "error",
-                                    "error": "worker process ended before a terminal event",
-                                    "summary": str(state.get("summary") or "").strip() or "Sub-agent execution was interrupted by a server restart; its durable history remains available.",
-                                    "finished_at": time.time(),
-                                    "parent_notified": False,
-                                },
-                            )
+                            self._artifact_store.record_event(task_id, {"kind": "subagent_recovered", "status": "error"}, state_patch={
+                                "status": "error", "error": "worker process ended before a terminal event",
+                                "summary": str(state.get("summary") or "").strip() or "Sub-agent execution was interrupted by a server restart; its durable history remains available.",
+                                "finished_at": time.time(), "parent_notified": False,
+                            })
             self._hydrate_durable_mailbox()
         except Exception:
             self._artifact_store = None
@@ -155,18 +148,13 @@ class SubagentRegistry:
                 continue
             self._durable_mailbox_seen.add(task_id)
             self._queue_mailbox_event({
-                "kind": "completion",
-                "task_id": task_id,
-                "specialist": str(state.get("specialist_key") or "specialist"),
-                "status": status or "done",
-                "summary": str(state.get("summary") or state.get("error") or "").strip(),
+                "kind": "completion", "task_id": task_id, "specialist": str(state.get("specialist_key") or "specialist"),
+                "status": status or "done", "summary": str(state.get("summary") or state.get("error") or "").strip(),
                 "importance": "high" if status == "error" else "normal",
                 "artifact": state.get("artifact") if isinstance(state.get("artifact"), dict) else {},
-                "result_path": state.get("result_path"),
-                "durable": True,
+                "result_path": state.get("result_path"), "durable": True,
             })
 
-    # ----- UI/render plane
     @property
     def tracker(self):
         if self._tracker is None:
@@ -212,10 +200,7 @@ class SubagentRegistry:
             rec = self._records.get(task_id)
             if rec is None:
                 return
-            rec.context_pct = float(context_pct)
-            rec.iter = int(iter)
-            rec.max_iter = int(max_iter)
-            rec.tokens_in = int(tokens_in)
+            rec.context_pct, rec.iter, rec.max_iter, rec.tokens_in = float(context_pct), int(iter), int(max_iter), int(tokens_in)
             batch_id = rec.batch_id
         self._emit({"kind": "subagent_progress", "task_id": task_id, "batch_id": batch_id, "context_pct": float(context_pct), "iter": int(iter), "max_iter": int(max_iter), "tokens_in": int(tokens_in)})
 
@@ -227,37 +212,24 @@ class SubagentRegistry:
         except Exception:
             pass
 
-    # ----- persistent specialist pool
     @staticmethod
     def _tool_profile(disabled_tools: Sequence[str] | None) -> tuple[str, ...]:
         return tuple(sorted(str(x) for x in (disabled_tools or []) if str(x)))
 
     def acquire_specialist(self, specialist_key: str, *, depth: int, model: str, provider_key: str = "", disabled_tools: Sequence[str] | None = None) -> Optional[SpecialistRecord]:
-        profile = self._tool_profile(disabled_tools)
-        key = str(specialist_key or "general")
+        profile, key = self._tool_profile(disabled_tools), str(specialist_key or "general")
         with self._lock:
-            candidates = [self._specialists[wid] for wid in self._specialist_order if wid in self._specialists]
-            for worker in reversed(candidates):
-                if worker.status == "idle" and worker.specialist_key == key and worker.depth == int(depth) and worker.model == str(model or "") and worker.provider_key == str(provider_key or "") and worker.disabled_tools == profile:
-                    worker.status = "busy"
-                    worker.last_active_at = time.time()
-                    worker.delegation_count += 1
+            for wid in reversed(self._specialist_order):
+                worker = self._specialists.get(wid)
+                if worker and worker.status == "idle" and worker.specialist_key == key and worker.depth == int(depth) and worker.model == str(model or "") and worker.provider_key == str(provider_key or "") and worker.disabled_tools == profile:
+                    worker.status = "busy"; worker.last_active_at = time.time(); worker.delegation_count += 1
                     return worker
         return None
 
     def register_specialist(self, child: Any, *, specialist_key: str, depth: int, model: str, provider_key: str = "", disabled_tools: Sequence[str] | None = None) -> SpecialistRecord:
-        worker = SpecialistRecord(
-            worker_id="sp-" + uuid.uuid4().hex[:8],
-            specialist_key=str(specialist_key or "general"),
-            child=child,
-            depth=int(depth),
-            model=str(model or ""),
-            provider_key=str(provider_key or ""),
-            disabled_tools=self._tool_profile(disabled_tools),
-        )
+        worker = SpecialistRecord(worker_id="sp-" + uuid.uuid4().hex[:8], specialist_key=str(specialist_key or "general"), child=child, depth=int(depth), model=str(model or ""), provider_key=str(provider_key or ""), disabled_tools=self._tool_profile(disabled_tools))
         with self._lock:
-            self._specialists[worker.worker_id] = worker
-            self._specialist_order.append(worker.worker_id)
+            self._specialists[worker.worker_id] = worker; self._specialist_order.append(worker.worker_id)
         return worker
 
     def _release_specialist(self, record: SubagentRecord, *, failed: bool = False) -> None:
@@ -265,15 +237,13 @@ class SubagentRegistry:
             return
         with self._lock:
             worker = self._specialists.get(record.worker_id)
-            if worker is not None:
-                worker.status = "failed" if failed else "idle"
-                worker.last_active_at = time.time()
+            if worker:
+                worker.status = "failed" if failed else "idle"; worker.last_active_at = time.time()
 
     def specialist_snapshot(self) -> List[Dict[str, Any]]:
         with self._lock:
             return [{"worker_id": w.worker_id, "specialist_key": w.specialist_key, "status": w.status, "depth": w.depth, "model": w.model, "provider": w.provider_key, "delegations": w.delegation_count, "last_active_at": w.last_active_at} for w in (self._specialists[x] for x in self._specialist_order if x in self._specialists)]
 
-    # ----- sparse mailbox
     def _queue_mailbox_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             self._mailbox_seq += 1
@@ -304,7 +274,7 @@ class SubagentRegistry:
                 if item.get("task_id") == task_id and item.get("kind") == "completion":
                     item["delivered"] = True
             rec = self._records.get(task_id)
-            if rec is not None:
+            if rec:
                 rec.parent_notified = True
         if self._artifact_store is not None:
             try:
@@ -313,16 +283,13 @@ class SubagentRegistry:
                 pass
 
     def context_block(self, parent: Any = None, *, max_chars: int = 7000) -> str:
-        """Drain unread worker findings/completions; never inject running status."""
         parent = parent or self._parent()
-        self._hydrate_durable_mailbox()
         with self._lock:
             unread = [x for x in self._mailbox if not x.get("delivered")]
             unread.sort(key=lambda x: ({"critical": 0, "high": 1, "normal": 2, "low": 3}.get(str(x.get("importance") or "normal"), 2), x.get("mailbox_id", 0)))
         if not unread:
             return ""
-        lines = ["Unread specialist mailbox (new information only):"]
-        delivered: list[int] = []
+        lines, delivered = ["Unread specialist mailbox (new information only):"], []
         for item in unread:
             refs = item.get("refs") or []
             ref_text = f" refs={','.join(str(x) for x in refs[:6])}" if refs else ""
@@ -331,8 +298,7 @@ class SubagentRegistry:
             line = f"- [{item.get('kind')}/{item.get('importance', 'normal')}] {item.get('specialist')} {item.get('task_id')}: {str(item.get('summary') or '')[:3000]}{ref_text}{durable}"
             if len("\n".join(lines + [line])) > max_chars:
                 break
-            lines.append(line)
-            delivered.append(int(item.get("mailbox_id") or 0))
+            lines.append(line); delivered.append(int(item.get("mailbox_id") or 0))
             if parent is not None and item.get("summary"):
                 try:
                     parent.task_memory.save(content=f"Specialist {item.get('specialist')} ({item.get('task_id')}): {str(item.get('summary'))[:5000]}", tags=["subagent", str(item.get("task_id")), "mailbox"], source=f"subagent:{item.get('task_id')}", kind="finding", status="active")
@@ -342,22 +308,16 @@ class SubagentRegistry:
             for item in self._mailbox:
                 if int(item.get("mailbox_id") or 0) in delivered:
                     item["delivered"] = True
-                    if item.get("kind") == "completion":
-                        rec = self._records.get(str(item.get("task_id") or ""))
-                        if rec is not None:
-                            rec.parent_notified = True
         for item in unread:
             if int(item.get("mailbox_id") or 0) in delivered and item.get("kind") == "completion":
                 self.acknowledge_completion(str(item.get("task_id") or ""))
         return "\n".join(lines)
 
-    # ----- delegation lifecycle
     def register(self, child: Any, *, task: str, depth: int, lifecycle: Any, tracker_agent_id: Optional[str] = None, model: Optional[str] = None, specialist_key: str = "general", worker_id: str = "", reused_specialist: bool = False) -> SubagentRecord:
         with self._lock:
             task_id = "sa-" + uuid.uuid4().hex[:8]
             if not any(r.status == "running" for r in self._records.values()):
-                self._batch_seq += 1
-                self._active_batch_id = f"sab-{int(time.time()*1000):x}-{self._batch_seq}"
+                self._batch_seq += 1; self._active_batch_id = f"sab-{int(time.time()*1000):x}-{self._batch_seq}"
             batch_id = self._active_batch_id
         if tracker_agent_id is None:
             try:
@@ -367,8 +327,7 @@ class SubagentRegistry:
         record = SubagentRecord(task_id=task_id, task=task, depth=depth, child=child, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=model or "", batch_id=batch_id, specialist_key=specialist_key, worker_id=worker_id, reused_specialist=bool(reused_specialist))
         lifecycle.on_signal = lambda lc, r=record: self._on_lifecycle_signal(r, lc)
         with self._lock:
-            self._records[task_id] = record
-            self._order.append(task_id)
+            self._records[task_id] = record; self._order.append(task_id)
         self._link_tracker_task_id(tracker_agent_id, task_id)
         if self._artifact_store is not None:
             try:
@@ -401,15 +360,12 @@ class SubagentRegistry:
             except Exception:
                 tool_calls = 0
             with self._lock:
-                record.status = "error"; record.summary = summary; record.error = str(exc); record.tool_calls = tool_calls; record.history_length = len(history); record.finished_at = time.monotonic(); record.finished_wall_at = time.time()
-            self._persist_finish(record, history)
-            record.done_event.set(); lifecycle.close(); self._release_specialist(record, failed=True)
-            self._queue_completion(record)
+                record.status, record.summary, record.error, record.tool_calls, record.history_length = "error", summary, str(exc), tool_calls, len(history)
+                record.finished_at, record.finished_wall_at = time.monotonic(), time.time()
+            self._persist_finish(record, history); record.done_event.set(); lifecycle.close(); self._release_specialist(record, failed=True); self._queue_completion(record)
             self._close_tracker(record, tool_count=tool_calls, summary=summary, error=str(exc), status="error")
             return
-        raw_status = str(result.get("status") or "")
-        final_text = str(result.get("assistant_text") or "").strip()
-        kill_reason = None
+        raw_status = str(result.get("status") or ""); final_text = str(result.get("assistant_text") or "").strip(); kill_reason = None
         if raw_status == "killed" or getattr(child, "_subagent_cancelled", False):
             status = "killed"; kill_reason = getattr(child, "_subagent_kill_reason", None) or "killed"; lifecycle.cancel(kill_reason)
         elif raw_status == "error":
@@ -423,16 +379,19 @@ class SubagentRegistry:
             lc = lifecycle.snapshot()
         except Exception:
             lc = {}
-        tool_calls = max(len(result.get("tool_calls") or []), int(lc.get("tool_count", 0) or 0))
-        history = list(getattr(child.session_manager, "history", []) or [])
+        tool_calls = max(len(result.get("tool_calls") or []), int(lc.get("tool_count", 0) or 0)); history = list(getattr(child.session_manager, "history", []) or [])
         with self._lock:
-            record.status = status; record.summary = final_text; record.tokens = tokens; record.tool_calls = tool_calls; record.error = None if status != "error" else str(result.get("error") or final_text); record.kill_reason = kill_reason; record.history_length = len(history); record.finished_at = time.monotonic(); record.finished_wall_at = time.time()
-        self._persist_finish(record, history)
-        record.done_event.set(); lifecycle.close(); self._release_specialist(record, failed=(status == "error"))
-        self._queue_completion(record)
+            record.status, record.summary, record.tokens, record.tool_calls = status, final_text, tokens, tool_calls
+            record.error, record.kill_reason, record.history_length = (None if status != "error" else str(result.get("error") or final_text)), kill_reason, len(history)
+            record.finished_at, record.finished_wall_at = time.monotonic(), time.time()
+        self._persist_finish(record, history); record.done_event.set(); lifecycle.close(); self._release_specialist(record, failed=(status == "error")); self._queue_completion(record)
         self._close_tracker(record, tool_count=tool_calls, summary=final_text, error=record.error, status=status, kill_reason=kill_reason)
 
     def _queue_completion(self, record: SubagentRecord) -> None:
+        # The just-finished task already exists in durable storage. Mark it seen
+        # before queuing the live event so recovery scans cannot enqueue a twin.
+        with self._lock:
+            self._durable_mailbox_seen.add(record.task_id)
         self._queue_mailbox_event({"kind": "completion", "task_id": record.task_id, "specialist": record.specialist_key, "status": record.status, "summary": record.summary, "importance": "high" if record.status == "error" else "normal", "artifact": dict(record.artifact), "result_path": self._artifact_store.relative_path(record.task_id, "result.json") if self._artifact_store is not None else None})
 
     def _persist_finish(self, record: SubagentRecord, history: List[Dict[str, Any]]) -> None:
@@ -453,7 +412,6 @@ class SubagentRegistry:
                 pass
         self._emit({"kind": "subagent_end", "task_id": record.task_id, "status": status, "summary": summary, "tokens": dict(record.tokens), "tool_calls": tool_count, "elapsed": round(max(0.0, (record.finished_at or time.monotonic()) - record.started_at), 2), "kill_reason": kill_reason, "error": error, "batch_id": record.batch_id, "artifact": dict(record.artifact), "specialist_key": record.specialist_key, "worker_id": record.worker_id, "reused_specialist": record.reused_specialist})
 
-    # ----- introspection / control
     def get(self, task_id: str) -> Optional[SubagentRecord]:
         with self._lock:
             return self._records.get(task_id)
@@ -506,8 +464,7 @@ class SubagentRegistry:
         if rec is None:
             return self.snapshot(task_id)
         if rec.status != "running":
-            self.acknowledge_completion(task_id)
-            return self.snapshot(task_id)
+            self.acknowledge_completion(task_id); return self.snapshot(task_id)
         try:
             rec.child._subagent_cancelled = True; rec.child._subagent_kill_reason = "killed_by_parent"; rec.lifecycle.cancel("killed_by_parent")
         except Exception:
@@ -522,19 +479,19 @@ class SubagentRegistry:
             if rec.status != "running" or (rec.thread is not None and not rec.thread.is_alive()):
                 break
             time.sleep(0.05)
-        rec.done_event.set()
-        snap = self.snapshot(task_id)
+        rec.done_event.set(); snap = self.snapshot(task_id)
         if str(snap.get("status") or "") != "running":
             self.acknowledge_completion(task_id)
         return snap
 
     def shutdown(self) -> None:
-        for rec in [x for x in self.list() if x.status == "running"]:
+        running = [x for x in self.list() if x.status == "running"]
+        for rec in running:
             try:
                 rec.child._subagent_cancelled = True; rec.child._subagent_kill_reason = "session_shutdown"; rec.lifecycle.cancel("session_shutdown")
             except Exception:
                 pass
-        for rec in [x for x in self.list() if x.status == "running"]:
+        for rec in running:
             if rec.thread is not None and rec.thread.is_alive():
                 try:
                     rec.thread.join(timeout=2.0)

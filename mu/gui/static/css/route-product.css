@@ -1,26 +1,28 @@
-/* Shared product foundation for standalone MuCLI routes (Trace, Containers). */
+/* Shared atmospheric product foundation for standalone MuCLI routes. */
 :root,
 html[data-theme="dark"] {
-  --bg:#10151b; --bg-lift:rgba(255,255,255,.018); --bg-hover:rgba(178,196,214,.055);
-  --surface:transparent; --surface-raised:rgba(18,25,33,.82); --surface-strong:rgba(190,205,220,.045);
-  --glass:rgba(18,25,33,.74); --glass-strong:rgba(18,25,33,.94);
-  --border:rgba(213,224,235,.065); --border-strong:rgba(213,224,235,.12); --hairline:rgba(213,224,235,.09);
-  --text:#edf1f5; --text-soft:#b8c1ca; --text-dim:#818c98; --text-dimmer:#5d6874;
-  --accent:#7f9db8; --accent-strong:#6688a6; --accent-soft:rgba(127,157,184,.075); --accent-line:rgba(127,157,184,.24);
-  --success:#7f9a8f; --warning:#bca274; --err:#d9828c; --tool:#90a5b7;
-  --shadow-card:0 18px 60px rgba(0,0,0,.20); --shadow-modal:0 28px 100px rgba(0,0,0,.40); --backdrop:rgba(7,11,16,.44);
-  --mist-a:rgba(118,153,184,.042); --mist-b:rgba(164,180,195,.024);
+  --bg:#0d1219; --bg-lift:rgba(255,255,255,.018); --bg-hover:rgba(201,216,231,.052);
+  --surface:transparent; --surface-raised:rgba(18,24,32,.70); --surface-strong:rgba(214,225,236,.040);
+  --glass:rgba(19,25,34,.61); --glass-strong:rgba(18,24,32,.88);
+  --border:rgba(222,231,240,.060); --border-strong:rgba(222,231,240,.105); --hairline:rgba(222,231,240,.082);
+  --text:#eef2f6; --text-soft:#bbc4cd; --text-dim:#85909c; --text-dimmer:#606b76;
+  --accent:#8ba9c6; --accent-strong:#7295b5; --accent-soft:rgba(139,169,198,.070); --accent-line:rgba(139,169,198,.23);
+  --success:#86a897; --warning:#aa987b; --err:#cd7c86; --tool:#92a6b8;
+  --shadow-card:0 18px 60px rgba(6,12,20,.14); --shadow-modal:0 28px 100px rgba(4,9,15,.34); --backdrop:rgba(5,10,16,.38);
+  --sky-blue:rgba(102,161,218,.28); --glacier-blue:rgba(179,215,239,.18); --sunrise-pink:rgba(226,143,174,.19); --alpine-green:rgba(91,146,121,.14); --snow-glow:rgba(236,243,248,.10);
+  --mountain-near:rgba(68,84,98,.28); --mountain-far:rgba(122,145,160,.16);
 }
 html[data-theme="light"] {
-  --bg:#f7f9fb; --bg-lift:rgba(40,66,91,.018); --bg-hover:rgba(59,87,113,.045);
-  --surface:transparent; --surface-raised:rgba(252,253,254,.86); --surface-strong:rgba(57,83,107,.035);
-  --glass:rgba(249,251,253,.80); --glass-strong:rgba(252,253,254,.96);
-  --border:rgba(37,59,79,.065); --border-strong:rgba(37,59,79,.12); --hairline:rgba(37,59,79,.09);
-  --text:#1c2731; --text-soft:#52606c; --text-dim:#788691; --text-dimmer:#9da8b2;
-  --accent:#587a99; --accent-strong:#496b89; --accent-soft:rgba(88,122,153,.065); --accent-line:rgba(88,122,153,.22);
-  --success:#66877a; --warning:#947b51; --err:#bd5e6b; --tool:#708a9e;
-  --shadow-card:0 24px 70px rgba(40,55,70,.08); --shadow-modal:0 30px 100px rgba(40,55,70,.16); --backdrop:rgba(44,58,72,.16);
-  --mist-a:rgba(109,151,187,.050); --mist-b:rgba(167,185,201,.028);
+  --bg:#edf3f8; --bg-lift:rgba(40,64,87,.016); --bg-hover:rgba(58,84,109,.040);
+  --surface:transparent; --surface-raised:rgba(252,253,255,.62); --surface-strong:rgba(49,75,99,.030);
+  --glass:rgba(249,252,254,.59); --glass-strong:rgba(252,254,255,.88);
+  --border:rgba(39,59,77,.055); --border-strong:rgba(39,59,77,.105); --hairline:rgba(39,59,77,.080);
+  --text:#1c2732; --text-soft:#53616e; --text-dim:#7b8894; --text-dimmer:#9da8b2;
+  --accent:#6286a8; --accent-strong:#527795; --accent-soft:rgba(98,134,168,.060); --accent-line:rgba(98,134,168,.20);
+  --success:#66877a; --warning:#8f7d60; --err:#b95f6b; --tool:#748b9f;
+  --shadow-card:0 24px 70px rgba(44,64,82,.09); --shadow-modal:0 30px 100px rgba(44,64,82,.16); --backdrop:rgba(52,70,86,.14);
+  --sky-blue:rgba(96,165,226,.34); --glacier-blue:rgba(177,216,241,.38); --sunrise-pink:rgba(239,161,187,.32); --alpine-green:rgba(102,159,132,.20); --snow-glow:rgba(255,255,255,.68);
+  --mountain-near:rgba(113,133,145,.20); --mountain-far:rgba(153,174,187,.16);
 }
 :root {
   --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
@@ -29,7 +31,8 @@ html[data-theme="light"] {
 }
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
 body{position:relative;isolation:isolate;font:14px/1.55 var(--sans);letter-spacing:-.006em;-webkit-font-smoothing:antialiased}
-body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 72% 42% at 72% -10%,var(--mist-a),transparent 70%),radial-gradient(ellipse 60% 38% at 12% 110%,var(--mist-b),transparent 74%)}
+body::before{content:"";position:fixed;inset:-7%;pointer-events:none;z-index:-2;background:radial-gradient(ellipse 42% 34% at 72% 4%,var(--sunrise-pink),transparent 72%),radial-gradient(ellipse 62% 48% at 26% 8%,var(--sky-blue),transparent 72%),radial-gradient(ellipse 54% 44% at 91% 78%,var(--alpine-green),transparent 74%),radial-gradient(ellipse 48% 36% at 52% 42%,var(--glacier-blue),transparent 75%),radial-gradient(ellipse 34% 26% at 48% -4%,var(--snow-glow),transparent 74%);filter:blur(24px) saturate(.92);transform:scale(1.04)}
+body::after{content:"";position:fixed;left:-3%;right:-3%;bottom:-4%;height:46%;pointer-events:none;z-index:-1;background:linear-gradient(180deg,transparent 0 22%,var(--mountain-far) 23% 100%),linear-gradient(180deg,transparent 0 44%,var(--mountain-near) 45% 100%);clip-path:polygon(0 78%,8% 68%,15% 73%,26% 49%,35% 66%,47% 41%,58% 69%,69% 48%,79% 66%,89% 55%,100% 72%,100% 100%,0 100%);filter:blur(13px);opacity:.72}
 a{color:var(--text-soft);text-decoration:none}a:hover{color:var(--accent)}
 button,input,textarea,select{font-family:var(--sans)}
 button{border:0;background:transparent;color:var(--text-soft);cursor:pointer;border-radius:5px}
@@ -41,4 +44,4 @@ input:focus,textarea:focus,select:focus{border-bottom-color:var(--accent);box-sh
 :focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
 .muted{color:var(--text-dim)}.mono{font-family:var(--mono)}
 ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px}::-webkit-scrollbar-track{background:transparent}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}body::before,body::after{filter:none}}

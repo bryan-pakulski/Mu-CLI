@@ -1,0 +1,44 @@
+/* Shared product foundation for standalone MuCLI routes (Trace, Containers). */
+:root,
+html[data-theme="dark"] {
+  --bg:#0b1114; --bg-lift:rgba(255,255,255,.025); --bg-hover:rgba(205,236,238,.055);
+  --surface:transparent; --surface-raised:rgba(17,29,33,.72); --surface-strong:rgba(191,222,224,.055);
+  --glass:rgba(13,24,28,.70); --glass-strong:rgba(14,26,30,.92);
+  --border:rgba(206,235,234,.075); --border-strong:rgba(206,235,234,.14); --hairline:rgba(206,235,234,.095);
+  --text:#edf4f2; --text-soft:#b5c4c1; --text-dim:#7d918e; --text-dimmer:#536764;
+  --accent:#79c2cb; --accent-strong:#62b5c0; --accent-soft:rgba(121,194,203,.11); --accent-line:rgba(121,194,203,.32);
+  --success:#70c69f; --warning:#d7b56c; --err:#ed8590; --tool:#9ebfd0;
+  --shadow-card:0 18px 60px rgba(0,0,0,.22); --shadow-modal:0 28px 100px rgba(0,0,0,.42); --backdrop:rgba(4,9,11,.46);
+  --mist-a:rgba(71,151,164,.10); --mist-b:rgba(107,139,159,.075);
+}
+html[data-theme="light"] {
+  --bg:#f5f8f7; --bg-lift:rgba(26,74,76,.025); --bg-hover:rgba(31,91,94,.05);
+  --surface:transparent; --surface-raised:rgba(252,255,254,.72); --surface-strong:rgba(32,89,92,.045);
+  --glass:rgba(249,253,252,.76); --glass-strong:rgba(251,254,253,.95);
+  --border:rgba(24,65,66,.075); --border-strong:rgba(24,65,66,.14); --hairline:rgba(24,65,66,.10);
+  --text:#152321; --text-soft:#526662; --text-dim:#718581; --text-dimmer:#9baba7;
+  --accent:#327f8a; --accent-strong:#276e78; --accent-soft:rgba(50,127,138,.085); --accent-line:rgba(50,127,138,.26);
+  --success:#2b8163; --warning:#9b7228; --err:#c84e5c; --tool:#557e94;
+  --shadow-card:0 24px 70px rgba(34,64,61,.10); --shadow-modal:0 30px 100px rgba(34,64,61,.18); --backdrop:rgba(39,67,64,.18);
+  --mist-a:rgba(87,181,188,.12); --mist-b:rgba(111,153,171,.10);
+}
+:root {
+  --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  --mono:"SFMono-Regular","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  --radius:8px; --radius-pill:8px;
+}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+body{position:relative;isolation:isolate;font:14px/1.55 var(--sans);letter-spacing:-.006em;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 70% 46% at 78% -14%,var(--mist-a),transparent 67%),radial-gradient(ellipse 54% 42% at 6% 112%,var(--mist-b),transparent 70%)}
+a{color:var(--text-soft);text-decoration:none}a:hover{color:var(--accent)}
+button,input,textarea,select{font-family:var(--sans)}
+button{border:0;background:transparent;color:var(--text-soft);cursor:pointer;border-radius:5px}
+button:hover{background:var(--bg-hover);color:var(--text)}
+button.primary{background:var(--accent-strong);color:#fff;font-weight:600}
+button.primary:hover{background:var(--accent);color:#fff}
+input,textarea,select{background:transparent;color:var(--text);border:0;border-bottom:1px solid var(--hairline);border-radius:0;padding:9px 2px;outline:none}
+input:focus,textarea:focus,select:focus{border-bottom-color:var(--accent);box-shadow:none;background:transparent}
+:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
+.muted{color:var(--text-dim)}.mono{font-family:var(--mono)}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px}::-webkit-scrollbar-track{background:transparent}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}}

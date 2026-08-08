@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "mu" / "gui" / "templates" / "index.html"
+INSPECTOR = ROOT / "mu" / "gui" / "templates" / "fragments" / "inspector.html"
 PANEL_TABS = ROOT / "mu" / "gui" / "templates" / "fragments" / "panel_tabs.html"
 CONTAINERS = ROOT / "mu" / "gui" / "templates" / "containers.html"
 PRODUCT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "product.css"
@@ -35,7 +36,6 @@ def test_product_shell_keeps_core_navigation_contracts():
     assert '$store.inspector.openDrawer()' in text
     assert '$store.yolo.toggle()' in text
     assert '$store.layout.togglePanel()' in text
-    # RHS must be independently accessible when no panel view is active.
     assert "$store.mode.setView('memory'); $store.layout.panelOpen = true" in text
     assert 'aria-label="Toggle workspace panel"' in text
 
@@ -112,10 +112,13 @@ def test_choice_picker_is_flat_not_card_based():
 
 def test_settings_drawer_is_wide_with_vertical_tabs():
     css = CLARITY_CSS.read_text(encoding="utf-8")
+    template = INSPECTOR.read_text(encoding="utf-8")
     assert 'width: min(980px, 94vw)' in css
     assert 'grid-template-columns: 172px minmax(0, 1fr)' in css
     assert '.inspector-tabs' in css and 'flex-direction: column' in css
     assert 'grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px)' in css
+    assert 'aria-orientation="vertical"' in template
+    assert 'aria-label="Settings sections"' in template
 
 
 def test_clarity_palette_is_restrained_cold_blue_not_teal_brand_wash():

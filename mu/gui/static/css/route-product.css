@@ -44,4 +44,10 @@ input:focus,textarea:focus,select:focus{border-bottom-color:var(--accent);box-sh
 :focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
 .muted{color:var(--text-dim)}.mono{font-family:var(--mono)}
 ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px}::-webkit-scrollbar-track{background:transparent}
+
+/* Trace is analytical content, not a separate orange-branded mode. */
+.trace-mu{color:var(--text-soft)!important}
+.trace-canvas{filter:saturate(.48) contrast(.98)}
+.trace-card--warn .tc-val,.trace-row--mech td,.trace-conv-warn,.flag-stall,.th-badge--saved{color:var(--text-soft)!important}
+
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}body::before,body::after{filter:none}}

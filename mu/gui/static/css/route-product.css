@@ -28,9 +28,8 @@ html[data-theme="light"] {
   --radius:8px; --radius-pill:8px;
 }
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
-body{font:14px/1.55 var(--sans);letter-spacing:-.006em;-webkit-font-smoothing:antialiased}
-body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;background:radial-gradient(ellipse 70% 46% at 78% -14%,var(--mist-a),transparent 67%),radial-gradient(ellipse 54% 42% at 6% 112%,var(--mist-b),transparent 70%)}
-body>*{position:relative;z-index:1}
+body{position:relative;isolation:isolate;font:14px/1.55 var(--sans);letter-spacing:-.006em;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 70% 46% at 78% -14%,var(--mist-a),transparent 67%),radial-gradient(ellipse 54% 42% at 6% 112%,var(--mist-b),transparent 70%)}
 a{color:var(--text-soft);text-decoration:none}a:hover{color:var(--accent)}
 button,input,textarea,select{font-family:var(--sans)}
 button{border:0;background:transparent;color:var(--text-soft);cursor:pointer;border-radius:5px}

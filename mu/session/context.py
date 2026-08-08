@@ -1,6 +1,6 @@
 """Hierarchical context assembly for the system prompt.
 
-L2 is now state-first: structured runtime state is projected deterministically
+L2 is state-first: structured runtime state is projected deterministically
 from tool envelopes/stores. The rolling conversation summary remains a bounded
 semantic residue for information that cannot be derived structurally.
 """
@@ -58,7 +58,8 @@ def build_workspace_context_files(session: Any) -> str:
             if not os.path.isfile(path):
                 continue
             try:
-                body = open(path, "r", encoding="utf-8", errors="replace").read().strip()
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    body = fh.read().strip()
             except OSError:
                 continue
             if not body:
@@ -107,16 +108,22 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_work
 
     summary_limit = max(0, int(session.variables.get("conversation_summary_char_limit", 24000) or 12000))
     semantic_residue = str(getattr(session.session_manager, "conversation_summary", "") or "").strip()
-    if summary_limit and len(semantic_residue) > summary_limit:
-        semantic_residue = semantic_residue[-summary_limit:].lstrip()
 
-    # Deterministic state refresh also replaces periodic LLM progress checkpoints
-    # on this SessionManager. Do not duplicate session_goal here; L3 owns it.
+    # State and semantic residue share one L2 budget. Structured state gets
+    # priority; residue receives only the unused tail. This prevents the new
+    # projection from doubling the old L2 budget.
+    state_budget = int(summary_limit * 0.70) if summary_limit else 0
     try:
         from mu.session.state_capsule import build_state_capsule
-        state_capsule = build_state_capsule(session, max_chars=summary_limit or 12000, include_goal=False)
+        state_capsule = build_state_capsule(session, max_chars=state_budget, include_goal=False)
+        state_capsule = state_capsule[:state_budget] if state_budget else ""
     except Exception:
         state_capsule = ""
+    residue_budget = max(0, summary_limit - len(state_capsule))
+    if residue_budget:
+        semantic_residue = semantic_residue[-residue_budget:].lstrip()
+    else:
+        semantic_residue = ""
 
     goal_context = session._build_active_goal_context()
     layers: list[str] = []

@@ -64,10 +64,9 @@
             </button>
 
             <button class="product-icon-button"
-                    x-show="$store.mode.panelModes.includes($store.mode.active)"
-                    @click="$store.layout.togglePanel()"
-                    :title="$store.layout.panelOpen ? 'Hide side panel' : 'Show side panel'"
-                    aria-label="Toggle side panel">
+                    @click="if (!$store.mode.panelModes.includes($store.mode.active)) { $store.mode.setView('memory'); $store.layout.panelOpen = true } else { $store.layout.togglePanel() }"
+                    :title="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'Hide workspace panel' : 'Open workspace panel'"
+                    aria-label="Toggle workspace panel">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="3" y="4" width="18" height="16" rx="2.5"></rect>
                     <path d="M15 4v16"></path>

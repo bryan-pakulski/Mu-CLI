@@ -9,6 +9,7 @@ CONTAINERS = ROOT / "mu" / "gui" / "templates" / "containers.html"
 PRODUCT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "product.css"
 CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "crystal.css"
 CLARITY_CSS = ROOT / "mu" / "gui" / "static" / "css" / "clarity.css"
+POPOUT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "popouts.css"
 ROUTE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "route-product.css"
 TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "trace.css"
 CONTAINER_CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css"
@@ -66,11 +67,12 @@ def test_rhs_panel_has_top_tabs_and_dropdown_without_eating_body_width():
 
 
 def test_product_css_covers_primary_web_surfaces():
-    combined = ''.join(path.read_text(encoding="utf-8") for path in (PRODUCT_CSS, CRYSTAL_CSS, CLARITY_CSS))
+    combined = ''.join(path.read_text(encoding="utf-8") for path in (PRODUCT_CSS, CRYSTAL_CSS, CLARITY_CSS, POPOUT_CSS))
     for selector in (
         '.product-header', '.product-sidebar', '.chat-history', '.msg.user',
         '.composer', '.panel-stage', '.panel-tabs', '.inspector',
         '.welcome-entry', '.prompt-body .options label',
+        '.composer-mode-popout', '.composer-settings-popout',
     ):
         assert selector in combined
     assert 'backdrop-filter' in combined
@@ -103,20 +105,44 @@ def test_alpine_sunrise_is_atmospheric_not_css_scenery():
 
 def test_product_javascript_positions_overlays_and_is_presentation_only():
     js = PRODUCT_JS.read_text(encoding="utf-8")
+    assert 'installPresentationStylesheet' in js
+    assert "link.href = '/static/css/popouts.css'" in js
     assert 'polishWelcomeCopy' in js
     assert 'focusComposer' in js
     assert 'preserveOverlayGeometry' in js
     assert 'refineComposerGeometry' in js
     assert 'positionFloatingLayer' in js
+    assert 'floatingLayerProfile' in js
     assert 'installComposerFloatingLayers' in js
     assert 'installPanelTransitions' in js
     assert "dataset.placement = preferAbove ? 'top' : 'bottom'" in js
+    assert "dataset.alignment = profile.align" in js
     assert "toolbar.style.bottom = '96px'" in js
     assert "main.style.flexDirection = 'row'" in js
     assert "node.style.position = 'fixed'" in js
     assert "event.key.toLowerCase() === 'k'" in js
     assert 'fetch(' not in js
     assert 'Alpine.store(' not in js
+
+
+def test_composer_feature_and_provider_popouts_fit_content_cleanly():
+    css = POPOUT_CSS.read_text(encoding="utf-8")
+    js = PRODUCT_JS.read_text(encoding="utf-8")
+    assert 'min-width: min(310px, calc(100vw - 20px))' in css
+    assert 'max-width: min(420px, calc(100vw - 20px))' in css
+    assert '.composer-mode-popout .mode-desc' in css
+    assert 'max-width: 44ch' in css
+    assert 'min-width: min(460px, calc(100vw - 20px))' in css
+    assert 'max-width: min(590px, calc(100vw - 20px))' in css
+    assert '.composer-settings-popout .settings-header' in css
+    assert 'position: sticky' in css
+    assert 'grid-template-columns: minmax(110px, 142px) minmax(0, 1fr)' in css
+    assert '.composer-settings-popout .settings-var-select' in css
+    assert "return { minWidth: 460, maxWidth: 590, align: 'end' }" in js
+    assert "return { minWidth: 310, maxWidth: 420, align: 'start' }" in js
+    assert 'layer.scrollWidth' in js
+    assert "layer.style.width = ''" in js
+    assert "layer.style.maxHeight = ''" in js
 
 
 def test_session_history_hydrates_after_authoritative_focus():

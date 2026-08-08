@@ -149,6 +149,8 @@ def test_trace_analyzer_uses_same_neutral_product_foundation():
     assert '.trace-info-popout' in css and 'var(--glass-strong)' in css
     assert '--accent:#8ba9c6' in route
     assert '#79c2cb' not in route
+    assert '.trace-canvas{filter:saturate(.48) contrast(.98)}' in route
+    assert '.trace-mu{color:var(--text-soft)!important}' in route
 
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():

@@ -1,8 +1,11 @@
 /* MuCLI Product UI — presentation-only enhancements.
- * No backend/store semantics live here. This file intentionally confines
- * itself to static copy, focus ergonomics and product-level shortcuts.
+ * No backend/store semantics live here. This file handles copy, focus,
+ * floating-layer geometry and visual transitions only.
  */
 (function () {
+    const FLOAT_MARGIN = 10;
+    const FLOAT_GAP = 9;
+
     function setText(selector, value) {
         const node = document.querySelector(selector);
         if (node) node.textContent = value;
@@ -23,7 +26,6 @@
             const strong = entry.querySelector('.welcome-entry-copy strong');
             const small = entry.querySelector('.welcome-entry-copy small');
             if (strong) strong.textContent = copy[index][0];
-            // Preserve Alpine-owned dynamic counters on the first/third card.
             if (small && !small.hasAttribute('x-text')) small.textContent = copy[index][1];
         });
 
@@ -39,9 +41,104 @@
         return true;
     }
 
+    function isVisible(node) {
+        if (!node || node.hidden) return false;
+        const style = window.getComputedStyle(node);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), Math.max(min, max));
+    }
+
+    function positionFloatingLayer(layer, anchor) {
+        if (!layer || !anchor || !isVisible(layer)) return;
+
+        layer.dataset.productFloating = 'true';
+        layer.style.visibility = 'hidden';
+        layer.style.maxHeight = `${Math.max(180, window.innerHeight - FLOAT_MARGIN * 2)}px`;
+
+        const anchorRect = anchor.getBoundingClientRect();
+        const layerRect = layer.getBoundingClientRect();
+        const maxWidth = Math.max(220, window.innerWidth - FLOAT_MARGIN * 2);
+        const width = Math.min(layerRect.width || 330, maxWidth);
+
+        const roomAbove = anchorRect.top - FLOAT_MARGIN;
+        const roomBelow = window.innerHeight - anchorRect.bottom - FLOAT_MARGIN;
+        const preferAbove = roomAbove >= Math.min(layerRect.height + FLOAT_GAP, 280) || roomAbove > roomBelow;
+        let available = preferAbove ? roomAbove - FLOAT_GAP : roomBelow - FLOAT_GAP;
+        available = Math.max(170, available);
+        const height = Math.min(layerRect.height, available);
+
+        let top = preferAbove
+            ? anchorRect.top - height - FLOAT_GAP
+            : anchorRect.bottom + FLOAT_GAP;
+        top = clamp(top, FLOAT_MARGIN, window.innerHeight - height - FLOAT_MARGIN);
+
+        let left = anchorRect.left;
+        if (left + width > window.innerWidth - FLOAT_MARGIN) {
+            left = anchorRect.right - width;
+        }
+        left = clamp(left, FLOAT_MARGIN, window.innerWidth - width - FLOAT_MARGIN);
+
+        layer.style.width = `${width}px`;
+        layer.style.maxHeight = `${available}px`;
+        layer.style.left = `${Math.round(left)}px`;
+        layer.style.top = `${Math.round(top)}px`;
+        layer.style.visibility = '';
+        layer.dataset.placement = preferAbove ? 'top' : 'bottom';
+    }
+
+    function installFloatingLayer(wrapperSelector, layerSelector, anchorSelector) {
+        const wrapper = document.querySelector(wrapperSelector);
+        if (!wrapper) return;
+        const layer = wrapper.querySelector(layerSelector);
+        const anchor = wrapper.querySelector(anchorSelector);
+        if (!layer || !anchor) return;
+
+        const reposition = () => requestAnimationFrame(() => positionFloatingLayer(layer, anchor));
+        const observer = new MutationObserver(reposition);
+        observer.observe(layer, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+        anchor.addEventListener('click', reposition);
+        window.addEventListener('resize', reposition, { passive: true });
+        document.addEventListener('scroll', reposition, { passive: true, capture: true });
+        new ResizeObserver(reposition).observe(layer);
+    }
+
+    function installComposerFloatingLayers() {
+        installFloatingLayer('.composer-mode-picker', '.composer-mode-popout', '.composer-mode-pill');
+        installFloatingLayer('.composer-settings', '.composer-settings-popout', '.composer-settings-btn');
+    }
+
+    function animateVisiblePanel(panel) {
+        if (!panel || !isVisible(panel)) return;
+        panel.classList.add('product-panel-enter');
+        requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.remove('product-panel-enter')));
+    }
+
+    function installPanelTransitions() {
+        const stage = document.querySelector('.panel-stage');
+        if (!stage) return;
+        const panels = Array.from(stage.querySelectorAll('.mode-panel'));
+        const observer = new MutationObserver(records => {
+            for (const record of records) {
+                const panel = record.target;
+                if (panel.classList && panel.classList.contains('mode-panel') && isVisible(panel)) {
+                    animateVisiblePanel(panel);
+                }
+            }
+        });
+        panels.forEach(panel => {
+            observer.observe(panel, { attributes: true, attributeFilter: ['style', 'class'] });
+            if (isVisible(panel)) animateVisiblePanel(panel);
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.classList.add('mucli-product-ui');
         polishWelcomeCopy();
+        installComposerFloatingLayers();
+        installPanelTransitions();
     });
 
     document.addEventListener('keydown', (event) => {

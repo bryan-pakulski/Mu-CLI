@@ -1,0 +1,335 @@
+/* MuCLI Clarity — restrained production refinement.
+ *
+ * A cold, neutral foundation with sky-blue used only for focus, selection and
+ * primary action. Whitespace, alignment and fine rules carry the hierarchy.
+ */
+:root,
+html[data-theme="dark"] {
+    --bg: #10151b;
+    --bg-lift: rgba(255,255,255,.018);
+    --bg-hover: rgba(178,196,214,.055);
+    --surface: transparent;
+    --surface-raised: rgba(18,25,33,.82);
+    --surface-strong: rgba(190,205,220,.045);
+    --sidebar-bg: rgba(13,18,24,.80);
+    --header-bg: rgba(16,21,27,.72);
+    --composer-bg: rgba(16,22,29,.78);
+    --glass: rgba(18,25,33,.74);
+    --glass-strong: rgba(18,25,33,.94);
+    --border: rgba(213,224,235,.065);
+    --border-strong: rgba(213,224,235,.12);
+    --hairline: rgba(213,224,235,.09);
+    --text: #edf1f5;
+    --text-soft: #b8c1ca;
+    --text-dim: #818c98;
+    --text-dimmer: #5d6874;
+    --accent: #7f9db8;
+    --accent-strong: #6688a6;
+    --accent-soft: rgba(127,157,184,.075);
+    --accent-line: rgba(127,157,184,.24);
+    --success: #7f9a8f;
+    --warning: #bca274;
+    --err: #d9828c;
+    --tool: #90a5b7;
+    --mist-a: rgba(118,153,184,.042);
+    --mist-b: rgba(164,180,195,.024);
+}
+
+html[data-theme="light"] {
+    --bg: #f7f9fb;
+    --bg-lift: rgba(40,66,91,.018);
+    --bg-hover: rgba(59,87,113,.045);
+    --surface: transparent;
+    --surface-raised: rgba(252,253,254,.86);
+    --surface-strong: rgba(57,83,107,.035);
+    --sidebar-bg: rgba(244,247,250,.86);
+    --header-bg: rgba(248,250,252,.78);
+    --composer-bg: rgba(249,251,253,.86);
+    --glass: rgba(249,251,253,.80);
+    --glass-strong: rgba(252,253,254,.96);
+    --border: rgba(37,59,79,.065);
+    --border-strong: rgba(37,59,79,.12);
+    --hairline: rgba(37,59,79,.09);
+    --text: #1c2731;
+    --text-soft: #52606c;
+    --text-dim: #788691;
+    --text-dimmer: #9da8b2;
+    --accent: #587a99;
+    --accent-strong: #496b89;
+    --accent-soft: rgba(88,122,153,.065);
+    --accent-line: rgba(88,122,153,.22);
+    --success: #66877a;
+    --warning: #947b51;
+    --err: #bd5e6b;
+    --tool: #708a9e;
+    --mist-a: rgba(109,151,187,.050);
+    --mist-b: rgba(167,185,201,.028);
+}
+
+/* Reduce decorative colour further: brand and readiness stay neutral. */
+.header-brand-mark,
+.sidebar-logo,
+.welcome-mark,
+.empty-state::before {
+    color: var(--text-soft) !important;
+}
+.status-dot {
+    background: var(--text-dim) !important;
+    box-shadow: none !important;
+}
+.status-dot.busy { background: var(--accent) !important; }
+.sidebar-primary-action svg { color: var(--text-dim) !important; }
+
+/* The atmospheric field should be barely perceptible, like cold morning haze. */
+.product-app::before,
+.welcome-shell::before {
+    background:
+        radial-gradient(ellipse 72% 42% at 72% -10%, var(--mist-a), transparent 70%),
+        radial-gradient(ellipse 60% 38% at 12% 110%, var(--mist-b), transparent 74%) !important;
+}
+
+/* ---------------------------------------------------------------- RHS view rail */
+.panel-stage { --panel-tabs-w: 118px; }
+.panel-tabs {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 5;
+    width: var(--panel-tabs-w);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 12px 18px;
+    border-right: 1px solid var(--hairline);
+    background: color-mix(in srgb, var(--glass) 72%, transparent);
+    backdrop-filter: blur(22px) saturate(108%);
+    -webkit-backdrop-filter: blur(22px) saturate(108%);
+}
+.panel-tabs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 32px;
+    padding: 0 6px 13px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--hairline);
+    color: var(--text-dim);
+    font-size: 10.5px;
+    font-weight: 620;
+    letter-spacing: .015em;
+}
+.panel-tabs-close {
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    color: var(--text-dimmer);
+    font-size: 16px;
+}
+.panel-tabs-close:hover { color: var(--text); background: var(--bg-hover); }
+.panel-tabs-scroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+.panel-tabs-scroll::-webkit-scrollbar { display: none; }
+.panel-tab-group { margin-bottom: 22px; }
+.panel-tab-label {
+    display: block;
+    padding: 0 7px 5px;
+    color: var(--text-dimmer);
+    font-size: 9.5px;
+    font-weight: 560;
+}
+.panel-tab {
+    position: relative;
+    width: 100%;
+    min-height: 32px;
+    padding: 0 7px;
+    display: flex;
+    align-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    text-align: left;
+    font-size: 10.8px;
+    line-height: 1.25;
+}
+.panel-tab:hover { color: var(--text); background: var(--bg-hover); }
+.panel-tab.active { color: var(--text); background: transparent; }
+.panel-tab.active::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: var(--accent);
+}
+.panel-tab.disabled { opacity: .38; cursor: default; }
+.panel-stage .mode-panel {
+    inset: 0 0 0 var(--panel-tabs-w) !important;
+    width: auto !important;
+    padding-left: 29px !important;
+    padding-right: 29px !important;
+}
+
+/* ---------------------------------------------------------------- inspector */
+.inspector {
+    width: min(980px, 94vw) !important;
+    max-width: 980px !important;
+    display: grid !important;
+    grid-template-columns: 172px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden !important;
+}
+.inspector-head {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 100%;
+    padding: 28px 16px 20px !important;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    border: 0 !important;
+    border-right: 1px solid var(--hairline) !important;
+}
+.inspector-tabs {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px !important;
+    padding: 0 !important;
+    background: transparent !important;
+}
+.inspector-tabs button {
+    position: relative;
+    width: 100%;
+    min-height: 38px;
+    padding: 0 11px !important;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    border: 0 !important;
+    border-radius: 4px !important;
+    background: transparent !important;
+    color: var(--text-dim);
+    text-align: left;
+    font-size: 12px;
+    font-weight: 520;
+}
+.inspector-tabs button:hover { color: var(--text); background: var(--bg-hover) !important; }
+.inspector-tabs button.active {
+    color: var(--text) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.inspector-tabs button.active::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: 9px;
+    bottom: 9px;
+    width: 1px;
+    background: var(--accent);
+}
+.inspector-head > .icon-btn {
+    margin-top: auto;
+    align-self: flex-start;
+    color: var(--text-dimmer);
+}
+.inspector-body {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 38px 46px 56px !important;
+}
+.inspector-body > section { max-width: 720px; }
+.inspector-body .inline-form { gap: 10px; }
+.inspector-body .inline-form input { min-width: 0; }
+
+/* Settings should read as a configuration table, not compressed cards. */
+.var-group { margin-bottom: 14px; }
+.var-group-head {
+    padding: 11px 0 !important;
+    border-radius: 0 !important;
+    border-bottom: 1px solid var(--hairline);
+    background: transparent !important;
+}
+.var-group-body { padding: 0 !important; }
+.var-row {
+    margin: 0 !important;
+    padding: 14px 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px);
+    gap: 26px;
+    align-items: center;
+    border: 0 !important;
+    border-bottom: 1px solid var(--hairline) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+}
+.var-head { min-width: 0; }
+.var-row > input,
+.var-row > .var-bool { width: 100%; justify-self: stretch; }
+.var-key { overflow-wrap: anywhere; }
+.mem-entry,
+.kv-row,
+.stat-grid > div {
+    background: transparent !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+/* ---------------------------------------------------------------- general restraint */
+button.primary {
+    background: var(--accent-strong) !important;
+    box-shadow: none !important;
+}
+.mode-option.active { background: var(--accent-soft) !important; }
+.tag {
+    background: transparent !important;
+    border: 1px solid var(--hairline);
+    color: var(--text-dim) !important;
+    border-radius: 4px !important;
+}
+
+@media (max-width: 900px) {
+    .inspector { width: min(860px, 96vw) !important; grid-template-columns: 145px minmax(0,1fr); }
+    .inspector-body { padding: 30px 30px 44px !important; }
+    .var-row { grid-template-columns: minmax(180px,1fr) minmax(190px,260px); gap: 18px; }
+}
+
+@media (max-width: 760px) {
+    .panel-stage { --panel-tabs-w: 0px; }
+    .panel-tabs {
+        inset: 0 0 auto 0;
+        width: auto;
+        height: 54px;
+        padding: 9px 12px 7px;
+        flex-direction: row;
+        border-right: 0;
+        border-bottom: 1px solid var(--hairline);
+    }
+    .panel-tabs-head { display: none; }
+    .panel-tabs-scroll { display: flex; overflow-x: auto; overflow-y: hidden; }
+    .panel-tab-group { display: flex; margin: 0 14px 0 0; }
+    .panel-tab-label { display: none; }
+    .panel-tab { width: auto; min-width: max-content; padding: 0 9px; }
+    .panel-tab.active::before { left: 8px; right: 8px; top: auto; bottom: -7px; width: auto; height: 1px; }
+    .panel-stage .mode-panel { inset: 54px 0 0 0 !important; padding: 24px 22px 36px !important; }
+
+    .inspector {
+        width: min(96vw, 720px) !important;
+        grid-template-columns: 112px minmax(0,1fr);
+    }
+    .inspector-head { padding: 20px 10px 16px !important; }
+    .inspector-tabs button { padding: 0 8px !important; font-size: 11px; }
+    .inspector-body { padding: 24px 20px 36px !important; }
+    .var-row { grid-template-columns: 1fr; gap: 9px; }
+}

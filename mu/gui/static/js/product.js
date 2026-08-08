@@ -116,6 +116,11 @@
     function installPanelTransitions() {
         const stage = document.querySelector('.panel-stage');
         if (!stage) return;
+        const main = stage.closest('.main');
+        // Legacy app.css stacks panels below chat at <=880px. The product
+        // panel stage owns responsive behavior now and must never reflow chat.
+        if (main) main.style.flexDirection = 'row';
+
         const panels = Array.from(stage.querySelectorAll('.mode-panel'));
         const observer = new MutationObserver(records => {
             for (const record of records) {

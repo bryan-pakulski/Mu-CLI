@@ -1,4 +1,7 @@
-/* Shared atmospheric product foundation for standalone MuCLI routes. */
+/* Shared atmospheric product foundation for standalone MuCLI routes.
+ * Uses the alpine sunrise reference only as colour/light inspiration.
+ * No CSS scenery, polygons or illustrative mountain shapes.
+ */
 :root,
 html[data-theme="dark"] {
   --bg:#0d1219; --bg-lift:rgba(255,255,255,.018); --bg-hover:rgba(201,216,231,.052);
@@ -9,8 +12,7 @@ html[data-theme="dark"] {
   --accent:#8ba9c6; --accent-strong:#7295b5; --accent-soft:rgba(139,169,198,.070); --accent-line:rgba(139,169,198,.23);
   --success:#86a897; --warning:#aa987b; --err:#cd7c86; --tool:#92a6b8;
   --shadow-card:0 18px 60px rgba(6,12,20,.14); --shadow-modal:0 28px 100px rgba(4,9,15,.34); --backdrop:rgba(5,10,16,.38);
-  --sky-blue:rgba(102,161,218,.28); --glacier-blue:rgba(179,215,239,.18); --sunrise-pink:rgba(226,143,174,.19); --alpine-green:rgba(91,146,121,.14); --snow-glow:rgba(236,243,248,.10);
-  --mountain-near:rgba(68,84,98,.28); --mountain-far:rgba(122,145,160,.16);
+  --sky-blue:rgba(91,157,220,.34); --glacier-blue:rgba(170,215,242,.24); --sunrise-pink:rgba(234,143,180,.24); --sunrise-peach:rgba(247,185,169,.14); --alpine-green:rgba(78,137,112,.16); --snow-glow:rgba(241,247,252,.13);
 }
 html[data-theme="light"] {
   --bg:#edf3f8; --bg-lift:rgba(40,64,87,.016); --bg-hover:rgba(58,84,109,.040);
@@ -21,8 +23,7 @@ html[data-theme="light"] {
   --accent:#6286a8; --accent-strong:#527795; --accent-soft:rgba(98,134,168,.060); --accent-line:rgba(98,134,168,.20);
   --success:#66877a; --warning:#8f7d60; --err:#b95f6b; --tool:#748b9f;
   --shadow-card:0 24px 70px rgba(44,64,82,.09); --shadow-modal:0 30px 100px rgba(44,64,82,.16); --backdrop:rgba(52,70,86,.14);
-  --sky-blue:rgba(96,165,226,.34); --glacier-blue:rgba(177,216,241,.38); --sunrise-pink:rgba(239,161,187,.32); --alpine-green:rgba(102,159,132,.20); --snow-glow:rgba(255,255,255,.68);
-  --mountain-near:rgba(113,133,145,.20); --mountain-far:rgba(153,174,187,.16);
+  --sky-blue:rgba(72,145,214,.43); --glacier-blue:rgba(166,212,240,.48); --sunrise-pink:rgba(240,151,188,.40); --sunrise-peach:rgba(249,191,172,.26); --alpine-green:rgba(91,151,122,.23); --snow-glow:rgba(255,255,255,.76);
 }
 :root {
   --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
@@ -31,8 +32,7 @@ html[data-theme="light"] {
 }
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
 body{position:relative;isolation:isolate;font:14px/1.55 var(--sans);letter-spacing:-.006em;-webkit-font-smoothing:antialiased}
-body::before{content:"";position:fixed;inset:-7%;pointer-events:none;z-index:-2;background:radial-gradient(ellipse 42% 34% at 72% 4%,var(--sunrise-pink),transparent 72%),radial-gradient(ellipse 62% 48% at 26% 8%,var(--sky-blue),transparent 72%),radial-gradient(ellipse 54% 44% at 91% 78%,var(--alpine-green),transparent 74%),radial-gradient(ellipse 48% 36% at 52% 42%,var(--glacier-blue),transparent 75%),radial-gradient(ellipse 34% 26% at 48% -4%,var(--snow-glow),transparent 74%);filter:blur(24px) saturate(.92);transform:scale(1.04)}
-body::after{content:"";position:fixed;left:-3%;right:-3%;bottom:-4%;height:46%;pointer-events:none;z-index:-1;background:linear-gradient(180deg,transparent 0 22%,var(--mountain-far) 23% 100%),linear-gradient(180deg,transparent 0 44%,var(--mountain-near) 45% 100%);clip-path:polygon(0 78%,8% 68%,15% 73%,26% 49%,35% 66%,47% 41%,58% 69%,69% 48%,79% 66%,89% 55%,100% 72%,100% 100%,0 100%);filter:blur(13px);opacity:.72}
+body::before{content:"";position:fixed;inset:-10%;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 46% 38% at 72% 5%,var(--sunrise-pink),transparent 72%),radial-gradient(ellipse 34% 30% at 84% 21%,var(--sunrise-peach),transparent 72%),radial-gradient(ellipse 68% 55% at 20% 8%,var(--sky-blue),transparent 74%),radial-gradient(ellipse 58% 48% at 52% 50%,var(--glacier-blue),transparent 76%),radial-gradient(ellipse 48% 42% at 92% 88%,var(--alpine-green),transparent 78%),radial-gradient(ellipse 42% 30% at 47% -3%,var(--snow-glow),transparent 76%);filter:blur(38px) saturate(.94);transform:scale(1.05)}
 a{color:var(--text-soft);text-decoration:none}a:hover{color:var(--accent)}
 button,input,textarea,select{font-family:var(--sans)}
 button{border:0;background:transparent;color:var(--text-soft);cursor:pointer;border-radius:5px}
@@ -50,4 +50,4 @@ input:focus,textarea:focus,select:focus{border-bottom-color:var(--accent);box-sh
 .trace-canvas{filter:saturate(.48) contrast(.98)}
 .trace-card--warn .tc-val,.trace-row--mech td,.trace-conv-warn,.flag-stall,.th-badge--saved{color:var(--text-soft)!important}
 
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}body::before,body::after{filter:none}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}body::before{filter:blur(38px) saturate(.90)}}

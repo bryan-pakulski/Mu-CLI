@@ -4,6 +4,7 @@
 <link rel="stylesheet" href="/static/css/product.css">
 <link rel="stylesheet" href="/static/css/crystal.css">
 <link rel="stylesheet" href="/static/css/clarity.css">
+<link rel="stylesheet" href="/static/css/refinement.css">
 <script src="/static/js/product.js"></script>
 <script src="/static/js/web_shell.js"></script>
 
@@ -73,6 +74,19 @@
                 </svg>
             </button>
 
+            <a class="product-icon-button"
+               :href="'/trace?session=' + encodeURIComponent($store.chat.currentName || '')"
+               target="_blank" rel="noopener"
+               title="Trace Analyzer" aria-label="Open Trace Analyzer">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19V9"></path>
+                    <path d="M10 19V5"></path>
+                    <path d="M16 19v-7"></path>
+                    <path d="M22 19V3"></path>
+                    <path d="M2 19h22"></path>
+                </svg>
+            </a>
+
             <a class="product-icon-button" href="/containers" title="Container environments" aria-label="Container environments">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"></path>
@@ -86,13 +100,13 @@
                 <svg x-show="$store.theme.current !== 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
             </button>
 
-            <button class="product-icon-button"
+            <button class="product-icon-button settings-cog-button"
                     @click="$store.inspector.openDrawer()"
                     title="Workspace and settings"
                     aria-label="Open settings">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"></path>
                     <circle cx="12" cy="12" r="3"></circle>
-                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V20.3h-3v-.08a1.7 1.7 0 0 0-1.08-1.57 1.7 1.7 0 0 0-1.87.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.55-1.03H5.3v-3h.15A1.7 1.7 0 0 0 7 9.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.87.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.87A1.7 1.7 0 0 0 20.9 11h.1v3h-.1A1.7 1.7 0 0 0 19.4 15Z"></path>
                 </svg>
             </button>
         </div>

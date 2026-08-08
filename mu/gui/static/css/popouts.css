@@ -1,0 +1,319 @@
+/* MuCLI composer popouts — compact frosted menus sized around their content.
+ * Loaded by product.js so these late overrides stay isolated from legacy app.css.
+ */
+
+.composer-mode-popout,
+.composer-settings-popout {
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--border-strong) 84%, rgba(255,255,255,.10)) !important;
+    border-radius: 16px !important;
+    background: color-mix(in srgb, var(--glass-strong) 96%, transparent) !important;
+    box-shadow:
+        0 24px 72px rgba(3,9,16,.25),
+        0 4px 18px rgba(3,9,16,.12),
+        inset 0 1px 0 rgba(255,255,255,.055) !important;
+    backdrop-filter: blur(34px) saturate(110%) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(110%) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+
+html[data-theme="light"] .composer-mode-popout,
+html[data-theme="light"] .composer-settings-popout {
+    box-shadow:
+        0 24px 68px rgba(56,76,94,.16),
+        0 3px 14px rgba(56,76,94,.08),
+        inset 0 1px 0 rgba(255,255,255,.82) !important;
+}
+
+/* ---------------------------------------------------------------- mode / Feature menu */
+.composer-mode-popout {
+    width: auto !important;
+    min-width: min(310px, calc(100vw - 20px));
+    max-width: min(420px, calc(100vw - 20px));
+    padding: 8px !important;
+}
+
+.composer-mode-popout .mode-option {
+    position: relative;
+    display: block !important;
+    width: 100%;
+    min-height: 0;
+    margin: 0 !important;
+    padding: 11px 12px 10px !important;
+    border: 0 !important;
+    border-radius: 9px !important;
+    background: transparent !important;
+    color: var(--text-soft);
+    text-align: left;
+    box-shadow: none !important;
+    transition: background-color .14s ease, color .14s ease, opacity .14s ease;
+}
+
+.composer-mode-popout .mode-option + .mode-option {
+    margin-top: 1px !important;
+}
+
+.composer-mode-popout .mode-option:hover {
+    background: rgba(255,255,255,.034) !important;
+    color: var(--text);
+}
+
+html[data-theme="light"] .composer-mode-popout .mode-option:hover {
+    background: rgba(48,73,95,.042) !important;
+}
+
+.composer-mode-popout .mode-option.active {
+    background: rgba(255,255,255,.027) !important;
+    color: var(--text);
+}
+
+html[data-theme="light"] .composer-mode-popout .mode-option.active {
+    background: rgba(48,73,95,.034) !important;
+}
+
+.composer-mode-popout .mode-option.active::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 12px;
+    bottom: 12px;
+    width: 1px;
+    border-radius: 1px;
+    background: var(--accent);
+    opacity: .78;
+}
+
+.composer-mode-popout .mode-option.disabled {
+    opacity: .38;
+    cursor: default;
+}
+
+.composer-mode-popout .mode-name {
+    display: flex !important;
+    align-items: baseline;
+    gap: 9px;
+    min-width: 0;
+    color: inherit;
+    font-size: 12.5px;
+    line-height: 1.25;
+    font-weight: 620;
+    letter-spacing: -.008em;
+}
+
+.composer-mode-popout .mode-key {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--text-dimmer) !important;
+    font-size: 9.5px !important;
+    font-weight: 500;
+    letter-spacing: -.02em;
+}
+
+.composer-mode-popout .mode-desc {
+    max-width: 44ch;
+    margin-top: 4px;
+    color: var(--text-dim);
+    font-size: 10.8px;
+    line-height: 1.45;
+    font-weight: 400;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- provider / settings menu */
+.composer-settings-popout {
+    width: auto !important;
+    min-width: min(460px, calc(100vw - 20px));
+    max-width: min(590px, calc(100vw - 20px));
+    padding: 0 !important;
+}
+
+.composer-settings-popout .settings-header {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    min-height: 50px;
+    padding: 0 16px !important;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--hairline);
+    background: color-mix(in srgb, var(--glass-strong) 94%, transparent) !important;
+    color: var(--text-soft);
+    font-size: 12px !important;
+    line-height: 1;
+    font-weight: 620;
+    letter-spacing: -.006em !important;
+    text-transform: none !important;
+    backdrop-filter: blur(30px) saturate(108%);
+    -webkit-backdrop-filter: blur(30px) saturate(108%);
+}
+
+.composer-settings-popout .settings-close-btn {
+    width: 28px;
+    height: 28px;
+    margin-right: -5px;
+    color: var(--text-dimmer);
+    border-radius: 7px !important;
+}
+
+.composer-settings-popout .settings-close-btn:hover {
+    color: var(--text);
+    background: var(--bg-hover) !important;
+}
+
+.composer-settings-popout .settings-group {
+    margin: 0 16px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--hairline) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.composer-settings-popout .provider-model-section {
+    margin: 0 !important;
+    padding: 9px 16px 13px !important;
+    background: rgba(255,255,255,.012) !important;
+}
+
+html[data-theme="light"] .composer-settings-popout .provider-model-section {
+    background: rgba(255,255,255,.17) !important;
+}
+
+.composer-settings-popout .settings-group:last-child {
+    border-bottom: 0 !important;
+}
+
+.composer-settings-popout .settings-group-label {
+    padding: 9px 0 5px;
+    color: var(--text-dimmer);
+    font-size: 9.5px;
+    line-height: 1.3;
+    font-weight: 610;
+    letter-spacing: .035em;
+    text-transform: uppercase;
+}
+
+.composer-settings-popout .settings-group-toggle {
+    width: 100%;
+    min-height: 42px;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--text-soft);
+    font-size: 11.5px;
+    font-weight: 550;
+    text-align: left;
+}
+
+.composer-settings-popout .settings-group-toggle:hover {
+    color: var(--text);
+    background: transparent !important;
+}
+
+.composer-settings-popout .settings-group-toggle .caret {
+    width: 12px;
+    color: var(--text-dimmer);
+    font-size: 10px;
+}
+
+.composer-settings-popout .settings-var {
+    min-width: 0;
+    min-height: 46px;
+    margin: 0 !important;
+    padding: 7px 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(110px, 142px) minmax(0, 1fr);
+    align-items: center;
+    gap: 16px;
+    border: 0 !important;
+    border-top: 1px solid color-mix(in srgb, var(--hairline) 66%, transparent) !important;
+    background: transparent !important;
+}
+
+.composer-settings-popout .provider-model-section .settings-group-label + .settings-var {
+    border-top: 0 !important;
+}
+
+.composer-settings-popout .settings-var-key {
+    min-width: 0;
+    color: var(--text-dim);
+    font-size: 10.5px !important;
+    line-height: 1.3;
+    font-weight: 520;
+    letter-spacing: -.018em;
+    overflow-wrap: anywhere;
+}
+
+.composer-settings-popout .settings-var-select,
+.composer-settings-popout .settings-var input[type="text"],
+.composer-settings-popout .settings-var input[type="number"],
+.composer-settings-popout .settings-var input[type="password"] {
+    min-width: 0;
+    width: 100%;
+    height: 38px;
+    padding: 0 31px 0 10px !important;
+    border: 1px solid var(--hairline) !important;
+    border-radius: 9px !important;
+    background: rgba(255,255,255,.026) !important;
+    color: var(--text);
+    font: 11.5px/1.2 var(--sans) !important;
+    box-shadow: none !important;
+    text-overflow: ellipsis;
+}
+
+html[data-theme="light"] .composer-settings-popout .settings-var-select,
+html[data-theme="light"] .composer-settings-popout .settings-var input[type="text"],
+html[data-theme="light"] .composer-settings-popout .settings-var input[type="number"],
+html[data-theme="light"] .composer-settings-popout .settings-var input[type="password"] {
+    background: rgba(255,255,255,.34) !important;
+}
+
+.composer-settings-popout .settings-var-select:hover,
+.composer-settings-popout .settings-var input:hover {
+    border-color: var(--border-strong) !important;
+}
+
+.composer-settings-popout .settings-var-select:focus,
+.composer-settings-popout .settings-var input:focus {
+    border-color: var(--accent-line) !important;
+    background: rgba(255,255,255,.038) !important;
+    box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+.composer-settings-popout .settings-var input[type="checkbox"] {
+    justify-self: end;
+}
+
+.composer-settings-popout .settings-group-body {
+    padding: 0 0 8px !important;
+}
+
+@media (max-width: 560px) {
+    .composer-mode-popout,
+    .composer-settings-popout {
+        min-width: 0 !important;
+        max-width: calc(100vw - 16px) !important;
+        border-radius: 14px !important;
+    }
+
+    .composer-settings-popout .settings-var {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        padding: 10px 0 !important;
+    }
+
+    .composer-settings-popout .settings-var input[type="checkbox"] {
+        justify-self: start;
+    }
+}

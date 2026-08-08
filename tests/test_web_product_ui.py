@@ -35,6 +35,9 @@ def test_product_shell_keeps_core_navigation_contracts():
     assert '$store.inspector.openDrawer()' in text
     assert '$store.yolo.toggle()' in text
     assert '$store.layout.togglePanel()' in text
+    # RHS must be independently accessible when no panel view is active.
+    assert "$store.mode.setView('memory'); $store.layout.panelOpen = true" in text
+    assert 'aria-label="Toggle workspace panel"' in text
 
 
 def test_rhs_panel_has_its_own_view_tabs():
@@ -96,7 +99,6 @@ def test_session_history_hydrates_after_authoritative_focus():
     assert 'chat.loadHistory(current, { force: true })' in js
     assert 'chat.loadHistory(name, { force: true })' in js
     assert 'slot.pendingReload = true' in js
-    # Reuse existing stores/endpoints rather than introducing a second API path.
     assert 'fetch(' not in js
 
 

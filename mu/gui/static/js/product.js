@@ -78,37 +78,60 @@
         return Math.min(Math.max(value, min), Math.max(min, max));
     }
 
+    function floatingLayerProfile(layer) {
+        if (layer.classList.contains('composer-settings-popout')) {
+            return { minWidth: 460, maxWidth: 590, align: 'end' };
+        }
+        if (layer.classList.contains('composer-mode-popout')) {
+            return { minWidth: 310, maxWidth: 420, align: 'start' };
+        }
+        return { minWidth: 260, maxWidth: 440, align: 'start' };
+    }
+
     function positionFloatingLayer(layer, anchor) {
         if (!layer || !anchor || !isVisible(layer)) return;
 
         layer.dataset.productFloating = 'true';
         layer.style.visibility = 'hidden';
+        // Clear the previous inline constraints before measuring. This lets
+        // each popout size from its actual content on every open/reflow rather
+        // than inheriting a stale width or height from the previous viewport.
+        layer.style.width = '';
+        layer.style.maxHeight = '';
+
+        const profile = floatingLayerProfile(layer);
         const anchorRect = anchor.getBoundingClientRect();
         const layerRect = layer.getBoundingClientRect();
-        const maxWidth = Math.max(220, window.innerWidth - FLOAT_MARGIN * 2);
-        const width = Math.min(layerRect.width || 330, maxWidth);
+        const viewportMaxWidth = Math.max(220, window.innerWidth - FLOAT_MARGIN * 2);
+        const effectiveMaxWidth = Math.min(profile.maxWidth, viewportMaxWidth);
+        const effectiveMinWidth = Math.min(profile.minWidth, effectiveMaxWidth);
+        const naturalWidth = Math.max(layerRect.width || 0, layer.scrollWidth || 0, effectiveMinWidth);
+        const width = clamp(naturalWidth, effectiveMinWidth, effectiveMaxWidth);
 
+        const naturalHeight = Math.max(layerRect.height || 0, layer.scrollHeight || 0);
         const roomAbove = anchorRect.top - FLOAT_MARGIN;
         const roomBelow = window.innerHeight - anchorRect.bottom - FLOAT_MARGIN;
-        const preferAbove = roomAbove >= Math.min(layerRect.height + FLOAT_GAP, 280) || roomAbove > roomBelow;
+        const preferAbove = roomAbove >= Math.min(naturalHeight + FLOAT_GAP, 340) || roomAbove > roomBelow;
         const available = Math.max(170, (preferAbove ? roomAbove : roomBelow) - FLOAT_GAP);
-        const height = Math.min(layerRect.height, available);
+        const height = Math.min(naturalHeight, available);
 
         let top = preferAbove
             ? anchorRect.top - height - FLOAT_GAP
             : anchorRect.bottom + FLOAT_GAP;
         top = clamp(top, FLOAT_MARGIN, window.innerHeight - height - FLOAT_MARGIN);
 
-        let left = anchorRect.left;
-        if (left + width > window.innerWidth - FLOAT_MARGIN) left = anchorRect.right - width;
+        let left = profile.align === 'end'
+            ? anchorRect.right - width
+            : anchorRect.left;
         left = clamp(left, FLOAT_MARGIN, window.innerWidth - width - FLOAT_MARGIN);
 
-        layer.style.width = `${width}px`;
-        layer.style.maxHeight = `${available}px`;
+        layer.style.width = `${Math.round(width)}px`;
+        layer.style.maxHeight = `${Math.round(available)}px`;
         layer.style.left = `${Math.round(left)}px`;
         layer.style.top = `${Math.round(top)}px`;
         layer.style.visibility = '';
         layer.dataset.placement = preferAbove ? 'top' : 'bottom';
+        layer.dataset.alignment = profile.align;
     }
 
     function installFloatingLayer(wrapperSelector, layerSelector, anchorSelector) {

@@ -88,6 +88,70 @@
 }
 .panel-tabs-close:hover { background: var(--bg-hover); color: var(--text); }
 
+/* ---------------------------------------------------------------- composer */
+/* One input pane only. The older crystal layer drew a second frosted pseudo-
+ * surface behind the real form, which made the bottom of chat look stacked. */
+.composer {
+    padding-top: 10px !important;
+}
+.composer::before {
+    content: none !important;
+    display: none !important;
+}
+
+/* Mode + session settings are a separate utility line. Keep them in normal
+ * flow so textarea growth can never overlap the controls. */
+.composer-toolbar {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 100%;
+    min-height: 28px;
+    margin: 0 0 16px;
+    padding: 0 2px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+.composer-mode-pill,
+.composer-settings-btn {
+    min-height: 28px;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    color: var(--text-dimmer) !important;
+}
+.composer-mode-pill:hover,
+.composer-settings-btn:hover,
+.composer-mode-pill.open,
+.composer-settings-btn.open {
+    color: var(--text-soft) !important;
+}
+
+/* The real form is the sole composer surface. */
+.composer form {
+    background: color-mix(in srgb, var(--glass-strong) 72%, transparent) !important;
+    backdrop-filter: blur(30px) saturate(108%);
+    -webkit-backdrop-filter: blur(30px) saturate(108%);
+}
+
+/* Status remains available when needed, but never reads as another pane. */
+.composer .hint {
+    min-height: 0 !important;
+    margin-top: 7px !important;
+    padding: 0 4px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
 /* ---------------------------------------------------------------- settings */
 .settings-pane {
     max-width: 780px;
@@ -370,4 +434,5 @@
     .settings-pane-head { align-items: flex-start; flex-direction: column; }
     .settings-pane .var-row { grid-template-columns: 1fr; gap: 10px; padding-left: 18px !important; }
     .settings-pane .var-bool { justify-content: flex-start; }
+    .composer-toolbar { margin-bottom: 12px; }
 }

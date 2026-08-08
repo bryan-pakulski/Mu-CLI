@@ -1,44 +1,52 @@
 <nav class="panel-tabs" role="tablist" aria-label="Workspace views">
-    <div class="panel-tabs-head">
-        <span>Views</span>
-        <button type="button"
-                class="panel-tabs-close"
-                @click="$store.layout.panelOpen = false"
-                title="Close panel"
-                aria-label="Close panel">×</button>
+    <div class="panel-tabs-strip">
+        <template x-for="m in $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name))" :key="'panel-mode-' + m.name">
+            <button type="button"
+                    class="panel-tab"
+                    role="tab"
+                    :aria-selected="$store.mode.active === m.name"
+                    :class="{ active: $store.mode.active === m.name, disabled: m.disabled }"
+                    :disabled="m.disabled"
+                    @click="!m.disabled && $store.mode.setView(m.name)"
+                    :title="m.description || m.display_name">
+                <span x-text="m.display_name"></span>
+            </button>
+        </template>
+        <template x-for="v in $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name))" :key="'panel-view-' + v.name">
+            <button type="button"
+                    class="panel-tab"
+                    role="tab"
+                    :aria-selected="$store.mode.active === v.name"
+                    :class="{ active: $store.mode.active === v.name, disabled: v.disabled }"
+                    :disabled="v.disabled"
+                    @click="!v.disabled && $store.mode.setView(v.name)"
+                    :title="v.description || v.display_name">
+                <span x-text="v.display_name"></span>
+            </button>
+        </template>
     </div>
 
-    <div class="panel-tabs-scroll">
-        <div class="panel-tab-group">
-            <span class="panel-tab-label">Work</span>
-            <template x-for="m in $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name))" :key="'panel-mode-' + m.name">
-                <button type="button"
-                        class="panel-tab"
-                        role="tab"
-                        :aria-selected="$store.mode.active === m.name"
-                        :class="{ active: $store.mode.active === m.name, disabled: m.disabled }"
-                        :disabled="m.disabled"
-                        @click="!m.disabled && $store.mode.setView(m.name)"
-                        :title="m.description || m.display_name">
-                    <span x-text="m.display_name"></span>
-                </button>
-            </template>
-        </div>
+    <label class="panel-view-select-wrap" title="Switch workspace view">
+        <span class="sr-only">Workspace view</span>
+        <select class="panel-view-select"
+                :value="$store.mode.active"
+                @change="$store.mode.setView($event.target.value)">
+            <optgroup label="Work">
+                <template x-for="m in $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name))" :key="'panel-select-mode-' + m.name">
+                    <option :value="m.name" :disabled="m.disabled" x-text="m.display_name"></option>
+                </template>
+            </optgroup>
+            <optgroup label="Tools">
+                <template x-for="v in $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name))" :key="'panel-select-view-' + v.name">
+                    <option :value="v.name" :disabled="v.disabled" x-text="v.display_name"></option>
+                </template>
+            </optgroup>
+        </select>
+    </label>
 
-        <div class="panel-tab-group">
-            <span class="panel-tab-label">Tools</span>
-            <template x-for="v in $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name))" :key="'panel-view-' + v.name">
-                <button type="button"
-                        class="panel-tab"
-                        role="tab"
-                        :aria-selected="$store.mode.active === v.name"
-                        :class="{ active: $store.mode.active === v.name, disabled: v.disabled }"
-                        :disabled="v.disabled"
-                        @click="!v.disabled && $store.mode.setView(v.name)"
-                        :title="v.description || v.display_name">
-                    <span x-text="v.display_name"></span>
-                </button>
-            </template>
-        </div>
-    </div>
+    <button type="button"
+            class="panel-tabs-close"
+            @click="$store.layout.panelOpen = false"
+            title="Close panel"
+            aria-label="Close workspace panel">×</button>
 </nav>

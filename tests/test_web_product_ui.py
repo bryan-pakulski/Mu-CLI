@@ -2,13 +2,16 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BASE = ROOT / "mu" / "gui" / "templates" / "base.html"
 INDEX = ROOT / "mu" / "gui" / "templates" / "index.html"
 INSPECTOR = ROOT / "mu" / "gui" / "templates" / "fragments" / "inspector.html"
 PANEL_TABS = ROOT / "mu" / "gui" / "templates" / "fragments" / "panel_tabs.html"
+FILES_PANEL = ROOT / "mu" / "gui" / "templates" / "fragments" / "files_panel.html"
 CONTAINERS = ROOT / "mu" / "gui" / "templates" / "containers.html"
 PRODUCT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "product.css"
 CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "crystal.css"
 CLARITY_CSS = ROOT / "mu" / "gui" / "static" / "css" / "clarity.css"
+REFINEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "refinement.css"
 POPOUT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "popouts.css"
 ROUTE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "route-product.css"
 TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "trace.css"
@@ -19,11 +22,12 @@ WEB_SHELL_JS = ROOT / "mu" / "gui" / "static" / "js" / "web_shell.js"
 
 def test_product_assets_are_loaded_by_main_web_shell():
     text = INDEX.read_text(encoding="utf-8")
-    assert '/static/css/product.css' in text
-    assert '/static/css/crystal.css' in text
-    assert '/static/css/clarity.css' in text
-    assert '/static/js/product.js' in text
-    assert '/static/js/web_shell.js' in text
+    for asset in (
+        '/static/css/product.css', '/static/css/crystal.css',
+        '/static/css/clarity.css', '/static/css/refinement.css',
+        '/static/js/product.js', '/static/js/web_shell.js',
+    ):
+        assert asset in text
     assert 'class="app product-app"' in text
     assert 'class="panel-stage"' in text
     assert 'fragments/panel_tabs.html' in text
@@ -41,6 +45,15 @@ def test_left_navigation_is_sessions_only():
     assert '$store.mode.setView(v.name)' not in sidebar
 
 
+def test_header_has_trace_action_and_centered_settings_cog():
+    text = INDEX.read_text(encoding="utf-8")
+    assert "'/trace?session=' + encodeURIComponent($store.chat.currentName || '')" in text
+    assert 'aria-label="Open Trace Analyzer"' in text
+    assert 'class="product-icon-button settings-cog-button"' in text
+    assert '<circle cx="12" cy="12" r="3"></circle>' in text
+    assert 'M12.22 2h-.44' in text
+
+
 def test_product_shell_keeps_core_navigation_contracts():
     text = INDEX.read_text(encoding="utf-8")
     assert '$store.sessions.switchTo(s.name)' in text
@@ -51,26 +64,31 @@ def test_product_shell_keeps_core_navigation_contracts():
     assert 'href="/containers"' in text
 
 
-def test_rhs_panel_has_top_tabs_and_dropdown_without_eating_body_width():
+def test_rhs_panel_uses_exactly_two_dropdowns_not_scrollable_tabs():
     text = PANEL_TABS.read_text(encoding="utf-8")
-    css = CLARITY_CSS.read_text(encoding="utf-8")
-    assert 'role="tablist"' in text
-    assert 'class="panel-tabs-strip"' in text
-    assert 'class="panel-view-select"' in text
-    assert '$store.mode.setView(m.name)' in text
-    assert '$store.mode.setView(v.name)' in text
-    assert '$store.mode.setView($event.target.value)' in text
+    css = REFINEMENT_CSS.read_text(encoding="utf-8")
+    assert 'class="panel-view-select panel-mode-select"' in text
+    assert 'class="panel-view-select panel-tool-select"' in text
+    assert 'Select mode' in text
+    assert 'Select tool' in text
+    assert text.count('<select ') == 2
+    assert 'panel-tabs-strip' not in text
+    assert 'class="panel-tab"' not in text
+    assert '$event.target.value && $store.mode.setView($event.target.value)' in text
     assert '$store.layout.panelOpen = false' in text
-    assert '--panel-tabs-h: 55px' in css
+    assert '--panel-tabs-h: 58px' in css
+    assert '.panel-selectors' in css
+    assert '.panel-selector-label' in css
     assert 'inset: var(--panel-tabs-h) 0 0 0 !important' in css
-    assert '--panel-tabs-w' not in css
 
 
 def test_product_css_covers_primary_web_surfaces():
-    combined = ''.join(path.read_text(encoding="utf-8") for path in (PRODUCT_CSS, CRYSTAL_CSS, CLARITY_CSS, POPOUT_CSS))
+    combined = ''.join(path.read_text(encoding="utf-8") for path in (
+        PRODUCT_CSS, CRYSTAL_CSS, CLARITY_CSS, REFINEMENT_CSS, POPOUT_CSS,
+    ))
     for selector in (
         '.product-header', '.product-sidebar', '.chat-history', '.msg.user',
-        '.composer', '.panel-stage', '.panel-tabs', '.inspector',
+        '.composer', '.panel-stage', '.panel-select-nav', '.inspector',
         '.welcome-entry', '.prompt-body .options label',
         '.composer-mode-popout', '.composer-settings-popout',
     ):
@@ -99,8 +117,6 @@ def test_alpine_sunrise_is_atmospheric_not_css_scenery():
     assert '--mountain-far' not in route
     assert '.product-app::after' not in css
     assert 'body::after' not in route
-    assert '.product-icon-button' in css
-    assert 'color: var(--text-dim)' in css
 
 
 def test_product_javascript_positions_overlays_and_is_presentation_only():
@@ -157,6 +173,27 @@ def test_session_history_hydrates_after_authoritative_focus():
     assert 'fetch(' not in js
 
 
+def test_embedded_file_editor_and_codemirror_dependencies_are_removed():
+    base = BASE.read_text(encoding="utf-8")
+    files = FILES_PANEL.read_text(encoding="utf-8")
+    for token in ('codemirror.min.css', 'codemirror.min.js', 'codemirror-simple.js', 'codemirror-modes.min.js'):
+        assert token not in base
+    for path in (
+        ROOT / 'mu/gui/static/vendor/codemirror.min.css',
+        ROOT / 'mu/gui/static/vendor/codemirror.min.js',
+        ROOT / 'mu/gui/static/vendor/codemirror-simple.js',
+        ROOT / 'mu/gui/static/vendor/codemirror-modes.min.js',
+    ):
+        assert not path.exists()
+    assert 'CodeMirror' not in files
+    assert 'files-editor-pane' not in files
+    assert 'files-cm-host' not in files
+    assert 'saveCurrent' not in files
+    assert 'reloadFile' not in files
+    assert 'filesBrowserPanel()' in files
+    assert 'Browse the attached workspace' in files
+
+
 def test_choice_picker_is_flat_not_card_based():
     css = CRYSTAL_CSS.read_text(encoding="utf-8")
     compact = css.replace(' ', '')
@@ -165,15 +202,23 @@ def test_choice_picker_is_flat_not_card_based():
     assert 'appearance: none' in css
 
 
-def test_settings_drawer_is_spacious_with_vertical_tabs():
-    css = CLARITY_CSS.read_text(encoding="utf-8")
+def test_settings_drawer_is_spacious_clean_and_consistent():
+    clarity = CLARITY_CSS.read_text(encoding="utf-8")
+    refinement = REFINEMENT_CSS.read_text(encoding="utf-8")
     template = INSPECTOR.read_text(encoding="utf-8")
-    assert 'width: min(1040px, 94vw)' in css
-    assert 'grid-template-columns: 176px minmax(0, 1fr)' in css
-    assert '.inspector-tabs' in css and 'flex-direction: column' in css
-    assert 'grid-template-columns: minmax(250px, 1fr) minmax(260px, 340px)' in css
+    assert 'width: min(1040px, 94vw)' in clarity
+    assert 'grid-template-columns: 176px minmax(0, 1fr)' in clarity
     assert 'aria-orientation="vertical"' in template
-    assert 'aria-label="Settings sections"' in template
+    assert 'class="settings-pane"' in template
+    assert 'class="settings-pane-head"' in template
+    assert 'Configuration' in template
+    assert 'Manage skills' in template
+    assert '.settings-pane .var-group-head' in refinement
+    assert '.settings-pane .var-row' in refinement
+    assert 'border-top: 1px solid color-mix' in refinement
+    assert 'background: transparent !important' in refinement
+    assert '.settings-pane .var-row > input' in refinement
+    assert 'border-bottom: 1px solid var(--hairline)' in refinement
 
 
 def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():

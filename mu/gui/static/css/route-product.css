@@ -1,7 +1,4 @@
-/* Shared atmospheric product foundation for standalone MuCLI routes.
- * Uses the alpine sunrise reference only as colour/light inspiration.
- * No CSS scenery, polygons or illustrative mountain shapes.
- */
+/* Shared atmospheric product foundation for standalone MuCLI routes. */
 :root,
 html[data-theme="dark"] {
   --bg:#0d1219; --bg-lift:rgba(255,255,255,.018); --bg-hover:rgba(201,216,231,.052);
@@ -47,7 +44,6 @@ input:focus,textarea:focus,select:focus{border-bottom-color:var(--accent);box-sh
 
 /* Trace is analytical content, not a separate orange-branded mode. */
 .trace-mu{color:var(--text-soft)!important}
-.trace-canvas{filter:saturate(.48) contrast(.98)}
 .trace-card--warn .tc-val,.trace-row--mech td,.trace-conv-warn,.flag-stall,.th-badge--saved{color:var(--text-soft)!important}
 
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}body::before{filter:blur(38px) saturate(.90)}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important;animation-iteration-count:1!important}body::before{filter:none}}

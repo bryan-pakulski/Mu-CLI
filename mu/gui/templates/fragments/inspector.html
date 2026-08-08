@@ -73,8 +73,7 @@
                        x-model="$store.inspector.memory.query"
                        placeholder="search task memory…"
                        title="Full-text search across task memory content + tags. Empty query restores the full list.">
-                <button type="submit"
-                        title="Run search">search</button>
+                <button type="submit" title="Run search">search</button>
                 <button type="button"
                         @click="$store.inspector.memory.query=''; $store.inspector.loadMemory()"
                         title="Clear the query and show all entries">clear</button>
@@ -87,9 +86,7 @@
                     <div class="mem-entry" :data-id="e.id">
                         <div class="mem-head">
                             <span class="mono" x-text="'#' + e.id"></span>
-                            <template x-for="tag in e.tags" :key="tag">
-                                <span class="tag" x-text="tag"></span>
-                            </template>
+                            <template x-for="tag in e.tags" :key="tag"><span class="tag" x-text="tag"></span></template>
                             <span class="muted mono"
                                   x-text="e.hits + ' hits'"
                                   :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"
@@ -116,9 +113,7 @@
                     <div class="mem-entry">
                         <div class="mem-head">
                             <span class="mono" x-text="'#' + e.id"></span>
-                            <template x-for="tag in e.tags" :key="tag">
-                                <span class="tag" x-text="tag"></span>
-                            </template>
+                            <template x-for="tag in e.tags" :key="tag"><span class="tag" x-text="tag"></span></template>
                             <span class="muted mono"
                                   x-text="e.hits + ' hits'"
                                   :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"
@@ -140,9 +135,7 @@
                     <div class="mem-entry">
                         <div class="mem-head">
                             <span class="mono" x-text="'#' + e.id"></span>
-                            <template x-for="tag in e.tags" :key="tag">
-                                <span class="tag" x-text="tag"></span>
-                            </template>
+                            <template x-for="tag in e.tags" :key="tag"><span class="tag" x-text="tag"></span></template>
                         </div>
                         <div class="mem-body" x-text="e.content"></div>
                     </div>
@@ -155,29 +148,18 @@
         <!-- stats -->
         <section x-show="$store.inspector.tab === 'stats'">
             <div x-show="$store.inspector.stats && $store.inspector.stats.active">
-                <div class="stat">
-                    <div class="stat-key">session</div>
-                    <div class="stat-val mono" x-text="$store.inspector.stats?.name"></div>
-                </div>
-                <div class="stat">
-                    <div class="stat-key">provider · model</div>
-                    <div class="stat-val mono"
-                         x-text="($store.inspector.stats?.provider || '') + ' · ' + ($store.inspector.stats?.model || '')"></div>
-                </div>
-                <div class="stat">
-                    <div class="stat-key">mode</div>
-                    <div class="stat-val mono" x-text="$store.inspector.stats?.agent_mode"></div>
-                </div>
+                <div class="stat"><div class="stat-key">session</div><div class="stat-val mono" x-text="$store.inspector.stats?.name"></div></div>
+                <div class="stat"><div class="stat-key">provider · model</div><div class="stat-val mono" x-text="($store.inspector.stats?.provider || '') + ' · ' + ($store.inspector.stats?.model || '')"></div></div>
+                <div class="stat"><div class="stat-key">mode</div><div class="stat-val mono" x-text="$store.inspector.stats?.agent_mode"></div></div>
                 <h4 class="label-mono" style="margin-top:20px;">tokens</h4>
                 <div class="stat-grid">
-                    <div><div class="stat-key">input</div><div class="stat-val mono"  x-text="$store.inspector.stats?.tokens?.input || 0"></div></div>
+                    <div><div class="stat-key">input</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.input || 0"></div></div>
                     <div><div class="stat-key">output</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.output || 0"></div></div>
-                    <div><div class="stat-key">total</div><div class="stat-val mono"  x-text="$store.inspector.stats?.tokens?.total || 0"></div></div>
+                    <div><div class="stat-key">total</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.total || 0"></div></div>
                     <div><div class="stat-key">cached</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.cached || 0"></div></div>
                 </div>
                 <h4 class="label-mono" style="margin-top:20px;">cost (estimate)</h4>
-                <div class="stat-val mono large"
-                     x-text="'$' + (($store.inspector.stats?.estimated_cost_usd || 0).toFixed(4))"></div>
+                <div class="stat-val mono large" x-text="'$' + (($store.inspector.stats?.estimated_cost_usd || 0).toFixed(4))"></div>
                 <h4 class="label-mono" style="margin-top:20px;">other</h4>
                 <div class="stat-grid">
                     <div><div class="stat-key">history</div><div class="stat-val mono" x-text="$store.inspector.stats?.history_length"></div></div>
@@ -189,31 +171,34 @@
             <div class="empty-row" x-show="!$store.inspector.stats?.active">no active session</div>
         </section>
 
-        <!-- settings (variables) — collapsible submenus per category -->
-        <section x-show="$store.inspector.tab === 'settings'">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3);">
-                <button class="primary" style="font-size:12px;padding:5px 14px;"
+        <!-- settings -->
+        <section class="settings-pane" x-show="$store.inspector.tab === 'settings'">
+            <div class="settings-pane-head">
+                <div>
+                    <h3 class="settings-pane-title">Configuration</h3>
+                    <p class="settings-pane-copy">Session-level behavior and runtime defaults. Changes apply to the active workspace immediately.</p>
+                </div>
+                <button class="settings-skills-button"
                         @click="$store.skills.openModal()"
-                        title="Manage skills — enable, disable, edit, create">skills</button>
+                        title="Manage skills — enable, disable, edit, create">Manage skills</button>
             </div>
 
-            <input type="text"
-                   x-model="$store.inspector.varFilter"
-                   placeholder="filter variables…"
-                   title="Substring filter on variable name. Auto-expands groups that contain matches."
-                   style="margin-bottom:12px;">
+            <div class="settings-filter">
+                <input type="text"
+                       x-model="$store.inspector.varFilter"
+                       placeholder="Filter settings…"
+                       title="Filter by setting name. Matching groups expand automatically.">
+            </div>
 
             <template x-for="group in $store.inspector.filteredVariables()" :key="group.name">
-                <div class="var-group"
-                     :class="{ open: $store.inspector.isGroupOpen(group.name) }">
+                <div class="var-group" :class="{ open: $store.inspector.isGroupOpen(group.name) }">
                     <button class="var-group-head"
                             @click="$store.inspector.toggleGroup(group.name)"
                             :title="'Toggle ' + group.name + ' (' + group.variables.length + ' items)'"
                             :aria-expanded="$store.inspector.isGroupOpen(group.name)">
                         <span class="caret">›</span>
                         <span class="var-group-name" x-text="group.name"></span>
-                        <span class="var-group-count mono muted"
-                              x-text="group.variables.length"></span>
+                        <span class="var-group-count mono muted" x-text="group.variables.length"></span>
                     </button>
                     <div class="var-group-body"
                          x-show="$store.inspector.isGroupOpen(group.name)"
@@ -221,28 +206,19 @@
                         <template x-for="v in group.variables" :key="v.key">
                             <div class="var-row"
                                  :class="{ 'is-default': v.is_default }"
-                                 :title="v.help
-                                    ? (v.help + ' — default: ' + JSON.stringify(v.default))
-                                    : (v.key + ' — default: ' + JSON.stringify(v.default))">
+                                 :title="v.help ? (v.help + ' — default: ' + JSON.stringify(v.default)) : (v.key + ' — default: ' + JSON.stringify(v.default))">
                                 <div class="var-head">
-                                    <span class="var-key mono" x-text="v.key"></span>
-                                    <span class="var-type mono muted" x-text="v.type"
-                                          :title="'type: ' + v.type"></span>
-                                    <span class="var-help-glyph muted"
-                                          x-show="v.help"
-                                          aria-hidden="true"
-                                          :title="v.help">?</span>
+                                    <span class="var-key" x-text="v.key"></span>
+                                    <span class="var-type mono muted" x-text="v.type" :title="'type: ' + v.type"></span>
+                                    <span class="var-help-glyph muted" x-show="v.help" aria-hidden="true" :title="v.help">?</span>
                                     <button class="icon-btn"
                                             x-show="!v.is_default"
                                             @click="$store.confirm.ask('Reset ' + v.key + ' to ' + JSON.stringify(v.default) + '?', $event, () => $store.inspector.resetVariable(v.key))"
-                                            title="Reset to default (asks first)">↺</button>
+                                            title="Reset to default">↺</button>
                                 </div>
-                                <label class="var-bool" x-show="v.type === 'bool'"
-                                       :title="v.help || v.key">
-                                    <input type="checkbox"
-                                           :checked="!!v.value"
-                                           @change="$store.inspector.setVariable(v.key, $event.target.checked)">
-                                    <span x-text="v.value ? 'on' : 'off'"></span>
+                                <label class="var-bool" x-show="v.type === 'bool'" :title="v.help || v.key">
+                                    <input type="checkbox" :checked="!!v.value" @change="$store.inspector.setVariable(v.key, $event.target.checked)">
+                                    <span x-text="v.value ? 'On' : 'Off'"></span>
                                 </label>
                                 <input type="number"
                                        x-show="v.type === 'int' || v.type === 'float'"
@@ -263,9 +239,7 @@
 
             <div class="empty-row"
                  x-show="$store.inspector.varFilter && $store.inspector.filteredVariables().length === 0"
-                 title="No variable name matches the current filter.">
-                no matches
-            </div>
+                 title="No setting name matches the current filter.">No matching settings</div>
         </section>
     </div>
     </div>

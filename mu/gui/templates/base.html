@@ -16,7 +16,6 @@
                 ? 'light' : 'dark';
             var theme = (saved === 'light' || saved === 'dark') ? saved : sys;
             document.documentElement.setAttribute('data-theme', theme);
-            // Flip hljs sheets as soon as they appear in the DOM.
             document.addEventListener('DOMContentLoaded', function () {
                 var d = document.getElementById('hljs-dark');
                 var l = document.getElementById('hljs-light');
@@ -33,8 +32,7 @@
     <link rel="stylesheet" href="/static/css/app.css">
     <!-- MathJax (vendored, SVG output, no external fonts needed).
          Config MUST precede the script load. startup.typeset=false
-         so we drive typesetting manually after each render (app.js
-         calls MathJax.typesetPromise on the changed subtree). -->
+         so we drive typesetting manually after each render. -->
     <script>
     window.MathJax = {
         tex: {
@@ -43,8 +41,6 @@
             processEscapes: true
         },
         svg: { fontCache: 'global' },
-        // Skip code blocks so `$` inside inline `code` / fenced ```code```
-        // is never mistaken for math delimiters.
         options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code','option'] },
         startup: { typeset: false }
     };
@@ -52,12 +48,6 @@
     <script src="/static/vendor/mathjax-tex-svg.js"></script>
     <script src="/static/vendor/marked.min.js"></script>
     <script src="/static/vendor/highlight.min.js"></script>
-    <link rel="stylesheet" href="/static/vendor/codemirror.min.css">
-    <script src="/static/vendor/codemirror.min.js"></script>
-    <!-- Some bundled modes use CodeMirror.defineSimpleMode. Load its addon
-         before the mode bundle so one optional mode cannot abort all GUI JS. -->
-    <script src="/static/vendor/codemirror-simple.js"></script>
-    <script src="/static/vendor/codemirror-modes.min.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/vendor/htmx.min.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
@@ -156,7 +146,6 @@
                     </div>
                 </div>
 
-                <!-- Phases -->
                 <div class="modal-section">
                     <div class="modal-section-head">
                         <span class="modal-label" style="margin-bottom:0">phases</span>
@@ -169,56 +158,43 @@
                                 <button class="modal-remove-btn" @click="$store.feature.removePhase(pi)">&times;</button>
                             </div>
                             <div class="modal-field-row">
-                                <input type="text" x-model="phase.title"
-                                       placeholder="Phase title" @keydown.stop />
-                                <input type="text" x-model="phase.goal"
-                                       placeholder="Goal (optional)" @keydown.stop />
+                                <input type="text" x-model="phase.title" placeholder="Phase title" @keydown.stop />
+                                <input type="text" x-model="phase.goal" placeholder="Goal (optional)" @keydown.stop />
                             </div>
 
-                            <!-- Tasks -->
                             <div class="modal-tasks">
                                 <div class="modal-section-head small">
                                     <span class="modal-label" style="margin-bottom:0;font-size:9.5px">tasks</span>
-                                    <button class="modal-add-btn small"
-                                            @click="$store.feature.addTask(pi)">+ task</button>
+                                    <button class="modal-add-btn small" @click="$store.feature.addTask(pi)">+ task</button>
                                 </div>
                                 <template x-for="(task, ti) in (phase.tasks || [])" :key="ti">
                                     <div class="modal-task">
                                         <div class="modal-task-head">
-                                            <span class="muted mono" style="font-size:10px"
-                                                  x-text="'task ' + (ti + 1)"></span>
-                                            <button class="modal-remove-btn"
-                                                    @click="$store.feature.removeTask(pi, ti)">&times;</button>
+                                            <span class="muted mono" style="font-size:10px" x-text="'task ' + (ti + 1)"></span>
+                                            <button class="modal-remove-btn" @click="$store.feature.removeTask(pi, ti)">&times;</button>
                                         </div>
                                         <div class="modal-field">
-                                            <input type="text" x-model="task.title"
-                                                   placeholder="Task title" @keydown.stop />
+                                            <input type="text" x-model="task.title" placeholder="Task title" @keydown.stop />
                                         </div>
                                         <div class="modal-list-field">
                                             <span class="modal-label" style="font-size:9px">objectives</span>
                                             <template x-for="(obj, oi) in (task.objectives || [])" :key="oi">
                                                 <div class="modal-list-row">
-                                                    <input type="text" x-model="task.objectives[oi]"
-                                                           placeholder="Objective" @keydown.stop />
-                                                    <button class="modal-remove-btn"
-                                                            @click="$store.feature.removeListItem(pi, ti, 'objectives', oi)">&times;</button>
+                                                    <input type="text" x-model="task.objectives[oi]" placeholder="Objective" @keydown.stop />
+                                                    <button class="modal-remove-btn" @click="$store.feature.removeListItem(pi, ti, 'objectives', oi)">&times;</button>
                                                 </div>
                                             </template>
-                                            <button class="modal-add-btn small"
-                                                    @click="$store.feature.addListItem(pi, ti, 'objectives')">+</button>
+                                            <button class="modal-add-btn small" @click="$store.feature.addListItem(pi, ti, 'objectives')">+</button>
                                         </div>
                                         <div class="modal-list-field">
                                             <span class="modal-label" style="font-size:9px">exit criteria</span>
                                             <template x-for="(crit, ci) in (task.exit_criteria || [])" :key="ci">
                                                 <div class="modal-list-row">
-                                                    <input type="text" x-model="task.exit_criteria[ci]"
-                                                           placeholder="Criterion" @keydown.stop />
-                                                    <button class="modal-remove-btn"
-                                                            @click="$store.feature.removeListItem(pi, ti, 'exit_criteria', ci)">&times;</button>
+                                                    <input type="text" x-model="task.exit_criteria[ci]" placeholder="Criterion" @keydown.stop />
+                                                    <button class="modal-remove-btn" @click="$store.feature.removeListItem(pi, ti, 'exit_criteria', ci)">&times;</button>
                                                 </div>
                                             </template>
-                                            <button class="modal-add-btn small"
-                                                    @click="$store.feature.addListItem(pi, ti, 'exit_criteria')">+</button>
+                                            <button class="modal-add-btn small" @click="$store.feature.addListItem(pi, ti, 'exit_criteria')">+</button>
                                         </div>
                                     </div>
                                 </template>
@@ -245,8 +221,6 @@
          x-transition.opacity.duration.150ms
          @keydown.escape.window="$store.skills.modalOpen && $store.skills.view === 'list' && $store.skills.closeModal()">
         <div class="modal modal-lg" @click.stop style="max-height:85vh;">
-
-            <!-- List view -->
             <template x-if="$store.skills.view === 'list'">
                 <div style="display:flex;flex-direction:column;max-height:85vh;">
                     <div class="modal-head">
@@ -254,8 +228,7 @@
                         <button class="icon-btn" @click="$store.skills.closeModal()">&times;</button>
                     </div>
                     <div class="skills-toolbar">
-                        <span class="skills-count"
-                              x-text="$store.skills.enabledCount() + '/' + $store.skills.list.length + ' enabled'"></span>
+                        <span class="skills-count" x-text="$store.skills.enabledCount() + '/' + $store.skills.list.length + ' enabled'"></span>
                         <div class="skills-toolbar-btns">
                             <button class="modal-add-btn" @click="$store.skills.reload()">reload</button>
                             <button class="modal-add-btn" @click="$store.skills.startCreate()">+ new</button>
@@ -292,13 +265,11 @@
                                 </li>
                             </template>
                         </ul>
-                        <div class="empty-row" x-show="!$store.skills.list.length"
-                             style="padding:var(--space-5);text-align:center;">no skills found</div>
+                        <div class="empty-row" x-show="!$store.skills.list.length" style="padding:var(--space-5);text-align:center;">no skills found</div>
                     </div>
                 </div>
             </template>
 
-            <!-- Edit / Create view -->
             <template x-if="$store.skills.view === 'edit'">
                 <div style="display:flex;flex-direction:column;max-height:85vh;">
                     <div class="modal-head">
@@ -311,25 +282,15 @@
                     <div class="modal-body">
                         <div class="modal-field">
                             <label class="modal-label">name</label>
-                            <input type="text"
-                                   x-model="$store.skills.form.name"
-                                   placeholder="my-skill (alphanumeric, hyphens, underscores)"
-                                   :disabled="!!$store.skills.editing"
-                                   @keydown.stop />
+                            <input type="text" x-model="$store.skills.form.name" placeholder="my-skill (alphanumeric, hyphens, underscores)" :disabled="!!$store.skills.editing" @keydown.stop />
                         </div>
                         <div class="modal-field">
                             <label class="modal-label">description</label>
-                            <input type="text"
-                                   x-model="$store.skills.form.description"
-                                   placeholder="What this skill does"
-                                   @keydown.stop />
+                            <input type="text" x-model="$store.skills.form.description" placeholder="What this skill does" @keydown.stop />
                         </div>
                         <div class="modal-field">
                             <label class="modal-label">trigger regex</label>
-                            <input type="text"
-                                   x-model="$store.skills.form.trigger"
-                                   placeholder="\b(commit|message)\b (optional)"
-                                   @keydown.stop />
+                            <input type="text" x-model="$store.skills.form.trigger" placeholder="\b(commit|message)\b (optional)" @keydown.stop />
                         </div>
                         <div class="modal-field">
                             <label class="modal-label">scope</label>

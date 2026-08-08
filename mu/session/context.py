@@ -1,75 +1,30 @@
 """Hierarchical context assembly for the system prompt.
 
-Two top-level helpers, both consumed by the agent loop just before
-sending to the provider:
-
-  * `build_workspace_context_files(session)` — LAYER 1: concat any
-    user-curated `AGENTS.md`/`CLAUDE.md`/`MUCLI.md`/`.mu/CONTEXT.md`
-    files from each attached workspace folder, with provenance headers
-    and a `workspace_context_max_chars` budget.
-
-  * `inject_hierarchical_context(session, system_prompt)` — assemble
-    the full layered system prompt: time prelude → LAYER 1
-    (workspace files) → LAYER 1B (skills) → LAYER 2 (summary) →
-    LAYER 3 (active goal) →
-    LAYER 5 (current turn). Per-layer
-    budgets + eviction policies are surfaced inline so they show up
-    verbatim in `/memory list L*`.
-
-These helpers delegate to other session methods that stay on the
-`Session` class: `_build_active_goal_context`, `_build_skills_block`.
-They also read `session.session_manager.conversation_summary`
-and `session.session_manager.conversation_summary` for the L2 block.
-
-Tests: `tests/test_workspace_context_files.py` (LAYER 1),
-`tests/test_skills.py` (LAYER 1B injection),
-`tests/test_time_awareness.py` (time prelude),
-`tests/test_session.py` (layer ordering + budgets).
+L2 is state-first: structured runtime state is projected deterministically
+from tool envelopes/stores. The rolling conversation summary remains a bounded
+semantic residue for information that cannot be derived structurally.
 """
-
 from __future__ import annotations
 
 import os
 from typing import Any, Optional
 
-
-# Depth cap for sub-agent spawning (mirrors mu/tools/agent/spawn.py).
 _MAX_SUBAGENT_DEPTH = 2
 
 
 def _build_role_layer(role: str, session: Any) -> str:
-    """LAYER 3B — Agent Role guidance. Kept under 500 chars.
-
-    * ``parent``  — orchestrator instructions: delegate, don't block, poll,
-      kill/extend, synthesize. Rendered only after the session has spawned
-      at least one child (lazy gating via ``session_role``).
-    * ``child``   — focused sub-agent instructions with depth + depth-cap
-      message. Rendered for spawned sub-agent sessions.
-    """
+    """Minimal role metadata; detailed specialist policy lives in spawn.py."""
     role = (role or "").strip().lower()
     if role == "parent":
-        # Count currently-registered children for context.
-        n_active = 0
         try:
-            n_active = sum(
-                1 for r in session._subagent_registry.list() if r.status == "running"
-            )
+            n_active = sum(1 for r in session._subagent_registry.list() if r.status == "running")
         except Exception:
             n_active = 0
-        children = f"{n_active} child sub-agent(s) running" if n_active else "child sub-agents may be running"
         return (
-            "You are the ORCHESTRATOR. You may spawn sub-agents for research, deep dives, and focused tasks.\n"
-            f"- {children}. To wait for a child without burning iterations, call "
-            "await_subagent(task_id, timeout=N) — it blocks your loop on a single "
-            "tool call and wakes when the child finishes OR the timer fires, so no "
-            "poll-loop warning triggers. Do NOT busy-poll poll_subagent in a tight "
-            "loop; use poll_subagent only for a quick non-blocking check when you "
-            "have other work to do meanwhile.\n"
-            "- Use await_subagent(task_id, timeout=...) to block until results are ready; "
-            "poll_subagent(task_id) for a quick non-blocking status check; "
-            "kill_subagent(task_id) to cancel a stuck or unneeded child.\n"
-            "- Sub-agents return summaries via await/poll. You synthesize their findings into the final response.\n"
-            "- You can extend a child that needs more time (re-await with a longer timeout) or kill one that is looping."
+            f"ROLE: ORCHESTRATOR ({n_active} active delegation(s)). "
+            "Persistent specialists push material findings/completions through the unread mailbox. "
+            "Use await_subagent when you must block; poll_subagent only occasionally; "
+            "kill_subagent cancels an unneeded or stuck delegation."
         )
     if role == "child":
         try:
@@ -77,53 +32,29 @@ def _build_role_layer(role: str, session: Any) -> str:
         except Exception:
             depth = 1
         remaining = max(0, _MAX_SUBAGENT_DEPTH - depth)
-        if remaining <= 0:
-            cap_line = "Do NOT spawn further sub-agents (depth cap reached)."
-        else:
-            cap_line = f"You may spawn up to {remaining} further sub-agent level(s)."
-        return (
-            f"You are a SUB-AGENT (depth={depth}), spawned by the parent orchestrator.\n"
-            "- Complete your assigned task. Return a concise summary of findings via your final response.\n"
-            f"- {cap_line}\n"
-            "- Do NOT interact with the user. Return results to the parent only.\n"
-            "- If you cannot complete the task, return what you have — partial results are valuable."
-        )
+        cap = "depth cap reached; do not spawn further sub-agents" if remaining <= 0 else f"you may spawn up to {remaining} further sub-agent level(s)"
+        return f"ROLE: SUB-AGENT depth={depth}; persistent specialist policy is in the base system instruction; {cap}."
     return ""
 
 
 def build_workspace_context_files(session: Any) -> str:
-    """LAYER 1 — read any user-curated context files from the workspace
-    folders and concatenate with provenance headers. Returns "" when
-    no folders are attached, no files match, or the feature is
-    disabled via `workspace_context_files = ""`.
-    """
     folder_context = session.folder_context
     if not folder_context or not folder_context.folders:
         return ""
-    raw_names = str(
-        session.variables.get(
-            "workspace_context_files", "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md"
-        )
-        or ""
-    )
+    raw_names = str(session.variables.get("workspace_context_files", "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md") or "")
     candidates = [n.strip() for n in raw_names.split(",") if n.strip()]
-    if not candidates:
-        return ""
-    budget = max(
-        0,
-        int(session.variables.get("workspace_context_max_chars", 16384) or 16384),
-    )
-    if budget == 0:
+    budget = max(0, int(session.variables.get("workspace_context_max_chars", 16384) or 16384))
+    if not candidates or budget <= 0:
         return ""
     blocks: list[str] = []
     used = 0
-    seen_paths: set[str] = set()
+    seen: set[str] = set()
     for folder in folder_context.folders:
         for name in candidates:
             path = os.path.normpath(os.path.join(folder, name))
-            if path in seen_paths:
+            if path in seen:
                 continue
-            seen_paths.add(path)
+            seen.add(path)
             if not os.path.isfile(path):
                 continue
             try:
@@ -133,15 +64,14 @@ def build_workspace_context_files(session: Any) -> str:
                 continue
             if not body:
                 continue
-            header = f"### {os.path.relpath(path, folder)}  (from {folder})"
-            entry = f"{header}\n{body}"
+            entry = f"### {os.path.relpath(path, folder)}  (from {folder})\n{body}"
             remaining = budget - used
             if remaining <= 0:
                 break
             if len(entry) > remaining:
                 entry = entry[:remaining].rstrip() + "\n...[truncated]"
             blocks.append(entry)
-            used += len(entry) + 2  # account for separator
+            used += len(entry) + 2
             if used >= budget:
                 break
         if used >= budget:
@@ -150,7 +80,6 @@ def build_workspace_context_files(session: Any) -> str:
 
 
 def build_attachment_context(session: Any) -> str:
-    """Compact manifest only; document contents are read on demand by tools."""
     registry = getattr(session, "attachment_registry", None)
     if registry is None:
         return ""
@@ -160,204 +89,89 @@ def build_attachment_context(session: Any) -> str:
         return ""
     if not items:
         return ""
-    lines = [
-        "Uploaded documents are durable session inputs. Use list_attachments, "
-        "read_attachment, search_attachments, or download_attachment (workspace/container); do not guess their contents."
-    ]
+    lines = ["Uploaded documents are durable session inputs. Retrieve contents on demand; do not guess them."]
     for item in items[:30]:
-        lines.append(
-            "- id={attachment_id} | {name} | {mime_type} | {size} bytes".format(
-                attachment_id=item.get("attachment_id", ""),
-                name=item.get("name", "attachment"),
-                mime_type=item.get("mime_type", "application/octet-stream"),
-                size=int(item.get("size", 0) or 0),
-            )
-        )
+        lines.append("- id={attachment_id} | {name} | {mime_type} | {size} bytes".format(
+            attachment_id=item.get("attachment_id", ""), name=item.get("name", "attachment"),
+            mime_type=item.get("mime_type", "application/octet-stream"), size=int(item.get("size", 0) or 0)))
     if len(items) > 30:
-        lines.append(f"- ... {len(items) - 30} more; call list_attachments")
+        lines.append(f"- ... {len(items)-30} more; call list_attachments")
     return "\n".join(lines)[:6000]
 
 
-def inject_hierarchical_context(
-    session: Any,
-    system_prompt: str,
-    *,
-    cached_workspace: Optional[str] = None,
-    cached_skills: Optional[str] = None,
-    cached_folder_context: Optional[str] = None,
-) -> str:
-    """Compose the full layered system prompt sent to the provider.
-
-    Layer order (each is omitted when empty):
-      L0  Time prelude (current date/time)
-      L1  Workspace context files (user-curated)
-      L1B Installed skills (compact index or full bodies)
-      L2  Conversation summary
-      L3  Active task plan / current goal
-      L5  Current-turn marker (telling the model to prioritize the
-          live user message + current-turn tool results)
-
-    ``cached_workspace`` / ``cached_skills`` let the caller reuse L1 / L1B
-    text built once per turn (those read files from disk and are expensive
-    to rebuild every iteration). When omitted (``None``), the layers are
-    rebuilt from session as before. ``cached_folder_context`` does the same
-    for L1C (workspace file tree + diffs), which is rebuilt per turn and
-    refreshed mid-turn only when files change. L2 and L3 are always rebuilt fresh from
-    in-memory state so mid-turn updates (auto-compaction rewriting the
-    summary, tools updating feature_state / scratchpad) reach the model
-    the same turn — the frozen-at-turn-start bug that caused long-horizon
-    amnesia.
-    """
-    # L0 — prepend a time-awareness banner so the model isn't guessing
-    # at the wall clock. Cheap (~25 tokens) and reflected in L0 of
-    # the /memory table via compose_base_system_prompt.
+def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_workspace: Optional[str] = None, cached_skills: Optional[str] = None, cached_folder_context: Optional[str] = None) -> str:
     try:
         from utils.runtime_metrics import _current_time_prelude
-
         system_prompt = f"{_current_time_prelude()}\n\n{system_prompt}".strip()
     except Exception:
         pass
 
-    summary_limit = max(
-        0,
-        int(
-            session.variables.get("conversation_summary_char_limit", 24000)
-            or 12000
-        ),
-    )
-    summary = str(
-        getattr(session.session_manager, "conversation_summary", "") or ""
-    ).strip()
-    if summary_limit and len(summary) > summary_limit:
-        summary = summary[-summary_limit:].lstrip()
+    summary_limit = max(0, int(session.variables.get("conversation_summary_char_limit", 24000) or 12000))
+    semantic_residue = str(getattr(session.session_manager, "conversation_summary", "") or "").strip()
 
-    # Prepend pinned session_goal to L2 summary as a durable preamble.
-    # This ensures the goal survives compaction even if L3 is empty or
-    # the session_goal variable is cleared at end of turn.
-    session_goal = str(session.variables.get("session_goal", "") or "").strip()
-    if session_goal and summary:
-        summary = f"[Active Goal: {session_goal}]\n\n{summary}"
+    # State and semantic residue share one L2 budget. Structured state gets
+    # priority; residue receives only the unused tail. This prevents the new
+    # projection from doubling the old L2 budget.
+    state_budget = int(summary_limit * 0.70) if summary_limit else 0
+    try:
+        from mu.session.state_capsule import build_state_capsule
+        state_capsule = build_state_capsule(session, max_chars=state_budget, include_goal=False)
+        state_capsule = state_capsule[:state_budget] if state_budget else ""
+    except Exception:
+        state_capsule = ""
+    residue_budget = max(0, summary_limit - len(state_capsule))
+    if residue_budget:
+        semantic_residue = semantic_residue[-residue_budget:].lstrip()
+    else:
+        semantic_residue = ""
 
     goal_context = session._build_active_goal_context()
-    # L4 (Recent tool activity) removed from system prompt — tool activity
-    # now lives in messages: verbatim for recent calls, compressed with
-    # [cache:KEY] tags for older calls (see prepare_runtime_history in
-    # messages.py). The model can recall() cached results on demand.
-    # This eliminates ~3000 tokens of redundant system-prompt content.
-
     layers: list[str] = []
 
-    workspace_files = (
-        cached_workspace
-        if cached_workspace is not None
-        else build_workspace_context_files(session)
-    )
+    workspace_files = cached_workspace if cached_workspace is not None else build_workspace_context_files(session)
     if workspace_files:
-        ws_limit = max(
-            0,
-            int(
-                session.variables.get("workspace_context_max_chars", 16384)
-                or 8192
-            ),
-        )
-        layers.append(
-            "LAYER 1 — Workspace context files (user-curated, authoritative):\n"
-            f"[budget: {ws_limit} chars | eviction: truncate-after-budget]\n"
-            + workspace_files
-        )
+        limit = max(0, int(session.variables.get("workspace_context_max_chars", 16384) or 8192))
+        layers.append(f"LAYER 1 — Workspace context files (user-curated, authoritative):\n[budget: {limit} chars | eviction: truncate-after-budget]\n{workspace_files}")
 
-    # LAYER 1C — Workspace file tree (paths only). Previously appended raw
-    # to the system-prompt base (L0), where per-file change diffs grew
-    # unbounded in long-horizon runs (~787k L0 bloat) and hid from layer
-    # accounting. Now a tree-only layer (no diffs) bounded by
-    # folder_context_max_chars, so the compactor and the /memory table see
-    # it. The model reads file contents on demand via read_file/get_chunk.
-    # Cached per turn; refreshed mid-turn only on file add/remove.
     session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
     if session_type == "container":
         from mu.container.context import build_container_context
-
         folder_context_block = build_container_context(session)
     else:
-        folder_context_block = (
-            cached_folder_context
-            if cached_folder_context is not None
-            else session._build_folder_context_block()
-        )
+        folder_context_block = cached_folder_context if cached_folder_context is not None else session._build_folder_context_block()
     if folder_context_block:
-        fc_limit = max(
-            0,
-            int(
-                session.variables.get("folder_context_max_chars", 8192)
-                or 8192
-            ),
-        )
-        layers.append(
-            ("LAYER 1C — Container sandbox:\n" if session_type == "container" else "LAYER 1C — Workspace file tree:\n")
-            + f"[budget: {fc_limit} chars | tree-only, no diffs]\n"
-            + folder_context_block
-        )
+        limit = max(0, int(session.variables.get("folder_context_max_chars", 8192) or 8192))
+        title = "LAYER 1C — Container sandbox:" if session_type == "container" else "LAYER 1C — Workspace file tree:"
+        layers.append(f"{title}\n[budget: {limit} chars | tree-only, no diffs]\n{folder_context_block}")
 
     attachment_context = build_attachment_context(session)
     if attachment_context:
-        layers.append(
-            "LAYER 1D — User-uploaded attachment registry (metadata only):\n"
-            "[budget: 6000 chars | contents retrieved on demand]\n"
-            + attachment_context
-        )
+        layers.append("LAYER 1D — User-uploaded attachment registry (metadata only):\n[budget: 6000 chars | contents retrieved on demand]\n" + attachment_context)
 
-    skills_block = (
-        cached_skills
-        if cached_skills is not None
-        else session._build_skills_block(announce=True)
-    )
+    skills_block = cached_skills if cached_skills is not None else session._build_skills_block(announce=True)
     if skills_block:
-        sk_limit = max(
-            0, int(session.variables.get("skills_max_chars", 6144) or 6144)
-        )
-        layers.append(
-            "LAYER 1B — Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n"
-            f"[budget: {sk_limit} chars | eviction: drop-tail after auto-expand]\n"
-            + skills_block
-        )
+        limit = max(0, int(session.variables.get("skills_max_chars", 6144) or 6144))
+        layers.append(f"LAYER 1B — Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n[budget: {limit} chars | eviction: drop-tail after auto-expand]\n{skills_block}")
 
-    if summary:
-        layers.append(
-            "LAYER 2 — Conversation summary:\n"
-            f"[budget: {summary_limit} chars | eviction: keep newest]\n{summary}"
-        )
+    if state_capsule or semantic_residue:
+        parts = [f"[budget: {summary_limit} chars | eviction: keep newest]"]
+        if state_capsule:
+            parts.append(state_capsule)
+        if semantic_residue:
+            parts.append("Semantic residue from compacted older conversation (non-authoritative where structured state disagrees):\n" + semantic_residue)
+        layers.append("LAYER 2 — Conversation summary:\n" + "\n\n".join(parts))
 
     if goal_context:
-        layers.append(
-            "LAYER 3 — Active task plan / current goal:\n" + goal_context
-        )
-    # LAYER 3B — Agent Role (parent orchestrator / child sub-agent). Skipped
-    # when `session_role` is unset (single-agent sessions) so the prompt is
-    # unchanged for the common case. Lazy: the parent is stamped "parent"
-    # only on its first spawn; children are stamped "child" at creation.
+        layers.append("LAYER 3 — Active task plan / current goal:\n" + goal_context)
+
     session_role = str(session.variables.get("session_role", "") or "").strip()
     if session_role:
         role_block = _build_role_layer(session_role, session)
         if role_block:
             layers.append("LAYER 3B — Agent role:\n" + role_block)
-    # L4B auto-retrieval removed — model uses retrieve_relevant_context
-    # tool on demand instead of pre-injected snippets.
 
-    layers.append(
-        "LAYER 5 — Current turn:\n"
-        "Always prioritize the live user message and current turn tool "
-        "results over older context. "
-        "Some older messages marked [PRESERVED CONTEXT] are kept verbatim "
-        "and protected from summarisation — they are NOT stale or duplicated."
-    )
-
-    if not layers:
-        return system_prompt
-    return (
-        f"{system_prompt}\n\n"
-        "Hierarchical runtime context (layered with independent budgets/eviction):\n"
-        + "\n\n".join(layers)
-    )
+    layers.append("LAYER 5 — Current turn:\nAlways prioritize the live user message and current-turn tool results. Structured L2 state is authoritative; older semantic residue is fallback context only.")
+    return f"{system_prompt}\n\nHierarchical runtime context (layered with independent budgets/eviction):\n" + "\n\n".join(layers)
 
 
 __all__ = ["build_attachment_context", "build_workspace_context_files", "inject_hierarchical_context"]

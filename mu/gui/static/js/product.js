@@ -69,14 +69,15 @@
     }
 
     function refineComposerGeometry() {
-        const composer = document.querySelector('.composer');
         const toolbar = document.querySelector('.composer-toolbar');
-        if (!composer || !toolbar) return;
-        // The legacy toolbar sat on top of the textarea. Keep it in the
-        // composer hierarchy, but give it its own quiet line above input.
-        composer.style.paddingTop = '58px';
-        toolbar.style.bottom = '96px';
-        toolbar.style.gap = '2px';
+        if (!toolbar) return;
+        // Composer controls now live in normal flow above the input. Remove
+        // any legacy inline geometry from earlier product passes so textarea
+        // growth can never overlap mode/session controls.
+        toolbar.style.removeProperty('bottom');
+        toolbar.style.removeProperty('gap');
+        const composer = toolbar.closest('.composer');
+        if (composer) composer.style.removeProperty('padding-top');
         const value = toolbar.querySelector('.composer-mode-pill .value');
         if (value) value.style.textTransform = 'capitalize';
     }

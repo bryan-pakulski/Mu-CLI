@@ -6,6 +6,19 @@
     const FLOAT_MARGIN = 10;
     const FLOAT_GAP = 9;
 
+    function installPresentationStylesheet() {
+        if (document.getElementById('mucli-popouts-css')) return;
+        const link = document.createElement('link');
+        link.id = 'mucli-popouts-css';
+        link.rel = 'stylesheet';
+        link.href = '/static/css/popouts.css';
+        document.head.appendChild(link);
+    }
+
+    // product.js is loaded synchronously by the main web shell, so install the
+    // late override sheet immediately and avoid a first-open style flash.
+    installPresentationStylesheet();
+
     function setText(selector, value) {
         const node = document.querySelector(selector);
         if (node) node.textContent = value;

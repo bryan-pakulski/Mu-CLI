@@ -151,7 +151,7 @@
                 if (current) {
                     if (chat.currentName !== current) chat.focus(current);
                     const slot = chat._slot(current);
-                    if (!slot.__authoritativeHydrated) {
+                    if (!slot.__authoritativeHydrated || !slot.historyHydrated) {
                         await chat.loadHistory(current, { force: true });
                     }
                     decorateWorkedDurations(chat, current);

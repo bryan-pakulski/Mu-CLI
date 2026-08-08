@@ -70,8 +70,10 @@ def test_product_javascript_positions_overlays_and_is_presentation_only():
 
 def test_choice_picker_is_flat_not_card_based():
     css = CRYSTAL_CSS.read_text(encoding="utf-8")
+    compact = css.replace(' ', '')
+    assert '.prompt-body.optionslabel' not in compact  # guard accidental selector collapse
     assert '.prompt-body .options label' in css
-    assert 'border-bottom:1px solid var(--hairline)' in css.replace(' ', '')
+    assert 'border-bottom:1pxsolidvar(--hairline)' in compact
     assert 'appearance: none' in css
 
 

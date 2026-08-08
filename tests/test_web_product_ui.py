@@ -57,11 +57,15 @@ def test_product_javascript_positions_overlays_and_is_presentation_only():
     js = PRODUCT_JS.read_text(encoding="utf-8")
     assert 'polishWelcomeCopy' in js
     assert 'focusComposer' in js
+    assert 'preserveOverlayGeometry' in js
+    assert 'refineComposerGeometry' in js
     assert 'positionFloatingLayer' in js
     assert 'installComposerFloatingLayers' in js
     assert 'installPanelTransitions' in js
     assert "dataset.placement = preferAbove ? 'top' : 'bottom'" in js
+    assert "toolbar.style.bottom = '96px'" in js
     assert "main.style.flexDirection = 'row'" in js
+    assert "node.style.position = 'fixed'" in js
     assert "event.key.toLowerCase() === 'k'" in js
     # Product JS must not own API requests or mutate agent-mode state.
     assert 'fetch(' not in js

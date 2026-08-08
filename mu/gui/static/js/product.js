@@ -56,8 +56,6 @@
 
         layer.dataset.productFloating = 'true';
         layer.style.visibility = 'hidden';
-        layer.style.maxHeight = `${Math.max(180, window.innerHeight - FLOAT_MARGIN * 2)}px`;
-
         const anchorRect = anchor.getBoundingClientRect();
         const layerRect = layer.getBoundingClientRect();
         const maxWidth = Math.max(220, window.innerWidth - FLOAT_MARGIN * 2);
@@ -66,8 +64,7 @@
         const roomAbove = anchorRect.top - FLOAT_MARGIN;
         const roomBelow = window.innerHeight - anchorRect.bottom - FLOAT_MARGIN;
         const preferAbove = roomAbove >= Math.min(layerRect.height + FLOAT_GAP, 280) || roomAbove > roomBelow;
-        let available = preferAbove ? roomAbove - FLOAT_GAP : roomBelow - FLOAT_GAP;
-        available = Math.max(170, available);
+        const available = Math.max(170, (preferAbove ? roomAbove : roomBelow) - FLOAT_GAP);
         const height = Math.min(layerRect.height, available);
 
         let top = preferAbove
@@ -76,9 +73,7 @@
         top = clamp(top, FLOAT_MARGIN, window.innerHeight - height - FLOAT_MARGIN);
 
         let left = anchorRect.left;
-        if (left + width > window.innerWidth - FLOAT_MARGIN) {
-            left = anchorRect.right - width;
-        }
+        if (left + width > window.innerWidth - FLOAT_MARGIN) left = anchorRect.right - width;
         left = clamp(left, FLOAT_MARGIN, window.innerWidth - width - FLOAT_MARGIN);
 
         layer.style.width = `${width}px`;
@@ -97,12 +92,10 @@
         if (!layer || !anchor) return;
 
         const reposition = () => requestAnimationFrame(() => positionFloatingLayer(layer, anchor));
-        const observer = new MutationObserver(reposition);
-        observer.observe(layer, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
         anchor.addEventListener('click', reposition);
         window.addEventListener('resize', reposition, { passive: true });
         document.addEventListener('scroll', reposition, { passive: true, capture: true });
-        new ResizeObserver(reposition).observe(layer);
+        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(reposition).observe(layer);
     }
 
     function installComposerFloatingLayers() {
@@ -111,9 +104,13 @@
     }
 
     function animateVisiblePanel(panel) {
-        if (!panel || !isVisible(panel)) return;
+        if (!panel || !isVisible(panel) || panel.dataset.productEntering === 'true') return;
+        panel.dataset.productEntering = 'true';
         panel.classList.add('product-panel-enter');
-        requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.remove('product-panel-enter')));
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            panel.classList.remove('product-panel-enter');
+            window.setTimeout(() => { delete panel.dataset.productEntering; }, 240);
+        }));
     }
 
     function installPanelTransitions() {
@@ -129,7 +126,7 @@
             }
         });
         panels.forEach(panel => {
-            observer.observe(panel, { attributes: true, attributeFilter: ['style', 'class'] });
+            observer.observe(panel, { attributes: true, attributeFilter: ['style'] });
             if (isVisible(panel)) animateVisiblePanel(panel);
         });
     }

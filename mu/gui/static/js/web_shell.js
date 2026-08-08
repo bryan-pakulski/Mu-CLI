@@ -20,6 +20,10 @@
                 if (current) {
                     if (chat.currentName !== current) chat.focus(current);
                     const slot = chat._slot(current);
+                    // Initial history must be hydrated only after the focused
+                    // session is authoritative. This fixes cold-load sessions
+                    // appearing empty when the earlier parallel history fetch
+                    // landed in a provisional slot.
                     if (!slot.historyHydrated && !slot.busy) {
                         await chat.loadHistory(current, { force: true });
                     }
@@ -33,9 +37,13 @@
                 if (this.current !== name) return result;
                 const slot = chat._slot(name);
                 if (slot.busy) {
+                    // Never force-replace an in-flight transcript. The core
+                    // store will reconcile once the active turn completes.
                     if (!slot.historyHydrated) slot.pendingReload = true;
                     return result;
                 }
+                // Re-read the saved transcript after focus has switched so a
+                // resident daemon session cannot show an empty local slot.
                 await chat.loadHistory(name, { force: true });
                 return result;
             };

@@ -107,6 +107,28 @@ def test_environment_error_residence_is_stopped_not_active_execution(tmp_path):
     assert analysis["summary"]["passive_seconds"] >= 37 * 60
 
 
+def test_current_environment_error_continues_accruing_passive_residence(tmp_path):
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+    job = service.create(JobSpec(title="Current worktree failure"))
+
+    clock.advance(4)
+    service.transition(job.id, JobStatus.PREPARING, reason="prepare")
+    clock.advance(2)
+    service.transition(job.id, JobStatus.ENVIRONMENT_ERROR, reason="git failed")
+    clock.advance(30 * 60)
+
+    analysis = build_job_performance(service, job.id)
+    interval = analysis["phase_intervals"][-1]
+
+    assert service.get(job.id).terminal is False
+    assert interval["status"] == "environment_error"
+    assert interval["classification"] == "stopped"
+    assert interval["duration_seconds"] == 30 * 60
+    assert analysis["summary"]["stopped_seconds"] == 30 * 60
+    assert analysis["summary"]["elapsed_seconds"] == 4 + 2 + 30 * 60
+
+
 def test_old_job_reports_missing_harness_trace_instead_of_inventing_detail(tmp_path):
     service = make_service(tmp_path)
     job = service.create(JobSpec(title="Old job"))

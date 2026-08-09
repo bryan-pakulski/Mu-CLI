@@ -51,9 +51,10 @@ def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
     script = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
     css = WORK_POLISH.read_text(encoding="utf-8")
 
-    assert 'work-app work-product-app' in template
+    assert 'product-app work-product-app' in template
     assert 'work-header product-header' in template
     assert 'product-icon-button work-header-icon' in template
+    assert 'Toggle appearance' in template
     assert 'data-route-theme' in template
     assert 'title="Analyze jobs"' in template
     assert 'title="Model pricing"' in template
@@ -61,10 +62,19 @@ def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
     assert 'id="work-refresh"' in template
     assert 'enhanceChrome' not in script
     assert 'installPolishStyles' not in script
-    assert 'work-theme' not in script
     assert '.work-product-app::before' in css
     assert 'var(--header-bg)' in css
     assert '.work-header-icon' in css
+
+
+def test_engineering_work_exposes_split_model_cost_evidence():
+    script = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
+
+    assert 'modelApi.cost_components' in script
+    assert 'components.input_usd' in script
+    assert 'components.output_usd' in script
+    assert 'Configured provider estimate: input ~' in script
+    assert 'output ~$' in script
 
 
 def test_web_activity_trace_is_filterable_and_drillable():

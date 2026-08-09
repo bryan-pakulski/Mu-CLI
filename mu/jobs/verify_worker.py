@@ -7,8 +7,9 @@ import os
 import threading
 
 from .models import AttentionReason, JobStatus
+from .receipt import JobReceiptBuilder
 from .service import JobStateError, get_default_job_service
-from .verification import DeterministicVerifier
+from .verification import DeterministicVerifier, VerificationRun
 
 
 def _heartbeat(service, job_id: str, worker_id: str, ttl: int, stop: threading.Event) -> None:
@@ -21,7 +22,7 @@ def _heartbeat(service, job_id: str, worker_id: str, ttl: int, stop: threading.E
             return
 
 
-def _verification_feedback(run) -> dict:
+def verification_feedback(run: VerificationRun) -> dict:
     failed = []
     for check in run.checks:
         if check.passed:
@@ -42,6 +43,86 @@ def _verification_feedback(run) -> dict:
         "failed_checks": failed,
         "dirty_status": run.dirty_status[-6000:] if run.dirty else "",
     }
+
+
+def _refresh_receipt(service, job_id: str) -> None:
+    try:
+        JobReceiptBuilder(service).write(job_id)
+    except Exception as exc:
+        service.store.append_event(
+            job_id,
+            "work_receipt_failed",
+            reason=str(exc),
+        )
+
+
+def apply_verification_result(service, job_id: str, run: VerificationRun) -> int:
+    """Apply deterministic readiness policy to persisted verification evidence."""
+    feedback = verification_feedback(run)
+    current = service.get(job_id)
+    if current.status == JobStatus.CANCELLED:
+        _refresh_receipt(service, job_id)
+        return 0
+    if current.status != JobStatus.VERIFYING:
+        _refresh_receipt(service, job_id)
+        return 0
+
+    if run.status == "missing_contract":
+        service.require_human(
+            job_id,
+            AttentionReason.VERIFICATION_REQUIRED,
+            "No validation commands are configured, so MuCLI cannot automatically verify this job.",
+            payload=feedback,
+        )
+        _refresh_receipt(service, job_id)
+        return 21
+
+    if run.passed:
+        service.transition(
+            job_id,
+            JobStatus.READY_FOR_REVIEW,
+            reason="deterministic verification passed",
+            payload=feedback,
+        )
+        _refresh_receipt(service, job_id)
+        return 0
+
+    attempts = service.attempts(job_id)
+    latest_attempt = max((attempt.number for attempt in attempts), default=0)
+    if latest_attempt <= int(current.max_retries):
+        service.store.append_event(
+            job_id,
+            "verification_failed",
+            reason="automatic repair attempt scheduled",
+            payload=feedback,
+        )
+        service.transition(
+            job_id,
+            JobStatus.QUEUED,
+            reason="verification failed; requeueing implementation",
+            payload={
+                "verification_id": run.id,
+                "attempt": latest_attempt,
+                "max_retries": current.max_retries,
+            },
+        )
+        _refresh_receipt(service, job_id)
+        return 10
+
+    service.store.append_event(
+        job_id,
+        "verification_failed",
+        reason="automatic retry budget exhausted",
+        payload=feedback,
+    )
+    service.require_human(
+        job_id,
+        AttentionReason.TEST_FAILURE,
+        "Verification failed and the automatic implementation retry budget is exhausted.",
+        payload=feedback,
+    )
+    _refresh_receipt(service, job_id)
+    return 22
 
 
 def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
@@ -66,66 +147,8 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
         if job.status != JobStatus.VERIFYING:
             return 0
         heartbeat_thread.start()
-        verifier = DeterministicVerifier(service)
-        run = verifier.verify(job)
-        feedback = _verification_feedback(run)
-
-        current = service.get(job_id)
-        if current.status == JobStatus.CANCELLED:
-            return 0
-
-        if run.status == "missing_contract":
-            service.require_human(
-                job_id,
-                AttentionReason.VERIFICATION_REQUIRED,
-                "No validation commands are configured, so MuCLI cannot automatically verify this job.",
-                payload=feedback,
-            )
-            return 21
-
-        if run.passed:
-            service.transition(
-                job_id,
-                JobStatus.READY_FOR_REVIEW,
-                reason="deterministic verification passed",
-                payload=feedback,
-            )
-            return 0
-
-        attempts = service.attempts(job_id)
-        latest_attempt = max((attempt.number for attempt in attempts), default=0)
-        if latest_attempt <= int(job.max_retries):
-            service.store.append_event(
-                job_id,
-                "verification_failed",
-                reason="automatic repair attempt scheduled",
-                payload=feedback,
-            )
-            service.transition(
-                job_id,
-                JobStatus.QUEUED,
-                reason="verification failed; requeueing implementation",
-                payload={
-                    "verification_id": run.id,
-                    "attempt": latest_attempt,
-                    "max_retries": job.max_retries,
-                },
-            )
-            return 10
-
-        service.store.append_event(
-            job_id,
-            "verification_failed",
-            reason="automatic retry budget exhausted",
-            payload=feedback,
-        )
-        service.require_human(
-            job_id,
-            AttentionReason.TEST_FAILURE,
-            "Verification failed and the automatic implementation retry budget is exhausted.",
-            payload=feedback,
-        )
-        return 22
+        run = DeterministicVerifier(service).verify(job)
+        return apply_verification_result(service, job_id, run)
 
     except JobStateError:
         return 0
@@ -137,11 +160,11 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
                 reason=str(exc),
                 payload={"process_id": os.getpid()},
             )
+            _refresh_receipt(service, job_id)
         except Exception:
             pass
-        # Leave VERIFYING in place. Once this lease expires/releases, the
-        # controller can safely retry the deterministic verifier rather than
-        # re-running implementation work.
+        # Leave VERIFYING in place. Once this lease releases/expires the
+        # controller starts a fresh deterministic verifier, not implementation.
         return 4
     finally:
         heartbeat_stop.set()

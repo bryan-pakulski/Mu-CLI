@@ -6,13 +6,14 @@ job diff semantics stay identical across control planes.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List
 
 from .models import JobStatus
-from .service import JobService, JobStateError
+from .service import JobService
 
 
 class JobReviewError(RuntimeError):
@@ -100,6 +101,24 @@ class JobReviewService:
                 return dict(event.payload or {})
         return {}
 
+    def _set_validation_commands(self, job_id: str, values: List[str]) -> None:
+        commands = [str(value).strip() for value in values if str(value).strip()]
+        if not commands:
+            raise JobReviewError("At least one validation command is required to resolve this gate.")
+        now = float(self.service.store._clock())
+        with self.service.store._transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET validation_json = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+                (json.dumps(commands, ensure_ascii=False), now, job_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(job_id)
+        self.service.store.append_event(
+            job_id,
+            "verification_contract_updated",
+            payload={"validation_commands": commands},
+        )
+
     def respond(
         self,
         job_id: str,
@@ -121,14 +140,32 @@ class JobReviewService:
             "selected": list(selected or []),
             "target": context,
         }
-        if job.attention_reason.value == "approval_required" and response["decision"] not in {
-            "approve", "deny", "explain"
-        }:
-            raise JobReviewError("Approval responses require decision=approve, deny, or explain.")
+        if job.attention_reason.value == "approval_required":
+            if response["decision"] not in {"approve", "deny", "explain"}:
+                raise JobReviewError("Approval responses require decision=approve, deny, or explain.")
+            if response["decision"] == "approve" and context.get("can_approve") is False:
+                raise JobReviewError("This tool request cannot be approved because its modification preview failed.")
+        if job.attention_reason.value == "verification_required":
+            commands: List[str] = []
+            if isinstance(value, list):
+                commands.extend(value)
+            elif isinstance(value, str):
+                commands.extend(value.splitlines())
+            commands.extend(response["selected"])
+            if response["detail"]:
+                commands.extend(response["detail"].splitlines())
+            # Deduplicate while preserving reviewer order.
+            seen = set()
+            commands = [c for c in commands if not (c in seen or seen.add(c))]
+            self._set_validation_commands(job_id, commands)
+            response["value"] = commands
         if not response["decision"] and value is None and not response["selected"] and not response["detail"]:
             raise JobReviewError("A response value, decision, selection, or detail is required.")
         self.service.store.append_event(job_id, "interaction_response", payload=response)
-        return self.service.resume(job_id, detail=response["detail"] or str(value or response["decision"] or response["selected"]))
+        return self.service.resume(
+            job_id,
+            detail=response["detail"] or str(response.get("value") or response["decision"] or response["selected"]),
+        )
 
     def request_changes(self, job_id: str, feedback: str):
         job = self.service.get(job_id)
@@ -143,8 +180,6 @@ class JobReviewService:
             reason="reviewer requested changes",
             payload={"detail": text},
         )
-        # The runner already reads the newest human_response into the next
-        # implementation prompt. Keep that contract shared with blockers.
         self.service.store.append_event(
             job_id,
             "human_response",

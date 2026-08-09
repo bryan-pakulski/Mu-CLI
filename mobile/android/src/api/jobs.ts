@@ -174,7 +174,7 @@ export interface JobBoardResponse {
   sections: Record<JobBoardSection, EngineeringJob[]>;
 }
 
-export interface CreateJobInput {
+export interface CreateJobInput extends Record<string, unknown> {
   title: string;
   description?: string;
   repository?: string;
@@ -193,7 +193,7 @@ export interface CreateJobInput {
   metadata?: Record<string, unknown>;
 }
 
-export interface JobInteractionResponse {
+export interface JobInteractionResponse extends Record<string, unknown> {
   detail?: string;
   decision?: 'approve' | 'deny' | 'explain' | string;
   value?: unknown;

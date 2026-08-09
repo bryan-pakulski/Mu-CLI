@@ -59,7 +59,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   }, []);
 
   useEffect(() => {
-    if (visible) load();
+    if (visible) void load();
   }, [load, visible]);
 
   useEffect(() => {
@@ -69,8 +69,6 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   const switchSession = async (session: SessionSummary) => {
     if (switchingName) return;
     setSwitchingName(session.name);
-    // Release the native modal immediately. Loading/focusing continues in the
-    // background and cannot hold the navigation surface hostage.
     onClose();
     try {
       if (!session.is_loaded) {
@@ -85,10 +83,6 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
     } finally {
       setSwitchingName(null);
     }
-  };
-
-  const newSession = () => {
-    setCreateOpen(true);
   };
 
   const sessionCreated = (session: { name: string; provider: string; model: string }) => {
@@ -110,7 +104,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
             setActiveProviderModel(null, null);
             onClose();
           }
-          load();
+          void load();
         },
       },
     ]);
@@ -124,118 +118,148 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
         style: 'destructive',
         onPress: async () => {
           await sessionsApi.delete(session.name);
-          load();
+          void load();
         },
       },
     ]);
   };
 
   const statusColor = (session: SessionSummary) => {
-    if (session.is_busy) return colors.warning;
-    if (session.is_loaded) return colors.success;
+    if (session.is_busy) return colors.accent;
+    if (session.is_loaded) return colors.textSoft;
     return colors.textDim;
   };
 
   const typeIcon = (session: SessionSummary): keyof typeof Ionicons.glyphMap => {
-    const t = session.session_type;
-    if (t === 'container') return 'cube-outline';
-    if (t === 'chat') return 'chatbubble-ellipses-outline';
+    if (session.session_type === 'container') return 'cube-outline';
+    if (session.session_type === 'chat') return 'chatbubble-ellipses-outline';
     return 'folder-open-outline';
   };
 
   return (
     <>
-    <SafeAreaModal visible={visible && !createOpen} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View
-          {...swipeResponder.panHandlers}
-          style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: 16 }]}
-        >
-          <View style={styles.header}>
-            <View>
-              <Text style={[styles.title, { color: colors.text }]}>Sessions</Text>
-              <Text variant="xs" dim>Tap a row to open it.</Text>
+      <SafeAreaModal visible={visible && !createOpen} transparent animationType="fade" onRequestClose={onClose}>
+        <View style={styles.overlay}>
+          <View
+            {...swipeResponder.panHandlers}
+            style={[
+              styles.drawer,
+              {
+                backgroundColor: colors.glassStrong,
+                borderRightColor: colors.hairline,
+                paddingTop: 16,
+              },
+            ]}
+          >
+            <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
+              <View>
+                <Text style={[styles.title, { color: colors.text }]}>Sessions</Text>
+                <Text variant="xs" dim>Saved and running work</Text>
+              </View>
+              <View style={styles.headerActions}>
+                <TouchableOpacity onPress={() => setCreateOpen(true)} style={styles.iconButton} accessibilityLabel="Create session">
+                  <Ionicons name="add" size={20} color={colors.textDim} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close sessions">
+                  <Ionicons name="close" size={20} color={colors.textDim} />
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity onPress={newSession} style={[styles.iconButton, { backgroundColor: colors.bgHover }]} accessibilityLabel="Create session">
-                <Ionicons name="add" size={20} color={colors.accent} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]} accessibilityLabel="Close sessions">
-                <Ionicons name="close" size={20} color={colors.text} />
-              </TouchableOpacity>
-            </View>
+
+            <FlatList
+              data={sessions}
+              keyExtractor={item => item.name}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
+              contentContainerStyle={styles.listContent}
+              ListEmptyComponent={
+                loading ? null : (
+                  <View style={styles.empty}>
+                    <Text variant="sm" dim>{loadError || 'No saved sessions'}</Text>
+                    {loadError ? (
+                      <TouchableOpacity onPress={() => void load()} style={{ marginTop: 12 }}>
+                        <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                )
+              }
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => switchSession(item)}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.row,
+                    { borderBottomColor: colors.hairline },
+                    activeSessionName === item.name && { backgroundColor: colors.bgHover },
+                  ]}
+                >
+                  <View style={styles.typeIconWrap}>
+                    <Ionicons name={typeIcon(item)} size={17} color={statusColor(item)} />
+                  </View>
+                  <View style={styles.rowCopy}>
+                    <Text variant="sm" style={styles.rowName} numberOfLines={1}>{item.name}</Text>
+                    <Text variant="xs" dim>
+                      {switchingName === item.name ? 'Opening…' : item.is_busy ? 'Working' : item.is_loaded ? 'Loaded' : 'Saved'}
+                      {item.session_type ? ` · ${item.session_type}` : ''}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => unloadSession(item)} style={styles.rowAction} accessibilityLabel={`Unload ${item.name}`}>
+                    <Ionicons name="remove-circle-outline" size={18} color={colors.textDim} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => deleteSession(item)} style={styles.rowAction} accessibilityLabel={`Delete ${item.name}`}>
+                    <Ionicons name="trash-outline" size={17} color={colors.textDim} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              )}
+            />
           </View>
-
-          <FlatList
-            data={sessions}
-            keyExtractor={item => item.name}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-            contentContainerStyle={styles.listContent}
-            ListEmptyComponent={
-              loading ? null : (
-                <View style={styles.empty}>
-                  <Text variant="sm" dim>{loadError || 'No saved sessions'}</Text>
-                  {loadError ? (
-                    <TouchableOpacity onPress={load} style={{ marginTop: 12 }}>
-                      <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              )
-            }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => switchSession(item)}
-                activeOpacity={0.7}
-                style={[
-                  styles.row,
-                  activeSessionName === item.name && { backgroundColor: colors.bgHover },
-                ]}
-              >
-                <View style={[styles.typeIconWrap, { backgroundColor: colors.bgHover }]}>
-                  <Ionicons name={typeIcon(item)} size={17} color={statusColor(item)} />
-                </View>
-                <View style={styles.rowCopy}>
-                  <Text variant="sm" style={styles.rowName} numberOfLines={1}>{item.name}</Text>
-                  <Text variant="xs" dim>{switchingName === item.name ? 'Opening…' : item.is_busy ? 'Running' : item.is_loaded ? 'Loaded' : 'Saved'}{item.session_type ? ` · ${item.session_type}` : ''}</Text>
-                </View>
-                <TouchableOpacity onPress={() => unloadSession(item)} style={styles.rowAction}>
-                  <Ionicons name="remove-circle-outline" size={19} color={colors.textDim} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => deleteSession(item)} style={styles.rowAction}>
-                  <Ionicons name="trash-outline" size={18} color={colors.textDim} />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            )}
-          />
-
+          <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
         </View>
-        <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
-      </View>
-    </SafeAreaModal>
-    <NewSessionSheet
-      visible={createOpen}
-      onClose={() => setCreateOpen(false)}
-      onCreated={sessionCreated}
-    />
+      </SafeAreaModal>
+      <NewSessionSheet
+        visible={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={sessionCreated}
+      />
     </>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, flexDirection: 'row' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)' },
-  drawer: { width: '88%', maxWidth: 380, elevation: 10, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 24, shadowOffset: { width: 8, height: 0 } },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 16 },
-  headerActions: { flexDirection: 'row', gap: 7 },
-  title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.4 },
-  iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  listContent: { paddingHorizontal: 8, paddingBottom: 12 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(5,10,16,0.42)' },
+  drawer: {
+    width: '88%',
+    maxWidth: 380,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 6, height: 0 },
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerActions: { flexDirection: 'row', gap: 2 },
+  title: { fontSize: 19, fontWeight: '600', letterSpacing: -0.25 },
+  iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  listContent: { paddingHorizontal: 10, paddingBottom: 12 },
   empty: { padding: 28, alignItems: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', minHeight: 62, borderRadius: 15, paddingHorizontal: 12, marginBottom: 4 },
-  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 11 },
-  typeIconWrap: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  typeIconWrap: { width: 28, alignItems: 'flex-start', justifyContent: 'center', marginRight: 8 },
   rowCopy: { flex: 1 },
   rowName: { fontWeight: '600' },
-  rowAction: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
+  rowAction: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

@@ -24,6 +24,45 @@ Jobs are core runtime state, **not GUI state**.
 The three control planes may render and control jobs differently, but they must
 never maintain independent lifecycle truth.
 
+### Git artifact rule
+
+A Git worktree is an **execution primitive only**. It must not be the durable
+artifact a reviewer is expected to work with after implementation finishes.
+
+Each workspace job owns a normal `mu/job-*` branch for its lifetime. While the
+job is running, MuCLI may attach that branch to a managed worktree so several
+jobs can execute safely in parallel. Once deterministic verification passes,
+MuCLI must:
+
+1. confirm the worktree is clean and its HEAD matches the job branch;
+2. preserve the branch and verified HEAD as the authoritative review artifact;
+3. retire the managed worktree;
+4. clear the active worktree from the durable job record;
+5. enter `READY_FOR_REVIEW` only after that branch handoff succeeds.
+
+Review, diff, merge and eventual PR operations therefore use the normal branch,
+not the managed worktree path. If a reviewer requests changes, MuCLI re-creates
+a temporary worktree from the same branch and continues the same durable job.
+
+In short:
+
+```
+execution:  branch + temporary worktree
+                 |
+                 v
+verification passes
+                 |
+                 v
+review:     normal branch only
+                 |
+        request changes?
+          /           \
+        yes            no
+         |              |
+recreate worktree     merge/PR
+on same branch
+```
+
 ## Lifecycle
 
 ```
@@ -40,6 +79,10 @@ Failure states are retryable through QUEUED; CANCELLED and MERGED are terminal.
 
 State changes and human/worker events are append-only records in the job event
 log. Jobs use optimistic versions for concurrent control-plane updates.
+
+`READY_FOR_REVIEW` means both verification and Git finalization have completed:
+the verified changes are available on the durable review branch and the managed
+execution worktree has been retired.
 
 ## Milestone 1 — Durable Jobs
 
@@ -75,43 +118,50 @@ to an execution terminal/gate state from TUI/mobile later.
 
 ## Milestone 2 — Isolated Engineering Work
 
-- [ ] Repository registry / canonical repository identity.
-- [ ] Base branch + base SHA capture.
-- [ ] Per-job Git branch.
-- [ ] Per-job Git worktree.
-- [ ] Environment association.
-- [ ] Checkpoints.
-- [ ] Concurrent scheduler with collision-safe workspaces.
+- [x] Repository registry / canonical repository identity.
+- [x] Base branch + base SHA capture.
+- [x] Per-job Git branch.
+- [x] Per-job Git worktree for active execution.
+- [x] Branch-first finalization after successful verification.
+- [x] Worktree recreation on review changes.
+- [x] Environment association.
+- [x] Checkpoints.
+- [x] Concurrent scheduler with collision-safe workspaces.
 
-**Completion gate:** five jobs can safely work against the same repository at once.
+**Completion gate:** five jobs can safely work against the same repository at once,
+and finished jobs can be reviewed from ordinary branches without keeping their
+execution worktrees alive.
 
 ## Milestone 3 — Verification
 
-- [ ] Acceptance criteria contract.
-- [ ] Validation command plan.
-- [ ] Deterministic verifier runner.
-- [ ] Structured verification evidence.
+- [x] Acceptance criteria contract.
+- [x] Validation command plan.
+- [x] Deterministic verifier runner.
+- [x] Structured verification evidence.
 - [ ] Optional independent verifier-agent pass.
-- [ ] Work receipt/result manifest.
+- [x] Work receipt/result manifest.
 
 **Completion gate:** `READY_FOR_REVIEW` always has evidence and never means merely
-"the builder said it was done".
+"the builder said it was done". It also means the verified implementation has
+been handed off to its normal Git review branch.
 
 ## Milestone 4 — Review + Attention UI
 
-- [ ] Shared query model: Needs You / Running / Ready / Failed.
-- [ ] GUI work queue and job detail.
-- [ ] TUI work queue/detail/attention workflow.
-- [ ] Mobile work queue/detail/attention workflow.
-- [ ] Diff review surface.
-- [ ] Evidence/Trace/cost summary.
-- [ ] Continue / request-changes / discard controls.
+- [x] Shared query model: Needs You / Running / Ready / Failed.
+- [x] GUI work queue and job detail.
+- [x] TUI work queue/detail/attention workflow.
+- [x] Mobile work queue/detail/attention workflow.
+- [x] Diff review surface.
+- [x] Evidence/Trace/cost summary.
+- [x] Continue / request-changes / discard controls.
 
 **Completion gate:** understand five jobs without opening five chat transcripts.
 
 ## Milestone 5 — Git / PR Completion
 
-- [ ] Structured commits.
+- [x] Verified implementation materialized as a normal review branch.
+- [x] Execution worktree retired before `READY_FOR_REVIEW`.
+- [ ] Final commit policy / commit cleanup.
 - [ ] PR creation.
 - [ ] Base-drift detection.
 - [ ] Merge-conflict state.
@@ -119,7 +169,7 @@ to an execution terminal/gate state from TUI/mobile later.
 - [ ] Mergeability state.
 - [ ] Merge action.
 
-**Completion gate:** ticket -> autonomous implementation -> review -> merge.
+**Completion gate:** ticket -> autonomous implementation -> branch review -> merge.
 
 ## Milestone 6 — Unattended Reliability
 

@@ -27,6 +27,7 @@ on:
       - 'mu/gui/static/css/work_polish.css'
       - 'mu/gui/static/css/job_trace.css'
       - 'mu/gui/static/css/model_costs.css'
+      - 'mu/gui/static/js/route_theme.js'
       - 'mu/gui/static/js/work.js'
       - 'mu/gui/static/js/work_analysis_link.js'
       - 'mu/gui/static/js/work_diagnostics.js'

@@ -17,10 +17,10 @@ def git(path, *args):
     ).stdout.strip()
 
 
-def make_repo(tmp_path):
+def make_repo(tmp_path, *, branch="main"):
     repo = tmp_path / "repo"
     repo.mkdir()
-    git(repo, "init", "-b", "main")
+    git(repo, "init", "-b", branch)
     git(repo, "config", "user.name", "Test")
     git(repo, "config", "user.email", "test@example.com")
     (repo / "README.md").write_text("base\n", encoding="utf-8")
@@ -45,6 +45,19 @@ def test_primary_and_existing_worktree_share_one_repository_identity(tmp_path):
     assert len(registry.list()) == 1
 
 
+def test_registry_detects_current_branch_when_origin_head_is_unavailable(tmp_path):
+    repo = make_repo(tmp_path, branch="develop")
+    registry = RepositoryRegistry(JobStore(str(tmp_path / "jobs.sqlite3")))
+
+    record = registry.register(str(repo))
+
+    assert record.default_branch == "develop"
+    assert record.metadata["current_branch"] == "develop"
+    assert record.metadata["remote_default_ref"] == ""
+    assert record.metadata["head_sha"] == git(repo, "rev-parse", "HEAD")
+    assert record.metadata["clean"] is True
+
+
 def test_worktree_preparation_persists_repository_and_environment_identity(tmp_path):
     repo = make_repo(tmp_path)
     service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
@@ -56,7 +69,9 @@ def test_worktree_preparation_persists_repository_and_environment_identity(tmp_p
 
     assert current.metadata["repository_id"] == info.repository_id
     assert current.metadata["repository_root"] == str(repo)
+    assert current.metadata["resolved_base_ref"] == "main"
     assert current.environment["kind"] == "host_git_worktree"
     assert current.environment["repository_id"] == info.repository_id
     assert current.environment["worktree"] == current.worktree
     assert current.environment["branch"] == current.branch
+    assert current.environment["base_ref"] == "main"

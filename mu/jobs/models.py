@@ -41,60 +41,33 @@ class AttentionReason(str, Enum):
 
 TERMINAL_STATUSES = frozenset({JobStatus.CANCELLED, JobStatus.MERGED})
 
-# Explicit transitions are deliberately conservative. Retry/recovery paths are
-# represented here rather than bypassing lifecycle rules in individual UIs.
 ALLOWED_TRANSITIONS = {
     JobStatus.QUEUED: {JobStatus.PREPARING, JobStatus.CANCELLED},
     JobStatus.PREPARING: {
-        JobStatus.RUNNING,
-        JobStatus.NEEDS_HUMAN,
-        JobStatus.RECOVERING,
-        JobStatus.ENVIRONMENT_ERROR,
-        JobStatus.FAILED,
-        JobStatus.CANCELLED,
+        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
+        JobStatus.ENVIRONMENT_ERROR, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.RUNNING: {
-        JobStatus.NEEDS_HUMAN,
-        JobStatus.VERIFYING,
-        JobStatus.RECOVERING,
-        JobStatus.FAILED,
-        JobStatus.TIMED_OUT,
-        JobStatus.BUDGET_EXCEEDED,
-        JobStatus.ENVIRONMENT_ERROR,
-        JobStatus.CANCELLED,
+        JobStatus.NEEDS_HUMAN, JobStatus.VERIFYING, JobStatus.RECOVERING,
+        JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED,
+        JobStatus.ENVIRONMENT_ERROR, JobStatus.CANCELLED,
     },
     JobStatus.NEEDS_HUMAN: {
-        JobStatus.RUNNING,
-        JobStatus.QUEUED,
-        JobStatus.FAILED,
-        JobStatus.CANCELLED,
+        JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.VERIFYING: {
-        JobStatus.READY_FOR_REVIEW,
-        JobStatus.RUNNING,
-        JobStatus.NEEDS_HUMAN,
-        JobStatus.RECOVERING,
-        JobStatus.CONFLICTED,
-        JobStatus.FAILED,
+        JobStatus.READY_FOR_REVIEW, JobStatus.RUNNING, JobStatus.NEEDS_HUMAN,
+        JobStatus.RECOVERING, JobStatus.CONFLICTED, JobStatus.FAILED,
         JobStatus.CANCELLED,
     },
     JobStatus.READY_FOR_REVIEW: {
-        JobStatus.RUNNING,
-        JobStatus.CONFLICTED,
-        JobStatus.MERGED,
-        JobStatus.CANCELLED,
+        JobStatus.RUNNING, JobStatus.CONFLICTED, JobStatus.MERGED, JobStatus.CANCELLED,
     },
     JobStatus.RECOVERING: {
-        JobStatus.RUNNING,
-        JobStatus.NEEDS_HUMAN,
-        JobStatus.FAILED,
-        JobStatus.CANCELLED,
+        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.CONFLICTED: {
-        JobStatus.RUNNING,
-        JobStatus.NEEDS_HUMAN,
-        JobStatus.FAILED,
-        JobStatus.CANCELLED,
+        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.CANCELLED},
     JobStatus.TIMED_OUT: {JobStatus.QUEUED, JobStatus.CANCELLED},
@@ -110,9 +83,26 @@ def coerce_status(value: JobStatus | str) -> JobStatus:
 
 
 def can_transition(current: JobStatus | str, target: JobStatus | str) -> bool:
-    current_status = coerce_status(current)
-    target_status = coerce_status(target)
-    return target_status in ALLOWED_TRANSITIONS[current_status]
+    return coerce_status(target) in ALLOWED_TRANSITIONS[coerce_status(current)]
+
+
+def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Normalize the reproducible agent execution policy stored with a job."""
+    raw = dict(value or {})
+    execution = {
+        "provider": str(raw.get("provider") or "").strip(),
+        "model": str(raw.get("model") or "").strip(),
+        "agent_mode": str(raw.get("agent_mode") or "default").strip() or "default",
+        "session_type": str(raw.get("session_type") or "workspace").strip().lower() or "workspace",
+        "auto_approve_writes": bool(raw.get("auto_approve_writes", False)),
+    }
+    if execution["session_type"] not in {"chat", "workspace", "container"}:
+        raise ValueError("execution.session_type must be chat, workspace, or container")
+    # Preserve future execution policy keys without making control planes lose data.
+    for key, item in raw.items():
+        if key not in execution:
+            execution[str(key)] = item
+    return execution
 
 
 @dataclass(frozen=True)
@@ -130,14 +120,13 @@ class JobSpec:
     max_retries: int = 2
     max_subagents: Optional[int] = None
     environment: Dict[str, Any] = field(default_factory=dict)
+    execution: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def normalized(self) -> "JobSpec":
         title = str(self.title or "").strip()
         if not title:
             raise ValueError("job title is required")
-        repository = str(self.repository or "").strip()
-        base_branch = str(self.base_branch or "main").strip() or "main"
         if self.max_cost_usd is not None and float(self.max_cost_usd) <= 0:
             raise ValueError("max_cost_usd must be positive")
         if self.max_runtime_seconds is not None and int(self.max_runtime_seconds) <= 0:
@@ -151,8 +140,8 @@ class JobSpec:
         return JobSpec(
             title=title,
             description=str(self.description or "").strip(),
-            repository=repository,
-            base_branch=base_branch,
+            repository=str(self.repository or "").strip(),
+            base_branch=str(self.base_branch or "main").strip() or "main",
             base_sha=str(self.base_sha or "").strip(),
             acceptance_criteria=[str(v).strip() for v in self.acceptance_criteria if str(v).strip()],
             validation_commands=[str(v).strip() for v in self.validation_commands if str(v).strip()],
@@ -162,6 +151,7 @@ class JobSpec:
             max_retries=int(self.max_retries),
             max_subagents=int(self.max_subagents) if self.max_subagents is not None else None,
             environment=dict(self.environment or {}),
+            execution=normalize_execution(self.execution),
             metadata=dict(self.metadata or {}),
         )
 
@@ -192,6 +182,7 @@ class Job:
     branch: str = ""
     worktree: str = ""
     environment: Dict[str, Any] = field(default_factory=dict)
+    execution: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     session_name: str = ""
     worker_id: str = ""

@@ -211,8 +211,8 @@ function JobRow({ job, onPress }: { job: EngineeringJob; onPress: () => void }) 
 type NewJobSheetProps = {
   visible: boolean;
   sessionName: string | null;
-  provider: string;
-  model: string;
+  provider: string | null;
+  model: string | null;
   onClose: () => void;
   onCreated: (job: EngineeringJob) => void;
 };
@@ -315,7 +315,7 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
         <TouchableOpacity onPress={onClose} style={[styles.sheetButton, { borderColor: colors.hairline }]}>
           <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>Cancel</Text>
         </TouchableOpacity>
-        <TouchableOpacity disabled={submitting} onPress={() => void submit()} style={[styles.sheetButton, { borderColor: colors.accentLine, backgroundColor: colors.accentSoft }]}>
+        <TouchableOpacity disabled={submitting} onPress={() => void submit()} style={[styles.sheetButton, { borderColor: colors.accent, backgroundColor: colors.accentSoft }]}>
           {submitting ? <ActivityIndicator size="small" color={colors.accent} /> : <Text variant="xs" style={{ color: colors.text, fontWeight: '600' }}>Queue job</Text>}
         </TouchableOpacity>
       </View>
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   pageHeaderCopy: { flex: 1 },
-  pageTitle: { fontWeight: '650', letterSpacing: -0.45 },
+  pageTitle: { fontWeight: '600', letterSpacing: -0.45 },
   pageSubtitle: { marginTop: 4, lineHeight: 19 },
   newButton: {
     minHeight: 36,

@@ -6,9 +6,22 @@ import shlex
 from typing import Any, Dict, List
 
 from mu.jobs import JobSpec, JobStateError, get_default_job_service
+from mu.jobs.board import BOARD_ORDER, build_job_board
 from mu.jobs.host import ensure_controller_daemon
+from mu.jobs.receipt import JobReceiptBuilder
+from mu.jobs.review import JobReviewError, JobReviewService, build_job_diff
 
 from . import CommandResult, command
+
+
+BOARD_LABELS = {
+    "needs_you": "Needs you",
+    "running": "Running",
+    "queued": "Queued",
+    "ready": "Ready for review",
+    "failed": "Failed",
+    "done": "Done",
+}
 
 
 def _emit(session: Any, text: str, allow_prompt: bool, *, error: bool = False) -> None:
@@ -23,23 +36,40 @@ def _emit(session: Any, text: str, allow_prompt: bool, *, error: bool = False) -
 def _format_job(job) -> str:
     budget = f"${job.cost_usd:.2f}"
     if job.max_cost_usd is not None:
-        budget += f" / ${job.max_cost_usd:.2f}"
-    attention = f" · needs you: {job.attention_reason.value}" if job.needs_attention else ""
-    return f"{job.id[:10]}  {job.status.value:<17}  {budget:<15}  {job.title}{attention}"
+        budget += f"/${job.max_cost_usd:.2f}"
+    attention = f" · {job.attention_reason.value}" if job.needs_attention else ""
+    return f"{job.id[:10]}  {job.status.value:<17}  {budget:<13}  {job.title}{attention}"
+
+
+def _board_jobs(session: Any, allow_prompt: bool) -> CommandResult:
+    board = build_job_board(get_default_job_service())
+    lines = ["Engineering work", ""]
+    for section in BOARD_ORDER:
+        jobs = getattr(board, section)
+        if not jobs:
+            continue
+        lines.extend([f"{BOARD_LABELS[section]} ({len(jobs)})", "─" * 76])
+        lines.extend(_format_job(job) for job in jobs)
+        lines.append("")
+    if not any(board.counts.values()):
+        lines.append("No jobs found.")
+    body = "\n".join(lines).rstrip()
+    _emit(session, body, allow_prompt)
+    return CommandResult(ok=True, message=f"{sum(board.counts.values())} job(s).", data=board.to_dict())
 
 
 def _list_jobs(session: Any, status: str, allow_prompt: bool) -> CommandResult:
+    if not status:
+        return _board_jobs(session, allow_prompt)
     service = get_default_job_service()
     try:
-        jobs = service.list(statuses=[status] if status else None)
+        jobs = service.list(statuses=[status])
     except ValueError as exc:
         _emit(session, str(exc), allow_prompt, error=True)
         return CommandResult(ok=False, message=str(exc))
-    lines = ["Durable engineering jobs", ""]
-    if jobs:
-        lines.extend(["ID          STATUS             COST             TITLE", "─" * 76])
-        lines.extend(_format_job(job) for job in jobs)
-    else:
+    lines = [f"Jobs · {status}", "", "ID          STATUS             COST           TITLE", "─" * 76]
+    lines.extend(_format_job(job) for job in jobs)
+    if not jobs:
         lines.append("No jobs found.")
     body = "\n".join(lines)
     _emit(session, body, allow_prompt)
@@ -61,6 +91,13 @@ def _resolve_job(service, token: str):
         raise
 
 
+def _fmt_elapsed(seconds: float) -> str:
+    total = max(0, int(seconds or 0))
+    minutes, sec = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m {sec}s" if hours else f"{minutes}m {sec}s"
+
+
 def _show_job(session: Any, token: str, allow_prompt: bool) -> CommandResult:
     service = get_default_job_service()
     try:
@@ -69,19 +106,23 @@ def _show_job(session: Any, token: str, allow_prompt: bool) -> CommandResult:
         message = f"Job not found: {token}" if isinstance(exc, KeyError) else str(exc)
         _emit(session, message, allow_prompt, error=True)
         return CommandResult(ok=False, message=message)
-    attempts = service.attempts(job.id)
+    receipt = JobReceiptBuilder(service).build(job.id)
     execution = job.execution or {}
+    git = receipt.get("git") or {}
+    verification = receipt.get("verification") or {}
     lines = [
         f"Job {job.id}",
         f"Status: {job.status.value}",
         f"Title: {job.title}",
         f"Repository: {job.repository or '—'}",
-        f"Base: {job.base_branch}{('@' + job.base_sha[:12]) if job.base_sha else ''}",
-        f"Runtime: {execution.get('provider') or '—'} / {execution.get('model') or '—'} · {execution.get('agent_mode') or 'default'} · {execution.get('session_type') or 'workspace'}",
-        f"Write approval: {'automatic' if execution.get('auto_approve_writes') else 'human gate'}",
+        f"Branch: {job.branch or '—'}",
+        f"Base → head: {(job.base_sha or '—')[:12]} → {str(git.get('head_sha') or '—')[:12]}",
+        f"Runtime: {execution.get('provider') or '—'} / {execution.get('model') or '—'} · {execution.get('agent_mode') or 'default'}",
         f"Cost: ${job.cost_usd:.2f}{f' / ${job.max_cost_usd:.2f}' if job.max_cost_usd is not None else ''}",
-        f"Attempts: {len(attempts)}",
-        f"Events: {len(service.events(job.id))}",
+        f"Elapsed: {_fmt_elapsed((receipt.get('outcome') or {}).get('elapsed_seconds', 0))}",
+        f"Attempts: {(receipt.get('outcome') or {}).get('attempts', 0)}",
+        f"Changes: {len(git.get('changed_files') or [])} files · +{git.get('additions', 0)} / -{git.get('deletions', 0)}",
+        f"Verification: {verification.get('status') or 'not run'}",
     ]
     if job.description:
         lines.extend(["", job.description])
@@ -93,7 +134,68 @@ def _show_job(session: Any, token: str, allow_prompt: bool) -> CommandResult:
         lines.extend(["", "Validation:", *[f"  $ {item}" for item in job.validation_commands]])
     body = "\n".join(lines)
     _emit(session, body, allow_prompt)
-    return CommandResult(ok=True, message=job.title, data={"job": job.to_dict(), "attempts": [a.to_dict() for a in attempts]})
+    return CommandResult(ok=True, message=job.title, data={"job": job.to_dict(), "receipt": receipt})
+
+
+def _show_receipt(session: Any, token: str, allow_prompt: bool) -> CommandResult:
+    service = get_default_job_service()
+    try:
+        job = _resolve_job(service, token)
+        receipt = JobReceiptBuilder(service).build(job.id)
+    except (KeyError, ValueError) as exc:
+        message = f"Job not found: {token}" if isinstance(exc, KeyError) else str(exc)
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message)
+    outcome = receipt.get("outcome") or {}
+    git = receipt.get("git") or {}
+    verification = receipt.get("verification") or {}
+    activity = receipt.get("activity") or {}
+    lines = [
+        f"Work receipt · {job.title}",
+        "",
+        f"Outcome: {job.status.value}{' · READY TO REVIEW' if outcome.get('ready_for_review') else ''}",
+        f"Worked: {_fmt_elapsed(outcome.get('elapsed_seconds', 0))}",
+        f"Cost: ${float(outcome.get('cost_usd') or 0):.2f}",
+        f"Attempts: {outcome.get('attempts', 0)}",
+        "",
+        f"Branch: {git.get('branch') or '—'}",
+        f"Base: {str(git.get('base_sha') or '—')[:12]}",
+        f"Head: {str(git.get('head_sha') or '—')[:12]}",
+        f"Changed: {len(git.get('changed_files') or [])} files · +{git.get('additions', 0)} / -{git.get('deletions', 0)}",
+        f"Clean worktree: {'yes' if git.get('dirty') is False else 'no/unknown'}",
+        "",
+        f"Verification: {verification.get('status') or 'not run'}",
+    ]
+    for check in verification.get("checks") or []:
+        icon = "✓" if check.get("passed") else "✗"
+        lines.append(f"  {icon} {check.get('command')} · {check.get('duration_seconds', 0):.2f}s")
+    lines.extend([
+        "",
+        f"Activity: {activity.get('tool_calls', 0)} tools · {activity.get('checkpoints', 0)} checkpoints · {activity.get('human_responses', 0)} human responses",
+    ])
+    body = "\n".join(lines)
+    _emit(session, body, allow_prompt)
+    return CommandResult(ok=True, message="Work receipt", data={"receipt": receipt})
+
+
+def _show_diff(session: Any, token: str, allow_prompt: bool) -> CommandResult:
+    service = get_default_job_service()
+    try:
+        job = _resolve_job(service, token)
+        diff = build_job_diff(service, job.id)
+    except (KeyError, ValueError, JobReviewError) as exc:
+        message = f"Job not found: {token}" if isinstance(exc, KeyError) else str(exc)
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message)
+    body = "\n".join([
+        f"Diff · {job.title}",
+        f"{diff.base_sha[:12]} → {diff.head_sha[:12]} · {len(diff.files)} files",
+        diff.stat or "No changed files.",
+        "",
+        diff.patch or "No diff.",
+    ])
+    _emit(session, body, allow_prompt)
+    return CommandResult(ok=True, message=f"{len(diff.files)} changed file(s).", data={"diff": diff.to_dict()})
 
 
 def _session_defaults(session: Any) -> Dict[str, Any]:
@@ -198,53 +300,107 @@ def _create_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
     return CommandResult(ok=host.running, message=message, data={"job": job.to_dict(), "controller": host.__dict__})
 
 
-def _control_job(session: Any, action: str, raw: str, allow_prompt: bool) -> CommandResult:
+def _respond_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
+    token, _, answer = str(raw or "").strip().partition(" ")
+    service = get_default_job_service()
+    try:
+        job = _resolve_job(service, token)
+        if not answer.strip():
+            raise JobReviewError("Response text or approval decision is required.")
+        review = JobReviewService(service)
+        if job.attention_reason.value == "approval_required":
+            decision, _, detail = answer.strip().partition(" ")
+            updated = review.respond(job.id, decision=decision, detail=detail)
+        else:
+            context = {}
+            for event in reversed(service.events(job.id)):
+                if event.to_status and event.to_status.value == "needs_human":
+                    context = dict(event.payload or {})
+                    break
+            shape = str(context.get("shape") or "input")
+            value: Any = answer.strip()
+            selected: List[Any] = []
+            decision = ""
+            if shape == "confirm":
+                normalized = answer.strip().lower()
+                value = normalized in {"y", "yes", "true", "confirm", "approve"}
+            elif shape in {"choices", "choice"}:
+                selected = [answer.strip()]
+            updated = review.respond(job.id, detail=answer.strip(), decision=decision, value=value, selected=selected)
+    except (KeyError, ValueError, JobStateError, JobReviewError) as exc:
+        message = str(exc) if not isinstance(exc, KeyError) else f"Job not found: {token}"
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message)
+    host = ensure_controller_daemon()
+    message = f"Response saved · job {updated.id[:10]} → {updated.status.value}"
+    if not host.running:
+        message += f" · WARNING: {host.detail}"
+    _emit(session, message, allow_prompt, error=not host.running)
+    return CommandResult(ok=host.running, message=message, data={"job": updated.to_dict()})
+
+
+def _review_action(session: Any, action: str, raw: str, allow_prompt: bool) -> CommandResult:
     token, _, detail = str(raw or "").strip().partition(" ")
     service = get_default_job_service()
     try:
         job = _resolve_job(service, token)
-        if action == "cancel":
-            job = service.cancel(job.id, reason=detail or "cancelled from TUI")
+        review = JobReviewService(service)
+        if action == "changes":
+            updated = review.request_changes(job.id, detail)
+        elif action == "continue":
+            updated = review.continue_job(job.id, detail)
+        elif action == "discard":
+            updated = review.discard(job.id, detail)
+        elif action == "cancel":
+            updated = service.cancel(job.id, reason=detail or "cancelled from TUI")
         elif action == "resume":
-            job = service.resume(job.id, detail=detail)
+            updated = service.resume(job.id, detail=detail)
         elif action == "retry":
-            job = service.retry(job.id, reason=detail or "retry requested from TUI")
+            updated = service.retry(job.id, reason=detail or "retry requested from TUI")
         else:
             raise ValueError(f"unknown action {action}")
-    except (KeyError, ValueError, JobStateError) as exc:
+    except (KeyError, ValueError, JobStateError, JobReviewError) as exc:
         message = str(exc) if not isinstance(exc, KeyError) else f"Job not found: {token}"
         _emit(session, message, allow_prompt, error=True)
         return CommandResult(ok=False, message=message)
-    host = ensure_controller_daemon() if job.status.value == "queued" else None
-    message = f"Job {job.id[:10]} → {job.status.value}"
+    host = ensure_controller_daemon() if updated.status.value == "queued" else None
+    message = f"Job {updated.id[:10]} → {updated.status.value}"
     if host and not host.running:
         message += f" · WARNING: {host.detail}"
     _emit(session, message, allow_prompt, error=bool(host and not host.running))
-    return CommandResult(ok=not host or host.running, message=message, data={"job": job.to_dict()})
+    return CommandResult(ok=not host or host.running, message=message, data={"job": updated.to_dict()})
 
 
 @command(
     "/job",
     "/jobs",
     help=(
-        "Durable engineering jobs: list [status], show <id>, create <title> "
-        "[--repo PATH --provider NAME --model NAME --mode MODE --auto-approve "
-        "--accept TEXT --check CMD --cost USD --runtime SEC], cancel|resume|retry <id>."
+        "Engineering jobs: board, list [status], show|receipt|diff <id>, "
+        "create <title> [--repo PATH --provider NAME --model NAME --accept TEXT --check CMD], "
+        "respond <id> <answer>, changes <id> <feedback>, continue|discard <id> [detail]."
     ),
 )
 def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     raw = str(args or "").strip()
     if not raw:
-        return _list_jobs(session, "", allow_prompt)
+        return _board_jobs(session, allow_prompt)
     head, _, rest = raw.partition(" ")
     sub = head.lower()
     rest = rest.strip()
+    if sub == "board":
+        return _board_jobs(session, allow_prompt)
     if sub == "list":
         return _list_jobs(session, rest, allow_prompt)
     if sub == "show":
         return _show_job(session, rest, allow_prompt)
+    if sub == "receipt":
+        return _show_receipt(session, rest, allow_prompt)
+    if sub == "diff":
+        return _show_diff(session, rest, allow_prompt)
     if sub == "create":
         return _create_job(session, rest, allow_prompt)
-    if sub in {"cancel", "resume", "retry"}:
-        return _control_job(session, sub, rest, allow_prompt)
+    if sub == "respond":
+        return _respond_job(session, rest, allow_prompt)
+    if sub in {"changes", "continue", "discard", "cancel", "resume", "retry"}:
+        return _review_action(session, sub, rest, allow_prompt)
     return _show_job(session, raw, allow_prompt)

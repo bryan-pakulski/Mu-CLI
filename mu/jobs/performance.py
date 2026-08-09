@@ -13,6 +13,7 @@ from typing import Any, Dict
 from .analysis import build_job_analysis as _build_raw_analysis
 from .analysis import compare_job_analyses as _compare_raw_analyses
 from .analysis_detail import enrich_job_analysis
+from .analysis_live import extend_open_residence
 from .management import JobManagementService
 from .receipt import JobReceiptBuilder
 from .service import JobService
@@ -24,11 +25,9 @@ def build_job_performance(
     *,
     timeline_limit: int = 5000,
 ) -> Dict[str, Any]:
-    analysis = enrich_job_analysis(
-        service,
-        job_id,
-        _build_raw_analysis(service, job_id, timeline_limit=timeline_limit),
-    )
+    raw = _build_raw_analysis(service, job_id, timeline_limit=timeline_limit)
+    raw = extend_open_residence(service, job_id, raw)
+    analysis = enrich_job_analysis(service, job_id, raw)
 
     # Archival is deliberately orthogonal to execution status and lives in the
     # management table. Never infer it from job metadata or runtime state.

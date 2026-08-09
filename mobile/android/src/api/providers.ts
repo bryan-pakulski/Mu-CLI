@@ -19,6 +19,7 @@ export interface ModelPricingInfo {
   input_per_million: number | null;
   cached_input_per_million: number | null;
   output_per_million: number | null;
+  /** Legacy compatibility only. New estimated-token rows use input/output rates. */
   estimated_total_per_million: number | null;
   billing: 'token' | 'estimated_token' | 'local' | 'unknown' | string;
   aliases: string[];

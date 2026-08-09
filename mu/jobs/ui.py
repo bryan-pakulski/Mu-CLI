@@ -1,7 +1,9 @@
 """UI adapter for autonomous durable job execution.
 
 The adapter never blocks on stdin or a browser. Human interactions become a
-control-flow signal which the outer job runner persists as NEEDS_HUMAN.
+control-flow signal which the outer job runner persists as NEEDS_HUMAN. A later
+control-plane response is persisted and consumed exactly once by the next
+isolated worker attempt.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ class JobUI(BaseUI):
         self.service = service
         self.job_id = job_id
         self._variables: Dict[str, Any] = {}
+        self._responses = self._load_pending_responses()
 
     def _event(self, event_type: str, *, payload: Dict[str, Any] | None = None, reason: str = "") -> None:
         self.service.store.append_event(
@@ -28,6 +31,40 @@ class JobUI(BaseUI):
             reason=reason,
             payload=payload or {},
         )
+
+    def _load_pending_responses(self):
+        events = self.service.events(self.job_id)
+        consumed = {
+            int(event.payload.get("response_event_id"))
+            for event in events
+            if event.event_type == "interaction_response_consumed"
+            and str(event.payload.get("response_event_id") or "").isdigit()
+        }
+        return [
+            event for event in events
+            if event.event_type == "interaction_response" and event.id not in consumed
+        ]
+
+    def _take_response(self, kind: str, *, tool_name: str = "") -> Dict[str, Any] | None:
+        for index, event in enumerate(list(self._responses)):
+            payload = dict(event.payload or {})
+            response_kind = str(payload.get("kind") or "question")
+            if kind == "approval_required":
+                if response_kind != "approval_required":
+                    continue
+                target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+                target_tool = str(target.get("tool_name") or "")
+                if tool_name and target_tool and target_tool != tool_name:
+                    continue
+            elif response_kind not in {kind, "question"}:
+                continue
+            self._responses.pop(index)
+            self._event(
+                "interaction_response_consumed",
+                payload={"response_event_id": event.id, "kind": kind, "tool_name": tool_name},
+            )
+            return payload
+        return None
 
     def render_message(self, role, content, model_name=None):
         text = str(content or "")
@@ -43,7 +80,6 @@ class JobUI(BaseUI):
         self._event("runtime_error", payload={"text": str(message or "")[:12000]})
 
     def show_info(self, message):
-        # Keep operational breadcrumbs, but bound noisy harness messages.
         self._event("runtime_info", payload={"text": str(message or "")[:8000]})
 
     @contextmanager
@@ -72,6 +108,15 @@ class JobUI(BaseUI):
 
     def request_tool_approval(self, **kwargs):
         tool_name = str(kwargs.get("tool_name") or "tool")
+        response = self._take_response("approval_required", tool_name=tool_name)
+        if response is not None:
+            decision = str(response.get("decision") or "").lower()
+            detail = str(response.get("detail") or "").strip() or None
+            if decision == "approve":
+                return "y", None
+            if decision == "explain":
+                return "e", detail
+            return "n", None
         raise InteractionRequired(
             "approval_required",
             f"Approval required for {tool_name}",
@@ -81,10 +126,17 @@ class JobUI(BaseUI):
                 "can_approve": bool(kwargs.get("can_approve", True)),
                 "preview_error": kwargs.get("preview_error"),
                 "error_code": kwargs.get("error_code"),
+                "modifications": kwargs.get("modifications") or [],
             },
         )
 
     def prompt(self, message, default=None):
+        response = self._take_response("question")
+        if response is not None:
+            if response.get("value") is not None:
+                return response.get("value")
+            detail = str(response.get("detail") or "").strip()
+            return detail if detail else default
         raise InteractionRequired(
             "question",
             str(message or "Input required"),
@@ -92,6 +144,17 @@ class JobUI(BaseUI):
         )
 
     def confirm(self, message, default=True):
+        response = self._take_response("question")
+        if response is not None:
+            value = response.get("value")
+            if isinstance(value, bool):
+                return value
+            decision = str(response.get("decision") or "").lower()
+            if decision in {"approve", "yes", "confirm", "true"}:
+                return True
+            if decision in {"deny", "no", "false"}:
+                return False
+            return bool(default)
         raise InteractionRequired(
             "question",
             str(message or "Confirmation required"),
@@ -99,6 +162,15 @@ class JobUI(BaseUI):
         )
 
     def prompt_choices(self, message, choices, default=None):
+        response = self._take_response("question")
+        if response is not None:
+            if response.get("value") is not None:
+                return response.get("value")
+            selected = list(response.get("selected") or [])
+            if selected:
+                return selected[0]
+            detail = str(response.get("detail") or "").strip()
+            return detail or default
         raise InteractionRequired(
             "question",
             str(message or "Choice required"),
@@ -106,6 +178,9 @@ class JobUI(BaseUI):
         )
 
     def run_quiz(self, questions):
+        response = self._take_response("question")
+        if response is not None and isinstance(response.get("value"), dict):
+            return dict(response["value"])
         raise InteractionRequired(
             "question",
             "Quiz response required",
@@ -113,6 +188,16 @@ class JobUI(BaseUI):
         )
 
     def ask_user_choice(self, question, options, *, multi_select=False, description="", allow_other=False):
+        response = self._take_response("question")
+        if response is not None:
+            selected = list(response.get("selected") or [])
+            if not selected and response.get("value") is not None:
+                selected = [response.get("value")]
+            return {
+                "selected": selected,
+                "other_text": str(response.get("detail") or ""),
+                "cancelled": False,
+            }
         raise InteractionRequired(
             "question",
             str(question or "Choice required"),

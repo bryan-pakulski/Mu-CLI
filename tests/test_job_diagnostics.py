@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from pathlib import Path
 
 from mu.jobs import JobService, JobSpec, JobStore, JobStatus
 from mu.jobs.diagnostics import build_job_diagnostics
+from mu.jobs.management import JobManagementService
 
 
 def service(tmp_path):
@@ -102,3 +106,24 @@ def test_diagnostics_returns_only_bounded_log_tail(tmp_path):
     assert snapshot.worker_log_size > len(snapshot.worker_log_tail)
     assert snapshot.worker_log_tail.endswith("THE-END")
     assert len(snapshot.worker_log_tail.encode("utf-8")) <= 2048
+
+
+def test_debug_export_contains_durable_trace_and_worker_log(tmp_path):
+    svc = service(tmp_path)
+    job = svc.create(JobSpec(title="Export diagnostics", repository="/repo"))
+    svc.cancel(job.id, reason="done")
+    svc.store.append_event(job.id, "runtime_error", reason="provider exploded", payload={"error": "boom"})
+    log_dir = Path(svc.store.path).parent / "logs"
+    log_dir.mkdir(parents=True)
+    (log_dir / f"{job.id}.log").write_text("trace line\nprovider stack\n", encoding="utf-8")
+
+    bundle = JobManagementService(svc).debug_bundle(job.id)
+
+    with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+        names = set(archive.namelist())
+        assert {"manifest.json", "job.json", "events.json", "events.ndjson", "diagnostics.json", "worker.log"}.issubset(names)
+        manifest = json.loads(archive.read("manifest.json"))
+        events = json.loads(archive.read("events.json"))
+        assert manifest["job_id"] == job.id
+        assert any(event["event_type"] == "runtime_error" for event in events)
+        assert b"provider stack" in archive.read("worker.log")

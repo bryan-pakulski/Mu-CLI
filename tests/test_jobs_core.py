@@ -124,7 +124,10 @@ def test_worker_lease_is_exclusive_and_expired_run_becomes_recovering(tmp_path):
     current = service.get(job.id)
     assert current.status == JobStatus.RECOVERING
     assert current.worker_id == ""
-    assert any(event.reason == "worker lease expired" for event in service.events(job.id))
+    assert any(
+        event.reason == "implementation worker lease expired"
+        for event in service.events(job.id)
+    )
 
 
 def test_attempt_records_survive_and_are_numbered(tmp_path):

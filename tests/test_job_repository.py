@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from mu.jobs import JobService, JobSpec, JobStore
 from mu.jobs.repository import RepositoryRegistry
 from mu.jobs.worktree import JobWorktreeManager
@@ -56,6 +58,67 @@ def test_registry_detects_current_branch_when_origin_head_is_unavailable(tmp_pat
     assert record.metadata["remote_default_ref"] == ""
     assert record.metadata["head_sha"] == git(repo, "rev-parse", "HEAD")
     assert record.metadata["clean"] is True
+
+
+def test_payload_creation_snapshots_current_repository_head_instead_of_inventing_main(tmp_path):
+    repo = make_repo(tmp_path, branch="develop")
+    service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
+
+    job = service.create_from_payload({
+        "title": "Queue from GUI",
+        "repository": str(repo),
+        "execution": {
+            "provider": "ollama",
+            "model": "test-model",
+            "session_type": "workspace",
+        },
+    })
+
+    assert job.base_branch == "develop"
+    assert job.base_sha == git(repo, "rev-parse", "HEAD")
+    preflight = job.metadata["submission_repository_preflight"]
+    assert preflight["canonical_path"] == str(repo)
+    assert preflight["current_branch"] == "develop"
+    assert preflight["head_sha"] == job.base_sha
+    assert preflight["clean"] is True
+
+
+def test_payload_creation_rejects_invalid_repository_before_queueing(tmp_path):
+    service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
+    missing = tmp_path / "does-not-exist"
+
+    with pytest.raises(ValueError, match="Repository preflight failed"):
+        service.create_from_payload({
+            "title": "Bad workspace",
+            "repository": str(missing),
+            "execution": {
+                "provider": "ollama",
+                "model": "test-model",
+                "session_type": "workspace",
+            },
+        })
+
+    assert service.list() == []
+
+
+def test_explicit_base_branch_is_preserved_for_worker_resolution(tmp_path):
+    repo = make_repo(tmp_path, branch="develop")
+    service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
+
+    job = service.create_from_payload({
+        "title": "Release job",
+        "repository": str(repo),
+        "base_branch": "release",
+        "execution": {
+            "provider": "ollama",
+            "model": "test-model",
+            "session_type": "workspace",
+        },
+    })
+
+    assert job.base_branch == "release"
+    assert job.base_sha == ""
+    assert "submission_repository_preflight" not in job.metadata
 
 
 def test_worktree_preparation_persists_repository_and_environment_identity(tmp_path):

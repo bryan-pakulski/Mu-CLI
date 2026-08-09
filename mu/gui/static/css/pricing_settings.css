@@ -1,0 +1,245 @@
+.pricing-settings-pane {
+    padding-bottom: 84px;
+}
+
+.pricing-settings-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.pricing-settings-title {
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+
+.pricing-settings-copy {
+    margin: 5px 0 0;
+    max-width: 560px;
+    color: var(--text-soft);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.pricing-settings-advanced {
+    flex: 0 0 auto;
+    color: var(--text-soft);
+    font-size: 11px;
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.pricing-settings-advanced:hover {
+    color: var(--text);
+}
+
+.pricing-settings-meta {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
+    align-items: center;
+    margin-bottom: 14px;
+    padding: 11px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.pricing-settings-source {
+    overflow: hidden;
+    color: var(--text-soft);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pricing-settings-state {
+    color: var(--text-soft);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+}
+
+.pricing-settings-state.is-override {
+    color: var(--accent);
+}
+
+.pricing-provider-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.pricing-provider-filter button {
+    min-height: 30px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 10px;
+    text-transform: capitalize;
+}
+
+.pricing-provider-filter button.active {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: color-mix(in srgb, var(--accent) 11%, transparent);
+    color: var(--text);
+}
+
+.pricing-settings-error {
+    margin-bottom: 12px;
+    padding: 9px 11px;
+    border-left: 2px solid var(--err);
+    background: color-mix(in srgb, var(--err) 8%, transparent);
+    color: var(--err);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.pricing-model-list {
+    display: grid;
+    gap: 8px;
+}
+
+.pricing-model-row {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.pricing-model-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.pricing-provider-badge {
+    flex: 0 0 auto;
+    min-width: 48px;
+    color: var(--text-soft);
+    font-family: var(--mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.pricing-model-name {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pricing-billing-select {
+    width: 132px;
+    min-height: 30px;
+    font-size: 10px;
+}
+
+.pricing-rate-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.pricing-rate-field {
+    display: grid;
+    gap: 4px;
+}
+
+.pricing-rate-field span {
+    color: var(--text-soft);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.pricing-rate-field input {
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.pricing-rate-field input:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.pricing-model-note {
+    margin: 8px 0 0;
+    color: var(--text-soft);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.pricing-settings-empty {
+    padding: 22px 12px;
+    color: var(--text-soft);
+    font-size: 11px;
+    text-align: center;
+}
+
+.pricing-settings-actions {
+    position: sticky;
+    bottom: -1px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 16px -4px -4px;
+    padding: 12px 4px 4px;
+    background: linear-gradient(to bottom, transparent, var(--surface) 28%);
+}
+
+.pricing-settings-dirty {
+    color: var(--text-soft);
+    font-size: 10px;
+}
+
+.pricing-settings-buttons {
+    display: flex;
+    gap: 7px;
+}
+
+.pricing-settings-buttons button {
+    min-height: 32px;
+}
+
+@media (max-width: 720px) {
+    .pricing-settings-head {
+        display: grid;
+    }
+
+    .pricing-settings-advanced {
+        width: fit-content;
+    }
+
+    .pricing-rate-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pricing-model-head {
+        flex-wrap: wrap;
+    }
+
+    .pricing-billing-select {
+        width: 100%;
+    }
+}

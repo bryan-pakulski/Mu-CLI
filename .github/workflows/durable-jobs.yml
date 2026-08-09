@@ -81,6 +81,7 @@ jobs:
             tests/test_job_verification.py \
             tests/test_job_receipt.py \
             tests/test_job_review.py \
+            tests/test_job_review_branch.py \
             tests/test_job_review_surfaces.py \
             tests/test_job_diagnostics.py \
             tests/test_job_diagnostics_surfaces.py \

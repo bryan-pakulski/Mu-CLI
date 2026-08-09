@@ -8,8 +8,10 @@ import threading
 
 from .models import AttentionReason, JobStatus
 from .receipt import JobReceiptBuilder
+from .review_branch import materialize_review_branch
 from .service import JobStateError, get_default_job_service
 from .verification import DeterministicVerifier, VerificationRun
+from .worktree import WorktreeError
 
 
 def _heartbeat(service, job_id: str, worker_id: str, ttl: int, stop: threading.Event) -> None:
@@ -56,6 +58,50 @@ def _refresh_receipt(service, job_id: str) -> None:
         )
 
 
+def _materialize_for_review(service, job_id: str, feedback: dict) -> tuple[bool, dict]:
+    """Convert the verified execution worktree into a normal review branch.
+
+    Verification success is necessary but review state is only entered once the
+    branch is confirmed and the temporary worktree is safely retired.  This
+    keeps READY_FOR_REVIEW usable from ordinary Git tooling instead of requiring
+    callers to navigate MuCLI's managed worktree directory.
+    """
+
+    try:
+        info = materialize_review_branch(service, job_id)
+        return True, {**feedback, "review_branch": info.to_dict()}
+    except WorktreeError as exc:
+        payload = {**feedback, "review_branch_error": exc.to_dict()}
+        service.store.append_event(
+            job_id,
+            "review_branch_materialization_failed",
+            reason=str(exc),
+            payload=payload,
+        )
+        service.require_human(
+            job_id,
+            AttentionReason.ENVIRONMENT_FAILURE,
+            "Verification passed, but MuCLI could not safely move the completed work into branch-only review state.",
+            payload=payload,
+        )
+        return False, payload
+    except Exception as exc:
+        payload = {**feedback, "review_branch_error": {"error": str(exc)}}
+        service.store.append_event(
+            job_id,
+            "review_branch_materialization_failed",
+            reason=str(exc),
+            payload=payload,
+        )
+        service.require_human(
+            job_id,
+            AttentionReason.ENVIRONMENT_FAILURE,
+            "Verification passed, but MuCLI could not safely move the completed work into branch-only review state.",
+            payload=payload,
+        )
+        return False, payload
+
+
 def apply_verification_result(service, job_id: str, run: VerificationRun) -> int:
     """Apply deterministic readiness policy to persisted verification evidence."""
     feedback = verification_feedback(run)
@@ -78,11 +124,15 @@ def apply_verification_result(service, job_id: str, run: VerificationRun) -> int
         return 21
 
     if run.passed:
+        materialized, review_feedback = _materialize_for_review(service, job_id, feedback)
+        if not materialized:
+            _refresh_receipt(service, job_id)
+            return 23
         service.transition(
             job_id,
             JobStatus.READY_FOR_REVIEW,
-            reason="deterministic verification passed",
-            payload=feedback,
+            reason="deterministic verification passed; review branch materialized",
+            payload=review_feedback,
         )
         _refresh_receipt(service, job_id)
         return 0

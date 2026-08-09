@@ -156,9 +156,18 @@ def test_prepare_is_idempotent_for_resumed_job(tmp_path):
     checkpoint = manager.checkpoint(service.get(job.id), label="blocked")
     second = manager.prepare(service.get(job.id))
 
-    assert second == first
+    # The first prepare resolves the symbolic branch and persists an immutable
+    # base_sha. A resumed prepare may therefore report that pinned SHA as its
+    # base_ref. The isolation invariants themselves must remain identical.
+    assert second.repository == first.repository
+    assert second.worktree == first.worktree
+    assert second.branch == first.branch
+    assert second.base_sha == first.base_sha
+    assert first.base_ref == "main"
+    assert second.base_ref in {first.base_ref, first.base_sha}
     assert checkpoint == git(second.worktree, "rev-parse", "HEAD")
     assert (tmp_path / "worktrees" / job.id / "resume.txt").read_text(encoding="utf-8") == "saved\n"
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
 
 
 def test_two_jobs_get_separate_worktrees_and_branches(tmp_path):

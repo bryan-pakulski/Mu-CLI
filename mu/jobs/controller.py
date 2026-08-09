@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WorkerHandle:
     job_id: str
+    phase: str
     worker_id: str
     process: subprocess.Popen
     log_path: str
@@ -32,12 +33,7 @@ class WorkerHandle:
 
 
 class JobController:
-    """Lease queued jobs and launch isolated worker processes.
-
-    The child process owns Session runtime, CWD, worktree preparation,
-    heartbeat, attempt lifecycle and checkpoints. This controller is therefore
-    safe to schedule several engineering jobs concurrently.
-    """
+    """Lease jobs and launch isolated implementation/verification processes."""
 
     def __init__(
         self,
@@ -80,16 +76,11 @@ class JobController:
         self._thread.start()
 
     def stop(self, *, wait: bool = False) -> None:
-        """Stop scheduling without killing active child workers.
-
-        Workers heartbeat their own leases and can finish while the daemon is
-        restarting. This is important for controller/browser independence.
-        """
+        """Stop scheduling without killing active child workers."""
         self._stop.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=None if wait else 2.0)
         if wait:
-            handles = []
             with self._lock:
                 handles = list(self._active.values())
             for handle in handles:
@@ -109,6 +100,7 @@ class JobController:
             processes = {
                 job_id: {
                     "pid": getattr(handle.process, "pid", None),
+                    "phase": handle.phase,
                     "worker_id": handle.worker_id,
                     "log_path": handle.log_path,
                 }
@@ -131,6 +123,10 @@ class JobController:
                 logger.exception("durable job controller tick failed")
             self._stop.wait(self.poll_interval)
 
+    @staticmethod
+    def _phase_for_status(status: JobStatus) -> str:
+        return "verification" if status == JobStatus.VERIFYING else "implementation"
+
     def tick(self) -> int:
         """One deterministic scheduler pass; returns processes started."""
         self._reap()
@@ -142,26 +138,26 @@ class JobController:
             return 0
 
         candidates = self.service.list(
-            statuses=[JobStatus.QUEUED, JobStatus.RECOVERING],
-            limit=max(capacity * 4, 20),
+            statuses=[JobStatus.QUEUED, JobStatus.RECOVERING, JobStatus.VERIFYING],
+            limit=max(capacity * 5, 25),
         )
         started = 0
-        # list_jobs is newest-first; reverse so older queued work gets priority.
         for job in reversed(candidates):
             if started >= capacity:
                 break
             with self._lock:
                 if job.id in self._active:
                     continue
-            if self._spawn(job.id):
+            phase = self._phase_for_status(job.status)
+            if self._spawn(job.id, phase):
                 started += 1
         return started
 
-    def _worker_id(self, job_id: str) -> str:
-        return f"{self.controller_id}:{job_id[:10]}:{uuid.uuid4().hex[:6]}"
+    def _worker_id(self, job_id: str, phase: str) -> str:
+        return f"{self.controller_id}:{phase}:{job_id[:10]}:{uuid.uuid4().hex[:6]}"
 
-    def _spawn(self, job_id: str) -> bool:
-        worker_id = self._worker_id(job_id)
+    def _spawn(self, job_id: str, phase: str) -> bool:
+        worker_id = self._worker_id(job_id, phase)
         if not self.service.acquire(
             job_id,
             worker_id,
@@ -169,14 +165,15 @@ class JobController:
         ):
             return False
 
-        log_path = os.path.join(self.log_root, f"{job_id}.log")
+        module = "mu.jobs.verify_worker" if phase == "verification" else "mu.jobs.worker"
+        log_path = os.path.join(self.log_root, f"{job_id}.{phase}.log")
         log_handle: Optional[IO[bytes]] = None
         try:
             log_handle = open(log_path, "ab", buffering=0)
             command = [
                 self.python_executable,
                 "-m",
-                "mu.jobs.worker",
+                module,
                 "--job-id",
                 job_id,
                 "--worker-id",
@@ -196,17 +193,18 @@ class JobController:
         except Exception as exc:
             if log_handle is not None:
                 log_handle.close()
-            self.service.release(job_id, worker_id, reason="worker spawn failed")
+            self.service.release(job_id, worker_id, reason=f"{phase} worker spawn failed")
             self.service.store.append_event(
                 job_id,
                 "worker_spawn_failed",
                 reason=str(exc),
-                payload={"log_path": log_path},
+                payload={"phase": phase, "log_path": log_path},
             )
             return False
 
         handle = WorkerHandle(
             job_id=job_id,
+            phase=phase,
             worker_id=worker_id,
             process=process,
             log_path=log_path,
@@ -219,6 +217,7 @@ class JobController:
             "worker_process_started",
             payload={
                 "pid": getattr(process, "pid", None),
+                "phase": phase,
                 "worker_id": worker_id,
                 "log_path": log_path,
                 "controller_id": self.controller_id,
@@ -246,13 +245,12 @@ class JobController:
                 reason=f"exit code {code}",
                 payload={
                     "pid": getattr(handle.process, "pid", None),
+                    "phase": handle.phase,
                     "worker_id": handle.worker_id,
                     "exit_code": code,
                     "log_path": handle.log_path,
                 },
             )
-            # Normal workers release their own lease. A force-killed/cancelled
-            # process cannot run finally, so clear ownership once it is gone.
             try:
                 current = self.service.get(job_id)
                 if current.status == JobStatus.CANCELLED:
@@ -265,7 +263,6 @@ class JobController:
                 pass
 
     def _terminate_cancelled(self) -> None:
-        handles: list[WorkerHandle] = []
         with self._lock:
             handles = list(self._active.values())
         for handle in handles:
@@ -273,9 +270,7 @@ class JobController:
                 job = self.service.get(handle.job_id)
             except KeyError:
                 continue
-            if job.status != JobStatus.CANCELLED:
-                continue
-            if handle.process.poll() is not None:
+            if job.status != JobStatus.CANCELLED or handle.process.poll() is not None:
                 continue
             try:
                 handle.process.terminate()
@@ -283,12 +278,18 @@ class JobController:
                     handle.job_id,
                     "worker_process_terminated",
                     reason="job cancelled",
-                    payload={"pid": getattr(handle.process, "pid", None)},
+                    payload={
+                        "pid": getattr(handle.process, "pid", None),
+                        "phase": handle.phase,
+                    },
                 )
             except Exception as exc:
                 self.service.store.append_event(
                     handle.job_id,
                     "worker_termination_failed",
                     reason=str(exc),
-                    payload={"pid": getattr(handle.process, "pid", None)},
+                    payload={
+                        "pid": getattr(handle.process, "pid", None),
+                        "phase": handle.phase,
+                    },
                 )

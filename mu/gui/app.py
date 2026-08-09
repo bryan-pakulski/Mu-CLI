@@ -45,6 +45,7 @@ from .routers import (
     feature as feature_router,
     files as files_router,
     inspector,
+    jobs as jobs_router,
     loop as loop_router,
     memory as memory_router,
     modes,
@@ -60,10 +61,9 @@ from .routers import (
 )
 from .watcher import SessionWatcher
 from mu.container import ContainerSupervisor
+from mu.jobs import get_default_job_service
 from .web_ui import WebUI
 
-# Hook registry + context for the live memory-snapshot push. Imported
-# lazily-safe at module load (mu.agent.hooks has no heavy deps).
 from mu.agent.hooks import HookContext, default_registry
 
 _MEMORY_HOOK_NAME = "gui_memory_snapshot"
@@ -71,16 +71,7 @@ _SUBAGENT_HOOK_NAME = "gui_subagent_snapshot"
 
 
 def _register_memory_snapshot_hook() -> None:
-    """Register a ``pre_provider_call`` hook that pushes a live context
-    snapshot to the GUI per iteration so the Memory Map panel updates in
-    real time while a turn runs.
-
-    Idempotent: no-ops if the hook is already registered (tests may call
-    ``create_app`` more than once). The handler skips any session whose
-    UI isn't a :class:`WebUI`, so CLI runs are unaffected. Fires on the
-    agent thread, where ``HookContext`` already carries the fully
-    assembled system prompt + messages about to go to the provider.
-    """
+    """Register a ``pre_provider_call`` hook that pushes a live context snapshot."""
     if any(spec.name == _MEMORY_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
         return
 
@@ -89,17 +80,7 @@ def _register_memory_snapshot_hook() -> None:
         if not isinstance(ui, WebUI):
             return None
         try:
-            # Keep the Memory Map's headline total on the exact same
-            # pre-request estimate that the trace records for this iteration.
-            # Layer estimates omit message framing and transient prompt text.
-            # Include tool schemas — the trace's request_token_estimate adds
-            # `_estimate_tools_tokens(tools)`, so the Memory Map must too or
-            # its headline undercounts the trace by the whole tool-schema
-            # cost (thousands of tokens in agentic mode).
-            from mu.agent.loop_body import (
-                _estimate_messages_tokens,
-                _estimate_tools_tokens,
-            )
+            from mu.agent.loop_body import _estimate_messages_tokens, _estimate_tools_tokens
             from utils.token_estimator import estimate_tokens
 
             request_tokens = (
@@ -114,7 +95,7 @@ def _register_memory_snapshot_hook() -> None:
                 rows=LIVE_RESOLUTION,
                 request_token_estimate=request_tokens,
             )
-        except Exception as exc:  # defensive — must never break a turn
+        except Exception as exc:
             _logger.warning("memory snapshot hook failed: %s", exc)
             return None
         ui._publish({"kind": "context_snapshot", **snap})
@@ -124,14 +105,7 @@ def _register_memory_snapshot_hook() -> None:
 
 
 def _register_subagent_snapshot_hook() -> None:
-    """Register a ``pre_provider_call`` hook that pushes a live sub-agent
-    snapshot to the GUI each parent iteration while sub-agents are running,
-    so the chat-feed status panel reconciles progress / context / tokens
-    even if a granular ``subagent_progress`` event was missed.
-
-    Idempotent. Skips non-WebUI sessions (CLI/TUI unaffected) and sessions
-    with no active sub-agent registry. Fires on the parent agent thread.
-    """
+    """Register live sub-agent snapshots for the GUI."""
     if any(spec.name == _SUBAGENT_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
         return
 
@@ -143,9 +117,8 @@ def _register_subagent_snapshot_hook() -> None:
         if registry is None:
             return None
         try:
-            # MUCLI_SUBAGENT_DURABLE_RESULTS_V1: active-only live reconciliation.
             children = registry.snapshot_active()
-        except Exception as exc:  # defensive — must never break a turn
+        except Exception as exc:
             _logger.warning("subagent snapshot hook failed: %s", exc)
             return None
         active = sum(1 for c in children if c.get("status") == "running")
@@ -180,13 +153,7 @@ class _NoCacheStaticFiles(StaticFiles):
         return response
 
 
-# ---------------------------------------------------------------------------
-# Session resolution helpers (shared by routers + watcher)
-
-
 def session_by_name(app: FastAPI, name: Optional[str]):
-    """Return the loaded Session for `name`, or the focused session
-    when `name` is None/empty, or None if nothing matches."""
     sessions: Dict[str, Any] = app.state.sessions
     if name:
         return sessions.get(name)
@@ -195,10 +162,8 @@ def session_by_name(app: FastAPI, name: Optional[str]):
 
 
 def session_lock_for(app: FastAPI, name: Optional[str]) -> threading.Lock:
-    sessions = app.state.sessions
     target = name or app.state.current_session_name
     if target is None:
-        # No session yet — return a dummy lock so callers don't blow up.
         return app.state._fallback_lock
     locks: Dict[str, threading.Lock] = app.state.session_locks
     return locks.setdefault(target, threading.Lock())
@@ -220,9 +185,6 @@ def web_ui_for(app: FastAPI, name: Optional[str]) -> Optional[WebUI]:
     return uis.get(target)
 
 
-# ---------------------------------------------------------------------------
-
-
 def create_app(
     *,
     args: Any,
@@ -234,13 +196,11 @@ def create_app(
     bus = EventBus()
     prompts = PromptStore()
 
-    # ---- multi-session state ------------------------------------------
     app.state.sessions: Dict[str, Any] = {}
     app.state.session_locks: Dict[str, threading.Lock] = {}
     app.state.session_busy: Dict[str, threading.Event] = {}
     app.state.web_uis: Dict[str, WebUI] = {}
     app.state.current_session_name: Optional[str] = None
-    # Fallbacks used when no session is active (so routers don't blow up).
     app.state._fallback_lock = threading.Lock()
     app.state._fallback_busy = threading.Event()
     app.state.container_creation_status: Dict[str, Dict[str, Any]] = {}
@@ -249,7 +209,6 @@ def create_app(
     app.state.container_environment_jobs: Dict[str, Dict[str, Any]] = {}
     app.state.container_environment_tasks: Dict[str, asyncio.Task] = {}
 
-    # ---- shared infra -------------------------------------------------
     app.state.bus = bus
     app.state.prompts = prompts
     app.state.port = port
@@ -258,21 +217,17 @@ def create_app(
     app.state.load_session = lambda **kw: _load_session(app, **kw)
     app.state.unload_session = lambda **kw: _unload_session(app, **kw)
     app.state.watcher = SessionWatcher(app)
-    # Lazy with respect to Docker: constructing the supervisor only reads its
-    # JSON registry. Docker objects are touched when a container session is
-    # explicitly created, loaded, mounted, stopped, or removed.
     app.state.container_supervisor = ContainerSupervisor()
+    # Shared durable job service. GUI is a control plane only; the same service
+    # is used directly by TUI and through this API by mobile.
+    app.state.job_service = get_default_job_service()
 
-    # Resolver helpers exposed on app.state so routers don't have to
-    # import the module-level functions.
     app.state.session_by_name = lambda name=None: session_by_name(app, name)
     app.state.session_lock_for = lambda name=None: session_lock_for(app, name)
     app.state.session_busy_for = lambda name=None: session_busy_for(app, name)
     app.state.web_ui_for = lambda name=None: web_ui_for(app, name)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-    # Ensure Jinja2 auto-reloads templates when files change on disk
-    # (prevents stale template serving during development).
     templates.env.auto_reload = True
     app.state.templates = templates
 
@@ -286,12 +241,9 @@ def create_app(
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(modes.router, prefix="/api/modes", tags=["modes"])
     app.include_router(prompts_router.router, prefix="/api/prompts", tags=["prompts"])
-    app.include_router(
-        system_prompts_router.router,
-        prefix="/api/system-prompts",
-        tags=["system-prompts"],
-    )
+    app.include_router(system_prompts_router.router, prefix="/api/system-prompts", tags=["system-prompts"])
     app.include_router(inspector.router, prefix="/api", tags=["inspector"])
+    app.include_router(jobs_router.router, prefix="/api/jobs", tags=["jobs"])
     app.include_router(teacher_router.router, prefix="/api/teacher", tags=["teacher"])
     app.include_router(feature_router.router, prefix="/api/feature", tags=["feature"])
     app.include_router(research_router.router, prefix="/api/research", tags=["research"])
@@ -302,16 +254,10 @@ def create_app(
     app.include_router(files_router.router, prefix="/api/files", tags=["files"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
-    app.include_router(
-        traces_router.router, prefix="/api/traces", tags=["traces"]
-    )
+    app.include_router(traces_router.router, prefix="/api/traces", tags=["traces"])
     app.include_router(chat.events_router, tags=["events"])
 
-    # Live Memory Map: push a context snapshot per provider iteration so
-    # the panel updates in real time while a turn runs. Idempotent.
     _register_memory_snapshot_hook()
-    # Live sub-agent status: push a registry snapshot per parent iteration
-    # while sub-agents run, so the chat-feed panel reconciles state. Idempotent.
     _register_subagent_snapshot_hook()
 
     @app.get("/", response_class=HTMLResponse)
@@ -333,9 +279,6 @@ def create_app(
 
     @app.get("/trace", response_class=HTMLResponse)
     async def trace_analyzer(request: Request):
-        # Full-page Trace Analyzer dashboard (separate from the chat SPA).
-        # Renders its own layout + Alpine store; data is fetched from
-        # /api/traces/* by trace.js.
         return templates.TemplateResponse(
             request,
             "trace.html",
@@ -354,11 +297,15 @@ def create_app(
             "ok": True,
             "session_active": app.state.current_session_name is not None,
             "loaded_sessions": list(app.state.sessions.keys()),
+            "durable_jobs": len(app.state.job_service.list(limit=1000)),
         }
 
     @app.on_event("startup")
     async def _bind_loop():
         bus.bind_loop(asyncio.get_running_loop())
+        # Any active job whose execution owner disappeared before restart is
+        # moved to RECOVERING before clients see it.
+        app.state.job_service.recover_expired_leases()
         app.state.watcher.start()
 
     @app.on_event("shutdown")
@@ -382,14 +329,10 @@ def _load_session(
     provider: Optional[str] = None,
     model: Optional[str] = None,
 ):
-    """Build & install a Session into ``app.state.sessions[name]`` and
-    focus on it. Idempotent: a session already loaded with the same name
-    just gets focused (no rebuild)."""
     if name in app.state.sessions:
         app.state.current_session_name = name
         return app.state.sessions[name]
 
-    # Each session gets its own WebUI bridge so events are attributable.
     bus = app.state.bus
     prompts = app.state.prompts
     web_ui = WebUI(bus, prompts, session_name=name)
@@ -417,9 +360,6 @@ def _unload_session(
     *,
     name: Optional[str] = None,
 ) -> bool:
-    """Drop a session from the in-memory cache. If `name` is None, the
-    focused session is unloaded. Returns True if something was unloaded.
-    The session's data on disk is untouched."""
     target = name or app.state.current_session_name
     if not target or target not in app.state.sessions:
         return False
@@ -432,7 +372,6 @@ def _unload_session(
     except Exception:
         pass
     if app.state.current_session_name == target:
-        # Focus falls back to whichever session is still resident, or None.
         remaining = list(app.state.sessions.keys())
         app.state.current_session_name = remaining[-1] if remaining else None
     return True

@@ -75,11 +75,17 @@ def test_receipt_answers_outcome_cost_git_verification_and_activity(tmp_path):
     builder = JobReceiptBuilder(service, root=str(tmp_path / "evidence"))
     receipt = builder.build(job.id)
 
-    assert receipt["schema_version"] == 1
+    assert receipt["schema_version"] == 2
     assert receipt["job"]["status"] == "ready_for_review"
     assert receipt["outcome"]["ready_for_review"] is True
     assert receipt["outcome"]["attempts"] == 1
     assert receipt["outcome"]["cost_usd"] == 1.25
+    # Historical attempts without a pricing record retain their number but are
+    # explicitly labelled legacy/incomplete instead of pretending the rate
+    # provenance is known.
+    assert receipt["outcome"]["cost_status"] == "legacy"
+    assert receipt["outcome"]["cost_complete"] is False
+    assert receipt["usage"]["model_api"]["api_cost_usd"] == 1.25
     assert receipt["git"]["branch"] == job.branch
     assert receipt["git"]["base_sha"] == job.base_sha
     assert receipt["git"]["head_sha"] == verification.head_sha

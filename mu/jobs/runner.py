@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict
 
 from mu.ui.exceptions import InteractionRequired
+from utils.model_pricing import estimate_model_cost
 
 from .models import AttentionReason, Job, JobAttempt
 from .service import JobService
@@ -26,6 +27,9 @@ class JobRunOutcome:
     result: Dict[str, Any] = field(default_factory=dict)
 
 
+_TOKEN_KEYS = ("input", "output", "total", "cached", "reasoning")
+
+
 class SessionJobRunner:
     def __init__(self, service: JobService, *, build_session_fn: Callable, base_args: Any):
         self.service = service
@@ -39,6 +43,81 @@ class SessionJobRunner:
     @staticmethod
     def workspace_path(job: Job) -> str:
         return str(job.worktree or job.repository or "")
+
+    @staticmethod
+    def _token_snapshot(session) -> Dict[str, float]:
+        counts = getattr(getattr(session, "session_manager", None), "token_counts", {}) or {}
+        value: Dict[str, float] = {
+            key: float(counts.get(key, 0) or 0) for key in _TOKEN_KEYS
+        }
+        value["total_cost"] = float(counts.get("total_cost", 0.0) or 0.0)
+        return value
+
+    @staticmethod
+    def _token_delta(before: Dict[str, float], after: Dict[str, float]) -> Dict[str, int]:
+        return {
+            key: max(0, int(round(float(after.get(key, 0)) - float(before.get(key, 0)))))
+            for key in _TOKEN_KEYS
+        }
+
+    def _usage_result(
+        self,
+        job: Job,
+        session,
+        before: Dict[str, float],
+        result: Dict[str, Any] | None = None,
+    ) -> tuple[float, Dict[str, Any]]:
+        """Return authoritative attempt API cost + persistence-ready result.
+
+        The inner ReAct loop historically priced only a small Gemini map.  A
+        durable engineering job instead recomputes its attempt from actual
+        provider token deltas and the versioned pricing registry.  The pricing
+        key/rates/version are persisted with the attempt so historical job
+        economics remain explainable when list prices change later.
+        """
+        after = self._token_snapshot(session)
+        tokens = self._token_delta(before, after)
+        execution = dict(job.execution or {})
+        provider_name = str(execution.get("provider") or getattr(session.provider, "name", "") or "")
+        model_name = str(execution.get("model") or getattr(session.provider, "model_name", "") or "")
+        endpoint = str(getattr(session.provider, "host", "") or getattr(session.provider, "BASE_URL", "") or "")
+        pricing = estimate_model_cost(
+            provider=provider_name,
+            model_name=model_name,
+            input_tokens=tokens["input"],
+            output_tokens=tokens["output"],
+            cached_tokens=tokens["cached"],
+            reasoning_tokens=tokens["reasoning"],
+            ollama_mode=str(session.variables.get("ollama_mode", "") or ""),
+            endpoint=endpoint,
+        )
+        mapped_cost = pricing.get("api_cost_usd")
+        legacy_delta = max(0.0, float(after.get("total_cost", 0.0)) - float(before.get("total_cost", 0.0)))
+        # Unknown/plan-based pricing must remain explicitly unpriced.  The
+        # numeric job accumulator cannot store None, so it receives $0 while
+        # the structured record carries billing=plan/unknown.  If a provider
+        # already supplied a real positive cost through the legacy accounting
+        # path, retain it as a fallback rather than throwing data away.
+        attributable_cost = (
+            max(0.0, float(mapped_cost))
+            if mapped_cost is not None
+            else legacy_delta if legacy_delta > 0 else 0.0
+        )
+        if mapped_cost is not None:
+            # Keep the dedicated job session's lifetime total aligned with the
+            # mapped price so later attempts start from a coherent baseline.
+            session.session_manager.token_counts["total_cost"] = (
+                float(before.get("total_cost", 0.0)) + attributable_cost
+            )
+        output = dict(result or {})
+        output["tokens"] = tokens
+        output["cost"] = {
+            **pricing,
+            "api_cost_usd": mapped_cost,
+            "attributed_cost_usd": attributable_cost,
+            "legacy_loop_cost_usd": legacy_delta,
+        }
+        return attributable_cost, output
 
     def _args_for(self, job: Job):
         execution = dict(job.execution or {})
@@ -122,7 +201,7 @@ class SessionJobRunner:
 
     def run(self, job: Job, attempt: JobAttempt) -> JobRunOutcome:
         session = None
-        initial_cost = 0.0
+        initial_usage: Dict[str, float] = {key: 0.0 for key in (*_TOKEN_KEYS, "total_cost")}
         try:
             execution = dict(job.execution or {})
             session_type = str(execution.get("session_type") or "workspace")
@@ -158,34 +237,39 @@ class SessionJobRunner:
             session.session_manager.save_history(session.folder_context)
             self.service.store.update_runtime_fields(job.id, session_name=self.session_name(job))
 
-            initial_cost = float(session.session_manager.token_counts.get("total_cost", 0.0) or 0.0)
-            result = session.send_message(self._prompt(job)) or {}
-            final_cost = float(session.session_manager.token_counts.get("total_cost", 0.0) or 0.0)
-            cost = max(0.0, final_cost - initial_cost)
-            status = str(result.get("status") or "completed") if isinstance(result, dict) else "completed"
-            error = str(result.get("error") or "") if isinstance(result, dict) else ""
+            initial_usage = self._token_snapshot(session)
+            raw_result = session.send_message(self._prompt(job)) or {}
+            base_result = dict(raw_result) if isinstance(raw_result, dict) else {}
+            cost, result = self._usage_result(job, session, initial_usage, base_result)
+            status = str(result.get("status") or "completed")
+            error = str(result.get("error") or "")
             if status == "completed":
-                return JobRunOutcome(kind="completed", status=status, cost_usd=cost, result=dict(result))
-            return JobRunOutcome(kind="failed", status=status, error=error or f"Agent stopped with status {status}", cost_usd=cost, result=dict(result) if isinstance(result, dict) else {})
+                return JobRunOutcome(kind="completed", status=status, cost_usd=cost, result=result)
+            return JobRunOutcome(kind="failed", status=status, error=error or f"Agent stopped with status {status}", cost_usd=cost, result=result)
 
         except InteractionRequired as gate:
-            current = initial_cost
+            cost = 0.0
+            result: Dict[str, Any] = {}
             if session is not None:
-                current = float(session.session_manager.token_counts.get("total_cost", initial_cost) or initial_cost)
+                cost, result = self._usage_result(job, session, initial_usage)
             reason = AttentionReason.APPROVAL_REQUIRED if gate.kind == "approval_required" else AttentionReason.QUESTION
             return JobRunOutcome(
                 kind="needs_human",
                 status="needs_human",
-                cost_usd=max(0.0, current - initial_cost),
+                cost_usd=cost,
                 attention_reason=reason,
                 attention_detail=gate.detail,
                 attention_payload=gate.payload,
+                result=result,
             )
         except Exception as exc:
-            current = initial_cost
+            cost = 0.0
+            result: Dict[str, Any] = {}
             if session is not None:
-                current = float(session.session_manager.token_counts.get("total_cost", initial_cost) or initial_cost)
-            return JobRunOutcome(kind="failed", status="error", error=str(exc), cost_usd=max(0.0, current - initial_cost))
+                cost, result = self._usage_result(job, session, initial_usage)
+            return JobRunOutcome(
+                kind="failed", status="error", error=str(exc), cost_usd=cost, result=result
+            )
         finally:
             if session is not None:
                 try:

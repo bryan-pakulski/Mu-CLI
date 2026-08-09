@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 from mu.jobs import AttentionReason, JobService, JobSpec, JobStatus, JobStore
+from mu.jobs.review import build_job_diff
 from mu.jobs.verification import DeterministicVerifier, VerificationStore
 from mu.jobs.verify_worker import apply_verification_result
 from mu.jobs.worktree import JobWorktreeManager
@@ -61,11 +62,13 @@ def verifying_job(tmp_path, *, commands, max_retries=2, attempts=1):
     return service, service.get(job.id), repo
 
 
-def test_passing_commands_create_evidence_and_unlock_ready_for_review(tmp_path):
+def test_passing_commands_materialize_branch_and_retire_worktree_for_review(tmp_path):
     command = python_command(
         "from pathlib import Path; assert Path('code.txt').read_text() == 'implemented\\n'"
     )
     service, job, primary = verifying_job(tmp_path, commands=[command])
+    original_worktree = job.worktree
+    branch = job.branch
     store = VerificationStore(service.store, evidence_root=str(tmp_path / "evidence"))
     run = DeterministicVerifier(service, store=store).verify(job)
 
@@ -82,8 +85,27 @@ def test_passing_commands_create_evidence_and_unlock_ready_for_review(tmp_path):
     assert apply_verification_result(service, job.id, run) == 0
     ready = service.get(job.id)
     assert ready.status == JobStatus.READY_FOR_REVIEW
+    assert ready.worktree == ""
+    assert not os.path.exists(original_worktree)
+    assert ready.branch == branch
+    assert git(primary, "rev-parse", f"refs/heads/{branch}^{{commit}}") == run.head_sha
+    assert ready.environment["kind"] == "host_git_review_branch"
+    assert ready.environment["head_sha"] == run.head_sha
+    assert ready.metadata["review_branch"] == branch
+    assert ready.metadata["review_head_sha"] == run.head_sha
+
+    # Review evidence no longer depends on the retired execution worktree.
+    diff = build_job_diff(service, job.id)
+    assert diff.head_sha == run.head_sha
+    assert diff.branch == branch
+    assert "code.txt" in diff.files
+    assert "-base" in diff.patch
+    assert "+implemented" in diff.patch
+
     event = [e for e in service.events(job.id) if e.to_status == JobStatus.READY_FOR_REVIEW][-1]
     assert event.payload["verification_id"] == run.id
+    assert event.payload["review_branch"]["branch"] == branch
+    assert any(e.event_type == "review_branch_ready" for e in service.events(job.id))
 
 
 def test_failed_verification_requeues_agent_while_retry_budget_remains(tmp_path):
@@ -103,6 +125,7 @@ def test_failed_verification_requeues_agent_while_retry_budget_remains(tmp_path)
     assert apply_verification_result(service, job.id, run) == 10
     current = service.get(job.id)
     assert current.status == JobStatus.QUEUED
+    assert current.worktree  # failed work remains available for repair
     feedback = [e for e in service.events(job.id) if e.event_type == "verification_failed"][-1]
     assert feedback.payload["verification_id"] == run.id
     assert feedback.payload["failed_checks"][0]["return_code"] == 3
@@ -125,6 +148,7 @@ def test_failed_verification_exhausts_retries_into_human_gate(tmp_path):
     assert current.status == JobStatus.NEEDS_HUMAN
     assert current.attention_reason == AttentionReason.TEST_FAILURE
     assert current.attention_detail
+    assert current.worktree  # human/repair states keep execution workspace
 
 
 def test_missing_verification_contract_never_becomes_ready(tmp_path):
@@ -140,6 +164,7 @@ def test_missing_verification_contract_never_becomes_ready(tmp_path):
     current = service.get(job.id)
     assert current.status == JobStatus.NEEDS_HUMAN
     assert current.attention_reason == AttentionReason.VERIFICATION_REQUIRED
+    assert current.worktree
 
 
 def test_validation_that_leaves_tracked_changes_is_not_merge_ready(tmp_path):
@@ -158,3 +183,4 @@ def test_validation_that_leaves_tracked_changes_is_not_merge_ready(tmp_path):
     assert run.passed is False
     assert apply_verification_result(service, job.id, run) == 10
     assert service.get(job.id).status == JobStatus.QUEUED
+    assert service.get(job.id).worktree

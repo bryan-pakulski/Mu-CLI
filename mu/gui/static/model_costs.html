@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>μcli · Model Costs</title>
+    <script>
+    (function () {
+        try {
+            var saved = localStorage.getItem('mucli-theme');
+            var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', (saved === 'light' || saved === 'dark') ? saved : sys);
+        } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/trace.css">
+    <link rel="stylesheet" href="/static/css/model_costs.css">
+    <script src="/static/js/model_costs.js" defer></script>
+</head>
+<body class="trace-body model-cost-body">
+    <header class="trace-header">
+        <div class="trace-title"><span class="trace-mu">μ</span> Model Costs <span class="trace-session" id="mc-version"></span></div>
+        <div class="trace-run-picker">
+            <input id="mc-search" class="mc-search" type="search" placeholder="Filter models…" aria-label="Filter models">
+            <button class="trace-btn trace-theme-btn" id="mc-theme" title="Toggle theme">☾</button>
+            <a class="trace-back" href="/work">← work</a>
+        </div>
+    </header>
+
+    <div id="mc-loading" class="trace-empty">Loading pricing baseline…</div>
+    <div id="mc-error" class="trace-empty" hidden></div>
+
+    <main id="mc-main" class="trace-main" hidden>
+        <section class="trace-section">
+            <h2 class="trace-h2">Cost semantics <span class="trace-sub">planning estimates, not provider invoices</span></h2>
+            <div class="mc-notes" id="mc-notes"></div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Token-priced models <span class="trace-sub">USD per 1M tokens · standard synchronous list-rate baseline</span></h2>
+            <div class="trace-scroll">
+                <table class="trace-table mc-table">
+                    <thead><tr><th>provider</th><th>model</th><th>input</th><th>cached input</th><th>output</th><th>context / high tier</th><th>best fit</th></tr></thead>
+                    <tbody id="mc-token-models"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Ollama baseline <span class="trace-sub">local = $0 provider/API; cloud = plan/usage unless a token tariff is known</span></h2>
+            <div class="trace-scroll">
+                <table class="trace-table mc-table">
+                    <thead><tr><th>model</th><th>billing</th><th>context</th><th>local size</th><th>usage</th><th>best fit</th></tr></thead>
+                    <tbody id="mc-ollama"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Quick estimator <span class="trace-sub">compare list-rate API economics before queuing work</span></h2>
+            <div class="mc-estimator">
+                <label>Model<select id="mc-est-model"></select></label>
+                <label>Input tokens<input id="mc-est-in" type="number" min="0" step="1000" value="100000"></label>
+                <label>Cached input<input id="mc-est-cache" type="number" min="0" step="1000" value="0"></label>
+                <label>Output tokens<input id="mc-est-out" type="number" min="0" step="1000" value="10000"></label>
+                <div class="mc-est-result"><span>Estimated API cost</span><strong id="mc-est-cost">—</strong><small id="mc-est-detail"></small></div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

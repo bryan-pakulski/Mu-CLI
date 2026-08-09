@@ -1,0 +1,160 @@
+/* Job Trace Analyzer — retrospective durable-job analytics layered on the
+ * existing Trace Analyzer visual language. */
+.job-trace-picker { flex-wrap: wrap; justify-content: flex-end; }
+.job-trace-picker .trace-select { min-width: min(330px, 31vw); }
+.job-trace-picker .jt-compare-select { min-width: min(250px, 25vw); }
+.job-trace-main { max-width: 1540px; }
+.jt-error { color: var(--err); }
+.jt-overview-cards { grid-template-columns: repeat(6, minmax(120px, 1fr)); }
+.jt-signal-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 0;
+    margin-top: 20px;
+    border-top: 1px solid var(--hairline);
+}
+.jt-signal {
+    min-width: 0;
+    padding: 14px 18px 4px 0;
+    margin-right: 18px;
+    border-right: 1px solid var(--hairline);
+}
+.jt-signal:last-child { border-right: 0; margin-right: 0; }
+.jt-signal-label { color: var(--text-dim); font-size: 10px; }
+.jt-signal-value { margin-top: 5px; color: var(--text-soft); font: 600 13px/1.35 var(--mono); }
+.jt-signal-detail { margin-top: 4px; color: var(--text-dimmer); font-size: 10px; line-height: 1.45; }
+.jt-signal[data-tone="good"] .jt-signal-value { color: var(--success); }
+.jt-signal[data-tone="warn"] .jt-signal-value { color: var(--warn); }
+.jt-signal[data-tone="bad"] .jt-signal-value { color: var(--err); }
+
+.jt-phase-wrap { padding-top: 18px; }
+.jt-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px 15px;
+    margin-top: 12px;
+    color: var(--text-dim);
+    font-size: 10px;
+}
+.jt-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.jt-legend-swatch { width: 9px; height: 9px; border-radius: 2px; opacity: .85; }
+.jt-table-wrap { margin-top: 18px; max-height: 360px; }
+
+.jt-two-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+    gap: clamp(28px, 4vw, 58px);
+}
+.jt-two-column > div + div { border-left: 1px solid var(--hairline); padding-left: clamp(28px, 4vw, 58px); }
+
+.jt-tool-bars { display: flex; flex-direction: column; gap: 9px; }
+.jt-tool-row { display: grid; grid-template-columns: minmax(120px, .6fr) minmax(160px, 1fr) 56px; gap: 12px; align-items: center; }
+.jt-tool-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); font: 11px/1.3 var(--mono); }
+.jt-tool-track { height: 8px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--hairline) 70%, transparent); }
+.jt-tool-fill { height: 100%; border-radius: inherit; background: var(--accent); opacity: .64; }
+.jt-tool-value { color: var(--text-dim); text-align: right; font: 10.5px/1 var(--mono); }
+
+.jt-verification-list { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--hairline); }
+.jt-verification {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: start;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--hairline);
+}
+.jt-verification-mark { font-weight: 700; }
+.jt-verification[data-pass="true"] .jt-verification-mark { color: var(--success); }
+.jt-verification[data-pass="false"] .jt-verification-mark { color: var(--err); }
+.jt-verification-main { min-width: 0; }
+.jt-verification-title { color: var(--text-soft); font-size: 11px; }
+.jt-verification-meta { margin-top: 4px; color: var(--text-dim); font: 10px/1.4 var(--mono); }
+.jt-verification-time { color: var(--text-dimmer); font: 10px/1.3 var(--mono); }
+
+.jt-incidents { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.jt-incident-group { min-width: 0; }
+.jt-incident-title { margin-bottom: 8px; color: var(--text-dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.jt-incident-list { border-top: 1px solid var(--hairline); }
+.jt-incident {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--hairline);
+}
+.jt-incident-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.jt-incident-kind { color: var(--text-soft); font-size: 11px; font-weight: 600; }
+.jt-incident-time { color: var(--text-dimmer); font: 10px/1.3 var(--mono); }
+.jt-incident-copy { margin-top: 4px; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; }
+
+.jt-compare-grid { display: grid; grid-template-columns: repeat(3, minmax(190px, 1fr)); gap: 0; border-top: 1px solid var(--hairline); }
+.jt-compare-metric { padding: 14px 18px 14px 0; margin-right: 18px; border-bottom: 1px solid var(--hairline); }
+.jt-compare-label { color: var(--text-dim); font-size: 10px; }
+.jt-compare-values { display: flex; align-items: baseline; gap: 7px; margin-top: 5px; font: 600 12px/1.3 var(--mono); }
+.jt-compare-primary { color: var(--text); }
+.jt-compare-ref { color: var(--text-dimmer); }
+.jt-compare-delta { margin-top: 3px; color: var(--text-dim); font: 10px/1.3 var(--mono); }
+.jt-compare-delta[data-tone="good"] { color: var(--success); }
+.jt-compare-delta[data-tone="bad"] { color: var(--err); }
+
+.jt-section-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.jt-section-toolbar .trace-h2 { margin-bottom: 16px; }
+.jt-filter-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.jt-inline-input, .jt-inline-select {
+    min-height: 32px;
+    padding: 5px 8px;
+    border: 0;
+    border-bottom: 1px solid var(--hairline);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 10.5px;
+}
+.jt-inline-input { width: 180px; }
+.jt-wide-btn { width: auto; padding: 0 9px; font: 10px/1 var(--mono); }
+.jt-event-list { border-top: 1px solid var(--hairline); }
+.jt-event {
+    border-bottom: 1px solid var(--hairline);
+}
+.jt-event > summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 90px 104px minmax(130px, .8fr) minmax(0, 1.4fr) 130px;
+    gap: 10px;
+    align-items: baseline;
+    padding: 9px 0;
+}
+.jt-event > summary::-webkit-details-marker { display: none; }
+.jt-event > summary:hover { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
+.jt-event-elapsed, .jt-event-time { color: var(--text-dimmer); font: 9.5px/1.3 var(--mono); }
+.jt-event-category { color: var(--text-dim); font-size: 9.5px; text-transform: uppercase; letter-spacing: .03em; }
+.jt-event-title { color: var(--text-soft); font-size: 10.5px; font-weight: 600; }
+.jt-event-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 10.5px; }
+.jt-event[data-severity="error"] .jt-event-title { color: var(--err); }
+.jt-event[data-severity="warning"] .jt-event-title { color: var(--warn); }
+.jt-event-detail { padding: 2px 0 12px 204px; }
+.jt-event-detail pre { max-height: 420px; margin: 0; overflow: auto; }
+
+@media (max-width: 1120px) {
+    .job-trace-header { align-items: flex-start; padding-top: 14px; padding-bottom: 14px; }
+    .job-trace-picker { max-width: 68%; }
+    .job-trace-picker .trace-select { min-width: 210px; max-width: 100%; }
+    .jt-overview-cards { grid-template-columns: repeat(3, 1fr); }
+    .jt-signal-strip { grid-template-columns: repeat(2, 1fr); }
+    .jt-two-column { grid-template-columns: 1fr; }
+    .jt-two-column > div + div { border-left: 0; border-top: 1px solid var(--hairline); padding-left: 0; padding-top: 28px; }
+    .jt-compare-grid { grid-template-columns: repeat(2, 1fr); }
+    .jt-event > summary { grid-template-columns: 76px 90px 120px minmax(0,1fr); }
+    .jt-event-time { display: none; }
+    .jt-event-detail { padding-left: 166px; }
+}
+@media (max-width: 760px) {
+    .job-trace-header { position: relative; flex-direction: column; }
+    .job-trace-picker { max-width: none; width: 100%; justify-content: flex-start; }
+    .job-trace-picker .trace-select { width: 100%; min-width: 0; max-width: none; }
+    .jt-overview-cards, .jt-signal-strip, .jt-compare-grid, .jt-incidents { grid-template-columns: 1fr; }
+    .jt-section-toolbar { flex-direction: column; }
+    .jt-filter-row { width: 100%; justify-content: flex-start; }
+    .jt-inline-input, .jt-inline-select { flex: 1 1 140px; }
+    .jt-event > summary { grid-template-columns: 68px 82px minmax(0,1fr); }
+    .jt-event-category { display: none; }
+    .jt-event-detail { padding-left: 0; }
+}

@@ -240,7 +240,7 @@ class Job:
 
 @dataclass
 class JobEvent:
-    id: str
+    id: int
     job_id: str
     event_type: str
     from_status: Optional[JobStatus]

@@ -146,6 +146,7 @@ def _load_command_modules() -> None:
     from . import compact  # noqa: F401
     from . import container  # noqa: F401
     from . import job  # noqa: F401 — registers /job and /jobs
+    from . import job_diagnostics  # noqa: F401 — registers /jobdiag
 
 
 _load_command_modules()

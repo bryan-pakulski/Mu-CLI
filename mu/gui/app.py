@@ -1,18 +1,4 @@
-"""FastAPI factory for the GUI server.
-
-Multi-session model: ``app.state.sessions`` holds every loaded Session
-keyed by name. Each session gets its own ``threading.Lock``,
-``threading.Event`` (busy), and ``WebUI`` bridge — so two sessions can
-have turns in flight simultaneously. ``app.state.current_session_name``
-tracks which one the user is *focused* on (purely a UI hint; chat
-sends explicitly name their session).
-
-Backward-compat shim: ``app.state.session`` (and ``session_lock`` /
-``busy``) remain as Python ``@property``-like accessors via
-``__getattr__`` on a tiny holder, returning the current session's
-view. Existing code paths that didn't know about multi-session keep
-working against whichever session is focused.
-"""
+"""FastAPI factory for the GUI server and shared background control daemon."""
 
 from __future__ import annotations
 
@@ -32,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.types import Scope
 
 from .bus import EventBus
-from .deps import require_session  # re-exported
+from .deps import require_session
 from .memory_snapshot import LIVE_RESOLUTION, build_memory_snapshot
 from .prompts import PromptStore
 from .routers import (
@@ -60,18 +46,18 @@ from .routers import (
     traces as traces_router,
 )
 from .watcher import SessionWatcher
+from .web_ui import WebUI
+from mu.agent.hooks import HookContext, default_registry
 from mu.container import ContainerSupervisor
 from mu.jobs import get_default_job_service
-from .web_ui import WebUI
-
-from mu.agent.hooks import HookContext, default_registry
+from mu.jobs.controller import JobController
+from mu.jobs.runner import SessionJobRunner
 
 _MEMORY_HOOK_NAME = "gui_memory_snapshot"
 _SUBAGENT_HOOK_NAME = "gui_subagent_snapshot"
 
 
 def _register_memory_snapshot_hook() -> None:
-    """Register a ``pre_provider_call`` hook that pushes a live context snapshot."""
     if any(spec.name == _MEMORY_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
         return
 
@@ -82,7 +68,6 @@ def _register_memory_snapshot_hook() -> None:
         try:
             from mu.agent.loop_body import _estimate_messages_tokens, _estimate_tools_tokens
             from utils.token_estimator import estimate_tokens
-
             request_tokens = (
                 estimate_tokens(ctx.system_prompt or "")
                 + _estimate_messages_tokens(ctx.messages or [])
@@ -105,7 +90,6 @@ def _register_memory_snapshot_hook() -> None:
 
 
 def _register_subagent_snapshot_hook() -> None:
-    """Register live sub-agent snapshots for the GUI."""
     if any(spec.name == _SUBAGENT_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
         return
 
@@ -121,27 +105,22 @@ def _register_subagent_snapshot_hook() -> None:
         except Exception as exc:
             _logger.warning("subagent snapshot hook failed: %s", exc)
             return None
-        active = sum(1 for c in children if c.get("status") == "running")
-        stuck = sum(1 for c in children if c.get("stuck"))
-        stall = sum(1 for c in children if c.get("stall"))
-        ui._publish(
-            {
-                "kind": "subagent_snapshot",
-                "children": children,
-                "active": active,
-                "stuck": stuck,
-                "stall": stall,
-                "batch_id": registry.active_batch_id(),
-            }
-        )
+        ui._publish({
+            "kind": "subagent_snapshot",
+            "children": children,
+            "active": sum(1 for c in children if c.get("status") == "running"),
+            "stuck": sum(1 for c in children if c.get("stuck")),
+            "stall": sum(1 for c in children if c.get("stall")),
+            "batch_id": registry.active_batch_id(),
+        })
         return None
 
     default_registry.register("pre_provider_call", name=_SUBAGENT_HOOK_NAME)(_snapshot)
 
+
 GUI_ROOT = Path(__file__).parent
 TEMPLATES_DIR = GUI_ROOT / "templates"
 STATIC_DIR = GUI_ROOT / "static"
-
 __all__ = ["create_app", "require_session"]
 
 
@@ -157,57 +136,46 @@ def session_by_name(app: FastAPI, name: Optional[str]):
     sessions: Dict[str, Any] = app.state.sessions
     if name:
         return sessions.get(name)
-    cur = app.state.current_session_name
-    return sessions.get(cur) if cur else None
+    current = app.state.current_session_name
+    return sessions.get(current) if current else None
 
 
 def session_lock_for(app: FastAPI, name: Optional[str]) -> threading.Lock:
     target = name or app.state.current_session_name
     if target is None:
         return app.state._fallback_lock
-    locks: Dict[str, threading.Lock] = app.state.session_locks
-    return locks.setdefault(target, threading.Lock())
+    return app.state.session_locks.setdefault(target, threading.Lock())
 
 
 def session_busy_for(app: FastAPI, name: Optional[str]) -> threading.Event:
     target = name or app.state.current_session_name
     if target is None:
         return app.state._fallback_busy
-    busys: Dict[str, threading.Event] = app.state.session_busy
-    return busys.setdefault(target, threading.Event())
+    return app.state.session_busy.setdefault(target, threading.Event())
 
 
 def web_ui_for(app: FastAPI, name: Optional[str]) -> Optional[WebUI]:
     target = name or app.state.current_session_name
-    if target is None:
-        return None
-    uis: Dict[str, WebUI] = app.state.web_uis
-    return uis.get(target)
+    return app.state.web_uis.get(target) if target else None
 
 
-def create_app(
-    *,
-    args: Any,
-    build_session_fn: Callable,
-    port: int = 30311,
-) -> FastAPI:
+def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> FastAPI:
     app = FastAPI(title="mucli", version="1.0", docs_url=None, redoc_url=None)
-
     bus = EventBus()
     prompts = PromptStore()
 
-    app.state.sessions: Dict[str, Any] = {}
-    app.state.session_locks: Dict[str, threading.Lock] = {}
-    app.state.session_busy: Dict[str, threading.Event] = {}
-    app.state.web_uis: Dict[str, WebUI] = {}
-    app.state.current_session_name: Optional[str] = None
+    app.state.sessions = {}
+    app.state.session_locks = {}
+    app.state.session_busy = {}
+    app.state.web_uis = {}
+    app.state.current_session_name = None
     app.state._fallback_lock = threading.Lock()
     app.state._fallback_busy = threading.Event()
-    app.state.container_creation_status: Dict[str, Dict[str, Any]] = {}
+    app.state.container_creation_status = {}
     app.state.container_creation_lock = threading.Lock()
-    app.state.container_creation_tasks: Dict[str, asyncio.Task] = {}
-    app.state.container_environment_jobs: Dict[str, Dict[str, Any]] = {}
-    app.state.container_environment_tasks: Dict[str, asyncio.Task] = {}
+    app.state.container_creation_tasks = {}
+    app.state.container_environment_jobs = {}
+    app.state.container_environment_tasks = {}
 
     app.state.bus = bus
     app.state.prompts = prompts
@@ -218,9 +186,19 @@ def create_app(
     app.state.unload_session = lambda **kw: _unload_session(app, **kw)
     app.state.watcher = SessionWatcher(app)
     app.state.container_supervisor = ContainerSupervisor()
-    # Shared durable job service. GUI is a control plane only; the same service
-    # is used directly by TUI and through this API by mobile.
     app.state.job_service = get_default_job_service()
+    # Milestone 1 intentionally serializes job execution. Existing Session
+    # initialization changes process CWD; safe five-way parallelism arrives in
+    # Milestone 2 with per-job worktree/process isolation.
+    app.state.job_controller = JobController(
+        app.state.job_service,
+        SessionJobRunner(
+            app.state.job_service,
+            build_session_fn=build_session_fn,
+            base_args=args,
+        ),
+        max_workers=1,
+    )
 
     app.state.session_by_name = lambda name=None: session_by_name(app, name)
     app.state.session_lock_for = lambda name=None: session_lock_for(app, name)
@@ -230,7 +208,6 @@ def create_app(
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.auto_reload = True
     app.state.templates = templates
-
     app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
     app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
@@ -263,33 +240,22 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         session = session_by_name(app, None)
-        sm = session.session_manager if session else None
-        return templates.TemplateResponse(
-            request,
-            "index.html",
-            {
-                "session_name": sm.current_session_name if sm else "",
-                "agent_mode": session.variables.get("agent_mode", "default") if session else "default",
-                "session_type": session.variables.get("session_type", "workspace") if session else "workspace",
-                "provider": session.provider.name if session and session.provider else "",
-                "model": session.provider.model_name if session and session.provider else "",
-                "session_active": session is not None,
-            },
-        )
+        manager = session.session_manager if session else None
+        return templates.TemplateResponse(request, "index.html", {
+            "session_name": manager.current_session_name if manager else "",
+            "agent_mode": session.variables.get("agent_mode", "default") if session else "default",
+            "session_type": session.variables.get("session_type", "workspace") if session else "workspace",
+            "provider": session.provider.name if session and session.provider else "",
+            "model": session.provider.model_name if session and session.provider else "",
+            "session_active": session is not None,
+        })
 
     @app.get("/trace", response_class=HTMLResponse)
     async def trace_analyzer(request: Request):
-        return templates.TemplateResponse(
-            request,
-            "trace.html",
-            {
-                "session_name": "",
-                "agent_mode": "default",
-                "provider": "",
-                "model": "",
-                "session_active": False,
-            },
-        )
+        return templates.TemplateResponse(request, "trace.html", {
+            "session_name": "", "agent_mode": "default", "provider": "",
+            "model": "", "session_active": False,
+        })
 
     @app.get("/healthz")
     async def healthz():
@@ -298,19 +264,19 @@ def create_app(
             "session_active": app.state.current_session_name is not None,
             "loaded_sessions": list(app.state.sessions.keys()),
             "durable_jobs": len(app.state.job_service.list(limit=1000)),
+            "job_controller": app.state.job_controller.snapshot(),
         }
 
     @app.on_event("startup")
     async def _bind_loop():
         bus.bind_loop(asyncio.get_running_loop())
-        # Any active job whose execution owner disappeared before restart is
-        # moved to RECOVERING before clients see it.
-        app.state.job_service.recover_expired_leases()
+        app.state.job_controller.start()
         app.state.watcher.start()
 
     @app.on_event("shutdown")
-    async def _stop_watcher():
+    async def _stop_services():
         app.state.watcher.stop()
+        app.state.job_controller.stop(wait=False)
         tasks = list(app.state.container_creation_tasks.values())
         tasks += list(app.state.container_environment_tasks.values())
         for task in tasks:
@@ -322,22 +288,12 @@ def create_app(
     return app
 
 
-def _load_session(
-    app: FastAPI,
-    *,
-    name: str,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-):
+def _load_session(app: FastAPI, *, name: str, provider: Optional[str] = None, model: Optional[str] = None):
     if name in app.state.sessions:
         app.state.current_session_name = name
         return app.state.sessions[name]
-
-    bus = app.state.bus
-    prompts = app.state.prompts
-    web_ui = WebUI(bus, prompts, session_name=name)
+    web_ui = WebUI(app.state.bus, app.state.prompts, session_name=name)
     app.state.web_uis[name] = web_ui
-
     args = copy.copy(app.state.args)
     args.session = name
     if provider is not None:
@@ -347,7 +303,6 @@ def _load_session(
     session = app.state.build_session_fn(args, web_ui, allow_prompt=False)
     session.ui = web_ui
     session.session_manager.ui = web_ui
-
     app.state.sessions[name] = session
     app.state.session_locks.setdefault(name, threading.Lock())
     app.state.session_busy.setdefault(name, threading.Event())
@@ -355,11 +310,7 @@ def _load_session(
     return session
 
 
-def _unload_session(
-    app: FastAPI,
-    *,
-    name: Optional[str] = None,
-) -> bool:
+def _unload_session(app: FastAPI, *, name: Optional[str] = None) -> bool:
     target = name or app.state.current_session_name
     if not target or target not in app.state.sessions:
         return False

@@ -125,6 +125,7 @@ def dispatch(
 def _load_command_modules() -> None:
     from . import misc  # noqa: F401
     from . import stats  # noqa: F401
+    from . import costs  # noqa: F401
     from . import mode  # noqa: F401
     from . import ollama  # noqa: F401
     from . import skills  # noqa: F401

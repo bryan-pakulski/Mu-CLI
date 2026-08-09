@@ -120,6 +120,7 @@ def test_cost_map_is_exposed_to_gui_tui_and_mobile_control_planes():
     work = (ROOT / "mu/gui/templates/work.html").read_text(encoding="utf-8")
     html = (ROOT / "mu/gui/static/model_costs.html").read_text(encoding="utf-8")
     script = (ROOT / "mu/gui/static/js/model_costs.js").read_text(encoding="utf-8")
+    work_semantics = (ROOT / "mu/gui/static/js/work_analysis_link.js").read_text(encoding="utf-8")
     commands = (ROOT / "mu/commands/__init__.py").read_text(encoding="utf-8")
     costs = (ROOT / "mu/commands/costs.py").read_text(encoding="utf-8")
     mobile = (ROOT / "mobile/android/src/api/providers.ts").read_text(encoding="utf-8")
@@ -129,6 +130,9 @@ def test_cost_map_is_exposed_to_gui_tui_and_mobile_control_planes():
     assert 'Model Costs' in html
     assert '/api/providers/pricing' in script
     assert 'Quick estimator' in html
+    assert "value.textContent = 'Unpriced'" in work_semantics
+    assert "value.textContent = '$0.00 API'" in work_semantics
+    assert "$${amount.toFixed(2)} + ?" in work_semantics
     assert 'from . import costs' in commands
     assert '"/costs"' in costs and '"/pricing"' in costs
     assert "pricing: () => api.get<ModelPricingCatalog>('/api/providers/pricing')" in mobile

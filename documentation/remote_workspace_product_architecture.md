@@ -342,6 +342,12 @@ Do **not** replace this with a single mutable `total_cost` field.
 
 The current versioned model pricing map is the beginning of the `model_api_usd` meter. Local Ollama can legitimately have `$0` provider/API spend while still consuming billable hosted GPU/CPU compute.
 
+### Current accounting boundary
+
+Durable Engineering Work is the authoritative cost path. Each attempt snapshots input/output/cached/reasoning token deltas plus pricing key/version/rates into its durable evidence. Work receipts and Job Trace distinguish `metered`, `local_zero`, `partial`, `unpriced` and `legacy` economics, so unknown or plan-based spend cannot be mistaken for a true `$0` provider bill.
+
+The older interactive-session `/stats` path still calls the historical Gemini-era pricing helper in `utils/config.py`. It is not billing evidence and should be migrated to the shared pricing registry during the next harness/config cleanup. Durable job accounting must remain the source of truth for paid workspace billing until that cleanup lands.
+
 ### Recommended early commercial model
 
 Start with **BYOK model providers** plus MuCLI subscription/remote-workspace billing rather than becoming an LLM reseller immediately.

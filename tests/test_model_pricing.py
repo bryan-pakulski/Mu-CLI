@@ -11,7 +11,10 @@ from utils.model_pricing import (
     PRICING_VERSION,
     estimate_model_cost,
     pricing_catalog,
+    pricing_config_path,
+    reset_pricing_config,
     resolve_token_pricing,
+    save_pricing_config,
 )
 
 
@@ -26,8 +29,6 @@ def test_openai_cached_tokens_are_not_double_charged():
         cached_tokens=40_000,
         output_tokens=20_000,
     )
-    # 0.16M*$2.50 + 0.04M*$0.25 + 0.02M*$15 = $0.71.
-    # Staying below Terra's long-context threshold isolates cache accounting.
     assert estimate["pricing_key"] == "gpt-5.6-terra"
     assert estimate["long_context_tier"] is False
     assert estimate["api_cost_usd"] == pytest.approx(0.71)
@@ -63,15 +64,13 @@ def test_gemini_pro_high_tier_and_reasoning_not_double_charged():
         output_tokens=20_000,
         reasoning_tokens=10_000,
     )
-    # 0.2M*$4 + 0.05M*$0.40 + 0.02M*$18 = $1.18.
-    # Reasoning is informational: Gemini's priced output already includes it.
     assert estimate["pricing_key"] == "gemini-3.1-pro-preview"
     assert estimate["long_context_tier"] is True
     assert estimate["api_cost_usd"] == pytest.approx(1.18)
     assert estimate["usage"]["reasoning"] == 10_000
 
 
-def test_ollama_local_zero_api_cost_cloud_plan_cost_unknown():
+def test_ollama_local_zero_api_cost_and_glm_cloud_uses_configured_estimate():
     local = estimate_model_cost(
         provider="ollama",
         model_name="qwen3-coder-next:latest",
@@ -90,8 +89,10 @@ def test_ollama_local_zero_api_cost_cloud_plan_cost_unknown():
         output_tokens=2_000,
         endpoint="https://ollama.com",
     )
-    assert cloud["billing"] == "plan"
-    assert cloud["api_cost_usd"] is None
+    assert cloud["billing"] == "estimated_token"
+    assert cloud["source"] == "configured_estimate"
+    assert cloud["rates"]["estimated_total_per_million"] == pytest.approx(1.40)
+    assert cloud["api_cost_usd"] == pytest.approx(0.0728)
     assert cloud["catalog"]["context_window"] == 976_000
 
 
@@ -107,34 +108,82 @@ def test_unknown_model_is_unpriced_not_free():
     assert estimate["api_cost_usd"] is None
 
 
-def test_public_catalog_is_versioned_and_covers_all_supported_providers():
+def test_public_catalog_is_versioned_unified_and_exposes_config_paths():
     catalog = pricing_catalog()
     assert catalog["version"] == PRICING_VERSION
-    assert {item["provider"] for item in catalog["models"]} == {"openai", "gemini"}
+    assert {item["provider"] for item in catalog["models"]} == {"openai", "gemini", "ollama"}
     assert catalog["ollama"]
-    assert "provider/API cost" in catalog["provider_notes"]["ollama_local"]
+    assert catalog["config_path"].endswith("model_pricing.json")
+    assert catalog["active_config_path"]
+    glm = next(item for item in catalog["models"] if item["key"] == "glm-5.2:cloud")
+    assert glm["estimated_total_per_million"] == pytest.approx(1.4)
 
 
-def test_cost_map_is_exposed_to_gui_tui_and_mobile_control_planes():
+def test_operator_override_is_live_and_can_be_reset(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUCLI_HOME", str(tmp_path / "mucli-home"))
+    base = pricing_catalog()
+    assert base["using_override"] is False
+    rows = [dict(item) for item in base["models"]]
+    glm = next(item for item in rows if item["key"] == "glm-5.2:cloud")
+    glm["estimated_total_per_million"] = 2.0
+
+    saved = save_pricing_config({
+        "version": "operator-test",
+        "currency": "USD",
+        "unit": "per_million_tokens",
+        "models": rows,
+    })
+    assert pricing_config_path().exists()
+    assert saved["using_override"] is True
+    assert saved["version"] == "operator-test"
+
+    estimate = estimate_model_cost(
+        provider="ollama",
+        model_name="glm-5.2:cloud",
+        input_tokens=50_000,
+        output_tokens=2_000,
+        endpoint="https://ollama.com",
+    )
+    assert estimate["pricing_version"] == "operator-test"
+    assert estimate["config_source"] == "user"
+    assert estimate["api_cost_usd"] == pytest.approx(0.104)
+
+    reset = reset_pricing_config()
+    assert reset["using_override"] is False
+    assert not pricing_config_path().exists()
+
+
+def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     providers_router = (ROOT / "mu/gui/routers/providers.py").read_text(encoding="utf-8")
     work = (ROOT / "mu/gui/templates/work.html").read_text(encoding="utf-8")
     html = (ROOT / "mu/gui/static/model_costs.html").read_text(encoding="utf-8")
     script = (ROOT / "mu/gui/static/js/model_costs.js").read_text(encoding="utf-8")
+    css = (ROOT / "mu/gui/static/css/model_costs.css").read_text(encoding="utf-8")
     work_semantics = (ROOT / "mu/gui/static/js/work_analysis_link.js").read_text(encoding="utf-8")
     commands = (ROOT / "mu/commands/__init__.py").read_text(encoding="utf-8")
     costs = (ROOT / "mu/commands/costs.py").read_text(encoding="utf-8")
     mobile = (ROOT / "mobile/android/src/api/providers.ts").read_text(encoding="utf-8")
+    config = (ROOT / "config/model_pricing.json").read_text(encoding="utf-8")
 
     assert '@router.get("/pricing")' in providers_router
+    assert '@router.put("/pricing")' in providers_router
+    assert '@router.post("/pricing/reset")' in providers_router
     assert 'href="/static/model_costs.html"' in work
-    assert 'Model Costs' in html
-    assert '/api/providers/pricing' in script
-    assert 'Quick estimator' in html
+    assert 'Pricing registry' in html
+    assert 'Blended est. / 1M total' in html
+    assert 'Quick estimator' not in html
+    assert "fetch('/api/providers/pricing', {" in script
+    assert "method: 'PUT'" in script
+    assert "/api/providers/pricing/reset" in script
+    assert 'product-header' in html
+    assert '.mc-table' in css
+    assert 'estimated_token' in config
+    assert '"glm-5.2:cloud"' in config
     assert "value.textContent = 'Unpriced'" in work_semantics
     assert "value.textContent = '$0.00 API'" in work_semantics
-    assert "$${amount.toFixed(2)} + ?" in work_semantics
     assert 'from . import costs' in commands
     assert '"/costs"' in costs and '"/pricing"' in costs
+    assert 'estimated_total_per_million' in mobile
     assert "pricing: () => api.get<ModelPricingCatalog>('/api/providers/pricing')" in mobile
 
 
@@ -146,7 +195,7 @@ class _Manager:
             "total": 30,
             "cached": 0,
             "reasoning": 0,
-            "total_cost": 99.0,  # deliberately bogus legacy baseline
+            "total_cost": 99.0,
         }
 
 
@@ -186,7 +235,6 @@ def test_durable_job_usage_result_persists_tokens_and_pricing_provenance(tmp_pat
 
     cost, result = runner._usage_result(job, session, before, {"status": "completed"})
 
-    # 0.8M*$0.75 + 0.2M*$0.075 + 0.1M*$4.50 = $1.065
     assert cost == pytest.approx(1.065)
     assert result["tokens"] == {
         "input": 1_000_000,
@@ -201,5 +249,4 @@ def test_durable_job_usage_result_persists_tokens_and_pricing_provenance(tmp_pat
     assert record["source"] == "pricing_map"
     assert record["api_cost_usd"] == pytest.approx(1.065)
     assert record["legacy_loop_cost_usd"] == pytest.approx(1135.0)
-    # Dedicated job session lifetime accounting is repaired to mapped cost.
     assert session.session_manager.token_counts["total_cost"] == pytest.approx(100.065)

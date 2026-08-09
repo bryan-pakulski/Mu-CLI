@@ -31,6 +31,20 @@ def _duration(value: float) -> str:
     return f"{seconds}s"
 
 
+def _phase_class(status: str) -> str:
+    if status in {"preparing", "running", "recovering"}:
+        return "active"
+    if status == "verifying":
+        return "verify"
+    if status in {"queued", "needs_human"}:
+        return "waiting"
+    if status in {"failed", "environment_error", "timed_out", "budget_exceeded", "conflicted"}:
+        return "stopped"
+    if status == "ready_for_review":
+        return "review"
+    return "terminal" if status in {"cancelled", "merged"} else "other"
+
+
 @command(
     "/jobtrace",
     "/job-analysis",
@@ -56,18 +70,23 @@ def job_analysis_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> C
     tools = analysis.get("tools") or []
     verifications = analysis.get("verifications") or []
     phases = analysis.get("phase_breakdown") or []
+    intervals = analysis.get("phase_intervals") or []
     tokens = s.get("tokens") or {}
+    runtime_trace = analysis.get("runtime_trace") or {}
+    billing_modes = list(s.get("billing_modes") or [])
+    cost_label = "estimated" if "estimated_token" in billing_modes else "attributed"
 
     lines = [
         f"Job Trace · {job.title}",
         f"{job.id} · {job.status.value}{' · archived' if analysis['job'].get('archived') else ''}",
         "",
         f"Wall time:        {_duration(s['elapsed_seconds'])}",
-        f"Active time:      {_duration(s['active_seconds'])}",
-        f"Waiting time:     {_duration(s['waiting_seconds'])}",
+        f"Active execution: {_duration(s['active_seconds'])}",
+        f"Passive time:     {_duration(s.get('passive_seconds', 0))}",
+        f"Stopped/errors:   {_duration(s.get('stopped_seconds', 0))}",
         f"Verification:     {_duration(s['verification_seconds'])}",
         f"Attempts/retries: {s['attempts']} / {s['retries']}",
-        f"Cost:             ${float(s['cost_usd'] or 0):.2f}",
+        f"Model cost:       ${float(s.get('model_api_cost_usd', s.get('cost_usd', 0)) or 0):.2f} ({cost_label})",
         f"Tool calls:       {s['tool_calls']} ({s['unique_tools']} unique)",
         f"Human gates:      {s['human_gates']}",
         f"Failures:         {s['failures']}",
@@ -79,12 +98,35 @@ def job_analysis_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> C
     if tokens:
         lines.append("Tokens:            " + " · ".join(f"{k}={int(v):,}" for k, v in list(tokens.items())[:8]))
 
+    lines.extend(["", "Harness trace:"])
+    if runtime_trace.get("available"):
+        rt = runtime_trace.get("summary") or {}
+        lines.append(
+            f"  available · {runtime_trace.get('run_count', 0)} run(s) · {int(rt.get('iters') or 0)} iterations · "
+            f"{runtime_trace.get('trace_url', '')}"
+        )
+    else:
+        lines.append(f"  not available · {runtime_trace.get('reason') or 'no trace recorded'}")
+
     if phases:
         lines.extend(["", "Time by lifecycle state:"])
-        for phase in phases[:8]:
+        for phase in phases[:10]:
             lines.append(
-                f"  {phase['status']:<18} {_duration(phase['seconds']):>10}  {float(phase['percent']):5.1f}%"
+                f"  {phase['status']:<18} {_phase_class(phase['status']):<8} {_duration(phase['seconds']):>10}  {float(phase['percent']):5.1f}%"
             )
+
+    stopped = [item for item in intervals if item.get("classification") == "stopped"]
+    if stopped:
+        lines.extend(["", "Stopped/error residences:"])
+        for item in stopped[-8:]:
+            lines.append(f"  {item.get('status', ''):<18} {_duration(item.get('duration_seconds', 0)):>10}")
+            lines.append(f"    {item.get('interpretation') or ''}")
+            entry = item.get("entry_event") or {}
+            exit_event = item.get("exit_event") or {}
+            if entry:
+                lines.append(f"    entered: {entry.get('summary') or entry.get('event_type')}")
+            if exit_event:
+                lines.append(f"    exited:  {exit_event.get('summary') or exit_event.get('event_type')}")
 
     if tools:
         lines.extend(["", "Top tools:"])
@@ -99,10 +141,7 @@ def job_analysis_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> C
                 f"  {index:>2}. {mark:<4} {run['checks_passed']}/{run['checks']} checks · {_duration(run['duration_seconds'])}"
             )
 
-    lines.extend([
-        "",
-        f"GUI analyzer: /static/job_trace.html?job={job.id}",
-    ])
+    lines.extend(["", f"GUI analyzer: /static/job_trace.html?job={job.id}"])
     body = "\n".join(lines)
     _emit(session, body, allow_prompt)
     return CommandResult(ok=True, message="Job analysis generated.", data={"analysis": analysis})

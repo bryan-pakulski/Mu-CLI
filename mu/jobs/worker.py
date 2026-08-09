@@ -60,11 +60,14 @@ def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, l
     try:
         return manager.checkpoint(service.get(job_id), label=label)
     except Exception as exc:
+        payload = {"label": label}
+        if isinstance(exc, WorktreeError):
+            payload.update(exc.to_dict())
         service.store.append_event(
             job_id,
             "checkpoint_failed",
             reason=str(exc),
-            payload={"label": label},
+            payload=payload,
         )
         return None
 
@@ -209,11 +212,20 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
             try:
                 manager.prepare(job)
             except WorktreeError as exc:
+                diagnostics = exc.to_dict()
+                diagnostics.update(
+                    {
+                        "repository": job.repository,
+                        "requested_base_branch": job.base_branch,
+                        "requested_base_sha": job.base_sha,
+                        "worker_process_id": os.getpid(),
+                    }
+                )
                 service.transition(
                     job_id,
                     JobStatus.ENVIRONMENT_ERROR,
                     reason="could not prepare isolated Git worktree",
-                    payload={"error": str(exc)},
+                    payload=diagnostics,
                 )
                 _refresh_receipt(service, job_id)
                 return 3
@@ -257,7 +269,11 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                     job_id,
                     JobStatus.FAILED,
                     reason="isolated worker crashed",
-                    payload={"error": str(exc), "process_id": os.getpid()},
+                    payload={
+                        "error": str(exc),
+                        "process_id": os.getpid(),
+                        "exception_type": type(exc).__name__,
+                    },
                 )
             _refresh_receipt(service, job_id)
         except Exception:

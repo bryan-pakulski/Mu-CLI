@@ -51,7 +51,6 @@ from mu.agent.hooks import HookContext, default_registry
 from mu.container import ContainerSupervisor
 from mu.jobs import get_default_job_service
 from mu.jobs.controller import JobController
-from mu.jobs.runner import SessionJobRunner
 
 _MEMORY_HOOK_NAME = "gui_memory_snapshot"
 _SUBAGENT_HOOK_NAME = "gui_subagent_snapshot"
@@ -187,17 +186,11 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.state.watcher = SessionWatcher(app)
     app.state.container_supervisor = ContainerSupervisor()
     app.state.job_service = get_default_job_service()
-    # Milestone 1 intentionally serializes job execution. Existing Session
-    # initialization changes process CWD; safe five-way parallelism arrives in
-    # Milestone 2 with per-job worktree/process isolation.
+    # Milestone 2: each worker is a separate Python process with a managed Git
+    # worktree, so five jobs can execute without sharing Session CWD/runtime.
     app.state.job_controller = JobController(
         app.state.job_service,
-        SessionJobRunner(
-            app.state.job_service,
-            build_session_fn=build_session_fn,
-            base_args=args,
-        ),
-        max_workers=1,
+        max_workers=5,
     )
 
     app.state.session_by_name = lambda name=None: session_by_name(app, name)
@@ -276,6 +269,8 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     @app.on_event("shutdown")
     async def _stop_services():
         app.state.watcher.stop()
+        # Active worker processes are intentionally not killed here. Their own
+        # heartbeat/lease lets them survive daemon/browser restarts.
         app.state.job_controller.stop(wait=False)
         tasks = list(app.state.container_creation_tasks.values())
         tasks += list(app.state.container_environment_tasks.values())

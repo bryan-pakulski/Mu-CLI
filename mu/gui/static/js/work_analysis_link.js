@@ -50,6 +50,9 @@
         const amount = Number(modelApi.api_cost_usd || 0);
         const unpriced = Number(modelApi.unpriced_attempts || 0);
         const billing = Array.isArray(modelApi.billing_modes) ? modelApi.billing_modes.join(', ') : '';
+        const components = modelApi.cost_components || {};
+        const inputCost = Number(components.input_usd || 0);
+        const outputCost = Number(components.output_usd || 0);
 
         metric.dataset.costStatus = status;
         if (status === 'unpriced') {
@@ -64,12 +67,11 @@
         } else if (status === 'legacy') {
             value.title = 'Historical/legacy estimate without full pricing provenance.';
         } else {
-            value.textContent = billing.includes('estimated_token')
-                ? `~$${amount.toFixed(2)}`
-                : `$${amount.toFixed(2)}`;
-            value.title = billing.includes('estimated_token')
-                ? 'Configured provider estimate based on measured tokens; not an invoice.'
-                : 'Attributed model/API spend. Workspace compute/storage/network cost is separate.';
+            const estimated = billing.includes('estimated_token');
+            value.textContent = estimated ? `~$${amount.toFixed(2)}` : `$${amount.toFixed(2)}`;
+            value.title = estimated
+                ? `Configured provider estimate: input ~$${inputCost.toFixed(2)} · output ~$${outputCost.toFixed(2)} · total ~$${amount.toFixed(2)}. Not an invoice.`
+                : `Attributed model/API spend: input $${inputCost.toFixed(2)} · output $${outputCost.toFixed(2)} · total $${amount.toFixed(2)}. Workspace compute/storage/network cost is separate.`;
         }
     }
 

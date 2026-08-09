@@ -17,6 +17,12 @@ import { useTheme } from '../theme/ThemeContext';
 export type JobAnalysisScreenProps = NativeStackScreenProps<RootStackParamList, 'JobAnalysis'>;
 
 type PhaseBreakdown = { status: string; seconds: number; percent: number; occurrences: number };
+type IntervalEvent = { id: number; event_type: string; created_at: number; summary: string };
+type PhaseInterval = {
+  status: string; classification: string; duration_seconds: number; explanation: string; interpretation: string;
+  event_count: number; activity_event_count: number; worker_event_count: number; agent_event_count: number;
+  entry_event: IntervalEvent | null; exit_event: IntervalEvent | null;
+};
 type AttemptAnalysis = {
   number: number; status: string; duration_seconds: number; cost_usd: number;
   tool_calls: number; agent_messages: number; runtime_errors: number; tokens: Record<string, number>;
@@ -26,17 +32,24 @@ type VerificationAnalysis = {
   status: string; passed: boolean; duration_seconds: number; checks: number; checks_passed: number;
   changed_files: number; additions: number; deletions: number; dirty: boolean;
 };
+type RuntimeTrace = {
+  available: boolean; session_name: string; trace_url: string; reason: string; run_count?: number;
+  summary?: Record<string, number | string | null>;
+};
 type JobAnalysis = {
   job: { id: string; title: string; status: string; archived?: boolean };
   summary: {
     elapsed_seconds: number; active_seconds: number; waiting_seconds: number; verification_seconds: number;
-    attempts: number; retries: number; cost_usd: number; tokens: Record<string, number>;
-    tool_calls: number; unique_tools: number; human_gates: number; human_responses: number;
+    passive_seconds?: number; stopped_seconds?: number; review_wait_seconds?: number;
+    attempts: number; retries: number; cost_usd: number; model_api_cost_usd?: number; billing_modes?: string[];
+    tokens: Record<string, number>; tool_calls: number; unique_tools: number; human_gates: number; human_responses: number;
     verification_runs: number; verification_passes: number; verification_failures: number;
     first_pass_verification: boolean | null; failures: number; recoveries: number;
     changed_files: number; additions: number; deletions: number; waiting_ratio: number | null;
   };
+  runtime_trace?: RuntimeTrace;
   phase_breakdown: PhaseBreakdown[];
+  phase_intervals?: PhaseInterval[];
   attempts: AttemptAnalysis[];
   tools: ToolAnalysis[];
   verifications: VerificationAnalysis[];
@@ -95,6 +108,9 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
   const s = analysis.summary;
   const firstPass = s.first_pass_verification == null ? 'Not measured' : s.first_pass_verification ? 'Passed' : 'Needed repair';
   const maxTool = Math.max(1, ...analysis.tools.map(item => item.count));
+  const costIsEstimate = (s.billing_modes || []).includes('estimated_token');
+  const cost = Number(s.model_api_cost_usd ?? s.cost_usd ?? 0);
+  const runtime = analysis.runtime_trace;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.safe}>
@@ -105,27 +121,40 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
         <View style={[styles.hero, { borderBottomColor: colors.hairline }]}>
           <Text variant="xs" style={{ color: colors.textDim }}>{label(analysis.job.status)}{analysis.job.archived ? ' · Archived' : ''}</Text>
           <Text variant="xl" style={styles.title}>Job performance</Text>
-          <Text variant="sm" dim style={styles.subtitle}>Retrospective analysis from durable execution, verification and human-intervention telemetry.</Text>
+          <Text variant="sm" dim style={styles.subtitle}>Durable execution analysis separates active work from waiting, review and stopped/error residence.</Text>
           {error ? <Text variant="xs" style={{ color: colors.error, marginTop: 8 }}>{error}</Text> : null}
         </View>
 
         <View style={[styles.metrics, { borderBottomColor: colors.hairline }]}>
           <Metric label="Wall" value={duration(s.elapsed_seconds)} />
           <Metric label="Active" value={duration(s.active_seconds)} />
-          <Metric label="Waiting" value={duration(s.waiting_seconds)} />
-          <Metric label="Cost" value={`$${Number(s.cost_usd || 0).toFixed(2)}`} />
+          <Metric label="Passive" value={duration(s.passive_seconds || 0)} />
+          <Metric label="Stopped" value={duration(s.stopped_seconds || 0)} />
         </View>
         <View style={[styles.metrics, { borderBottomColor: colors.hairline }]}>
+          <Metric label={costIsEstimate ? 'Cost est.' : 'Cost'} value={`$${cost.toFixed(2)}`} />
           <Metric label="Attempts" value={String(s.attempts)} />
           <Metric label="Tools" value={String(s.tool_calls)} />
-          <Metric label="Human gates" value={String(s.human_gates)} />
           <Metric label="Failures" value={String(s.failures)} />
         </View>
+
+        <Section title="Harness trace">
+          {runtime?.available ? (
+            <>
+              <Row label="Detailed trace" value={`${runtime.run_count || 0} run(s) · available`} />
+              <Row label="Session" value={runtime.session_name || '—'} />
+              <Text variant="xs" dim style={styles.copy}>{runtime.reason}</Text>
+            </>
+          ) : (
+            <Text variant="xs" dim style={styles.copy}>{runtime?.reason || 'No detailed harness trace was recorded for this job.'}</Text>
+          )}
+        </Section>
 
         <Section title="Signals">
           <Row label="First verification" value={firstPass} />
           <Row label="Verification" value={`${s.verification_passes} passed · ${s.verification_failures} failed`} />
           <Row label="Additional attempts" value={String(s.retries)} />
+          <Row label="Human gates" value={String(s.human_gates)} />
           <Row label="Human responses" value={String(s.human_responses)} />
           <Row label="Recoveries" value={String(s.recoveries)} />
           <Row label="Changed files" value={`${s.changed_files} · +${s.additions} / -${s.deletions}`} />
@@ -139,6 +168,22 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
               <View style={[styles.track, { backgroundColor: colors.hairline }]}><View style={[styles.fill, { width: `${Math.max(1, item.percent)}%`, backgroundColor: colors.accent }]} /></View>
             </View>
           ))}
+        </Section>
+
+        <Section title="State drill-down">
+          {(analysis.phase_intervals || []).length ? (analysis.phase_intervals || []).map((item, index) => (
+            <View key={`${index}-${item.status}`} style={[styles.interval, { borderTopColor: colors.hairline }]}>
+              <View style={styles.barHead}>
+                <Text variant="sm" style={{ fontWeight: '600', color: item.classification === 'stopped' ? colors.error : colors.text }}>{label(item.status)}</Text>
+                <Text variant="xs" dim>{label(item.classification)} · {duration(item.duration_seconds)}</Text>
+              </View>
+              <Text variant="xs" style={[styles.copy, { color: colors.textSoft }]}>{item.interpretation}</Text>
+              <Text variant="xs" dim style={styles.copy}>{item.explanation}</Text>
+              <Row label="Entered" value={item.entry_event?.summary || 'Not recorded'} />
+              <Row label="Exited" value={item.exit_event?.summary || 'Not recorded'} />
+              <Row label="Activity" value={`${item.agent_event_count} agent/tool · ${item.worker_event_count} worker · ${item.event_count} total`} />
+            </View>
+          )) : <Text variant="sm" dim>No lifecycle intervals recorded.</Text>}
         </Section>
 
         <Section title={`Attempts · ${analysis.attempts.length}`}>
@@ -211,6 +256,8 @@ const styles = StyleSheet.create({
   barHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' },
   track: { height: 5, marginTop: 7, borderRadius: 3, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 3, opacity: 0.72 },
+  interval: { paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  copy: { marginTop: 6, lineHeight: 17 },
   attempt: { paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth },
   attemptMeta: { marginTop: 4, lineHeight: 16 },
   toolRow: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 8 },

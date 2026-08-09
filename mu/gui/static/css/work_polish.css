@@ -32,22 +32,6 @@
     backdrop-filter: blur(30px) saturate(108%);
     -webkit-backdrop-filter: blur(30px) saturate(108%);
 }
-.work-product-brand {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: var(--text);
-    text-decoration: none;
-}
-.work-product-brand > svg {
-    width: 17px;
-    height: 17px;
-    color: var(--text-dim);
-}
-.work-product-brand:hover > svg { color: var(--text); }
-.work-product-brand .session-title { max-width: 360px; }
-.work-product-brand .session-subtitle { margin-top: 1px; }
 .work-product-actions { gap: 6px !important; }
 .work-product-actions .work-session-context {
     margin-right: 8px;
@@ -75,10 +59,31 @@
 }
 .work-new-product:hover { background: var(--bg-hover) !important; color: var(--text) !important; }
 .work-new-product svg { width: 15px; height: 15px; }
-#work-theme [hidden] { display: none !important; }
+[data-route-theme] [hidden] { display: none !important; }
 
-/* The route previously painted a second custom landscape wash. Keep only the
-   same atmospheric foundation used by the main MuCLI shell. */
+/* Refresh belongs to the work queue rather than the global route chrome. */
+.work-pane-head-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding-top: 1px;
+}
+.work-board-refresh {
+    width: 30px;
+    height: 30px;
+    color: var(--text-dimmer);
+}
+.work-board-refresh svg { width: 15px; height: 15px; }
+.work-board-refresh:hover { color: var(--text); }
+.work-pane-head-controls .work-total {
+    min-width: 24px;
+    padding: 0;
+    margin-left: 2px;
+    color: var(--text-soft);
+    font-size: 16px;
+}
+
+/* Keep a single environmental colour layer and the same neutral panes used by chat. */
 .work-board-pane {
     background: var(--sidebar-bg) !important;
     border-right-color: var(--hairline) !important;
@@ -124,5 +129,9 @@
 
 @media (max-width: 880px) {
     .work-product-actions .work-session-context { display: none; }
-    .work-product-brand .session-subtitle { display: none; }
+    .work-header.product-header { padding-inline: 14px; }
+}
+@media (max-width: 680px) {
+    .work-new-product span { display: none; }
+    .work-new-product { width: 36px; padding: 0; justify-content: center; }
 }

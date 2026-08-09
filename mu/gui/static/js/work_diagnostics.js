@@ -85,8 +85,11 @@
             return payload.error || event.reason || `${event.from_status || ''} → ${event.to_status || ''}`;
         }
         if (event.event_type === 'repository_inspected') {
-            const branch = payload.detected_default_branch ? `default ${payload.detected_default_branch}` : '';
-            return [payload.canonical_path, branch].filter(Boolean).join(' · ');
+            const branch = payload.current_branch || payload.detected_default_branch || '';
+            const clean = payload.source_worktree_clean === true
+                ? 'clean'
+                : payload.source_worktree_clean === false ? 'dirty' : '';
+            return [payload.submitted_path || payload.canonical_path, branch ? `branch ${branch}` : '', clean].filter(Boolean).join(' · ');
         }
         if (event.event_type === 'job_base_resolved') {
             return `${payload.resolved_base_ref || 'unknown ref'} · ${String(payload.base_sha || '').slice(0, 12)}${payload.fallback_used ? ' · fallback from requested base' : ''}`;
@@ -114,8 +117,14 @@
             rows.push(`<div class="work-receipt-row"><span class="work-receipt-label">${escapeHtml(label)}</span><span class="work-receipt-value" title="${escapeHtml(String(value))}">${escapeHtml(String(value))}</span></div>`);
         };
         add('Stage', payload.stage);
-        add('Repository', payload.canonical_path || payload.repository || payload.repository_input);
-        add('Detected branch', payload.detected_default_branch);
+        add('Submitted path', payload.submitted_path || payload.repository_input);
+        add('Repository', payload.canonical_path || payload.repository);
+        add('Current branch', payload.current_branch);
+        add('Default branch', payload.detected_default_branch);
+        add('Source HEAD', payload.head_sha);
+        if (payload.source_worktree_clean !== undefined) {
+            add('Source clean', payload.source_worktree_clean ? 'yes' : 'no');
+        }
         add('Requested base', payload.requested_base_branch);
         add('Resolved base', payload.resolved_base_ref);
         add('Base SHA', payload.base_sha);

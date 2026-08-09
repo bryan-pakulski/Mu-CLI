@@ -31,24 +31,29 @@ export function Button({
   const { colors, spacing, radii, typography } = useTheme();
 
   const baseStyle: ViewStyle = {
-    minHeight: 46,
+    minHeight: 44,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.base,
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    opacity: disabled ? 0.45 : 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    opacity: disabled ? 0.42 : 1,
   };
 
   const variantStyles: Record<string, ViewStyle> = {
-    primary: { backgroundColor: colors.accent },
-    secondary: { backgroundColor: colors.bgHover },
-    ghost: { backgroundColor: 'transparent' },
-    danger: { backgroundColor: colors.error },
+    primary: { backgroundColor: colors.accentStrong, borderColor: colors.accentStrong },
+    secondary: { backgroundColor: 'transparent', borderColor: colors.hairline },
+    ghost: { backgroundColor: 'transparent', borderColor: 'transparent' },
+    danger: { backgroundColor: colors.error, borderColor: colors.error },
   };
 
-  const textColor = variant === 'primary' || variant === 'danger' ? colors.accentText : colors.text;
+  const textColor = variant === 'primary' || variant === 'danger'
+    ? colors.accentText
+    : variant === 'ghost'
+      ? colors.textDim
+      : colors.textSoft;
   const fontSpec = typography.sm;
 
   return (

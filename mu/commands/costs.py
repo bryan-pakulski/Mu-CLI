@@ -1,4 +1,4 @@
-"""TUI model-economics baseline."""
+"""TUI view of the configurable model-pricing registry."""
 
 from __future__ import annotations
 
@@ -24,59 +24,51 @@ def _emit(session: Any, text: str, allow_prompt: bool) -> None:
 @command(
     "/costs",
     "/pricing",
-    help="Show MuCLI's versioned model cost baseline. Optional: /costs openai|gemini|ollama",
+    help="Show MuCLI's configurable model pricing registry. Optional: /costs openai|gemini|ollama",
 )
 def costs_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     catalog = pricing_catalog()
     wanted = str(args or "").strip().lower()
     if wanted and wanted not in {"openai", "gemini", "ollama"}:
-        return CommandResult(
-            ok=False,
-            message="Usage: /costs [openai|gemini|ollama]",
-        )
+        return CommandResult(ok=False, message="Usage: /costs [openai|gemini|ollama]")
 
     lines = [
-        f"Model cost baseline · {catalog['version']} · USD / 1M tokens",
-        "Input / cached input / output",
+        f"Model pricing registry · {catalog['version']}",
+        f"Active config: {catalog.get('active_config_path') or catalog.get('config_path')}",
+        "Rates are USD / 1M tokens and are telemetry estimates, not invoices.",
         "",
     ]
-    if wanted in {"", "openai", "gemini"}:
-        for provider in ("openai", "gemini"):
-            if wanted and wanted != provider:
-                continue
-            lines.append(provider.upper())
-            for item in catalog["models"]:
-                if item["provider"] != provider:
-                    continue
-                normal = (
-                    f"{_money(item['input_per_million'])} / "
-                    f"{_money(item['cached_input_per_million'])} / "
-                    f"{_money(item['output_per_million'])}"
+    for provider in ("openai", "gemini", "ollama"):
+        if wanted and wanted != provider:
+            continue
+        rows = [item for item in catalog["models"] if item["provider"] == provider]
+        if not rows:
+            continue
+        lines.append(provider.upper())
+        for item in rows:
+            billing = str(item.get("billing") or "unknown")
+            if billing == "local":
+                rates = "$0 provider/API · host compute excluded"
+            elif billing == "estimated_token":
+                rates = f"~{_money(item.get('estimated_total_per_million'))} / 1M total measured tokens"
+            elif billing == "token":
+                rates = (
+                    f"{_money(item.get('input_per_million'))} in / "
+                    f"{_money(item.get('cached_input_per_million'))} cached / "
+                    f"{_money(item.get('output_per_million'))} out"
                 )
-                tier = ""
-                if item.get("long_context_cutoff"):
-                    tier = f" · high tier >{int(item['long_context_cutoff']):,} input"
-                lines.append(f"  {item['key']:<28} {normal}{tier}")
-            lines.append("")
-
-    if wanted in {"", "ollama"}:
-        lines.extend([
-            "OLLAMA",
-            "  local daemon                 $0 provider/API cost · host/GPU compute excluded",
-            "  Ollama Cloud                 plan/usage based · no fabricated token rate",
-        ])
-        for item in catalog["ollama"]:
-            meta = " · ".join(
-                value for value in (
-                    item.get("local_size") or "",
-                    f"ctx {int(item['context_window']):,}" if item.get("context_window") else "",
-                    item.get("usage_tier") or "",
-                ) if value
-            )
-            lines.append(f"  {item['key']:<28} {item.get('role') or ''}{(' · ' + meta) if meta else ''}")
+            else:
+                rates = "unpriced"
+            tier = ""
+            if item.get("long_context_cutoff"):
+                tier = f" · high tier >{int(item['long_context_cutoff']):,} input"
+            lines.append(f"  {item['key']:<30} {rates}{tier}")
         lines.append("")
 
-    lines.append("These are planning/telemetry estimates, not provider invoices.")
+    lines.extend([
+        f"GUI editor: /static/model_costs.html",
+        f"Override file: {catalog.get('config_path')}",
+    ])
     body = "\n".join(lines)
     _emit(session, body, allow_prompt)
-    return CommandResult(ok=True, message="Model pricing baseline generated.", data=catalog)
+    return CommandResult(ok=True, message="Model pricing registry generated.", data=catalog)

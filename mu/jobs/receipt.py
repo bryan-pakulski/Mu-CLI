@@ -63,6 +63,15 @@ class JobReceiptBuilder:
             # know the rates/cached-token treatment that produced it.
             priced_api_cost = float(fallback_cost or 0.0)
 
+        component_totals: Dict[str, float] = {}
+        for record in records:
+            components = record.get("cost_components")
+            if not isinstance(components, dict):
+                continue
+            for key, value in components.items():
+                if isinstance(value, (int, float)):
+                    component_totals[str(key)] = component_totals.get(str(key), 0.0) + float(value)
+
         if not records:
             status = "legacy"
         elif unpriced and len(unpriced) == len(records):
@@ -82,6 +91,7 @@ class JobReceiptBuilder:
             "unpriced_attempts": len(unpriced),
             "local_zero_attempts": len(local_zero),
             "pricing_versions": pricing_versions,
+            "cost_components": component_totals,
             "records": records,
             "note": "Workspace CPU/GPU/storage/network economics are separate from model/API spend.",
         }

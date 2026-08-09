@@ -15,7 +15,7 @@ import { SwipeSessionsDrawer } from '../components/SwipeSessionsDrawer';
 import { sessionsApi } from '../api/sessions';
 import { useConnectionStore } from '../store/connection';
 
-import { ChatScreen } from '../screens/ChatScreen';
+import { ChatScreenProduct } from '../screens/ChatScreenProduct';
 import { WorkspaceScreen } from '../screens/WorkspaceScreen';
 import { WorkspaceCategoryScreen } from '../screens/WorkspaceCategoryScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
@@ -118,8 +118,6 @@ function ChatScreenWithChrome() {
       .then(response => {
         if (controller.signal.aborted) return;
         const selected = useConnectionStore.getState().activeSessionName;
-        // Keep a valid user-selected session. Bootstrap from server focus only
-        // when mobile has no usable selection; do not run a focus tug-of-war.
         if (selected && response.loaded.includes(selected)) return;
         const current = response.current && response.loaded.includes(response.current)
           ? response.current
@@ -127,8 +125,7 @@ function ChatScreenWithChrome() {
         setActiveSession(current);
       })
       .catch(() => {
-        // The connection screen owns transport errors. A timeout must not
-        // replace the navigator or clear a previously usable session.
+        // The connection screen owns transport errors.
       });
     return () => controller.abort();
   }, [baseUrl, isConnected, setActiveSession]);
@@ -149,7 +146,7 @@ function ChatScreenWithChrome() {
         {!isConnected ? (
           <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
         ) : activeSessionName ? (
-          <ChatScreen />
+          <ChatScreenProduct />
         ) : (
           <SessionStartPrompt
             onLoadSession={openSessions}

@@ -13,7 +13,7 @@ from .service import JobService
 from .verification import VerificationStore
 
 
-RECEIPT_SCHEMA_VERSION = 1
+RECEIPT_SCHEMA_VERSION = 2
 
 
 class JobReceiptBuilder:
@@ -38,6 +38,54 @@ class JobReceiptBuilder:
                     totals[str(key)] = totals.get(str(key), 0.0) + float(value)
         return totals
 
+    @staticmethod
+    def _cost_summary(attempts, fallback_cost: float) -> Dict[str, Any]:
+        records: list[Dict[str, Any]] = []
+        for attempt in attempts:
+            result = attempt.metadata.get("agent_result") if isinstance(attempt.metadata, dict) else None
+            cost = result.get("cost") if isinstance(result, dict) else None
+            if isinstance(cost, dict):
+                records.append(dict(cost))
+
+        unpriced = [record for record in records if record.get("api_cost_usd") is None]
+        local_zero = [record for record in records if record.get("billing") == "local"]
+        billing_modes = sorted({str(record.get("billing") or "unknown") for record in records})
+        pricing_versions = sorted({str(record.get("pricing_version") or "") for record in records if record.get("pricing_version")})
+        if records:
+            priced_api_cost = sum(
+                float(record.get("api_cost_usd") or 0.0)
+                for record in records
+                if record.get("api_cost_usd") is not None
+            )
+        else:
+            # Pre-pricing-ledger historical jobs retain their old accumulated
+            # value but are explicitly marked legacy rather than pretending we
+            # know the rates/cached-token treatment that produced it.
+            priced_api_cost = float(fallback_cost or 0.0)
+
+        if not records:
+            status = "legacy"
+        elif unpriced and len(unpriced) == len(records):
+            status = "unpriced"
+        elif unpriced:
+            status = "partial"
+        elif local_zero and len(local_zero) == len(records) and priced_api_cost == 0:
+            status = "local_zero"
+        else:
+            status = "metered"
+
+        return {
+            "api_cost_usd": priced_api_cost,
+            "cost_complete": not bool(unpriced) if records else False,
+            "status": status,
+            "billing_modes": billing_modes,
+            "unpriced_attempts": len(unpriced),
+            "local_zero_attempts": len(local_zero),
+            "pricing_versions": pricing_versions,
+            "records": records,
+            "note": "Workspace CPU/GPU/storage/network economics are separate from model/API spend.",
+        }
+
     def build(self, job_id: str) -> Dict[str, Any]:
         job = self.service.get(job_id)
         attempts = self.service.attempts(job_id)
@@ -52,6 +100,7 @@ class JobReceiptBuilder:
         for event in events:
             event_counts[event.event_type] = event_counts.get(event.event_type, 0) + 1
 
+        cost_summary = self._cost_summary(attempts, float(job.cost_usd or 0.0))
         receipt: Dict[str, Any] = {
             "schema_version": RECEIPT_SCHEMA_VERSION,
             "generated_at": time.time(),
@@ -70,6 +119,8 @@ class JobReceiptBuilder:
                 "attempts": len(attempts),
                 "elapsed_seconds": elapsed,
                 "cost_usd": float(job.cost_usd or 0.0),
+                "cost_status": cost_summary["status"],
+                "cost_complete": cost_summary["cost_complete"],
             },
             "ticket": {
                 "acceptance_criteria": list(job.acceptance_criteria),
@@ -93,6 +144,7 @@ class JobReceiptBuilder:
             "attempts": [attempt.to_dict() for attempt in attempts],
             "usage": {
                 "cost_usd": float(job.cost_usd or 0.0),
+                "model_api": cost_summary,
                 "tokens": self._token_totals(attempts),
             },
             "activity": {

@@ -1,0 +1,50 @@
+name: Durable engineering jobs
+
+on:
+  push:
+    branches:
+      - feature/durable-engineering-jobs
+  pull_request:
+    paths:
+      - 'mu/jobs/**'
+      - 'mu/ui/exceptions.py'
+      - 'mu/commands/job.py'
+      - 'mu/gui/routers/jobs.py'
+      - 'mu/gui/routers/job_board.py'
+      - 'mu/gui/app.py'
+      - 'mobile/android/src/api/jobs.ts'
+      - 'tests/test_job*.py'
+      - '.github/workflows/durable-jobs.yml'
+
+jobs:
+  durable-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run durable jobs tests
+        env:
+          MUCLI_HOME: ${{ runner.temp }}/mucli-test
+          PYTHONPATH: .
+        run: >-
+          python -m pytest -q
+          tests/test_jobs_core.py
+          tests/test_job_controller.py
+          tests/test_job_controller_verification.py
+          tests/test_job_runner.py
+          tests/test_job_repository.py
+          tests/test_job_worktree.py
+          tests/test_job_worker.py
+          tests/test_job_verification.py
+          tests/test_job_receipt.py

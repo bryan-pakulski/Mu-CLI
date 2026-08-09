@@ -13,6 +13,7 @@ import threading
 from types import SimpleNamespace
 
 from .models import AttentionReason, JobStatus
+from .receipt import JobReceiptBuilder
 from .runner import JobRunOutcome, SessionJobRunner
 from .service import JobService, JobStateError, get_default_job_service
 from .worktree import JobWorktreeManager, WorktreeError
@@ -68,6 +69,17 @@ def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, l
         return None
 
 
+def _refresh_receipt(service: JobService, job_id: str) -> None:
+    try:
+        JobReceiptBuilder(service).write(job_id)
+    except Exception as exc:
+        service.store.append_event(
+            job_id,
+            "work_receipt_failed",
+            reason=str(exc),
+        )
+
+
 def _add_cost(service: JobService, job_id: str, amount: float) -> float:
     current = service.get(job_id)
     total = float(current.cost_usd or 0.0) + max(0.0, float(amount or 0.0))
@@ -85,14 +97,20 @@ def _apply_outcome(
 ) -> int:
     total_cost = _add_cost(service, job_id, outcome.cost_usd)
     current = service.get(job_id)
+    common_metadata = {
+        "agent_status": outcome.status,
+        "agent_result": dict(outcome.result or {}),
+        "total_job_cost_usd": total_cost,
+    }
     if current.status == JobStatus.CANCELLED:
+        checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-cancelled")
         service.finish_attempt(
             attempt_id,
             status="cancelled",
             cost_usd=outcome.cost_usd,
-            metadata={"cancelled_while_running": True},
+            metadata={**common_metadata, "cancelled_while_running": True, "checkpoint": checkpoint},
         )
-        _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-cancelled")
+        _refresh_receipt(service, job_id)
         return 0
 
     if outcome.kind == "needs_human":
@@ -101,7 +119,11 @@ def _apply_outcome(
             attempt_id,
             status="needs_human",
             cost_usd=outcome.cost_usd,
-            metadata={"attention": outcome.attention_payload, "checkpoint": checkpoint},
+            metadata={
+                **common_metadata,
+                "attention": outcome.attention_payload,
+                "checkpoint": checkpoint,
+            },
         )
         service.require_human(
             job_id,
@@ -109,6 +131,7 @@ def _apply_outcome(
             outcome.attention_detail,
             payload={**outcome.attention_payload, "checkpoint": checkpoint},
         )
+        _refresh_receipt(service, job_id)
         return 20
 
     if outcome.kind == "completed":
@@ -117,11 +140,7 @@ def _apply_outcome(
             attempt_id,
             status="completed",
             cost_usd=outcome.cost_usd,
-            metadata={
-                "agent_status": outcome.status,
-                "checkpoint": checkpoint,
-                "total_job_cost_usd": total_cost,
-            },
+            metadata={**common_metadata, "checkpoint": checkpoint},
         )
         service.transition(
             job_id,
@@ -132,9 +151,10 @@ def _apply_outcome(
         service.store.append_event(
             job_id,
             "verification_pending",
-            reason="Milestone 3 verifier not implemented yet",
+            reason="deterministic verifier scheduled",
             payload={"attempt_id": attempt_id, "checkpoint": checkpoint},
         )
+        _refresh_receipt(service, job_id)
         return 0
 
     checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-failed")
@@ -143,11 +163,7 @@ def _apply_outcome(
         status="failed",
         error=outcome.error,
         cost_usd=outcome.cost_usd,
-        metadata={
-            "agent_status": outcome.status,
-            "checkpoint": checkpoint,
-            "total_job_cost_usd": total_cost,
-        },
+        metadata={**common_metadata, "checkpoint": checkpoint},
     )
     target = JobStatus.ENVIRONMENT_ERROR if outcome.status == "environment_error" else JobStatus.FAILED
     service.transition(
@@ -156,6 +172,7 @@ def _apply_outcome(
         reason="job attempt failed",
         payload={"error": outcome.error, "agent_status": outcome.status, "checkpoint": checkpoint},
     )
+    _refresh_receipt(service, job_id)
     return 1
 
 
@@ -198,6 +215,7 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                     reason="could not prepare isolated Git worktree",
                     payload={"error": str(exc)},
                 )
+                _refresh_receipt(service, job_id)
                 return 3
             job = service.get(job_id)
 
@@ -241,6 +259,7 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                     reason="isolated worker crashed",
                     payload={"error": str(exc), "process_id": os.getpid()},
                 )
+            _refresh_receipt(service, job_id)
         except Exception:
             pass
         return 4

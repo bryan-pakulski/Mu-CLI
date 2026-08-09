@@ -47,18 +47,21 @@ def test_web_work_page_loads_shared_structured_job_diagnostics():
 
 
 def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
+    template = WORK_TEMPLATE.read_text(encoding="utf-8")
     script = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
     css = WORK_POLISH.read_text(encoding="utf-8")
 
-    assert "product-app', 'work-product-app" in script
-    assert "header', 'product-header" in script
-    assert "product-icon-button" in script
-    assert "Toggle appearance" in script
-    assert "localStorage.setItem('mucli-theme'" in script
-    assert "Analyze jobs" in script
-    assert "Model pricing" in script
-    assert "Manage job history" in script
-    assert "Refresh work queue" in script
+    assert 'work-app work-product-app' in template
+    assert 'work-header product-header' in template
+    assert 'product-icon-button work-header-icon' in template
+    assert 'data-route-theme' in template
+    assert 'title="Analyze jobs"' in template
+    assert 'title="Model pricing"' in template
+    assert 'title="Manage jobs"' in template
+    assert 'id="work-refresh"' in template
+    assert 'enhanceChrome' not in script
+    assert 'installPolishStyles' not in script
+    assert 'work-theme' not in script
     assert '.work-product-app::before' in css
     assert 'var(--header-bg)' in css
     assert '.work-header-icon' in css

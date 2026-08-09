@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mu.jobs import get_default_job_service
-from mu.jobs.analysis import build_job_analysis
+from mu.jobs.performance import build_job_performance
 
 from . import CommandResult, command
 from .job import _resolve_job
@@ -46,7 +46,7 @@ def job_analysis_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> C
     service = get_default_job_service()
     try:
         job = _resolve_job(service, token)
-        analysis = build_job_analysis(service, job.id, timeline_limit=1000)
+        analysis = build_job_performance(service, job.id, timeline_limit=1000)
     except (KeyError, ValueError) as exc:
         message = f"Job not found: {token}" if isinstance(exc, KeyError) else str(exc)
         _emit(session, message, allow_prompt, error=True)
@@ -60,7 +60,7 @@ def job_analysis_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> C
 
     lines = [
         f"Job Trace · {job.title}",
-        f"{job.id} · {job.status.value}",
+        f"{job.id} · {job.status.value}{' · archived' if analysis['job'].get('archived') else ''}",
         "",
         f"Wall time:        {_duration(s['elapsed_seconds'])}",
         f"Active time:      {_duration(s['active_seconds'])}",
@@ -74,6 +74,8 @@ def job_analysis_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> C
         f"Verification:     {s['verification_passes']} passed / {s['verification_failures']} failed",
         f"Changed files:    {s['changed_files']} (+{s['additions']} / -{s['deletions']})",
     ]
+    if s.get("first_pass_verification") is not None:
+        lines.append(f"First verify:      {'PASS' if s['first_pass_verification'] else 'FAIL'}")
     if tokens:
         lines.append("Tokens:            " + " · ".join(f"{k}={int(v):,}" for k, v in list(tokens.items())[:8]))
 

@@ -36,6 +36,13 @@ class SessionJobRunner:
     def session_name(job: Job) -> str:
         return f"job-{job.id[:20]}"
 
+    @staticmethod
+    def workspace_path(job: Job) -> str:
+        # Milestone 2 isolates Git-backed jobs in managed worktrees. Falling
+        # back to repository keeps non-Git/chat tests and legacy M1 records
+        # readable, but the process worker always prepares a worktree first.
+        return str(job.worktree or job.repository or "")
+
     def _args_for(self, job: Job):
         execution = dict(job.execution or {})
         provider = str(execution.get("provider") or "").strip()
@@ -52,7 +59,8 @@ class SessionJobRunner:
         args.model = model
         args.provider_prevalidated = True
         args.session_type = str(execution.get("session_type") or "workspace")
-        args.workspace = [job.repository] if job.repository and args.session_type == "workspace" else []
+        workspace = self.workspace_path(job)
+        args.workspace = [workspace] if workspace and args.session_type == "workspace" else []
         args.yolo = bool(execution.get("auto_approve_writes", False))
         args.gui = False
         args.trace = False
@@ -66,6 +74,8 @@ class SessionJobRunner:
             lines.extend(["", "Acceptance criteria:", *[f"- {v}" for v in job.acceptance_criteria]])
         if job.validation_commands:
             lines.extend(["", "Validation expected by the controller:", *[f"- {v}" for v in job.validation_commands]])
+        if job.branch:
+            lines.extend(["", f"Managed job branch: {job.branch}"])
         for event in reversed(self.service.events(job.id)):
             if event.event_type == "human_response":
                 detail = str(event.payload.get("detail") or "").strip()
@@ -75,6 +85,7 @@ class SessionJobRunner:
         lines.extend([
             "",
             "Implement the ticket and validate the result where possible.",
+            "Work only inside the attached job workspace; do not modify the user's primary checkout.",
             "The controller, not the agent, decides whether the job is ready for review.",
         ])
         return "\n".join(lines)
@@ -85,17 +96,18 @@ class SessionJobRunner:
         try:
             execution = dict(job.execution or {})
             session_type = str(execution.get("session_type") or "workspace")
+            workspace = self.workspace_path(job)
             if session_type == "workspace":
-                if not job.repository:
+                if not workspace:
                     raise InteractionRequired("question", "This job needs a repository/workspace path.", payload={"shape": "repository"})
-                if not os.path.isdir(os.path.expanduser(job.repository)):
-                    return JobRunOutcome(kind="failed", status="environment_error", error=f"Repository/workspace does not exist: {job.repository}")
+                if not os.path.isdir(os.path.expanduser(workspace)):
+                    return JobRunOutcome(kind="failed", status="environment_error", error=f"Job workspace does not exist: {workspace}")
             if session_type == "container":
                 return JobRunOutcome(
                     kind="needs_human",
                     status="needs_human",
                     attention_reason=AttentionReason.ENVIRONMENT_FAILURE,
-                    attention_detail="Container-backed durable jobs need the per-job environment adapter from Milestone 2.",
+                    attention_detail="Container-backed durable jobs need the per-job container adapter before autonomous execution is safe.",
                     attention_payload={"session_type": "container"},
                 )
 
@@ -109,6 +121,8 @@ class SessionJobRunner:
             session.variables["yolo"] = bool(execution.get("auto_approve_writes", False))
             session.variables["durable_job_id"] = job.id
             session.variables["durable_job_attempt"] = attempt.number
+            session.variables["durable_job_branch"] = job.branch
+            session.variables["durable_job_base_sha"] = job.base_sha
             if job.max_iterations is not None:
                 session.variables["max_iterations"] = int(job.max_iterations)
             session.session_manager.save_history(session.folder_context)

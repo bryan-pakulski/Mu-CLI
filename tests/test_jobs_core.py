@@ -5,6 +5,8 @@ import sqlite3
 import pytest
 
 from mu.jobs import AttentionReason, JobService, JobSpec, JobStateError, JobStatus, JobStore
+from mu.jobs.board import build_job_board
+from mu.jobs.management import JobManagementError, JobManagementService
 
 
 class Clock:
@@ -161,3 +163,43 @@ def test_job_spec_rejects_invalid_budgets_and_execution_type(tmp_path):
         service.create(JobSpec(title="Bad", max_retries=-1))
     with pytest.raises(ValueError):
         service.create(JobSpec(title="Bad", execution={"session_type": "spaceship"}))
+
+
+def test_archived_history_is_hidden_from_board_and_queryable(tmp_path):
+    service = make_service(tmp_path)
+    job = service.create(JobSpec(title="Historic drone job", repository="/repo"))
+    service.cancel(job.id, reason="done")
+    management = JobManagementService(service)
+
+    assert any(item.id == job.id for item in build_job_board(service).done)
+    management.archive(job.id, reason="old")
+    assert not any(item.id == job.id for item in build_job_board(service).done)
+
+    history = management.query_jobs(q="drone", archive="archived", scope="history")
+    report = management.report(q="drone", archive="archived", scope="history")
+    assert history["total"] == 1
+    assert history["jobs"][0]["archived"] is True
+    assert report["total_jobs"] == 1
+    assert report["archived_jobs"] == 1
+
+
+def test_historic_job_requires_archive_before_delete_and_cascades_events(tmp_path):
+    service = make_service(tmp_path)
+    job = service.create(JobSpec(title="Delete history", repository="/repo"))
+    service.cancel(job.id, reason="done")
+    management = JobManagementService(service)
+
+    with pytest.raises(JobManagementError, match="Archive a historic job"):
+        management.delete(job.id, purge_artifacts=False)
+
+    management.archive(job.id)
+    result = management.delete(job.id, purge_artifacts=False)
+    assert result["deleted"] is True
+    with pytest.raises(KeyError):
+        service.get(job.id)
+    conn = service.store._connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM job_events WHERE job_id = ?", (job.id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM job_management WHERE job_id = ?", (job.id,)).fetchone()[0] == 0
+    finally:
+        conn.close()

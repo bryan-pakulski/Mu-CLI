@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
+from typing import Dict, List
 
 from .models import Job, JobStatus
 from .service import JobService
@@ -68,7 +68,14 @@ def bucket_for(job: Job) -> str:
 
 
 def build_job_board(service: JobService, *, limit: int = 1000) -> JobBoard:
+    # Archive is a management concern rather than a runtime state. Keep the
+    # operational board quiet while retaining archived jobs in durable history.
+    from .management import JobManagementService
+
+    archived = JobManagementService(service).archived_ids()
     sections = {name: [] for name in BOARD_ORDER}
     for job in service.list(limit=limit):
+        if job.id in archived:
+            continue
         sections[bucket_for(job)].append(job)
     return JobBoard(**sections)

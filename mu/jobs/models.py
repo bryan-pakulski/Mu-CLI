@@ -33,6 +33,7 @@ class AttentionReason(str, Enum):
     MERGE_CONFLICT = "merge_conflict"
     BUDGET_EXCEEDED = "budget_exceeded"
     ENVIRONMENT_FAILURE = "environment_failure"
+    VERIFICATION_REQUIRED = "verification_required"
     TEST_FAILURE = "test_failure"
     UNSAFE_ACTION = "unsafe_action"
     WORKER_LOST = "worker_lost"
@@ -56,9 +57,9 @@ ALLOWED_TRANSITIONS = {
         JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.VERIFYING: {
-        JobStatus.READY_FOR_REVIEW, JobStatus.RUNNING, JobStatus.NEEDS_HUMAN,
-        JobStatus.RECOVERING, JobStatus.CONFLICTED, JobStatus.FAILED,
-        JobStatus.CANCELLED,
+        JobStatus.READY_FOR_REVIEW, JobStatus.QUEUED, JobStatus.RUNNING,
+        JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.CONFLICTED,
+        JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.READY_FOR_REVIEW: {
         JobStatus.RUNNING, JobStatus.CONFLICTED, JobStatus.MERGED, JobStatus.CANCELLED,
@@ -98,7 +99,6 @@ def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
     }
     if execution["session_type"] not in {"chat", "workspace", "container"}:
         raise ValueError("execution.session_type must be chat, workspace, or container")
-    # Preserve future execution policy keys without making control planes lose data.
     for key, item in raw.items():
         if key not in execution:
             execution[str(key)] = item

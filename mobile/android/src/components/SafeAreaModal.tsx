@@ -25,7 +25,6 @@ export function SafeAreaModal({
   edges = ['top', 'bottom'],
   containerStyle,
   statusBarTranslucent = false,
-  navigationBarTranslucent = false,
   transparent = false,
   ...modalProps
 }: SafeAreaModalProps) {
@@ -42,7 +41,6 @@ export function SafeAreaModal({
       {...modalProps}
       transparent={transparent}
       statusBarTranslucent={statusBarTranslucent}
-      navigationBarTranslucent={navigationBarTranslucent}
     >
       {transparent ? safeArea : <AtmosphericBackground>{safeArea}</AtmosphericBackground>}
     </Modal>

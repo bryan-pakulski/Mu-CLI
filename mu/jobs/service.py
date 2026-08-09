@@ -21,22 +21,62 @@ class JobService:
         return self.store.create_job(spec, job_id=job_id)
 
     def create_from_payload(self, payload: Dict[str, Any]) -> Job:
+        value = dict(payload or {})
+        repository = str(value.get("repository") or value.get("repo") or "").strip()
+        execution = dict(value.get("execution") or {})
+        metadata = dict(value.get("metadata") or {})
+        supplied_base_branch = str(value.get("base_branch") or "").strip()
+        supplied_base_sha = str(value.get("base_sha") or "").strip()
+        base_branch = supplied_base_branch or "main"
+        base_sha = supplied_base_sha
+
+        # GUI/mobile normally submit a workspace but no base. Resolve that
+        # ambiguity synchronously, before the job is queued, so a bad path or
+        # non-Git directory is reported immediately instead of producing an
+        # opaque child-worker environment failure several seconds later.
+        # Snapshot the current committed HEAD: that is the actual code state
+        # the user was looking at when delegating the ticket.
+        session_type = str(execution.get("session_type") or "workspace").strip().lower()
+        if repository and session_type == "workspace" and not supplied_base_branch and not supplied_base_sha:
+            try:
+                from .repository import RepositoryRegistry
+
+                info = RepositoryRegistry.inspect(repository)
+            except Exception as exc:
+                raise ValueError(f"Repository preflight failed for {repository}: {exc}") from exc
+            base_branch = str(info.get("current_branch") or info.get("default_branch") or "main")
+            base_sha = str(info.get("head_sha") or "")
+            if not base_sha:
+                raise ValueError(
+                    f"Repository preflight failed for {repository}: could not resolve current HEAD commit"
+                )
+            metadata["submission_repository_preflight"] = {
+                "canonical_path": info.get("canonical_path", ""),
+                "git_common_dir": info.get("git_common_dir", ""),
+                "origin_url": info.get("origin_url", ""),
+                "current_branch": info.get("current_branch", ""),
+                "default_branch": info.get("default_branch", ""),
+                "remote_default_ref": info.get("remote_default_ref", ""),
+                "head_sha": base_sha,
+                "clean": bool(info.get("clean", False)),
+            }
+
         return self.create(JobSpec(
-            title=str(payload.get("title") or ""),
-            description=str(payload.get("description") or ""),
-            repository=str(payload.get("repository") or payload.get("repo") or ""),
-            base_branch=str(payload.get("base_branch") or "main"),
-            base_sha=str(payload.get("base_sha") or ""),
-            acceptance_criteria=list(payload.get("acceptance_criteria") or []),
-            validation_commands=list(payload.get("validation_commands") or []),
-            max_cost_usd=payload.get("max_cost_usd"),
-            max_runtime_seconds=payload.get("max_runtime_seconds"),
-            max_iterations=payload.get("max_iterations"),
-            max_retries=int(payload.get("max_retries", 2)),
-            max_subagents=payload.get("max_subagents"),
-            environment=dict(payload.get("environment") or {}),
-            execution=dict(payload.get("execution") or {}),
-            metadata=dict(payload.get("metadata") or {}),
+            title=str(value.get("title") or ""),
+            description=str(value.get("description") or ""),
+            repository=repository,
+            base_branch=base_branch,
+            base_sha=base_sha,
+            acceptance_criteria=list(value.get("acceptance_criteria") or []),
+            validation_commands=list(value.get("validation_commands") or []),
+            max_cost_usd=value.get("max_cost_usd"),
+            max_runtime_seconds=value.get("max_runtime_seconds"),
+            max_iterations=value.get("max_iterations"),
+            max_retries=int(value.get("max_retries", 2)),
+            max_subagents=value.get("max_subagents"),
+            environment=dict(value.get("environment") or {}),
+            execution=execution,
+            metadata=metadata,
         ))
 
     def get(self, job_id: str) -> Job:
@@ -160,10 +200,6 @@ class JobService:
                 except JobStateError:
                     pass
             elif job.status == JobStatus.VERIFYING:
-                # Verification is deterministic and side-effect constrained.
-                # Keep the job in VERIFYING; once ownership is cleared the
-                # scheduler simply launches a fresh verifier instead of
-                # repeating implementation work.
                 self.store.append_event(
                     job.id,
                     "verification_lease_expired",

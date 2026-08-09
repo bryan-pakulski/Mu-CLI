@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from mu.jobs import AttentionReason, JobService, JobStateError, JobStatus
+from mu.jobs.board import build_job_board
 from mu.jobs.receipt import JobReceiptBuilder
 from mu.jobs.repository import RepositoryRegistry
+from mu.jobs.review import JobReviewError, JobReviewService, build_job_diff
 from mu.jobs.verification import VerificationStore
 
 
@@ -30,9 +32,40 @@ def _job_or_404(service: JobService, job_id: str):
 
 
 def _state_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, (JobStateError, ValueError)):
+    if isinstance(exc, (JobStateError, JobReviewError, ValueError)):
         return HTTPException(status_code=409, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Allow GUI/mobile job creation to inherit the currently loaded session.
+
+    The durable job still stores explicit provider/model/workspace values; this
+    is only a control-plane convenience at creation time.
+    """
+    value = dict(payload or {})
+    session_name = str(value.get("session_name") or "").strip()
+    if not session_name:
+        return value
+    resolver = getattr(request.app.state, "session_by_name", None)
+    session = resolver(session_name) if callable(resolver) else None
+    if session is None:
+        raise HTTPException(status_code=409, detail=f"Session '{session_name}' is not loaded")
+
+    folders = list(getattr(getattr(session, "folder_context", None), "folders", []) or [])
+    if not str(value.get("repository") or "").strip() and folders:
+        value["repository"] = folders[0]
+    execution = dict(value.get("execution") or {})
+    provider = getattr(getattr(session, "provider", None), "name", "") or ""
+    model = getattr(getattr(session, "provider", None), "model_name", "") or ""
+    variables = getattr(session, "variables", {}) or {}
+    execution.setdefault("provider", str(provider))
+    execution.setdefault("model", str(model))
+    execution.setdefault("agent_mode", str(variables.get("agent_mode", "default") or "default"))
+    execution.setdefault("session_type", str(variables.get("session_type", "workspace") or "workspace"))
+    execution.setdefault("auto_approve_writes", bool(variables.get("yolo", False)))
+    value["execution"] = execution
+    return value
 
 
 @router.get("")
@@ -53,10 +86,17 @@ async def list_jobs(
 async def create_job(request: Request, payload: Dict[str, Any]):
     service = _service(request)
     try:
-        job = service.create_from_payload(payload)
+        job = service.create_from_payload(_with_session_defaults(request, payload))
+    except HTTPException:
+        raise
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"job": job.to_dict()}
+
+
+@router.get("/board")
+async def get_job_board(request: Request):
+    return build_job_board(_service(request)).to_dict()
 
 
 @router.get("/repositories")
@@ -89,6 +129,20 @@ async def get_job_receipt(job_id: str, request: Request):
     service = _service(request)
     _job_or_404(service, job_id)
     return {"receipt": JobReceiptBuilder(service).build(job_id)}
+
+
+@router.get("/{job_id}/diff")
+async def get_job_diff(
+    job_id: str,
+    request: Request,
+    max_chars: int = Query(default=500_000, ge=10_000, le=2_000_000),
+):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        return {"diff": build_job_diff(service, job_id, max_chars=max_chars).to_dict()}
+    except JobReviewError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/{job_id}/events")
@@ -135,6 +189,56 @@ async def get_job_verification(job_id: str, verification_id: str, request: Reque
     return {"verification": value.to_dict()}
 
 
+@router.post("/{job_id}/respond")
+async def respond_to_job(job_id: str, request: Request, payload: Dict[str, Any]):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        job = JobReviewService(service).respond(
+            job_id,
+            detail=str(payload.get("detail") or ""),
+            decision=str(payload.get("decision") or ""),
+            value=payload.get("value"),
+            selected=list(payload.get("selected") or []),
+        )
+    except (JobReviewError, JobStateError, ValueError) as exc:
+        raise _state_error(exc) from exc
+    return {"job": job.to_dict()}
+
+
+@router.post("/{job_id}/request-changes")
+async def request_job_changes(job_id: str, request: Request, payload: Dict[str, Any]):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        job = JobReviewService(service).request_changes(job_id, str(payload.get("feedback") or ""))
+    except (JobReviewError, JobStateError) as exc:
+        raise _state_error(exc) from exc
+    return {"job": job.to_dict()}
+
+
+@router.post("/{job_id}/continue")
+async def continue_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        job = JobReviewService(service).continue_job(job_id, str((payload or {}).get("detail") or ""))
+    except (JobReviewError, JobStateError) as exc:
+        raise _state_error(exc) from exc
+    return {"job": job.to_dict()}
+
+
+@router.post("/{job_id}/discard")
+async def discard_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        job = JobReviewService(service).discard(job_id, str((payload or {}).get("reason") or ""))
+    except (JobReviewError, JobStateError) as exc:
+        raise _state_error(exc) from exc
+    return {"job": job.to_dict()}
+
+
 @router.post("/{job_id}/transition")
 async def transition_job(job_id: str, request: Request, payload: Dict[str, Any]):
     service = _service(request)
@@ -157,6 +261,7 @@ async def transition_job(job_id: str, request: Request, payload: Dict[str, Any])
     return {"job": job.to_dict()}
 
 
+# Compatibility controls retained while clients migrate to the review actions.
 @router.post("/{job_id}/cancel")
 async def cancel_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
     service = _service(request)

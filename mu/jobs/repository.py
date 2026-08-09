@@ -38,6 +38,8 @@ class RepositoryRegistry:
 
     A job may be submitted from the primary checkout or any existing worktree;
     both resolve to one repository record and one canonical primary worktree.
+    The inspection result separately retains the submitted worktree's HEAD so a
+    job starts from the exact committed state the user delegated from.
     """
 
     def __init__(self, store: JobStore):
@@ -92,17 +94,18 @@ class RepositoryRegistry:
         candidate = os.path.abspath(os.path.expanduser(str(path or "")))
         if not os.path.isdir(candidate):
             raise RepositoryError(f"Repository does not exist: {candidate or path}")
-        top = (cls._git(candidate, "rev-parse", "--show-toplevel").stdout or "").strip()
-        if not top:
+        submitted = (cls._git(candidate, "rev-parse", "--show-toplevel").stdout or "").strip()
+        if not submitted:
             raise RepositoryError(f"Not a Git repository: {candidate}")
-        common_raw = (cls._git(top, "rev-parse", "--git-common-dir").stdout or "").strip()
-        common_dir = common_raw if os.path.isabs(common_raw) else os.path.join(top, common_raw)
+        common_raw = (cls._git(submitted, "rev-parse", "--git-common-dir").stdout or "").strip()
+        common_dir = common_raw if os.path.isabs(common_raw) else os.path.join(submitted, common_raw)
         common_dir = os.path.realpath(os.path.abspath(common_dir))
 
         # The first porcelain worktree is Git's primary checkout. Use it as the
-        # canonical path even when a ticket was submitted from another worktree.
-        listing = (cls._git(top, "worktree", "list", "--porcelain").stdout or "").splitlines()
-        primary = top
+        # stable repository identity/canonical path, but DO NOT use its HEAD as
+        # the delegated starting point when the user supplied another worktree.
+        listing = (cls._git(submitted, "worktree", "list", "--porcelain").stdout or "").splitlines()
+        primary = submitted
         for line in listing:
             if line.startswith("worktree "):
                 primary = os.path.abspath(line.split(" ", 1)[1].strip())
@@ -111,13 +114,28 @@ class RepositoryRegistry:
         origin = cls._git(primary, "config", "--get", "remote.origin.url", check=False)
         origin_url = (origin.stdout or "").strip()
 
-        current = cls._git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
-        current_branch = (current.stdout or "").strip()
+        primary_branch_result = cls._git(
+            primary,
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+            check=False,
+        )
+        primary_branch = (primary_branch_result.stdout or "").strip()
 
-        # Prefer origin/HEAD when configured: it represents the repository's
-        # remote default rather than whatever branch the developer currently
-        # has checked out. Fall back to the primary checkout branch for local
-        # repositories that have no remote HEAD (very common in test/dev repos).
+        submitted_branch_result = cls._git(
+            submitted,
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+            check=False,
+        )
+        current_branch = (submitted_branch_result.stdout or "").strip()
+
+        # Prefer origin/HEAD for the repository-level default. Fall back to
+        # the primary checkout branch and finally the submitted worktree branch.
         remote_head = cls._git(
             primary,
             "symbolic-ref",
@@ -132,20 +150,23 @@ class RepositoryRegistry:
             if remote_default_ref.startswith("origin/")
             else remote_default_ref
         )
-        default_branch = remote_default_branch or current_branch or "main"
+        default_branch = remote_default_branch or primary_branch or current_branch or "main"
 
-        head = cls._git(primary, "rev-parse", "--verify", "HEAD^{commit}", check=False)
+        # These are deliberately taken from `submitted`, not `primary`.
+        head = cls._git(submitted, "rev-parse", "--verify", "HEAD^{commit}", check=False)
         head_sha = (head.stdout or "").strip()
-        status = cls._git(primary, "status", "--porcelain", check=False)
+        status = cls._git(submitted, "status", "--porcelain", check=False)
         clean = status.returncode == 0 and not bool((status.stdout or "").strip())
 
         identity = hashlib.sha256(common_dir.encode("utf-8")).hexdigest()[:24]
         return {
             "id": identity,
             "canonical_path": primary,
+            "submitted_path": submitted,
             "git_common_dir": common_dir,
             "origin_url": origin_url,
             "default_branch": default_branch,
+            "primary_branch": primary_branch,
             "current_branch": current_branch,
             "remote_default_ref": remote_default_ref,
             "head_sha": head_sha,
@@ -170,7 +191,9 @@ class RepositoryRegistry:
                     previous_metadata = {}
             previous_metadata.update(
                 {
+                    "last_submitted_path": info.get("submitted_path", ""),
                     "current_branch": info.get("current_branch", ""),
+                    "primary_branch": info.get("primary_branch", ""),
                     "remote_default_ref": info.get("remote_default_ref", ""),
                     "head_sha": info.get("head_sha", ""),
                     "clean": bool(info.get("clean", False)),

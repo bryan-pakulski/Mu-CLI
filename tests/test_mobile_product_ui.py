@@ -37,20 +37,20 @@ def test_mobile_uses_same_alpine_environmental_palette_as_web():
     assert "#B0ACA0" not in text
 
 
-def test_mobile_atmosphere_is_colour_only_not_fake_landscape():
+def test_mobile_atmosphere_is_smooth_colour_not_fake_landscape():
     app = read(APP)
     atmosphere = read(ATMOSPHERE)
     assert "<AtmosphericBackground>" in app
-    assert "no mountains, polygons" in atmosphere
-    assert "skyField" in atmosphere
-    assert "sunriseField" in atmosphere
-    assert "alpineField" in atmosphere
-    for forbidden in ("mountain", "triangle", "clipPath", "polygon("):
-        # The explanatory comment may mention mountains, but no drawable mountain selector/object exists.
-        if forbidden == "mountain":
-            assert "styles.mountain" not in atmosphere
-        else:
-            assert forbidden not in atmosphere
+    assert "data:image/png;base64" in atmosphere
+    assert "smooth atmospheric colour/light falloff" in atmosphere
+    assert "no scenery or geometric" in atmosphere
+    assert "resizeMode=\"stretch\"" in atmosphere
+    assert "styles.mountain" not in atmosphere
+    assert "clipPath" not in atmosphere
+    assert "polygon(" not in atmosphere
+    # The atmosphere is a local embedded asset, not a remote wallpaper.
+    assert "http://" not in atmosphere
+    assert "https://" not in atmosphere
 
 
 def test_mobile_navigation_uses_production_chat_and_glass_chrome():
@@ -128,7 +128,6 @@ def test_mobile_trace_inherits_shared_glass_and_alpine_semantics():
     assert "color: colors.info" in trace
     assert "color: colors.success" in trace
     assert "color: colors.error" in trace
-    # No separate orange Trace brand colour is hardcoded into the mobile screen.
     assert "#e0a040" not in trace.lower()
 
 

@@ -101,6 +101,28 @@ def _event_failure(event: JobEvent) -> bool:
     )
 
 
+def _recent_events(service: JobService, job_id: str, *, limit: int) -> List[JobEvent]:
+    """Return the newest N events in chronological order.
+
+    The normal event API is oldest-first because clients use `after_id` for
+    streaming. Diagnostics has the opposite need: when a long job has thousands
+    of events, its latest crash/preflight failure must not fall outside a bounded
+    read. Keep this specialized query local to the diagnostics read-model so the
+    public event-stream contract remains unchanged.
+    """
+    bounded = max(1, min(int(limit), 1000))
+    conn = service.store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM job_events WHERE job_id = ? ORDER BY id DESC LIMIT ?",
+            (job_id, bounded),
+        ).fetchall()
+    finally:
+        conn.close()
+    rows = list(reversed(rows))
+    return [service.store._event_from_row(row) for row in rows]
+
+
 def _read_tail(path: str, *, max_bytes: int) -> tuple[str, int, bool]:
     try:
         size = int(os.path.getsize(path))
@@ -127,9 +149,10 @@ def build_job_diagnostics(
     job = service.get(job_id)
     events = [
         event
-        for event in service.events(
+        for event in _recent_events(
+            service,
             job_id,
-            limit=max(1, min(int(event_limit), 1000)),
+            limit=event_limit,
         )
         if _is_diagnostic_event(event)
     ]

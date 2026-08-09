@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List
 
 from .models import JobStatus
+from .repository import RepositoryRegistry
 from .service import JobService
 
 
@@ -35,9 +36,9 @@ class JobDiff:
         return asdict(self)
 
 
-def _git(worktree: str, *args: str, timeout: int = 60) -> str:
+def _git(repo: str, *args: str, timeout: int = 60) -> str:
     result = subprocess.run(
-        ["git", "-C", worktree, *args],
+        ["git", "-C", repo, *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -50,28 +51,58 @@ def _git(worktree: str, *args: str, timeout: int = 60) -> str:
     return result.stdout or ""
 
 
+def _review_target(service: JobService, job) -> tuple[str, str]:
+    """Return (git repository/path, head ref) for review.
+
+    Completed jobs are reviewed from their durable branch, so the temporary
+    execution worktree can be removed.  A worktree/HEAD fallback remains for
+    older or partially-prepared jobs that do not yet have a managed branch.
+    """
+
+    if job.branch:
+        metadata = dict(job.metadata or {})
+        repo = str(metadata.get("repository_root") or "").strip()
+        if not repo or not os.path.isdir(os.path.expanduser(repo)):
+            try:
+                repo = RepositoryRegistry(service.store).register(job.repository).canonical_path
+            except Exception as exc:
+                raise JobReviewError(f"Could not resolve repository for review branch: {exc}") from exc
+        repo = os.path.abspath(os.path.expanduser(repo))
+        try:
+            _git(repo, "rev-parse", "--verify", f"refs/heads/{job.branch}^{{commit}}")
+        except JobReviewError as exc:
+            raise JobReviewError(
+                f"Review branch {job.branch!r} is not available in the repository: {exc}"
+            ) from exc
+        return repo, job.branch
+
+    worktree = os.path.abspath(os.path.expanduser(str(job.worktree or "")))
+    if worktree and os.path.isdir(worktree):
+        return worktree, "HEAD"
+    raise JobReviewError("This job does not have an available review branch yet.")
+
+
 def build_job_diff(service: JobService, job_id: str, *, max_chars: int = 500_000) -> JobDiff:
     job = service.get(job_id)
-    worktree = os.path.abspath(os.path.expanduser(str(job.worktree or "")))
-    if not worktree or not os.path.isdir(worktree):
-        raise JobReviewError("This job does not have an available worktree yet.")
     if not job.base_sha:
         raise JobReviewError("This job does not have a captured base commit yet.")
 
-    head_sha = _git(worktree, "rev-parse", "HEAD").strip()
+    repo, head_ref = _review_target(service, job)
+    head_sha = _git(repo, "rev-parse", f"{head_ref}^{{commit}}").strip()
+    diff_range = f"{job.base_sha}...{head_ref}"
     files = [
         line.strip()
-        for line in _git(worktree, "diff", "--name-only", f"{job.base_sha}...HEAD").splitlines()
+        for line in _git(repo, "diff", "--name-only", diff_range).splitlines()
         if line.strip()
     ]
-    stat = _git(worktree, "diff", "--stat", f"{job.base_sha}...HEAD").strip()
+    stat = _git(repo, "diff", "--stat", diff_range).strip()
     patch = _git(
-        worktree,
+        repo,
         "diff",
         "--no-ext-diff",
         "--no-color",
         "--find-renames",
-        f"{job.base_sha}...HEAD",
+        diff_range,
         "--",
         timeout=120,
     )
@@ -189,7 +220,7 @@ class JobReviewService:
             job_id,
             JobStatus.QUEUED,
             reason="review changes requested; requeued",
-            payload={"feedback": text},
+            payload={"feedback": text, "branch": job.branch},
         )
 
     def continue_job(self, job_id: str, detail: str = ""):

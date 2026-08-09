@@ -62,6 +62,7 @@ jobs:
             tests/test_job_receipt.py \
             tests/test_job_review.py \
             tests/test_job_review_surfaces.py \
+            tests/test_job_diagnostics.py \
             tests/test_job_diagnostics_surfaces.py \
             2>&1 | tee "${RUNNER_TEMP}/durable-jobs-pytest.log"
 

@@ -1,8 +1,9 @@
 """Canonical retrospective performance read-model for durable jobs.
 
 `analysis.py` performs the raw evidence aggregation. This module attaches
-orthogonal management state (archive metadata) and defines semantic metrics
-that every control plane must interpret identically.
+orthogonal management state, lifecycle interval semantics, full harness-trace
+availability and cost provenance so every control plane interprets a job the
+same way.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import Any, Dict
 
 from .analysis import build_job_analysis as _build_raw_analysis
 from .analysis import compare_job_analyses as _compare_raw_analyses
+from .analysis_detail import enrich_job_analysis
 from .management import JobManagementService
 from .receipt import JobReceiptBuilder
 from .service import JobService
@@ -22,7 +24,11 @@ def build_job_performance(
     *,
     timeline_limit: int = 5000,
 ) -> Dict[str, Any]:
-    analysis = _build_raw_analysis(service, job_id, timeline_limit=timeline_limit)
+    analysis = enrich_job_analysis(
+        service,
+        job_id,
+        _build_raw_analysis(service, job_id, timeline_limit=timeline_limit),
+    )
 
     # Archival is deliberately orthogonal to execution status and lives in the
     # management table. Never infer it from job metadata or runtime state.
@@ -41,9 +47,8 @@ def build_job_performance(
         bool(verifications[0].get("passed")) if verifications else None
     )
 
-    # Cost must preserve the distinction between a true local $0 provider bill
-    # and a model/provider for which MuCLI does not have a complete tariff.
-    # The receipt owns this provenance because it is persisted per attempt.
+    # Cost preserves the distinction between a true local $0 provider bill,
+    # a configured estimate, and a model for which MuCLI has no tariff.
     receipt = JobReceiptBuilder(service).build(job_id)
     model_api = ((receipt.get("usage") or {}).get("model_api") or {})
     summary["cost_status"] = str(model_api.get("status") or "legacy")

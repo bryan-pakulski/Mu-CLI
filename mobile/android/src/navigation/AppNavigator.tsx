@@ -135,7 +135,7 @@ function ChatScreenWithChrome() {
 
   return (
     <EdgeSwipeView onSwipeFromLeft={openSessions} onSwipeFromRight={openMode}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ModernHeader
           onOpenSessions={openSessions}
           onOpenWorkspace={() => activeSessionName ? navRef.current?.navigate('Workspace') : openSessions()}
@@ -144,7 +144,7 @@ function ChatScreenWithChrome() {
           onOpenModes={() => activeSessionName ? navRef.current?.navigate('Modes') : openSessions()}
           onOpenProviders={() => navRef.current?.navigate('Providers')}
           onOpenArtifacts={() => activeSessionName ? navRef.current?.navigate('Artifacts') : openSessions()}
-          onOpenContainers={() => { /* MUCLI_MOBILE_CONTAINER_MENU_V1: active-session access. */ setContainersOpen(true); }}
+          onOpenContainers={() => setContainersOpen(true)}
         />
         {!isConnected ? (
           <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
@@ -180,9 +180,9 @@ export function AppNavigator() {
     ...baseTheme,
     colors: {
       ...baseTheme.colors,
-      background: colors.bg,
-      card: colors.bg,
-      border: colors.border,
+      background: 'transparent',
+      card: colors.glassStrong,
+      border: colors.hairline,
       text: colors.text,
       primary: colors.accent,
     },
@@ -194,11 +194,11 @@ export function AppNavigator() {
         screenOptions={{
           animation: 'slide_from_right',
           contentStyle: { backgroundColor: colors.bg },
-          headerStyle: { backgroundColor: colors.bg },
+          headerStyle: { backgroundColor: colors.glassStrong },
           headerTintColor: colors.text,
           headerShadowVisible: false,
           headerBackTitle: '',
-          headerTitleStyle: { fontSize: 17, fontWeight: '600' },
+          headerTitleStyle: { fontSize: 16, fontWeight: '600' },
         }}
       >
         <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />

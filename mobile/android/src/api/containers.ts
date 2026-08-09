@@ -97,7 +97,7 @@ export interface ContainerConfiguration {
   hardware?: ContainerHardwareCapabilities;
 }
 
-export interface ContainerEnvironmentPayload {
+export interface ContainerEnvironmentPayload extends Record<string, unknown> {
   name: string;
   dockerfile?: string | null;
   template_name?: string | null;

@@ -105,19 +105,12 @@ class SessionJobRunner:
             0.0,
             float(after.get("total_cost", 0.0)) - float(before.get("total_cost", 0.0)),
         )
-        # Unknown/plan-based pricing must remain explicitly unpriced. The
-        # numeric job accumulator cannot store None, so it receives $0 while
-        # the structured record carries billing=plan/unknown. If a provider
-        # already supplied a real positive cost through the legacy accounting
-        # path, retain it as a fallback rather than throwing data away.
         attributable_cost = (
             max(0.0, float(mapped_cost))
             if mapped_cost is not None
             else legacy_delta if legacy_delta > 0 else 0.0
         )
         if mapped_cost is not None:
-            # Keep the dedicated job session's lifetime total aligned with the
-            # mapped price so later attempts start from a coherent baseline.
             session.session_manager.token_counts["total_cost"] = (
                 float(before.get("total_cost", 0.0)) + attributable_cost
             )
@@ -151,7 +144,10 @@ class SessionJobRunner:
         args.workspace = [workspace] if workspace and args.session_type == "workspace" else []
         args.yolo = bool(execution.get("auto_approve_writes", False))
         args.gui = False
-        args.trace = False
+        # Durable jobs need the same provider/iteration/context telemetry as
+        # interactive sessions so retrospective Job Trace can drill into the
+        # actual agent loop rather than only coarse controller events.
+        args.trace = True
         return args
 
     @staticmethod

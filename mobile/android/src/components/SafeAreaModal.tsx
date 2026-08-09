@@ -7,6 +7,7 @@ import {
   initialWindowMetrics,
 } from 'react-native-safe-area-context';
 import type { Edge } from 'react-native-safe-area-context';
+import { AtmosphericBackground } from './AtmosphericBackground';
 
 export type SafeAreaModalProps = Omit<ModalProps, 'children'> & {
   children: React.ReactNode;
@@ -15,10 +16,9 @@ export type SafeAreaModalProps = Omit<ModalProps, 'children'> & {
 };
 
 /**
- * React Native modals are rendered in their own native window. On Android,
- * relying on the app-level SafeAreaProvider can therefore produce a zero or
- * stale navigation-bar inset. Give every modal window its own provider and
- * constrain its content to the requested system-bar edges.
+ * React Native modals render in their own native window. Full-screen modal
+ * workflows receive the same atmospheric product background as the app;
+ * transparent overlays keep the underlying app visible instead.
  */
 export function SafeAreaModal({
   children,
@@ -26,19 +26,25 @@ export function SafeAreaModal({
   containerStyle,
   statusBarTranslucent = false,
   navigationBarTranslucent = false,
+  transparent = false,
   ...modalProps
 }: SafeAreaModalProps) {
+  const safeArea = (
+    <SafeAreaProvider initialMetrics={initialWindowMetrics} style={styles.provider}>
+      <SafeAreaView edges={edges} style={[styles.container, containerStyle]}>
+        {children}
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+
   return (
     <Modal
       {...modalProps}
+      transparent={transparent}
       statusBarTranslucent={statusBarTranslucent}
       navigationBarTranslucent={navigationBarTranslucent}
     >
-      <SafeAreaProvider initialMetrics={initialWindowMetrics} style={styles.provider}>
-        <SafeAreaView edges={edges} style={[styles.container, containerStyle]}>
-          {children}
-        </SafeAreaView>
-      </SafeAreaProvider>
+      {transparent ? safeArea : <AtmosphericBackground>{safeArea}</AtmosphericBackground>}
     </Modal>
   );
 }

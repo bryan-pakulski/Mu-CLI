@@ -19,7 +19,8 @@ export interface ModelPricingInfo {
   input_per_million: number | null;
   cached_input_per_million: number | null;
   output_per_million: number | null;
-  billing: 'token' | 'local' | 'plan' | 'unknown' | string;
+  estimated_total_per_million: number | null;
+  billing: 'token' | 'estimated_token' | 'local' | 'unknown' | string;
   aliases: string[];
   context_window: number | null;
   long_context_cutoff: number | null;
@@ -31,17 +32,7 @@ export interface ModelPricingInfo {
   source: string;
 }
 
-export interface OllamaCatalogInfo {
-  provider: string;
-  key: string;
-  aliases: string[];
-  context_window: number | null;
-  role: string;
-  local_size: string;
-  usage_tier: string;
-  notes: string;
-  source: string;
-}
+export interface OllamaCatalogInfo extends ModelPricingInfo {}
 
 export interface ModelPricingCatalog {
   version: string;
@@ -50,6 +41,10 @@ export interface ModelPricingCatalog {
   models: ModelPricingInfo[];
   ollama: OllamaCatalogInfo[];
   provider_notes: Record<string, string>;
+  config_path: string;
+  active_config_path: string;
+  default_config_path: string;
+  using_override: boolean;
 }
 
 export const providersApi = {

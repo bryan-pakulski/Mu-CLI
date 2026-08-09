@@ -73,7 +73,7 @@ def test_runner_uses_existing_session_runtime_and_persists_job_context(tmp_path)
         session.folder_context.folders = list(args.workspace)
         return session
 
-    base_args = SimpleNamespace(gui=True, trace=True, workspace=[], yolo=False)
+    base_args = SimpleNamespace(gui=True, trace=False, workspace=[], yolo=False)
     runner = SessionJobRunner(service, build_session_fn=build, base_args=base_args)
     outcome = runner.run(job, attempt)
 
@@ -83,6 +83,7 @@ def test_runner_uses_existing_session_runtime_and_persists_job_context(tmp_path)
     assert built[0][0].provider == "openai"
     assert built[0][0].model == "test-model"
     assert built[0][0].workspace == [str(repo)]
+    assert built[0][0].trace is True
     assert built[0][2] is False
     assert session.variables["durable_job_id"] == job.id
     assert "Acceptance criteria:" in session.prompts[0]
@@ -105,7 +106,7 @@ def test_runner_converts_noninteractive_gate_to_needs_human(tmp_path):
     runner = SessionJobRunner(
         service,
         build_session_fn=lambda args, ui, allow_prompt: session,
-        base_args=SimpleNamespace(gui=True, trace=True, workspace=[], yolo=False),
+        base_args=SimpleNamespace(gui=True, trace=False, workspace=[], yolo=False),
     )
     outcome = runner.run(job, attempt)
     assert outcome.kind == "needs_human"
@@ -123,7 +124,7 @@ def test_runner_missing_execution_profile_gates_instead_of_guessing(tmp_path):
     runner = SessionJobRunner(
         service,
         build_session_fn=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not build")),
-        base_args=SimpleNamespace(gui=True, trace=True, workspace=[], yolo=False),
+        base_args=SimpleNamespace(gui=True, trace=False, workspace=[], yolo=False),
     )
     outcome = runner.run(job, attempt)
     assert outcome.kind == "needs_human"
@@ -137,7 +138,7 @@ def test_runner_missing_workspace_is_environment_failure(tmp_path):
     runner = SessionJobRunner(
         service,
         build_session_fn=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not build")),
-        base_args=SimpleNamespace(gui=True, trace=True, workspace=[], yolo=False),
+        base_args=SimpleNamespace(gui=True, trace=False, workspace=[], yolo=False),
     )
     outcome = runner.run(job, attempt)
     assert outcome.kind == "failed"

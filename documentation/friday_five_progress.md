@@ -6,7 +6,8 @@ North star:
 > later, and understand in under two minutes what each agent did, what passed,
 > what failed, what needs a human, what it cost, and what is safe to merge.
 
-This ledger distinguishes **source complete** from **validated complete**.
+This ledger distinguishes **source/automated validation** from real-provider and
+manual control-plane validation.
 
 ## Architectural invariant
 
@@ -26,7 +27,8 @@ job lifecycle state.
 ## Milestone 1 — Durable Jobs
 
 **Source status: COMPLETE**  
-**Runtime validation: PENDING**
+**Automated validation: GREEN**  
+**Real-provider validation: PENDING USER TEST**
 
 Done:
 - Durable `Job`, `JobSpec`, `JobEvent`, `JobAttempt` domain model.
@@ -39,15 +41,16 @@ Done:
 - Existing MuCLI `Session`/agent runtime adapter; no second agent stack.
 - Detached controller daemon starts independently of browser/TUI lifecycle.
 - TUI `/job`/`/jobs`, GUI `/api/jobs`, and mobile `jobsApi` share the same core.
+- CI exercises persistence, state, attempts, leases and recovery.
 
-Still required for validated completion:
-- Green durable-jobs CI.
-- Exercise one real provider job end-to-end with browser/TUI closed.
+Manual validation still required:
+- Exercise real-provider execution while GUI/TUI/mobile are closed/reopened.
 
 ## Milestone 2 — Isolated Engineering Work
 
 **Source status: COMPLETE**  
-**Runtime validation: PENDING**
+**Automated validation: GREEN**  
+**Five-real-ticket validation: PENDING USER TEST**
 
 Done:
 - Durable canonical Git repository registry.
@@ -58,16 +61,17 @@ Done:
 - Worker-owned heartbeat/lease, surviving controller/browser restart.
 - Scheduler target of five concurrent isolated job processes.
 - Targeted cancellation and duplicate-controller lease protection.
+- CI uses real temporary Git repositories plus subprocess scheduler tests.
 
-Still required for validated completion:
-- Green Git fixture/subprocess scheduler CI.
-- Run five simultaneous real tickets against one repository.
+Manual validation still required:
+- Run several simultaneous real tickets, ultimately the Friday Five scenario.
 - Container-backed durable jobs remain deliberately gated until their own adapter exists.
 
 ## Milestone 3 — Deterministic Verification
 
 **Source status: COMPLETE**  
-**Runtime validation: PENDING**
+**Automated validation: GREEN**  
+**Real-repository validation: PENDING USER TEST**
 
 Done:
 - First-class validation commands and separate verifier subprocess.
@@ -80,16 +84,15 @@ Done:
 - Retry exhaustion => `NEEDS_HUMAN / test_failure`.
 - Failed verification evidence enters the next implementation prompt.
 - Durable work receipt aggregates outcome, attempts, cost/tokens, Git and verification evidence.
+- CI exercises verifier pass/fail/retry/missing-contract/dirty-worktree and receipt behavior.
 
-Still required for validated completion:
-- Green verifier/receipt CI.
-- Optional independent verifier-agent remains a strengthening layer.
+Optional independent verifier-agent remains a strengthening layer.
 
 ## Milestone 4 — Review + Attention UI
 
-**Source status: COMPLETE**  
-**Automated validation: RUNNING**  
-**Manual three-plane validation: READY AFTER CI GREEN**
+**Status: COMPLETE**  
+**Automated validation: GREEN**  
+**Manual three-plane validation: READY**
 
 Shared review core:
 - Shared board projection: `needs_you`, `running`, `queued`, `ready`, `failed`, `done`.
@@ -120,10 +123,9 @@ Mobile:
 - Receipt, verifier evidence, Git diff and activity timeline.
 - Approval/question/validation response, request changes, continue/retry and discard.
 
-Validation gate:
-- M4 shared review workflow regression tests added.
-- CI now runs the durable Python suite plus `npm run typecheck` for mobile.
-- Do not mark M4 validated complete until those checks are green.
+Automated gate on final M4 head:
+- durable Python suite: **49 passed**;
+- mobile: **`npm run typecheck` passed**.
 
 ## Milestone 5 — Git / PR Completion
 

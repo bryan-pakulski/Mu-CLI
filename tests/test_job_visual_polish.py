@@ -49,7 +49,9 @@ def test_job_trace_and_model_pricing_share_product_visual_language():
     assert 'id="jt-theme"' in trace
     assert 'id="mc-theme"' in pricing
     assert 'Pricing registry' in pricing
-    assert 'Blended est. / 1M total' in pricing
+    assert 'Input / 1M' in pricing
+    assert 'Output / 1M' in pricing
+    assert 'Blended est. / 1M total' not in pricing
     assert 'Quick estimator' not in pricing
 
 
@@ -69,10 +71,12 @@ def test_job_analyzer_explains_state_residence_and_links_full_harness_trace():
     assert 'args.trace = True' in runner
 
 
-def test_glm_cloud_default_estimate_is_configured_not_silently_unpriced():
+def test_glm_cloud_default_estimate_uses_separate_input_and_output_rates():
     config = json.loads(PRICING.read_text(encoding="utf-8"))
     glm = next(row for row in config["models"] if row["provider"] == "ollama" and row["key"] == "glm-5.2:cloud")
 
     assert glm["billing"] == "estimated_token"
-    assert glm["estimated_total_per_million"] == 1.4
-    assert 'estimate' in glm["notes"].lower()
+    assert glm["input_per_million"] == 1.4
+    assert glm["output_per_million"] == 4.4
+    assert glm["estimated_total_per_million"] is None
+    assert 'separate measured input and output tokens' in glm["notes"].lower()

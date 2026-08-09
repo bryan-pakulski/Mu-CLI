@@ -22,15 +22,17 @@ def test_openai_cached_tokens_are_not_double_charged():
     estimate = estimate_model_cost(
         provider="openai",
         model_name="gpt-5.6-terra",
-        input_tokens=1_000_000,
-        cached_tokens=200_000,
-        output_tokens=100_000,
+        input_tokens=200_000,
+        cached_tokens=40_000,
+        output_tokens=20_000,
     )
-    # 0.8M*$2.50 + 0.2M*$0.25 + 0.1M*$15 = $3.55
+    # 0.16M*$2.50 + 0.04M*$0.25 + 0.02M*$15 = $0.71.
+    # Staying below Terra's long-context threshold isolates cache accounting.
     assert estimate["pricing_key"] == "gpt-5.6-terra"
-    assert estimate["api_cost_usd"] == pytest.approx(3.55)
-    assert estimate["usage"]["uncached_input"] == 800_000
-    assert estimate["usage"]["cached_input"] == 200_000
+    assert estimate["long_context_tier"] is False
+    assert estimate["api_cost_usd"] == pytest.approx(0.71)
+    assert estimate["usage"]["uncached_input"] == 160_000
+    assert estimate["usage"]["cached_input"] == 40_000
 
 
 def test_openai_long_context_tier_and_specific_alias_win():

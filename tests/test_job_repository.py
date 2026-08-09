@@ -60,6 +60,24 @@ def test_registry_detects_current_branch_when_origin_head_is_unavailable(tmp_pat
     assert record.metadata["clean"] is True
 
 
+def test_inspect_keeps_primary_identity_but_reports_submitted_worktree_head(tmp_path):
+    repo = make_repo(tmp_path)
+    secondary = tmp_path / "secondary"
+    git(repo, "worktree", "add", "-b", "feature/test", str(secondary), "main")
+    (secondary / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(secondary, "add", "feature.txt")
+    git(secondary, "commit", "-m", "feature worktree commit")
+
+    info = RepositoryRegistry.inspect(str(secondary))
+
+    assert info["canonical_path"] == str(repo)
+    assert info["submitted_path"] == str(secondary)
+    assert info["current_branch"] == "feature/test"
+    assert info["head_sha"] == git(secondary, "rev-parse", "HEAD")
+    assert info["head_sha"] != git(repo, "rev-parse", "HEAD")
+    assert info["clean"] is True
+
+
 def test_payload_creation_snapshots_current_repository_head_instead_of_inventing_main(tmp_path):
     repo = make_repo(tmp_path, branch="develop")
     service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
@@ -81,6 +99,33 @@ def test_payload_creation_snapshots_current_repository_head_instead_of_inventing
     assert preflight["current_branch"] == "develop"
     assert preflight["head_sha"] == job.base_sha
     assert preflight["clean"] is True
+
+
+def test_payload_creation_from_existing_worktree_snapshots_that_worktree(tmp_path):
+    repo = make_repo(tmp_path)
+    secondary = tmp_path / "secondary"
+    git(repo, "worktree", "add", "-b", "feature/delegated", str(secondary), "main")
+    (secondary / "delegated.txt").write_text("delegated\n", encoding="utf-8")
+    git(secondary, "add", "delegated.txt")
+    git(secondary, "commit", "-m", "delegated base")
+    service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
+
+    job = service.create_from_payload({
+        "title": "Queue from attached worktree",
+        "repository": str(secondary),
+        "execution": {
+            "provider": "ollama",
+            "model": "test-model",
+            "session_type": "workspace",
+        },
+    })
+
+    assert job.base_branch == "feature/delegated"
+    assert job.base_sha == git(secondary, "rev-parse", "HEAD")
+    assert job.base_sha != git(repo, "rev-parse", "HEAD")
+    preflight = job.metadata["submission_repository_preflight"]
+    assert preflight["canonical_path"] == str(repo)
+    assert preflight["current_branch"] == "feature/delegated"
 
 
 def test_payload_creation_rejects_invalid_repository_before_queueing(tmp_path):

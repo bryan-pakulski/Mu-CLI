@@ -46,6 +46,10 @@ export type ThemeColors = {
   peachField: string;
   alpineField: string;
   snowField: string;
+  // Compatibility aliases for older screens as they migrate to glass/pane
+  // naming. They intentionally resolve to neutral surfaces, not new colours.
+  card: string;
+  errorBg: string;
   syntax: SyntaxColors;
 };
 
@@ -76,6 +80,8 @@ export const lightColors: ThemeColors = {
   peachField: '#F9BFAC',
   alpineField: '#5B977A',
   snowField: '#FFFFFF',
+  card: 'rgba(249,252,254,0.64)',
+  errorBg: 'rgba(185,95,107,0.08)',
   syntax: {
     keyword: '#657F9A', string: '#66877A', comment: '#8C98A3', number: '#9B7D72',
     func: '#527795', operator: '#6D7985', punctuation: '#89949E', plain: '#1C2732',
@@ -110,6 +116,8 @@ export const darkColors: ThemeColors = {
   peachField: '#F7B9A9',
   alpineField: '#4E8970',
   snowField: '#F1F7FC',
+  card: 'rgba(19,25,34,0.62)',
+  errorBg: 'rgba(205,124,134,0.10)',
   syntax: {
     keyword: '#9DB4CB', string: '#94B3A2', comment: '#65717D', number: '#B9A08F',
     func: '#8BA9C6', operator: '#A3ADB7', punctuation: '#7C8792', plain: '#EEF2F6',

@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   jobsApi,
   type EngineeringJob,
+  type JobDiagnosticsSnapshot,
   type JobDiff,
   type JobEvent,
   type WorkReceipt,
@@ -46,7 +47,10 @@ function eventSummary(event: JobEvent): string {
   if (event.event_type === 'agent_message') return String(payload.text || '').slice(0, 1000);
   if (event.event_type === 'tool_call_ui') return String(payload.tool_name || '');
   if (event.event_type === 'human_response' || event.event_type === 'review_feedback') return String(payload.detail || '');
-  if (event.event_type === 'status_changed') return `${event.from_status || 'new'} → ${event.to_status || ''}${event.reason ? ` · ${event.reason}` : ''}`;
+  if (event.event_type === 'status_changed') {
+    const underlying = String(payload.error || '');
+    return `${event.from_status || 'new'} → ${event.to_status || ''}${event.reason ? ` · ${event.reason}` : ''}${underlying ? ` · ${underlying}` : ''}`;
+  }
   if (event.event_type === 'checkpoint_created') return `${String(payload.label || 'checkpoint')} · ${String(payload.sha || '').slice(0, 12)}`;
   if (event.reason) return event.reason;
   return String(payload.text || payload.summary || payload.error || '');
@@ -65,6 +69,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const [job, setJob] = useState<EngineeringJob | null>(null);
   const [receipt, setReceipt] = useState<WorkReceipt | null>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
+  const [diagnostics, setDiagnostics] = useState<JobDiagnosticsSnapshot | null>(null);
   const [diff, setDiff] = useState<JobDiff | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,10 +80,11 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [jobResult, receiptResult, eventsResult, diffResult] = await Promise.allSettled([
+      const [jobResult, receiptResult, eventsResult, diagnosticsResult, diffResult] = await Promise.allSettled([
         jobsApi.get(jobId),
         jobsApi.receipt(jobId),
         jobsApi.events(jobId),
+        jobsApi.diagnostics(jobId),
         jobsApi.diff(jobId),
       ]);
       if (jobResult.status !== 'fulfilled') throw jobResult.reason;
@@ -87,6 +93,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
       navigation.setOptions({ title: nextJob.title });
       setReceipt(receiptResult.status === 'fulfilled' ? receiptResult.value.receipt : null);
       setEvents(eventsResult.status === 'fulfilled' ? eventsResult.value.events || [] : []);
+      setDiagnostics(diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value.diagnostics : null);
       setDiff(diffResult.status === 'fulfilled' ? diffResult.value.diff : null);
       setError('');
     } catch (err) {
@@ -236,6 +243,39 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           <ReceiptRow label="Mode" value={job.execution?.agent_mode || 'default'} />
           <ReceiptRow label="Workspace clean" value={git?.dirty === false ? 'yes' : git?.dirty === true ? 'no' : 'unknown'} />
         </DetailSection>
+
+        {diagnostics && (diagnostics.diagnostics.length || diagnostics.worker_log_exists) ? (
+          <DetailSection title="Job diagnostics">
+            {diagnostics.latest_failure ? (
+              <View style={[styles.diagnosticFailure, { borderLeftColor: colors.error, backgroundColor: colors.bgHover }]}>
+                <Text variant="xs" style={{ color: colors.error, fontWeight: '600' }}>
+                  {statusLabel(diagnostics.latest_failure.event_type)}
+                </Text>
+                <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4 }} selectable>
+                  {eventSummary(diagnostics.latest_failure)}
+                </Text>
+              </View>
+            ) : null}
+            <ReceiptRow label="Worker" value={diagnostics.worker_id || '—'} />
+            <ReceiptRow label="Worker log" value={diagnostics.worker_log_exists ? `${diagnostics.worker_log_size} bytes` : 'not created'} />
+            {diagnostics.worker_log_tail ? (
+              <ScrollView style={[styles.logBox, { borderTopColor: colors.hairline, borderBottomColor: colors.hairline }]}>
+                <Text variant="xs" style={[styles.mono, { color: colors.textSoft }]} selectable>
+                  {diagnostics.worker_log_tail}
+                </Text>
+              </ScrollView>
+            ) : null}
+            {diagnostics.diagnostics.slice(-15).reverse().map(event => (
+              <View key={`diag-${event.id}`} style={[styles.timelineRow, { borderBottomColor: colors.hairline }]}>
+                <View style={[styles.timelineDot, { backgroundColor: colors.textDim }]} />
+                <View style={styles.timelineCopy}>
+                  <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>{statusLabel(event.event_type)}</Text>
+                  {eventSummary(event) ? <Text variant="xs" dim style={styles.timelineBody} selectable>{eventSummary(event)}</Text> : null}
+                </View>
+              </View>
+            ))}
+          </DetailSection>
+        ) : null}
 
         <DetailSection title="Acceptance criteria">
           {job.acceptance_criteria.length ? job.acceptance_criteria.map((item, index) => (
@@ -453,6 +493,8 @@ const styles = StyleSheet.create({
   mono: { fontFamily: 'monospace' },
   diffStat: { lineHeight: 17, marginBottom: 10 },
   diffBox: { maxHeight: 420, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  logBox: { maxHeight: 300, marginTop: 10, marginBottom: 8, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  diagnosticFailure: { paddingHorizontal: 10, paddingVertical: 9, marginBottom: 10, borderLeftWidth: 2 },
   timelineRow: { minHeight: 48, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 10 },
   timelineDot: { width: 4, height: 4, borderRadius: 2, marginTop: 6 },
   timelineCopy: { flex: 1 },

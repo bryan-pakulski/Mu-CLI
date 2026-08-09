@@ -38,9 +38,6 @@ class SessionJobRunner:
 
     @staticmethod
     def workspace_path(job: Job) -> str:
-        # Milestone 2 isolates Git-backed jobs in managed worktrees. Falling
-        # back to repository keeps non-Git/chat tests and legacy M1 records
-        # readable, but the process worker always prepares a worktree first.
         return str(job.worktree or job.repository or "")
 
     def _args_for(self, job: Job):
@@ -66,6 +63,32 @@ class SessionJobRunner:
         args.trace = False
         return args
 
+    @staticmethod
+    def _verification_feedback(payload: Dict[str, Any]) -> list[str]:
+        lines = ["", "The previous implementation failed deterministic verification."]
+        verification_id = str(payload.get("verification_id") or "")
+        if verification_id:
+            lines.append(f"Verification: {verification_id}")
+        for check in list(payload.get("failed_checks") or [])[:4]:
+            if not isinstance(check, dict):
+                continue
+            command = str(check.get("command") or "verification command")
+            lines.append(f"- FAILED: {command}")
+            if check.get("timed_out"):
+                lines.append("  timed out")
+            error = str(check.get("error") or "").strip()
+            if error:
+                lines.append(f"  error: {error[:1200]}")
+            output = str(check.get("stderr") or check.get("stdout") or "").strip()
+            if output:
+                lines.append("  output:")
+                lines.append(output[-2500:])
+        dirty = str(payload.get("dirty_status") or "").strip()
+        if dirty:
+            lines.extend(["- Verification left the worktree dirty:", dirty[-2000:]])
+        lines.append("Repair the implementation in the existing job branch and re-run relevant checks.")
+        return lines
+
     def _prompt(self, job: Job) -> str:
         lines = ["DURABLE ENGINEERING JOB", f"Title: {job.title}"]
         if job.description:
@@ -76,12 +99,19 @@ class SessionJobRunner:
             lines.extend(["", "Validation expected by the controller:", *[f"- {v}" for v in job.validation_commands]])
         if job.branch:
             lines.extend(["", f"Managed job branch: {job.branch}"])
-        for event in reversed(self.service.events(job.id)):
+
+        events = self.service.events(job.id)
+        for event in reversed(events):
+            if event.event_type == "verification_failed":
+                lines.extend(self._verification_feedback(event.payload))
+                break
+        for event in reversed(events):
             if event.event_type == "human_response":
                 detail = str(event.payload.get("detail") or "").strip()
                 if detail:
                     lines.extend(["", "Latest human response:", detail])
                 break
+
         lines.extend([
             "",
             "Implement the ticket and validate the result where possible.",

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import type { WorkspaceCategoryId } from './workspace';
 
@@ -20,6 +20,7 @@ import { WorkspaceScreen } from '../screens/WorkspaceScreen';
 import { WorkspaceCategoryScreen } from '../screens/WorkspaceCategoryScreen';
 import { WorkScreen } from '../screens/WorkScreen';
 import { JobDetailScreen } from '../screens/JobDetailScreen';
+import { JobAnalysisScreen } from '../screens/JobAnalysisScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
@@ -44,6 +45,7 @@ export type RootStackParamList = {
   Chat: undefined;
   Work: undefined;
   JobDetail: { jobId: string };
+  JobAnalysis: { jobId: string };
   Workspace: undefined;
   WorkspaceCategory: { categoryId: WorkspaceCategoryId; title: string };
   Teacher: undefined;
@@ -71,7 +73,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
 const PANEL_SCREENS: {
-  name: Exclude<keyof RootStackParamList, 'Chat' | 'Work' | 'JobDetail' | 'Workspace' | 'WorkspaceCategory'>;
+  name: Exclude<keyof RootStackParamList, 'Chat' | 'Work' | 'JobDetail' | 'JobAnalysis' | 'Workspace' | 'WorkspaceCategory'>;
   title: string;
   component: React.ComponentType;
 }[] = [
@@ -205,7 +207,19 @@ export function AppNavigator() {
       >
         <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />
         <Stack.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work' }} />
-        <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ title: 'Job review' }} />
+        <Stack.Screen
+          name="JobDetail"
+          component={JobDetailScreen}
+          options={({ navigation, route }) => ({
+            title: 'Job review',
+            headerRight: () => (
+              <Pressable onPress={() => navigation.navigate('JobAnalysis', { jobId: route.params.jobId })} hitSlop={10}>
+                <Text style={{ color: colors.textSoft, fontSize: 12, fontWeight: '600' }}>Analyze</Text>
+              </Pressable>
+            ),
+          })}
+        />
+        <Stack.Screen name="JobAnalysis" component={JobAnalysisScreen} options={{ title: 'Job performance' }} />
         <Stack.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace' }} />
         <Stack.Screen
           name="WorkspaceCategory"

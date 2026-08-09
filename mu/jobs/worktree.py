@@ -17,7 +17,7 @@ from .service import JobService
 
 
 class WorktreeError(RuntimeError):
-    """Structured Git/worktree preparation failure safe to expose to users."""
+    """Structured Git/worktree failure safe to expose in job diagnostics."""
 
     def __init__(
         self,
@@ -151,6 +151,22 @@ class JobWorktreeManager:
     def worktree_path(self, job: Job) -> str:
         return job.worktree or os.path.join(self.root, job.id)
 
+    @staticmethod
+    def _persisted_base_ref(job: Job) -> str:
+        metadata = dict(job.metadata or {})
+        existing = str(metadata.get("resolved_base_ref") or "").strip()
+        if existing:
+            return existing
+        submission = metadata.get("submission_repository_preflight")
+        if isinstance(submission, dict):
+            return str(
+                submission.get("current_branch")
+                or submission.get("default_branch")
+                or job.base_branch
+                or ""
+            ).strip()
+        return ""
+
     def _resolve_base(
         self,
         repo: str,
@@ -165,7 +181,13 @@ class JobWorktreeManager:
                 f"{job.base_sha}^{{commit}}",
                 stage="base_sha_resolution",
             )
-            return (result.stdout or "").strip(), str(job.base_sha)
+            sha = (result.stdout or "").strip()
+            # Preserve the originally resolved human-readable ref on retries.
+            # Newly-created GUI/mobile jobs already carry their submitted branch
+            # in the repository-preflight metadata; historical jobs gain
+            # resolved_base_ref after their first successful preparation.
+            base_ref = self._persisted_base_ref(job) or str(job.base_sha)
+            return sha, base_ref
 
         requested = str(job.base_branch or "main").strip() or "main"
         candidates: List[str] = []
@@ -175,16 +197,13 @@ class JobWorktreeManager:
             if value and value not in candidates:
                 candidates.append(value)
 
-        # Always respect the requested branch first.
         if requested.lower() != "auto":
             add(requested)
             if not requested.startswith("origin/"):
                 add(f"origin/{requested}")
 
-        # `main` is the historical implicit default in persisted jobs. If that
-        # ref is absent, fall back to the repository's detected default/current
-        # branch instead of treating a perfectly healthy `master`/`develop`/
-        # `trunk` repository as an environment failure.
+        # `main` was historically injected when callers did not specify a base.
+        # Only that implicit legacy value (plus explicit `auto`) may fall back.
         allow_fallback = requested.lower() in {"", "auto", "main"}
         if allow_fallback:
             add(repository.default_branch)
@@ -246,8 +265,6 @@ class JobWorktreeManager:
         )
 
     def _registered_worktrees(self, repo: str) -> Dict[str, Dict[str, str]]:
-        # Clear stale administrative entries left behind by deleted/crashed
-        # worktrees before deciding whether the managed path is occupied.
         self._run(repo, "worktree", "prune", check=False, stage="worktree_prune")
         result = self._run(
             repo,
@@ -296,33 +313,37 @@ class JobWorktreeManager:
                 ) from exc
 
             repo = repository.canonical_path
+            repo_meta = dict(repository.metadata or {})
             self._event(
                 job.id,
                 "repository_inspected",
                 payload={
                     "repository_id": repository.id,
                     "repository_input": job.repository,
+                    "submitted_path": repo_meta.get("last_submitted_path", job.repository),
                     "canonical_path": repo,
                     "git_common_dir": repository.git_common_dir,
                     "origin_url": repository.origin_url,
                     "detected_default_branch": repository.default_branch,
+                    "current_branch": repo_meta.get("current_branch", ""),
+                    "primary_branch": repo_meta.get("primary_branch", ""),
+                    "head_sha": repo_meta.get("head_sha", ""),
+                    "source_worktree_clean": repo_meta.get("clean"),
                 },
             )
 
             base_sha, base_ref = self._resolve_base(repo, job, repository)
+            requested = str(job.base_branch or "main").strip() or "main"
             self._event(
                 job.id,
                 "job_base_resolved",
                 payload={
-                    "requested_base_branch": job.base_branch,
+                    "requested_base_branch": requested,
                     "resolved_base_ref": base_ref,
                     "base_sha": base_sha,
                     "fallback_used": bool(
-                        str(job.base_branch or "main").strip()
-                        and base_ref not in {
-                            str(job.base_branch or "main").strip(),
-                            f"origin/{str(job.base_branch or 'main').strip()}",
-                        }
+                        not job.base_sha
+                        and base_ref not in {requested, f"origin/{requested}"}
                     ),
                 },
             )
@@ -507,13 +528,8 @@ class JobWorktreeManager:
         env.setdefault("GIT_COMMITTER_NAME", "MuCLI")
         env.setdefault("GIT_COMMITTER_EMAIL", "mucli@localhost")
         command = [
-            "git",
-            "-C",
-            worktree,
-            "commit",
-            "--no-gpg-sign",
-            "-m",
-            f"mu checkpoint: {label}",
+            "git", "-C", worktree, "commit", "--no-gpg-sign",
+            "-m", f"mu checkpoint: {label}",
         ]
         result = subprocess.run(
             command,
@@ -570,11 +586,7 @@ class JobWorktreeManager:
         if force:
             args.append("--force")
         args.append(worktree)
-        self._run(
-            repository.canonical_path,
-            *args,
-            stage="worktree_remove",
-        )
+        self._run(repository.canonical_path, *args, stage="worktree_remove")
         if os.path.exists(worktree) and force:
             shutil.rmtree(worktree, ignore_errors=True)
         self._event(

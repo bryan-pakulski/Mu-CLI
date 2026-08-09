@@ -40,7 +40,7 @@
     function billingSelect(value) {
         const options = [
             ['token', 'Token rates'],
-            ['estimated_token', 'Blended estimate'],
+            ['estimated_token', 'Estimated input/output'],
             ['local', 'Local / $0 API'],
             ['unknown', 'Unpriced'],
         ];
@@ -59,7 +59,6 @@
                 <td>${input(item.input_per_million, 'input_per_million', 'number', 'min="0" step="0.001"')}</td>
                 <td>${input(item.cached_input_per_million, 'cached_input_per_million', 'number', 'min="0" step="0.001"')}</td>
                 <td>${input(item.output_per_million, 'output_per_million', 'number', 'min="0" step="0.001"')}</td>
-                <td>${input(item.estimated_total_per_million, 'estimated_total_per_million', 'number', 'min="0" step="0.001"')}</td>
                 <td>${input(item.context_window, 'context_window', 'number', 'min="1" step="1"')}</td>
                 <td>${input(item.long_context_cutoff, 'long_context_cutoff', 'number', 'min="1" step="1"')}</td>
                 <td>${input(item.long_input_per_million, 'long_input_per_million', 'number', 'min="0" step="0.001"')}</td>
@@ -73,7 +72,7 @@
                 <td><button class="mc-row-remove" data-remove title="Remove model" aria-label="Remove model">×</button></td>
             </tr>`;
         }).join('');
-        $('mc-models').innerHTML = rows || '<tr><td colspan="15" class="mc-table-empty">No configured models.</td></tr>';
+        $('mc-models').innerHTML = rows || '<tr><td colspan="14" class="mc-table-empty">No configured models.</td></tr>';
         $('mc-count').textContent = `${state.models.length} model${state.models.length === 1 ? '' : 's'}`;
         wireRows();
     }
@@ -143,6 +142,17 @@
         const invalid = state.models.find(item => !String(item.provider || '').trim() || !String(item.key || '').trim());
         if (invalid) {
             $('mc-status').textContent = 'Provider and model are required on every row.';
+            return;
+        }
+        const invalidEstimate = state.models.find(item => {
+            if (item.billing !== 'estimated_token') return false;
+            const split = item.input_per_million != null || item.output_per_million != null;
+            return split
+                ? item.input_per_million == null || item.output_per_million == null
+                : item.estimated_total_per_million == null;
+        });
+        if (invalidEstimate) {
+            $('mc-status').textContent = 'Estimated pricing requires both input and output rates.';
             return;
         }
         $('mc-save').disabled = true;

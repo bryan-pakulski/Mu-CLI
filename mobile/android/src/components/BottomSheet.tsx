@@ -22,31 +22,43 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
   return (
     <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent edges={['bottom']}>
       <TouchableWithoutFeedback onPress={onClose}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }} />
+        <View style={styles.backdrop} />
       </TouchableWithoutFeedback>
       <View
-        style={{
-          backgroundColor: colors.bg,
-          borderTopLeftRadius: radii.lg,
-          borderTopRightRadius: radii.lg,
-          padding: spacing.base,
-          maxHeight: '80%',
-        }}
+        style={[
+          styles.sheet,
+          {
+            backgroundColor: colors.glassStrong,
+            borderColor: colors.hairline,
+            borderTopLeftRadius: radii.lg + 2,
+            borderTopRightRadius: radii.lg + 2,
+            padding: spacing.base,
+          },
+        ]}
       >
-        <View
-          style={{
-            width: 40,
-            height: 4,
-            borderRadius: 2,
-            backgroundColor: colors.borderStrong,
-            alignSelf: 'center',
-            marginBottom: spacing.base,
-          }}
-        />
+        <View style={[styles.handle, { backgroundColor: colors.borderStrong }]} />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView>{children}</ScrollView>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {children}
+          </ScrollView>
         </KeyboardAvoidingView>
       </View>
     </SafeAreaModal>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(5,10,16,0.48)' },
+  sheet: {
+    maxHeight: '80%',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  handle: {
+    width: 34,
+    height: 3,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 14,
+    opacity: 0.7,
+  },
+});

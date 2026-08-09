@@ -6,10 +6,7 @@ North star:
 > later, and understand in under two minutes what each agent did, what passed,
 > what failed, what needs a human, what it cost, and what is safe to merge.
 
-This ledger distinguishes **source complete** from **validated complete**. The
-current development environment has no GitHub workflow runs for this branch and
-cannot execute the new repository tests, so no milestone is labelled runtime-
-validated until those tests are run externally/locally.
+This ledger distinguishes **source complete** from **validated complete**.
 
 ## Architectural invariant
 
@@ -41,13 +38,10 @@ Done:
 - Noninteractive `JobUI`; approvals/questions become durable `NEEDS_HUMAN` gates.
 - Existing MuCLI `Session`/agent runtime adapter; no second agent stack.
 - Detached controller daemon starts independently of browser/TUI lifecycle.
-- TUI `/job`/`/jobs` job creation/control path.
-- GUI `/api/jobs` shared job API.
-- Mobile typed `jobsApi` shared API client.
-- Core, runner and controller regression tests written.
+- TUI `/job`/`/jobs`, GUI `/api/jobs`, and mobile `jobsApi` share the same core.
 
 Still required for validated completion:
-- Run the new test suite in a real checkout/CI.
+- Green durable-jobs CI.
 - Exercise one real provider job end-to-end with browser/TUI closed.
 
 ## Milestone 2 — Isolated Engineering Work
@@ -56,69 +50,80 @@ Still required for validated completion:
 **Runtime validation: PENDING**
 
 Done:
-- Durable canonical Git repository registry keyed by Git common-dir identity.
+- Durable canonical Git repository registry.
 - Concrete base SHA resolved before implementation.
-- Deterministic per-job `mu/job-*` branch.
-- Managed per-job Git worktree under MuCLI state.
-- Job environment records repository/worktree/branch identity.
-- Checkpoint commits on implementation complete/block/failure/cancel boundaries.
+- Deterministic per-job `mu/job-*` branch and managed Git worktree.
+- Checkpoint commits on complete/block/failure/cancel boundaries.
 - One Python subprocess per active job: Session/CWD/runtime isolation.
-- Worker process owns its heartbeat/lease and can outlive daemon restart.
-- Scheduler supports five concurrent isolated job processes.
-- A second controller cannot duplicate an active leased job.
-- Cancellation targets only the matching worker process.
-- Real temporary-Git worktree/repository/checkpoint tests written.
-- Subprocess scheduler tests written.
+- Worker-owned heartbeat/lease, surviving controller/browser restart.
+- Scheduler target of five concurrent isolated job processes.
+- Targeted cancellation and duplicate-controller lease protection.
 
 Still required for validated completion:
-- Run Git fixture + subprocess scheduler tests.
-- Run five real simultaneous tickets against one repository.
-- Container-backed durable job environment adapter is still intentionally gated;
-  host workspace jobs are the first supported unattended execution environment.
+- Green Git fixture/subprocess scheduler CI.
+- Run five simultaneous real tickets against one repository.
+- Container-backed durable jobs remain deliberately gated until their own adapter exists.
 
-## Milestone 3 — Verification
+## Milestone 3 — Deterministic Verification
 
-**Source status: COMPLETE (deterministic path)**  
+**Source status: COMPLETE**  
 **Runtime validation: PENDING**
 
 Done:
-- Validation commands are a first-class ticket contract.
-- Separate deterministic verifier subprocess for `VERIFYING` jobs.
-- Bounded stdout/stderr, exit codes, timeout and timing captured per check.
-- Verification runs persisted in SQLite and JSON evidence manifests.
-- Git evidence: base/head, changed files, additions/deletions, diff stat, dirty state.
-- Exit-0 validation that dirties tracked/untracked job state is not considered ready.
-- No validation contract => `NEEDS_HUMAN / verification_required`.
-- All checks pass => `READY_FOR_REVIEW`.
-- Failed checks with retry budget => same job/session/branch requeued for repair.
-- Verification failure evidence is injected into the next implementation prompt.
+- First-class validation commands and separate verifier subprocess.
+- Exit code/stdout/stderr/timeout/duration captured per check.
+- Persistent SQLite + JSON verification evidence.
+- Git base/head, changed files, additions/deletions, diff stat and dirty-state evidence.
+- Clean all-pass verification is required for `READY_FOR_REVIEW`.
+- Missing validation => `NEEDS_HUMAN / verification_required`.
+- Failed verification => automatic repair attempt while retry budget remains.
 - Retry exhaustion => `NEEDS_HUMAN / test_failure`.
-- Verification worker crash retries verification, not implementation.
-- Work receipt aggregates status, attempts, elapsed time, cost, tokens, Git diff,
-  verification evidence, checkpoints and activity.
-- GUI/mobile evidence endpoints/types implemented.
-- Deterministic verification, repair-loop and receipt tests written.
+- Failed verification evidence enters the next implementation prompt.
+- Durable work receipt aggregates outcome, attempts, cost/tokens, Git and verification evidence.
 
-Strengthening work still left:
-- Optional independent verifier-agent review of the diff/acceptance criteria.
-- Machine-readable acceptance criteria beyond declared validation commands.
-- Run verification/receipt tests in a real checkout/CI.
+Still required for validated completion:
+- Green verifier/receipt CI.
+- Optional independent verifier-agent remains a strengthening layer.
 
 ## Milestone 4 — Review + Attention UI
 
-**Status: IN PROGRESS**
+**Source status: COMPLETE**  
+**Automated validation: RUNNING**  
+**Manual three-plane validation: READY AFTER CI GREEN**
 
-Done:
-- Shared core board projection with exactly these buckets:
-  `needs_you`, `running`, `queued`, `ready`, `failed`, `done`.
-- Shared work receipt/evidence schema is ready for presentation.
+Shared review core:
+- Shared board projection: `needs_you`, `running`, `queued`, `ready`, `failed`, `done`.
+- Shared work receipt, verification evidence, Git diff and activity timeline contracts.
+- Durable human interaction responses consumed exactly once by the next worker.
+- Tool approvals support approve/deny/explain and preserve preview safety.
+- `verification_required` can be resolved by supplying validation commands.
+- Request changes requeues the same durable job/branch/worktree/session with reviewer feedback.
+- Continue/retry and discard are common actions across all control planes.
 
-Left:
-- GUI work queue + detail/review surface.
-- TUI board/detail/evidence workflow.
-- Mobile work queue + detail/attention workflow.
-- Diff review presentation.
-- Request-changes/continue/discard controls.
+GUI:
+- First-class Engineering Work briefcase action in the product header.
+- Dedicated `/work` board/detail page using the alpine glass visual language.
+- New-job form with current-session inheritance.
+- Receipt, deterministic verification output, Git diff and activity timeline.
+- Approval/question/validation gates, request changes, continue/retry and discard.
+
+TUI:
+- `/jobs` / `/job board` shared queue view.
+- `/job show`, `/job receipt`, `/job diff`.
+- `/job respond`, `/job changes`, `/job continue`, `/job discard`.
+- Queued work ensures the detached controller daemon is running.
+
+Mobile:
+- First-class Work briefcase action in the chat header/settings.
+- `Work` board and `JobDetail` review routes.
+- New-job flow inheriting the active session.
+- Receipt, verifier evidence, Git diff and activity timeline.
+- Approval/question/validation response, request changes, continue/retry and discard.
+
+Validation gate:
+- M4 shared review workflow regression tests added.
+- CI now runs the durable Python suite plus `npm run typecheck` for mobile.
+- Do not mark M4 validated complete until those checks are green.
 
 ## Milestone 5 — Git / PR Completion
 
@@ -126,8 +131,7 @@ Left:
 
 Left:
 - Structured final commits/rebase policy.
-- Base drift detection.
-- Merge conflicts as durable state.
+- Base drift/conflict handling.
 - PR creation/linkage.
 - CI/check state ingestion.
 - Mergeability and merge action.
@@ -136,25 +140,22 @@ Left:
 
 **Status: PARTIAL FOUNDATION**
 
-Already present from M1/M2:
+Already present:
 - leases/heartbeats;
 - process-loss recovery;
 - controller restart independence;
-- attempt history;
-- isolated checkpoints;
+- attempt history and checkpoints;
 - implementation retry after deterministic verification failure.
 
 Left:
-- enforce cost/runtime/iteration/subagent budgets during execution;
-- provider retry policy at job level;
-- stuck/loop watchdogs at controller level;
+- enforce cost/runtime/iteration/subagent budgets;
+- job-level provider retry/watchdogs;
 - state-driven notifications;
-- durable notification delivery;
 - failure-injection harness;
-- Friday Five benchmark run and release gate.
+- Friday Five benchmark/release gate.
 
-## Current trust rule
+## Trust rule
 
 `READY_FOR_REVIEW` is never set because an agent says it is done. It requires a
 persisted deterministic verification run with all configured checks passing and
-a clean job worktree. Missing or failed evidence blocks readiness.
+a clean isolated job worktree. Missing or failed evidence blocks readiness.

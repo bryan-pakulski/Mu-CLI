@@ -11,12 +11,13 @@ export function AtmosphericBackground({ children }: { children: React.ReactNode 
   const { colors, isDark } = useTheme();
   return (
     <View style={[styles.root, { backgroundColor: colors.canvas }]}>
-      <Image
-        pointerEvents="none"
-        source={{ uri: ATMOSPHERE_URI }}
-        resizeMode="stretch"
-        style={[styles.atmosphere, { opacity: isDark ? 0.82 : 0.74 }]}
-      />
+      <View pointerEvents="none" style={styles.atmosphere}>
+        <Image
+          source={{ uri: ATMOSPHERE_URI }}
+          resizeMode="stretch"
+          style={[styles.atmosphere, { opacity: isDark ? 0.82 : 0.74 }]}
+        />
+      </View>
       <View style={styles.content}>{children}</View>
     </View>
   );

@@ -4,21 +4,6 @@
     const detail = document.getElementById('work-detail');
     if (!detail) return;
 
-    const DIAGNOSTIC_EVENTS = new Set([
-        'worker_lease_acquired',
-        'worker_process_started',
-        'worker_process_exited',
-        'worker_spawn_failed',
-        'worktree_preflight_started',
-        'repository_inspected',
-        'job_base_resolved',
-        'worktree_inventory',
-        'worktree_add_started',
-        'worktree_prepare_failed',
-        'checkpoint_failed',
-        'runtime_error',
-    ]);
-
     let lastJobId = '';
     let lastSignature = '';
     let inFlight = false;
@@ -60,18 +45,24 @@
     function eventTitle(event) {
         const names = {
             worker_lease_acquired: 'Worker claimed job',
+            worker_lease_released: 'Worker released job',
             worker_process_started: 'Worker process started',
             worker_process_exited: 'Worker process exited',
+            worker_process_terminated: 'Worker terminated',
             worker_spawn_failed: 'Worker spawn failed',
+            worker_rejected: 'Worker rejected',
             worktree_preflight_started: 'Git preflight started',
             repository_inspected: 'Repository inspected',
             job_base_resolved: 'Base revision resolved',
             worktree_inventory: 'Worktree inventory',
             worktree_add_started: 'Worktree creation started',
             worktree_prepare_failed: 'Worktree preparation failed',
+            worktree_ready: 'Worktree ready',
             checkpoint_failed: 'Checkpoint failed',
             runtime_error: 'Runtime error',
-            status_changed: 'Environment failure',
+            verification_worker_error: 'Verification worker error',
+            verification_lease_expired: 'Verification lease expired',
+            status_changed: 'Status changed',
         };
         return names[event.event_type] || String(event.event_type || 'Diagnostic');
     }
@@ -122,9 +113,7 @@
         add('Current branch', payload.current_branch);
         add('Default branch', payload.detected_default_branch);
         add('Source HEAD', payload.head_sha);
-        if (payload.source_worktree_clean !== undefined) {
-            add('Source clean', payload.source_worktree_clean ? 'yes' : 'no');
-        }
+        if (payload.source_worktree_clean !== undefined) add('Source clean', payload.source_worktree_clean ? 'yes' : 'no');
         add('Requested base', payload.requested_base_branch);
         add('Resolved base', payload.resolved_base_ref);
         add('Base SHA', payload.base_sha);
@@ -149,30 +138,22 @@
         `;
     }
 
-    function render(jobId, events) {
+    function render(snapshot) {
         const existing = detail.querySelector('.work-diagnostics-section');
         if (existing) existing.remove();
         const host = detail.querySelector('.work-detail');
-        if (!host || !jobId) return;
+        if (!host || !snapshot || !snapshot.job_id) return;
 
-        const diagnostics = events.filter(event =>
-            DIAGNOSTIC_EVENTS.has(event.event_type)
-            || (event.event_type === 'status_changed' && event.to_status === 'environment_error')
-        );
-        if (!diagnostics.length) return;
-
-        const failure = [...diagnostics].reverse().find(event =>
-            event.event_type === 'worktree_prepare_failed'
-            || event.event_type === 'worker_spawn_failed'
-            || event.event_type === 'runtime_error'
-            || (event.event_type === 'status_changed' && event.to_status === 'environment_error')
-        );
+        const diagnostics = Array.isArray(snapshot.diagnostics) ? snapshot.diagnostics : [];
+        const failure = snapshot.latest_failure || null;
+        const hasLog = Boolean(snapshot.worker_log_exists && snapshot.worker_log_tail);
+        if (!diagnostics.length && !hasLog) return;
 
         const section = document.createElement('section');
         section.className = 'work-section work-diagnostics-section';
         section.innerHTML = `
             <h3>Job diagnostics</h3>
-            <p class="work-muted">Structured controller, worker and Git-preflight details for troubleshooting this job.</p>
+            <p class="work-muted">Controller, worker and Git-preflight evidence. Worker output is tailed from this job's managed log; no shell access is required.</p>
             ${failure ? `
                 <div class="work-error-banner">
                     <strong>${escapeHtml(eventTitle(failure))}</strong><br>
@@ -180,16 +161,26 @@
                 </div>
                 ${detailsBlock(failure)}
             ` : ''}
+            <div class="work-receipt-list">
+                <div class="work-receipt-row"><span class="work-receipt-label">Worker</span><span class="work-receipt-value">${escapeHtml(snapshot.worker_id || '—')}</span></div>
+                <div class="work-receipt-row"><span class="work-receipt-label">Log</span><span class="work-receipt-value" title="${escapeHtml(snapshot.worker_log_path || '')}">${escapeHtml(snapshot.worker_log_exists ? `${snapshot.worker_log_size || 0} bytes` : 'not created')}</span></div>
+            </div>
+            ${hasLog ? `
+                <details class="work-advanced" ${failure ? 'open' : ''}>
+                    <summary>Worker log tail${snapshot.worker_log_truncated ? ' · tail only' : ''}</summary>
+                    <pre class="work-diff">${escapeHtml(String(snapshot.worker_log_tail || '').slice(-65536))}</pre>
+                </details>
+            ` : ''}
             <details class="work-advanced" ${failure ? 'open' : ''}>
                 <summary>Execution trace · ${diagnostics.length} events</summary>
                 <div class="work-timeline">
-                    ${diagnostics.slice(-30).reverse().map(event => `
+                    ${diagnostics.slice(-40).reverse().map(event => `
                         <div class="work-timeline-item">
                             <div class="work-timeline-head">
                                 <span class="work-timeline-kind">${escapeHtml(eventTitle(event))}</span>
                                 <span class="work-timeline-time">${escapeHtml(fmtWhen(event.created_at))}</span>
                             </div>
-                            <div class="work-timeline-body">${escapeHtml(diagnosticSummary(event))}</div>
+                            ${diagnosticSummary(event) ? `<div class="work-timeline-body">${escapeHtml(diagnosticSummary(event))}</div>` : ''}
                             ${detailsBlock(event)}
                         </div>
                     `).join('')}
@@ -207,22 +198,20 @@
         }
         inFlight = true;
         try {
-            const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/events?limit=500`);
+            const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/diagnostics?event_limit=500&log_tail_bytes=65536`);
             if (!response.ok) return;
             const data = await response.json();
-            const events = Array.isArray(data.events) ? data.events : [];
-            const relevant = events.filter(event =>
-                DIAGNOSTIC_EVENTS.has(event.event_type)
-                || (event.event_type === 'status_changed' && event.to_status === 'environment_error')
-            );
-            const signature = `${jobId}:${relevant.map(event => event.id).join(',')}`;
+            const snapshot = data && data.diagnostics ? data.diagnostics : null;
+            if (!snapshot) return;
+            const ids = Array.isArray(snapshot.diagnostics) ? snapshot.diagnostics.map(event => event.id).join(',') : '';
+            const signature = `${jobId}:${ids}:${snapshot.worker_log_size || 0}:${snapshot.status || ''}`;
             if (jobId !== lastJobId || signature !== lastSignature || !detail.querySelector('.work-diagnostics-section')) {
                 lastJobId = jobId;
                 lastSignature = signature;
-                render(jobId, events);
+                render(snapshot);
             }
         } catch (_) {
-            // Diagnostics must never interfere with the main work surface.
+            // Diagnostics must never interfere with the primary work surface.
         } finally {
             inFlight = false;
         }

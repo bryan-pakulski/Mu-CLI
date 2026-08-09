@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="/static/css/clarity.css">
 <link rel="stylesheet" href="/static/css/refinement.css">
 <link rel="stylesheet" href="/static/css/work.css">
+<link rel="stylesheet" href="/static/css/work_management.css">
 
 <div class="work-app" id="work-app" data-session="{{ session_name or '' }}">
     <header class="work-header">
@@ -18,6 +19,7 @@
         </a>
         <div class="work-header-actions">
             <span class="work-session-context" id="work-session-context"></span>
+            <button class="work-manage-button" id="work-manage">Manage jobs</button>
             <button class="work-icon-button" id="work-refresh" title="Refresh work queue" aria-label="Refresh work queue">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path></svg>
             </button>
@@ -48,6 +50,113 @@
             </div>
         </section>
     </main>
+
+    <div class="work-management-backdrop" id="work-management-backdrop" hidden>
+        <section class="work-management-pane" role="dialog" aria-modal="true" aria-labelledby="work-management-title">
+            <header class="work-management-head">
+                <div>
+                    <span class="work-eyebrow">History & telemetry</span>
+                    <h2 id="work-management-title">Job management</h2>
+                    <p>Query historic work, review aggregate outcomes, archive records and export debugging evidence.</p>
+                </div>
+                <div class="work-management-head-actions">
+                    <button class="work-icon-button" id="work-management-close" aria-label="Close job management">×</button>
+                </div>
+            </header>
+
+            <div class="work-management-query">
+                <input id="work-management-query-text" type="search" placeholder="Search title, ID, description, branch…" aria-label="Search jobs">
+                <select id="work-management-status" aria-label="Filter by status">
+                    <option value="all">All statuses</option>
+                    <option value="failed">Failed</option>
+                    <option value="environment_error">Environment error</option>
+                    <option value="timed_out">Timed out</option>
+                    <option value="budget_exceeded">Budget exceeded</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="merged">Merged</option>
+                    <option value="ready_for_review">Ready for review</option>
+                    <option value="needs_human">Needs human</option>
+                    <option value="running">Running</option>
+                    <option value="queued">Queued</option>
+                </select>
+                <select id="work-management-archive" aria-label="Archive state">
+                    <option value="all">Archived + current</option>
+                    <option value="current">Current only</option>
+                    <option value="archived">Archived only</option>
+                </select>
+                <select id="work-management-scope" aria-label="Job scope">
+                    <option value="history">Historic jobs</option>
+                    <option value="all">All jobs</option>
+                    <option value="active">Active only</option>
+                </select>
+                <input id="work-management-repository" type="search" placeholder="Repository contains…" aria-label="Filter repository">
+                <div style="display:flex;gap:7px;">
+                    <select id="work-management-age" aria-label="Created within">
+                        <option value="0">Any time</option>
+                        <option value="1">Last 24h</option>
+                        <option value="7">Last 7 days</option>
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                    </select>
+                    <button class="work-secondary" id="work-management-apply" type="button">Apply</button>
+                    <button class="work-secondary" id="work-management-reset" type="button">Reset</button>
+                </div>
+            </div>
+
+            <section class="work-management-report" id="work-management-report-data" aria-label="Job report">
+                <div class="work-report-metrics">
+                    <div class="work-report-metric"><span>Jobs</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Archived</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Attempts</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Cost</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Avg runtime</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Failure rate</span><strong>—</strong></div>
+                </div>
+            </section>
+
+            <div class="work-management-results-wrap">
+                <div class="work-management-toolbar">
+                    <div class="work-management-toolbar-left">
+                        <span class="work-management-selection" id="work-management-selection">0 selected</span>
+                        <button type="button" id="work-management-archive-selected" disabled>Archive</button>
+                        <button type="button" id="work-management-restore-selected" disabled>Restore</button>
+                        <button type="button" class="is-danger" id="work-management-delete-selected" disabled>Delete</button>
+                    </div>
+                    <div class="work-management-toolbar-right">
+                        <a id="work-management-export-json" href="#">Export report JSON</a>
+                        <a id="work-management-export-csv" href="#">Export CSV</a>
+                    </div>
+                </div>
+                <div class="work-management-table-scroll">
+                    <table class="work-management-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="work-management-select-all" aria-label="Select visible jobs"></th>
+                                <th>Job</th>
+                                <th>Status</th>
+                                <th>Repository</th>
+                                <th>Cost</th>
+                                <th>Attempts</th>
+                                <th>Updated</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="work-management-results">
+                            <tr><td colspan="8"><div class="work-loading">Open management to query history.</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <footer class="work-management-footer">
+                <span id="work-management-range">0–0 of 0</span>
+                <div class="work-management-pager">
+                    <button type="button" id="work-management-previous">Previous</button>
+                    <button type="button" id="work-management-next">Next</button>
+                </div>
+            </footer>
+        </section>
+    </div>
 
     <div class="work-modal-backdrop" id="work-create-backdrop" hidden>
         <section class="work-modal" role="dialog" aria-modal="true" aria-labelledby="work-create-title">
@@ -129,5 +238,7 @@
     <div class="work-toast" id="work-toast" hidden></div>
 </div>
 <script src="/static/js/work.js"></script>
+<script src="/static/js/work_trace.js"></script>
 <script src="/static/js/work_diagnostics.js"></script>
+<script src="/static/js/work_management.js"></script>
 {% endblock %}

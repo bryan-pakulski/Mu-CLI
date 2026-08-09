@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-09",
+  "version": "2026-08-10",
   "currency": "USD",
   "unit": "per_million_tokens",
   "models": [
@@ -278,17 +278,17 @@
       "key": "glm-5.2:cloud",
       "billing": "estimated_token",
       "aliases": ["glm-5.2", "glm-5.2:cloud"],
-      "input_per_million": null,
+      "input_per_million": 1.4,
       "cached_input_per_million": null,
-      "output_per_million": null,
-      "estimated_total_per_million": 1.4,
+      "output_per_million": 4.4,
+      "estimated_total_per_million": null,
       "context_window": 976000,
       "long_context_cutoff": null,
       "long_input_per_million": null,
       "long_cached_input_per_million": null,
       "long_output_per_million": null,
       "role": "flagship long-horizon agentic work",
-      "notes": "Ollama Cloud blended provider estimate. Applied to total measured tokens; adjust as better tariff data becomes available.",
+      "notes": "Ollama Cloud cost estimate uses separate measured input and output tokens. Adjust these configured rates as provider economics change.",
       "source": "configured provider estimate"
     },
     {
@@ -306,7 +306,7 @@
       "long_cached_input_per_million": null,
       "long_output_per_million": null,
       "role": "long-horizon coding agent",
-      "notes": "Cloud hosted. Add a configured estimate when known.",
+      "notes": "Cloud hosted. Add configured input/output estimates when known.",
       "source": "configured catalog"
     },
     {

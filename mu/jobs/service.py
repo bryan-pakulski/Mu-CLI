@@ -117,9 +117,6 @@ class JobService:
         if current.status != JobStatus.NEEDS_HUMAN:
             raise JobStateError("only a needs_human job can be resumed")
         self.store.append_event(job_id, "human_response", payload={"detail": str(detail or "")})
-        # A response removes the gate, but no worker owns the job yet. Requeue it
-        # so the scheduler can create a new attempt against the same durable
-        # job session rather than publishing a false RUNNING state.
         return self.transition(job_id, JobStatus.QUEUED, reason="human response received; requeued")
 
     def retry(self, job_id: str, *, reason: str = "retry requested") -> Job:
@@ -152,17 +149,30 @@ class JobService:
         recovered: List[Job] = []
         for job in self.store.expired_leases():
             worker = job.worker_id
-            if job.status in {JobStatus.PREPARING, JobStatus.RUNNING, JobStatus.VERIFYING}:
+            if job.status in {JobStatus.PREPARING, JobStatus.RUNNING}:
                 try:
                     recovered.append(self.transition(
                         job.id,
                         JobStatus.RECOVERING,
-                        reason="worker lease expired",
+                        reason="implementation worker lease expired",
                         payload={"worker_id": worker},
                     ))
                 except JobStateError:
                     pass
+            elif job.status == JobStatus.VERIFYING:
+                # Verification is deterministic and side-effect constrained.
+                # Keep the job in VERIFYING; once ownership is cleared the
+                # scheduler simply launches a fresh verifier instead of
+                # repeating implementation work.
+                self.store.append_event(
+                    job.id,
+                    "verification_lease_expired",
+                    reason="verification worker lease expired; verifier will retry",
+                    payload={"worker_id": worker},
+                )
             self.store.release_lease(job.id, worker, reason="expired lease recovered")
+            if job.status == JobStatus.VERIFYING:
+                recovered.append(self.get(job.id))
         return recovered
 
 

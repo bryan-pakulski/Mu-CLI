@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}MuCLI — Engineering Work{% endblock %}
+{% block body %}
+<link rel="stylesheet" href="/static/css/product.css">
+<link rel="stylesheet" href="/static/css/crystal.css">
+<link rel="stylesheet" href="/static/css/clarity.css">
+<link rel="stylesheet" href="/static/css/refinement.css">
+<link rel="stylesheet" href="/static/css/work.css">
+
+<div class="work-app" id="work-app" data-session="{{ session_name or '' }}">
+    <header class="work-header">
+        <a class="work-brand" href="/" aria-label="Back to MuCLI chat">
+            <span class="work-brand-mark">μ</span>
+            <span class="work-brand-copy">
+                <strong>MuCLI</strong>
+                <small>Engineering work</small>
+            </span>
+        </a>
+        <div class="work-header-actions">
+            <span class="work-session-context" id="work-session-context"></span>
+            <button class="work-icon-button" id="work-refresh" title="Refresh work queue" aria-label="Refresh work queue">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path></svg>
+            </button>
+            <button class="work-primary" id="work-new">New job</button>
+        </div>
+    </header>
+
+    <main class="work-layout">
+        <aside class="work-board-pane">
+            <div class="work-pane-head">
+                <div>
+                    <span class="work-eyebrow">Friday Five</span>
+                    <h1>Engineering work</h1>
+                    <p>Autonomous jobs, human gates, verification and review.</p>
+                </div>
+                <div class="work-total" id="work-total">0</div>
+            </div>
+            <div class="work-board" id="work-board">
+                <div class="work-loading">Loading jobs…</div>
+            </div>
+        </aside>
+
+        <section class="work-detail-pane" id="work-detail" aria-live="polite">
+            <div class="work-empty-detail">
+                <div class="work-empty-mark">μ</div>
+                <h2>Select a job</h2>
+                <p>Review implementation evidence, verification output, Git changes and anything that needs your input.</p>
+            </div>
+        </section>
+    </main>
+
+    <div class="work-modal-backdrop" id="work-create-backdrop" hidden>
+        <section class="work-modal" role="dialog" aria-modal="true" aria-labelledby="work-create-title">
+            <header class="work-modal-head">
+                <div>
+                    <span class="work-eyebrow">Delegate work</span>
+                    <h2 id="work-create-title">New engineering job</h2>
+                </div>
+                <button class="work-icon-button" id="work-create-close" aria-label="Close">×</button>
+            </header>
+            <form id="work-create-form" class="work-form">
+                <label class="work-field work-field-wide">
+                    <span>Title</span>
+                    <input id="job-title" required maxlength="180" placeholder="Fix OAuth callback validation">
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Description</span>
+                    <textarea id="job-description" rows="4" placeholder="What should change, and what constraints matter?"></textarea>
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Repository</span>
+                    <input id="job-repository" placeholder="Inherited from the current session when left blank">
+                    <small id="job-repository-hint"></small>
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Acceptance criteria</span>
+                    <textarea id="job-acceptance" rows="4" placeholder="One criterion per line"></textarea>
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Validation commands</span>
+                    <textarea id="job-validation" rows="4" placeholder="pytest tests/auth\nnpm run typecheck"></textarea>
+                    <small>Jobs without validation commands will stop at a verification-required human gate.</small>
+                </label>
+                <div class="work-form-grid">
+                    <label class="work-field">
+                        <span>Cost budget (USD)</span>
+                        <input id="job-cost" type="number" min="0.01" step="0.01" placeholder="5.00">
+                    </label>
+                    <label class="work-field">
+                        <span>Runtime budget (seconds)</span>
+                        <input id="job-runtime" type="number" min="1" step="1" placeholder="7200">
+                    </label>
+                    <label class="work-field">
+                        <span>Repair retries</span>
+                        <input id="job-retries" type="number" min="0" step="1" value="2">
+                    </label>
+                </div>
+                <details class="work-advanced" id="work-execution-details">
+                    <summary>Execution profile</summary>
+                    <p id="work-execution-help">Provider, model and mode are inherited from the current session when available.</p>
+                    <div class="work-form-grid">
+                        <label class="work-field">
+                            <span>Provider</span>
+                            <input id="job-provider" placeholder="openai">
+                        </label>
+                        <label class="work-field">
+                            <span>Model</span>
+                            <input id="job-model" placeholder="model name">
+                        </label>
+                        <label class="work-field">
+                            <span>Agent mode</span>
+                            <input id="job-mode" placeholder="default">
+                        </label>
+                    </div>
+                    <label class="work-check-field">
+                        <input id="job-auto-approve" type="checkbox">
+                        <span>Auto-approve write tools for this job</span>
+                    </label>
+                </details>
+                <div class="work-form-error" id="work-create-error"></div>
+                <footer class="work-modal-actions">
+                    <button type="button" class="work-secondary" id="work-create-cancel">Cancel</button>
+                    <button type="submit" class="work-primary" id="work-create-submit">Queue job</button>
+                </footer>
+            </form>
+        </section>
+    </div>
+
+    <div class="work-toast" id="work-toast" hidden></div>
+</div>
+<script src="/static/js/work.js"></script>
+{% endblock %}

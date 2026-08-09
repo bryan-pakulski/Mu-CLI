@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from mu.jobs import AttentionReason, JobService, JobStateError, JobStatus
+from mu.jobs.repository import RepositoryRegistry
+from mu.jobs.verification import VerificationStore
 
 
 router = APIRouter()
@@ -56,6 +58,25 @@ async def create_job(request: Request, payload: Dict[str, Any]):
     return {"job": job.to_dict()}
 
 
+@router.get("/repositories")
+async def list_job_repositories(
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=1000),
+):
+    registry = RepositoryRegistry(_service(request).store)
+    return {"repositories": [item.to_dict() for item in registry.list(limit=limit)]}
+
+
+@router.get("/repositories/{repository_id}")
+async def get_job_repository(repository_id: str, request: Request):
+    registry = RepositoryRegistry(_service(request).store)
+    try:
+        record = registry.get(repository_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Repository '{repository_id}' not found") from exc
+    return {"repository": record.to_dict()}
+
+
 @router.get("/{job_id}")
 async def get_job(job_id: str, request: Request):
     job = _job_or_404(_service(request), job_id)
@@ -79,6 +100,31 @@ async def get_job_attempts(job_id: str, request: Request):
     service = _service(request)
     _job_or_404(service, job_id)
     return {"attempts": [attempt.to_dict() for attempt in service.attempts(job_id)]}
+
+
+@router.get("/{job_id}/verifications")
+async def get_job_verifications(
+    job_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    values = VerificationStore(service.store).list(job_id, limit=limit)
+    return {"verifications": [value.to_dict() for value in values]}
+
+
+@router.get("/{job_id}/verifications/{verification_id}")
+async def get_job_verification(job_id: str, verification_id: str, request: Request):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        value = VerificationStore(service.store).get(verification_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Verification '{verification_id}' not found") from exc
+    if value.job_id != job_id:
+        raise HTTPException(status_code=404, detail=f"Verification '{verification_id}' not found for job")
+    return {"verification": value.to_dict()}
 
 
 @router.post("/{job_id}/transition")

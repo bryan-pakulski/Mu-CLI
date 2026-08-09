@@ -5,6 +5,8 @@ ROOT = Path(__file__).resolve().parents[1]
 WORK_TEMPLATE = ROOT / "mu" / "gui" / "templates" / "work.html"
 WORK_DIAGNOSTICS = ROOT / "mu" / "gui" / "static" / "js" / "work_diagnostics.js"
 WORK_TRACE = ROOT / "mu" / "gui" / "static" / "js" / "work_trace.js"
+WORK_ANALYSIS_LINK = ROOT / "mu" / "gui" / "static" / "js" / "work_analysis_link.js"
+WORK_POLISH = ROOT / "mu" / "gui" / "static" / "css" / "work_polish.css"
 WORK_MANAGEMENT = ROOT / "mu" / "gui" / "static" / "js" / "work_management.js"
 WORK_MANAGEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "work_management.css"
 JOB_TRACE_HTML = ROOT / "mu" / "gui" / "static" / "job_trace.html"
@@ -13,6 +15,7 @@ JOB_TRACE_DELTA_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace_signed_d
 JOB_TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "job_trace.css"
 JOB_ANALYSIS_ROUTER = ROOT / "mu" / "gui" / "routers" / "job_analysis.py"
 JOB_PERFORMANCE = ROOT / "mu" / "jobs" / "performance.py"
+JOB_ANALYSIS_DETAIL = ROOT / "mu" / "jobs" / "analysis_detail.py"
 ROUTERS_INIT = ROOT / "mu" / "gui" / "routers" / "__init__.py"
 JOBS_ROUTER = ROOT / "mu" / "gui" / "routers" / "jobs.py"
 COMMANDS = ROOT / "mu" / "commands" / "__init__.py"
@@ -41,6 +44,24 @@ def test_web_work_page_loads_shared_structured_job_diagnostics():
     assert 'build_job_diagnostics' in router
     assert '@router.get("/{job_id}/diagnostics")' in router
     assert '@router.get("/{job_id}/debug-export")' in router
+
+
+def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
+    script = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
+    css = WORK_POLISH.read_text(encoding="utf-8")
+
+    assert "product-app', 'work-product-app" in script
+    assert "header', 'product-header" in script
+    assert "product-icon-button" in script
+    assert "Toggle appearance" in script
+    assert "localStorage.setItem('mucli-theme'" in script
+    assert "Analyze jobs" in script
+    assert "Model pricing" in script
+    assert "Manage job history" in script
+    assert "Refresh work queue" in script
+    assert '.work-product-app::before' in css
+    assert 'var(--header-bg)' in css
+    assert '.work-header-icon' in css
 
 
 def test_web_activity_trace_is_filterable_and_drillable():
@@ -83,7 +104,7 @@ def test_web_job_management_queries_archives_reports_and_exports():
     assert '@router.delete("/{job_id}")' in router
 
 
-def test_web_job_trace_analyzer_is_first_class_and_comparable():
+def test_web_job_trace_analyzer_matches_product_chrome_and_drills_lifecycle():
     template = WORK_TEMPLATE.read_text(encoding="utf-8")
     html = JOB_TRACE_HTML.read_text(encoding="utf-8")
     script = JOB_TRACE_JS.read_text(encoding="utf-8")
@@ -91,27 +112,36 @@ def test_web_job_trace_analyzer_is_first_class_and_comparable():
     css = JOB_TRACE_CSS.read_text(encoding="utf-8")
     router = JOB_ANALYSIS_ROUTER.read_text(encoding="utf-8")
     performance = JOB_PERFORMANCE.read_text(encoding="utf-8")
+    detail = JOB_ANALYSIS_DETAIL.read_text(encoding="utf-8")
     routers_init = ROUTERS_INIT.read_text(encoding="utf-8")
 
     assert 'href="/static/job_trace.html"' in template
     assert 'Job Trace Analyzer' in html
-    assert 'compare with…' in html
-    assert 'Attempts & cost' in html
+    assert 'product-app job-trace-shell' in html
+    assert 'header product-header job-trace-header' in html
+    assert 'id="jt-theme"' in html
+    assert 'Compare with…' in html
+    assert 'Agent harness trace' in html
+    assert 'state residence is separated from actual execution' in html
+    assert 'id="jt-intervals"' in html
     assert 'Execution timeline' in html
     assert '/static/js/job_trace_signed_delta.js' in html
     assert '/api/jobs/${encodeURIComponent(jobId)}/analysis' in script
     assert '/api/jobs/analysis/compare?' in script
-    assert 'renderPhaseChart' in script
-    assert 'renderAttemptChart' in script
+    assert 'renderRuntimeTrace' in script
+    assert 'renderIntervals' in script
+    assert 'stopped after errors' in script
+    assert 'no activity' in script
     assert 'formatSigned' in signed
     assert 'primary - reference' in signed
     assert 'Export analysis JSON' in html
-    assert '.jt-compare-grid' in css
+    assert '.jt-interval' in css
+    assert '.jt-runtime-grid' in css
     assert '@router.get("/analysis/compare")' in router
     assert '@router.get("/{job_id}/analysis")' in router
-    assert 'build_job_performance' in router
-    assert 'JobManagementService(service).state(job_id)' in performance
-    assert 'verifications[0].get("passed")' in performance
+    assert 'enrich_job_analysis' in performance
+    assert 'Stopped-state residence' in detail
+    assert 'No harness trace was recorded' in detail
     assert '_jobs.router.include_router(_job_analysis.router)' in routers_init
 
 
@@ -135,9 +165,10 @@ def test_tui_registers_retrospective_job_trace_command():
     assert '"/jobtrace"' in analysis
     assert '"/job-analysis"' in analysis
     assert 'build_job_performance' in analysis
-    assert 'Time by lifecycle state' in analysis
+    assert 'Active execution' in analysis
+    assert 'Stopped/error residences' in analysis
+    assert 'Harness trace:' in analysis
     assert 'Top tools' in analysis
-    assert 'First verify' in analysis
 
 
 def test_mobile_exposes_shared_diagnostics_and_worker_log_tail():
@@ -163,6 +194,9 @@ def test_mobile_job_review_links_to_native_job_performance_analyzer():
     assert 'component={JobAnalysisScreen}' in nav
     assert '/api/jobs/${encodeURIComponent(jobId)}/analysis' in screen
     assert 'Job performance' in screen
-    assert 'Lifecycle' in screen
+    assert 'Harness trace' in screen
+    assert 'State drill-down' in screen
+    assert 'Passive' in screen
+    assert 'Stopped' in screen
     assert 'Tool profile' in screen
     assert 'Interventions & failures' in screen

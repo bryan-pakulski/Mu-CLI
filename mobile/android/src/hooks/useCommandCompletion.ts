@@ -199,7 +199,8 @@ export function useCommandCompletion() {
       const nested = tree.nested[sub];
       if (nested) {
         if (parts.length === 3) {
-          const q = parts[2].toLowerCase();
+          const part2 = parts[2] || '';
+          const q = part2.toLowerCase();
           const result: CompletionItem[] = [];
           if (nested.subs) {
             for (const s of nested.subs) {
@@ -209,7 +210,7 @@ export function useCommandCompletion() {
             }
           }
           const nDynKey = nested.dynamic && (
-            nested.dynamic[parts[2]] !== undefined ? parts[2] :
+            nested.dynamic[part2] !== undefined ? part2 :
             nested.dynamic[''] !== undefined ? '' : null
           );
           if (nDynKey !== null && nested.dynamic) {

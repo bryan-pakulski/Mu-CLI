@@ -6,6 +6,7 @@ on:
       - feature/durable-engineering-jobs
   pull_request:
     paths:
+      - 'config/model_pricing.json'
       - 'mu/jobs/**'
       - 'mu/ui/exceptions.py'
       - 'mu/commands/job.py'
@@ -23,9 +24,11 @@ on:
       - 'mu/gui/static/job_trace.html'
       - 'mu/gui/static/model_costs.html'
       - 'mu/gui/static/css/work.css'
+      - 'mu/gui/static/css/work_polish.css'
       - 'mu/gui/static/css/job_trace.css'
       - 'mu/gui/static/css/model_costs.css'
       - 'mu/gui/static/js/work.js'
+      - 'mu/gui/static/js/work_analysis_link.js'
       - 'mu/gui/static/js/work_diagnostics.js'
       - 'mu/gui/static/js/job_trace.js'
       - 'mu/gui/static/js/job_trace_signed_delta.js'

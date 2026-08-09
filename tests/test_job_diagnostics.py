@@ -50,6 +50,26 @@ def test_diagnostics_collects_failure_events_and_safe_worker_log_tail(tmp_path):
     assert any(event["event_type"] == "worktree_prepare_failed" for event in snapshot.diagnostics)
 
 
+def test_diagnostics_uses_newest_events_when_event_limit_is_bounded(tmp_path):
+    svc = service(tmp_path)
+    job = svc.create(JobSpec(title="Long trace", repository="/repo"))
+    for index in range(25):
+        svc.store.append_event(job.id, "agent_message", payload={"text": f"noise {index}"})
+    svc.store.append_event(
+        job.id,
+        "worktree_prepare_failed",
+        reason="latest worktree failure",
+        payload={"stage": "worktree_add_new_branch", "stderr": "boom"},
+    )
+
+    snapshot = build_job_diagnostics(svc, job.id, event_limit=5)
+
+    assert snapshot.latest_failure is not None
+    assert snapshot.latest_failure["event_type"] == "worktree_prepare_failed"
+    assert snapshot.latest_failure["reason"] == "latest worktree failure"
+    assert any(event["event_type"] == "worktree_prepare_failed" for event in snapshot.diagnostics)
+
+
 def test_diagnostics_log_path_is_derived_from_job_id_not_event_payload(tmp_path):
     svc = service(tmp_path)
     job = svc.create(JobSpec(title="Safe logs", repository="/repo"))

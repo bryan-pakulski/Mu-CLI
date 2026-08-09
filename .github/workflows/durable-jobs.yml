@@ -9,12 +9,15 @@ on:
       - 'mu/jobs/**'
       - 'mu/ui/exceptions.py'
       - 'mu/commands/job.py'
+      - 'mu/commands/job_diagnostics.py'
+      - 'mu/commands/__init__.py'
       - 'mu/gui/routers/jobs.py'
       - 'mu/gui/app.py'
       - 'mu/gui/templates/index.html'
       - 'mu/gui/templates/work.html'
       - 'mu/gui/static/css/work.css'
       - 'mu/gui/static/js/work.js'
+      - 'mu/gui/static/js/work_diagnostics.js'
       - 'mobile/android/src/api/jobs.ts'
       - 'mobile/android/src/navigation/AppNavigator.tsx'
       - 'mobile/android/src/components/ModernHeader.tsx'
@@ -59,6 +62,7 @@ jobs:
             tests/test_job_receipt.py \
             tests/test_job_review.py \
             tests/test_job_review_surfaces.py \
+            tests/test_job_diagnostics_surfaces.py \
             2>&1 | tee "${RUNNER_TEMP}/durable-jobs-pytest.log"
 
       - name: Upload pytest diagnostics

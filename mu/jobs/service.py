@@ -117,7 +117,10 @@ class JobService:
         if current.status != JobStatus.NEEDS_HUMAN:
             raise JobStateError("only a needs_human job can be resumed")
         self.store.append_event(job_id, "human_response", payload={"detail": str(detail or "")})
-        return self.transition(job_id, JobStatus.RUNNING, reason="human response received")
+        # A response removes the gate, but no worker owns the job yet. Requeue it
+        # so the scheduler can create a new attempt against the same durable
+        # job session rather than publishing a false RUNNING state.
+        return self.transition(job_id, JobStatus.QUEUED, reason="human response received; requeued")
 
     def retry(self, job_id: str, *, reason: str = "retry requested") -> Job:
         current = self.get(job_id)
@@ -139,28 +142,11 @@ class JobService:
     def release(self, job_id: str, worker_id: str, *, reason: str = "") -> bool:
         return self.store.release_lease(job_id, worker_id, reason=reason)
 
-    def start_attempt(
-        self,
-        job_id: str,
-        *,
-        worker_id: str = "",
-        session_name: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> JobAttempt:
+    def start_attempt(self, job_id: str, *, worker_id: str = "", session_name: str = "", metadata: Optional[Dict[str, Any]] = None) -> JobAttempt:
         return self.store.start_attempt(job_id, worker_id=worker_id, session_name=session_name, metadata=metadata)
 
-    def finish_attempt(
-        self,
-        attempt_id: str,
-        *,
-        status: str,
-        error: str = "",
-        cost_usd: float = 0.0,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> JobAttempt:
-        return self.store.finish_attempt(
-            attempt_id, status=status, error=error, cost_usd=cost_usd, metadata=metadata
-        )
+    def finish_attempt(self, attempt_id: str, *, status: str, error: str = "", cost_usd: float = 0.0, metadata: Optional[Dict[str, Any]] = None) -> JobAttempt:
+        return self.store.finish_attempt(attempt_id, status=status, error=error, cost_usd=cost_usd, metadata=metadata)
 
     def recover_expired_leases(self) -> List[Job]:
         recovered: List[Job] = []

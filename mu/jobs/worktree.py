@@ -7,12 +7,12 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from utils.config import HISTORY_DIR
 
 from .models import Job
+from .repository import RepositoryRegistry
 from .service import JobService
 
 
@@ -22,6 +22,7 @@ class WorktreeError(RuntimeError):
 
 @dataclass(frozen=True)
 class WorktreeInfo:
+    repository_id: str
     repository: str
     worktree: str
     branch: str
@@ -29,6 +30,7 @@ class WorktreeInfo:
 
     def to_dict(self) -> Dict[str, str]:
         return {
+            "repository_id": self.repository_id,
             "repository": self.repository,
             "worktree": self.worktree,
             "branch": self.branch,
@@ -39,6 +41,7 @@ class WorktreeInfo:
 class JobWorktreeManager:
     def __init__(self, service: JobService, *, root: Optional[str] = None):
         self.service = service
+        self.repositories = RepositoryRegistry(service.store)
         self.root = os.path.abspath(
             os.path.expanduser(root or os.path.join(HISTORY_DIR, "jobs", "worktrees"))
         )
@@ -58,17 +61,6 @@ class JobWorktreeManager:
             detail = (result.stderr or result.stdout or "git command failed").strip()
             raise WorktreeError(detail)
         return result
-
-    @classmethod
-    def canonical_repo(cls, path: str) -> str:
-        candidate = os.path.abspath(os.path.expanduser(str(path or "")))
-        if not candidate or not os.path.isdir(candidate):
-            raise WorktreeError(f"Repository does not exist: {candidate or path}")
-        result = cls._run(candidate, "rev-parse", "--show-toplevel")
-        root = (result.stdout or "").strip()
-        if not root:
-            raise WorktreeError(f"Not a Git repository: {candidate}")
-        return os.path.abspath(root)
 
     @staticmethod
     def _slug(text: str, limit: int = 28) -> str:
@@ -109,7 +101,11 @@ class JobWorktreeManager:
         return entries
 
     def prepare(self, job: Job) -> WorktreeInfo:
-        repo = self.canonical_repo(job.repository)
+        try:
+            repository = self.repositories.register(job.repository)
+        except Exception as exc:
+            raise WorktreeError(str(exc)) from exc
+        repo = repository.canonical_path
         base_sha = self._resolve_base(repo, job)
         branch = self.branch_name(job)
         worktree = os.path.abspath(self.worktree_path(job))
@@ -117,6 +113,11 @@ class JobWorktreeManager:
 
         existing = registered.get(worktree)
         if existing:
+            expected_ref = f"refs/heads/{branch}"
+            if existing.get("branch") and existing.get("branch") != expected_ref:
+                raise WorktreeError(
+                    f"Managed worktree {worktree} is attached to {existing.get('branch')}, expected {expected_ref}"
+                )
             head = self._run(worktree, "rev-parse", "--verify", "HEAD^{commit}")
             if not (head.stdout or "").strip():
                 raise WorktreeError(f"Registered worktree has no HEAD: {worktree}")
@@ -137,28 +138,47 @@ class JobWorktreeManager:
             else:
                 self._run(repo, "worktree", "add", "-b", branch, worktree, base_sha)
 
+        metadata = {
+            **dict(job.metadata or {}),
+            "repository_id": repository.id,
+            "repository_root": repo,
+            "repository_origin": repository.origin_url,
+            "worktree_managed": True,
+        }
+        environment = {
+            **dict(job.environment or {}),
+            "kind": "host_git_worktree",
+            "repository_id": repository.id,
+            "repository_root": repo,
+            "worktree": worktree,
+            "branch": branch,
+        }
         updated = self.service.store.update_runtime_fields(
             job.id,
+            base_sha=base_sha,
             branch=branch,
             worktree=worktree,
-            base_sha=base_sha,
-            metadata_json={
-                **dict(job.metadata or {}),
-                "repository_root": repo,
-                "worktree_managed": True,
-            },
+            environment_json=environment,
+            metadata_json=metadata,
         )
         self.service.store.append_event(
             job.id,
             "worktree_ready",
             payload={
+                "repository_id": repository.id,
                 "repository": repo,
                 "worktree": updated.worktree,
                 "branch": updated.branch,
                 "base_sha": updated.base_sha,
             },
         )
-        return WorktreeInfo(repo, updated.worktree, updated.branch, updated.base_sha)
+        return WorktreeInfo(
+            repository.id,
+            repo,
+            updated.worktree,
+            updated.branch,
+            updated.base_sha,
+        )
 
     def checkpoint(self, job: Job, *, label: str) -> Optional[str]:
         worktree = str(job.worktree or "")
@@ -197,7 +217,10 @@ class JobWorktreeManager:
         return sha
 
     def remove(self, job: Job, *, force: bool = False) -> bool:
-        repo = self.canonical_repo(job.repository)
+        try:
+            repository = self.repositories.register(job.repository)
+        except Exception as exc:
+            raise WorktreeError(str(exc)) from exc
         worktree = str(job.worktree or self.worktree_path(job))
         if not os.path.exists(worktree):
             return False
@@ -205,7 +228,7 @@ class JobWorktreeManager:
         if force:
             args.append("--force")
         args.append(worktree)
-        self._run(repo, *args)
+        self._run(repository.canonical_path, *args)
         if os.path.exists(worktree) and force:
             shutil.rmtree(worktree, ignore_errors=True)
         self.service.store.append_event(

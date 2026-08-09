@@ -13,7 +13,7 @@ from .service import JobService
 from .verification import VerificationStore
 
 
-RECEIPT_SCHEMA_VERSION = 2
+RECEIPT_SCHEMA_VERSION = 3
 
 
 class JobReceiptBuilder:
@@ -110,6 +110,16 @@ class JobReceiptBuilder:
         for event in events:
             event_counts[event.event_type] = event_counts.get(event.event_type, 0) + 1
 
+        metadata = dict(job.metadata or {})
+        review_branch = str(metadata.get("review_branch") or "").strip()
+        if not review_branch and job.status.value == "ready_for_review":
+            review_branch = str(job.branch or "").strip()
+        review_head_sha = str(metadata.get("review_head_sha") or "").strip()
+        if review_branch and not review_head_sha and verification:
+            review_head_sha = str(verification.head_sha or "").strip()
+        retired_worktree = str(metadata.get("retired_worktree") or "").strip()
+        review_artifact = "branch" if review_branch else ("worktree" if job.worktree else "none")
+
         cost_summary = self._cost_summary(attempts, float(job.cost_usd or 0.0))
         receipt: Dict[str, Any] = {
             "schema_version": RECEIPT_SCHEMA_VERSION,
@@ -125,12 +135,13 @@ class JobReceiptBuilder:
             },
             "outcome": {
                 "ready_for_review": job.status.value == "ready_for_review",
-                "terminal": job.terminal,
+                "review_artifact": review_artifact,
                 "attempts": len(attempts),
                 "elapsed_seconds": elapsed,
                 "cost_usd": float(job.cost_usd or 0.0),
                 "cost_status": cost_summary["status"],
                 "cost_complete": cost_summary["cost_complete"],
+                "terminal": job.terminal,
             },
             "ticket": {
                 "acceptance_criteria": list(job.acceptance_criteria),
@@ -138,12 +149,21 @@ class JobReceiptBuilder:
             },
             "git": {
                 "repository": job.repository,
-                "repository_id": job.metadata.get("repository_id") if isinstance(job.metadata, dict) else None,
+                "repository_id": metadata.get("repository_id"),
                 "base_branch": job.base_branch,
                 "base_sha": job.base_sha,
+                # `branch` / `worktree` remain for receipt compatibility.  The
+                # review_* fields below define the authoritative completed
+                # artifact: execution happens in a worktree, review happens on
+                # a normal branch after that worktree is retired.
                 "branch": job.branch,
                 "worktree": job.worktree,
-                "head_sha": verification.head_sha if verification else "",
+                "review_artifact": review_artifact,
+                "review_branch": review_branch,
+                "review_head_sha": review_head_sha,
+                "execution_worktree": job.worktree,
+                "retired_worktree": retired_worktree,
+                "head_sha": review_head_sha or (verification.head_sha if verification else ""),
                 "changed_files": verification.changed_files if verification else [],
                 "additions": verification.additions if verification else 0,
                 "deletions": verification.deletions if verification else 0,

@@ -157,7 +157,6 @@ class JobStore:
                         ON job_attempts(job_id, number);
                     """
                 )
-                # v1 databases predate reproducible provider/model/mode policy.
                 columns = {
                     str(row["name"])
                     for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
@@ -315,7 +314,7 @@ class JobStore:
 
     def update_runtime_fields(self, job_id: str, **fields: Any) -> Job:
         allowed = {
-            "cost_usd", "branch", "worktree", "environment_json",
+            "base_sha", "cost_usd", "branch", "worktree", "environment_json",
             "execution_json", "metadata_json", "session_name",
         }
         updates: Dict[str, Any] = {}

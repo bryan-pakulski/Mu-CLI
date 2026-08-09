@@ -69,18 +69,27 @@ class SessionJobRunner:
     ) -> tuple[float, Dict[str, Any]]:
         """Return authoritative attempt API cost + persistence-ready result.
 
-        The inner ReAct loop historically priced only a small Gemini map.  A
+        The inner ReAct loop historically priced only a small Gemini map. A
         durable engineering job instead recomputes its attempt from actual
-        provider token deltas and the versioned pricing registry.  The pricing
+        provider token deltas and the versioned pricing registry. The pricing
         key/rates/version are persisted with the attempt so historical job
         economics remain explainable when list prices change later.
         """
         after = self._token_snapshot(session)
         tokens = self._token_delta(before, after)
         execution = dict(job.execution or {})
-        provider_name = str(execution.get("provider") or getattr(session.provider, "name", "") or "")
-        model_name = str(execution.get("model") or getattr(session.provider, "model_name", "") or "")
-        endpoint = str(getattr(session.provider, "host", "") or getattr(session.provider, "BASE_URL", "") or "")
+        provider_obj = getattr(session, "provider", None)
+        provider_name = str(
+            execution.get("provider") or getattr(provider_obj, "name", "") or ""
+        )
+        model_name = str(
+            execution.get("model") or getattr(provider_obj, "model_name", "") or ""
+        )
+        endpoint = str(
+            getattr(provider_obj, "host", "")
+            or getattr(provider_obj, "BASE_URL", "")
+            or ""
+        )
         pricing = estimate_model_cost(
             provider=provider_name,
             model_name=model_name,
@@ -92,10 +101,13 @@ class SessionJobRunner:
             endpoint=endpoint,
         )
         mapped_cost = pricing.get("api_cost_usd")
-        legacy_delta = max(0.0, float(after.get("total_cost", 0.0)) - float(before.get("total_cost", 0.0)))
-        # Unknown/plan-based pricing must remain explicitly unpriced.  The
+        legacy_delta = max(
+            0.0,
+            float(after.get("total_cost", 0.0)) - float(before.get("total_cost", 0.0)),
+        )
+        # Unknown/plan-based pricing must remain explicitly unpriced. The
         # numeric job accumulator cannot store None, so it receives $0 while
-        # the structured record carries billing=plan/unknown.  If a provider
+        # the structured record carries billing=plan/unknown. If a provider
         # already supplied a real positive cost through the legacy accounting
         # path, retain it as a fallback rather than throwing data away.
         attributable_cost = (
@@ -201,16 +213,26 @@ class SessionJobRunner:
 
     def run(self, job: Job, attempt: JobAttempt) -> JobRunOutcome:
         session = None
-        initial_usage: Dict[str, float] = {key: 0.0 for key in (*_TOKEN_KEYS, "total_cost")}
+        initial_usage: Dict[str, float] = {
+            key: 0.0 for key in (*_TOKEN_KEYS, "total_cost")
+        }
         try:
             execution = dict(job.execution or {})
             session_type = str(execution.get("session_type") or "workspace")
             workspace = self.workspace_path(job)
             if session_type == "workspace":
                 if not workspace:
-                    raise InteractionRequired("question", "This job needs a repository/workspace path.", payload={"shape": "repository"})
+                    raise InteractionRequired(
+                        "question",
+                        "This job needs a repository/workspace path.",
+                        payload={"shape": "repository"},
+                    )
                 if not os.path.isdir(os.path.expanduser(workspace)):
-                    return JobRunOutcome(kind="failed", status="environment_error", error=f"Job workspace does not exist: {workspace}")
+                    return JobRunOutcome(
+                        kind="failed",
+                        status="environment_error",
+                        error=f"Job workspace does not exist: {workspace}",
+                    )
             if session_type == "container":
                 return JobRunOutcome(
                     kind="needs_human",
@@ -235,7 +257,9 @@ class SessionJobRunner:
             if job.max_iterations is not None:
                 session.variables["max_iterations"] = int(job.max_iterations)
             session.session_manager.save_history(session.folder_context)
-            self.service.store.update_runtime_fields(job.id, session_name=self.session_name(job))
+            self.service.store.update_runtime_fields(
+                job.id, session_name=self.session_name(job)
+            )
 
             initial_usage = self._token_snapshot(session)
             raw_result = session.send_message(self._prompt(job)) or {}
@@ -244,15 +268,27 @@ class SessionJobRunner:
             status = str(result.get("status") or "completed")
             error = str(result.get("error") or "")
             if status == "completed":
-                return JobRunOutcome(kind="completed", status=status, cost_usd=cost, result=result)
-            return JobRunOutcome(kind="failed", status=status, error=error or f"Agent stopped with status {status}", cost_usd=cost, result=result)
+                return JobRunOutcome(
+                    kind="completed", status=status, cost_usd=cost, result=result
+                )
+            return JobRunOutcome(
+                kind="failed",
+                status=status,
+                error=error or f"Agent stopped with status {status}",
+                cost_usd=cost,
+                result=result,
+            )
 
         except InteractionRequired as gate:
             cost = 0.0
             result: Dict[str, Any] = {}
             if session is not None:
                 cost, result = self._usage_result(job, session, initial_usage)
-            reason = AttentionReason.APPROVAL_REQUIRED if gate.kind == "approval_required" else AttentionReason.QUESTION
+            reason = (
+                AttentionReason.APPROVAL_REQUIRED
+                if gate.kind == "approval_required"
+                else AttentionReason.QUESTION
+            )
             return JobRunOutcome(
                 kind="needs_human",
                 status="needs_human",

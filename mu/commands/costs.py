@@ -74,7 +74,7 @@ def costs_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         lines.append("")
 
     lines.extend([
-        "Estimated-token rows cost measured input and output independently.",
+        "Estimated input and output independently from measured token counts.",
         f"GUI editor: /static/model_costs.html",
         f"Override file: {catalog.get('config_path')}",
     ])

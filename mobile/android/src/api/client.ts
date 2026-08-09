@@ -20,7 +20,7 @@ export function baseUrl(): string {
 type QueryValue = string | number | boolean | undefined;
 
 export interface RequestOptions {
-  body?: Record<string, unknown>;
+  body?: unknown;
   signal?: AbortSignal;
   query?: Record<string, QueryValue>;
   timeoutMs?: number;
@@ -65,7 +65,7 @@ async function request<T>(
 
   const headers: Record<string, string> = {};
   let bodyStr: string | undefined;
-  if (opts?.body) {
+  if (opts?.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     bodyStr = JSON.stringify(opts.body);
   }
@@ -139,10 +139,10 @@ export const api = {
   },
   // MUCLI_MOBILE_RECONNECT_YOLO_V1: POST query support lets mutating
   // inspector routes target the mobile-selected session explicitly.
-  post<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
+  post<T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('POST', path, { ...opts, body });
   },
-  put<T>(path: string, body?: Record<string, unknown>, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
+  put<T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('PUT', path, { ...opts, body });
   },
   delete<T>(path: string, opts?: Omit<RequestOptions, 'body'>): Promise<T> {

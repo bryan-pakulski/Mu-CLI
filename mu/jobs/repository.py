@@ -88,7 +88,7 @@ class RepositoryRegistry:
         return result
 
     @classmethod
-    def inspect(cls, path: str) -> Dict[str, str]:
+    def inspect(cls, path: str) -> Dict[str, Any]:
         candidate = os.path.abspath(os.path.expanduser(str(path or "")))
         if not os.path.isdir(candidate):
             raise RepositoryError(f"Repository does not exist: {candidate or path}")
@@ -110,8 +110,35 @@ class RepositoryRegistry:
 
         origin = cls._git(primary, "config", "--get", "remote.origin.url", check=False)
         origin_url = (origin.stdout or "").strip()
-        branch = cls._git(primary, "symbolic-ref", "--short", "HEAD", check=False)
-        default_branch = (branch.stdout or "").strip() or "main"
+
+        current = cls._git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+        current_branch = (current.stdout or "").strip()
+
+        # Prefer origin/HEAD when configured: it represents the repository's
+        # remote default rather than whatever branch the developer currently
+        # has checked out. Fall back to the primary checkout branch for local
+        # repositories that have no remote HEAD (very common in test/dev repos).
+        remote_head = cls._git(
+            primary,
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+            check=False,
+        )
+        remote_default_ref = (remote_head.stdout or "").strip()
+        remote_default_branch = (
+            remote_default_ref.split("/", 1)[1]
+            if remote_default_ref.startswith("origin/")
+            else remote_default_ref
+        )
+        default_branch = remote_default_branch or current_branch or "main"
+
+        head = cls._git(primary, "rev-parse", "--verify", "HEAD^{commit}", check=False)
+        head_sha = (head.stdout or "").strip()
+        status = cls._git(primary, "status", "--porcelain", check=False)
+        clean = status.returncode == 0 and not bool((status.stdout or "").strip())
+
         identity = hashlib.sha256(common_dir.encode("utf-8")).hexdigest()[:24]
         return {
             "id": identity,
@@ -119,6 +146,10 @@ class RepositoryRegistry:
             "git_common_dir": common_dir,
             "origin_url": origin_url,
             "default_branch": default_branch,
+            "current_branch": current_branch,
+            "remote_default_ref": remote_default_ref,
+            "head_sha": head_sha,
+            "clean": clean,
         }
 
     def register(self, path: str, *, metadata: Optional[Dict[str, Any]] = None) -> RepositoryRecord:
@@ -137,6 +168,14 @@ class RepositoryRegistry:
                     previous_metadata = json.loads(existing["metadata_json"] or "{}")
                 except (TypeError, ValueError):
                     previous_metadata = {}
+            previous_metadata.update(
+                {
+                    "current_branch": info.get("current_branch", ""),
+                    "remote_default_ref": info.get("remote_default_ref", ""),
+                    "head_sha": info.get("head_sha", ""),
+                    "clean": bool(info.get("clean", False)),
+                }
+            )
             previous_metadata.update(metadata or {})
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(

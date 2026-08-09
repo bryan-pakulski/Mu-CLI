@@ -169,6 +169,27 @@ export interface JobDiff {
   truncated: boolean;
 }
 
+export interface JobDiagnosticsSnapshot {
+  job_id: string;
+  status: JobStatus;
+  attention_reason: AttentionReason;
+  repository: string;
+  base_branch: string;
+  base_sha: string;
+  branch: string;
+  worktree: string;
+  worker_id: string;
+  heartbeat_at: number | null;
+  lease_expires_at: number | null;
+  diagnostics: JobEvent[];
+  latest_failure: JobEvent | null;
+  worker_log_path: string;
+  worker_log_exists: boolean;
+  worker_log_size: number;
+  worker_log_tail: string;
+  worker_log_truncated: boolean;
+}
+
 export interface JobBoardResponse {
   counts: Record<JobBoardSection, number>;
   sections: Record<JobBoardSection, EngineeringJob[]>;
@@ -206,6 +227,7 @@ export const jobsApi = {
   get: (jobId: string) => api.get<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}`),
   create: (input: CreateJobInput) => api.post<{ job: EngineeringJob }>('/api/jobs', input),
   receipt: (jobId: string) => api.get<{ receipt: WorkReceipt }>(`/api/jobs/${encodeURIComponent(jobId)}/receipt`),
+  diagnostics: (jobId: string) => api.get<{ diagnostics: JobDiagnosticsSnapshot }>(`/api/jobs/${encodeURIComponent(jobId)}/diagnostics`),
   diff: (jobId: string) => api.get<{ diff: JobDiff }>(`/api/jobs/${encodeURIComponent(jobId)}/diff`),
   events: (jobId: string, after = 0) => api.get<{ events: JobEvent[] }>(`/api/jobs/${encodeURIComponent(jobId)}/events`, { query: { after } }),
   attempts: (jobId: string) => api.get<{ attempts: JobAttempt[] }>(`/api/jobs/${encodeURIComponent(jobId)}/attempts`),

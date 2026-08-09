@@ -250,6 +250,18 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
             "model": "", "session_active": False,
         })
 
+    @app.get("/work", response_class=HTMLResponse)
+    async def engineering_work(request: Request):
+        requested = str(request.query_params.get("session") or "").strip()
+        session_name = requested or app.state.current_session_name or ""
+        return templates.TemplateResponse(request, "work.html", {
+            "session_name": session_name,
+            "agent_mode": "default",
+            "provider": "",
+            "model": "",
+            "session_active": bool(session_name),
+        })
+
     @app.get("/healthz")
     async def healthz():
         return {

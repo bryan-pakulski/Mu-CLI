@@ -1,4 +1,5 @@
-// Design tokens — aligned with the warm, low-contrast MuCLI web GUI palette.
+// Mobile design tokens aligned with the MuCLI alpine-glass web UI.
+// Colour belongs to the environment; controls stay quiet and neutral.
 
 export const spacing = {
   xs: 4,
@@ -21,8 +22,8 @@ export const typography = {
 } as const;
 
 export const radii = {
-  sm: 10,
-  lg: 18,
+  sm: 7,
+  lg: 16,
   pill: 999,
 } as const;
 
@@ -41,83 +42,118 @@ export type SyntaxColors = {
 };
 
 export type ThemeColors = {
+  /** Solid colour behind the environmental light fields. */
+  canvas: string;
+  /** Translucent app plane used by ordinary screen roots. */
   bg: string;
   bgLift: string;
   bgHover: string;
+  glass: string;
+  glassStrong: string;
   text: string;
   textDim: string;
   textSoft: string;
   accent: string;
+  accentStrong: string;
   accentSoft: string;
   accentText: string;
   border: string;
   borderStrong: string;
+  hairline: string;
   success: string;
   warning: string;
   error: string;
   info: string;
+  skyField: string;
+  glacierField: string;
+  sunriseField: string;
+  peachField: string;
+  alpineField: string;
+  snowField: string;
   syntax: SyntaxColors;
 };
 
 export const lightColors: ThemeColors = {
-  bg: '#FAF8F5',
-  bgLift: '#F3F0EB',
-  bgHover: '#EBE7E0',
-  text: '#2B2B2B',
-  textDim: '#999999',
-  textSoft: '#6B6B6B',
-  accent: '#555555',
-  accentSoft: '#E8E3DB',
-  accentText: '#FAF8F5',
-  border: '#E7E2DA',
-  borderStrong: '#D9D2C8',
-  success: '#587A5C',
-  warning: '#9A6A28',
-  error: '#C8455D',
-  info: '#667A8E',
+  canvas: '#EDF3F8',
+  bg: 'rgba(237,243,248,0.70)',
+  bgLift: 'rgba(249,252,254,0.68)',
+  bgHover: 'rgba(58,84,109,0.050)',
+  glass: 'rgba(249,252,254,0.64)',
+  glassStrong: 'rgba(252,254,255,0.91)',
+  text: '#1C2732',
+  textDim: '#7B8894',
+  textSoft: '#53616E',
+  accent: '#6286A8',
+  accentStrong: '#527795',
+  accentSoft: 'rgba(98,134,168,0.075)',
+  accentText: '#F8FBFD',
+  border: 'rgba(39,59,77,0.060)',
+  borderStrong: 'rgba(39,59,77,0.110)',
+  hairline: 'rgba(39,59,77,0.085)',
+  success: '#66877A',
+  warning: '#8F7D60',
+  error: '#B95F6B',
+  info: '#748B9F',
+  skyField: '#4891D6',
+  glacierField: '#A6D4F0',
+  sunriseField: '#F097BC',
+  peachField: '#F9BFAC',
+  alpineField: '#5B977A',
+  snowField: '#FFFFFF',
   syntax: {
-    keyword: '#8B5A9F',
-    string: '#5C7A4E',
-    comment: '#999999',
-    number: '#9A6A28',
-    func: '#4A6B8A',
-    operator: '#7A7A7A',
-    punctuation: '#9C998F',
-    plain: '#2B2B2B',
-    added: '#587A5C',
-    removed: '#C8455D',
-    diffHeader: '#667A8E',
+    keyword: '#657F9A',
+    string: '#66877A',
+    comment: '#8C98A3',
+    number: '#9B7D72',
+    func: '#527795',
+    operator: '#6D7985',
+    punctuation: '#89949E',
+    plain: '#1C2732',
+    added: '#66877A',
+    removed: '#B95F6B',
+    diffHeader: '#748B9F',
   },
 };
 
 export const darkColors: ThemeColors = {
-  bg: '#1A1814',
-  bgLift: '#221F1A',
-  bgHover: '#2A2722',
-  text: '#D4D0C8',
-  textDim: '#6B6860',
-  textSoft: '#9C998F',
-  accent: '#B0ACA0',
-  accentSoft: '#302D27',
-  accentText: '#1A1814',
-  border: '#2C2924',
-  borderStrong: '#3A3630',
-  success: '#8CAA83',
-  warning: '#C6A15B',
-  error: '#D98787',
-  info: '#8EA4B8',
+  canvas: '#0D1219',
+  bg: 'rgba(13,18,25,0.74)',
+  bgLift: 'rgba(18,24,32,0.68)',
+  bgHover: 'rgba(201,216,231,0.055)',
+  glass: 'rgba(19,25,34,0.62)',
+  glassStrong: 'rgba(18,24,32,0.90)',
+  text: '#EEF2F6',
+  textDim: '#85909C',
+  textSoft: '#BBC4CD',
+  accent: '#8BA9C6',
+  accentStrong: '#7295B5',
+  accentSoft: 'rgba(139,169,198,0.085)',
+  accentText: '#0D1219',
+  border: 'rgba(222,231,240,0.065)',
+  borderStrong: 'rgba(222,231,240,0.115)',
+  hairline: 'rgba(222,231,240,0.085)',
+  success: '#86A897',
+  warning: '#AA987B',
+  error: '#CD7C86',
+  info: '#92A6B8',
+  skyField: '#5B9DDC',
+  glacierField: '#AAD7F2',
+  sunriseField: '#EA8FB4',
+  peachField: '#F7B9A9',
+  alpineField: '#4E8970',
+  snowField: '#F1F7FC',
   syntax: {
-    keyword: '#B89AD4',
-    string: '#A3C795',
-    comment: '#6B6860',
-    number: '#D9B98A',
-    func: '#94B5D9',
-    operator: '#9C998F',
-    punctuation: '#7A7770',
-    plain: '#D4D0C8',
-    added: '#8CAA83',
-    removed: '#D98787',
-    diffHeader: '#8EA4B8',
+    keyword: '#9DB4CB',
+    string: '#94B3A2',
+    comment: '#65717D',
+    number: '#B9A08F',
+    func: '#8BA9C6',
+    operator: '#A3ADB7',
+    punctuation: '#7C8792',
+    plain: '#EEF2F6',
+    added: '#86A897',
+    removed: '#CD7C86',
+    diffHeader: '#92A6B8',
   },
 };
 

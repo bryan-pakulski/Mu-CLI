@@ -50,7 +50,15 @@ def costs_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
             if billing == "local":
                 rates = "$0 provider/API · host compute excluded"
             elif billing == "estimated_token":
-                rates = f"~{_money(item.get('estimated_total_per_million'))} / 1M total measured tokens"
+                if item.get("input_per_million") is not None and item.get("output_per_million") is not None:
+                    rates = (
+                        f"~{_money(item.get('input_per_million'))} in / "
+                        f"~{_money(item.get('output_per_million'))} out"
+                    )
+                    if item.get("cached_input_per_million") is not None:
+                        rates += f" / ~{_money(item.get('cached_input_per_million'))} cached"
+                else:
+                    rates = f"~{_money(item.get('estimated_total_per_million'))} / 1M total · legacy blended"
             elif billing == "token":
                 rates = (
                     f"{_money(item.get('input_per_million'))} in / "
@@ -66,6 +74,7 @@ def costs_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         lines.append("")
 
     lines.extend([
+        "Estimated-token rows cost measured input and output independently.",
         f"GUI editor: /static/model_costs.html",
         f"Override file: {catalog.get('config_path')}",
     ])

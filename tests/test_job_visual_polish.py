@@ -61,7 +61,7 @@ def test_job_analyzer_explains_state_residence_and_links_full_harness_trace():
     assert 'Agent harness trace' in html
     assert 'state residence is separated from actual execution' in html
     assert 'Lifecycle drill-down' in html
-    assert 'jt-phase-drill' in html
+    assert 'id="jt-intervals"' in html
     assert 'runtime_trace' in script
     assert 'interpretation' in script
     assert 'entry_event' in script

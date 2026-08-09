@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from mu.jobs import JobService, JobSpec, JobStore
-from mu.jobs.worktree import JobWorktreeManager
+from mu.jobs.worktree import JobWorktreeManager, WorktreeError
 
 
 def git(path, *args):
@@ -17,10 +19,10 @@ def git(path, *args):
     return result.stdout.strip()
 
 
-def make_repo(tmp_path):
+def make_repo(tmp_path, *, branch="main"):
     repo = tmp_path / "repo"
     repo.mkdir()
-    git(repo, "init", "-b", "main")
+    git(repo, "init", "-b", branch)
     git(repo, "config", "user.name", "Test User")
     git(repo, "config", "user.email", "test@example.com")
     (repo / "app.txt").write_text("base\n", encoding="utf-8")
@@ -43,12 +45,84 @@ def test_prepare_creates_branch_and_worktree_without_touching_primary_checkout(t
     current = service.get(job.id)
 
     assert info.repository == str(repo)
+    assert info.base_ref == "main"
     assert current.worktree == info.worktree
     assert current.branch.startswith(f"mu/job-{job.id[:10]}-")
     assert current.base_sha == git(repo, "rev-parse", "main^{commit}")
     assert git(current.worktree, "rev-parse", "--show-toplevel") == current.worktree
     assert git(current.worktree, "branch", "--show-current") == current.branch
     assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
+
+
+def test_implicit_main_falls_back_to_detected_repository_branch(tmp_path):
+    """Historical jobs default to `main`; healthy non-main repos must still run."""
+    repo = make_repo(tmp_path, branch="develop")
+    service = make_service(tmp_path)
+    job = service.create(JobSpec(title="Non-main repository", repository=str(repo)))
+    assert job.base_branch == "main"  # historical implicit default
+
+    manager = JobWorktreeManager(service, root=str(tmp_path / "worktrees"))
+    info = manager.prepare(job)
+    current = service.get(job.id)
+
+    assert info.base_ref == "develop"
+    assert current.base_sha == git(repo, "rev-parse", "develop^{commit}")
+    assert git(current.worktree, "branch", "--show-current") == current.branch
+    events = service.events(job.id)
+    resolved = next(event for event in events if event.event_type == "job_base_resolved")
+    assert resolved.payload["resolved_base_ref"] == "develop"
+    assert resolved.payload["fallback_used"] is True
+    inspected = next(event for event in events if event.event_type == "repository_inspected")
+    assert inspected.payload["detected_default_branch"] == "develop"
+
+
+def test_explicit_missing_non_main_branch_does_not_silently_fallback(tmp_path):
+    repo = make_repo(tmp_path, branch="develop")
+    service = make_service(tmp_path)
+    job = service.create(
+        JobSpec(
+            title="Explicit release branch",
+            repository=str(repo),
+            base_branch="release-does-not-exist",
+        )
+    )
+    manager = JobWorktreeManager(service, root=str(tmp_path / "worktrees"))
+
+    with pytest.raises(WorktreeError) as caught:
+        manager.prepare(job)
+
+    assert caught.value.stage == "base_resolution"
+    assert "release-does-not-exist" in str(caught.value)
+    failed = [event for event in service.events(job.id) if event.event_type == "worktree_prepare_failed"]
+    assert len(failed) == 1
+    assert failed[0].payload["stage"] == "base_resolution"
+    assert failed[0].payload["requested_base_branch"] == "release-does-not-exist"
+    assert failed[0].payload["attempted_refs"]
+
+
+def test_worktree_preflight_records_user_visible_git_diagnostics(tmp_path):
+    repo = make_repo(tmp_path)
+    service = make_service(tmp_path)
+    job = service.create(JobSpec(title="Trace preparation", repository=str(repo)))
+    manager = JobWorktreeManager(service, root=str(tmp_path / "worktrees"))
+
+    manager.prepare(job)
+    events = service.events(job.id)
+    names = [event.event_type for event in events]
+
+    assert "worktree_preflight_started" in names
+    assert "repository_inspected" in names
+    assert "job_base_resolved" in names
+    assert "worktree_inventory" in names
+    assert "worktree_add_started" in names
+    assert "worktree_ready" in names
+
+    inspected = next(event for event in events if event.event_type == "repository_inspected")
+    assert inspected.payload["canonical_path"] == str(repo)
+    assert inspected.payload["git_common_dir"]
+    ready = next(event for event in events if event.event_type == "worktree_ready")
+    assert ready.payload["base_sha"]
+    assert ready.payload["branch"].startswith("mu/job-")
 
 
 def test_checkpoint_commits_job_changes_only_on_managed_branch(tmp_path):

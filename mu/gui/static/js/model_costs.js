@@ -1,7 +1,7 @@
 (() => {
     'use strict';
 
-    const state = { catalog: null };
+    const state = { catalog: null, models: [], dirty: false };
     const $ = id => document.getElementById(id);
 
     function esc(value) {
@@ -9,108 +9,205 @@
             .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
             .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
     }
-    function money(value) { return value == null ? '—' : `$${Number(value).toFixed(Number(value) < 1 ? 3 : 2)}`; }
-    function number(value) { return value == null ? '—' : Number(value).toLocaleString(); }
-    function rowSearch(row, needle) { return !needle || String(row.dataset.search || '').includes(needle); }
-
-    function renderNotes(catalog) {
-        $('mc-notes').innerHTML = Object.entries(catalog.provider_notes || {}).map(([key, value]) => `
-            <div class="mc-note"><span>${esc(key.replaceAll('_', ' '))}</span><p>${esc(value)}</p></div>
-        `).join('');
+    function nullable(value) {
+        const text = String(value ?? '').trim();
+        if (!text) return null;
+        const number = Number(text);
+        return Number.isFinite(number) ? number : null;
     }
-
-    function renderTokenModels(catalog) {
-        const rows = catalog.models || [];
-        $('mc-token-models').innerHTML = rows.map(item => {
-            const high = item.long_context_cutoff
-                ? `>${number(item.long_context_cutoff)}: ${money(item.long_input_per_million)} / ${money(item.long_cached_input_per_million)} / ${money(item.long_output_per_million)}`
-                : (item.context_window ? number(item.context_window) : 'standard tier');
-            const search = `${item.provider} ${item.key} ${item.role || ''} ${item.notes || ''}`.toLowerCase();
-            return `<tr data-model-row data-search="${esc(search)}">
-                <td>${esc(item.provider)}</td>
-                <td><strong>${esc(item.key)}</strong>${item.notes ? `<small>${esc(item.notes)}</small>` : ''}</td>
-                <td>${money(item.input_per_million)}</td>
-                <td>${money(item.cached_input_per_million)}</td>
-                <td>${money(item.output_per_million)}</td>
-                <td>${esc(high)}</td>
-                <td>${esc(item.role || '—')}</td>
-            </tr>`;
-        }).join('');
+    function input(value, field, type = 'text', extra = '') {
+        const display = value == null ? '' : String(value);
+        return `<input data-field="${field}" type="${type}" value="${esc(display)}" ${extra}>`;
     }
-
-    function renderOllama(catalog) {
-        $('mc-ollama').innerHTML = (catalog.ollama || []).map(item => {
-            const cloud = String(item.key || '').endsWith(':cloud');
-            const search = `${item.key} ${item.role || ''} ${item.notes || ''}`.toLowerCase();
-            return `<tr data-model-row data-search="${esc(search)}">
-                <td><strong>${esc(item.key)}</strong>${item.notes ? `<small>${esc(item.notes)}</small>` : ''}</td>
-                <td>${cloud ? 'plan / usage' : '$0 provider API'}</td>
-                <td>${number(item.context_window)}</td>
-                <td>${esc(item.local_size || '—')}</td>
-                <td>${esc(item.usage_tier || '—')}</td>
-                <td>${esc(item.role || '—')}</td>
-            </tr>`;
-        }).join('');
+    function markDirty() {
+        state.dirty = true;
+        $('mc-dirty').hidden = false;
+        $('mc-status').textContent = '';
     }
-
-    function activeRates(item, input) {
-        const high = item.long_context_cutoff && input > Number(item.long_context_cutoff);
-        return {
-            high,
-            input: high && item.long_input_per_million != null ? Number(item.long_input_per_million) : Number(item.input_per_million || 0),
-            cached: high && item.long_cached_input_per_million != null
-                ? Number(item.long_cached_input_per_million)
-                : Number(item.cached_input_per_million != null ? item.cached_input_per_million : item.input_per_million || 0),
-            output: high && item.long_output_per_million != null ? Number(item.long_output_per_million) : Number(item.output_per_million || 0),
-        };
+    function syncThemeIcon() {
+        const dark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
+        document.querySelectorAll('.mc-theme-dark').forEach(node => { node.style.display = dark ? '' : 'none'; });
+        document.querySelectorAll('.mc-theme-light').forEach(node => { node.style.display = dark ? 'none' : ''; });
     }
-
-    function estimate() {
-        const catalog = state.catalog;
-        if (!catalog) return;
-        const key = $('mc-est-model').value;
-        const item = (catalog.models || []).find(model => model.key === key);
-        if (!item) { $('mc-est-cost').textContent = '—'; return; }
-        const input = Math.max(0, Number($('mc-est-in').value || 0));
-        const cached = Math.max(0, Math.min(input, Number($('mc-est-cache').value || 0)));
-        const output = Math.max(0, Number($('mc-est-out').value || 0));
-        const rates = activeRates(item, input);
-        const cost = ((input - cached) * rates.input + cached * rates.cached + output * rates.output) / 1_000_000;
-        $('mc-est-cost').textContent = `$${cost.toFixed(cost < 1 ? 4 : 2)}`;
-        $('mc-est-detail').textContent = `${rates.high ? 'high-context tier · ' : ''}${money(rates.input)} input · ${money(rates.cached)} cached · ${money(rates.output)} output / 1M`;
-    }
-
-    function renderEstimator(catalog) {
-        $('mc-est-model').innerHTML = (catalog.models || []).map(item => `<option value="${esc(item.key)}">${esc(item.provider)} · ${esc(item.key)}</option>`).join('');
-        ['mc-est-model', 'mc-est-in', 'mc-est-cache', 'mc-est-out'].forEach(id => {
-            $(id).addEventListener(id === 'mc-est-model' ? 'change' : 'input', estimate);
-        });
-        estimate();
-    }
-
-    function applySearch() {
-        const needle = String($('mc-search').value || '').trim().toLowerCase();
-        document.querySelectorAll('[data-model-row]').forEach(row => { row.hidden = !rowSearch(row, needle); });
-    }
-
     function toggleTheme() {
         const current = document.documentElement.getAttribute('data-theme') || 'dark';
         const next = current === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
         try { localStorage.setItem('mucli-theme', next); } catch (_) {}
-        $('mc-theme').textContent = next === 'dark' ? '☾' : '☼';
+        syncThemeIcon();
     }
 
-    async function init() {
-        $('mc-search').addEventListener('input', applySearch);
-        $('mc-theme').addEventListener('click', toggleTheme);
+    function billingSelect(value) {
+        const options = [
+            ['token', 'Token rates'],
+            ['estimated_token', 'Blended estimate'],
+            ['local', 'Local / $0 API'],
+            ['unknown', 'Unpriced'],
+        ];
+        return `<select data-field="billing">${options.map(([key, label]) => `<option value="${key}" ${key === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
+    }
+
+    function render() {
+        const needle = String($('mc-search').value || '').trim().toLowerCase();
+        const rows = state.models.map((item, index) => {
+            const search = `${item.provider} ${item.key} ${(item.aliases || []).join(' ')} ${item.role || ''} ${item.notes || ''}`.toLowerCase();
+            const hidden = needle && !search.includes(needle) ? ' hidden' : '';
+            return `<tr data-index="${index}" data-search="${esc(search)}"${hidden}>
+                <td>${input(item.provider, 'provider')}</td>
+                <td class="mc-model-cell">${input(item.key, 'key')}</td>
+                <td>${billingSelect(item.billing || 'token')}</td>
+                <td>${input(item.input_per_million, 'input_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input(item.cached_input_per_million, 'cached_input_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input(item.output_per_million, 'output_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input(item.estimated_total_per_million, 'estimated_total_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input(item.context_window, 'context_window', 'number', 'min="1" step="1"')}</td>
+                <td>${input(item.long_context_cutoff, 'long_context_cutoff', 'number', 'min="1" step="1"')}</td>
+                <td>${input(item.long_input_per_million, 'long_input_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input(item.long_cached_input_per_million, 'long_cached_input_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input(item.long_output_per_million, 'long_output_per_million', 'number', 'min="0" step="0.001"')}</td>
+                <td>${input((item.aliases || []).join(', '), 'aliases')}</td>
+                <td class="mc-notes-cell">
+                    ${input(item.role || '', 'role')}
+                    <textarea data-field="notes" rows="2" placeholder="Notes">${esc(item.notes || '')}</textarea>
+                </td>
+                <td><button class="mc-row-remove" data-remove title="Remove model" aria-label="Remove model">×</button></td>
+            </tr>`;
+        }).join('');
+        $('mc-models').innerHTML = rows || '<tr><td colspan="15" class="mc-table-empty">No configured models.</td></tr>';
+        $('mc-count').textContent = `${state.models.length} model${state.models.length === 1 ? '' : 's'}`;
+        wireRows();
+    }
+
+    function updateField(index, field, raw) {
+        const item = state.models[index];
+        if (!item) return;
+        if (field === 'aliases') {
+            item.aliases = String(raw || '').split(',').map(value => value.trim()).filter(Boolean);
+        } else if ([
+            'input_per_million', 'cached_input_per_million', 'output_per_million',
+            'estimated_total_per_million', 'context_window', 'long_context_cutoff',
+            'long_input_per_million', 'long_cached_input_per_million', 'long_output_per_million',
+        ].includes(field)) {
+            item[field] = nullable(raw);
+        } else {
+            item[field] = String(raw ?? '');
+        }
+        markDirty();
+    }
+
+    function wireRows() {
+        $('mc-models').querySelectorAll('tr[data-index]').forEach(row => {
+            const index = Number(row.dataset.index);
+            row.querySelectorAll('[data-field]').forEach(control => {
+                const eventName = control.tagName === 'SELECT' ? 'change' : 'input';
+                control.addEventListener(eventName, () => updateField(index, control.dataset.field, control.value));
+            });
+            row.querySelector('[data-remove]')?.addEventListener('click', () => {
+                state.models.splice(index, 1);
+                markDirty();
+                render();
+            });
+        });
+    }
+
+    function addModel() {
+        state.models.unshift({
+            provider: 'ollama', key: '', billing: 'unknown', aliases: [],
+            input_per_million: null, cached_input_per_million: null, output_per_million: null,
+            estimated_total_per_million: null, context_window: null,
+            long_context_cutoff: null, long_input_per_million: null,
+            long_cached_input_per_million: null, long_output_per_million: null,
+            role: '', notes: '', source: 'operator configuration',
+        });
+        markDirty();
+        render();
+        $('mc-models').querySelector('input[data-field="key"]')?.focus();
+    }
+
+    async function load() {
+        const response = await fetch('/api/providers/pricing');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+        state.catalog = data;
+        state.models = JSON.parse(JSON.stringify(data.models || []));
+        state.dirty = false;
+        $('mc-dirty').hidden = true;
+        $('mc-version').textContent = `Registry ${data.version}`;
+        $('mc-config-path').textContent = data.using_override
+            ? `override · ${data.active_config_path}`
+            : `defaults · edit ${data.config_path}`;
+        render();
+    }
+
+    async function save() {
+        const invalid = state.models.find(item => !String(item.provider || '').trim() || !String(item.key || '').trim());
+        if (invalid) {
+            $('mc-status').textContent = 'Provider and model are required on every row.';
+            return;
+        }
+        $('mc-save').disabled = true;
+        $('mc-status').textContent = 'Saving…';
         try {
-            const response = await fetch('/api/providers/pricing');
+            const response = await fetch('/api/providers/pricing', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    version: new Date().toISOString(),
+                    currency: state.catalog?.currency || 'USD',
+                    unit: state.catalog?.unit || 'per_million_tokens',
+                    models: state.models,
+                }),
+            });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
             state.catalog = data;
-            $('mc-version').textContent = `· baseline ${data.version}`;
-            renderNotes(data); renderTokenModels(data); renderOllama(data); renderEstimator(data);
+            state.models = JSON.parse(JSON.stringify(data.models || []));
+            state.dirty = false;
+            $('mc-dirty').hidden = true;
+            $('mc-version').textContent = `Registry ${data.version}`;
+            $('mc-config-path').textContent = `override · ${data.active_config_path}`;
+            $('mc-status').textContent = 'Saved.';
+            render();
+        } catch (error) {
+            $('mc-status').textContent = `Save failed: ${error.message}`;
+        } finally {
+            $('mc-save').disabled = false;
+        }
+    }
+
+    async function reset() {
+        if (!window.confirm('Remove the user pricing override and return to packaged defaults?')) return;
+        $('mc-status').textContent = 'Resetting…';
+        const response = await fetch('/api/providers/pricing/reset', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            $('mc-status').textContent = `Reset failed: ${data.detail || response.status}`;
+            return;
+        }
+        state.catalog = data;
+        state.models = JSON.parse(JSON.stringify(data.models || []));
+        state.dirty = false;
+        $('mc-dirty').hidden = true;
+        $('mc-version').textContent = `Registry ${data.version}`;
+        $('mc-config-path').textContent = `defaults · edit ${data.config_path}`;
+        $('mc-status').textContent = 'Using packaged defaults.';
+        render();
+    }
+
+    async function init() {
+        syncThemeIcon();
+        $('mc-search').addEventListener('input', render);
+        $('mc-theme').addEventListener('click', toggleTheme);
+        $('mc-add').addEventListener('click', addModel);
+        $('mc-save').addEventListener('click', save);
+        $('mc-reset').addEventListener('click', reset);
+        window.addEventListener('beforeunload', event => {
+            if (!state.dirty) return;
+            event.preventDefault();
+            event.returnValue = '';
+        });
+        try {
+            await load();
             $('mc-loading').hidden = true;
             $('mc-main').hidden = false;
         } catch (error) {

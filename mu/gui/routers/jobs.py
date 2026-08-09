@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from mu.jobs import AttentionReason, JobService, JobStateError, JobStatus
 from mu.jobs.board import build_job_board
 from mu.jobs.diagnostics import build_job_diagnostics
+from mu.jobs.management import JobManagementError, JobManagementService
 from mu.jobs.receipt import JobReceiptBuilder
 from mu.jobs.repository import RepositoryRegistry
 from mu.jobs.review import JobReviewError, JobReviewService, build_job_diff
@@ -33,9 +34,30 @@ def _job_or_404(service: JobService, job_id: str):
 
 
 def _state_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, (JobStateError, JobReviewError, ValueError)):
+    if isinstance(exc, (JobStateError, JobReviewError, JobManagementError, ValueError)):
         return HTTPException(status_code=409, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _history_filters(
+    *,
+    q: str = "",
+    status: Optional[List[str]] = None,
+    repository: str = "",
+    archive: str = "all",
+    scope: str = "history",
+    created_after: Optional[float] = None,
+    created_before: Optional[float] = None,
+) -> Dict[str, Any]:
+    return {
+        "q": q,
+        "statuses": status,
+        "repository": repository,
+        "archive": archive,
+        "scope": scope,
+        "created_after": created_after,
+        "created_before": created_before,
+    }
 
 
 def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,6 +122,116 @@ async def get_job_board(request: Request):
     return build_job_board(_service(request)).to_dict()
 
 
+@router.get("/history")
+async def query_job_history(
+    request: Request,
+    q: str = Query(default="", max_length=300),
+    status: Optional[List[str]] = Query(default=None),
+    repository: str = Query(default="", max_length=1000),
+    archive: str = Query(default="all"),
+    scope: str = Query(default="history"),
+    created_after: Optional[float] = Query(default=None),
+    created_before: Optional[float] = Query(default=None),
+    sort: str = Query(default="updated"),
+    order: str = Query(default="desc"),
+    limit: int = Query(default=100, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+):
+    try:
+        return JobManagementService(_service(request)).query_jobs(
+            **_history_filters(
+                q=q,
+                status=status,
+                repository=repository,
+                archive=archive,
+                scope=scope,
+                created_after=created_after,
+                created_before=created_before,
+            ),
+            sort=sort,
+            order=order,
+            limit=limit,
+            offset=offset,
+        )
+    except (ValueError, JobManagementError) as exc:
+        raise _state_error(exc) from exc
+
+
+@router.get("/report")
+async def get_job_report(
+    request: Request,
+    q: str = Query(default="", max_length=300),
+    status: Optional[List[str]] = Query(default=None),
+    repository: str = Query(default="", max_length=1000),
+    archive: str = Query(default="all"),
+    scope: str = Query(default="history"),
+    created_after: Optional[float] = Query(default=None),
+    created_before: Optional[float] = Query(default=None),
+):
+    try:
+        return {
+            "report": JobManagementService(_service(request)).report(
+                **_history_filters(
+                    q=q,
+                    status=status,
+                    repository=repository,
+                    archive=archive,
+                    scope=scope,
+                    created_after=created_after,
+                    created_before=created_before,
+                )
+            )
+        }
+    except (ValueError, JobManagementError) as exc:
+        raise _state_error(exc) from exc
+
+
+@router.get("/report/export")
+async def export_job_report(
+    request: Request,
+    format: str = Query(default="json"),
+    q: str = Query(default="", max_length=300),
+    status: Optional[List[str]] = Query(default=None),
+    repository: str = Query(default="", max_length=1000),
+    archive: str = Query(default="all"),
+    scope: str = Query(default="history"),
+    created_after: Optional[float] = Query(default=None),
+    created_before: Optional[float] = Query(default=None),
+):
+    try:
+        content, media_type, filename = JobManagementService(_service(request)).report_export(
+            format=format,
+            **_history_filters(
+                q=q,
+                status=status,
+                repository=repository,
+                archive=archive,
+                scope=scope,
+                created_after=created_after,
+                created_before=created_before,
+            ),
+        )
+    except (ValueError, JobManagementError) as exc:
+        raise _state_error(exc) from exc
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/manage/bulk")
+async def bulk_manage_jobs(request: Request, payload: Dict[str, Any]):
+    try:
+        return JobManagementService(_service(request)).bulk(
+            str(payload.get("action") or ""),
+            list(payload.get("job_ids") or []),
+            reason=str(payload.get("reason") or ""),
+        )
+    except (ValueError, JobManagementError) as exc:
+        raise _state_error(exc) from exc
+
+
 @router.get("/repositories")
 async def list_job_repositories(
     request: Request,
@@ -121,8 +253,50 @@ async def get_job_repository(repository_id: str, request: Request):
 
 @router.get("/{job_id}")
 async def get_job(job_id: str, request: Request):
-    job = _job_or_404(_service(request), job_id)
-    return {"job": job.to_dict()}
+    service = _service(request)
+    job = _job_or_404(service, job_id)
+    management = JobManagementService(service).state(job.id)
+    return {"job": {**job.to_dict(), **management}}
+
+
+@router.post("/{job_id}/archive")
+async def archive_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
+    try:
+        state = JobManagementService(_service(request)).archive(
+            job_id,
+            reason=str((payload or {}).get("reason") or ""),
+        )
+    except (KeyError, ValueError, JobManagementError) as exc:
+        if isinstance(exc, KeyError):
+            raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
+        raise _state_error(exc) from exc
+    return {"job_id": job_id, **state}
+
+
+@router.post("/{job_id}/restore")
+async def restore_job(job_id: str, request: Request):
+    try:
+        state = JobManagementService(_service(request)).restore(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
+    return {"job_id": job_id, **state}
+
+
+@router.delete("/{job_id}")
+async def delete_historic_job(
+    job_id: str,
+    request: Request,
+    purge_artifacts: bool = Query(default=True),
+):
+    try:
+        return JobManagementService(_service(request)).delete(
+            job_id,
+            purge_artifacts=purge_artifacts,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
+    except (ValueError, JobManagementError) as exc:
+        raise _state_error(exc) from exc
 
 
 @router.get("/{job_id}/receipt")
@@ -149,6 +323,22 @@ async def get_job_diagnostics(
             log_tail_bytes=log_tail_bytes,
         ).to_dict()
     }
+
+
+@router.get("/{job_id}/debug-export")
+async def export_job_debug_bundle(job_id: str, request: Request):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        content = JobManagementService(service).debug_bundle(job_id)
+    except (JobManagementError, ValueError) as exc:
+        raise _state_error(exc) from exc
+    filename = f"mucli-job-{job_id[:12]}-debug.zip"
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{job_id}/diff")

@@ -26,44 +26,36 @@ export type AdvancedSettingsSheetProps = {
 type GroupMeta = {
   title: string;
   description: string;
-  icon: keyof typeof Ionicons.glyphMap;
 };
 
 const GROUP_META: Record<string, GroupMeta> = {
   behavior: {
     title: 'Agent behaviour',
     description: 'Reasoning, streaming, approvals, and iteration controls.',
-    icon: 'options-outline',
   },
   memory: {
     title: 'Memory & scratchpad',
     description: 'Retention limits and short-term working memory.',
-    icon: 'layers-outline',
   },
   'context budgets': {
     title: 'Context & budgets',
     description: 'Provider window allocation, retrieval, skills, and collation.',
-    icon: 'speedometer-outline',
   },
   'provider retry': {
     title: 'Provider resilience',
     description: 'Retry counts, backoff, and total wait limits.',
-    icon: 'refresh-outline',
   },
   ollama: {
     title: 'Ollama',
     description: 'Endpoint, authentication, context, and sampling options.',
-    icon: 'server-outline',
   },
   'loop mode': {
     title: 'Loop automation',
     description: 'Loop detection and autonomous feature execution.',
-    icon: 'repeat-outline',
   },
   other: {
     title: 'Other',
     description: 'Additional session variables exposed by MuCLI.',
-    icon: 'ellipsis-horizontal-outline',
   },
 };
 
@@ -105,7 +97,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
   useEffect(() => {
     if (!visible) return;
     setSearch('');
-    load();
+    void load();
   }, [load, visible]);
 
   const filteredGroups = useMemo(() => {
@@ -117,7 +109,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
         variables: group.variables.filter(variable =>
           variable.key.toLowerCase().includes(query)
           || humanizeKey(variable.key).toLowerCase().includes(query)
-          || variable.help.toLowerCase().includes(query),
+          || String(variable.help || '').toLowerCase().includes(query),
         ),
       }))
       .filter(group => group.variables.length > 0);
@@ -186,12 +178,9 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
   };
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Advanced settings">
+    <ModernBottomSheet visible={visible} onClose={onClose} title="Session settings">
       {!activeSessionName ? (
         <View style={styles.emptyState}>
-          <View style={[styles.emptyIcon, { backgroundColor: colors.bgHover }]}>
-            <Ionicons name="options-outline" size={24} color={colors.textDim} />
-          </View>
           <Text variant="base" style={styles.emptyTitle}>Load a session first</Text>
           <Text variant="sm" dim style={styles.emptyBody}>
             Session variables are stored per session and cannot be edited without an active session.
@@ -200,15 +189,15 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
       ) : (
         <>
           <Text variant="sm" dim style={styles.intro}>
-            Runtime variables override MuCLI defaults for {activeSessionName}. Changed values are marked and can be reset individually.
+            Runtime overrides for {activeSessionName}. Changed values can be reset individually.
           </Text>
 
-          <View style={[styles.searchShell, { backgroundColor: colors.bgHover }]}>
-            <Ionicons name="search-outline" size={18} color={colors.textDim} />
+          <View style={[styles.searchShell, { borderBottomColor: colors.hairline }]}>
+            <Ionicons name="search-outline" size={17} color={colors.textDim} />
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search variables"
+              placeholder="Filter variables"
               placeholderTextColor={colors.textDim}
               autoCapitalize="none"
               autoCorrect={false}
@@ -216,7 +205,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
             />
             {search ? (
               <TouchableOpacity onPress={() => setSearch('')} style={styles.clearButton}>
-                <Ionicons name="close-circle" size={18} color={colors.textDim} />
+                <Ionicons name="close" size={17} color={colors.textDim} />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -226,61 +215,62 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
           ) : filteredGroups.length === 0 ? (
             <Text variant="sm" dim style={styles.noResults}>No variables match this search.</Text>
           ) : (
-            filteredGroups.map(group => {
-              const meta = GROUP_META[group.name] || {
-                title: titleCase(group.name),
-                description: 'Session configuration variables.',
-                icon: 'settings-outline' as const,
-              };
-              const isOpen = search.length > 0 || expanded.has(group.name);
-              const changed = group.variables.filter(variable => !variable.is_default).length;
-              return (
-                <View key={group.name} style={[styles.group, { borderColor: colors.border }]}>
-                  <TouchableOpacity
-                    onPress={() => toggleGroup(group.name)}
-                    activeOpacity={0.72}
-                    style={styles.groupHeader}
-                  >
-                    <View style={[styles.groupIcon, { backgroundColor: colors.bgHover }]}>
-                      <Ionicons name={meta.icon} size={19} color={colors.text} />
-                    </View>
-                    <View style={styles.groupCopy}>
-                      <View style={styles.groupTitleRow}>
-                        <Text variant="base" style={styles.groupTitle}>{meta.title}</Text>
-                        {changed > 0 ? (
-                          <View style={[styles.changedBadge, { backgroundColor: colors.accentSoft }]}>
+            <View style={[styles.groupList, { borderTopColor: colors.hairline }]}>
+              {filteredGroups.map(group => {
+                const meta = GROUP_META[group.name] || {
+                  title: titleCase(group.name),
+                  description: 'Session configuration variables.',
+                };
+                const isOpen = search.length > 0 || expanded.has(group.name);
+                const changed = group.variables.filter(variable => !variable.is_default).length;
+                return (
+                  <View key={group.name} style={[styles.group, { borderBottomColor: colors.hairline }]}>
+                    <TouchableOpacity
+                      onPress={() => toggleGroup(group.name)}
+                      activeOpacity={0.72}
+                      style={styles.groupHeader}
+                    >
+                      <Ionicons
+                        name={isOpen ? 'chevron-down' : 'chevron-forward'}
+                        size={15}
+                        color={colors.textDim}
+                      />
+                      <View style={styles.groupCopy}>
+                        <View style={styles.groupTitleRow}>
+                          <Text variant="sm" style={styles.groupTitle}>{meta.title}</Text>
+                          {changed > 0 ? (
                             <Text variant="xs" style={{ color: colors.accent }}>{changed} changed</Text>
-                          </View>
-                        ) : null}
+                          ) : null}
+                        </View>
+                        <Text variant="xs" dim numberOfLines={2}>{meta.description}</Text>
                       </View>
-                      <Text variant="xs" dim numberOfLines={2}>{meta.description}</Text>
-                    </View>
-                    <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
-                  </TouchableOpacity>
+                      <Text variant="xs" dim>{group.variables.length}</Text>
+                    </TouchableOpacity>
 
-                  {isOpen ? (
-                    <View style={[styles.variableList, { borderTopColor: colors.border }]}>
-                      {group.variables.map(variable => (
-                        <VariableRow
-                          key={variable.key}
-                          variable={variable}
-                          draft={drafts[variable.key] ?? ''}
-                          onDraftChange={value => setDrafts(current => ({ ...current, [variable.key]: value }))}
-                          onSave={value => saveValue(variable, value)}
-                          onReset={() => resetValue(variable)}
-                          saving={savingKey === variable.key}
-                        />
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })
+                    {isOpen ? (
+                      <View style={styles.variableList}>
+                        {group.variables.map(variable => (
+                          <VariableRow
+                            key={variable.key}
+                            variable={variable}
+                            draft={drafts[variable.key] ?? ''}
+                            onDraftChange={value => setDrafts(current => ({ ...current, [variable.key]: value }))}
+                            onSave={value => saveValue(variable, value)}
+                            onReset={() => resetValue(variable)}
+                            saving={savingKey === variable.key}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
           )}
 
           {error ? (
-            <View style={[styles.errorBox, { backgroundColor: colors.bgHover }]}>
-              <Ionicons name="alert-circle-outline" size={18} color={colors.error} />
+            <View style={[styles.errorLine, { borderTopColor: colors.hairline }]}>
+              <Ionicons name="alert-circle-outline" size={17} color={colors.error} />
               <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
             </View>
           ) : null}
@@ -311,7 +301,7 @@ function VariableRow({
   const keyboardType = variable.type === 'int' || variable.type === 'float' ? 'numeric' : 'default';
 
   return (
-    <View style={[styles.variableRow, { borderBottomColor: colors.border }]}>
+    <View style={[styles.variableRow, { borderTopColor: colors.hairline }]}>
       <View style={styles.variableHeader}>
         <View style={styles.variableCopy}>
           <View style={styles.variableTitleRow}>
@@ -322,15 +312,15 @@ function VariableRow({
           {variable.help ? <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4 }}>{variable.help}</Text> : null}
         </View>
         {!variable.is_default ? (
-          <TouchableOpacity onPress={onReset} disabled={saving} style={[styles.resetButton, { backgroundColor: colors.bgHover }]}>
-            <Ionicons name="refresh-outline" size={16} color={colors.textDim} />
+          <TouchableOpacity onPress={onReset} disabled={saving} style={styles.resetButton} accessibilityLabel={`Reset ${variable.key}`}>
+            <Ionicons name="refresh-outline" size={15} color={colors.textDim} />
           </TouchableOpacity>
         ) : null}
       </View>
 
       {isBoolean ? (
         <View style={styles.booleanControl}>
-          <Text variant="xs" dim>{currentBoolean ? 'Enabled' : 'Disabled'}</Text>
+          <Text variant="xs" dim>{currentBoolean ? 'On' : 'Off'}</Text>
           {saving ? (
             <ActivityIndicator size="small" color={colors.accent} />
           ) : (
@@ -338,7 +328,7 @@ function VariableRow({
               value={currentBoolean}
               onValueChange={(value: boolean) => onSave(value)}
               trackColor={{ false: colors.borderStrong, true: colors.accent }}
-              thumbColor={colors.bgLift}
+              thumbColor={colors.glassStrong}
             />
           )}
         </View>
@@ -353,17 +343,18 @@ function VariableRow({
             autoCorrect={false}
             placeholder={variable.secret && variable.is_set ? 'Configured — enter to replace' : valueToDraft(variable.default)}
             placeholderTextColor={colors.textDim}
-            style={[styles.valueInput, { color: colors.text, backgroundColor: colors.bgHover }]}
+            style={[styles.valueInput, { color: colors.text, borderBottomColor: colors.hairline }]}
           />
           <TouchableOpacity
             onPress={() => onSave()}
             disabled={saving || (variable.secret && !draft.trim())}
-            style={[styles.saveButton, { backgroundColor: colors.text }]}
+            style={styles.saveButton}
+            accessibilityLabel={`Save ${variable.key}`}
           >
             {saving ? (
-              <ActivityIndicator size="small" color={colors.bg} />
+              <ActivityIndicator size="small" color={colors.accent} />
             ) : (
-              <Ionicons name="checkmark" size={18} color={colors.bg} />
+              <Ionicons name="checkmark" size={18} color={colors.accent} />
             )}
           </TouchableOpacity>
         </View>
@@ -396,34 +387,53 @@ function titleCase(value: string): string {
 }
 
 const styles = StyleSheet.create({
-  intro: { lineHeight: 20, marginBottom: 14 },
-  searchShell: { minHeight: 44, borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, marginBottom: 14 },
-  searchInput: { flex: 1, minHeight: 44, paddingHorizontal: 9, fontSize: 14 },
-  clearButton: { width: 32, height: 38, alignItems: 'center', justifyContent: 'center' },
+  intro: { lineHeight: 19, marginBottom: 18 },
+  searchShell: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+    marginBottom: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  searchInput: { flex: 1, minHeight: 42, paddingHorizontal: 9, fontSize: 14 },
+  clearButton: { width: 34, height: 40, alignItems: 'center', justifyContent: 'center' },
   loader: { marginVertical: 28 },
   noResults: { textAlign: 'center', marginVertical: 28 },
-  group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 17, marginBottom: 10, overflow: 'hidden' },
-  groupHeader: { minHeight: 78, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10 },
-  groupIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  groupCopy: { flex: 1, marginHorizontal: 12 },
-  groupTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 },
+  groupList: { borderTopWidth: StyleSheet.hairlineWidth },
+  group: { borderBottomWidth: StyleSheet.hairlineWidth },
+  groupHeader: { minHeight: 62, flexDirection: 'row', alignItems: 'center', paddingVertical: 9, gap: 8 },
+  groupCopy: { flex: 1 },
+  groupTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
   groupTitle: { fontWeight: '600' },
-  changedBadge: { borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
-  variableList: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12 },
-  variableRow: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  variableList: { paddingLeft: 22 },
+  variableRow: { paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },
   variableHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  variableCopy: { flex: 1, paddingRight: 10 },
+  variableCopy: { flex: 1, paddingRight: 8 },
   variableTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
   variableTitle: { fontWeight: '600', flex: 1 },
   variableKey: { marginTop: 1, fontFamily: 'monospace' },
-  resetButton: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  booleanControl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
-  editorRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
-  valueInput: { flex: 1, minHeight: 42, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13 },
-  saveButton: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  errorBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 14, padding: 12, marginVertical: 10 },
-  emptyState: { alignItems: 'center', paddingVertical: 36, paddingHorizontal: 18 },
-  emptyIcon: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  emptyTitle: { fontWeight: '700' },
-  emptyBody: { textAlign: 'center', maxWidth: 330, marginTop: 6, lineHeight: 20 },
+  resetButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  booleanControl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 9 },
+  editorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 9 },
+  valueInput: {
+    flex: 1,
+    minHeight: 40,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 2,
+    paddingVertical: 7,
+    fontSize: 13,
+  },
+  saveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  errorLine: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingVertical: 12,
+    marginVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  emptyState: { alignItems: 'flex-start', paddingVertical: 28, paddingHorizontal: 2 },
+  emptyTitle: { fontWeight: '600' },
+  emptyBody: { marginTop: 6, lineHeight: 20 },
 });

@@ -74,11 +74,18 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
         <View
           {...swipeResponder.panHandlers}
-          style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: 16 }]}
+          style={[
+            styles.drawer,
+            {
+              backgroundColor: colors.glassStrong,
+              borderLeftColor: colors.hairline,
+              paddingTop: 16,
+            },
+          ]}
         >
-          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <View style={styles.headerCopy}>
-              <Text variant="xs" dim>MODE PANEL</Text>
+              <Text variant="xs" dim>Active mode</Text>
               <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
                 {activeMode?.display_name || (loading ? 'Loading…' : 'Default mode')}
               </Text>
@@ -86,8 +93,8 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
                 {activeMode?.description || 'No mode-specific explorer is active.'}
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}>
-              <Ionicons name="close" size={20} color={colors.text} />
+            <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
+              <Ionicons name="close" size={20} color={colors.textDim} />
             </TouchableOpacity>
           </View>
 
@@ -96,14 +103,12 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               <ModeContent />
             ) : (
               <View style={styles.emptyState}>
-                <View style={[styles.emptyIcon, { backgroundColor: colors.bgHover }]}>
-                  <Ionicons name="options-outline" size={28} color={colors.textDim} />
-                </View>
+                <Ionicons name="options-outline" size={25} color={colors.textDim} />
                 <Text variant="lg" style={styles.emptyTitle}>No mode explorer</Text>
                 <Text variant="sm" dim style={styles.emptyBody}>
                   Select Feature, Research, Debug, Security, Loop, or Teacher mode to expose its dedicated controls here.
                 </Text>
-                <Button title="Choose a mode" onPress={openModes} style={styles.modeButton} />
+                <Button title="Choose a mode" variant="secondary" onPress={openModes} style={styles.modeButton} />
               </View>
             )}
           </View>
@@ -115,16 +120,30 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, flexDirection: 'row' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)' },
-  drawer: { width: '92%', maxWidth: 520, elevation: 10, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 24, shadowOffset: { width: -8, height: 0 } },
-  header: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  backdrop: { flex: 1, backgroundColor: 'rgba(5,10,16,0.42)' },
+  drawer: {
+    width: '92%',
+    maxWidth: 520,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: -6, height: 0 },
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   headerCopy: { flex: 1, paddingRight: 12 },
-  title: { fontSize: 21, lineHeight: 28, fontWeight: '700', letterSpacing: -0.4, marginTop: 2 },
-  iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 18, lineHeight: 24, fontWeight: '600', letterSpacing: -0.25, marginTop: 2 },
+  iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   content: { flex: 1 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
-  emptyIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
-  emptyTitle: { fontWeight: '700' },
+  emptyTitle: { fontWeight: '600', marginTop: 12 },
   emptyBody: { textAlign: 'center', maxWidth: 330, marginTop: 6, lineHeight: 21 },
   modeButton: { marginTop: 20, minWidth: 180 },
 });

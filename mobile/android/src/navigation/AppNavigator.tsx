@@ -15,7 +15,7 @@ import { SwipeSessionsDrawer } from '../components/SwipeSessionsDrawer';
 import { sessionsApi } from '../api/sessions';
 import { useConnectionStore } from '../store/connection';
 
-import { ChatScreen } from '../screens/ChatScreen';
+import { ChatScreenProduct } from '../screens/ChatScreenProduct';
 import { WorkspaceScreen } from '../screens/WorkspaceScreen';
 import { WorkspaceCategoryScreen } from '../screens/WorkspaceCategoryScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
@@ -118,8 +118,6 @@ function ChatScreenWithChrome() {
       .then(response => {
         if (controller.signal.aborted) return;
         const selected = useConnectionStore.getState().activeSessionName;
-        // Keep a valid user-selected session. Bootstrap from server focus only
-        // when mobile has no usable selection; do not run a focus tug-of-war.
         if (selected && response.loaded.includes(selected)) return;
         const current = response.current && response.loaded.includes(response.current)
           ? response.current
@@ -127,15 +125,14 @@ function ChatScreenWithChrome() {
         setActiveSession(current);
       })
       .catch(() => {
-        // The connection screen owns transport errors. A timeout must not
-        // replace the navigator or clear a previously usable session.
+        // The connection screen owns transport errors.
       });
     return () => controller.abort();
   }, [baseUrl, isConnected, setActiveSession]);
 
   return (
     <EdgeSwipeView onSwipeFromLeft={openSessions} onSwipeFromRight={openMode}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ModernHeader
           onOpenSessions={openSessions}
           onOpenWorkspace={() => activeSessionName ? navRef.current?.navigate('Workspace') : openSessions()}
@@ -144,12 +141,12 @@ function ChatScreenWithChrome() {
           onOpenModes={() => activeSessionName ? navRef.current?.navigate('Modes') : openSessions()}
           onOpenProviders={() => navRef.current?.navigate('Providers')}
           onOpenArtifacts={() => activeSessionName ? navRef.current?.navigate('Artifacts') : openSessions()}
-          onOpenContainers={() => { /* MUCLI_MOBILE_CONTAINER_MENU_V1: active-session access. */ setContainersOpen(true); }}
+          onOpenContainers={() => setContainersOpen(true)}
         />
         {!isConnected ? (
           <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
         ) : activeSessionName ? (
-          <ChatScreen />
+          <ChatScreenProduct />
         ) : (
           <SessionStartPrompt
             onLoadSession={openSessions}
@@ -180,9 +177,9 @@ export function AppNavigator() {
     ...baseTheme,
     colors: {
       ...baseTheme.colors,
-      background: colors.bg,
-      card: colors.bg,
-      border: colors.border,
+      background: 'transparent',
+      card: colors.glassStrong,
+      border: colors.hairline,
       text: colors.text,
       primary: colors.accent,
     },
@@ -194,11 +191,11 @@ export function AppNavigator() {
         screenOptions={{
           animation: 'slide_from_right',
           contentStyle: { backgroundColor: colors.bg },
-          headerStyle: { backgroundColor: colors.bg },
+          headerStyle: { backgroundColor: colors.glassStrong },
           headerTintColor: colors.text,
           headerShadowVisible: false,
           headerBackTitle: '',
-          headerTitleStyle: { fontSize: 17, fontWeight: '600' },
+          headerTitleStyle: { fontSize: 16, fontWeight: '600' },
         }}
       >
         <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />

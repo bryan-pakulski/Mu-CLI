@@ -1,5 +1,5 @@
 import React from 'react';
-import { TextInput, StyleSheet, TextStyle, ViewStyle } from 'react-native';
+import { TextInput, StyleSheet, TextStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 
 export type InputProps = {
@@ -46,9 +46,9 @@ export function Input({
           color: colors.text,
           fontSize: fontSpec.fontSize,
           lineHeight: fontSpec.lineHeight,
-          backgroundColor: colors.bg,
+          backgroundColor: colors.glass,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
+          borderColor: colors.hairline,
           borderRadius: radii.sm,
           paddingHorizontal: spacing.base,
           paddingVertical: spacing.sm,

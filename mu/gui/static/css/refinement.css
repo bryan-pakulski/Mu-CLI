@@ -1,0 +1,438 @@
+/* Final web-shell refinements: compact selectors, clean settings, browser-only Files. */
+
+/* ---------------------------------------------------------------- header */
+.settings-cog-button svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+
+/* ---------------------------------------------------------------- RHS selectors */
+.panel-stage { --panel-tabs-h: 58px; }
+.panel-select-nav {
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: 8;
+    height: var(--panel-tabs-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 14px 0 18px;
+    border-bottom: 1px solid var(--hairline);
+    background: color-mix(in srgb, var(--glass) 54%, transparent);
+    backdrop-filter: blur(24px) saturate(106%);
+    -webkit-backdrop-filter: blur(24px) saturate(106%);
+}
+.panel-selectors {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.panel-selector {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.panel-selector-label {
+    color: var(--text-dimmer);
+    font-size: 10.5px;
+    font-weight: 560;
+    white-space: nowrap;
+}
+.panel-select-nav .panel-view-select {
+    width: auto;
+    min-width: 138px;
+    max-width: 190px;
+    height: 34px;
+    padding: 0 28px 0 10px;
+    border: 1px solid var(--hairline);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--glass-strong) 34%, transparent);
+    color: var(--text-soft);
+    font-size: 11.5px;
+    font-weight: 520;
+    box-shadow: none;
+}
+.panel-select-nav .panel-view-select:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+.panel-select-nav .panel-view-select:focus {
+    border-color: var(--accent-line);
+    background: color-mix(in srgb, var(--glass-strong) 46%, transparent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.panel-stage .mode-panel {
+    inset: var(--panel-tabs-h) 0 0 0 !important;
+}
+.panel-tabs-strip,
+.panel-tab,
+.panel-view-select-wrap { display: none !important; }
+.panel-select-nav .panel-view-select { display: block !important; }
+.panel-select-nav .panel-selector { display: flex !important; }
+.panel-tabs-close {
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dimmer);
+    font-size: 16px;
+}
+.panel-tabs-close:hover { background: var(--bg-hover); color: var(--text); }
+
+/* ---------------------------------------------------------------- composer */
+/* One input pane only. The older crystal layer drew a second frosted pseudo-
+ * surface behind the real form, which made the bottom of chat look stacked. */
+.composer {
+    padding-top: 10px !important;
+}
+.composer::before {
+    content: none !important;
+    display: none !important;
+}
+
+/* Mode + session settings are a separate utility line. Keep them in normal
+ * flow so textarea growth can never overlap the controls. */
+.composer-toolbar {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 100%;
+    min-height: 28px;
+    margin: 0 0 16px;
+    padding: 0 2px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+.composer-mode-pill,
+.composer-settings-btn {
+    min-height: 28px;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    color: var(--text-dimmer) !important;
+}
+.composer-mode-pill:hover,
+.composer-settings-btn:hover,
+.composer-mode-pill.open,
+.composer-settings-btn.open {
+    color: var(--text-soft) !important;
+}
+
+/* The real form is the sole composer surface. */
+.composer form {
+    background: color-mix(in srgb, var(--glass-strong) 72%, transparent) !important;
+    backdrop-filter: blur(30px) saturate(108%);
+    -webkit-backdrop-filter: blur(30px) saturate(108%);
+}
+
+/* Status remains available when needed, but never reads as another pane. */
+.composer .hint {
+    min-height: 0 !important;
+    margin-top: 7px !important;
+    padding: 0 4px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+/* ---------------------------------------------------------------- settings */
+.settings-pane {
+    max-width: 780px;
+}
+.settings-pane-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--hairline);
+}
+.settings-pane-title {
+    margin: 0;
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -.018em;
+}
+.settings-pane-copy {
+    margin: 5px 0 0;
+    max-width: 500px;
+    color: var(--text-dim);
+    font-size: 11.5px;
+    line-height: 1.55;
+}
+.settings-skills-button {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0 12px !important;
+    border: 1px solid var(--hairline) !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: var(--text-soft) !important;
+    font-size: 11.5px !important;
+    font-weight: 560 !important;
+    box-shadow: none !important;
+}
+.settings-skills-button:hover {
+    border-color: var(--border-strong) !important;
+    background: var(--bg-hover) !important;
+    color: var(--text) !important;
+}
+.settings-filter {
+    margin: 0 0 26px;
+}
+.settings-filter input {
+    width: 100%;
+    height: 38px;
+    padding: 0 3px;
+    border: 0;
+    border-bottom: 1px solid var(--hairline);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    box-shadow: none;
+}
+.settings-filter input:focus {
+    border-bottom-color: var(--accent-line);
+    background: transparent;
+    box-shadow: none;
+}
+.settings-pane .var-group {
+    margin: 0;
+    border-bottom: 1px solid var(--hairline);
+}
+.settings-pane .var-group:first-of-type {
+    border-top: 1px solid var(--hairline);
+}
+.settings-pane .var-group-head {
+    width: 100%;
+    min-height: 50px;
+    padding: 0 !important;
+    display: grid;
+    grid-template-columns: 16px minmax(0,1fr) auto;
+    gap: 9px;
+    align-items: center;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--text-soft);
+    text-align: left;
+}
+.settings-pane .var-group-head:hover { color: var(--text); }
+.settings-pane .var-group-head .caret {
+    color: var(--text-dimmer);
+    transition: transform .16s ease;
+}
+.settings-pane .var-group.open .var-group-head .caret { transform: rotate(90deg); }
+.settings-pane .var-group-name {
+    font-size: 12.5px;
+    font-weight: 610;
+    letter-spacing: -.006em;
+}
+.settings-pane .var-group-count {
+    color: var(--text-dimmer);
+    font-size: 10px;
+    font-weight: 500;
+}
+.settings-pane .var-group-body {
+    padding: 0 !important;
+}
+.settings-pane .var-row {
+    min-height: 68px;
+    margin: 0 !important;
+    padding: 14px 0 14px 25px !important;
+    display: grid !important;
+    grid-template-columns: minmax(250px, 1fr) minmax(220px, 320px);
+    gap: 34px;
+    align-items: center;
+    border: 0 !important;
+    border-top: 1px solid color-mix(in srgb, var(--hairline) 68%, transparent) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transition: background-color .14s ease;
+}
+.settings-pane .var-row:hover {
+    background: color-mix(in srgb, var(--glass) 18%, transparent) !important;
+}
+.settings-pane .var-head {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+}
+.settings-pane .var-key {
+    min-width: 0;
+    color: var(--text-soft);
+    font-family: var(--sans);
+    font-size: 11.75px;
+    font-weight: 560;
+    letter-spacing: -.005em;
+    overflow-wrap: anywhere;
+}
+.settings-pane .var-type {
+    color: var(--text-dimmer) !important;
+    font-size: 9.5px;
+    font-weight: 500;
+}
+.settings-pane .var-help-glyph {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--hairline);
+    border-radius: 50%;
+    color: var(--text-dimmer) !important;
+    font-size: 9px;
+}
+.settings-pane .var-head .icon-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    color: var(--text-dimmer);
+}
+.settings-pane .var-row > input,
+.settings-pane .var-bool {
+    justify-self: stretch;
+    width: 100%;
+}
+.settings-pane .var-row > input {
+    height: 36px;
+    padding: 0 3px;
+    border: 0;
+    border-bottom: 1px solid var(--hairline);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    box-shadow: none;
+}
+.settings-pane .var-row > input:focus {
+    border-bottom-color: var(--accent-line);
+    background: transparent;
+    box-shadow: none;
+}
+.settings-pane .var-bool {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+    color: var(--text-dim);
+    font-size: 11px;
+}
+.settings-pane .var-bool input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+}
+
+/* ---------------------------------------------------------------- browser-only files */
+.files-browser-panel {
+    display: flex;
+    flex-direction: column;
+}
+.files-browser-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+}
+.files-browser-head .panel-title {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 640;
+    letter-spacing: -.015em;
+}
+.files-browser-head .panel-subtitle {
+    margin-top: 5px;
+    max-width: 440px;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.5;
+}
+.files-refresh {
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    color: var(--text-dim);
+}
+.files-browser {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
+}
+.files-root + .files-root { margin-top: 24px; }
+.files-root-label {
+    padding: 0 8px 8px;
+    color: var(--text-dimmer);
+    font-size: 9.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.files-entry {
+    width: 100%;
+    min-height: 36px;
+    padding: 0 8px;
+    display: grid;
+    grid-template-columns: 14px 17px minmax(0,1fr);
+    gap: 7px;
+    align-items: center;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-dim);
+    text-align: left;
+}
+.files-entry:hover { background: var(--bg-hover); color: var(--text-soft); }
+.files-entry.selected { color: var(--text); background: color-mix(in srgb, var(--glass) 24%, transparent); }
+.files-entry.indent { padding-left: 26px; }
+.files-entry-icon { width: 15px; height: 15px; color: var(--text-dimmer); }
+.files-entry-chevron { width: 14px; color: var(--text-dimmer); text-align: center; }
+.files-entry .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+}
+.files-subtree { margin-left: 7px; }
+.files-empty-directory { padding-left: 48px; font-size: 10.5px; }
+.files-empty { padding: 34px 0; }
+.files-empty-title { color: var(--text); font-size: 14px; font-weight: 610; }
+.files-error { margin-bottom: 14px; color: var(--err); font-size: 11px; }
+
+@media (max-width: 760px) {
+    .panel-select-nav { padding-left: 10px; gap: 8px; }
+    .panel-selector-label { display: none; }
+    .panel-selectors { flex: 1; gap: 7px; }
+    .panel-selector { flex: 1; }
+    .panel-select-nav .panel-view-select { min-width: 0; max-width: none; width: 100%; }
+    .settings-pane-head { align-items: flex-start; flex-direction: column; }
+    .settings-pane .var-row { grid-template-columns: 1fr; gap: 10px; padding-left: 18px !important; }
+    .settings-pane .var-bool { justify-content: flex-start; }
+    .composer-toolbar { margin-bottom: 12px; }
+}

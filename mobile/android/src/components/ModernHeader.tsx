@@ -44,8 +44,6 @@ export function ModernHeader({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [yoloSyncing, setYoloSyncing] = useState(false);
 
-  // MUCLI_MOBILE_RECONNECT_YOLO_V1: server-backed YOLO. The previous switch
-  // only changed local Zustand state, so the running Session kept prompting.
   const refreshYolo = useCallback(async () => {
     if (!isConnected || !activeSessionName) return;
     try {
@@ -76,7 +74,7 @@ export function ModernHeader({
       setYolo(Boolean(response.value));
     } catch (error) {
       setYolo(previous);
-      Alert.alert('Could not update YOLO mode', String(error));
+      Alert.alert('Could not update auto-approve', String(error));
     } finally {
       setYoloSyncing(false);
     }
@@ -96,9 +94,9 @@ export function ModernHeader({
         style={[
           styles.container,
           {
-            backgroundColor: colors.bg,
-            borderBottomColor: colors.border,
-            paddingTop: insets.top + 4,
+            backgroundColor: colors.glass,
+            borderBottomColor: colors.hairline,
+            paddingTop: insets.top + 3,
           },
         ]}
       >
@@ -106,10 +104,9 @@ export function ModernHeader({
           accessibilityRole="button"
           accessibilityLabel="Open sessions"
           onPress={onOpenSessions}
-          style={[styles.iconButton, { backgroundColor: colors.bgLift }]}
+          style={styles.iconButton}
         >
-          {/* MUCLI_MOBILE_MU_LOGO_V1: same μ mark as the web GUI favicon. */}
-          <Text style={[styles.brandMark, { color: colors.accent }]}>μ</Text>
+          <Text style={[styles.brandMark, { color: colors.textSoft }]}>μ</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -124,75 +121,80 @@ export function ModernHeader({
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
               {sessionTitle}
             </Text>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.success : colors.error }]} />
+            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.textDim : colors.error }]} />
           </View>
           <Text style={[styles.subtitle, { color: isConnected ? colors.textDim : colors.error }]} numberOfLines={1}>
             {sessionMeta}
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Open settings"
-          onPress={() => setMenuOpen(true)}
-          style={[styles.iconButton, { backgroundColor: colors.bgLift }]}
-        >
-          <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Open Trace Analyzer"
+            disabled={!activeSessionName}
+            onPress={onOpenTraces}
+            style={[styles.iconButton, !activeSessionName && styles.disabledAction]}
+          >
+            <Ionicons name="analytics-outline" size={19} color={colors.textDim} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+            onPress={() => setMenuOpen(true)}
+            style={styles.iconButton}
+          >
+            <Ionicons name="settings-outline" size={20} color={colors.textDim} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ModernBottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title="Settings">
         {!isConnected && (
           <TouchableOpacity
             onPress={() => openFromMenu(onOpenConnection)}
-            style={[styles.connectionBanner, { backgroundColor: colors.accentSoft }]}
+            style={[styles.connectionBanner, { borderBottomColor: colors.hairline }]}
           >
-            <View style={[styles.connectionIcon, { backgroundColor: colors.bg }]}>
-              <Ionicons name="wifi-outline" size={20} color={colors.accent} />
-            </View>
+            <Ionicons name="wifi-outline" size={20} color={colors.accent} />
             <View style={styles.menuCopy}>
-              <Text variant="base" style={{ color: colors.accent, fontWeight: '700' }}>Connect to MuCLI</Text>
-              <Text variant="xs" style={{ color: colors.textSoft }}>Configure a reachable GUI server</Text>
+              <Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>Connect to MuCLI</Text>
+              <Text variant="xs" style={{ color: colors.textDim }}>Configure a reachable GUI server</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+            <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
           </TouchableOpacity>
         )}
 
-        <SettingsSection title="SESSION">
+        <SettingsSection title="Session">
           <MenuRow icon="options-outline" label="Mode" detail="Choose the active agent strategy" onPress={() => openFromMenu(onOpenModes)} />
           <MenuRow icon="server-outline" label="Provider and model" detail={[activeProvider, activeModel].filter(Boolean).join(' · ') || 'Not selected'} onPress={() => openFromMenu(onOpenProviders)} />
           <MenuRow icon="wifi-outline" label="Connection" detail={isConnected ? 'Connected to MuCLI' : 'Not connected'} onPress={() => openFromMenu(onOpenConnection)} />
           <MenuRow
-            icon="download-outline"
-            label="Artifacts"
-            detail={activeSessionName ? 'Visualizations, model artifacts, and uploads' : 'Load a session to view artifacts'}
+            icon="document-attach-outline"
+            label="Session files"
+            detail={activeSessionName ? 'Visualizations, model artifacts, and uploads' : 'Load a session to view files'}
             onPress={() => openFromMenu(onOpenArtifacts)}
           />
         </SettingsSection>
 
-        {/* MUCLI_MOBILE_CONTAINER_MENU_V1: keep container controls reachable from an active session. */}
-        <SettingsSection title="CONTAINERS">
-          <MenuRow
-            icon="cube-outline"
-            label="Container management"
-            detail="Create, inspect, start, stop, and remove containers"
-            onPress={() => openFromMenu(onOpenContainers)}
-          />
-        </SettingsSection>
-
-        <SettingsSection title="BEHAVIOUR">
+        <SettingsSection title="Runtime">
           <ToggleRow
             icon="flash-outline"
             label="Auto-approve writes"
-            detail={yoloSyncing ? 'Updating session…' : 'YOLO mode · server session setting'}
+            detail={yoloSyncing ? 'Updating session…' : 'Apply to this running session'}
             value={yolo}
             onValueChange={updateYolo}
             disabled={!isConnected || !activeSessionName || yoloSyncing}
           />
           <MenuRow icon="grid-outline" label="Workspace tools" detail="Context, workflows, and runtime controls" onPress={() => openFromMenu(onOpenWorkspace)} />
+          <MenuRow
+            icon="cube-outline"
+            label="Containers"
+            detail="Create, inspect, start, stop, and remove containers"
+            onPress={() => openFromMenu(onOpenContainers)}
+          />
         </SettingsSection>
 
-        <SettingsSection title="ADVANCED">
+        <SettingsSection title="Configuration">
           <MenuRow
             icon="options-outline"
             label="Session variables"
@@ -201,7 +203,7 @@ export function ModernHeader({
           />
         </SettingsSection>
 
-        <SettingsSection title="APPEARANCE">
+        <SettingsSection title="Appearance">
           <ToggleRow
             icon={isDark ? 'moon-outline' : 'sunny-outline'}
             label="Dark appearance"
@@ -210,11 +212,6 @@ export function ModernHeader({
             onValueChange={() => toggleTheme()}
           />
         </SettingsSection>
-
-        <SettingsSection title="DIAGNOSTICS">
-          <MenuRow icon="analytics-outline" label="Session trace" detail="Context, tokens, tools, latency, and compaction" onPress={() => openFromMenu(onOpenTraces)} />
-        </SettingsSection>
-
       </ModernBottomSheet>
       <AdvancedSettingsSheet visible={advancedOpen} onClose={() => setAdvancedOpen(false)} />
     </>
@@ -226,7 +223,7 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   return (
     <View style={styles.section}>
       <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>{title}</Text>
-      <View style={[styles.sectionBody, { borderColor: colors.border }]}>{children}</View>
+      <View style={[styles.sectionBody, { borderTopColor: colors.hairline }]}>{children}</View>
     </View>
   );
 }
@@ -241,15 +238,19 @@ type MenuRowProps = {
 function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.68} style={styles.menuRow}>
-      <View style={[styles.menuIcon, { backgroundColor: colors.bgHover }]}>
-        <Ionicons name={icon} size={20} color={colors.text} />
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.68}
+      style={[styles.menuRow, { borderBottomColor: colors.hairline }]}
+    >
+      <View style={styles.menuIcon}>
+        <Ionicons name={icon} size={19} color={colors.textDim} />
       </View>
       <View style={styles.menuCopy}>
-        <Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>{label}</Text>
+        <Text variant="sm" style={{ color: colors.text, fontWeight: '600' }}>{label}</Text>
         <Text variant="xs" dim numberOfLines={2}>{detail}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+      <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
     </TouchableOpacity>
   );
 }
@@ -263,12 +264,12 @@ type ToggleRowProps = Omit<MenuRowProps, 'onPress'> & {
 function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false }: ToggleRowProps) {
   const { colors } = useTheme();
   return (
-    <View style={styles.menuRow}>
-      <View style={[styles.menuIcon, { backgroundColor: colors.bgHover }]}>
-        <Ionicons name={icon} size={20} color={colors.text} />
+    <View style={[styles.menuRow, { borderBottomColor: colors.hairline }]}>
+      <View style={styles.menuIcon}>
+        <Ionicons name={icon} size={19} color={colors.textDim} />
       </View>
       <View style={styles.menuCopy}>
-        <Text variant="base" style={{ fontWeight: '600' }}>{label}</Text>
+        <Text variant="sm" style={{ color: colors.text, fontWeight: '600' }}>{label}</Text>
         <Text variant="xs" dim>{detail}</Text>
       </View>
       <Switch
@@ -276,34 +277,57 @@ function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false
         onValueChange={onValueChange}
         disabled={disabled}
         trackColor={{ false: colors.borderStrong, true: colors.accent }}
-        thumbColor={colors.bgLift}
+        thumbColor={colors.glassStrong}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { minHeight: 72, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  iconButton: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  container: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingBottom: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 1 },
+  iconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  disabledAction: { opacity: 0.32 },
   brandMark: {
     fontFamily: 'serif',
-    fontSize: 32,
-    lineHeight: 38,
+    fontSize: 30,
+    lineHeight: 36,
     fontWeight: '400',
     textAlign: 'center',
     includeFontPadding: false,
   },
-  titleBlock: { flex: 1, alignItems: 'center', paddingHorizontal: 12 },
+  titleBlock: { flex: 1, alignItems: 'flex-start', paddingHorizontal: 8 },
   titleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 7 },
-  title: { maxWidth: '92%', fontSize: 15, lineHeight: 20, fontWeight: '600' },
-  subtitle: { maxWidth: '100%', marginTop: 1, fontSize: 11, lineHeight: 15 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  connectionBanner: { minHeight: 68, flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 12, marginBottom: 18 },
-  connectionIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  section: { marginBottom: 18 },
-  sectionTitle: { fontWeight: '700', letterSpacing: 0.8, marginBottom: 7, marginLeft: 4 },
-  sectionBody: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 17, paddingHorizontal: 12, overflow: 'hidden' },
-  menuRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  menuIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  menuCopy: { flex: 1, marginHorizontal: 14 },
+  title: { maxWidth: '92%', fontSize: 14.5, lineHeight: 19, fontWeight: '600', letterSpacing: -0.15 },
+  subtitle: { maxWidth: '100%', marginTop: 1, fontSize: 10.5, lineHeight: 14 },
+  statusDot: { width: 5, height: 5, borderRadius: 3 },
+  connectionBanner: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 18,
+  },
+  section: { marginBottom: 21 },
+  sectionTitle: { fontWeight: '600', marginBottom: 7, marginLeft: 2 },
+  sectionBody: { borderTopWidth: StyleSheet.hairlineWidth },
+  menuRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  menuIcon: { width: 28, alignItems: 'flex-start', justifyContent: 'center' },
+  menuCopy: { flex: 1, marginHorizontal: 8 },
 });

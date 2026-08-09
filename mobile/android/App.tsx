@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from './src/theme/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { PromptHost } from './src/components/PromptHost';
+import { AtmosphericBackground } from './src/components/AtmosphericBackground';
 import { useConnectionStore } from './src/store/connection';
 
 export default function App() {
@@ -35,10 +36,10 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <>
+        <AtmosphericBackground>
           <AppNavigator />
           <PromptHost />
-        </>
+        </AtmosphericBackground>
       </ThemeProvider>
     </SafeAreaProvider>
   );

@@ -1,0 +1,35 @@
+<nav class="panel-tabs panel-select-nav" aria-label="Workspace views">
+    <div class="panel-selectors">
+        <label class="panel-selector">
+            <span class="panel-selector-label">View mode</span>
+            <select class="panel-view-select panel-mode-select"
+                    :value="$store.mode.modes.some(item => item.name === $store.mode.active) ? $store.mode.active : ''"
+                    @change="$event.target.value && $store.mode.setView($event.target.value)"
+                    aria-label="Select view mode">
+                <option value="">Select mode</option>
+                <template x-for="m in $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name))" :key="'panel-mode-select-' + m.name">
+                    <option :value="m.name" :disabled="m.disabled" x-text="m.display_name"></option>
+                </template>
+            </select>
+        </label>
+
+        <label class="panel-selector">
+            <span class="panel-selector-label">Tooling</span>
+            <select class="panel-view-select panel-tool-select"
+                    :value="$store.mode.views.some(item => !item.external && item.name === $store.mode.active) ? $store.mode.active : ''"
+                    @change="$event.target.value && $store.mode.setView($event.target.value)"
+                    aria-label="Select tooling view">
+                <option value="">Select tool</option>
+                <template x-for="v in $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name))" :key="'panel-tool-select-' + v.name">
+                    <option :value="v.name" :disabled="v.disabled" x-text="v.display_name"></option>
+                </template>
+            </select>
+        </label>
+    </div>
+
+    <button type="button"
+            class="panel-tabs-close"
+            @click="$store.layout.panelOpen = false"
+            title="Close panel"
+            aria-label="Close workspace panel">×</button>
+</nav>

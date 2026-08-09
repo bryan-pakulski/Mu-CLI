@@ -7,11 +7,19 @@ WORK_DIAGNOSTICS = ROOT / "mu" / "gui" / "static" / "js" / "work_diagnostics.js"
 WORK_TRACE = ROOT / "mu" / "gui" / "static" / "js" / "work_trace.js"
 WORK_MANAGEMENT = ROOT / "mu" / "gui" / "static" / "js" / "work_management.js"
 WORK_MANAGEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "work_management.css"
+JOB_TRACE_HTML = ROOT / "mu" / "gui" / "static" / "job_trace.html"
+JOB_TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace.js"
+JOB_TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "job_trace.css"
+JOB_ANALYSIS_ROUTER = ROOT / "mu" / "gui" / "routers" / "job_analysis.py"
+ROUTERS_INIT = ROOT / "mu" / "gui" / "routers" / "__init__.py"
 JOBS_ROUTER = ROOT / "mu" / "gui" / "routers" / "jobs.py"
 COMMANDS = ROOT / "mu" / "commands" / "__init__.py"
 JOB_DIAGNOSTICS = ROOT / "mu" / "commands" / "job_diagnostics.py"
+JOB_ANALYSIS_COMMAND = ROOT / "mu" / "commands" / "job_analysis.py"
 MOBILE_API = ROOT / "mobile" / "android" / "src" / "api" / "jobs.ts"
 MOBILE_DETAIL = ROOT / "mobile" / "android" / "src" / "screens" / "JobDetailScreen.tsx"
+MOBILE_ANALYSIS = ROOT / "mobile" / "android" / "src" / "screens" / "JobAnalysisScreen.tsx"
+MOBILE_NAV = ROOT / "mobile" / "android" / "src" / "navigation" / "AppNavigator.tsx"
 
 
 def test_web_work_page_loads_shared_structured_job_diagnostics():
@@ -73,6 +81,30 @@ def test_web_job_management_queries_archives_reports_and_exports():
     assert '@router.delete("/{job_id}")' in router
 
 
+def test_web_job_trace_analyzer_is_first_class_and_comparable():
+    template = WORK_TEMPLATE.read_text(encoding="utf-8")
+    html = JOB_TRACE_HTML.read_text(encoding="utf-8")
+    script = JOB_TRACE_JS.read_text(encoding="utf-8")
+    css = JOB_TRACE_CSS.read_text(encoding="utf-8")
+    router = JOB_ANALYSIS_ROUTER.read_text(encoding="utf-8")
+    routers_init = ROUTERS_INIT.read_text(encoding="utf-8")
+
+    assert 'href="/static/job_trace.html"' in template
+    assert 'Job Trace Analyzer' in html
+    assert 'compare with…' in html
+    assert 'Attempts & cost' in html
+    assert 'Execution timeline' in html
+    assert '/api/jobs/${encodeURIComponent(jobId)}/analysis' in script
+    assert '/api/jobs/analysis/compare?' in script
+    assert 'renderPhaseChart' in script
+    assert 'renderAttemptChart' in script
+    assert 'Export analysis JSON' in html
+    assert '.jt-compare-grid' in css
+    assert '@router.get("/analysis/compare")' in router
+    assert '@router.get("/{job_id}/analysis")' in router
+    assert '_jobs.router.include_router(_job_analysis.router)' in routers_init
+
+
 def test_tui_registers_shared_job_diagnostics_command():
     commands = COMMANDS.read_text(encoding="utf-8")
     diagnostic = JOB_DIAGNOSTICS.read_text(encoding="utf-8")
@@ -83,6 +115,18 @@ def test_tui_registers_shared_job_diagnostics_command():
     assert 'build_job_diagnostics' in diagnostic
     assert 'worker_log_tail' in diagnostic
     assert 'attempted_refs' in diagnostic
+
+
+def test_tui_registers_retrospective_job_trace_command():
+    commands = COMMANDS.read_text(encoding="utf-8")
+    analysis = JOB_ANALYSIS_COMMAND.read_text(encoding="utf-8")
+
+    assert 'from . import job_analysis' in commands
+    assert '"/jobtrace"' in analysis
+    assert '"/job-analysis"' in analysis
+    assert 'build_job_analysis' in analysis
+    assert 'Time by lifecycle state' in analysis
+    assert 'Top tools' in analysis
 
 
 def test_mobile_exposes_shared_diagnostics_and_worker_log_tail():
@@ -98,3 +142,17 @@ def test_mobile_exposes_shared_diagnostics_and_worker_log_tail():
     assert 'diagnostics.worker_log_tail' in mobile
     # Old status events also reveal their underlying payload.error now.
     assert "const underlying = String(payload.error || '');" in mobile
+
+
+def test_mobile_job_review_links_to_native_job_performance_analyzer():
+    nav = MOBILE_NAV.read_text(encoding="utf-8")
+    screen = MOBILE_ANALYSIS.read_text(encoding="utf-8")
+
+    assert "JobAnalysis: { jobId: string }" in nav
+    assert "navigation.navigate('JobAnalysis'" in nav
+    assert 'component={JobAnalysisScreen}' in nav
+    assert '/api/jobs/${encodeURIComponent(jobId)}/analysis' in screen
+    assert 'Job performance' in screen
+    assert 'Lifecycle' in screen
+    assert 'Tool profile' in screen
+    assert 'Interventions & failures' in screen

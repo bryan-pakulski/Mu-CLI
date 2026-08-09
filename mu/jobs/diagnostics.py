@@ -32,6 +32,9 @@ DIAGNOSTIC_EVENT_TYPES = frozenset(
         "worktree_add_started",
         "worktree_prepare_failed",
         "worktree_ready",
+        "worktree_removed",
+        "review_branch_ready",
+        "review_branch_materialization_failed",
         "checkpoint_failed",
         "runtime_error",
         "verification_worker_error",
@@ -87,6 +90,7 @@ def _event_failure(event: JobEvent) -> bool:
         event.event_type
         in {
             "worktree_prepare_failed",
+            "review_branch_materialization_failed",
             "worker_spawn_failed",
             "runtime_error",
             "verification_worker_error",

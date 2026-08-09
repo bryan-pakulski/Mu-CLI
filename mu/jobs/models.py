@@ -61,8 +61,10 @@ ALLOWED_TRANSITIONS = {
         JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.CONFLICTED,
         JobStatus.FAILED, JobStatus.CANCELLED,
     },
-    # Reviewer feedback is a first-class loop: keep the same durable job,
-    # branch, worktree and session, but place it back on the scheduler queue.
+    # Reviewer feedback is a first-class loop. READY_FOR_REVIEW keeps the same
+    # durable job + branch, but its execution worktree has already been retired.
+    # Requeueing creates a fresh temporary worktree on that branch if more agent
+    # work is required.
     JobStatus.READY_FOR_REVIEW: {
         JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CONFLICTED,
         JobStatus.MERGED, JobStatus.CANCELLED,
@@ -201,18 +203,44 @@ class Job:
     def needs_attention(self) -> bool:
         return self.status == JobStatus.NEEDS_HUMAN or self.attention_reason != AttentionReason.NONE
 
+    @property
+    def review_branch(self) -> str:
+        """Normal Git branch that is authoritative once execution is finished."""
+        value = str((self.metadata or {}).get("review_branch") or "").strip()
+        if value:
+            return value
+        if self.status == JobStatus.READY_FOR_REVIEW:
+            return str(self.branch or "").strip()
+        return ""
+
+    @property
+    def review_head_sha(self) -> str:
+        return str((self.metadata or {}).get("review_head_sha") or "").strip()
+
+    @property
+    def review_artifact(self) -> str:
+        """Expose review semantics without making callers infer worktree state."""
+        if self.review_branch:
+            return "branch"
+        if self.worktree:
+            return "worktree"
+        return "none"
+
     def to_dict(self) -> Dict[str, Any]:
         value = asdict(self)
         value["status"] = self.status.value
         value["attention_reason"] = self.attention_reason.value
         value["terminal"] = self.terminal
         value["needs_attention"] = self.needs_attention
+        value["review_artifact"] = self.review_artifact
+        value["review_branch"] = self.review_branch
+        value["review_head_sha"] = self.review_head_sha
         return value
 
 
 @dataclass
 class JobEvent:
-    id: int
+    id: str
     job_id: str
     event_type: str
     from_status: Optional[JobStatus]

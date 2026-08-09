@@ -10,9 +10,16 @@ on:
       - 'mu/ui/exceptions.py'
       - 'mu/commands/job.py'
       - 'mu/gui/routers/jobs.py'
-      - 'mu/gui/routers/job_board.py'
       - 'mu/gui/app.py'
+      - 'mu/gui/templates/index.html'
+      - 'mu/gui/templates/work.html'
+      - 'mu/gui/static/css/work.css'
+      - 'mu/gui/static/js/work.js'
       - 'mobile/android/src/api/jobs.ts'
+      - 'mobile/android/src/navigation/AppNavigator.tsx'
+      - 'mobile/android/src/components/ModernHeader.tsx'
+      - 'mobile/android/src/screens/WorkScreen.tsx'
+      - 'mobile/android/src/screens/JobDetailScreen.tsx'
       - 'tests/test_job*.py'
       - '.github/workflows/durable-jobs.yml'
 
@@ -48,3 +55,28 @@ jobs:
           tests/test_job_worker.py
           tests/test_job_verification.py
           tests/test_job_receipt.py
+          tests/test_job_review.py
+          tests/test_job_review_surfaces.py
+
+  mobile-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile/android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/android/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Typecheck mobile M4 surface
+        run: npm run typecheck

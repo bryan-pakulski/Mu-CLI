@@ -3,6 +3,15 @@ import { api } from './client';
 export type JobStatus = 'queued' | 'preparing' | 'running' | 'needs_human' | 'verifying' | 'ready_for_review' | 'recovering' | 'conflicted' | 'failed' | 'timed_out' | 'budget_exceeded' | 'environment_error' | 'cancelled' | 'merged';
 export type AttentionReason = '' | 'question' | 'approval_required' | 'ambiguous_requirement' | 'secret_required' | 'merge_conflict' | 'budget_exceeded' | 'environment_failure' | 'test_failure' | 'unsafe_action' | 'worker_lost' | 'provider_error';
 
+export interface JobExecutionProfile {
+  provider: string;
+  model: string;
+  agent_mode: string;
+  session_type: 'chat' | 'workspace' | 'container';
+  auto_approve_writes: boolean;
+  [key: string]: unknown;
+}
+
 export interface EngineeringJob {
   id: string;
   title: string;
@@ -28,6 +37,7 @@ export interface EngineeringJob {
   branch: string;
   worktree: string;
   environment: Record<string, unknown>;
+  execution: JobExecutionProfile;
   metadata: Record<string, unknown>;
   session_name: string;
   worker_id: string;
@@ -77,6 +87,7 @@ export interface CreateJobInput {
   max_retries?: number;
   max_subagents?: number;
   environment?: Record<string, unknown>;
+  execution?: Partial<JobExecutionProfile>;
   metadata?: Record<string, unknown>;
 }
 

@@ -1,13 +1,24 @@
 from __future__ import annotations
 
-from mu.jobs import JobService, JobSpec, JobStore
+from mu.jobs import JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.management import JobManagementService
 from mu.jobs.performance import build_job_performance, compare_job_performance
 from mu.jobs.verification import VerificationRun, VerificationStore
 
 
-def make_service(tmp_path):
-    return JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
+class Clock:
+    def __init__(self, value: float = 1000.0):
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += seconds
+
+
+def make_service(tmp_path, clock=None):
+    return JobService(JobStore(str(tmp_path / "jobs.sqlite3"), clock=clock or Clock()))
 
 
 def save_verification(store, job_id, *, run_id, started, passed):
@@ -51,10 +62,6 @@ def test_first_pass_verification_tracks_original_run_not_total_run_count(tmp_pat
     service = make_service(tmp_path)
     job = service.create(JobSpec(title="Verification history"))
     verification_store = VerificationStore(service.store)
-
-    # The first verification passes. A later reviewer-requested change can
-    # legitimately cause another verification run without erasing first-pass
-    # success for the original implementation.
     save_verification(verification_store, job.id, run_id="first", started=100, passed=True)
     save_verification(verification_store, job.id, run_id="second", started=200, passed=False)
 
@@ -62,6 +69,53 @@ def test_first_pass_verification_tracks_original_run_not_total_run_count(tmp_pat
 
     assert [run["id"] for run in analysis["verifications"]] == ["first", "second"]
     assert analysis["summary"]["first_pass_verification"] is True
+
+
+def test_environment_error_residence_is_stopped_not_active_execution(tmp_path):
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+    job = service.create(JobSpec(title="Worktree failure"))
+
+    clock.advance(10)
+    service.transition(job.id, JobStatus.PREPARING, reason="worker preparing isolated workspace")
+    clock.advance(5)
+    service.transition(
+        job.id,
+        JobStatus.ENVIRONMENT_ERROR,
+        reason="could not prepare isolated Git worktree",
+        payload={"stage": "worktree_add", "error": "fatal: path already registered"},
+    )
+    # The job remains stopped for 37 minutes. This is state residence, not
+    # 37 minutes of active environment-error work.
+    clock.advance(37 * 60)
+    service.retry(job.id, reason="operator retry")
+    clock.advance(1)
+    service.cancel(job.id, reason="test complete")
+
+    analysis = build_job_performance(service, job.id)
+    interval = next(item for item in analysis["phase_intervals"] if item["status"] == "environment_error")
+
+    assert interval["classification"] == "stopped"
+    assert interval["active_execution"] is False
+    assert interval["passive_residence"] is True
+    assert interval["duration_seconds"] == 37 * 60
+    assert interval["agent_event_count"] == 0
+    assert "not agent execution time" in interval["interpretation"] or "no worker/agent activity" in interval["interpretation"]
+    assert interval["entry_event"]["summary"].startswith("preparing → environment_error")
+    assert interval["exit_event"]["summary"].startswith("environment_error → queued")
+    assert analysis["summary"]["stopped_seconds"] == 37 * 60
+    assert analysis["summary"]["passive_seconds"] >= 37 * 60
+
+
+def test_old_job_reports_missing_harness_trace_instead_of_inventing_detail(tmp_path):
+    service = make_service(tmp_path)
+    job = service.create(JobSpec(title="Old job"))
+    service.cancel(job.id, reason="done")
+
+    analysis = build_job_performance(service, job.id)
+
+    assert analysis["runtime_trace"]["available"] is False
+    assert "never reached" in analysis["runtime_trace"]["reason"].lower()
 
 
 def test_job_performance_comparison_preserves_signed_deltas(tmp_path):

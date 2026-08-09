@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from mu.jobs import AttentionReason, JobService, JobStateError, JobStatus
+from mu.jobs.receipt import JobReceiptBuilder
 from mu.jobs.repository import RepositoryRegistry
 from mu.jobs.verification import VerificationStore
 
@@ -81,6 +82,13 @@ async def get_job_repository(repository_id: str, request: Request):
 async def get_job(job_id: str, request: Request):
     job = _job_or_404(_service(request), job_id)
     return {"job": job.to_dict()}
+
+
+@router.get("/{job_id}/receipt")
+async def get_job_receipt(job_id: str, request: Request):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    return {"receipt": JobReceiptBuilder(service).build(job_id)}
 
 
 @router.get("/{job_id}/events")

@@ -48,6 +48,7 @@ ALLOWED_TRANSITIONS = {
     JobStatus.PREPARING: {
         JobStatus.RUNNING,
         JobStatus.NEEDS_HUMAN,
+        JobStatus.RECOVERING,
         JobStatus.ENVIRONMENT_ERROR,
         JobStatus.FAILED,
         JobStatus.CANCELLED,
@@ -72,6 +73,7 @@ ALLOWED_TRANSITIONS = {
         JobStatus.READY_FOR_REVIEW,
         JobStatus.RUNNING,
         JobStatus.NEEDS_HUMAN,
+        JobStatus.RECOVERING,
         JobStatus.CONFLICTED,
         JobStatus.FAILED,
         JobStatus.CANCELLED,

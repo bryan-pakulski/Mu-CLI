@@ -34,6 +34,8 @@ def test_openai_cached_tokens_are_not_double_charged():
     assert estimate["api_cost_usd"] == pytest.approx(0.71)
     assert estimate["usage"]["uncached_input"] == 160_000
     assert estimate["usage"]["cached_input"] == 40_000
+    assert estimate["cost_components"]["input_usd"] == pytest.approx(0.41)
+    assert estimate["cost_components"]["output_usd"] == pytest.approx(0.30)
 
 
 def test_openai_long_context_tier_and_specific_alias_win():
@@ -70,7 +72,7 @@ def test_gemini_pro_high_tier_and_reasoning_not_double_charged():
     assert estimate["usage"]["reasoning"] == 10_000
 
 
-def test_ollama_local_zero_api_cost_and_glm_cloud_uses_configured_estimate():
+def test_ollama_local_zero_api_cost_and_glm_cloud_uses_split_estimate():
     local = estimate_model_cost(
         provider="ollama",
         model_name="qwen3-coder-next:latest",
@@ -91,8 +93,13 @@ def test_ollama_local_zero_api_cost_and_glm_cloud_uses_configured_estimate():
     )
     assert cloud["billing"] == "estimated_token"
     assert cloud["source"] == "configured_estimate"
-    assert cloud["rates"]["estimated_total_per_million"] == pytest.approx(1.40)
-    assert cloud["api_cost_usd"] == pytest.approx(0.0728)
+    assert cloud["rate_shape"] == "input_output"
+    assert cloud["rates"]["input_per_million"] == pytest.approx(1.40)
+    assert cloud["rates"]["output_per_million"] == pytest.approx(4.40)
+    assert cloud["cost_components"]["input_usd"] == pytest.approx(0.0700)
+    assert cloud["cost_components"]["output_usd"] == pytest.approx(0.0088)
+    assert cloud["cost_components"]["total_usd"] == pytest.approx(0.0788)
+    assert cloud["api_cost_usd"] == pytest.approx(0.0788)
     assert cloud["catalog"]["context_window"] == 976_000
 
 
@@ -116,7 +123,9 @@ def test_public_catalog_is_versioned_unified_and_exposes_config_paths():
     assert catalog["config_path"].endswith("model_pricing.json")
     assert catalog["active_config_path"]
     glm = next(item for item in catalog["models"] if item["key"] == "glm-5.2:cloud")
-    assert glm["estimated_total_per_million"] == pytest.approx(1.4)
+    assert glm["input_per_million"] == pytest.approx(1.4)
+    assert glm["output_per_million"] == pytest.approx(4.4)
+    assert glm["estimated_total_per_million"] is None
 
 
 def test_operator_override_is_live_and_can_be_reset(tmp_path, monkeypatch):
@@ -125,7 +134,8 @@ def test_operator_override_is_live_and_can_be_reset(tmp_path, monkeypatch):
     assert base["using_override"] is False
     rows = [dict(item) for item in base["models"]]
     glm = next(item for item in rows if item["key"] == "glm-5.2:cloud")
-    glm["estimated_total_per_million"] = 2.0
+    glm["input_per_million"] = 2.0
+    glm["output_per_million"] = 5.0
 
     saved = save_pricing_config({
         "version": "operator-test",
@@ -146,11 +156,42 @@ def test_operator_override_is_live_and_can_be_reset(tmp_path, monkeypatch):
     )
     assert estimate["pricing_version"] == "operator-test"
     assert estimate["config_source"] == "user"
-    assert estimate["api_cost_usd"] == pytest.approx(0.104)
+    assert estimate["rates"]["input_per_million"] == pytest.approx(2.0)
+    assert estimate["rates"]["output_per_million"] == pytest.approx(5.0)
+    assert estimate["cost_components"]["input_usd"] == pytest.approx(0.10)
+    assert estimate["cost_components"]["output_usd"] == pytest.approx(0.01)
+    assert estimate["api_cost_usd"] == pytest.approx(0.11)
 
     reset = reset_pricing_config()
     assert reset["using_override"] is False
     assert not pricing_config_path().exists()
+
+
+def test_legacy_blended_estimate_override_remains_supported(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUCLI_HOME", str(tmp_path / "legacy-home"))
+    rows = [dict(item) for item in pricing_catalog()["models"]]
+    glm = next(item for item in rows if item["key"] == "glm-5.2:cloud")
+    glm["input_per_million"] = None
+    glm["output_per_million"] = None
+    glm["estimated_total_per_million"] = 2.0
+    save_pricing_config({
+        "version": "legacy-blended",
+        "currency": "USD",
+        "unit": "per_million_tokens",
+        "models": rows,
+    })
+
+    estimate = estimate_model_cost(
+        provider="ollama",
+        model_name="glm-5.2:cloud",
+        input_tokens=50_000,
+        output_tokens=2_000,
+        endpoint="https://ollama.com",
+    )
+    assert estimate["rate_shape"] == "legacy_blended"
+    assert estimate["cost_components"]["input_usd"] == pytest.approx(0.10)
+    assert estimate["cost_components"]["output_usd"] == pytest.approx(0.004)
+    assert estimate["api_cost_usd"] == pytest.approx(0.104)
 
 
 def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
@@ -170,19 +211,25 @@ def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     assert '@router.post("/pricing/reset")' in providers_router
     assert 'href="/static/model_costs.html"' in work
     assert 'Pricing registry' in html
-    assert 'Blended est. / 1M total' in html
+    assert 'Input / 1M' in html
+    assert 'Output / 1M' in html
+    assert 'Blended est. / 1M total' not in html
     assert 'Quick estimator' not in html
     assert "fetch('/api/providers/pricing', {" in script
     assert "method: 'PUT'" in script
     assert "/api/providers/pricing/reset" in script
+    assert 'Estimated input/output' in script
     assert 'product-header' in html
     assert '.mc-table' in css
     assert 'estimated_token' in config
     assert '"glm-5.2:cloud"' in config
     assert "value.textContent = 'Unpriced'" in work_semantics
     assert "value.textContent = '$0.00 API'" in work_semantics
+    assert 'components.input_usd' in work_semantics
+    assert 'components.output_usd' in work_semantics
     assert 'from . import costs' in commands
     assert '"/costs"' in costs and '"/pricing"' in costs
+    assert 'estimated input and output independently' in costs.lower()
     assert 'estimated_total_per_million' in mobile
     assert "pricing: () => api.get<ModelPricingCatalog>('/api/providers/pricing')" in mobile
 
@@ -248,5 +295,7 @@ def test_durable_job_usage_result_persists_tokens_and_pricing_provenance(tmp_pat
     assert record["pricing_key"] == "gpt-5.4-mini"
     assert record["source"] == "pricing_map"
     assert record["api_cost_usd"] == pytest.approx(1.065)
+    assert record["cost_components"]["input_usd"] == pytest.approx(0.615)
+    assert record["cost_components"]["output_usd"] == pytest.approx(0.45)
     assert record["legacy_loop_cost_usd"] == pytest.approx(1135.0)
     assert session.session_manager.token_counts["total_cost"] == pytest.approx(100.065)

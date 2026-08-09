@@ -27,7 +27,7 @@ shrinks.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -35,12 +35,9 @@ class CommandResult:
     ok: bool = True
     message: str = ""
     data: Dict[str, Any] = field(default_factory=dict)
-    # Set True to ask the REPL to terminate (used by /quit).
     exit: bool = False
 
 
-# A command handler receives `(session, args_string, *, allow_prompt)`. The
-# `args_string` is everything after the command token (whitespace-stripped).
 CommandHandler = Callable[..., Optional[CommandResult]]
 
 
@@ -125,32 +122,30 @@ def dispatch(
     return spec.handler(session, args, allow_prompt=allow_prompt)
 
 
-# Importing the command modules registers their handlers as a side effect.
-# Keep the import at the bottom of the module so the decorator and registry
-# are defined first.
 def _load_command_modules() -> None:
-    from . import misc  # noqa: F401 — registers /help, /quit, /clear, /splash
-    from . import stats  # noqa: F401 — registers /stats, /thinking, /yolo, /agentic
-    from . import mode  # noqa: F401 — registers /plan
-    from . import ollama  # noqa: F401 — registers /ollama
-    from . import skills  # noqa: F401 — registers /skills
-    from . import docs  # noqa: F401 — registers /docs
-    from . import session  # noqa: F401 — registers /session
-    from . import workspace  # noqa: F401 — registers /workspace (folder/file/clear)
-    from . import runtime  # noqa: F401 — registers /continue, /flush
-    from . import variables  # noqa: F401 — registers /set, /get, /unset, /variables
-    from . import provider  # noqa: F401 — registers /model, /provider, /system
-    from . import tool  # noqa: F401 — registers /tool
-    from . import memory  # noqa: F401 — registers /memory
-    from . import research  # noqa: F401 — registers /research
-    from . import feature  # noqa: F401 — registers /feature
-    from . import teach  # noqa: F401 — registers /teach
-    from . import trace  # noqa: F401 — registers /trace clear/list
-    from . import shell  # noqa: F401 — registers /bash, /sh, /!
-    from . import goal  # noqa: F401 — registers /goal
-    from . import prompts  # noqa: F401 — registers /prompts
-    from . import compact  # noqa: F401 — registers /compact
-    from . import container  # noqa: F401 — registers /container, /template
+    from . import misc  # noqa: F401
+    from . import stats  # noqa: F401
+    from . import mode  # noqa: F401
+    from . import ollama  # noqa: F401
+    from . import skills  # noqa: F401
+    from . import docs  # noqa: F401
+    from . import session  # noqa: F401
+    from . import workspace  # noqa: F401
+    from . import runtime  # noqa: F401
+    from . import variables  # noqa: F401
+    from . import provider  # noqa: F401
+    from . import tool  # noqa: F401
+    from . import memory  # noqa: F401
+    from . import research  # noqa: F401
+    from . import feature  # noqa: F401
+    from . import teach  # noqa: F401
+    from . import trace  # noqa: F401
+    from . import shell  # noqa: F401
+    from . import goal  # noqa: F401
+    from . import prompts  # noqa: F401
+    from . import compact  # noqa: F401
+    from . import container  # noqa: F401
+    from . import job  # noqa: F401 — registers /job and /jobs
 
 
 _load_command_modules()

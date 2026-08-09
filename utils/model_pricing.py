@@ -31,6 +31,8 @@ class ModelPricing:
     cached_input_per_million: Optional[float] = None
     output_per_million: Optional[float] = None
     billing: str = "token"  # token | estimated_token | local | unknown
+    # Kept for backward compatibility with older operator overrides. New
+    # estimated-token rows should prefer separate input/output rates.
     estimated_total_per_million: Optional[float] = None
     aliases: tuple[str, ...] = ()
     context_window: Optional[int] = None
@@ -146,6 +148,16 @@ def validate_pricing_config(value: Dict[str, Any]) -> Dict[str, Any]:
         if identity in seen:
             raise ValueError(f"Duplicate model pricing row: {item['provider']}/{item['key']}")
         seen.add(identity)
+        if item["billing"] == "estimated_token":
+            split = item["input_per_million"] is not None or item["output_per_million"] is not None
+            if split and (item["input_per_million"] is None or item["output_per_million"] is None):
+                raise ValueError(
+                    f"estimated_token requires both input_per_million and output_per_million for {item['provider']}/{item['key']}"
+                )
+            if not split and item["estimated_total_per_million"] is None:
+                raise ValueError(
+                    f"estimated_token requires input/output rates or a legacy blended rate for {item['provider']}/{item['key']}"
+                )
     return {
         "version": str(value.get("version") or "custom"),
         "currency": str(value.get("currency") or "USD").upper(),
@@ -315,24 +327,55 @@ def ollama_billing_mode(*, model_name: str, mode: str = "", endpoint: str = "") 
     return "local"
 
 
-def _token_cost(pricing: ModelPricing, *, input_tokens: int, cached_tokens: int, output_tokens: int) -> tuple[float, Dict[str, Any]]:
+def _token_cost(
+    pricing: ModelPricing,
+    *,
+    input_tokens: int,
+    cached_tokens: int,
+    output_tokens: int,
+) -> tuple[float, Dict[str, Any], Dict[str, float]]:
     high = bool(pricing.long_context_cutoff and input_tokens > pricing.long_context_cutoff)
     input_rate = pricing.long_input_per_million if high and pricing.long_input_per_million is not None else pricing.input_per_million
     cached_rate = pricing.long_cached_input_per_million if high and pricing.long_cached_input_per_million is not None else pricing.cached_input_per_million
     output_rate = pricing.long_output_per_million if high and pricing.long_output_per_million is not None else pricing.output_per_million
     effective_cached_rate = cached_rate if cached_rate is not None else input_rate
     uncached = max(0, input_tokens - cached_tokens)
-    cost = 0.0
-    if input_rate is not None:
-        cost += uncached / USD_PER_MILLION * input_rate
-    if effective_cached_rate is not None:
-        cost += cached_tokens / USD_PER_MILLION * effective_cached_rate
-    if output_rate is not None:
-        cost += output_tokens / USD_PER_MILLION * output_rate
+
+    uncached_input_usd = (uncached / USD_PER_MILLION * input_rate) if input_rate is not None else 0.0
+    cached_input_usd = (cached_tokens / USD_PER_MILLION * effective_cached_rate) if effective_cached_rate is not None else 0.0
+    output_usd = (output_tokens / USD_PER_MILLION * output_rate) if output_rate is not None else 0.0
+    input_usd = uncached_input_usd + cached_input_usd
+    cost = input_usd + output_usd
+
     return cost, {
         "input_per_million": input_rate,
         "cached_input_per_million": effective_cached_rate,
         "output_per_million": output_rate,
+    }, {
+        "input_usd": input_usd,
+        "uncached_input_usd": uncached_input_usd,
+        "cached_input_usd": cached_input_usd,
+        "output_usd": output_usd,
+        "total_usd": cost,
+    }
+
+
+def _legacy_blended_cost(
+    pricing: ModelPricing,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+) -> tuple[float, Dict[str, Any], Dict[str, float]]:
+    rate = float(pricing.estimated_total_per_million or 0.0)
+    input_usd = input_tokens / USD_PER_MILLION * rate
+    output_usd = output_tokens / USD_PER_MILLION * rate
+    total = input_usd + output_usd
+    return total, {"estimated_total_per_million": rate}, {
+        "input_usd": input_usd,
+        "uncached_input_usd": input_usd,
+        "cached_input_usd": 0.0,
+        "output_usd": output_usd,
+        "total_usd": total,
     }
 
 
@@ -392,32 +435,70 @@ def estimate_model_cost(
                 "source": "local",
                 "api_cost_usd": 0.0,
                 "rates": {},
+                "cost_components": {
+                    "input_usd": 0.0,
+                    "uncached_input_usd": 0.0,
+                    "cached_input_usd": 0.0,
+                    "output_usd": 0.0,
+                    "total_usd": 0.0,
+                },
                 "note": "Local Ollama has $0 attributable provider/API cost; host compute is excluded.",
             })
             if pricing:
                 base["catalog"] = pricing.public_dict()
             return base
-        if pricing and pricing.billing == "estimated_token" and pricing.estimated_total_per_million is not None:
-            total_tokens = in_tokens + out_tokens
-            amount = total_tokens / USD_PER_MILLION * pricing.estimated_total_per_million
-            base.update({
-                "pricing_key": pricing.key,
-                "billing": "estimated_token",
-                "source": "configured_estimate",
-                "api_cost_usd": amount,
-                "rates": {"estimated_total_per_million": pricing.estimated_total_per_million},
-                "note": pricing.notes or "Configured blended provider estimate.",
-                "catalog": pricing.public_dict(),
-            })
-            return base
+        if pricing and pricing.billing == "estimated_token":
+            if pricing.input_per_million is not None and pricing.output_per_million is not None:
+                cost, rates, components = _token_cost(
+                    pricing,
+                    input_tokens=in_tokens,
+                    cached_tokens=cache_tokens,
+                    output_tokens=out_tokens,
+                )
+                base.update({
+                    "pricing_key": pricing.key,
+                    "billing": "estimated_token",
+                    "source": "configured_estimate",
+                    "api_cost_usd": cost,
+                    "rates": rates,
+                    "cost_components": components,
+                    "rate_shape": "input_output",
+                    "note": pricing.notes or "Configured input/output provider estimate.",
+                    "catalog": pricing.public_dict(),
+                })
+                return base
+            if pricing.estimated_total_per_million is not None:
+                cost, rates, components = _legacy_blended_cost(
+                    pricing,
+                    input_tokens=in_tokens,
+                    output_tokens=out_tokens,
+                )
+                base.update({
+                    "pricing_key": pricing.key,
+                    "billing": "estimated_token",
+                    "source": "configured_estimate",
+                    "api_cost_usd": cost,
+                    "rates": rates,
+                    "cost_components": components,
+                    "rate_shape": "legacy_blended",
+                    "note": pricing.notes or "Configured legacy blended provider estimate.",
+                    "catalog": pricing.public_dict(),
+                })
+                return base
         if pricing and pricing.billing == "token":
-            cost, rates = _token_cost(pricing, input_tokens=in_tokens, cached_tokens=cache_tokens, output_tokens=out_tokens)
+            cost, rates, components = _token_cost(
+                pricing,
+                input_tokens=in_tokens,
+                cached_tokens=cache_tokens,
+                output_tokens=out_tokens,
+            )
             base.update({
                 "pricing_key": pricing.key,
                 "billing": "token",
                 "source": "pricing_map",
                 "api_cost_usd": cost,
                 "rates": rates,
+                "cost_components": components,
                 "catalog": pricing.public_dict(),
             })
             return base
@@ -444,19 +525,49 @@ def estimate_model_cost(
         })
         return base
 
-    if pricing.billing == "estimated_token" and pricing.estimated_total_per_million is not None:
-        amount = (in_tokens + out_tokens) / USD_PER_MILLION * pricing.estimated_total_per_million
-        base.update({
-            "pricing_key": pricing.key,
-            "billing": "estimated_token",
-            "source": "configured_estimate",
-            "api_cost_usd": amount,
-            "rates": {"estimated_total_per_million": pricing.estimated_total_per_million},
-            "long_context_tier": False,
-        })
-        return base
+    if pricing.billing == "estimated_token":
+        if pricing.input_per_million is not None and pricing.output_per_million is not None:
+            cost, rates, components = _token_cost(
+                pricing,
+                input_tokens=in_tokens,
+                cached_tokens=cache_tokens,
+                output_tokens=out_tokens,
+            )
+            base.update({
+                "pricing_key": pricing.key,
+                "billing": "estimated_token",
+                "source": "configured_estimate",
+                "api_cost_usd": cost,
+                "rates": rates,
+                "cost_components": components,
+                "rate_shape": "input_output",
+                "long_context_tier": bool(pricing.long_context_cutoff and in_tokens > pricing.long_context_cutoff),
+            })
+            return base
+        if pricing.estimated_total_per_million is not None:
+            cost, rates, components = _legacy_blended_cost(
+                pricing,
+                input_tokens=in_tokens,
+                output_tokens=out_tokens,
+            )
+            base.update({
+                "pricing_key": pricing.key,
+                "billing": "estimated_token",
+                "source": "configured_estimate",
+                "api_cost_usd": cost,
+                "rates": rates,
+                "cost_components": components,
+                "rate_shape": "legacy_blended",
+                "long_context_tier": False,
+            })
+            return base
 
-    cost, rates = _token_cost(pricing, input_tokens=in_tokens, cached_tokens=cache_tokens, output_tokens=out_tokens)
+    cost, rates, components = _token_cost(
+        pricing,
+        input_tokens=in_tokens,
+        cached_tokens=cache_tokens,
+        output_tokens=out_tokens,
+    )
     high = bool(pricing.long_context_cutoff and in_tokens > pricing.long_context_cutoff)
     base.update({
         "pricing_key": pricing.key,
@@ -465,6 +576,7 @@ def estimate_model_cost(
         "api_cost_usd": cost,
         "long_context_tier": high,
         "rates": rates,
+        "cost_components": components,
         "source_url": pricing.source,
     })
     return base
@@ -493,7 +605,7 @@ def pricing_catalog() -> Dict[str, Any]:
             "openai": "Configured token-rate estimate.",
             "gemini": "Configured token-rate estimate; output may include thinking tokens.",
             "ollama_local": "$0 attributable provider/API cost; host compute is separate.",
-            "ollama_cloud": "Uses a configured per-model estimate when present; otherwise remains explicitly unpriced.",
+            "ollama_cloud": "Uses separate configured input/output estimates when present; legacy blended overrides remain supported.",
         },
     }
 

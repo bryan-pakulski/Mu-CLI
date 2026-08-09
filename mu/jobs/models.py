@@ -61,8 +61,11 @@ ALLOWED_TRANSITIONS = {
         JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.CONFLICTED,
         JobStatus.FAILED, JobStatus.CANCELLED,
     },
+    # Reviewer feedback is a first-class loop: keep the same durable job,
+    # branch, worktree and session, but place it back on the scheduler queue.
     JobStatus.READY_FOR_REVIEW: {
-        JobStatus.RUNNING, JobStatus.CONFLICTED, JobStatus.MERGED, JobStatus.CANCELLED,
+        JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CONFLICTED,
+        JobStatus.MERGED, JobStatus.CANCELLED,
     },
     JobStatus.RECOVERING: {
         JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED, JobStatus.CANCELLED,

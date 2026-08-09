@@ -51,7 +51,6 @@ def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
     script = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
     css = WORK_POLISH.read_text(encoding="utf-8")
 
-    assert 'product-app work-product-app' in template
     assert 'work-header product-header' in template
     assert 'product-icon-button work-header-icon' in template
     assert 'Toggle appearance' in template

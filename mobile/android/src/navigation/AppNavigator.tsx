@@ -18,6 +18,8 @@ import { useConnectionStore } from '../store/connection';
 import { ChatScreenProduct } from '../screens/ChatScreenProduct';
 import { WorkspaceScreen } from '../screens/WorkspaceScreen';
 import { WorkspaceCategoryScreen } from '../screens/WorkspaceCategoryScreen';
+import { WorkScreen } from '../screens/WorkScreen';
+import { JobDetailScreen } from '../screens/JobDetailScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
@@ -40,6 +42,8 @@ import { ArtifactsScreen } from '../screens/ArtifactsScreen';
 
 export type RootStackParamList = {
   Chat: undefined;
+  Work: undefined;
+  JobDetail: { jobId: string };
   Workspace: undefined;
   WorkspaceCategory: { categoryId: WorkspaceCategoryId; title: string };
   Teacher: undefined;
@@ -67,7 +71,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
 const PANEL_SCREENS: {
-  name: Exclude<keyof RootStackParamList, 'Chat' | 'Workspace' | 'WorkspaceCategory'>;
+  name: Exclude<keyof RootStackParamList, 'Chat' | 'Work' | 'JobDetail' | 'Workspace' | 'WorkspaceCategory'>;
   title: string;
   component: React.ComponentType;
 }[] = [
@@ -135,6 +139,7 @@ function ChatScreenWithChrome() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ModernHeader
           onOpenSessions={openSessions}
+          onOpenWork={() => isConnected ? navRef.current?.navigate('Work') : navRef.current?.navigate('Connection')}
           onOpenWorkspace={() => activeSessionName ? navRef.current?.navigate('Workspace') : openSessions()}
           onOpenTraces={() => activeSessionName ? navRef.current?.navigate('Traces') : openSessions()}
           onOpenConnection={() => navRef.current?.navigate('Connection')}
@@ -199,6 +204,8 @@ export function AppNavigator() {
         }}
       >
         <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />
+        <Stack.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work' }} />
+        <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ title: 'Job review' }} />
         <Stack.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace' }} />
         <Stack.Screen
           name="WorkspaceCategory"

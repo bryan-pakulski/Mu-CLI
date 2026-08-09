@@ -4,14 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
-import { promptsApi } from '../api/prompts';
+import { promptsApi, type PendingPrompt } from '../api/prompts';
 import { spacing } from '../theme/tokens';
 import { SafeAreaModal } from '../components/SafeAreaModal';
 
-interface PendingPrompt {
-  id: string;
-  prompt: string;
-  [key: string]: unknown;
+function promptText(prompt: PendingPrompt | null | undefined): string {
+  if (!prompt) return '';
+  return String(prompt.message || prompt.question || prompt.description || prompt.tool_name || prompt.shape || 'Input required');
 }
 
 export function PromptsScreen() {
@@ -27,7 +26,7 @@ export function PromptsScreen() {
     try {
       setError(null);
       const res = await promptsApi.listPending();
-      setPending((res.pending as PendingPrompt[]) || []);
+      setPending(res.pending || []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -39,7 +38,7 @@ export function PromptsScreen() {
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
-      load();
+      void load();
     }, [load]),
   );
 
@@ -49,7 +48,7 @@ export function PromptsScreen() {
       await promptsApi.answer(answering.id, { text: answerText.trim() });
       setAnswering(null);
       setAnswerText('');
-      load();
+      void load();
     } catch (e) {
       Alert.alert('Failed to answer', String(e));
     }
@@ -60,7 +59,7 @@ export function PromptsScreen() {
       { text: 'No', style: 'cancel' },
       { text: 'Cancel prompt', style: 'destructive', onPress: async () => {
         await promptsApi.cancel(id);
-        load();
+        void load();
       }},
     ]);
   };
@@ -78,7 +77,7 @@ export function PromptsScreen() {
   if (error) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <ErrorState message={error} onRetry={load} />
+        <ErrorState message={error} onRetry={() => void load()} />
       </SafeAreaView>
     );
   }
@@ -96,12 +95,12 @@ export function PromptsScreen() {
       <FlatList
         data={pending}
         keyExtractor={item => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
         contentContainerStyle={{ padding: spacing.base }}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
             <Text variant="sm" style={{ color: colors.textDim, marginBottom: 4 }}>{item.id}</Text>
-            <Text variant="base" style={{ marginBottom: spacing.sm }}>{item.prompt}</Text>
+            <Text variant="base" style={{ marginBottom: spacing.sm }}>{promptText(item)}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Button title="Answer" onPress={() => { setAnswering(item); setAnswerText(''); }} />
               <Button title="Cancel" variant="ghost" onPress={() => cancelPrompt(item.id)} />
@@ -113,7 +112,7 @@ export function PromptsScreen() {
         <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setAnswering(null)} activeOpacity={1}>
           <View style={{ margin: spacing.base, marginTop: 80, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base }}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>Answer prompt</Text>
-            <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.sm }}>{answering?.prompt}</Text>
+            <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.sm }}>{promptText(answering)}</Text>
             <TextInput
               value={answerText}
               onChangeText={setAnswerText}
@@ -124,7 +123,7 @@ export function PromptsScreen() {
             />
             <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
               <Button title="Cancel" variant="ghost" onPress={() => setAnswering(null)} />
-              <Button title="Send" onPress={submitAnswer} disabled={!answerText.trim()} />
+              <Button title="Send" onPress={() => void submitAnswer()} disabled={!answerText.trim()} />
             </View>
           </View>
         </TouchableOpacity>

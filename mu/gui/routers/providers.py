@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from utils.model_pricing import pricing_catalog
 
 router = APIRouter()
 
@@ -105,6 +106,18 @@ async def list_providers() -> Dict[str, Any]:
             },
         ]
     }
+
+
+@router.get("/pricing")
+async def list_model_pricing() -> Dict[str, Any]:
+    """Return MuCLI's versioned model-cost baseline for every control plane.
+
+    These are estimation/list-rate economics, not an invoice. Ollama local is
+    explicitly zero *provider API* cost while host/GPU compute is kept separate;
+    Ollama Cloud remains plan-based unless/until a stable token tariff can be
+    attributed safely.
+    """
+    return pricing_catalog()
 
 
 @router.get("/{name}/models")

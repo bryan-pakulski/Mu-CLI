@@ -58,7 +58,7 @@
             <div>
                 <span class="mc-eyebrow">Cost configuration</span>
                 <h1>Pricing registry</h1>
-                <p>One editable population table drives job cost estimates. Change it here or edit the configuration file directly.</p>
+                <p>One editable population table drives job cost estimates. Estimated models use separate input and output rates so measured prompt and completion tokens are costed independently.</p>
             </div>
             <div class="mc-page-actions">
                 <span class="mc-dirty" id="mc-dirty" hidden>Unsaved changes</span>
@@ -75,9 +75,8 @@
                             <th>Model</th>
                             <th>Billing</th>
                             <th>Input / 1M</th>
-                            <th>Cached / 1M</th>
+                            <th>Cached input / 1M</th>
                             <th>Output / 1M</th>
-                            <th>Blended est. / 1M total</th>
                             <th>Context</th>
                             <th>Long cutoff</th>
                             <th>Long input</th>
@@ -94,7 +93,7 @@
         </section>
 
         <footer class="mc-footer">
-            <div><strong id="mc-count">0 models</strong><span> · Rates are estimates used for MuCLI telemetry, not invoices.</span></div>
+            <div><strong id="mc-count">0 models</strong><span> · Rates are telemetry estimates, not invoices. Legacy blended estimates are still accepted in the config file for compatibility.</span></div>
             <div id="mc-status"></div>
         </footer>
     </main>

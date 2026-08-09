@@ -20,7 +20,7 @@ from utils.config import HISTORY_DIR
 from .models import AttentionReason, Job, JobAttempt, JobEvent, JobSpec, JobStatus, coerce_status
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def default_db_path() -> str:
@@ -110,6 +110,7 @@ class JobStore:
                         branch TEXT NOT NULL DEFAULT '',
                         worktree TEXT NOT NULL DEFAULT '',
                         environment_json TEXT NOT NULL DEFAULT '{}',
+                        execution_json TEXT NOT NULL DEFAULT '{}',
                         metadata_json TEXT NOT NULL DEFAULT '{}',
                         session_name TEXT NOT NULL DEFAULT '',
                         worker_id TEXT NOT NULL DEFAULT '',
@@ -156,6 +157,15 @@ class JobStore:
                         ON job_attempts(job_id, number);
                     """
                 )
+                # v1 databases predate reproducible provider/model/mode policy.
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+                }
+                if "execution_json" not in columns:
+                    conn.execute(
+                        "ALTER TABLE jobs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'"
+                    )
                 conn.execute(
                     "INSERT OR REPLACE INTO job_meta(key, value) VALUES('schema_version', ?)",
                     (str(SCHEMA_VERSION),),
@@ -174,8 +184,8 @@ class JobStore:
                     id, title, description, repository, base_branch, base_sha,
                     acceptance_json, validation_json, status, created_at, updated_at,
                     max_cost_usd, max_runtime_seconds, max_iterations, max_retries,
-                    max_subagents, environment_json, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    max_subagents, environment_json, execution_json, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     identifier,
@@ -195,6 +205,7 @@ class JobStore:
                     normalized.max_retries,
                     normalized.max_subagents,
                     _json(normalized.environment),
+                    _json(normalized.execution),
                     _json(normalized.metadata),
                 ),
             )
@@ -205,7 +216,7 @@ class JobStore:
                 None,
                 JobStatus.QUEUED,
                 "",
-                {"title": normalized.title},
+                {"title": normalized.title, "execution": normalized.execution},
                 now,
             )
         return self.get_job(identifier)
@@ -297,31 +308,21 @@ class JobStore:
                 ),
             )
             self._insert_event(
-                conn,
-                job_id,
-                "status_changed",
-                current,
-                target_status,
-                reason,
-                payload or {},
-                now,
+                conn, job_id, "status_changed", current, target_status,
+                reason, payload or {}, now,
             )
         return self.get_job(job_id)
 
     def update_runtime_fields(self, job_id: str, **fields: Any) -> Job:
         allowed = {
-            "cost_usd",
-            "branch",
-            "worktree",
-            "environment_json",
-            "metadata_json",
-            "session_name",
+            "cost_usd", "branch", "worktree", "environment_json",
+            "execution_json", "metadata_json", "session_name",
         }
         updates: Dict[str, Any] = {}
         for key, value in fields.items():
             if key not in allowed:
                 raise ValueError(f"unsupported job field: {key}")
-            if key in {"environment_json", "metadata_json"} and not isinstance(value, str):
+            if key in {"environment_json", "execution_json", "metadata_json"} and not isinstance(value, str):
                 value = _json(value or {})
             updates[key] = value
         if not updates:
@@ -368,11 +369,7 @@ class JobStore:
         conn = self._connect()
         try:
             rows = conn.execute(
-                """
-                SELECT * FROM job_events
-                WHERE job_id = ? AND id > ?
-                ORDER BY id ASC LIMIT ?
-                """,
+                "SELECT * FROM job_events WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
                 (job_id, max(0, int(after_id)), max(1, min(int(limit), 5000))),
             ).fetchall()
         finally:
@@ -400,14 +397,8 @@ class JobStore:
                 (worker_id, expires, now, now, job_id),
             )
             self._insert_event(
-                conn,
-                job_id,
-                "worker_lease_acquired",
-                None,
-                None,
-                "",
-                {"worker_id": worker_id, "lease_expires_at": expires},
-                now,
+                conn, job_id, "worker_lease_acquired", None, None, "",
+                {"worker_id": worker_id, "lease_expires_at": expires}, now,
             )
         return True
 
@@ -438,14 +429,8 @@ class JobStore:
             if cursor.rowcount != 1:
                 return False
             self._insert_event(
-                conn,
-                job_id,
-                "worker_lease_released",
-                None,
-                None,
-                reason,
-                {"worker_id": worker_id},
-                now,
+                conn, job_id, "worker_lease_released", None, None, reason,
+                {"worker_id": worker_id}, now,
             )
         return True
 
@@ -493,14 +478,8 @@ class JobStore:
                 (attempt_id, job_id, number, session_name, worker_id, now, _json(metadata or {})),
             )
             self._insert_event(
-                conn,
-                job_id,
-                "attempt_started",
-                None,
-                None,
-                "",
-                {"attempt_id": attempt_id, "number": number, "worker_id": worker_id},
-                now,
+                conn, job_id, "attempt_started", None, None, "",
+                {"attempt_id": attempt_id, "number": number, "worker_id": worker_id}, now,
             )
         return self.get_attempt(attempt_id)
 
@@ -528,14 +507,8 @@ class JobStore:
                 (str(status), now, str(error or ""), float(cost_usd), _json(combined), attempt_id),
             )
             self._insert_event(
-                conn,
-                row["job_id"],
-                "attempt_finished",
-                None,
-                None,
-                str(status),
-                {"attempt_id": attempt_id, "cost_usd": float(cost_usd), "error": str(error or "")},
-                now,
+                conn, row["job_id"], "attempt_finished", None, None, str(status),
+                {"attempt_id": attempt_id, "cost_usd": float(cost_usd), "error": str(error or "")}, now,
             )
         return self.get_attempt(attempt_id)
 
@@ -577,13 +550,10 @@ class JobStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                job_id,
-                event_type,
+                job_id, event_type,
                 from_status.value if from_status else None,
                 to_status.value if to_status else None,
-                str(reason or ""),
-                _json(payload or {}),
-                created_at,
+                str(reason or ""), _json(payload or {}), created_at,
             ),
         )
         return int(cursor.lastrowid)
@@ -591,63 +561,42 @@ class JobStore:
     @staticmethod
     def _job_from_row(row: sqlite3.Row) -> Job:
         return Job(
-            id=row["id"],
-            title=row["title"],
-            description=row["description"],
-            repository=row["repository"],
-            base_branch=row["base_branch"],
-            base_sha=row["base_sha"],
+            id=row["id"], title=row["title"], description=row["description"],
+            repository=row["repository"], base_branch=row["base_branch"], base_sha=row["base_sha"],
             acceptance_criteria=_loads(row["acceptance_json"], []),
             validation_commands=_loads(row["validation_json"], []),
             status=JobStatus(row["status"]),
             attention_reason=AttentionReason(row["attention_reason"] or ""),
             attention_detail=row["attention_detail"],
-            created_at=float(row["created_at"]),
-            updated_at=float(row["updated_at"]),
-            started_at=row["started_at"],
-            completed_at=row["completed_at"],
-            max_cost_usd=row["max_cost_usd"],
-            max_runtime_seconds=row["max_runtime_seconds"],
-            max_iterations=row["max_iterations"],
-            max_retries=int(row["max_retries"]),
-            max_subagents=row["max_subagents"],
-            cost_usd=float(row["cost_usd"] or 0),
-            branch=row["branch"],
-            worktree=row["worktree"],
+            created_at=float(row["created_at"]), updated_at=float(row["updated_at"]),
+            started_at=row["started_at"], completed_at=row["completed_at"],
+            max_cost_usd=row["max_cost_usd"], max_runtime_seconds=row["max_runtime_seconds"],
+            max_iterations=row["max_iterations"], max_retries=int(row["max_retries"]),
+            max_subagents=row["max_subagents"], cost_usd=float(row["cost_usd"] or 0),
+            branch=row["branch"], worktree=row["worktree"],
             environment=_loads(row["environment_json"], {}),
+            execution=_loads(row["execution_json"], {}),
             metadata=_loads(row["metadata_json"], {}),
-            session_name=row["session_name"],
-            worker_id=row["worker_id"],
-            lease_expires_at=row["lease_expires_at"],
-            heartbeat_at=row["heartbeat_at"],
+            session_name=row["session_name"], worker_id=row["worker_id"],
+            lease_expires_at=row["lease_expires_at"], heartbeat_at=row["heartbeat_at"],
             version=int(row["version"]),
         )
 
     @staticmethod
     def _event_from_row(row: sqlite3.Row) -> JobEvent:
         return JobEvent(
-            id=int(row["id"]),
-            job_id=row["job_id"],
-            event_type=row["event_type"],
+            id=int(row["id"]), job_id=row["job_id"], event_type=row["event_type"],
             from_status=JobStatus(row["from_status"]) if row["from_status"] else None,
             to_status=JobStatus(row["to_status"]) if row["to_status"] else None,
-            reason=row["reason"],
-            payload=_loads(row["payload_json"], {}),
+            reason=row["reason"], payload=_loads(row["payload_json"], {}),
             created_at=float(row["created_at"]),
         )
 
     @staticmethod
     def _attempt_from_row(row: sqlite3.Row) -> JobAttempt:
         return JobAttempt(
-            id=row["id"],
-            job_id=row["job_id"],
-            number=int(row["number"]),
-            status=row["status"],
-            session_name=row["session_name"],
-            worker_id=row["worker_id"],
-            started_at=float(row["started_at"]),
-            finished_at=row["finished_at"],
-            error=row["error"],
-            cost_usd=float(row["cost_usd"] or 0),
-            metadata=_loads(row["metadata_json"], {}),
+            id=row["id"], job_id=row["job_id"], number=int(row["number"]),
+            status=row["status"], session_name=row["session_name"], worker_id=row["worker_id"],
+            started_at=float(row["started_at"]), finished_at=row["finished_at"], error=row["error"],
+            cost_usd=float(row["cost_usd"] or 0), metadata=_loads(row["metadata_json"], {}),
         )

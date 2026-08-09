@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from mu.jobs import AttentionReason, JobService, JobStateError, JobStatus
 from mu.jobs.board import build_job_board
+from mu.jobs.diagnostics import build_job_diagnostics
 from mu.jobs.receipt import JobReceiptBuilder
 from mu.jobs.repository import RepositoryRegistry
 from mu.jobs.review import JobReviewError, JobReviewService, build_job_diff
@@ -129,6 +130,25 @@ async def get_job_receipt(job_id: str, request: Request):
     service = _service(request)
     _job_or_404(service, job_id)
     return {"receipt": JobReceiptBuilder(service).build(job_id)}
+
+
+@router.get("/{job_id}/diagnostics")
+async def get_job_diagnostics(
+    job_id: str,
+    request: Request,
+    event_limit: int = Query(default=200, ge=1, le=1000),
+    log_tail_bytes: int = Query(default=65_536, ge=1024, le=524_288),
+):
+    service = _service(request)
+    _job_or_404(service, job_id)
+    return {
+        "diagnostics": build_job_diagnostics(
+            service,
+            job_id,
+            event_limit=event_limit,
+            log_tail_bytes=log_tail_bytes,
+        ).to_dict()
+    }
 
 
 @router.get("/{job_id}/diff")

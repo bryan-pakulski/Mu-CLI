@@ -10,19 +10,27 @@ on:
       - 'mu/ui/exceptions.py'
       - 'mu/commands/job.py'
       - 'mu/commands/job_diagnostics.py'
+      - 'mu/commands/job_analysis.py'
       - 'mu/commands/__init__.py'
       - 'mu/gui/routers/jobs.py'
+      - 'mu/gui/routers/job_analysis.py'
+      - 'mu/gui/routers/__init__.py'
       - 'mu/gui/app.py'
       - 'mu/gui/templates/index.html'
       - 'mu/gui/templates/work.html'
+      - 'mu/gui/static/job_trace.html'
       - 'mu/gui/static/css/work.css'
+      - 'mu/gui/static/css/job_trace.css'
       - 'mu/gui/static/js/work.js'
       - 'mu/gui/static/js/work_diagnostics.js'
+      - 'mu/gui/static/js/job_trace.js'
+      - 'mu/gui/static/js/job_trace_signed_delta.js'
       - 'mobile/android/src/api/jobs.ts'
       - 'mobile/android/src/navigation/AppNavigator.tsx'
       - 'mobile/android/src/components/ModernHeader.tsx'
       - 'mobile/android/src/screens/WorkScreen.tsx'
       - 'mobile/android/src/screens/JobDetailScreen.tsx'
+      - 'mobile/android/src/screens/JobAnalysisScreen.tsx'
       - 'tests/test_job*.py'
       - '.github/workflows/durable-jobs.yml'
 
@@ -64,6 +72,7 @@ jobs:
             tests/test_job_review_surfaces.py \
             tests/test_job_diagnostics.py \
             tests/test_job_diagnostics_surfaces.py \
+            tests/test_job_performance.py \
             2>&1 | tee "${RUNNER_TEMP}/durable-jobs-pytest.log"
 
       - name: Upload pytest diagnostics
@@ -94,5 +103,5 @@ jobs:
       - name: Install mobile dependencies
         run: npm ci
 
-      - name: Typecheck mobile M4 surface
+      - name: Typecheck mobile durable-work surfaces
         run: npm run typecheck

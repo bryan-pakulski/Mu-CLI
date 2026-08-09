@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,9 @@ from utils.model_pricing import (
     pricing_catalog,
     resolve_token_pricing,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_openai_cached_tokens_are_not_double_charged():
@@ -107,6 +111,25 @@ def test_public_catalog_is_versioned_and_covers_all_supported_providers():
     assert {item["provider"] for item in catalog["models"]} == {"openai", "gemini"}
     assert catalog["ollama"]
     assert "provider/API cost" in catalog["provider_notes"]["ollama_local"]
+
+
+def test_cost_map_is_exposed_to_gui_tui_and_mobile_control_planes():
+    providers_router = (ROOT / "mu/gui/routers/providers.py").read_text(encoding="utf-8")
+    work = (ROOT / "mu/gui/templates/work.html").read_text(encoding="utf-8")
+    html = (ROOT / "mu/gui/static/model_costs.html").read_text(encoding="utf-8")
+    script = (ROOT / "mu/gui/static/js/model_costs.js").read_text(encoding="utf-8")
+    commands = (ROOT / "mu/commands/__init__.py").read_text(encoding="utf-8")
+    costs = (ROOT / "mu/commands/costs.py").read_text(encoding="utf-8")
+    mobile = (ROOT / "mobile/android/src/api/providers.ts").read_text(encoding="utf-8")
+
+    assert '@router.get("/pricing")' in providers_router
+    assert 'href="/static/model_costs.html"' in work
+    assert 'Model Costs' in html
+    assert '/api/providers/pricing' in script
+    assert 'Quick estimator' in html
+    assert 'from . import costs' in commands
+    assert '"/costs"' in costs and '"/pricing"' in costs
+    assert "pricing: () => api.get<ModelPricingCatalog>('/api/providers/pricing')" in mobile
 
 
 class _Manager:

@@ -47,7 +47,7 @@
     padding: 11px 12px;
     border: 1px solid var(--border);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    background: color-mix(in srgb, var(--bg-lift) 82%, transparent);
 }
 
 .pricing-settings-source {
@@ -113,7 +113,7 @@
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--surface) 72%, transparent);
+    background: color-mix(in srgb, var(--bg-lift) 72%, transparent);
 }
 
 .pricing-model-head {
@@ -205,7 +205,7 @@
     gap: 10px;
     margin: 16px -4px -4px;
     padding: 12px 4px 4px;
-    background: linear-gradient(to bottom, transparent, var(--surface) 28%);
+    background: linear-gradient(to bottom, transparent, var(--bg-lift) 28%);
 }
 
 .pricing-settings-dirty {

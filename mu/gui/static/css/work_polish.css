@@ -22,6 +22,37 @@
 .work-product-app::after { display: none !important; }
 .work-product-app > * { position: relative; z-index: 1; }
 
+/*
+ * Modal layers are direct children too, so the generic route-layer rule above
+ * must never pull them back into document flow. Job management is a true
+ * viewport takeover; the underlying work board stays mounted but cannot scroll.
+ */
+.work-product-app > .work-management-backdrop,
+.work-product-app > .work-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+}
+.work-product-app > .work-management-backdrop {
+    z-index: 220;
+    display: grid;
+    place-items: stretch;
+}
+.work-product-app > .work-modal-backdrop { z-index: 210; }
+.work-product-app > .work-management-backdrop[hidden],
+.work-product-app > .work-modal-backdrop[hidden] { display: none !important; }
+body.work-management-open { overflow: hidden; }
+.work-product-app > .work-management-backdrop .work-management-pane {
+    width: calc(100vw - 24px);
+    max-width: none;
+    height: calc(100dvh - 24px);
+    max-height: none;
+    margin: 12px;
+    border-radius: 14px;
+}
+
 .work-header.product-header {
     height: 64px;
     min-height: 64px;
@@ -134,4 +165,10 @@
 @media (max-width: 680px) {
     .work-new-product span { display: none; }
     .work-new-product { width: 36px; padding: 0; justify-content: center; }
+    .work-product-app > .work-management-backdrop .work-management-pane {
+        width: 100vw;
+        height: 100dvh;
+        margin: 0;
+        border-radius: 0;
+    }
 }

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import utils.config as config
 from mu.gui.routers.session_history import get_authoritative_history
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _request_with_live_history(name: str, history: list[dict]):
@@ -102,3 +106,23 @@ def test_newer_live_history_wins_over_older_saved_snapshot(tmp_path, monkeypatch
     assert payload["history_recovered"] is False
     assert payload["total_turns"] == 4
     assert payload["turns"][-2]["parts"][0]["text"] == "new live prompt"
+
+
+def test_web_reload_groups_newly_hydrated_transcript_not_old_browser_slot():
+    """Regression for refresh rendering an empty conversation.
+
+    app.js rebuilds the durable transcript and passes the old turn array only so
+    collapsed-group open state can be preserved.  The hydration guard must group
+    slot.turns (the newly rebuilt transcript), never that pre-hydration array.
+    """
+    template = (ROOT / "mu/gui/templates/index.html").read_text(encoding="utf-8")
+    guard = (ROOT / "mu/gui/static/js/history_hydration.js").read_text(encoding="utf-8")
+
+    web_shell = '/static/js/web_shell.js'
+    hydration = '/static/js/history_hydration.js'
+    assert hydration in template
+    assert template.index(web_shell) < template.index(hydration)
+    assert "previousTurns !== slot.turns" in guard
+    assert "const result = coreGroup(slot, slot.turns);" in guard
+    assert "openByGroup" in guard
+    assert "openByUser" in guard

@@ -7,9 +7,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "mu" / "gui" / "templates" / "work.html"
 WORK_POLISH = ROOT / "mu" / "gui" / "static" / "css" / "work_polish.css"
+WORK_ANALYSIS_LINK = ROOT / "mu" / "gui" / "static" / "js" / "work_analysis_link.js"
 ROUTE_THEME = ROOT / "mu" / "gui" / "static" / "js" / "route_theme.js"
 TRACE_HTML = ROOT / "mu" / "gui" / "static" / "job_trace.html"
 TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace.js"
+TRACE_SINGLE_TASK = ROOT / "mu" / "gui" / "static" / "js" / "job_trace_signed_delta.js"
 MODEL_HTML = ROOT / "mu" / "gui" / "static" / "model_costs.html"
 RUNNER = ROOT / "mu" / "jobs" / "runner.py"
 PRICING = ROOT / "config" / "model_pricing.json"
@@ -38,6 +40,19 @@ def test_engineering_work_uses_primary_mucli_chrome_and_theme_switcher():
     assert "localStorage.setItem('mucli-theme'" in theme
 
 
+def test_job_management_is_a_full_viewport_modal_not_document_flow():
+    html = WORK.read_text(encoding="utf-8")
+    css = WORK_POLISH.read_text(encoding="utf-8")
+
+    assert 'id="work-management-backdrop"' in html
+    assert 'class="work-management-pane" role="dialog" aria-modal="true"' in html
+    assert '.work-product-app > .work-management-backdrop' in css
+    assert 'position: fixed;' in css
+    assert 'height: 100dvh;' in css
+    assert 'body.work-management-open { overflow: hidden; }' in css
+    assert '.work-product-app > .work-management-backdrop[hidden]' in css
+
+
 def test_job_trace_and_model_pricing_share_product_visual_language():
     trace = TRACE_HTML.read_text(encoding="utf-8")
     pricing = MODEL_HTML.read_text(encoding="utf-8")
@@ -53,6 +68,19 @@ def test_job_trace_and_model_pricing_share_product_visual_language():
     assert 'Output / 1M' in pricing
     assert 'Blended est. / 1M total' not in pricing
     assert 'Quick estimator' not in pricing
+
+
+def test_job_trace_focuses_on_selected_individual_task_without_comparison_ui():
+    work_link = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
+    single_task = TRACE_SINGLE_TASK.read_text(encoding="utf-8")
+
+    assert 'syncHeaderAnalysisLink' in work_link
+    assert '/static/job_trace.html?job=${encodeURIComponent(jobId)}' in work_link
+    assert "document.getElementById('jt-compare-select')?.remove()" in single_task
+    assert "document.getElementById('jt-compare-section')?.remove()" in single_task
+    assert "searchParams.delete('compare')" in single_task
+    assert 'autoLoadFirstJob' in single_task
+    assert "jobSelect.dispatchEvent(new Event('change'" in single_task
 
 
 def test_job_analyzer_explains_state_residence_and_links_full_harness_trace():

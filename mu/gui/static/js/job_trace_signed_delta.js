@@ -24,14 +24,17 @@
     const jobSelect = document.getElementById('jt-job-select');
     if (!jobSelect) return;
 
+    let autoLoadStarted = false;
+
     function requestedJob() {
         return String(new URL(window.location.href).searchParams.get('job') || '').trim();
     }
 
     function autoLoadFirstJob() {
-        if (requestedJob()) return true;
+        if (requestedJob() || autoLoadStarted) return true;
         const first = Array.from(jobSelect.options).find(option => String(option.value || '').trim());
         if (!first) return false;
+        autoLoadStarted = true;
         jobSelect.value = first.value;
         jobSelect.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
@@ -41,7 +44,7 @@
     // handles the normal path; the short timer is a defensive fallback for
     // browsers that coalesce option mutations during innerHTML replacement.
     const observer = new MutationObserver(() => {
-        if (!requestedJob() && jobSelect.options.length > 1) {
+        if (!requestedJob() && !autoLoadStarted && jobSelect.options.length > 1) {
             setTimeout(() => {
                 if (autoLoadFirstJob()) observer.disconnect();
             }, 0);

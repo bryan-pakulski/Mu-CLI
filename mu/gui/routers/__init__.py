@@ -12,13 +12,21 @@ _jobs.router.include_router(_job_analysis.router)
 # retaining the existing history formatter for timeline semantics.
 from . import sessions as _sessions  # noqa: E402,F401
 from . import session_history as _session_history  # noqa: E402,F401
+from . import session_visibility as _session_visibility  # noqa: E402,F401
 
 _sessions.router.routes[:] = [
     route
     for route in _sessions.router.routes
     if not (
-        getattr(route, "path", "") == "/current/history"
-        and "GET" in (getattr(route, "methods", set()) or set())
+        (
+            getattr(route, "path", "") == "/current/history"
+            and "GET" in (getattr(route, "methods", set()) or set())
+        )
+        or (
+            getattr(route, "path", "") in {"", "/"}
+            and "GET" in (getattr(route, "methods", set()) or set())
+        )
     )
 ]
 _sessions.router.include_router(_session_history.router)
+_sessions.router.include_router(_session_visibility.router)

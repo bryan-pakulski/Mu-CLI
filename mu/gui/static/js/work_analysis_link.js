@@ -11,8 +11,22 @@
         return String(document.querySelector('.work-job-card.is-selected[data-job-id]')?.dataset.jobId || '');
     }
 
+    function syncHeaderAnalysisLink() {
+        const headerLink = document.querySelector('.work-header-actions a.work-header-icon[href^="/static/job_trace.html"]');
+        if (!headerLink) return;
+        const jobId = selectedJobId();
+        headerLink.href = jobId
+            ? `/static/job_trace.html?job=${encodeURIComponent(jobId)}`
+            : '/static/job_trace.html';
+        headerLink.title = jobId
+            ? 'Analyze selected job'
+            : 'Analyze jobs';
+        headerLink.setAttribute('aria-label', headerLink.title);
+    }
+
     function enhanceAnalysisLink() {
         const jobId = selectedJobId();
+        syncHeaderAnalysisLink();
         const header = detail.querySelector('.work-detail-header-top');
         if (!jobId || !header) return;
         let link = header.querySelector('.work-job-analyze-link');

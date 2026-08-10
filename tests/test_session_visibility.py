@@ -4,6 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from mu.gui.routers import sessions
 from mu.gui.routers.session_visibility import list_user_sessions
 from mu.session.visibility import is_durable_job_session, is_user_visible_session
 
@@ -27,6 +28,17 @@ def test_durable_job_visibility_uses_marker_with_narrow_legacy_fallback():
     assert is_durable_job_session("job-0123456789abcdefabcd", {})
     assert not is_durable_job_session("job-notes", {})
     assert is_user_visible_session("job-notes", {})
+
+
+def test_sessions_router_has_one_user_visible_list_endpoint():
+    root_gets = [
+        route
+        for route in sessions.router.routes
+        if getattr(route, "path", "") in {"", "/"}
+        and "GET" in (getattr(route, "methods", set()) or set())
+    ]
+    assert len(root_gets) == 1
+    assert root_gets[0].endpoint is list_user_sessions
 
 
 def test_session_api_hides_durable_job_execution_sessions(tmp_path, monkeypatch):

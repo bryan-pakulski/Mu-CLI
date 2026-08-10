@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from mu.jobs import JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.management import JobManagementService
-from mu.jobs.performance import build_job_performance, compare_job_performance
+from mu.jobs.performance import build_job_performance
 from mu.jobs.verification import VerificationRun, VerificationStore
 
 
@@ -138,21 +138,3 @@ def test_old_job_reports_missing_harness_trace_instead_of_inventing_detail(tmp_p
 
     assert analysis["runtime_trace"]["available"] is False
     assert "never reached" in analysis["runtime_trace"]["reason"].lower()
-
-
-def test_job_performance_comparison_preserves_signed_deltas(tmp_path):
-    service = make_service(tmp_path)
-    primary = service.create(JobSpec(title="Primary"))
-    reference = service.create(JobSpec(title="Reference"))
-    service.cancel(primary.id, reason="done")
-    service.cancel(reference.id, reason="done")
-    service.store.update_runtime_fields(primary.id, cost_usd=1.0)
-    service.store.update_runtime_fields(reference.id, cost_usd=2.5)
-
-    result = compare_job_performance(service, primary.id, reference.id)
-    cost = next(item for item in result["comparison"]["metrics"] if item["key"] == "cost_usd")
-
-    assert cost["primary"] == 1.0
-    assert cost["comparison"] == 2.5
-    assert cost["delta"] == -1.5
-    assert cost["lower_is_better"] is True

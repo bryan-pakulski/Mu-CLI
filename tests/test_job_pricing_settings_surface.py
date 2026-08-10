@@ -8,7 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_model_pricing_is_first_class_in_settings():
     product = (ROOT / "mu/gui/static/js/product.js").read_text(encoding="utf-8")
+    shell = (ROOT / "mu/gui/static/js/web_shell.js").read_text(encoding="utf-8")
     css = (ROOT / "mu/gui/static/css/pricing_settings.css").read_text(encoding="utf-8")
+    rows_css = (ROOT / "mu/gui/static/css/pricing_rows.css").read_text(encoding="utf-8")
     providers = (ROOT / "mu/gui/routers/providers.py").read_text(encoding="utf-8")
 
     assert "Alpine.store('pricingSettings'" in product
@@ -31,6 +33,14 @@ def test_model_pricing_is_first_class_in_settings():
     assert "fetch('/api/providers/pricing/reset'" in product
     assert "method: 'POST'" in product
 
+    assert "addModelRow" in shell
+    assert "add pricing row" in shell
+    assert "+ model" in shell
+    assert "Pricing row already exists" in shell
+    assert "Input and output rates are required" in shell
+    assert "Operator-added pricing row." in shell
+    assert "pricing_rows.css" in shell
+
     assert '@router.get("/pricing")' in providers
     assert '@router.put("/pricing")' in providers
     assert '@router.post("/pricing/reset")' in providers
@@ -38,6 +48,8 @@ def test_model_pricing_is_first_class_in_settings():
     assert ".pricing-rate-grid" in css
     assert ".pricing-provider-filter" in css
     assert ".pricing-settings-actions" in css
+    assert ".pricing-add-row" in rows_css
+    assert ".pricing-add-model-button" in rows_css
 
 
 def test_pricing_settings_preserve_local_ollama_cost_semantics():

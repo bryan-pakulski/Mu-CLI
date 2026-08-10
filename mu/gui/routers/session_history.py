@@ -1,10 +1,10 @@
-"""Authoritative saved-session history endpoint for the web GUI.
+"""Authoritative session-history selection for the web GUI.
 
 Opening a saved session must not depend on the freshly reconstructed in-memory
-Session already containing its transcript.  The session JSON is the durable
-source of truth, so named history requests render directly from that saved
-history.  Unscoped/current-session requests continue to use the live in-memory
-path in ``sessions.get_history``.
+Session already containing its transcript.  Named history requests compare the
+live and durable copies and render whichever contains the more complete
+conversation.  This recovers empty/partially hydrated live sessions without
+throwing away newer in-memory turns that have not yet reached disk.
 """
 
 from __future__ import annotations
@@ -43,7 +43,13 @@ def _saved_history_session(name: str):
     return SimpleNamespace(session_manager=manager)
 
 
-def _request_for_saved_session(session):
+def _history_length(session) -> int:
+    manager = getattr(session, "session_manager", None)
+    history = getattr(manager, "history", None)
+    return len(history) if isinstance(history, list) else 0
+
+
+def _request_for_session(session):
     """Build the tiny request facade consumed by sessions.get_history()."""
     state = SimpleNamespace(session_by_name=lambda _name=None: session)
     return SimpleNamespace(app=SimpleNamespace(state=state))
@@ -57,33 +63,34 @@ async def get_authoritative_history(
     artifact_limit: Optional[int] = Query(default=None, ge=0, le=100),
     before_index: Optional[int] = Query(default=None, ge=0),
 ) -> Dict[str, Any]:
-    """Return persisted history for a named saved session.
+    """Return the most complete timeline available for a named session."""
+    selected_request = request
+    history_source = "live_session"
+    recovered = False
 
-    The GUI always supplies ``session_name`` once focus is known.  Reading that
-    transcript from disk avoids a race where a just-loaded in-memory Session is
-    visible to the API before its history has been hydrated.  The existing
-    formatter remains authoritative for timeline shape, tool traces,
-    attachments and visualization placement.
-    """
     if session_name:
+        live_session = request.app.state.session_by_name(session_name)
         saved_session = _saved_history_session(session_name)
-        if saved_session is not None:
-            payload = await sessions_router.get_history(
-                _request_for_saved_session(saved_session),
-                session_name=session_name,
-                limit_turns=limit_turns,
-                artifact_limit=artifact_limit,
-                before_index=before_index,
-            )
-            payload["history_source"] = "durable_session"
-            return payload
+        live_count = _history_length(live_session)
+        saved_count = _history_length(saved_session)
+
+        # A newly reconstructed Session can briefly exist with no/partial
+        # history even though session.json still contains the full transcript.
+        # Prefer durable state only when it is strictly more complete.  If the
+        # live copy has newer turns, keep it so a just-finished response is not
+        # replaced with an older disk snapshot.
+        if saved_session is not None and saved_count > live_count:
+            selected_request = _request_for_session(saved_session)
+            history_source = "durable_session"
+            recovered = live_session is not None
 
     payload = await sessions_router.get_history(
-        request,
+        selected_request,
         session_name=session_name,
         limit_turns=limit_turns,
         artifact_limit=artifact_limit,
         before_index=before_index,
     )
-    payload["history_source"] = "live_session"
+    payload["history_source"] = history_source
+    payload["history_recovered"] = recovered
     return payload

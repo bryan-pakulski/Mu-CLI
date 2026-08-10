@@ -47,6 +47,7 @@ jobs:
             tests/test_job_performance.py \
             tests/test_job_visual_polish.py \
             tests/test_job_pricing_settings_surface.py \
+            tests/test_gui_session_history.py \
             tests/test_model_pricing.py \
             2>&1 | tee "${RUNNER_TEMP}/durable-jobs-pytest.log"
 

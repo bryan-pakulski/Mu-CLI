@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from .analysis import build_job_analysis as _build_raw_analysis
-from .analysis import compare_job_analyses as _compare_raw_analyses
 from .analysis_detail import enrich_job_analysis
 from .analysis_live import extend_open_residence
 from .management import JobManagementService
@@ -57,27 +56,3 @@ def build_job_performance(
     summary["billing_modes"] = list(model_api.get("billing_modes") or [])
     analysis["cost"] = model_api
     return analysis
-
-
-def compare_job_performance(
-    service: JobService,
-    primary_job_id: str,
-    comparison_job_id: str,
-    *,
-    timeline_limit: int = 1000,
-) -> Dict[str, Any]:
-    primary = build_job_performance(
-        service,
-        primary_job_id,
-        timeline_limit=timeline_limit,
-    )
-    reference = build_job_performance(
-        service,
-        comparison_job_id,
-        timeline_limit=timeline_limit,
-    )
-    return {
-        "comparison": _compare_raw_analyses(primary, reference),
-        "primary": primary,
-        "reference": reference,
-    }

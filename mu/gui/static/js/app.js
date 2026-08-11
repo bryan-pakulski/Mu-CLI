@@ -2989,7 +2989,7 @@ ${problem.text}`, "error", 16000);
         },
     });
 
-    // Memory Map — a live color-grid fingerprint of the context window.
+    // Context Observatory — current fingerprint + provider-call evolution.
     // One horizontal band per layer (L0..L5); each band gets a fixed hue
     // (so you can tell layers apart) and each cell's *brightness* encodes
     // how often that slice of the layer's text has changed between
@@ -3002,9 +3002,9 @@ ${problem.text}`, "error", 16000);
     Alpine.store("memory", {
         active: false,
         loaded: false,
-        tab: "knowledge",     // durable Memory Ledger | live Context Map
+        tab: "knowledge",     // durable Memory Ledger | live context observatory
         resolution: 128,
-        view: "heat",        // "heat" | "layer" — pure client-side choice
+        view: "timeline",    // timeline | stream | churn | fingerprint
         cols: 128,
         rows: 128,
         layers: [],
@@ -3015,7 +3015,11 @@ ${problem.text}`, "error", 16000);
         freeTokens: 0,
         fillPct: 0,
         _canvas: null,
+        _timelineCanvas: null,
+        _timelineObserver: null,
         _renderPending: false,
+        timeline: { points: [], summary: {}, selectedId: null },
+        timelineHover: { visible: false, x: 0, y: 0, point: null, layer: null },
         cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
         _hoverTimer: null,
         durable: {
@@ -3179,6 +3183,16 @@ ${problem.text}`, "error", 16000);
             this.render();
         },
 
+        bindTimelineCanvas(canvas) {
+            this._timelineCanvas = canvas;
+            if (window.ResizeObserver) {
+                if (this._timelineObserver) this._timelineObserver.disconnect();
+                this._timelineObserver = new ResizeObserver(() => this._scheduleRender());
+                this._timelineObserver.observe(canvas);
+            }
+            this._scheduleRender();
+        },
+
         async load() {
             await Promise.all([this.loadDurable(), this.loadContext()]);
         },
@@ -3187,12 +3201,21 @@ ${problem.text}`, "error", 16000);
             const res = this.resolution || 128;
             try {
                 const session = this._sessionParam();
-                const r = await fetch(
-                    "/api/memory/state?cols=" + res + "&rows=" + res
-                    + (session ? "&" + session : "")
-                );
-                const d = await r.json();
+                const suffix = session ? "&" + session : "";
+                const [stateResponse, timelineResponse] = await Promise.all([
+                    fetch("/api/memory/state?cols=" + res + "&rows=" + res + suffix),
+                    fetch("/api/memory/timeline?limit=360" + suffix),
+                ]);
+                const d = await stateResponse.json();
+                if (!stateResponse.ok) throw new Error(d.detail || "context state unavailable");
+                const history = await timelineResponse.json();
+                if (!timelineResponse.ok) throw new Error(history.detail || "context timeline unavailable");
                 this._apply(d);
+                this.timeline.points = history.points || [];
+                this.timeline.summary = history.summary || {};
+                if (!this.timeline.selectedId && this.timeline.points.length) {
+                    this.timeline.selectedId = this.timeline.points[this.timeline.points.length - 1].id;
+                }
                 this.loaded = true;
                 this._scheduleRender();
             } catch (e) { console.error("memory.load", e); }
@@ -3201,7 +3224,7 @@ ${problem.text}`, "error", 16000);
         // Switch render mode without a re-fetch — same int grid, different
         // lightness mapping. Triggers a redraw.
         setView(v) {
-            if (v !== "heat" && v !== "layer") return;
+            if (!["timeline", "stream", "churn", "fingerprint"].includes(v)) return;
             this.view = v;
             this._scheduleRender();
         },
@@ -3211,7 +3234,62 @@ ${problem.text}`, "error", 16000);
         // requestAnimationFrame so we never draw more than once per frame.
         applySnapshot(snap) {
             this._apply(snap);
+            if (snap.timeline_point && snap.timeline_point.id) {
+                this.mergeTimelinePoint(snap.timeline_point);
+            }
             this._scheduleRender();
+        },
+
+        mergeTimelinePoint(point) {
+            const points = this.timeline.points || [];
+            const index = points.findIndex(item => item.id === point.id);
+            if (index >= 0) points.splice(index, 1, point);
+            else points.push(point);
+            if (points.length > 360) points.splice(0, points.length - 360);
+            this.timeline.points = points;
+            this.timeline.selectedId = point.id;
+            this.recomputeTimelineSummary();
+        },
+
+        recomputeTimelineSummary() {
+            const points = this.timeline.points || [];
+            if (!points.length) {
+                this.timeline.summary = { samples: 0, net_delta: 0, compactions: 0 };
+                return;
+            }
+            const churn = {};
+            for (const point of points) {
+                for (const layer of (point.layers || [])) {
+                    churn[layer.id] = (churn[layer.id] || 0) + (layer.changed_chunks || 0);
+                }
+            }
+            let hottest = null;
+            for (const id of Object.keys(churn)) {
+                if (!hottest || churn[id] > churn[hottest]) hottest = id;
+            }
+            this.timeline.summary = {
+                samples: points.length,
+                first_tokens: points[0].total_tokens || 0,
+                last_tokens: points[points.length - 1].total_tokens || 0,
+                net_delta: (points[points.length - 1].total_tokens || 0) - (points[0].total_tokens || 0),
+                peak_tokens: Math.max(...points.map(p => p.total_tokens || 0)),
+                peak_fill_pct: Math.max(...points.map(p => p.fill_pct || 0)),
+                compactions: points.filter(p => p.compaction).length,
+                hottest_layer: hottest && churn[hottest] ? hottest : null,
+                hottest_layer_changes: hottest ? churn[hottest] : 0,
+                max_churn_score: Math.max(...points.map(p => p.churn_score || 0)),
+            };
+        },
+
+        selectedTimelinePoint() {
+            const points = this.timeline.points || [];
+            return points.find(point => point.id === this.timeline.selectedId)
+                || points[points.length - 1]
+                || null;
+        },
+
+        selectTimelinePoint(point) {
+            if (point) this.timeline.selectedId = point.id;
         },
 
         _apply(d) {
@@ -3233,6 +3311,7 @@ ${problem.text}`, "error", 16000);
             const run = () => {
                 this._renderPending = false;
                 this.render();
+                this.renderTimeline();
             };
             (window.requestAnimationFrame || setTimeout)(run);
         },
@@ -3287,6 +3366,228 @@ ${problem.text}`, "error", 16000);
             }
         },
 
+        _timelineGeometry(canvas) {
+            const rect = canvas.getBoundingClientRect();
+            const width = Math.max(280, Math.round(rect.width || 0));
+            const height = Math.max(220, Math.round(rect.height || 0));
+            const dpr = Math.min(2, window.devicePixelRatio || 1);
+            if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+                canvas.width = Math.round(width * dpr);
+                canvas.height = Math.round(height * dpr);
+            }
+            const ctx = canvas.getContext("2d");
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return {
+                ctx, width, height,
+                left: 48, right: 12, top: 14, bottom: 28,
+                plotWidth: width - 60, plotHeight: height - 42,
+            };
+        },
+
+        _visibleTimelinePoints(width) {
+            const points = this.timeline.points || [];
+            const maxPoints = Math.max(16, Math.floor((width - 60) / 7));
+            return points.slice(-maxPoints);
+        },
+
+        _timelineBase(g, points) {
+            const { ctx, width, height, left, top, plotWidth, plotHeight } = g;
+            ctx.clearRect(0, 0, width, height);
+            const bg = ctx.createLinearGradient(0, top, 0, top + plotHeight);
+            bg.addColorStop(0, "rgba(99, 113, 255, .055)");
+            bg.addColorStop(1, "rgba(5, 8, 18, .02)");
+            ctx.fillStyle = bg;
+            ctx.fillRect(left, top, plotWidth, plotHeight);
+            ctx.strokeStyle = "rgba(148, 163, 184, .10)";
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = top + plotHeight * i / 4 + .5;
+                ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + plotWidth, y); ctx.stroke();
+            }
+            ctx.fillStyle = "rgba(148, 163, 184, .62)";
+            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.textAlign = "left";
+            if (points.length) {
+                ctx.fillText("call " + points[0].id, left, height - 8);
+                const end = "call " + points[points.length - 1].id;
+                ctx.textAlign = "right";
+                ctx.fillText(end, left + plotWidth, height - 8);
+            }
+        },
+
+        renderTimeline() {
+            const canvas = this._timelineCanvas;
+            if (!canvas || this.view === "fingerprint") return;
+            const g = this._timelineGeometry(canvas);
+            const points = this._visibleTimelinePoints(g.width);
+            this._timelineBase(g, points);
+            if (!points.length) {
+                g.ctx.fillStyle = "rgba(148, 163, 184, .7)";
+                g.ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+                g.ctx.textAlign = "center";
+                g.ctx.fillText("waiting for the first provider call", g.left + g.plotWidth / 2, g.top + g.plotHeight / 2);
+                return;
+            }
+            if (this.view === "stream") this._drawContextStream(g, points);
+            else if (this.view === "churn") this._drawContextChurn(g, points);
+            else this._drawContextHeatmap(g, points);
+            this._drawTimelineSelection(g, points);
+        },
+
+        _drawContextHeatmap(g, points) {
+            const { ctx, left, top, plotWidth, plotHeight } = g;
+            const rows = this.layers.length || 8;
+            const rowHeight = plotHeight / rows;
+            const cellWidth = plotWidth / points.length;
+            const fallback = [
+                { id: "L0", hue: 210 }, { id: "L1", hue: 135 },
+                { id: "L1C", hue: 150 }, { id: "L1B", hue: 168 },
+                { id: "L2", hue: 280 }, { id: "L3", hue: 25 },
+                { id: "L4B", hue: 50 }, { id: "L5", hue: 358 },
+            ];
+            const legend = this.layers.length ? this.layers : fallback;
+            for (let row = 0; row < legend.length; row++) {
+                const layerMeta = legend[row];
+                const y = top + row * rowHeight;
+                ctx.fillStyle = "rgba(203, 213, 225, .72)";
+                ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+                ctx.textAlign = "right";
+                ctx.fillText(layerMeta.id, left - 8, y + rowHeight * .62);
+                for (let col = 0; col < points.length; col++) {
+                    const pointLayer = (points[col].layers || []).find(item => item.id === layerMeta.id) || {};
+                    const ratio = Number(pointLayer.change_ratio || 0);
+                    const occupied = Number(pointLayer.tokens || 0) > 0;
+                    const alpha = pointLayer.changed ? Math.min(.96, .28 + ratio * .68) : (occupied ? .105 : .035);
+                    const inset = Math.min(1.5, cellWidth * .14);
+                    ctx.fillStyle = `hsla(${layerMeta.hue || 0}, 82%, ${pointLayer.changed ? 63 : 48}%, ${alpha})`;
+                    ctx.fillRect(
+                        left + col * cellWidth + inset,
+                        y + 1.5,
+                        Math.max(1, cellWidth - inset * 2),
+                        Math.max(1, rowHeight - 3),
+                    );
+                }
+            }
+        },
+
+        _drawContextStream(g, points) {
+            const { ctx, left, top, plotWidth, plotHeight } = g;
+            const layerIds = ["L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"];
+            const hueById = {};
+            for (const layer of this.layers) hueById[layer.id] = layer.hue;
+            const peak = Math.max(1, ...points.map(point => point.total_tokens || 0));
+            const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
+            const cumulative = points.map(() => 0);
+            for (const layerId of layerIds) {
+                const lower = cumulative.slice();
+                const upper = points.map((point, index) => {
+                    const layer = (point.layers || []).find(item => item.id === layerId);
+                    cumulative[index] += layer ? (layer.tokens || 0) : 0;
+                    return cumulative[index];
+                });
+                ctx.beginPath();
+                for (let i = 0; i < points.length; i++) {
+                    const y = top + plotHeight - upper[i] / peak * plotHeight;
+                    if (i === 0) ctx.moveTo(xAt(i), y); else ctx.lineTo(xAt(i), y);
+                }
+                for (let i = points.length - 1; i >= 0; i--) {
+                    const y = top + plotHeight - lower[i] / peak * plotHeight;
+                    ctx.lineTo(xAt(i), y);
+                }
+                ctx.closePath();
+                const hue = hueById[layerId] == null ? 210 : hueById[layerId];
+                const fill = ctx.createLinearGradient(0, top, 0, top + plotHeight);
+                fill.addColorStop(0, `hsla(${hue}, 78%, 62%, .72)`);
+                fill.addColorStop(1, `hsla(${hue}, 72%, 42%, .30)`);
+                ctx.fillStyle = fill;
+                ctx.fill();
+            }
+            ctx.fillStyle = "rgba(203, 213, 225, .68)";
+            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(peak.toLocaleString() + " tok peak", left + 6, top + 13);
+        },
+
+        _drawContextChurn(g, points) {
+            const { ctx, left, top, plotWidth, plotHeight } = g;
+            const maxChurn = Math.max(10, ...points.map(point => point.churn_score || 0));
+            const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
+            const yAt = value => top + plotHeight - (value / maxChurn) * plotHeight;
+            const gradient = ctx.createLinearGradient(0, top, 0, top + plotHeight);
+            gradient.addColorStop(0, "rgba(245, 92, 146, .48)");
+            gradient.addColorStop(1, "rgba(99, 102, 241, .03)");
+            ctx.beginPath();
+            ctx.moveTo(xAt(0), top + plotHeight);
+            points.forEach((point, index) => ctx.lineTo(xAt(index), yAt(point.churn_score || 0)));
+            ctx.lineTo(xAt(points.length - 1), top + plotHeight);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            ctx.beginPath();
+            points.forEach((point, index) => {
+                const x = xAt(index), y = yAt(point.churn_score || 0);
+                if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.strokeStyle = "rgba(248, 113, 163, .92)";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            for (let index = 0; index < points.length; index++) {
+                if (!points[index].compaction) continue;
+                const x = xAt(index);
+                ctx.strokeStyle = "rgba(45, 212, 191, .72)";
+                ctx.setLineDash([3, 4]);
+                ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotHeight); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            ctx.fillStyle = "rgba(203, 213, 225, .68)";
+            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(maxChurn.toFixed(1) + "% peak churn", left + 6, top + 13);
+        },
+
+        _drawTimelineSelection(g, points) {
+            const index = points.findIndex(point => point.id === this.timeline.selectedId);
+            if (index < 0) return;
+            const cellWidth = g.plotWidth / points.length;
+            const x = g.left + (index + .5) * cellWidth;
+            g.ctx.strokeStyle = "rgba(255, 255, 255, .78)";
+            g.ctx.lineWidth = 1;
+            g.ctx.beginPath(); g.ctx.moveTo(x, g.top); g.ctx.lineTo(x, g.top + g.plotHeight); g.ctx.stroke();
+        },
+
+        hoverTimeline(event) {
+            const canvas = this._timelineCanvas;
+            if (!canvas || !(this.timeline.points || []).length) return;
+            const rect = canvas.getBoundingClientRect();
+            const width = Math.max(280, rect.width);
+            const points = this._visibleTimelinePoints(width);
+            const plotLeft = 48;
+            const plotWidth = width - 60;
+            const localX = event.clientX - rect.left;
+            if (localX < plotLeft || localX > plotLeft + plotWidth) return this.clearTimelineHover();
+            const index = Math.min(points.length - 1, Math.max(0, Math.floor((localX - plotLeft) / plotWidth * points.length)));
+            const point = points[index];
+            let layer = null;
+            if (this.view === "timeline") {
+                const localY = event.clientY - rect.top;
+                const row = Math.floor((localY - 14) / ((Math.max(220, rect.height) - 42) / 8));
+                if (row >= 0 && row < 8) layer = (point.layers || [])[row] || null;
+            }
+            this.timelineHover = {
+                visible: true,
+                x: Math.min(width - 210, Math.max(8, localX + 12)),
+                y: Math.max(8, event.clientY - rect.top + 12),
+                point,
+                layer,
+            };
+        },
+
+        selectTimelineHover() {
+            if (this.timelineHover.point) this.selectTimelinePoint(this.timelineHover.point);
+        },
+
+        clearTimelineHover() { this.timelineHover.visible = false; },
+
         hoverCell(event) {
             const canvas = this._canvas;
             if (!canvas || !this.grid.length) return;
@@ -3303,7 +3604,8 @@ ${problem.text}`, "error", 16000);
             if (region.id === "FREE") return;
             this._hoverTimer = setTimeout(async () => {
                 try {
-                    const r = await fetch(`/api/memory/cell?layer=${encodeURIComponent(region.id)}&cols=${this.cols}&rows=${this.rows}&row=${row}&col=${col}`);
+                    const session = this._sessionParam();
+                    const r = await fetch(`/api/memory/cell?layer=${encodeURIComponent(region.id)}&cols=${this.cols}&rows=${this.rows}&row=${row}&col=${col}${session ? "&" + session : ""}`);
                     const d = await r.json();
                     if (this.cellHover.key === key) Object.assign(this.cellHover, { content: d.content || "", chars: d.chars || 0, loading: false });
                 } catch (e) { if (this.cellHover.key === key) this.cellHover.loading = false; }
@@ -3350,8 +3652,9 @@ ${problem.text}`, "error", 16000);
                 copied: false,
             };
             try {
+                const session = this._sessionParam();
                 const r = await fetch(
-                    `/api/memory/content?layer=${encodeURIComponent(l.id || "")}`
+                    `/api/memory/content?layer=${encodeURIComponent(l.id || "")}${session ? "&" + session : ""}`
                 );
                 const d = await r.json();
                 this.layerModal.content = d.content || "";
@@ -4826,7 +5129,7 @@ function routeEvent(ev) {
             if (isFocused) Alpine.store("attachments").load(name);
             break;
         case "context_snapshot": {
-            // Live Memory Map push from the pre_provider_call hook —
+            // Live Context Observatory push from the pre_provider_call hook —
             // one per iteration. Only act when the Memory view is the
             // active panel for the focused session, so background turns
             // and other views pay nothing.

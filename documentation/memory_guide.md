@@ -5,7 +5,7 @@
 Mu-CLI implements a multi-layered memory architecture designed to optimize
 context management for agentic AI workflows. Session working memory is kept
 separate from the cross-session **Memory Ledger**, and the UI distinguishes
-durable knowledge from the provider-visible **Context Map**.
+durable knowledge from the provider-visible **Context Observatory**.
 
 ---
 
@@ -96,6 +96,35 @@ Forget controls. /memory why last explains the last injection.
 
 **Precedence:** Current system policy and the current user request always win.
 Recalled memory is reference data, not an instruction channel.
+
+---
+
+### 2b. Context Observatory
+
+**Locations:** `mu/gui/memory_snapshot.py`, `mu/gui/routers/memory.py`
+
+**Purpose:** Show what the model is actually carrying, and how it changes
+during a session run, without persisting another copy of prompt content.
+
+Each pre-provider call records one bounded timeline point with per-layer token
+counts, token deltas, fixed-slice content hashes, churn ratios, context pressure
+and compaction detection. The timeline retains at most 360 points in runtime
+and never includes raw layer text. Opening or searching the view is read-only;
+only real provider calls advance it.
+
+The web and mobile Memory Center expose complementary views:
+
+- **Evolution heatmap:** provider calls on the x-axis, L0-L5 layers on the
+  y-axis, and brightness proportional to content replacement.
+- **Layer flow:** a stacked stream of provider-visible tokens, making growth,
+  redistribution and summary/history transitions visible.
+- **Churn pulse:** aggregate replacement rate with compaction markers.
+- **Current fingerprint:** the detailed slice-level map for inspecting the
+  latest assembled context and opening current layer contents.
+
+All Context Observatory APIs honor explicit session context from web and
+mobile clients, preventing a read from showing the focused desktop session
+while an action targets a different session.
 
 ---
 
@@ -237,7 +266,7 @@ driven by the SELF-MANAGEMENT block in `AGENTIC_SYSTEM_BASE` (rule 7).
   `stale_todos` (completed todos not yet cleared), `in_progress_todos`, and
   `memory_pressure_pct` (entries vs max — curate before a silent eviction).
   Reuses `collect_context_layers` so the numbers agree with `/memory` and
-  the Memory Map panel. Call before big gathers or when a turn feels long.
+  the Context Observatory. Call before big gathers or when a turn feels long.
 - **`checkpoint_progress(min_new_entries=6)`** — agent-callable wrapper
   around `HistoryMixin.force_progress_checkpoint`. Folds recent history
   into L2 *without* compacting (the anchor doesn't advance, entries stay

@@ -16,7 +16,6 @@ import os
 
 from utils.config import AGENTIC_MODES, AGENT_MODE_METADATA, GUI_VIEW_PANELS
 
-
 # ============================================================ view-panel registration
 
 
@@ -52,7 +51,11 @@ def test_memory_not_in_no_workspace_set():
 
 PANEL_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
-    "mu", "gui", "templates", "fragments", "memory_panel.html",
+    "mu",
+    "gui",
+    "templates",
+    "fragments",
+    "memory_panel.html",
 )
 
 
@@ -93,7 +96,10 @@ def test_memory_panel_has_legend():
 
 INDEX_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
-    "mu", "gui", "templates", "index.html",
+    "mu",
+    "gui",
+    "templates",
+    "index.html",
 )
 
 
@@ -108,7 +114,11 @@ def test_index_html_includes_memory_panel():
 
 APP_JS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
-    "mu", "gui", "static", "js", "app.js",
+    "mu",
+    "gui",
+    "static",
+    "js",
+    "app.js",
 )
 
 
@@ -139,6 +149,16 @@ def test_app_js_memory_store_has_apply_snapshot():
     assert "applySnapshot" in content
 
 
+def test_app_js_has_temporal_context_renderers():
+    with open(APP_JS_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "/api/memory/timeline" in content
+    assert "renderTimeline()" in content
+    assert "_drawContextHeatmap" in content
+    assert "_drawContextStream" in content
+    assert "_drawContextChurn" in content
+
+
 def test_app_js_panel_modes_includes_memory():
     with open(APP_JS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
@@ -165,14 +185,25 @@ def test_app_js_memory_store_has_layer_modal_methods():
 def test_memory_panel_legend_rows_are_clickable():
     with open(PANEL_PATH, "r", encoding="utf-8") as f:
         content = f.read()
-    assert "$store.memory.openLayer(l)" in content
-    # keyboard accessible too
-    assert "@keydown.enter" in content
+    assert "$store.memory.openLayer(layer)" in content
+    # Native buttons provide keyboard activation for the composition legend.
+    assert "context-composition-legend" in content
+
+
+def test_memory_panel_has_temporal_observability_views():
+    with open(PANEL_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "Context Observatory" in content
+    assert "Evolution heatmap" in content
+    assert "$store.memory.setView('stream')" in content
+    assert "$store.memory.setView('churn')" in content
+    assert "$store.memory.bindTimelineCanvas" in content
 
 
 def test_memory_layer_modal_fragment_exists():
     modal_path = os.path.join(
-        os.path.dirname(PANEL_PATH), "memory_layer_modal.html",
+        os.path.dirname(PANEL_PATH),
+        "memory_layer_modal.html",
     )
     assert os.path.isfile(modal_path)
     with open(modal_path, "r", encoding="utf-8") as f:
@@ -210,7 +241,11 @@ def test_css_has_memory_layer_modal_classes():
 
 CSS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
-    "mu", "gui", "static", "css", "app.css",
+    "mu",
+    "gui",
+    "static",
+    "css",
+    "app.css",
 )
 
 
@@ -265,7 +300,7 @@ def _make_content_app(session):
     app.state._fallback_lock = __import__("threading").Lock()
 
     def _session_by_name(name=None):
-        return app.state.sessions.get(app.state.current_session_name)
+        return app.state.sessions.get(name or app.state.current_session_name)
 
     app.state.session_by_name = _session_by_name
     app.include_router(memory_router.router, prefix="/api/memory")
@@ -300,6 +335,38 @@ def test_memory_content_endpoint_rejects_unknown_layer():
     d = r.json()
     assert d["error"] == "unknown layer"
     assert d["content"] == ""
+
+
+def test_memory_timeline_endpoint_honors_explicit_session():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from mu.gui.memory_snapshot import build_memory_snapshot, record_context_snapshot
+    from mu.gui.routers import memory as memory_router
+
+    first = _make_session()
+    second = _make_session()
+    _add_user_turn(first, "first session context")
+    _add_user_turn(second, "second session context with more words than first")
+    first_snapshot = build_memory_snapshot(first, cols=32, rows=32)
+    second_snapshot = build_memory_snapshot(second, cols=32, rows=32)
+    record_context_snapshot(first, first_snapshot, recorded_at=1.0)
+    record_context_snapshot(second, second_snapshot, recorded_at=2.0)
+
+    app = FastAPI()
+    app.state.sessions = {"first": first, "second": second}
+    app.state.current_session_name = "first"
+    app.state.session_by_name = lambda name=None: app.state.sessions.get(
+        name or app.state.current_session_name
+    )
+    app.include_router(memory_router.router, prefix="/api/memory")
+    client = TestClient(app)
+
+    response = client.get("/api/memory/timeline?session_name=second")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["samples"] == 1
+    assert body["points"][0]["at"] == 2.0
+    assert body["points"][0]["total_tokens"] == second_snapshot["total_tokens"]
 
 
 # ============================================================ builder behavior
@@ -405,6 +472,77 @@ def test_snapshot_changed_history_changes_grid():
     assert after_by_id["L5"] > before_by_id["L5"]
 
 
+def test_context_timeline_tracks_provider_call_churn_without_raw_content():
+    import json
+
+    from mu.gui.memory_snapshot import (
+        build_memory_snapshot,
+        get_context_timeline,
+        record_context_snapshot,
+    )
+
+    session = _make_session()
+    secret_marker = "timeline-raw-content-must-not-leak"
+    _add_user_turn(session, "alpha beta gamma")
+    first = build_memory_snapshot(session, cols=32, rows=32)
+    first_point = record_context_snapshot(session, first, recorded_at=10.0)
+
+    _add_user_turn(session, secret_marker)
+    second = build_memory_snapshot(session, cols=48, rows=48)
+    second_point = record_context_snapshot(session, second, recorded_at=11.5)
+    timeline = get_context_timeline(session)
+
+    assert first_point["id"] == 1
+    assert second_point["id"] == 2
+    assert timeline["summary"]["samples"] == 2
+    assert [point["at"] for point in timeline["points"]] == [10.0, 11.5]
+    changed_l5 = next(
+        layer for layer in timeline["points"][1]["layers"] if layer["id"] == "L5"
+    )
+    assert changed_l5["changed"] is True
+    assert changed_l5["changed_chunks"] > 0
+    assert timeline["points"][1]["changed_layers"] > 0
+    assert timeline["points"][1]["churn_score"] > 0
+    serialized = json.dumps(timeline)
+    assert secret_marker not in serialized
+    assert "_hashes" not in serialized
+
+
+def test_context_timeline_detects_material_token_drop_as_compaction(monkeypatch):
+    import mu.gui.memory_snapshot as snapshot
+
+    class _Session:
+        pass
+
+    session = _Session()
+    tokens = {layer_id: 0 for layer_id in snapshot._LAYER_ORDER}
+    tokens["L5"] = 4000
+
+    def _layers(_session):
+        return [
+            {
+                "layer": layer_id,
+                "name": layer_id,
+                "current": tokens[layer_id],
+                "maximum": 8192,
+            }
+            for layer_id in snapshot._LAYER_ORDER
+        ]
+
+    monkeypatch.setattr(snapshot, "collect_context_layers", _layers)
+    monkeypatch.setattr(
+        snapshot, "_layer_text", lambda _session, layer: layer * tokens[layer]
+    )
+    first = snapshot.build_memory_snapshot(session, cols=32, rows=32)
+    snapshot.record_context_snapshot(session, first, recorded_at=1.0)
+    tokens["L5"] = 2400
+    second = snapshot.build_memory_snapshot(session, cols=32, rows=32)
+    point = snapshot.record_context_snapshot(session, second, recorded_at=2.0)
+
+    assert point["total_delta"] == -1600
+    assert point["compaction"] is True
+
+
 def test_snapshot_clamps_resolution():
     from mu.gui.memory_snapshot import build_memory_snapshot
 
@@ -500,8 +638,8 @@ def test_snapshot_heat_keyed_per_resolution():
     b48 = build_memory_snapshot(session, cols=48, rows=48)
     b64 = build_memory_snapshot(session, cols=64, rows=64)  # fresh resolution
 
-    assert max(c for r in b48["grid"] for c in r) > 1      # 48 accumulated heat
-    assert max(c for r in b64["grid"] for c in r) <= 1     # 64 starts clean
+    assert max(c for r in b48["grid"] for c in r) > 1  # 48 accumulated heat
+    assert max(c for r in b64["grid"] for c in r) <= 1  # 64 starts clean
 
 
 def test_snapshot_resize_keeps_change_signal():

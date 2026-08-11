@@ -23,6 +23,8 @@ import {
   DurableMemory,
   DurableMemoryDetail,
   DurableMemoryList,
+  ContextTimeline,
+  ContextTimelinePoint,
   MemoryLayer,
   MemorySnapshot,
   RecallReceipt,
@@ -33,12 +35,16 @@ import { SafeAreaModal } from '../components/SafeAreaModal';
 
 
 type MemoryTab = 'memories' | 'context';
+type ContextView = 'heatmap' | 'churn';
 
 
 export function MemoryScreen() {
   const { colors } = useTheme();
   const [tab, setTab] = useState<MemoryTab>('memories');
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null);
+  const [contextTimeline, setContextTimeline] = useState<ContextTimeline | null>(null);
+  const [contextView, setContextView] = useState<ContextView>('heatmap');
+  const [selectedContextPoint, setSelectedContextPoint] = useState<ContextTimelinePoint | null>(null);
   const [ledger, setLedger] = useState<DurableMemoryList | null>(null);
   const [query, setQuery] = useState('');
   const [newStatement, setNewStatement] = useState('');
@@ -61,12 +67,17 @@ export function MemoryScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [durable, context] = await Promise.all([
+      const [durable, context, timeline] = await Promise.all([
         memoryApi.listDurable(query),
         memoryApi.getState(),
+        memoryApi.getTimeline(),
       ]);
       setLedger(durable);
       setSnapshot(context);
+      setContextTimeline(timeline);
+      if (timeline.points.length) {
+        setSelectedContextPoint(timeline.points[timeline.points.length - 1]);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -216,11 +227,17 @@ export function MemoryScreen() {
     </TouchableOpacity>
   );
 
+  const contextPoints = (contextTimeline?.points || []).slice(-96);
+  const contextSummary = contextTimeline?.summary || { samples: 0 };
+  const activeContextPoint = selectedContextPoint
+    || (contextPoints.length ? contextPoints[contextPoints.length - 1] : null);
+  const maxChurn = Math.max(10, ...contextPoints.map(point => point.churn_score || 0));
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {tabButton('memories', 'Memories')}
-        {tabButton('context', 'Context Map')}
+        {tabButton('context', 'Context')}
       </View>
 
       {tab === 'memories' ? (
@@ -360,46 +377,255 @@ export function MemoryScreen() {
         >
           {!snapshot || !snapshot.active ? (
             <EmptyState
-              title="No context map yet"
-              message="Send a prompt to see exactly what was placed in the model context."
+              title="Context observatory is ready"
+              message="Send a prompt. Each provider call will appear as a new heatmap column."
             />
           ) : (
             <>
               <Card style={{ marginBottom: spacing.sm }}>
-                <Text variant="base" style={{ fontWeight: '600' }}>Context Window</Text>
-                {[
-                  ['Total tokens', snapshot.total_tokens],
-                  ['Context limit', snapshot.context_limit],
-                  ['Free tokens', snapshot.free_tokens],
-                  ['Fill', String(snapshot.fill_pct) + '%'],
-                ].map(([label, value]) => (
-                  <View
-                    key={String(label)}
-                    style={{ flexDirection: 'row', justifyContent: 'space-between', minHeight: 28 }}
-                  >
-                    <Text variant="sm" style={{ color: colors.textDim }}>{label}</Text>
-                    <Text variant="sm" style={{ fontVariant: ['tabular-nums'] }}>{value}</Text>
-                  </View>
-                ))}
-              </Card>
-              <Text variant="sm" style={{ fontWeight: '500', marginBottom: spacing.sm }}>
-                Provider-visible layers
-              </Text>
-              {snapshot.layers.map(layer => (
-                <TouchableOpacity key={layer.id} onPress={() => openLayer(layer)}>
-                  <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <View style={{ flex: 1 }}>
-                        <Text variant="sm" style={{ fontWeight: '500' }}>{layer.name}</Text>
-                        <Text variant="xs" style={{ color: colors.textDim }}>
-                          {layer.tokens} tokens · {layer.fill_pct}%
-                        </Text>
-                      </View>
-                      <Badge label={String(layer.change_count)} />
+                <Text variant="xs" style={{ color: colors.accent, letterSpacing: 1.2 }}>
+                  MODEL INPUT · LIVE
+                </Text>
+                <Text variant="lg" style={{ fontWeight: '600', marginTop: spacing.xs }}>
+                  Context Observatory
+                </Text>
+                <Text variant="xs" style={{ color: colors.textDim }}>
+                  Provider-visible context, captured at every model call.
+                </Text>
+
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.base }}>
+                  {[
+                    ['Calls', contextSummary.samples || 0],
+                    ['Pressure', String(snapshot.fill_pct) + '%'],
+                    ['Net', ((contextSummary.net_delta || 0) > 0 ? '+' : '') + String(contextSummary.net_delta || 0)],
+                    ['Hottest', contextSummary.hottest_layer || 'stable'],
+                  ].map(([label, value]) => (
+                    <View
+                      key={String(label)}
+                      style={{
+                        width: '47%',
+                        borderWidth: 1,
+                        borderColor: colors.hairline,
+                        borderRadius: 10,
+                        padding: spacing.sm,
+                        backgroundColor: colors.bgHover,
+                      }}
+                    >
+                      <Text variant="xs" style={{ color: colors.textDim }}>{label}</Text>
+                      <Text variant="base" style={{ fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+                        {value}
+                      </Text>
                     </View>
-                  </Card>
-                </TouchableOpacity>
-              ))}
+                  ))}
+                </View>
+
+                <View style={{ marginTop: spacing.base }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs }}>
+                    <Text variant="xs" style={{ color: colors.textDim }}>Current composition</Text>
+                    <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
+                      {snapshot.total_tokens.toLocaleString()} / {snapshot.context_limit.toLocaleString()} tok
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      height: 14,
+                      flexDirection: 'row',
+                      gap: 2,
+                      padding: 2,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      borderColor: colors.hairline,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {snapshot.layers.filter(layer => layer.tokens > 0).map(layer => (
+                      <View
+                        key={layer.id}
+                        style={{
+                          flex: Math.max(1, layer.tokens),
+                          borderRadius: 999,
+                          backgroundColor: `hsl(${layer.hue}, 72%, 56%)`,
+                        }}
+                      />
+                    ))}
+                    <View
+                      style={{
+                        flex: Math.max(1, snapshot.free_tokens),
+                        borderRadius: 999,
+                        backgroundColor: colors.borderStrong,
+                      }}
+                    />
+                  </View>
+                </View>
+              </Card>
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  padding: 3,
+                  marginBottom: spacing.sm,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: colors.hairline,
+                }}
+              >
+                {(['heatmap', 'churn'] as ContextView[]).map(view => (
+                  <TouchableOpacity
+                    key={view}
+                    onPress={() => setContextView(view)}
+                    style={{
+                      flex: 1,
+                      alignItems: 'center',
+                      paddingVertical: spacing.sm,
+                      borderRadius: 7,
+                      backgroundColor: contextView === view ? colors.accentSoft : 'transparent',
+                    }}
+                  >
+                    <Text variant="xs" style={{ color: contextView === view ? colors.accent : colors.textDim }}>
+                      {view === 'heatmap' ? 'Evolution heatmap' : 'Churn pulse'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Card style={{ marginBottom: spacing.sm }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
+                  <View>
+                    <Text variant="sm" style={{ fontWeight: '600' }}>
+                      {contextView === 'heatmap' ? 'Layer evolution' : 'Context churn'}
+                    </Text>
+                    <Text variant="xs" style={{ color: colors.textDim }}>
+                      {contextView === 'heatmap'
+                        ? 'Brightness = content replaced at each provider call'
+                        : 'Replacement rate; teal bars mark compaction'}
+                    </Text>
+                  </View>
+                  <Badge label="live" variant="success" />
+                </View>
+
+                {contextPoints.length === 0 ? (
+                  <View style={{ minHeight: 140, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text variant="xs" style={{ color: colors.textDim }}>
+                      Waiting for the first provider call…
+                    </Text>
+                  </View>
+                ) : contextView === 'heatmap' ? (
+                  <View style={{ flexDirection: 'row' }}>
+                    <View style={{ width: 38, paddingRight: spacing.xs }}>
+                      {snapshot.layers.map(layer => (
+                        <View key={layer.id} style={{ height: 20, justifyContent: 'center' }}>
+                          <Text variant="xs" style={{ color: colors.textDim, fontFamily: 'monospace', fontSize: 10 }}>
+                            {layer.id}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                      <View>
+                        {snapshot.layers.map(layer => (
+                          <View key={layer.id} style={{ height: 20, flexDirection: 'row', alignItems: 'center' }}>
+                            {contextPoints.map(point => {
+                              const measured = point.layers.find(item => item.id === layer.id);
+                              const changed = !!measured?.changed;
+                              const ratio = measured?.change_ratio || 0;
+                              const alpha = changed ? Math.min(0.96, 0.28 + ratio * 0.68) : (measured?.tokens ? 0.12 : 0.035);
+                              return (
+                                <TouchableOpacity
+                                  key={point.id}
+                                  onPress={() => setSelectedContextPoint(point)}
+                                  style={{
+                                    width: 9,
+                                    height: 16,
+                                    marginRight: 2,
+                                    borderRadius: 2,
+                                    borderWidth: activeContextPoint?.id === point.id ? 1 : 0,
+                                    borderColor: colors.text,
+                                    backgroundColor: `hsla(${layer.hue}, 78%, ${changed ? 60 : 46}%, ${alpha})`,
+                                  }}
+                                />
+                              );
+                            })}
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ height: 150, flexDirection: 'row', alignItems: 'flex-end', gap: 3, paddingTop: spacing.sm }}>
+                      {contextPoints.map(point => (
+                        <TouchableOpacity
+                          key={point.id}
+                          onPress={() => setSelectedContextPoint(point)}
+                          style={{
+                            width: 8,
+                            height: Math.max(3, (point.churn_score || 0) / maxChurn * 128),
+                            borderRadius: 4,
+                            backgroundColor: point.compaction ? '#2dd4bf' : '#f471a5',
+                            opacity: activeContextPoint?.id === point.id ? 1 : 0.68,
+                          }}
+                        />
+                      ))}
+                    </View>
+                  </ScrollView>
+                )}
+              </Card>
+
+              {activeContextPoint && (
+                <Card style={{ marginBottom: spacing.sm }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
+                    <View>
+                      <Text variant="sm" style={{ fontWeight: '600' }}>
+                        Provider call {activeContextPoint.id}
+                      </Text>
+                      <Text variant="xs" style={{ color: colors.textDim }}>
+                        {new Date(activeContextPoint.at * 1000).toLocaleTimeString()}
+                      </Text>
+                    </View>
+                    <Badge
+                      label={(activeContextPoint.total_delta > 0 ? '+' : '') + activeContextPoint.total_delta + ' tok'}
+                      variant={activeContextPoint.total_delta < 0 ? 'success' : 'neutral'}
+                    />
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm }}>
+                    <Badge label={activeContextPoint.total_tokens.toLocaleString() + ' total'} />
+                    <Badge label={activeContextPoint.churn_score + '% churn'} />
+                    <Badge label={activeContextPoint.changed_layers + ' changed'} />
+                    {activeContextPoint.compaction && <Badge label="compacted" variant="success" />}
+                  </View>
+                  {activeContextPoint.layers.map(layer => {
+                    const currentLayer = snapshot.layers.find(item => item.id === layer.id);
+                    return (
+                      <TouchableOpacity
+                        key={layer.id}
+                        onPress={() => currentLayer && openLayer(currentLayer)}
+                        style={{ flexDirection: 'row', alignItems: 'center', minHeight: 34 }}
+                      >
+                        <View
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 3,
+                            marginRight: spacing.sm,
+                            backgroundColor: `hsl(${layer.hue}, 72%, 56%)`,
+                          }}
+                        />
+                        <Text variant="xs" style={{ width: 34, fontFamily: 'monospace', color: colors.textDim }}>
+                          {layer.id}
+                        </Text>
+                        <Text variant="xs" style={{ flex: 1 }} numberOfLines={1}>{layer.name}</Text>
+                        <Text variant="xs" style={{ color: layer.changed ? colors.warning : colors.textDim, fontVariant: ['tabular-nums'] }}>
+                          {layer.tokens.toLocaleString()} · Δ{layer.changed_chunks}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </Card>
+              )}
+
+              <Text variant="xs" style={{ color: colors.textDim, textAlign: 'center', marginVertical: spacing.sm }}>
+                Session-run history stores measurements and hashes, never prompt text.
+              </Text>
             </>
           )}
         </ScrollView>

@@ -99,7 +99,7 @@ The most common day-to-day commands — see [documentation/commands.md](document
 | `/tool <list\|enable\|disable> [name]` | Show or toggle tools |
 | `/skills [<name>\|reload\|enable <name>\|disable <name>]` | List, inspect, reload, or toggle skills |
 | `/docs [<name>]` | List or render bundled documentation (Tab autocompletes names) |
-| `/remember <text>` / `/memory ...` | Automatic scoped cross-session Memory Ledger with recall receipts, provenance, history and pin/archive/forget controls; also inspect working stores and Context Map layers |
+| `/remember <text>` / `/memory ...` | Automatic scoped cross-session Memory Ledger plus a Context Observatory with provider-call heatmap, layer flow, churn and compaction views across web and mobile |
 | `/research <query>` | Web search + synthesis |
 | `/set <key> <value>` / `/get <key>` / `/unset <key>` / `/variables` | Manage session variables |
 | `/model [name]` / `/provider <name>` | Show or switch model / provider |

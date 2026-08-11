@@ -28,6 +28,50 @@ export interface MemorySnapshot {
   fill_pct: number;
 }
 
+export interface ContextTimelineLayer {
+  id: string;
+  name: string;
+  hue: number;
+  tokens: number;
+  token_delta: number;
+  changed: boolean;
+  changed_chunks: number;
+  sampled_chunks: number;
+  change_ratio: number;
+}
+
+export interface ContextTimelinePoint {
+  id: number;
+  at: number;
+  phase: string;
+  total_tokens: number;
+  total_delta: number;
+  context_limit: number;
+  free_tokens: number;
+  fill_pct: number;
+  churn_score: number;
+  changed_layers: number;
+  compaction: boolean;
+  layers: ContextTimelineLayer[];
+}
+
+export interface ContextTimeline {
+  active: boolean;
+  points: ContextTimelinePoint[];
+  summary: {
+    samples: number;
+    first_tokens?: number;
+    last_tokens?: number;
+    net_delta?: number;
+    peak_tokens?: number;
+    peak_fill_pct?: number;
+    compactions?: number;
+    hottest_layer?: string | null;
+    hottest_layer_changes?: number;
+    max_churn_score?: number;
+  };
+}
+
 export interface DurableMemoryScope {
   type: 'personal' | 'workspace' | 'repository' | 'branch' | 'feature';
   key: string;
@@ -92,14 +136,18 @@ const sessionQuery = () => ({
 
 export const memoryApi = {
   getState: (cols?: number, rows?: number) =>
-    api.get<MemorySnapshot>('/api/memory/state', { query: { cols, rows } }),
+    api.get<MemorySnapshot>('/api/memory/state', { query: { ...sessionQuery(), cols, rows } }),
+  getTimeline: (limit = 360) =>
+    api.get<ContextTimeline>('/api/memory/timeline', {
+      query: { ...sessionQuery(), limit },
+    }),
   getLayerContent: (layer: string) =>
     api.get<{ layer: string; name: string; hue: number; content: string; tokens: number; chars: number; error: string }>(
-      '/api/memory/content', { query: { layer } },
+      '/api/memory/content', { query: { ...sessionQuery(), layer } },
     ),
   getCell: (layer: string, row: number, col: number, cols?: number, rows?: number) =>
     api.get<{ error: string; content: string; chars: number; tokens: number; cell_index: number; cell_count: number }>(
-      '/api/memory/cell', { query: { layer, row, col, cols, rows } },
+      '/api/memory/cell', { query: { ...sessionQuery(), layer, row, col, cols, rows } },
     ),
   listDurable: (q = '', lifecycle?: string) =>
     api.get<DurableMemoryList>('/api/v1/memories', {

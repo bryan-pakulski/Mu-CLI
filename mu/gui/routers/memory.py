@@ -1,24 +1,25 @@
-"""Memory Map panel — live context-window fingerprint.
+"""Context Observatory — current fingerprint and provider-call timeline.
 
-Surfaces ``build_memory_snapshot`` over the active session as JSON so the
-GUI "Memory Map" view can render a layer-banded color grid and refresh it
-each turn (and per iteration, via the ``context_snapshot`` SSE event the
-``pre_provider_call`` hook publishes). Mirrors the shape of the other
-mode-panel routers (e.g. ``routers/debug.py``).
+The current-state endpoints expose the assembled prompt layers and detailed
+slice grid. The timeline endpoint exposes content-free measurements captured
+only at real provider calls. All routes use the same explicit session
+dependency as web and mobile mutations.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Query
 
+from ..deps import require_session
 from ..memory_snapshot import (
     LAYER_HUES,
     _LAYER_ORDER,
     _layer_text,
     _sample_chunks,
     build_memory_snapshot,
+    get_context_timeline,
 )
 
 router = APIRouter()
@@ -26,7 +27,9 @@ router = APIRouter()
 
 @router.get("/state")
 async def get_memory_state(
-    request: Request, cols: int = 128, rows: int = 128
+    cols: int = 128,
+    rows: int = 128,
+    session: Any = Depends(require_session),
 ) -> Dict[str, Any]:
     """Current context-window snapshot for the focused session.
 
@@ -37,17 +40,30 @@ async def get_memory_state(
     per-layer legend (``hue`` + ``change_count``) the panel renders as a
     hue-per-layer, per-cell change-frequency heatmap alongside the canvas.
     """
-    session = request.app.state.session_by_name()
     return build_memory_snapshot(session, cols=cols, rows=rows)
+
+
+@router.get("/timeline")
+async def get_memory_timeline(
+    limit: int = Query(default=240, ge=1, le=360),
+    session: Any = Depends(require_session),
+) -> Dict[str, Any]:
+    """Provider-call history for the session's Context Observatory.
+
+    Points contain layer token counts, deltas and fixed-slice churn metrics;
+    they deliberately contain no raw prompt or conversation content.
+    """
+    return get_context_timeline(session, limit=limit)
 
 
 @router.get("/content")
 async def get_memory_layer_content(
-    request: Request, layer: str = ""
+    layer: str = "",
+    session: Any = Depends(require_session),
 ) -> Dict[str, Any]:
     """The actual text body the harness injects for one context layer.
 
-    Clicking a layer in the Memory Map legend opens a modal with this
+    Clicking a layer in the Context Observatory legend opens a modal with this
     content so you can inspect exactly what the model sees at that layer
     (the assembled system prompt for L0, the rendered conversation for L5,
     workspace files for L1, etc.). Returns plain text — the frontend shows
@@ -57,8 +73,6 @@ async def get_memory_layer_content(
     from utils.runtime_metrics import collect_context_layers
 
     lid = (layer or "").strip().upper()
-    session = request.app.state.session_by_name()
-
     if lid not in _LAYER_ORDER:
         return {
             "layer": lid,
@@ -77,7 +91,7 @@ async def get_memory_layer_content(
     except Exception:
         token_layers = []
     by_id = {e["layer"]: e for e in token_layers}
-    meta = (by_id.get(lid) or {})
+    meta = by_id.get(lid) or {}
     name = meta.get("name", lid)
     tokens = int(meta.get("current") or 0)
 
@@ -107,15 +121,24 @@ async def get_memory_layer_content(
 
 @router.get("/cell")
 async def get_memory_cell(
-    request: Request, layer: str = "", cols: int = 128, rows: int = 128,
-    row: int = -1, col: int = -1,
+    layer: str = "",
+    cols: int = 128,
+    rows: int = 128,
+    row: int = -1,
+    col: int = -1,
+    session: Any = Depends(require_session),
 ) -> Dict[str, Any]:
     """Return the metadata and exact text slice represented by one grid cell."""
-    session = request.app.state.session_by_name()
     lid = (layer or "").strip().upper()
     snapshot = build_memory_snapshot(session, cols=cols, rows=rows)
-    region = next((item for item in snapshot.get("regions", []) if item["id"] == lid), None)
-    if region is None or not (region["row_start"] <= row < region["row_end"]) or not (0 <= col < snapshot["cols"]):
+    region = next(
+        (item for item in snapshot.get("regions", []) if item["id"] == lid), None
+    )
+    if (
+        region is None
+        or not (region["row_start"] <= row < region["row_end"])
+        or not (0 <= col < snapshot["cols"])
+    ):
         return {"error": "cell is outside the current memory map", "content": ""}
     if lid == "FREE":
         return {"error": "", "content": "", "free": True, "tokens": 0, "chars": 0}

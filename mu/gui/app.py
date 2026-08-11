@@ -19,7 +19,11 @@ from starlette.types import Scope
 
 from .bus import EventBus
 from .deps import require_session
-from .memory_snapshot import LIVE_RESOLUTION, build_memory_snapshot
+from .memory_snapshot import (
+    LIVE_RESOLUTION,
+    build_memory_snapshot,
+    record_context_snapshot,
+)
 from .prompts import PromptStore
 from .routers import (
     artifacts as artifacts_router,
@@ -80,10 +84,17 @@ def _register_memory_snapshot_hook() -> None:
                 rows=LIVE_RESOLUTION,
                 request_token_estimate=request_tokens,
             )
+            timeline_point = record_context_snapshot(ctx.session, snap)
         except Exception as exc:
             _logger.warning("memory snapshot hook failed: %s", exc)
             return None
-        ui._publish({"kind": "context_snapshot", **snap})
+        ui._publish(
+            {
+                "kind": "context_snapshot",
+                **snap,
+                "timeline_point": timeline_point,
+            }
+        )
         return None
 
     default_registry.register("pre_provider_call", name=_MEMORY_HOOK_NAME)(_snapshot)

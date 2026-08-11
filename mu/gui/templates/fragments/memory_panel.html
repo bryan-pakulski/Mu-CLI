@@ -215,125 +215,211 @@
         </section>
     </section>
 
-    <section x-show="$store.memory.tab === 'context'">
-    <!-- empty state -->
-    <div class="panel-empty" x-show="!$store.memory.active">
-        <h3>no context map yet</h3>
-        <p class="muted">Send a prompt in chat. The map fills with one
-        color-banded row per context layer (system, workspace, skills,
-        summary, goal, history) and updates live as the model runs.</p>
-    </div>
-
-    <div x-show="$store.memory.active" class="memory-body">
-        <!-- Header: this is capacity, not merely a share of used layers. -->
-        <div class="panel-head">
-            <div class="panel-subject">context window</div>
-            <div class="panel-meta mono muted">
-                <span x-text="$store.memory.totalTokens + ' / ' + ($store.memory.contextLimit || 0) + ' tok'"></span>
-                <span x-text="' · ' + $store.memory.fillPct + '%'"></span>
-            </div>
+    <section x-show="$store.memory.tab === 'context'" class="context-observatory">
+        <div class="panel-empty" x-show="!$store.memory.active">
+            <h3>context observatory is ready</h3>
+            <p class="muted">Send a prompt. Every provider call becomes one
+            timeline column, revealing which context layers changed, grew,
+            compacted or stayed stable throughout the run.</p>
         </div>
 
-        <div class="memory-capacity" aria-label="Context capacity">
-            <div class="memory-capacity-used" :style="'width:' + Math.min(100, $store.memory.fillPct) + '%'"></div>
-        </div>
-        <div class="memory-capacity-label mono muted">
-            <span x-text="$store.memory.totalTokens + ' used' "></span>
-            <span x-text="$store.memory.freeTokens + ' free' "></span>
-        </div>
-
-        <!-- controls: view mode + resolution -->
-        <div class="memory-controls">
-            <div class="memory-view-toggle" role="group" aria-label="render view">
-                <button type="button"
-                        :class="{ active: $store.memory.view === 'heat' }"
-                        @click="$store.memory.setView('heat')"
-                        title="Brightness = how often each slice changed">heat</button>
-                <button type="button"
-                        :class="{ active: $store.memory.view === 'layer' }"
-                        @click="$store.memory.setView('layer')"
-                        title="Solid color per layer">layer</button>
-            </div>
-            <label class="mono muted" for="mem-res">res</label>
-            <select id="mem-res"
-                    x-model.number="$store.memory.resolution"
-                    @change="$store.memory.load()">
-                <option :value="64">64</option>
-                <option :value="128">128</option>
-                <option :value="256">256</option>
-            </select>
-            <button class="memory-refresh"
-                    @click="$store.memory.load()"
-                    title="Refresh snapshot">↻</button>
-        </div>
-
-        <!-- the fingerprint grid -->
-        <div class="memory-canvas-wrap">
-            <canvas x-ref="grid"
-                    class="memory-canvas"
-                    x-init="$store.memory.bindCanvas($refs.grid)"
-                    @pointermove="$store.memory.hoverCell($event)"
-                    @pointerleave="$store.memory.clearHover()"></canvas>
-            <div class="memory-cell-tooltip"
-                 x-show="$store.memory.cellHover.visible"
-                 x-cloak
-                 :style="'left:' + $store.memory.cellHover.x + 'px;top:' + $store.memory.cellHover.y + 'px'">
-                <div class="memory-cell-title" x-text="$store.memory.cellHover.layer + ' · cell ' + $store.memory.cellHover.index"></div>
-                <div x-text="$store.memory.cellHover.row + ',' + $store.memory.cellHover.col + ' · heat ' + $store.memory.cellHover.heat + ' · Δ' + $store.memory.cellHover.changeCount"></div>
-                <div x-text="'cell ' + ($store.memory.cellHover.index + 1) + '/' + $store.memory.cellHover.cellCount + ' · hue ' + $store.memory.cellHover.hue"></div>
-                <div x-text="$store.memory.cellHover.tokens + ' / ' + $store.memory.cellHover.max + ' layer tok · ' + $store.memory.cellHover.chars + ' chars' "></div>
-                <pre x-show="$store.memory.cellHover.content" x-text="$store.memory.cellHover.content"></pre>
-                <div x-show="$store.memory.cellHover.loading">loading cell content…</div>
-            </div>
-            <!-- layer band dividers, positioned by row share -->
-            <div class="memory-dividers">
-                <template x-for="l in $store.memory.regions" :key="l.id">
-                    <div class="memory-divider"
-                         x-show="l.row_start > 0"
-                         :style="'top:' + (l.row_start / $store.memory.rows * 100) + '%'"></div>
-                </template>
-            </div>
-        </div>
-
-        <!-- Per-layer legend — click a layer to open its actual
-             content in a modal (what the model sees at that layer). -->
-        <div class="memory-legend">
-            <template x-for="l in $store.memory.layers" :key="l.id">
-                <div class="memory-legend-row"
-                     :class="{ empty: !l.tokens }"
-                     role="button"
-                     tabindex="0"
-                     :title="'View ' + l.id + ' layer contents'"
-                     @click="$store.memory.openLayer(l)"
-                     @keydown.enter.prevent="$store.memory.openLayer(l)"
-                     @keydown.space.prevent="$store.memory.openLayer(l)">
-                    <span class="memory-legend-swatch"
-                          :style="'background:hsl(' + (l.hue || 0) + ',68%,42%)'"></span>
-                    <span class="memory-legend-id mono" x-text="l.id"></span>
-                    <span class="memory-legend-name" x-text="l.name"></span>
-                    <span class="memory-legend-tok mono muted"
-                          :style="'color:' + (l.fill_pct > 90 ? 'var(--err)' : '')"
-                          x-text="l.tokens + '  ·  ' + l.fill_pct + '%'"></span>
-                    <span class="memory-legend-delta mono"
-                          :class="{ hot: l.change_count > 0 }"
-                          x-text="'Δ' + (l.change_count || 0)"
-                          title="chunks changed since first seen"></span>
+        <div x-show="$store.memory.active" class="memory-body">
+            <header class="context-hero">
+                <div>
+                    <div class="context-kicker mono">MODEL INPUT · LIVE</div>
+                    <h3>Context Observatory</h3>
+                    <p>See the prompt evolve at every provider call.</p>
                 </div>
+                <button class="memory-refresh" @click="$store.memory.loadContext()"
+                        title="Refresh context history">↻</button>
+            </header>
+
+            <div class="context-stat-grid">
+                <div class="context-stat">
+                    <span class="context-stat-label">provider calls</span>
+                    <strong x-text="$store.memory.timeline.summary.samples || 0"></strong>
+                    <small>this session run</small>
+                </div>
+                <div class="context-stat">
+                    <span class="context-stat-label">window pressure</span>
+                    <strong x-text="$store.memory.fillPct.toFixed(1) + '%'"></strong>
+                    <small x-text="$store.memory.totalTokens.toLocaleString() + ' tokens visible'"></small>
+                </div>
+                <div class="context-stat">
+                    <span class="context-stat-label">net movement</span>
+                    <strong :class="{ positive: ($store.memory.timeline.summary.net_delta || 0) > 0 }"
+                            x-text="(($store.memory.timeline.summary.net_delta || 0) > 0 ? '+' : '') + ($store.memory.timeline.summary.net_delta || 0).toLocaleString()"></strong>
+                    <small>tokens since first call</small>
+                </div>
+                <div class="context-stat">
+                    <span class="context-stat-label">hottest layer</span>
+                    <strong x-text="$store.memory.timeline.summary.hottest_layer || 'stable'"></strong>
+                    <small x-text="($store.memory.timeline.summary.compactions || 0) + ' compaction events'"></small>
+                </div>
+            </div>
+
+            <section class="context-composition-card">
+                <div class="context-card-head">
+                    <div>
+                        <strong>Current composition</strong>
+                        <span class="mono muted"
+                              x-text="$store.memory.totalTokens.toLocaleString() + ' / ' + ($store.memory.contextLimit || 0).toLocaleString() + ' tok'"></span>
+                    </div>
+                    <span class="context-pressure-pill mono"
+                          :class="{ warm: $store.memory.fillPct >= 65, hot: $store.memory.fillPct >= 85 }"
+                          x-text="$store.memory.freeTokens.toLocaleString() + ' free'"></span>
+                </div>
+                <div class="context-composition" aria-label="Current context composition by layer">
+                    <template x-for="layer in $store.memory.layers" :key="layer.id">
+                        <button type="button"
+                                x-show="layer.tokens > 0"
+                                :title="layer.id + ' · ' + layer.tokens + ' tokens'"
+                                :style="'flex:' + Math.max(1, layer.tokens) + ';background:hsl(' + layer.hue + ',76%,56%)'"
+                                @click="$store.memory.openLayer(layer)"></button>
+                    </template>
+                    <span class="context-composition-free"
+                          :style="'flex:' + Math.max(1, $store.memory.freeTokens)"></span>
+                </div>
+                <div class="context-composition-legend">
+                    <template x-for="layer in $store.memory.layers" :key="layer.id">
+                        <button type="button" @click="$store.memory.openLayer(layer)"
+                                :class="{ empty: !layer.tokens }">
+                            <i :style="'background:hsl(' + layer.hue + ',76%,56%)'"></i>
+                            <span class="mono" x-text="layer.id"></span>
+                            <span x-text="layer.tokens.toLocaleString()"></span>
+                        </button>
+                    </template>
+                </div>
+            </section>
+
+            <div class="memory-controls context-view-controls">
+                <div class="memory-view-toggle" role="group" aria-label="Context visualization">
+                    <button type="button" :class="{ active: $store.memory.view === 'timeline' }"
+                            @click="$store.memory.setView('timeline')"
+                            title="Layer churn by provider call">heatmap</button>
+                    <button type="button" :class="{ active: $store.memory.view === 'stream' }"
+                            @click="$store.memory.setView('stream')"
+                            title="How each layer contributes to prompt growth">flow</button>
+                    <button type="button" :class="{ active: $store.memory.view === 'churn' }"
+                            @click="$store.memory.setView('churn')"
+                            title="Aggregate content replacement and compaction">churn</button>
+                    <button type="button" :class="{ active: $store.memory.view === 'fingerprint' }"
+                            @click="$store.memory.setView('fingerprint')"
+                            title="Current content-slice fingerprint">current</button>
+                </div>
+            </div>
+
+            <section class="context-chart-card" x-show="$store.memory.view !== 'fingerprint'">
+                <div class="context-chart-title">
+                    <div>
+                        <strong x-text="$store.memory.view === 'stream' ? 'Layer flow' : ($store.memory.view === 'churn' ? 'Context churn' : 'Evolution heatmap')"></strong>
+                        <span class="muted"
+                              x-text="$store.memory.view === 'stream' ? 'stacked provider-visible tokens over time' : ($store.memory.view === 'churn' ? 'content replacement; teal markers indicate compaction' : 'brightness shows how much of a layer changed')"></span>
+                    </div>
+                    <span class="context-live-dot">live</span>
+                </div>
+                <div class="context-timeline-wrap">
+                    <canvas x-ref="timeline"
+                            class="context-timeline-canvas"
+                            x-init="$store.memory.bindTimelineCanvas($refs.timeline)"
+                            @pointermove="$store.memory.hoverTimeline($event)"
+                            @pointerleave="$store.memory.clearTimelineHover()"
+                            @click="$store.memory.selectTimelineHover()"></canvas>
+                    <div class="context-timeline-tooltip"
+                         x-show="$store.memory.timelineHover.visible"
+                         x-cloak
+                         :style="'left:' + $store.memory.timelineHover.x + 'px;top:' + $store.memory.timelineHover.y + 'px'">
+                        <template x-if="$store.memory.timelineHover.point">
+                            <div>
+                                <strong x-text="'Provider call ' + $store.memory.timelineHover.point.id"></strong>
+                                <span x-text="new Date($store.memory.timelineHover.point.at * 1000).toLocaleTimeString()"></span>
+                                <span x-text="$store.memory.timelineHover.point.total_tokens.toLocaleString() + ' tokens · ' + $store.memory.timelineHover.point.churn_score + '% churn'"></span>
+                                <span x-show="$store.memory.timelineHover.layer"
+                                      x-text="$store.memory.timelineHover.layer && ($store.memory.timelineHover.layer.id + ' · ' + $store.memory.timelineHover.layer.tokens.toLocaleString() + ' tok · ' + $store.memory.timelineHover.layer.changed_chunks + ' slices changed')"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </section>
+
+            <section class="context-chart-card context-fingerprint-card"
+                     x-show="$store.memory.view === 'fingerprint'">
+                <div class="context-chart-title">
+                    <div>
+                        <strong>Current slice fingerprint</strong>
+                        <span class="muted">inspect exactly which regions of today's prompt have repeatedly changed</span>
+                    </div>
+                    <div class="context-resolution">
+                        <label class="mono muted" for="mem-res">detail</label>
+                        <select id="mem-res" x-model.number="$store.memory.resolution"
+                                @change="$store.memory.loadContext()">
+                            <option :value="64">64</option>
+                            <option :value="128">128</option>
+                            <option :value="256">256</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="memory-canvas-wrap">
+                    <canvas x-ref="grid" class="memory-canvas"
+                            x-init="$store.memory.bindCanvas($refs.grid)"
+                            @pointermove="$store.memory.hoverCell($event)"
+                            @pointerleave="$store.memory.clearHover()"></canvas>
+                    <div class="memory-cell-tooltip" x-show="$store.memory.cellHover.visible" x-cloak
+                         :style="'left:' + $store.memory.cellHover.x + 'px;top:' + $store.memory.cellHover.y + 'px'">
+                        <div class="memory-cell-title" x-text="$store.memory.cellHover.layer + ' · slice ' + ($store.memory.cellHover.index + 1)"></div>
+                        <div x-text="'heat ' + $store.memory.cellHover.heat + ' · ' + $store.memory.cellHover.tokens + ' layer tokens'"></div>
+                        <pre x-show="$store.memory.cellHover.content" x-text="$store.memory.cellHover.content"></pre>
+                        <div x-show="$store.memory.cellHover.loading">loading slice…</div>
+                    </div>
+                    <div class="memory-dividers">
+                        <template x-for="layer in $store.memory.regions" :key="layer.id">
+                            <div class="memory-divider" x-show="layer.row_start > 0"
+                                 :style="'top:' + (layer.row_start / $store.memory.rows * 100) + '%'"></div>
+                        </template>
+                    </div>
+                </div>
+            </section>
+
+            <template x-if="$store.memory.selectedTimelinePoint()">
+                <section class="context-selected-card">
+                    <div class="context-card-head">
+                        <div>
+                            <strong x-text="'Provider call ' + $store.memory.selectedTimelinePoint().id"></strong>
+                            <span class="mono muted"
+                                  x-text="new Date($store.memory.selectedTimelinePoint().at * 1000).toLocaleString()"></span>
+                        </div>
+                        <span class="context-delta-pill mono"
+                              :class="{ down: $store.memory.selectedTimelinePoint().total_delta < 0 }"
+                              x-text="($store.memory.selectedTimelinePoint().total_delta > 0 ? '+' : '') + $store.memory.selectedTimelinePoint().total_delta + ' tok'"></span>
+                    </div>
+                    <div class="context-selected-summary mono">
+                        <span x-text="$store.memory.selectedTimelinePoint().total_tokens.toLocaleString() + ' total'"></span>
+                        <span x-text="$store.memory.selectedTimelinePoint().fill_pct + '% full'"></span>
+                        <span x-text="$store.memory.selectedTimelinePoint().changed_layers + ' layers changed'"></span>
+                        <span x-text="$store.memory.selectedTimelinePoint().churn_score + '% churn'"></span>
+                    </div>
+                    <div class="memory-legend context-layer-detail">
+                        <template x-for="layer in $store.memory.selectedTimelinePoint().layers" :key="layer.id">
+                            <div class="memory-legend-row" :class="{ empty: !layer.tokens }">
+                                <span class="memory-legend-swatch"
+                                      :style="'background:hsl(' + layer.hue + ',76%,56%)'"></span>
+                                <span class="memory-legend-id mono" x-text="layer.id"></span>
+                                <span class="memory-legend-name" x-text="layer.name"></span>
+                                <span class="memory-legend-tok mono"
+                                      x-text="layer.tokens.toLocaleString() + ' tok'"></span>
+                                <span class="memory-legend-delta mono"
+                                      :class="{ hot: layer.changed, down: layer.token_delta < 0 }"
+                                      x-text="(layer.token_delta > 0 ? '+' : '') + layer.token_delta + ' · Δ' + layer.changed_chunks"></span>
+                            </div>
+                        </template>
+                    </div>
+                </section>
             </template>
-            <div class="memory-legend-row memory-free-row">
-                <span class="memory-legend-swatch memory-free-swatch"></span>
-                <span class="memory-legend-id mono">free</span>
-                <span class="memory-legend-name">Available space</span>
-                <span class="memory-legend-tok mono muted"
-                      x-text="$store.memory.freeTokens + '  ·  ' + (100 - Math.min(100, $store.memory.fillPct)).toFixed(1) + '%'"></span>
-                <span class="memory-legend-delta mono">static</span>
+
+            <div class="panel-footnote muted mono" x-show="$store.memory.loaded">
+                provider calls are retained for this session run · history contains metrics and hashes, never prompt text
             </div>
         </div>
-
-        <div class="panel-footnote muted mono" x-show="$store.memory.loaded">
-            <span x-text="'height = total context capacity · grey = free · hue = layer · brightness = change frequency · live per iteration'"></span>
-        </div>
-    </div>
     </section>
 
 </aside>

@@ -5,16 +5,17 @@
  * timing for completed model turns without changing backend/API semantics.
  */
 (function () {
-    function installConversationStylesheet() {
-        if (document.getElementById('mucli-conversation-css')) return;
+    function installStylesheet(id, href) {
+        if (document.getElementById(id)) return;
         const link = document.createElement('link');
-        link.id = 'mucli-conversation-css';
+        link.id = id;
         link.rel = 'stylesheet';
-        link.href = '/static/css/conversation.css';
+        link.href = href;
         document.head.appendChild(link);
     }
 
-    installConversationStylesheet();
+    installStylesheet('mucli-conversation-css', '/static/css/conversation.css');
+    installStylesheet('mucli-pricing-rows-css', '/static/css/pricing_rows.css');
 
     function hasLiveTranscript(slot) {
         return (slot.turns || []).some(turn => (
@@ -94,11 +95,222 @@
         }));
     }
 
+    function nullableRate(raw, label) {
+        const text = String(raw ?? '').trim();
+        if (!text) return null;
+        const value = Number(text);
+        if (!Number.isFinite(value) || value < 0) {
+            throw new Error(`${label} must be a non-negative number`);
+        }
+        return value;
+    }
+
+    function installPricingRowMethods(pricing) {
+        if (!pricing || pricing.__rowCreationInstalled) return;
+        pricing.__rowCreationInstalled = true;
+        pricing.addModelRow = function addModelRow(payload) {
+            const raw = payload && typeof payload === 'object' ? payload : {};
+            const provider = String(raw.provider || '').trim().toLowerCase();
+            const key = String(raw.key || '').trim();
+            const billing = String(raw.billing || 'token').trim().toLowerCase();
+            if (!['openai', 'gemini', 'ollama'].includes(provider)) {
+                throw new Error('Choose OpenAI, Gemini, or Ollama');
+            }
+            if (!key) throw new Error('Model name is required');
+            if (!['token', 'estimated_token', 'local', 'unknown'].includes(billing)) {
+                throw new Error('Choose a valid billing mode');
+            }
+            const duplicate = (this.models || []).some(row => (
+                String(row.provider || '').toLowerCase() === provider
+                && String(row.key || '').toLowerCase() === key.toLowerCase()
+            ));
+            if (duplicate) throw new Error(`Pricing row already exists for ${provider}/${key}`);
+
+            let inputRate = nullableRate(raw.input_per_million, 'Input rate');
+            let cachedRate = nullableRate(raw.cached_input_per_million, 'Cached input rate');
+            let outputRate = nullableRate(raw.output_per_million, 'Output rate');
+            if (billing === 'local' || billing === 'unknown') {
+                inputRate = null;
+                cachedRate = null;
+                outputRate = null;
+            } else if (inputRate === null || outputRate === null) {
+                throw new Error('Input and output rates are required for token-priced models');
+            }
+
+            const row = {
+                provider,
+                key,
+                billing,
+                aliases: [],
+                input_per_million: inputRate,
+                cached_input_per_million: cachedRate,
+                output_per_million: outputRate,
+                estimated_total_per_million: null,
+                context_window: null,
+                long_context_cutoff: null,
+                long_input_per_million: null,
+                long_cached_input_per_million: null,
+                long_output_per_million: null,
+                role: '',
+                notes: 'Operator-added pricing row.',
+                source: 'operator settings',
+            };
+            this.models = [...(this.models || []), row].sort((a, b) => {
+                const providerOrder = { openai: 0, gemini: 1, ollama: 2 };
+                const providerDelta = (providerOrder[a.provider] ?? 9) - (providerOrder[b.provider] ?? 9);
+                return providerDelta || String(a.key || '').localeCompare(String(b.key || ''));
+            });
+            this.provider = provider;
+            this.dirty = true;
+            this.error = '';
+            Alpine.store('toast').show(`Added pricing row for ${provider}/${key} — save pricing to persist it`, 'success', 5000);
+            return row;
+        };
+    }
+
+    function installPricingRowCreator() {
+        const pane = document.getElementById('pricing-settings-pane');
+        if (!pane || pane.querySelector('.pricing-add-row')) return;
+        const filter = pane.querySelector('.pricing-provider-filter');
+        const list = pane.querySelector('.pricing-model-list');
+        if (!filter || !list) return;
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'pricing-add-model-button';
+        addButton.textContent = '+ model';
+        filter.appendChild(addButton);
+
+        const creator = document.createElement('form');
+        creator.className = 'pricing-add-row';
+        creator.hidden = true;
+        creator.innerHTML = `
+            <div class="pricing-add-row-head">
+                <span class="pricing-add-row-title">Add model pricing</span>
+                <button type="button" class="pricing-add-cancel" aria-label="Cancel adding model">×</button>
+            </div>
+            <div class="pricing-add-row-grid">
+                <label class="pricing-add-field">
+                    <span>Provider</span>
+                    <select name="provider">
+                        <option value="openai">OpenAI</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="ollama">Ollama</option>
+                    </select>
+                </label>
+                <label class="pricing-add-field">
+                    <span>Model</span>
+                    <input name="key" type="text" autocomplete="off" placeholder="model-name or model:cloud" required>
+                </label>
+                <label class="pricing-add-field">
+                    <span>Billing</span>
+                    <select name="billing">
+                        <option value="token">token priced</option>
+                        <option value="estimated_token">estimated token</option>
+                        <option value="local">local / $0 API</option>
+                        <option value="unknown">unpriced</option>
+                    </select>
+                </label>
+            </div>
+            <div class="pricing-add-row-rates">
+                <label class="pricing-add-field">
+                    <span>Input / 1M</span>
+                    <input name="input_per_million" type="number" min="0" step="0.001" placeholder="0.000">
+                </label>
+                <label class="pricing-add-field">
+                    <span>Cached input / 1M</span>
+                    <input name="cached_input_per_million" type="number" min="0" step="0.001" placeholder="optional">
+                </label>
+                <label class="pricing-add-field">
+                    <span>Output / 1M</span>
+                    <input name="output_per_million" type="number" min="0" step="0.001" placeholder="0.000">
+                </label>
+            </div>
+            <div class="pricing-add-row-error" hidden></div>
+            <div class="pricing-add-row-actions">
+                <button type="button" class="pricing-add-cancel">cancel</button>
+                <button type="submit" class="primary">add pricing row</button>
+            </div>
+        `;
+        list.parentNode.insertBefore(creator, list);
+
+        const providerInput = creator.elements.provider;
+        const billingInput = creator.elements.billing;
+        const keyInput = creator.elements.key;
+        const rateInputs = [
+            creator.elements.input_per_million,
+            creator.elements.cached_input_per_million,
+            creator.elements.output_per_million,
+        ];
+        const errorNode = creator.querySelector('.pricing-add-row-error');
+
+        function pricingStore() {
+            return window.Alpine ? Alpine.store('pricingSettings') : null;
+        }
+
+        function syncRateAvailability() {
+            const disabled = billingInput.value === 'local' || billingInput.value === 'unknown';
+            rateInputs.forEach(input => {
+                input.disabled = disabled;
+                if (disabled) input.value = '';
+            });
+        }
+
+        function closeCreator() {
+            creator.hidden = true;
+            creator.reset();
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            syncRateAvailability();
+        }
+
+        addButton.addEventListener('click', () => {
+            const pricing = pricingStore();
+            const selectedProvider = pricing && ['openai', 'gemini', 'ollama'].includes(pricing.provider)
+                ? pricing.provider
+                : 'openai';
+            providerInput.value = selectedProvider;
+            billingInput.value = selectedProvider === 'ollama' ? 'estimated_token' : 'token';
+            syncRateAvailability();
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            creator.hidden = false;
+            keyInput.focus();
+        });
+
+        creator.querySelectorAll('.pricing-add-cancel').forEach(button => {
+            button.addEventListener('click', closeCreator);
+        });
+        billingInput.addEventListener('change', syncRateAvailability);
+        creator.addEventListener('submit', event => {
+            event.preventDefault();
+            const pricing = pricingStore();
+            if (!pricing || typeof pricing.addModelRow !== 'function') return;
+            try {
+                pricing.addModelRow({
+                    provider: providerInput.value,
+                    key: keyInput.value,
+                    billing: billingInput.value,
+                    input_per_million: creator.elements.input_per_million.value,
+                    cached_input_per_million: creator.elements.cached_input_per_million.value,
+                    output_per_million: creator.elements.output_per_million.value,
+                });
+                closeCreator();
+            } catch (error) {
+                errorNode.textContent = String(error instanceof Error ? error.message : error);
+                errorNode.hidden = false;
+            }
+        });
+        syncRateAvailability();
+    }
+
     document.addEventListener('alpine:init', () => {
         queueMicrotask(() => {
             const sessions = Alpine.store('sessions');
             const chat = Alpine.store('chat');
             const layout = Alpine.store('layout');
+            const pricing = Alpine.store('pricingSettings');
+            installPricingRowMethods(pricing);
             if (!sessions || !chat || sessions.__webShellHydrationInstalled) return;
             sessions.__webShellHydrationInstalled = true;
 
@@ -225,5 +437,12 @@
                 layout.panelWidth = 520;
             }
         });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // product.js installs the pricing pane first (it is loaded before this
+        // reliability layer), so the row creator can augment it without owning
+        // a second pricing UI or API path.
+        installPricingRowCreator();
     });
 })();

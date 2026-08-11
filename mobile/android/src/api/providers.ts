@@ -13,8 +13,44 @@ export interface CurrentProvider {
   ollama_api_key_set: boolean;
 }
 
+export interface ModelPricingInfo {
+  provider: string;
+  key: string;
+  input_per_million: number | null;
+  cached_input_per_million: number | null;
+  output_per_million: number | null;
+  /** Legacy compatibility only. New estimated-token rows use input/output rates. */
+  estimated_total_per_million: number | null;
+  billing: 'token' | 'estimated_token' | 'local' | 'unknown' | string;
+  aliases: string[];
+  context_window: number | null;
+  long_context_cutoff: number | null;
+  long_input_per_million: number | null;
+  long_cached_input_per_million: number | null;
+  long_output_per_million: number | null;
+  role: string;
+  notes: string;
+  source: string;
+}
+
+export interface OllamaCatalogInfo extends ModelPricingInfo {}
+
+export interface ModelPricingCatalog {
+  version: string;
+  currency: string;
+  unit: string;
+  models: ModelPricingInfo[];
+  ollama: OllamaCatalogInfo[];
+  provider_notes: Record<string, string>;
+  config_path: string;
+  active_config_path: string;
+  default_config_path: string;
+  using_override: boolean;
+}
+
 export const providersApi = {
   list: () => api.get<{ providers: ProviderInfo[] }>('/api/providers'),
+  pricing: () => api.get<ModelPricingCatalog>('/api/providers/pricing'),
   listModels: (name: string, ollamaMode?: string, ollamaApiKey?: string) =>
     api.get<{ models: string[]; error?: string }>(`/api/providers/${encodeURIComponent(name)}/models`, {
       query: { ollama_mode: ollamaMode, ollama_api_key: ollamaApiKey },

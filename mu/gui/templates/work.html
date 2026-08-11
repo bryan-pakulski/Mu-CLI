@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}MuCLI — Engineering Work{% endblock %}
+{% block body %}
+<link rel="stylesheet" href="/static/css/product.css">
+<link rel="stylesheet" href="/static/css/crystal.css">
+<link rel="stylesheet" href="/static/css/clarity.css">
+<link rel="stylesheet" href="/static/css/refinement.css">
+<link rel="stylesheet" href="/static/css/work.css">
+<link rel="stylesheet" href="/static/css/work_management.css">
+<link rel="stylesheet" href="/static/css/work_polish.css">
+
+<div class="work-app work-product-app" id="work-app" data-session="{{ session_name or '' }}">
+    <header class="work-header product-header">
+        <div class="header-primary">
+            <a class="product-icon-button" href="/" title="Back to MuCLI" aria-label="Back to MuCLI">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"></path><path d="m12 19-7-7 7-7"></path></svg>
+            </a>
+            <div class="session-identity">
+                <div class="session-title-wrap">
+                    <span class="session-title">Engineering work</span>
+                    <span class="session-subtitle"><span>MuCLI</span><span>·</span><span>Durable engineering jobs</span></span>
+                </div>
+            </div>
+        </div>
+        <div class="work-header-actions header-actions work-product-actions">
+            <span class="work-session-context" id="work-session-context"></span>
+            <a class="product-icon-button work-header-icon" href="/static/job_trace.html" title="Analyze jobs" aria-label="Analyze jobs">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9"></path><path d="M10 19V5"></path><path d="M16 19v-7"></path><path d="M22 19V3"></path><path d="M2 19h22"></path></svg>
+            </a>
+            <a class="product-icon-button work-header-icon" href="/static/model_costs.html" title="Model pricing" aria-label="Model pricing">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path></svg>
+            </a>
+            <button class="product-icon-button work-header-icon" id="work-manage" title="Manage jobs" aria-label="Manage jobs">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path><circle cx="18" cy="18" r="2.5"></circle></svg>
+            </button>
+            <button class="product-icon-button work-header-icon" type="button" data-route-theme title="Toggle appearance" aria-label="Toggle appearance">
+                <svg data-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 15.2A8.3 8.3 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"></path></svg>
+                <svg data-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+            </button>
+            <button class="product-header-chip work-new-product" id="work-new" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                <span>New job</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="work-layout">
+        <aside class="work-board-pane">
+            <div class="work-pane-head">
+                <div>
+                    <span class="work-eyebrow">Friday Five</span>
+                    <h1>Engineering work</h1>
+                    <p>Autonomous jobs, human gates, verification and review.</p>
+                </div>
+                <div class="work-pane-head-controls">
+                    <button class="product-icon-button work-board-refresh" id="work-refresh" title="Refresh work queue" aria-label="Refresh work queue">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6v5h-5"></path><path d="M19 11a7.5 7.5 0 1 0 .3 4.3"></path></svg>
+                    </button>
+                    <div class="work-total" id="work-total">0</div>
+                </div>
+            </div>
+            <div class="work-board" id="work-board">
+                <div class="work-loading">Loading jobs…</div>
+            </div>
+        </aside>
+
+        <section class="work-detail-pane" id="work-detail" aria-live="polite">
+            <div class="work-empty-detail">
+                <div class="work-empty-mark">μ</div>
+                <h2>Select a job</h2>
+                <p>Review implementation evidence, verification output, Git changes and anything that needs your input.</p>
+            </div>
+        </section>
+    </main>
+
+    <div class="work-management-backdrop" id="work-management-backdrop" hidden>
+        <section class="work-management-pane" role="dialog" aria-modal="true" aria-labelledby="work-management-title">
+            <header class="work-management-head">
+                <div>
+                    <span class="work-eyebrow">History & telemetry</span>
+                    <h2 id="work-management-title">Job management</h2>
+                    <p>Query historic work, review aggregate outcomes, archive records and export debugging evidence.</p>
+                </div>
+                <div class="work-management-head-actions">
+                    <button class="work-icon-button" id="work-management-close" aria-label="Close job management">×</button>
+                </div>
+            </header>
+
+            <div class="work-management-query">
+                <input id="work-management-query-text" type="search" placeholder="Search title, ID, description, branch…" aria-label="Search jobs">
+                <select id="work-management-status" aria-label="Filter by status">
+                    <option value="all">All statuses</option>
+                    <option value="failed">Failed</option>
+                    <option value="environment_error">Environment error</option>
+                    <option value="timed_out">Timed out</option>
+                    <option value="budget_exceeded">Budget exceeded</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="merged">Merged</option>
+                    <option value="ready_for_review">Ready for review</option>
+                    <option value="needs_human">Needs human</option>
+                    <option value="running">Running</option>
+                    <option value="queued">Queued</option>
+                </select>
+                <select id="work-management-archive" aria-label="Archive state">
+                    <option value="all">Archived + current</option>
+                    <option value="current">Current only</option>
+                    <option value="archived">Archived only</option>
+                </select>
+                <select id="work-management-scope" aria-label="Job scope">
+                    <option value="history">Historic jobs</option>
+                    <option value="all">All jobs</option>
+                    <option value="active">Active only</option>
+                </select>
+                <input id="work-management-repository" type="search" placeholder="Repository contains…" aria-label="Filter repository">
+                <div style="display:flex;gap:7px;">
+                    <select id="work-management-age" aria-label="Created within">
+                        <option value="0">Any time</option>
+                        <option value="1">Last 24h</option>
+                        <option value="7">Last 7 days</option>
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                    </select>
+                    <button class="work-secondary" id="work-management-apply" type="button">Apply</button>
+                    <button class="work-secondary" id="work-management-reset" type="button">Reset</button>
+                </div>
+            </div>
+
+            <section class="work-management-report" id="work-management-report-data" aria-label="Job report">
+                <div class="work-report-metrics">
+                    <div class="work-report-metric"><span>Jobs</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Archived</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Attempts</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Cost</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Avg runtime</span><strong>—</strong></div>
+                    <div class="work-report-metric"><span>Failure rate</span><strong>—</strong></div>
+                </div>
+            </section>
+
+            <div class="work-management-results-wrap">
+                <div class="work-management-toolbar">
+                    <div class="work-management-toolbar-left">
+                        <span class="work-management-selection" id="work-management-selection">0 selected</span>
+                        <button type="button" id="work-management-archive-selected" disabled>Archive</button>
+                        <button type="button" id="work-management-restore-selected" disabled>Restore</button>
+                        <button type="button" class="is-danger" id="work-management-delete-selected" disabled>Delete</button>
+                    </div>
+                    <div class="work-management-toolbar-right">
+                        <a id="work-management-export-json" href="#">Export report JSON</a>
+                        <a id="work-management-export-csv" href="#">Export CSV</a>
+                    </div>
+                </div>
+                <div class="work-management-table-scroll">
+                    <table class="work-management-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="work-management-select-all" aria-label="Select visible jobs"></th>
+                                <th>Job</th>
+                                <th>Status</th>
+                                <th>Repository</th>
+                                <th>Cost</th>
+                                <th>Attempts</th>
+                                <th>Updated</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="work-management-results">
+                            <tr><td colspan="8"><div class="work-loading">Open management to query history.</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <footer class="work-management-footer">
+                <span id="work-management-range">0–0 of 0</span>
+                <div class="work-management-pager">
+                    <button type="button" id="work-management-previous">Previous</button>
+                    <button type="button" id="work-management-next">Next</button>
+                </div>
+            </footer>
+        </section>
+    </div>
+
+    <div class="work-modal-backdrop" id="work-create-backdrop" hidden>
+        <section class="work-modal" role="dialog" aria-modal="true" aria-labelledby="work-create-title">
+            <header class="work-modal-head">
+                <div>
+                    <span class="work-eyebrow">Delegate work</span>
+                    <h2 id="work-create-title">New engineering job</h2>
+                </div>
+                <button class="work-icon-button" id="work-create-close" aria-label="Close">×</button>
+            </header>
+            <form id="work-create-form" class="work-form">
+                <label class="work-field work-field-wide">
+                    <span>Title</span>
+                    <input id="job-title" required maxlength="180" placeholder="Fix OAuth callback validation">
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Description</span>
+                    <textarea id="job-description" rows="4" placeholder="What should change, and what constraints matter?"></textarea>
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Repository</span>
+                    <input id="job-repository" placeholder="Inherited from the current session when left blank">
+                    <small id="job-repository-hint"></small>
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Acceptance criteria</span>
+                    <textarea id="job-acceptance" rows="4" placeholder="One criterion per line"></textarea>
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Validation commands</span>
+                    <textarea id="job-validation" rows="4" placeholder="pytest tests/auth\nnpm run typecheck"></textarea>
+                    <small>Jobs without validation commands will stop at a verification-required human gate.</small>
+                </label>
+                <div class="work-form-grid">
+                    <label class="work-field">
+                        <span>Cost budget (USD)</span>
+                        <input id="job-cost" type="number" min="0.01" step="0.01" placeholder="5.00">
+                    </label>
+                    <label class="work-field">
+                        <span>Runtime budget (seconds)</span>
+                        <input id="job-runtime" type="number" min="1" step="1" placeholder="7200">
+                    </label>
+                    <label class="work-field">
+                        <span>Repair retries</span>
+                        <input id="job-retries" type="number" min="0" step="1" value="2">
+                    </label>
+                </div>
+                <details class="work-advanced" id="work-execution-details">
+                    <summary>Execution profile</summary>
+                    <p id="work-execution-help">Provider, model and mode are inherited from the current session when available.</p>
+                    <div class="work-form-grid">
+                        <label class="work-field">
+                            <span>Provider</span>
+                            <input id="job-provider" placeholder="openai">
+                        </label>
+                        <label class="work-field">
+                            <span>Model</span>
+                            <input id="job-model" placeholder="model name">
+                        </label>
+                        <label class="work-field">
+                            <span>Agent mode</span>
+                            <input id="job-mode" placeholder="default">
+                        </label>
+                    </div>
+                    <label class="work-check-field">
+                        <input id="job-auto-approve" type="checkbox">
+                        <span>Auto-approve write tools for this job</span>
+                    </label>
+                </details>
+                <div class="work-form-error" id="work-create-error"></div>
+                <footer class="work-modal-actions">
+                    <button type="button" class="work-secondary" id="work-create-cancel">Cancel</button>
+                    <button type="submit" class="work-primary" id="work-create-submit">Queue job</button>
+                </footer>
+            </form>
+        </section>
+    </div>
+
+    <div class="work-toast" id="work-toast" hidden></div>
+</div>
+<script src="/static/js/route_theme.js"></script>
+<script src="/static/js/work.js"></script>
+<script src="/static/js/work_analysis_link.js"></script>
+<script src="/static/js/work_trace.js"></script>
+<script src="/static/js/work_diagnostics.js"></script>
+<script src="/static/js/work_management.js"></script>
+{% endblock %}

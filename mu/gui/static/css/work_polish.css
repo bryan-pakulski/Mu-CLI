@@ -1,0 +1,174 @@
+/* Engineering Work polish — align route chrome with the primary MuCLI shell. */
+.work-product-app {
+    min-height: 100vh;
+    background: var(--bg) !important;
+}
+.work-product-app::before {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(ellipse 46% 38% at 72% 5%, var(--sunrise-pink), transparent 72%),
+        radial-gradient(ellipse 34% 30% at 84% 21%, var(--sunrise-peach), transparent 72%),
+        radial-gradient(ellipse 68% 55% at 20% 8%, var(--sky-blue), transparent 74%),
+        radial-gradient(ellipse 58% 48% at 52% 50%, var(--glacier-blue), transparent 76%),
+        radial-gradient(ellipse 48% 42% at 92% 88%, var(--alpine-green), transparent 78%),
+        radial-gradient(ellipse 42% 30% at 47% -3%, var(--snow-glow), transparent 76%);
+    filter: blur(38px) saturate(.94);
+    transform: scale(1.05);
+}
+.work-product-app::after { display: none !important; }
+.work-product-app > * { position: relative; z-index: 1; }
+
+/*
+ * Modal layers are direct children too, so the generic route-layer rule above
+ * must never pull them back into document flow. Job management is a true
+ * viewport takeover; the underlying work board stays mounted but cannot scroll.
+ */
+.work-product-app > .work-management-backdrop,
+.work-product-app > .work-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+}
+.work-product-app > .work-management-backdrop {
+    z-index: 220;
+    display: grid;
+    place-items: stretch;
+}
+.work-product-app > .work-modal-backdrop { z-index: 210; }
+.work-product-app > .work-management-backdrop[hidden],
+.work-product-app > .work-modal-backdrop[hidden] { display: none !important; }
+body.work-management-open { overflow: hidden; }
+.work-product-app > .work-management-backdrop .work-management-pane {
+    width: calc(100vw - 24px);
+    max-width: none;
+    height: calc(100dvh - 24px);
+    max-height: none;
+    margin: 12px;
+    border-radius: 14px;
+}
+
+.work-header.product-header {
+    height: 64px;
+    min-height: 64px;
+    box-sizing: border-box;
+    padding: 0 22px;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--header-bg) !important;
+    backdrop-filter: blur(30px) saturate(108%);
+    -webkit-backdrop-filter: blur(30px) saturate(108%);
+}
+.work-product-actions { gap: 6px !important; }
+.work-product-actions .work-session-context {
+    margin-right: 8px;
+    color: var(--text-dim);
+    font-size: 11px;
+}
+.work-header-icon,
+.work-header-icon:visited {
+    width: 36px;
+    height: 36px;
+    color: var(--text-dim);
+}
+.work-header-icon:hover { color: var(--text); }
+.work-header-icon svg { width: 17px; height: 17px; }
+.work-new-product {
+    min-height: 34px;
+    gap: 7px;
+    padding: 6px 10px;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    color: var(--text-soft) !important;
+    font-size: 12px;
+    font-weight: 560;
+    box-shadow: none !important;
+}
+.work-new-product:hover { background: var(--bg-hover) !important; color: var(--text) !important; }
+.work-new-product svg { width: 15px; height: 15px; }
+[data-route-theme] [hidden] { display: none !important; }
+
+/* Refresh belongs to the work queue rather than the global route chrome. */
+.work-pane-head-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding-top: 1px;
+}
+.work-board-refresh {
+    width: 30px;
+    height: 30px;
+    color: var(--text-dimmer);
+}
+.work-board-refresh svg { width: 15px; height: 15px; }
+.work-board-refresh:hover { color: var(--text); }
+.work-pane-head-controls .work-total {
+    min-width: 24px;
+    padding: 0;
+    margin-left: 2px;
+    color: var(--text-soft);
+    font-size: 16px;
+}
+
+/* Keep a single environmental colour layer and the same neutral panes used by chat. */
+.work-board-pane {
+    background: var(--sidebar-bg) !important;
+    border-right-color: var(--hairline) !important;
+    backdrop-filter: blur(30px) saturate(108%);
+    -webkit-backdrop-filter: blur(30px) saturate(108%);
+}
+.work-detail-pane { background: var(--pane) !important; }
+.work-layout { height: calc(100vh - 65px); }
+.work-empty-detail { min-height: calc(100vh - 65px); }
+
+/* Keep operational actions flat and quiet, consistent with normal MuCLI. */
+.work-primary,
+.work-secondary,
+.work-action,
+.work-danger {
+    border-radius: 6px;
+    box-shadow: none;
+}
+.work-primary {
+    border-color: var(--hairline);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.work-action-panel {
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--glass) 88%, transparent);
+    box-shadow: none;
+}
+.work-detail-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+.work-job-analyze-link {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    color: var(--text-dim);
+    font-size: 10px;
+    font-weight: 550;
+    text-decoration: none;
+}
+.work-job-analyze-link:hover { color: var(--text); }
+
+@media (max-width: 880px) {
+    .work-product-actions .work-session-context { display: none; }
+    .work-header.product-header { padding-inline: 14px; }
+}
+@media (max-width: 680px) {
+    .work-new-product span { display: none; }
+    .work-new-product { width: 36px; padding: 0; justify-content: center; }
+    .work-product-app > .work-management-backdrop .work-management-pane {
+        width: 100vw;
+        height: 100dvh;
+        margin: 0;
+        border-radius: 0;
+    }
+}

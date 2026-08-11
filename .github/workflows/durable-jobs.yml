@@ -1,0 +1,84 @@
+name: Durable engineering jobs
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  durable-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run durable jobs tests
+        env:
+          MUCLI_HOME: ${{ runner.temp }}/mucli-test
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q --tb=short \
+            tests/test_jobs_core.py \
+            tests/test_job_controller.py \
+            tests/test_job_controller_verification.py \
+            tests/test_job_runner.py \
+            tests/test_job_repository.py \
+            tests/test_job_worktree.py \
+            tests/test_job_worker.py \
+            tests/test_job_verification.py \
+            tests/test_job_receipt.py \
+            tests/test_job_review.py \
+            tests/test_job_review_branch.py \
+            tests/test_job_review_surfaces.py \
+            tests/test_job_diagnostics.py \
+            tests/test_job_diagnostics_surfaces.py \
+            tests/test_job_performance.py \
+            tests/test_job_visual_polish.py \
+            tests/test_job_pricing_settings_surface.py \
+            tests/test_gui_session_history.py \
+            tests/test_session_visibility.py \
+            tests/test_model_pricing.py \
+            2>&1 | tee "${RUNNER_TEMP}/durable-jobs-pytest.log"
+
+      - name: Upload pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-jobs-pytest
+          path: ${{ runner.temp }}/durable-jobs-pytest.log
+          if-no-files-found: ignore
+
+  mobile-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile/android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/android/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Typecheck mobile durable-work surfaces
+        run: npm run typecheck

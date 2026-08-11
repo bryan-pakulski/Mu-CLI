@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MuCLI · Job Trace</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>μ</text></svg>">
+    <script>
+    (function () {
+        try {
+            var saved = localStorage.getItem('mucli-theme');
+            var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', (saved === 'light' || saved === 'dark') ? saved : sys);
+        } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/product.css">
+    <link rel="stylesheet" href="/static/css/crystal.css">
+    <link rel="stylesheet" href="/static/css/clarity.css">
+    <link rel="stylesheet" href="/static/css/refinement.css">
+    <link rel="stylesheet" href="/static/css/trace.css">
+    <link rel="stylesheet" href="/static/css/job_trace.css">
+    <style>.job-trace-body::before{display:none!important}</style>
+    <script src="/static/js/job_trace.js" defer></script>
+    <script src="/static/js/job_trace_signed_delta.js" defer></script>
+</head>
+<body class="job-trace-body">
+<div class="product-app job-trace-shell">
+    <header class="header product-header job-trace-header">
+        <div class="header-primary">
+            <a class="product-icon-button" href="/work" title="Back to Engineering work" aria-label="Back to Engineering work">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"></path><path d="m12 19-7-7 7-7"></path></svg>
+            </a>
+            <div class="session-identity">
+                <div class="session-title-wrap">
+                    <span class="session-title">Job Trace Analyzer</span>
+                    <span class="session-subtitle"><span id="jt-job-title">Retrospective job performance</span><span id="jt-job-status"></span></span>
+                </div>
+            </div>
+        </div>
+        <div class="header-actions job-trace-picker">
+            <select id="jt-job-select" class="jt-header-select" aria-label="Select engineering job"><option value="">Select a job…</option></select>
+            <select id="jt-compare-select" class="jt-header-select jt-compare-select" aria-label="Compare with another job"><option value="">Compare with…</option></select>
+            <button class="product-icon-button" id="jt-refresh" title="Refresh analysis" aria-label="Refresh analysis">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6v5h-5"></path><path d="M19 11a7.5 7.5 0 1 0 .3 4.3"></path></svg>
+            </button>
+            <a class="product-icon-button" id="jt-debug-export" href="#" download title="Export debug bundle" aria-label="Export debug bundle">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg>
+            </a>
+            <button class="product-icon-button" id="jt-theme" title="Toggle appearance" aria-label="Toggle appearance">
+                <svg data-theme-dark viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 15.2A8.3 8.3 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"></path></svg>
+                <svg data-theme-light viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="trace-empty" id="jt-loading">Loading engineering jobs…</div>
+    <div class="trace-empty" id="jt-empty" hidden>Select a job above to analyse its execution.</div>
+    <div class="trace-empty jt-error" id="jt-error" hidden></div>
+
+    <main class="trace-main job-trace-main" id="jt-main" hidden>
+        <section class="trace-section">
+            <h2 class="trace-h2">Overview <span class="trace-sub">outcome, active work, passive residence, autonomy and verification</span></h2>
+            <div class="trace-cards jt-overview-cards" id="jt-overview"></div>
+            <div class="jt-signal-strip" id="jt-signals"></div>
+        </section>
+
+        <section class="trace-section" id="jt-runtime-section">
+            <h2 class="trace-h2">Agent harness trace <span class="trace-sub">iteration-level provider, context, tool and compaction telemetry</span></h2>
+            <div id="jt-runtime-trace"></div>
+        </section>
+
+        <section class="trace-section" id="jt-compare-section" hidden>
+            <h2 class="trace-h2">Comparison <span class="trace-sub" id="jt-compare-caption"></span></h2>
+            <div class="jt-compare-grid" id="jt-comparison"></div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Lifecycle <span class="trace-sub">state residence is separated from actual execution</span></h2>
+            <div class="trace-canvas-wrap jt-phase-wrap"><canvas id="jt-phase-canvas" class="trace-canvas" width="1200" height="230"></canvas></div>
+            <div class="jt-legend" id="jt-phase-legend"></div>
+            <div class="trace-scroll jt-table-wrap">
+                <table class="trace-table"><thead><tr><th>state</th><th>class</th><th>time</th><th>share</th><th>entries</th></tr></thead><tbody id="jt-phase-table"></tbody></table>
+            </div>
+            <div class="jt-drill-head">
+                <strong>Lifecycle drill-down</strong>
+                <span>Expand an interval to inspect why the job entered the state, what happened while it was resident, and what caused it to leave.</span>
+            </div>
+            <div class="jt-intervals" id="jt-intervals"></div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Attempts & cost <span class="trace-sub">implementation passes, repair loops and configured/provider spend</span></h2>
+            <div class="trace-canvas-wrap"><canvas id="jt-attempt-canvas" class="trace-canvas" width="1200" height="260"></canvas></div>
+            <div class="trace-scroll jt-table-wrap"><table class="trace-table"><thead><tr><th>attempt</th><th>status</th><th>duration</th><th>cost</th><th>tools</th><th>messages</th><th>errors</th><th>tokens</th></tr></thead><tbody id="jt-attempt-table"></tbody></table></div>
+        </section>
+
+        <section class="trace-section jt-two-column">
+            <div><h2 class="trace-h2">Tool profile <span class="trace-sub">what the agent spent actions on</span></h2><div class="jt-tool-bars" id="jt-tools"></div></div>
+            <div><h2 class="trace-h2">Verification <span class="trace-sub">deterministic quality-gate history</span></h2><div class="jt-verification-list" id="jt-verifications"></div></div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Interventions & failures <span class="trace-sub">human gates, crashes, environment failures and recoveries</span></h2>
+            <div class="jt-incidents" id="jt-incidents"></div>
+        </section>
+
+        <section class="trace-section">
+            <div class="jt-section-toolbar">
+                <h2 class="trace-h2">Execution timeline <span class="trace-sub" id="jt-event-count"></span></h2>
+                <div class="jt-filter-row">
+                    <input id="jt-event-query" class="jt-inline-input" placeholder="Filter events…">
+                    <select id="jt-event-category" class="jt-inline-select"><option value="all">All categories</option><option value="lifecycle">Lifecycle</option><option value="attempt">Attempts</option><option value="worker">Worker</option><option value="git">Git / worktree</option><option value="verification">Verification</option><option value="human">Human</option><option value="agent">Agent</option><option value="tool">Tools</option><option value="runtime">Runtime</option><option value="system">System</option></select>
+                    <select id="jt-event-severity" class="jt-inline-select"><option value="all">All severity</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Info</option></select>
+                    <button class="jt-text-action" id="jt-export-analysis" type="button">Export analysis JSON</button>
+                </div>
+            </div>
+            <div class="jt-event-list" id="jt-events"></div>
+        </section>
+    </main>
+</div>
+</body>
+</html>

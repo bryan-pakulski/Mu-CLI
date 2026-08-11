@@ -11,6 +11,7 @@ import { Text } from './Text';
 
 export type ModernHeaderProps = {
   onOpenSessions: () => void;
+  onOpenWork: () => void;
   onOpenWorkspace: () => void;
   onOpenTraces: () => void;
   onOpenConnection: () => void;
@@ -22,6 +23,7 @@ export type ModernHeaderProps = {
 
 export function ModernHeader({
   onOpenSessions,
+  onOpenWork,
   onOpenWorkspace,
   onOpenTraces,
   onOpenConnection,
@@ -131,6 +133,15 @@ export function ModernHeader({
         <View style={styles.headerActions}>
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="Open engineering work"
+            disabled={!isConnected}
+            onPress={onOpenWork}
+            style={[styles.iconButton, !isConnected && styles.disabledAction]}
+          >
+            <Ionicons name="briefcase-outline" size={19} color={colors.textDim} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
             accessibilityLabel="Open Trace Analyzer"
             disabled={!activeSessionName}
             onPress={onOpenTraces}
@@ -177,6 +188,12 @@ export function ModernHeader({
         </SettingsSection>
 
         <SettingsSection title="Runtime">
+          <MenuRow
+            icon="briefcase-outline"
+            label="Engineering work"
+            detail="Autonomous jobs, approvals, verification and review"
+            onPress={() => openFromMenu(onOpenWork)}
+          />
           <ToggleRow
             icon="flash-outline"
             label="Auto-approve writes"

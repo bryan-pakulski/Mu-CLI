@@ -2615,6 +2615,13 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     color: var(--text-dim);
     animation: rise 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+.subagent-panel.leaving {
+    animation: subagent-panel-out .24s ease both;
+    pointer-events: none;
+}
+@keyframes subagent-panel-out {
+    to { opacity: 0; transform: translateY(-4px); }
+}
 .sap-header {
     display: flex;
     align-items: center;
@@ -2653,8 +2660,10 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 
 .sap-rows {
     margin-top: var(--space-2);
-    padding-left: var(--space-4);
-    border-left: 1px solid var(--border);
+    padding: var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-lift) 82%, transparent);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -2663,16 +2672,16 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     font-size: 11.5px;
     line-height: 1.5;
     color: var(--text-soft);
-    background: var(--bg-lift);
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 6px 8px;
+    border-radius: 9px;
+    padding: 9px 10px;
     animation: rise 0.18s ease-out both;
 }
-.sap-row.is-stuck   { border-color: rgba(224, 160, 64, 0.5); }
-.sap-row.is-stall   { border-color: rgba(224, 160, 64, 0.5); }
-.sap-row.is-killed  { border-color: rgba(176, 132, 176, 0.5); }
-.sap-row.is-error   { border-color: rgba(220, 100, 100, 0.5); }
+.sap-row.is-stuck,
+.sap-row.is-stall   { border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); }
+.sap-row.is-killed  { border-color: color-mix(in srgb, var(--text-dim) 42%, var(--border)); }
+.sap-row.is-error   { border-color: color-mix(in srgb, var(--err) 42%, var(--border)); }
 .sap-row.is-done    { opacity: 0.78; }
 
 .sap-row-head {
@@ -2704,11 +2713,11 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     flex-shrink: 0;
 }
 .sap-row.is-running .sap-status { color: var(--accent); }
-.sap-row.is-stuck   .sap-status { color: #e0a040; }
-.sap-row.is-stall   .sap-status { color: #e0a040; }
-.sap-row.is-killed  .sap-status { color: #b884b8; }
+.sap-row.is-stuck   .sap-status { color: var(--warning); }
+.sap-row.is-stall   .sap-status { color: var(--warning); }
+.sap-row.is-killed  .sap-status { color: var(--text-dim); }
 .sap-row.is-error   .sap-status { color: var(--err); }
-.sap-row.is-done    .sap-status { color: #7ec96b; }
+.sap-row.is-done    .sap-status { color: var(--success); }
 .sap-elapsed {
     font-size: 10px;
     color: var(--text-dimmer);
@@ -2724,22 +2733,46 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     font-size: 10px;
     color: var(--text-dimmer);
 }
-.sap-tools, .sap-tokens, .sap-iter { flex-shrink: 0; }
-.sap-ctx {
-    flex: 1 1 80px;
-    min-width: 60px;
-    height: 4px;
-    background: var(--bg);
-    border-radius: 2px;
+.sap-tools, .sap-tokens, .sap-model, .sap-last-tool { flex-shrink: 0; }
+.sap-last-tool::before { content: "tool · "; color: var(--text-dimmer); }
+.sap-model {
+    max-width: 150px;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
-.sap-ctx-fill {
+.sap-meters {
+    display: grid;
+    gap: 4px;
+    margin-top: 7px;
+}
+.sap-meter {
+    display: grid;
+    grid-template-columns: 52px minmax(80px, 1fr) 42px;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-dimmer);
+    font-size: 9px;
+}
+.sap-meter b {
+    color: var(--text-dim);
+    font-weight: 500;
+    text-align: right;
+}
+.sap-meter-track {
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.sap-meter-track i {
+    display: block;
     height: 100%;
     background: var(--accent);
-    border-radius: 2px;
+    border-radius: inherit;
     transition: width 0.3s ease;
 }
-.sap-ctx-fill.warn { background: #e0a040; }
+.sap-meter-track i.warn { background: var(--warning); }
 
 /* ------------------------------------------------------------ confirm popover
  *

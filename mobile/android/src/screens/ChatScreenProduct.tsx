@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -28,6 +30,7 @@ import type { AttachmentDescriptor } from '../api/attachments';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCompletion';
 import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
+import { SubagentActivityPanel } from '../components/SubagentActivityPanel';
 
 /**
  * Product presentation for the mobile conversation.
@@ -53,6 +56,7 @@ export function ChatScreenProduct() {
     sseConnected,
     error,
     artifactRevision,
+    subagents,
     hasMore,
     loadingOlder,
     sendMessage,
@@ -252,16 +256,6 @@ export function ChatScreenProduct() {
           {item.collapseOpen ? (
             <View style={[styles.interimBody, { borderLeftColor: colors.hairline }]}>
               {item.childTurns?.map(child => {
-                if (child.role === 'visualization' && child.artifact && activeSessionName) {
-                  return (
-                    <VisualizationCard
-                      key={child.id}
-                      artifact={child.artifact}
-                      sessionName={activeSessionName}
-                      onInteractionChange={onVisualizationInteractionChange}
-                    />
-                  );
-                }
                 if (child.role !== 'assistant') return null;
                 return (
                   <View key={child.id} style={styles.interimMessage}>
@@ -280,7 +274,8 @@ export function ChatScreenProduct() {
     const workedMs = workedById[item.id];
 
     return (
-      <View style={[styles.msgRow, isUser ? styles.userRow : styles.assistantRow]}>
+      <MessageHandoff phase={isAssistant ? item.handoff : undefined}>
+        <View style={[styles.msgRow, isUser ? styles.userRow : styles.assistantRow]}>
         <View
           style={[
             isUser ? styles.userMessage : styles.assistantMessage,
@@ -319,7 +314,8 @@ export function ChatScreenProduct() {
             </View>
           ) : null}
         </View>
-      </View>
+        </View>
+      </MessageHandoff>
     );
   }, [activeSessionName, colors, copyMessage, onVisualizationInteractionChange, renderAssistantBody, setMessages, workedById]);
 
@@ -403,6 +399,12 @@ export function ChatScreenProduct() {
             </View>
           }
         />
+
+        {subagents.length > 0 ? (
+          <View style={styles.liveSubagentDock}>
+            <SubagentActivityPanel agents={subagents} />
+          </View>
+        ) : null}
 
         <ArtifactStrip sessionName={activeSessionName} refreshKey={artifactRevision} />
         <CommandSuggestionBar
@@ -642,6 +644,43 @@ function SettingLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MessageHandoff({
+  phase,
+  children,
+}: {
+  phase?: ChatMessage['handoff'];
+  children: React.ReactNode;
+}) {
+  const opacity = useRef(new Animated.Value(phase === 'entering' ? 0 : 1)).current;
+  const translateY = useRef(new Animated.Value(phase === 'entering' ? 5 : 0)).current;
+
+  useEffect(() => {
+    const leaving = phase === 'leaving';
+    const entering = phase === 'entering';
+    if (!leaving && !entering) {
+      opacity.setValue(1);
+      translateY.setValue(0);
+      return;
+    }
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: leaving ? 0 : 1,
+        duration: 240,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: leaving ? -3 : 0,
+        duration: 240,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, phase, translateY]);
+
+  return <Animated.View style={{ opacity, transform: [{ translateY }] }}>{children}</Animated.View>;
+}
+
 function formatWorkedDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   const minutes = Math.floor(seconds / 60);
@@ -699,6 +738,7 @@ const styles = StyleSheet.create({
   historyLoading: { paddingTop: 22, paddingHorizontal: 4 },
   loadingOlderIndicator: { paddingVertical: 8, alignItems: 'center' },
   listFooter: { minHeight: 10, paddingTop: 2 },
+  liveSubagentDock: { paddingHorizontal: 14 },
   composerArea: { paddingHorizontal: 12, paddingTop: 4 },
   composerUtilities: { minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, paddingHorizontal: 2, marginBottom: 8 },
   utilityButton: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7 },

@@ -17,6 +17,21 @@
 .chat-history > .turn-wrap > .msg.assistant {
     margin-bottom: 22px !important;
 }
+.chat-history > .turn-wrap > .msg.assistant.interim-entering {
+    animation: interim-handoff-in .26s cubic-bezier(.2,.8,.2,1) both !important;
+}
+.chat-history > .turn-wrap > .msg.assistant.interim-leaving {
+    animation: interim-handoff-out .26s ease both !important;
+    pointer-events: none;
+}
+@keyframes interim-handoff-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes interim-handoff-out {
+    from { opacity: 1; transform: none; }
+    to { opacity: 0; transform: translateY(-3px); }
+}
 .chat-history > .turn-wrap > .msg.assistant > .body > :first-child,
 .chat-history > .turn-wrap > .msg.user > .body > :first-child {
     margin-top: 0 !important;
@@ -37,6 +52,13 @@
 .chat-history > .turn-wrap > .msg.prompt-resolved {
     margin-top: 4px !important;
     margin-bottom: 13px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-history > .turn-wrap > .msg.assistant.interim-entering,
+    .chat-history > .turn-wrap > .msg.assistant.interim-leaving {
+        animation-duration: .01ms !important;
+    }
 }
 
 /* ---------------------------------------------------------------- interim updates */

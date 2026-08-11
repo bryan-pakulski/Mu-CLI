@@ -33,6 +33,26 @@ export interface ChatMessage {
   collapseGroupKey?: string;
   collapseLive?: boolean;
   collapseUserId?: string;
+  handoff?: 'entering' | 'leaving';
+}
+
+export interface LiveSubagent {
+  task_id: string;
+  batch_id: string;
+  task: string;
+  depth: number;
+  model: string;
+  status: string;
+  tool_count: number;
+  last_tool: string | null;
+  elapsed: number;
+  context_pct: number;
+  iter: number;
+  max_iter: number;
+  tokens_in: number;
+  summary: string;
+  error: string | null;
+  observed_at: number;
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
@@ -118,9 +138,53 @@ function eventBelongsToSession(event: StreamEvent, activeSessionName: string | n
   return !eventSession || !activeSessionName || eventSession === activeSessionName;
 }
 
-// Collapse every completed exchange independently. Everything after the user
-// message and before the final non-streaming assistant response belongs to
-// the compact interim section, including visualization cards.
+function numberOr(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function isSubagentActive(status: string): boolean {
+  return status === 'running' || status === 'stuck' || status === 'stall';
+}
+
+function subagentFromEvent(
+  event: StreamEvent,
+  existing?: LiveSubagent,
+): LiveSubagent | null {
+  const taskId = typeof event.task_id === 'string' ? event.task_id : existing?.task_id;
+  if (!taskId) return null;
+  const tokens = event.tokens && typeof event.tokens === 'object'
+    ? event.tokens as Record<string, unknown>
+    : null;
+  const readString = (key: string, fallback: string) => (
+    typeof event[key] === 'string' ? String(event[key]) : fallback
+  );
+  const readNullableString = (key: string, fallback: string | null) => (
+    event[key] === null ? null : (typeof event[key] === 'string' ? String(event[key]) : fallback)
+  );
+  return {
+    task_id: taskId,
+    batch_id: readString('batch_id', existing?.batch_id || ''),
+    task: readString('task', existing?.task || ''),
+    depth: numberOr(event.depth, existing?.depth || 1),
+    model: readString('model', existing?.model || ''),
+    status: readString('status', existing?.status || 'running'),
+    tool_count: numberOr(event.tool_count ?? event.tool_calls, existing?.tool_count || 0),
+    last_tool: readNullableString('last_tool', existing?.last_tool || null),
+    elapsed: numberOr(event.elapsed, existing?.elapsed || 0),
+    context_pct: numberOr(event.context_pct, existing?.context_pct || 0),
+    iter: numberOr(event.iter, existing?.iter || 0),
+    max_iter: numberOr(event.max_iter, existing?.max_iter || 0),
+    tokens_in: numberOr(event.tokens_in ?? tokens?.['in'], existing?.tokens_in || 0),
+    summary: readString('summary', existing?.summary || ''),
+    error: readNullableString('error', existing?.error || null),
+    observed_at: Date.now(),
+  };
+}
+
+// Collapse every completed exchange independently. Visualizations are timeline
+// anchors: compact disclosures may form on either side, but an artifact card
+// itself always remains top-level and in chronological order.
 function flattenCollapsedMessages(messages: ChatMessage[]): ChatMessage[] {
   const flattened: ChatMessage[] = [];
   for (const message of messages) {
@@ -135,6 +199,55 @@ function flattenCollapsedMessages(messages: ChatMessage[]): ChatMessage[] {
 
 function collapseGroupKey(user: ChatMessage, finalResponse: ChatMessage): string {
   return JSON.stringify([user.text, finalResponse.text]);
+}
+
+function isTimelineAnchor(message: ChatMessage): boolean {
+  return message.role === 'visualization';
+}
+
+function appendCollapsedSegments(
+  target: ChatMessage[],
+  segmentSource: ChatMessage[],
+  options: {
+    idPrefix: string;
+    groupKey: string;
+    userId: string;
+    live: boolean;
+    previousOpen: Map<string, boolean>;
+    defaultOpen: boolean;
+  },
+) {
+  let segment: ChatMessage[] = [];
+  let segmentIndex = 0;
+  const flush = () => {
+    if (segment.length === 0) return;
+    const childTurns = segment;
+    segment = [];
+    const key = `${options.groupKey}:${segmentIndex}`;
+    segmentIndex += 1;
+    target.push({
+      id: `${options.idPrefix}-${segmentIndex}`,
+      role: 'collapse',
+      text: '',
+      childTurns,
+      collapseCount: childTurns.length,
+      collapseElapsed: '',
+      collapseTokens: '',
+      collapseOpen: options.previousOpen.get(key) ?? options.defaultOpen,
+      collapseGroupKey: key,
+      collapseLive: options.live,
+      collapseUserId: options.userId,
+    });
+  };
+  for (const message of segmentSource) {
+    if (isTimelineAnchor(message)) {
+      flush();
+      target.push(message);
+    } else {
+      segment.push(message);
+    }
+  }
+  flush();
 }
 
 function groupIntermediateTurns(
@@ -182,24 +295,18 @@ function groupIntermediateTurns(
     }
 
     if (finalOffset > 0) {
-      const childTurns = exchange.slice(0, finalOffset);
       const finalResponse = exchange[finalOffset];
       const groupKey = collapseGroupKey(userMessage, finalResponse);
-      grouped.push({
-        id: `collapse-${userMessage.id}-${finalResponse.id}`,
-        role: 'collapse',
-        text: '',
-        childTurns,
-        collapseCount: childTurns.length,
-        collapseElapsed: '',
-        collapseTokens: '',
-        collapseOpen:
+      appendCollapsedSegments(grouped, exchange.slice(0, finalOffset), {
+        idPrefix: `collapse-${userMessage.id}-${finalResponse.id}`,
+        groupKey,
+        userId: userMessage.id,
+        live: false,
+        previousOpen,
+        defaultOpen:
           previousOpen.get(groupKey)
           ?? previousLiveOpen.get(userMessage.id)
           ?? false,
-        collapseGroupKey: groupKey,
-        collapseLive: false,
-        collapseUserId: userMessage.id,
       });
       grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
     } else {
@@ -211,14 +318,10 @@ function groupIntermediateTurns(
   return grouped;
 }
 
-// MUCLI_SINGLE_TRACE_LIVE_INTERIM_V1: dynamically collect completed phases while the turn is still live.
-// A completed assistant segment is not classified as interim merely because it
-// ended. It becomes interim only when a later event proves the turn continues.
-function isLiveTimelineMessage(message: ChatMessage): boolean {
-  return message.role === 'assistant' && Boolean(message.streaming);
-}
-
-function foldLiveInterim(messages: ChatMessage[]): ChatMessage[] {
+// A completed response stays readable until replacement text exists. Once the
+// successor arrives, fold only the content before it; visualization anchors
+// remain top-level and keep their exact chronological position.
+function foldLiveInterim(messages: ChatMessage[], currentTurnId: string): ChatMessage[] {
   let userIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index].role === 'user') {
@@ -229,42 +332,38 @@ function foldLiveInterim(messages: ChatMessage[]): ChatMessage[] {
   if (userIndex < 0) return messages;
 
   const userMessage = messages[userIndex];
-  const tail = messages.slice(userIndex + 1);
-  const existing = tail.find(message =>
-    message.role === 'collapse'
-    && message.collapseLive
-    && message.collapseUserId === userMessage.id
-  );
-
-  const movable: ChatMessage[] = [];
-  const retained: ChatMessage[] = [];
-  for (const message of tail) {
-    if (message === existing) continue;
-    if (isLiveTimelineMessage(message)) retained.push(message);
-    else movable.push(message);
+  const originalTail = messages.slice(userIndex + 1);
+  const previousOpen = new Map<string, boolean>();
+  for (const message of originalTail) {
+    if (message.role === 'collapse' && message.collapseGroupKey) {
+      previousOpen.set(message.collapseGroupKey, Boolean(message.collapseOpen));
+    }
   }
-  if (movable.length === 0) return messages;
+  const tail = flattenCollapsedMessages(originalTail).map(message => ({
+    ...message,
+    handoff: undefined,
+  }));
+  let currentIndex = -1;
+  for (let index = tail.length - 1; index >= 0; index -= 1) {
+    const message = tail[index];
+    if (message.role === 'assistant' && message.turnId === currentTurnId) {
+      currentIndex = index;
+      break;
+    }
+  }
+  if (currentIndex < 0) return messages;
 
-  const childTurns = [...(existing?.childTurns || []), ...movable];
-  const collapse: ChatMessage = {
-    id: existing?.id || `live-collapse-${userMessage.id}`,
-    role: 'collapse',
-    text: '',
-    childTurns,
-    collapseCount: childTurns.length,
-    collapseElapsed: '',
-    collapseTokens: '',
-    collapseOpen: existing?.collapseOpen || false,
-    collapseGroupKey: `live:${userMessage.id}`,
-    collapseLive: true,
-    collapseUserId: userMessage.id,
-  };
-
-  return [
-    ...messages.slice(0, userIndex + 1),
-    collapse,
-    ...retained,
-  ];
+  const regrouped: ChatMessage[] = [];
+  appendCollapsedSegments(regrouped, tail.slice(0, currentIndex), {
+    idPrefix: `live-collapse-${userMessage.id}`,
+    groupKey: `live:${userMessage.id}`,
+    userId: userMessage.id,
+    live: true,
+    previousOpen,
+    defaultOpen: false,
+  });
+  regrouped.push(...tail.slice(currentIndex));
+  return [...messages.slice(0, userIndex + 1), ...regrouped];
 }
 
 function prepareForAssistantTurn(
@@ -278,7 +377,7 @@ function prepareForAssistantTurn(
       ? { ...message, streaming: false }
       : message
   );
-  return foldLiveInterim(retired);
+  return retired;
 }
 
 export function useChatSession(activeSessionName: string | null) {
@@ -291,6 +390,7 @@ export function useChatSession(activeSessionName: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
   const [artifactRevision, setArtifactRevision] = useState(0);
+  const [subagents, setSubagents] = useState<LiveSubagent[]>([]);
   // MUCLI_SLIDING_WINDOW_V1: track whether older turns exist on the server
   // and whether a backward-pagination request is in flight. Mobile ChatScreen
   // triggers loadOlderHistory when the user scrolls near the top.
@@ -299,6 +399,7 @@ export function useChatSession(activeSessionName: string | null) {
 
   const subscriptionRef = useRef<SSESubscription | null>(null);
   const messageIdRef = useRef(0);
+  const seenAssistantTurnsRef = useRef(new Set<string>());
   const messagesRef = useRef<ChatMessage[]>([]);
   const busyRef = useRef(false);
   const sseConnectedRef = useRef(false);
@@ -309,6 +410,8 @@ export function useChatSession(activeSessionName: string | null) {
   const stateAbortRef = useRef<AbortController | null>(null);
   const externalWriteAtRef = useRef(0);
   const completionProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subagentDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Fallback: if history_refresh doesn't arrive within 3s after
   // turn_complete, force a history reload. Safety net for server
   // bugs or network issues that drop the event.
@@ -351,9 +454,19 @@ export function useChatSession(activeSessionName: string | null) {
     });
   }, [nextId]);
 
+  const scheduleAssistantHandoff = useCallback((turnId: string) => {
+    if (handoffTimerRef.current) clearTimeout(handoffTimerRef.current);
+    handoffTimerRef.current = setTimeout(() => {
+      handoffTimerRef.current = null;
+      setMessages(current => foldLiveInterim(current, turnId));
+    }, 260);
+  }, []);
+
   const appendAssistantDelta = useCallback((turnId: string, delta: string) => {
     if (!delta) return;
     const safeTurnId = turnId || 'active-turn';
+    const firstDelta = !seenAssistantTurnsRef.current.has(safeTurnId);
+    seenAssistantTurnsRef.current.add(safeTurnId);
     setMessages(current => {
       const prepared = prepareForAssistantTurn(current, safeTurnId);
       const index = prepared.findIndex(
@@ -366,19 +479,36 @@ export function useChatSession(activeSessionName: string | null) {
           text: updated[index].text + delta,
           streaming: true,
           origin: 'stream',
+          handoff: firstDelta ? 'entering' : updated[index].handoff,
         };
         return updated;
       }
-      return [...prepared, {
+      let lastUserIndex = -1;
+      for (let scan = prepared.length - 1; scan >= 0; scan -= 1) {
+        if (prepared[scan].role === 'user') { lastUserIndex = scan; break; }
+      }
+      const previousMarked = firstDelta
+        ? prepared.map((message, messageIndex) => (
+          messageIndex > lastUserIndex
+          && message.role === 'assistant'
+          && !message.streaming
+          && message.text.trim().length > 0
+            ? { ...message, handoff: 'leaving' as const }
+            : message
+        ))
+        : prepared;
+      return [...previousMarked, {
         id: nextId('assistant'),
         role: 'assistant',
         text: delta,
         turnId: safeTurnId,
         streaming: true,
         origin: 'stream',
+        handoff: firstDelta ? 'entering' : undefined,
       }];
     });
-  }, [nextId]);
+    if (firstDelta) scheduleAssistantHandoff(safeTurnId);
+  }, [nextId, scheduleAssistantHandoff]);
 
   const finalizeAssistant = useCallback((turnId: string) => {
     setMessages(current => current.map(message =>
@@ -387,6 +517,54 @@ export function useChatSession(activeSessionName: string | null) {
         : message,
     ));
   }, []);
+
+  const cancelSubagentDismiss = useCallback(() => {
+    if (subagentDismissRef.current) clearTimeout(subagentDismissRef.current);
+    subagentDismissRef.current = null;
+  }, []);
+
+  const scheduleSubagentDismiss = useCallback((delay = 2400) => {
+    cancelSubagentDismiss();
+    subagentDismissRef.current = setTimeout(() => {
+      subagentDismissRef.current = null;
+      setSubagents(current => current.some(agent => isSubagentActive(agent.status)) ? current : []);
+    }, delay);
+  }, [cancelSubagentDismiss]);
+
+  const upsertSubagent = useCallback((event: StreamEvent) => {
+    setSubagents(current => {
+      const index = current.findIndex(agent => agent.task_id === event.task_id);
+      const next = subagentFromEvent(event, index >= 0 ? current[index] : undefined);
+      if (!next) return current;
+      const updated = [...current];
+      if (index >= 0) updated[index] = next;
+      else updated.push(next);
+      return updated;
+    });
+    const status = typeof event.status === 'string' ? event.status : 'running';
+    if (isSubagentActive(status)) cancelSubagentDismiss();
+    else scheduleSubagentDismiss();
+  }, [cancelSubagentDismiss, scheduleSubagentDismiss]);
+
+  const replaceSubagentSnapshot = useCallback((event: StreamEvent) => {
+    const children = Array.isArray(event.children)
+      ? event.children.filter(value => value && typeof value === 'object') as StreamEvent[]
+      : [];
+    const active = children.filter(child => isSubagentActive(String(child.status || 'running')));
+    if (active.length === 0) {
+      scheduleSubagentDismiss();
+      return;
+    }
+    cancelSubagentDismiss();
+    setSubagents(current => {
+      const terminal = current.filter(agent => !isSubagentActive(agent.status));
+      const rows = active.map(child => {
+        const existing = current.find(agent => agent.task_id === child.task_id);
+        return subagentFromEvent(child, existing);
+      }).filter((agent): agent is LiveSubagent => Boolean(agent));
+      return [...terminal, ...rows];
+    });
+  }, [cancelSubagentDismiss, scheduleSubagentDismiss]);
 
   const loadHistory = useCallback(async (preserveLive = true) => {
     if (!activeSessionName) {
@@ -608,7 +786,6 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'thinking_delta') {
-      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -617,7 +794,6 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'tool_call') {
-      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -627,11 +803,25 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'tool_result') {
-      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
       setActivityLabel('Thinking');
+      return;
+    }
+
+    if (kind === 'subagent_start' || kind === 'subagent_progress' || kind === 'subagent_end') {
+      upsertSubagent({
+        ...event,
+        status: kind === 'subagent_start'
+          ? 'running'
+          : (kind === 'subagent_end' ? String(event.status || 'done') : event.status),
+      });
+      return;
+    }
+
+    if (kind === 'subagent_snapshot') {
+      replaceSubagentSnapshot(event);
       return;
     }
 
@@ -649,7 +839,6 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'prompt') {
-      setMessages(current => foldLiveInterim(current));
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
@@ -666,6 +855,10 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'turn_complete') {
+      if (handoffTimerRef.current) {
+        clearTimeout(handoffTimerRef.current);
+        handoffTimerRef.current = null;
+      }
       if (completionProbeRef.current) {
         clearTimeout(completionProbeRef.current);
         completionProbeRef.current = null;
@@ -683,11 +876,12 @@ export function useChatSession(activeSessionName: string | null) {
       setMessages(current => {
         const retired = current.map(message =>
           message.role === 'assistant' && message.streaming
-            ? { ...message, streaming: false }
-            : message
+            ? { ...message, streaming: false, handoff: undefined }
+            : { ...message, handoff: undefined }
         );
         return groupIntermediateTurns(retired, current);
       });
+      scheduleSubagentDismiss();
       setArtifactRevision(value => value + 1);
       // Do NOT call loadHistory here. The server may not have persisted
       // the final assistant message yet, so loadHistory would replace
@@ -723,7 +917,7 @@ export function useChatSession(activeSessionName: string | null) {
           };
           if (existing >= 0) {
             updated[existing] = next;
-            return foldLiveInterim(updated);
+            return updated;
           }
 
           // MUCLI_VISUALIZATION_TIMELINE_V2: close the current assistant segment
@@ -733,6 +927,7 @@ export function useChatSession(activeSessionName: string | null) {
           for (let index = updated.length - 1; index >= 0; index -= 1) {
             const message = updated[index];
             if (message.role === 'assistant' && message.streaming) {
+              if (message.turnId) seenAssistantTurnsRef.current.delete(message.turnId);
               updated[index] = {
                 ...message,
                 id: `${message.id}-segment-${artifact.artifact_id}`,
@@ -744,7 +939,7 @@ export function useChatSession(activeSessionName: string | null) {
             }
           }
           updated.splice(insertAt, 0, next);
-          return foldLiveInterim(updated);
+          return updated;
         });
       }
       setArtifactRevision(value => value + 1);
@@ -784,7 +979,17 @@ export function useChatSession(activeSessionName: string | null) {
       // The server will emit history_refresh after persisting.
       if (!sseConnectedRef.current) void loadHistory(false);
     }
-  }, [activeSessionName, appendAssistantDelta, appendUserMessage, finalizeAssistant, loadHistory, syncSessionState]);
+  }, [
+    activeSessionName,
+    appendAssistantDelta,
+    appendUserMessage,
+    finalizeAssistant,
+    loadHistory,
+    replaceSubagentSnapshot,
+    scheduleSubagentDismiss,
+    syncSessionState,
+    upsertSubagent,
+  ]);
 
   useEffect(() => {
     subscriptionRef.current?.close();
@@ -798,6 +1003,7 @@ export function useChatSession(activeSessionName: string | null) {
     lastSessionRef.current = activeSessionName;
     if (sessionChanged) {
       setMessages([]);
+      setSubagents([]);
       setError(null);
       setActivityLabel('Thinking');
       busyRef.current = false;
@@ -808,10 +1014,16 @@ export function useChatSession(activeSessionName: string | null) {
       setHasMore(false);
       setLoadingOlder(false);
       setArtifactRevision(value => value + 1);
+      seenAssistantTurnsRef.current.clear();
       if (completionProbeRef.current) {
         clearTimeout(completionProbeRef.current);
         completionProbeRef.current = null;
       }
+      if (handoffTimerRef.current) {
+        clearTimeout(handoffTimerRef.current);
+        handoffTimerRef.current = null;
+      }
+      cancelSubagentDismiss();
       if (historyFallbackRef.current) {
         clearTimeout(historyFallbackRef.current);
         historyFallbackRef.current = null;
@@ -867,6 +1079,11 @@ export function useChatSession(activeSessionName: string | null) {
         clearTimeout(historyFallbackRef.current);
         historyFallbackRef.current = null;
       }
+      if (handoffTimerRef.current) {
+        clearTimeout(handoffTimerRef.current);
+        handoffTimerRef.current = null;
+      }
+      cancelSubagentDismiss();
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
       historyAbortRef.current?.abort();
@@ -874,7 +1091,7 @@ export function useChatSession(activeSessionName: string | null) {
       stateAbortRef.current?.abort();
       stateAbortRef.current = null;
     };
-  }, [activeSessionName, handleEvent, loadHistory, reconnectKey, syncSessionState]);
+  }, [activeSessionName, cancelSubagentDismiss, handleEvent, loadHistory, reconnectKey, syncSessionState]);
 
   const sendMessage = useCallback(async (text: string, attachments: AttachmentDescriptor[] = []) => {
     let trimmed = text.trim();
@@ -926,6 +1143,7 @@ export function useChatSession(activeSessionName: string | null) {
     sseConnected,
     error,
     artifactRevision,
+    subagents,
     hasMore,
     loadingOlder,
     sendMessage,

@@ -4,7 +4,11 @@
 
             <!-- user / assistant message bubbles -->
             <template x-if="t.role === 'user' || t.role === 'assistant'">
-                <div :class="'msg ' + t.role + (t.streaming ? ' streaming' : '')">
+                <div :class="'msg ' + t.role
+                    + (t.streaming ? ' streaming' : '')
+                    + (t.entering ? ' interim-entering' : '')
+                    + (t.leaving ? ' interim-leaving' : '')"
+                     x-show="t.role === 'user' || !!t.text">
                     <div class="role" x-text="t.role"></div>
                     <div class="body" x-html="t.html"></div>
                     <div class="message-attachments" x-show="t.attachments && t.attachments.length">
@@ -66,7 +70,8 @@
             <!-- collapsed intermediate turns: groups intermediate assistant +
                  trace + tool events between a user msg and the final response.
                  Shows "N interim updates · Xs · Yk tokens" heading. Expanded shows
-                 child turns inline, including visualizations. -->
+                 child turns inline. Visualizations and live subagent panels
+                 are timeline anchors and are never nested here. -->
             <template x-if="t.role === 'collapse'">
                 <div class="collapse-group" :class="{ open: t.open }">
                     <div class="collapse-header"
@@ -90,27 +95,6 @@
                          x-transition.opacity.duration.180ms>
                         <template x-for="ct in t.childTurns" :key="ct.id">
                             <div class="turn-wrap">
-                                <template x-if="ct.role === 'visualization'">
-                                    <section class="msg visualization collapsed-child">
-                                        <div class="visualization-head">
-                                            <div>
-                                                <div class="role">visualization</div>
-                                                <strong x-text="ct.artifact.title || ct.artifact.name"></strong>
-                                            </div>
-                                            <div class="visualization-actions">
-                                                <a :href="ct.artifact.view_url" target="_blank" rel="noopener noreferrer">Open</a>
-                                                <a :href="ct.artifact.download_url" download>Download</a>
-                                            </div>
-                                        </div>
-                                        <iframe class="visualization-frame"
-                                                :src="ct.artifact.view_url"
-                                                :title="ct.artifact.title || ct.artifact.name || 'Interactive visualization'"
-                                                :style="'height:' + (ct.height || 420) + 'px'"
-                                                loading="lazy"
-                                                referrerpolicy="no-referrer"
-                                                sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
-                                    </section>
-                                </template>
                                 <template x-if="ct.role === 'assistant'">
                                     <div class="msg assistant collapsed-child">
                                         <div class="role">assistant</div>
@@ -168,31 +152,6 @@
                                         <template x-if="!ct.isPreformatted && ct.body">
                                             <div class="cmd-body" x-html="ct.html"></div>
                                         </template>
-                                    </div>
-                                </template>
-                                <template x-if="ct.role === 'subagent_panel'">
-                                    <div class="subagent-panel collapsed-child" :class="{ open: ct.open, running: ct.running }">
-                                        <div class="sap-header"
-                                             @click="ct.open = !ct.open"
-                                             :aria-expanded="ct.open"
-                                             role="button" tabindex="0"
-                                             @keydown.enter.prevent="ct.open = !ct.open"
-                                             @keydown.space.prevent="ct.open = !ct.open">
-                                            <span class="caret">›</span>
-                                            <span class="label">subagents</span>
-                                            <span class="summary" x-text="summarizeSubagentPanel(ct)"></span>
-                                        </div>
-                                        <div class="sap-rows" x-show="ct.open" x-transition.opacity.duration.180ms>
-                                            <template x-for="a in ct.agents" :key="a.task_id">
-                                                <div class="sap-row" :class="'is-' + a.status">
-                                                    <div class="sap-row-head">
-                                                        <span class="sap-depth" x-text="'d=' + a.depth"></span>
-                                                        <span class="sap-task" x-text="a.task"></span>
-                                                        <span class="sap-status" x-text="subagentStatusText(a)"></span>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                        </div>
                                     </div>
                                 </template>
                                 <template x-if="ct.role === 'prompt_resolved'">
@@ -253,7 +212,7 @@
                  feed. Expanded while agents run (tool / context / tokens),
                  collapses to a one-line summary when all finish. -->
             <template x-if="t.role === 'subagent_panel'">
-                <div class="subagent-panel" :class="{ open: t.open, running: t.running }">
+                <div class="subagent-panel" :class="{ open: t.open, running: t.running, leaving: t.leaving }">
                     <div class="sap-header"
                          @click="t.open = !t.open"
                          :aria-expanded="t.open"
@@ -263,7 +222,7 @@
                          @keydown.space.prevent="t.open = !t.open">
                         <span class="caret">›</span>
                         <span class="label">subagents</span>
-                        <span class="summary" x-text="summarizeSubagentPanel(t)"></span>
+                        <span class="summary" x-text="summarizeSubagentPanel(t, $store.chat.clock)"></span>
                         <span x-show="t.running" class="thinking-dots" aria-hidden="true">
                             <span></span><span></span><span></span>
                         </span>
@@ -278,25 +237,32 @@
                                     <span class="sap-task" x-text="a.task"></span>
                                     <span class="sap-status" x-text="subagentStatusText(a)"></span>
                                     <span class="sap-elapsed"
-                                          x-show="a.elapsed"
-                                          x-text="(a.elapsed || 0).toFixed(1) + 's'"></span>
+                                          x-text="subagentElapsed(a, $store.chat.clock).toFixed(1) + 's'"></span>
                                 </div>
                                 <div class="sap-meta">
+                                    <span class="sap-model"
+                                          x-show="a.model"
+                                          x-text="a.model"></span>
+                                    <span class="sap-last-tool"
+                                          x-show="a.last_tool"
+                                          x-text="a.last_tool"></span>
                                     <span class="sap-tools"
                                           x-show="a.tool_count > 0"
                                           x-text="a.tool_count + ' call' + (a.tool_count > 1 ? 's' : '')"></span>
                                     <span class="sap-tokens"
                                           x-show="a.tokens_in > 0"
                                           x-text="_fmtTok(a.tokens_in) + ' in'"></span>
-                                    <span class="sap-iter"
-                                          x-show="a.max_iter > 0"
-                                          x-text="'iter ' + a.iter + '/' + a.max_iter"></span>
-                                    <div class="sap-ctx"
-                                         x-show="a.context_pct > 0"
-                                         :title="'context ' + (a.context_pct || 0).toFixed(1) + '%'">
-                                        <div class="sap-ctx-fill"
-                                             :class="{ warn: (a.context_pct || 0) > 80 }"
-                                             :style="'width:' + Math.min(100, a.context_pct || 0) + '%'"></div>
+                                </div>
+                                <div class="sap-meters" x-show="a.max_iter > 0 || a.context_pct > 0">
+                                    <div class="sap-meter" x-show="a.max_iter > 0">
+                                        <span>iteration</span>
+                                        <div class="sap-meter-track"><i :style="'width:' + Math.min(100, ((a.iter || 0) / Math.max(1, a.max_iter || 1)) * 100) + '%'"></i></div>
+                                        <b x-text="(a.iter || 0) + '/' + (a.max_iter || 0)"></b>
+                                    </div>
+                                    <div class="sap-meter" x-show="a.context_pct > 0">
+                                        <span>context</span>
+                                        <div class="sap-meter-track"><i :class="{ warn: (a.context_pct || 0) > 80 }" :style="'width:' + Math.min(100, a.context_pct || 0) + '%'"></i></div>
+                                        <b x-text="(a.context_pct || 0).toFixed(0) + '%'"></b>
                                     </div>
                                 </div>
                             </div>

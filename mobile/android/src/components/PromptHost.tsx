@@ -219,7 +219,7 @@ export function PromptHost() {
         accessibilityLabel="Review pending agent input"
         activeOpacity={0.86}
         onPress={() => setReviewOpen(true)}
-        style={[styles.pendingBanner, { backgroundColor: colors.bgLift, borderColor: colors.border }]}
+        style={[styles.pendingBanner, { backgroundColor: colors.glassStrong, borderColor: colors.accent }]}
       >
         <View style={[styles.pendingIcon, { backgroundColor: colors.accentSoft }]}>
           <Ionicons name="help-circle-outline" size={20} color={colors.accent} />
@@ -778,21 +778,23 @@ function InputBody({
 const styles = StyleSheet.create({
   pendingBanner: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 18,
+    top: '50%',
+    transform: [{ translateY: -38 }],
+    width: '88%',
+    maxWidth: 520,
+    alignSelf: 'center',
     zIndex: 1000,
-    elevation: 14,
-    minHeight: 62,
+    elevation: 18,
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    paddingHorizontal: 12,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    borderWidth: 1,
     shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.24,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 9 },
   },
   pendingIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   pendingCopy: { flex: 1, marginHorizontal: 11 },

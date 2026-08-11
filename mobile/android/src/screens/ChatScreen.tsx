@@ -410,16 +410,6 @@ export function ChatScreen() {
           {item.collapseOpen ? (
             <View style={styles.interimBody}>
               {item.childTurns?.map(child => {
-                if (child.role === 'visualization' && child.artifact && activeSessionName) {
-                  return (
-                    <VisualizationCard
-                      key={child.id}
-                      artifact={child.artifact}
-                      sessionName={activeSessionName}
-                      onInteractionChange={onVisualizationInteractionChange}
-                    />
-                  );
-                }
                 if (child.role !== 'assistant') return null;
                 return (
                   <View key={child.id} style={[styles.msgRow, { justifyContent: 'flex-start' }]}>

@@ -32,7 +32,7 @@ def _visible(state, name: str) -> bool:
     return is_user_visible_session(name, _loaded_data(state, name))
 
 
-@router.get("")
+@router.get("/")
 async def list_user_sessions(request: Request):
     """Return only conversations intended for the normal Sessions UI.
 

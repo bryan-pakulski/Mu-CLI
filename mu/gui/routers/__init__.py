@@ -29,4 +29,8 @@ _sessions.router.routes[:] = [
     )
 ]
 _sessions.router.include_router(_session_history.router)
-_sessions.router.include_router(_session_visibility.router)
+# Add the visibility-filtered list endpoint directly to avoid
+# FastAPI's "Prefix and path cannot be both empty" guard when
+# include_router is called with no prefix and a "" path route.
+from .session_visibility import list_user_sessions  # noqa: E402,F401
+_sessions.router.add_api_route("", list_user_sessions, methods=["GET"], name="list_user_sessions")

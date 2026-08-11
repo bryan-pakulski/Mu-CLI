@@ -34,6 +34,7 @@ from .routers import (
     jobs as jobs_router,
     loop as loop_router,
     memory as memory_router,
+    memories as memories_router,
     modes,
     prompts as prompts_router,
     providers as providers_router,
@@ -221,6 +222,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
     app.include_router(memory_router.router, prefix="/api/memory", tags=["memory"])
+    app.include_router(memories_router.router, prefix="/api/v1", tags=["memory-ledger"])
     app.include_router(files_router.router, prefix="/api/files", tags=["files"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])

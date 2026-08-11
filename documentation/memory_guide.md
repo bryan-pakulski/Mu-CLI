@@ -2,7 +2,10 @@
 
 ## Overview
 
-Mu-CLI implements a multi-layered memory architecture designed to optimize context management for agentic AI workflows. The system consists of four primary memory stores plus a collation buffer for deferred context delivery.
+Mu-CLI implements a multi-layered memory architecture designed to optimize
+context management for agentic AI workflows. Session working memory is kept
+separate from the cross-session **Memory Ledger**, and the UI distinguishes
+durable knowledge from the provider-visible **Context Map**.
 
 ---
 
@@ -26,7 +29,8 @@ Mu-CLI implements a multi-layered memory architecture designed to optimize conte
 
 **Location:** `mu/memory/stores.py`
 
-**Purpose:** Persistent, durable memory that survives across turns and sessions.
+**Purpose:** Working memory that survives turns and process restarts when the
+same named session is reopened.
 
 **Key features:**
 - **Max entries:** Configurable (effective default 64 via the `memory_max_entries` config variable, applied at turn start in `mu/agent/loop_body.py`; the `TaskMemoryStore` class default is 1024 when constructed directly)
@@ -54,6 +58,44 @@ class MemoryEntry:
 **Why implemented:** Prevents the AI from re-reading large files or re-executing expensive searches. Critical findings (file locations, search results, workspace structure) are preserved for quick recall.
 
 **Lifecycle fields** (`status`, `superseded_by`, `supersedes`) let the agent distinguish active work from completed, superseded, or archived entries. `kind` drives eviction priority (decisions > findings > observations > goals). See the [Memory Lifecycle](#memory-lifecycle) section below.
+
+---
+
+### 2a. Cross-session Memory Ledger
+
+**Locations:** mu/memory/models.py, mu/memory/ledger.py,
+mu/memory/service.py
+
+**Purpose:** Automatic, scoped knowledge shared by new sessions without
+replaying full conversation history.
+
+**Behaviour:**
+
+- Enabled by default. The model calls save_memory autonomously for useful
+  non-secret decisions, findings, conventions, preferences, procedures and
+  lessons. Eligible entries are promoted automatically; Mu-CLI does not pause
+  to request approval.
+- Before each user turn, the service resolves personal/workspace/repository/
+  branch/feature scope, runs a pure FTS5-backed retrieval, applies a fixed
+  token budget, and injects the result once as LAYER 2M.
+- Every write, revision, lifecycle change and provider injection has an
+  append-only event. Every recall has a receipt listing included and excluded
+  candidates, score factors and token cost.
+- The canonical store is ~/.mucli/memory/memory.db (SQLite WAL, mode 0600).
+  FTS is a derived search index; immutable revisions and current-state records
+  remain the source of truth.
+- Search and browsing do not change truth timestamps or reactivate records.
+  Only actual model injection records recall use.
+- Secret-pattern detection runs before persistence. Credential-like memory is
+  rejected rather than redacted into a misleading durable claim.
+
+**User experience:** Normal chat is uninterrupted. TUI, web and mobile show
+compact “recalled N” / “stored N” receipts. The Memory Center provides search,
+provenance, timeline, relationship, edit, pin, archive, restore and permanent
+Forget controls. /memory why last explains the last injection.
+
+**Precedence:** Current system policy and the current user request always win.
+Recalled memory is reference data, not an instruction channel.
 
 ---
 

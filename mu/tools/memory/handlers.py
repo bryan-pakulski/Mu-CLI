@@ -27,6 +27,47 @@ def _task_memory(context):
     return _fallback_task_memory()
 
 
+def _durable_memory(context):
+    session = getattr(context, "session", None)
+    if (
+        session is None
+        or not hasattr(session, "get_durable_memory_service")
+        or not bool(getattr(session, "variables", {}).get("durable_memory_enabled", True))
+    ):
+        return None
+    try:
+        return session.get_durable_memory_service()
+    except Exception:
+        return None
+
+
+def _sync_durable_status(context, entry, status: str, reason: str = "") -> None:
+    """Best-effort lifecycle mirror; working-memory curation never blocks."""
+
+    durable_id = str(getattr(entry, "durable_id", "") or "")
+    service = _durable_memory(context)
+    if service is None or not durable_id or durable_id == "rejected":
+        return
+    try:
+        if status == "archived":
+            service.ledger.action(durable_id, "archive", actor="model", reason=reason)
+        elif status == "active":
+            service.ledger.action(durable_id, "restore", actor="model", reason=reason)
+        elif status == "stale":
+            service.ledger.action(
+                durable_id, "mark_needs_review", actor="model", reason=reason
+            )
+        elif status == "superseded":
+            service.ledger.revise(
+                durable_id,
+                {"lifecycle": "superseded"},
+                actor="model",
+                reason=reason or "working memory superseded",
+            )
+    except Exception:
+        pass
+
+
 def _scratchpad(context):
     session = getattr(context, "session", None)
     if session is not None and hasattr(session, "turn_scratchpad"):
@@ -76,11 +117,12 @@ def _int_arg(args: Dict[str, Any], key: str, default: int) -> int:
 @tool(
     name="save_memory",
     description=(
-        "Saves a short, important fact into the in-task memory store so "
-        "it can be reused later without replaying large context. Use "
-        "kind to classify: decision (architectural choice), finding "
-        "(verified fact), observation (general note), or goal (active "
-        "work target). Use status to set the lifecycle state."
+        "Saves a concise, reusable fact to working memory and automatically "
+        "promotes eligible non-secret content into the scoped cross-session "
+        "Memory Ledger. This is model-controlled and never requires approval. "
+        "Choose repository scope for project facts and personal scope only "
+        "for genuine user-wide preferences. Use supersedes_id when replacing "
+        "an earlier durable memory instead of creating conflicting siblings."
     ),
     parameters={
         "type": "object",
@@ -100,13 +142,51 @@ def _int_arg(args: Dict[str, Any], key: str, default: int) -> int:
             },
             "kind": {
                 "type": "string",
-                "enum": ["decision", "finding", "observation", "goal"],
+                "enum": [
+                    "constraint", "decision", "preference", "convention",
+                    "finding", "procedure", "lesson", "handoff",
+                    "observation", "goal",
+                ],
                 "description": (
                     "Classification of this memory. Defaults to 'observation'. "
                     "Use 'decision' for architectural choices, 'finding' for "
                     "verified facts, 'goal' for active work targets."
                 ),
                 "default": "observation",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["auto", "personal", "workspace", "repository", "branch", "feature"],
+                "description": (
+                    "Durable scope. auto chooses repository, then workspace, "
+                    "then personal. Do not use personal for repository facts."
+                ),
+                "default": "auto",
+            },
+            "verification": {
+                "type": "string",
+                "enum": ["unverified", "source_backed", "tool_verified", "user_confirmed"],
+                "default": "unverified",
+            },
+            "confidence": {
+                "type": "number",
+                "description": "Confidence from 0.0 to 1.0.",
+                "default": 0.7,
+            },
+            "pinned": {
+                "type": "boolean",
+                "description": "Guarantee recall when scope matches, within the pin budget.",
+                "default": False,
+            },
+            "egress_policy": {
+                "type": "string",
+                "enum": ["never", "local_only", "any"],
+                "description": "Which model providers may receive this memory during recall.",
+                "default": "any",
+            },
+            "supersedes_id": {
+                "type": "string",
+                "description": "Optional durable UUID that this new memory supersedes.",
             },
             "status": {
                 "type": "string",
@@ -131,14 +211,85 @@ def _int_arg(args: Dict[str, Any], key: str, default: int) -> int:
 def save_memory(args: Dict[str, Any], context) -> str:
     kind = str(args.get("kind", "observation") or "observation").strip()
     status = str(args.get("status", "active") or "active").strip()
+    content = str(args.get("content", "") or "")
+    session = getattr(context, "session", None)
+    durable_item = None
+    durable_created = False
+    durable_error = ""
+    service = _durable_memory(context)
+    if service is not None and kind != "goal":
+        from mu.memory.service import MemoryRejectedError
+
+        try:
+            durable_item, durable_created = service.remember(
+                session,
+                content,
+                kind=kind,
+                scope=str(
+                    args.get("scope")
+                    or getattr(session, "variables", {}).get(
+                        "durable_memory_default_scope", "auto"
+                    )
+                ),
+                tags=args.get("tags", []),
+                source_refs=[
+                    {
+                        "type": "model_tool",
+                        "tool": "save_memory",
+                        "source": str(args.get("source", "") or ""),
+                    }
+                ],
+                actor="model",
+                trust_origin="model",
+                verification=str(args.get("verification", "unverified") or "unverified"),
+                confidence=float(args.get("confidence", 0.7) or 0.7),
+                egress_policy=str(args.get("egress_policy", "any") or "any"),
+                pinned=bool(args.get("pinned", False)),
+                lifecycle=(
+                    "archived"
+                    if status == "archived"
+                    else "needs_review"
+                    if status in {"stale", "superseded"}
+                    else "active"
+                ),
+                supersedes_id=str(args.get("supersedes_id", "") or ""),
+                reason="model save_memory tool",
+            )
+        except MemoryRejectedError as exc:
+            return f"Memory not stored: {exc}."
+        except Exception as exc:  # durable failure must not break working memory
+            durable_error = str(exc)
     entry = _task_memory(context).save(
-        args.get("content", ""),
+        content,
         tags=args.get("tags", []),
         source=args.get("source", ""),
         kind=kind,
         status=status,
     )
-    return f"Saved memory #{entry.id} [kind={entry.kind}, status={entry.status}] with tags={entry.tags}."
+    if durable_item is not None:
+        entry.durable_id = durable_item.id
+        if session is not None:
+            writes = getattr(session, "_turn_durable_writes", None)
+            if writes is None:
+                writes = []
+                session._turn_durable_writes = writes
+            for index, item in enumerate(writes):
+                if getattr(item, "id", "") == durable_item.id:
+                    writes[index] = durable_item
+                    break
+            else:
+                writes.append(durable_item)
+        verb = "created" if durable_created else "reinforced"
+        return (
+            f"Saved working memory #{entry.id}; durable memory {verb} "
+            f"{durable_item.id} [{durable_item.scope_type}/{durable_item.kind}] "
+            f"with tags={entry.tags}. No approval required; visible in Memory Center."
+        )
+    suffix = f" Durable ledger unavailable: {durable_error}." if durable_error else ""
+    return (
+        f"Saved memory #{entry.id} [kind={entry.kind}, status={entry.status}] "
+        f"with tags={entry.tags}.{suffix}"
+    )
 
 
 @tool(
@@ -213,7 +364,37 @@ def search_memory(args: Dict[str, Any], context) -> str:
         tags_exclude=tags_exclude,
         include_all=include_all,
     )
-    return store.format_results(entries)
+    parts = [store.format_results(entries)]
+    service = _durable_memory(context)
+    session = getattr(context, "session", None)
+    if service is not None:
+        try:
+            seen = {
+                str(getattr(entry, "durable_id", "") or "")
+                for entry in entries
+                if getattr(entry, "durable_id", "")
+            }
+            durable = [
+                item
+                for item in service.search_for_session(
+                    session,
+                    str(args.get("query", "") or ""),
+                    limit=_int_arg(args, "limit", 5),
+                )
+                if item.id not in seen
+            ]
+            if durable:
+                parts.append(
+                    "Cross-session Memory Ledger:\n"
+                    + "\n".join(
+                        f"[D:{item.id}] [{item.scope_type}/{item.lifecycle}] "
+                        f"kind={item.kind} :: {item.statement}"
+                        for item in durable
+                    )
+                )
+        except Exception:
+            pass
+    return "\n\n".join(parts)
 
 
 @tool(
@@ -253,7 +434,86 @@ def list_memory(args: Dict[str, Any], context) -> str:
         limit=_int_arg(args, "limit", 10),
         status_filter=status,
     )
-    return store.format_results(entries)
+    parts = [store.format_results(entries)]
+    service = _durable_memory(context)
+    session = getattr(context, "session", None)
+    if service is not None:
+        try:
+            durable = service.list_for_session(
+                session,
+                lifecycle=(
+                    status
+                    if status in {"active", "archived", "superseded"}
+                    else None
+                ),
+                limit=_int_arg(args, "limit", 10),
+            )
+            if durable:
+                parts.append(
+                    "Cross-session Memory Ledger:\n"
+                    + "\n".join(
+                        f"[D:{item.id}] [{item.scope_type}/{item.lifecycle}] "
+                        f"kind={item.kind} :: {item.statement}"
+                        for item in durable
+                    )
+                )
+        except Exception:
+            pass
+    return "\n\n".join(parts)
+
+
+@tool(
+    name="manage_durable_memory",
+    description=(
+        "Curates a visible cross-session Memory Ledger record without asking "
+        "the user for approval. Use archive for knowledge that should stop "
+        "being recalled, needs_review for stale or uncertain knowledge, and "
+        "pin sparingly for always-relevant scoped knowledge. Permanent Forget "
+        "is intentionally a user-facing privacy control, not a model action."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "memory_id": {
+                "type": "string",
+                "description": "Durable UUID or unique compact prefix from search_memory.",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["pin", "unpin", "archive", "restore", "needs_review"],
+            },
+            "reason": {
+                "type": "string",
+                "description": "Short audit reason for the lifecycle change.",
+            },
+        },
+        "required": ["memory_id", "action"],
+    },
+)
+def manage_durable_memory(args: Dict[str, Any], context) -> str:
+    service = _durable_memory(context)
+    session = getattr(context, "session", None)
+    if service is None or session is None:
+        return "Durable Memory Ledger is unavailable; working memory was unchanged."
+    memory_ref = str(args.get("memory_id", "") or "").strip()
+    action = str(args.get("action", "") or "").strip().lower()
+    ledger_action = "mark_needs_review" if action == "needs_review" else action
+    try:
+        item = service.get_for_session(session, memory_ref)
+        if item is None:
+            return f"Durable memory {memory_ref!r} was not found in active scopes."
+        item = service.ledger.action(
+            item.id,
+            ledger_action,
+            actor="model",
+            reason=str(args.get("reason", "") or f"model {action}"),
+        )
+    except Exception as exc:
+        return f"Durable memory management failed: {exc}."
+    return (
+        f"Durable memory {item.id} is now {item.lifecycle}"
+        f"{' and pinned' if item.pinned else ''}. The change is visible in Memory Center."
+    )
 
 
 # ---------------------------------------------------------------- lifecycle tools
@@ -326,6 +586,7 @@ def update_memory_status(args: Dict[str, Any], context) -> str:
             if store.get_entry(new_id) is not None:
                 result = store.supersede(entry_id, new_id)
                 if result is not None:
+                    _sync_durable_status(context, entry, "superseded", reason)
                     return (
                         f"Memory #{entry_id} status: {old_status} → superseded "
                         f"(superseded_by=#{new_id})."
@@ -335,6 +596,8 @@ def update_memory_status(args: Dict[str, Any], context) -> str:
     updated = store.update_status(entry_id, status)
     if updated is None:
         return f"Error: Could not update memory #{entry_id}."
+
+    _sync_durable_status(context, updated, status, reason)
 
     return f"Memory #{entry_id} status: {old_status} → {status}."
 
@@ -387,6 +650,39 @@ def supersede_memory(args: Dict[str, Any], context) -> str:
         return f"Error: Could not supersede memory #{old_id}."
 
     old, new, old_status, new_status = result
+    old_durable = str(getattr(old, "durable_id", "") or "")
+    new_durable = str(getattr(new, "durable_id", "") or "")
+    service = _durable_memory(context)
+    if service is not None and old_durable and new_durable:
+        try:
+            old_item = service.ledger.get(old_durable)
+            new_item = service.ledger.get(new_durable)
+            if old_item is not None and new_item is not None:
+                service.ledger.revise(
+                    old_durable,
+                    {
+                        "lifecycle": "superseded",
+                        "relations": [
+                            *old_item.relations,
+                            {"type": "superseded_by", "target_id": new_durable},
+                        ],
+                    },
+                    actor="model",
+                    reason=f"superseded by working memory #{new_id}",
+                )
+                service.ledger.revise(
+                    new_durable,
+                    {
+                        "relations": [
+                            *new_item.relations,
+                            {"type": "supersedes", "target_id": old_durable},
+                        ]
+                    },
+                    actor="model",
+                    reason=f"supersedes working memory #{old_id}",
+                )
+        except Exception:
+            pass
     return (
         f"Memory #{old_id} [{old_status} → superseded] superseded by #{new_id}. "
         f"Memory #{new_id} now supersedes #{old_id}."
@@ -476,6 +772,8 @@ def reactivate_memory(args: Dict[str, Any], context) -> str:
     if updated is None:
         return f"Error: Could not reactivate memory #{entry_id}."
 
+    _sync_durable_status(context, updated, "active", "model reactivated working memory")
+
     return f"Memory #{entry_id} reactivated: {old_status} → active."
 
 
@@ -517,6 +815,8 @@ def archive_memory(args: Dict[str, Any], context) -> str:
     updated = store.update_status(entry_id, "archived")
     if updated is None:
         return f"Error: Could not archive memory #{entry_id}."
+
+    _sync_durable_status(context, updated, "archived", "model archived working memory")
 
     return f"Memory #{entry_id} archived: {old_status} → archived."
 

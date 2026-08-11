@@ -1068,6 +1068,50 @@ def run_turn(session, text):
     # Reset to 0 in `_collect_turn_response` when the turn finishes.
     session._compaction_watermark = len(session.session_manager.history)
     session._pending_user_text = effective_text or text or ""
+    # Cross-session recall runs once per user turn, not once per provider
+    # iteration. The resulting block and receipt are reused by retries and
+    # tool-call iterations so browsing/looping cannot inflate recall counts.
+    session._turn_durable_recall_block = ""
+    session._last_durable_recall_receipt = None
+    session._turn_durable_writes = []
+    if (
+        effective_text
+        and session.variables.get("durable_memory_enabled", True)
+        and not str(text or "").lstrip().startswith("/")
+    ):
+        try:
+            _memory_service = session.get_durable_memory_service()
+            _memory_receipt = _memory_service.recall(
+                session,
+                effective_text,
+                limit=max(
+                    1,
+                    int(session.variables.get("durable_memory_max_items", 6) or 6),
+                ),
+                budget_tokens=max(
+                    64,
+                    int(
+                        session.variables.get("durable_memory_token_budget", 1200)
+                        or 1200
+                    ),
+                ),
+            )
+            session._last_durable_recall_receipt = _memory_receipt
+            session._turn_durable_recall_block = _memory_service.render_recall(
+                _memory_receipt
+            )
+            if (
+                _memory_receipt.included
+                and session.ui
+                and session.variables.get("durable_memory_show_receipts", True)
+            ):
+                session.ui.show_info(
+                    f"Memory · recalled {len(_memory_receipt.included)} · "
+                    f"{_memory_receipt.token_count} tokens · "
+                    f"receipt {_memory_receipt.id.split('-')[0]}"
+                )
+        except Exception:
+            logger.debug("durable memory recall failed", exc_info=True)
     # Resumption briefings: queued by /teach load, /feature load, and
     # session-switch paths. Drained here so the agent's next provider
     # call sees them once, then the queue clears.
@@ -1338,6 +1382,14 @@ def run_turn(session, text):
                 cached_skills=session._turn_skills_block,
                 cached_folder_context=session._turn_folder_context_block,
             )
+            _durable_recall = str(
+                getattr(session, "_turn_durable_recall_block", "") or ""
+            ).strip()
+            if _durable_recall:
+                dynamic_system_prompt += (
+                    "\n\nLAYER 2M — Durable cross-session recall:\n"
+                    f"{_durable_recall}"
+                )
             if session.variables.get("memory_enabled", True):
                 active_mode_for_mem = str(
                     session.variables.get("agent_mode", "default")

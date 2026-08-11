@@ -214,6 +214,30 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },
+    "durable_memory_enabled": {
+        "type": bool,
+        "default": True,
+    },  # Automatic scoped recall from the cross-session SQLite Memory Ledger.
+    "durable_memory_auto_capture": {
+        "type": bool,
+        "default": True,
+    },  # Promote model-managed save_memory entries automatically; never prompt.
+    "durable_memory_max_items": {
+        "type": int,
+        "default": 6,
+    },
+    "durable_memory_token_budget": {
+        "type": int,
+        "default": 1200,
+    },
+    "durable_memory_default_scope": {
+        "type": str,
+        "default": "auto",
+    },  # auto resolves repository -> workspace -> personal.
+    "durable_memory_show_receipts": {
+        "type": bool,
+        "default": True,
+    },  # Compact visibility only; never an approval step.
     "memory_max_entries": {
         "type": int,
         "default": 64,
@@ -654,7 +678,7 @@ TOOL SURFACE:
 - Search: `search_for_string` (exact substring, line numbers), `search_references` (context lines), `retrieve_relevant_context` (semantic index, lexical+symbol+recency).
 - Shell: `bash` covers everything else — git ops, make, grep, find, curl, anything not surfaced as a dedicated tool.
 - Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
-- Memory: `save_memory` / `search_memory` / `list_memory` (durable, cross-turn), `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` (per-turn).
+- Memory: `save_memory` / `search_memory` / `list_memory` manage working memory and the scoped cross-session Memory Ledger; `manage_durable_memory` pins, archives, restores or marks durable knowledge for review without an approval round-trip; `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` are per-turn.
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
 - Context self-management: `context_status` (live fill before/after broad investigation), `checkpoint_progress` (refresh L2 while retaining verbatim history), `compact(focus?)` (summarize completed/irrelevant history), `retire_thread(topic, reason)` (drop abandoned thread state). You decide when to clean up; call `compact` proactively before the hard provider ceiling forces recovery.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
@@ -693,7 +717,8 @@ GENERAL RULES:
 
 SELF-MANAGEMENT:
 - **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.
-- **Promote durable, drop ephemeral.** When a fact/decision/finding will matter beyond this turn, `save_memory` it AND clear the scratchpad note it came from. Memory is the durable store; scratchpad is scratch. Use the memory lifecycle: `supersede_memory` when a finding changes, `retire_memory` when done, `archive_memory` when no longer relevant, `retire_thread(topic, reason)` to drop a whole abandoned thread in one call.
+- **Memory plane is model-controlled and non-blocking.** When a reusable non-secret fact, decision, preference, convention, procedure, or lesson emerges, call `save_memory` autonomously. Do not ask permission for routine memory management. Mu-CLI surfaces write/recall receipts and lets the user inspect, edit, archive, pin, or forget afterward. Never store credentials or secret material.
+- **Promote durable, drop ephemeral.** When a fact/decision/finding will matter beyond this turn, `save_memory` it AND clear the scratchpad note it came from. The call automatically promotes eligible content into the scoped cross-session Memory Ledger; scratchpad is scratch. Use the memory lifecycle: `supersede_memory` when a finding changes, `retire_memory` when done, `archive_memory` when no longer relevant, `retire_thread(topic, reason)` to drop a whole abandoned thread in one call.
 - **Supersede, don't sibling.** When a finding/decision is UPDATED, `supersede_memory(old_id, new_id)` the old entry — do NOT save a sibling. Five progressively-better versions of the same fact, all `active`, is the fastest way to drown signal in noise. One source of truth per fact; the old one goes `superseded` (off the active set) the moment the new one lands.
 - **Decay keeps the active set honest — reconcile, don't accumulate.** Memory entries not searched or re-saved in the last `memory_stale_after_turns` turns auto-decay from `active` to `stale` at turn start, so "active" means recently mattered, not ever saved. A search hit or re-save promotes a stale entry back to `active` automatically — decay is reversible through use, it never loses what you're actually using. Your job is to FINISH the job decay starts: when `context_status` shows `stale_memory_count > 0`, `archive_memory` or `retire_thread` those entries before adding new state; when `stale_todos > 0`, `todo_clear('completed')`. Net metadata should stay flat or shrink over a turn — if you only ever add and never retire, you are accumulating the exact rot that confuses you about what's important. Watch `memory_pressure_pct`: curate BEFORE the cap forces a silent eviction that drops a high-value entry to make room for trivia.
 - **Watch your own context fill.** Call `context_status` before big gathers and when a turn feels long. It returns per-layer token fill plus `l2_stale_vs_l5`, `uncheckpointed_entries`, `stale_memory_count`, `stale_todos`, and `memory_pressure_pct`. If L2 is stale relative to L5 progress, call `checkpoint_progress` to fold recent work into the summary yourself — don't wait for the budget to force it.
@@ -1066,11 +1091,10 @@ GUI_VIEW_PANELS = [
     },
     {
         "name": "memory",
-        "display_name": "Memory Map",
+        "display_name": "Memory Center",
         "description": (
-            "Live context-window map: a color grid fingerprinting every "
-            "layer (system prompt, workspace, skills, summary, goal, "
-            "history) as it evolves each turn and each iteration."
+            "Auditable cross-session knowledge, recall receipts and the live "
+            "Context Map showing exactly what reaches the model."
         ),
     },
     {

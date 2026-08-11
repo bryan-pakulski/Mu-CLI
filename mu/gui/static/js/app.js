@@ -3002,6 +3002,7 @@ ${problem.text}`, "error", 16000);
     Alpine.store("memory", {
         active: false,
         loaded: false,
+        tab: "knowledge",     // durable Memory Ledger | live Context Map
         resolution: 128,
         view: "heat",        // "heat" | "layer" — pure client-side choice
         cols: 128,
@@ -3017,6 +3018,161 @@ ${problem.text}`, "error", 16000);
         _renderPending: false,
         cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
         _hoverTimer: null,
+        durable: {
+            items: [],
+            stats: {},
+            query: "",
+            scope: "auto",
+            kind: "observation",
+            newStatement: "",
+            loading: false,
+            error: "",
+            selected: null,
+            detail: null,
+            recall: null,
+        },
+
+        _sessionParam() {
+            const chat = Alpine.store("chat");
+            const name = chat && chat.currentName ? chat.currentName : "";
+            return name ? "session_name=" + encodeURIComponent(name) : "";
+        },
+
+        async loadDurable() {
+            this.durable.loading = true;
+            this.durable.error = "";
+            try {
+                const params = new URLSearchParams();
+                const chat = Alpine.store("chat");
+                if (chat && chat.currentName) params.set("session_name", chat.currentName);
+                if (this.durable.query) params.set("q", this.durable.query);
+                params.set("limit", "200");
+                const r = await fetch("/api/v1/memories?" + params.toString());
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "memory load failed (" + r.status + ")");
+                this.durable.items = d.memories || [];
+                this.durable.stats = d.stats || {};
+            } catch (e) {
+                this.durable.error = String(e || "memory load failed");
+            } finally {
+                this.durable.loading = false;
+            }
+        },
+
+        async addMemory() {
+            const statement = (this.durable.newStatement || "").trim();
+            if (!statement) return;
+            this.durable.error = "";
+            try {
+                const session = this._sessionParam();
+                const r = await fetch("/api/v1/memories" + (session ? "?" + session : ""), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        statement: statement,
+                        scope: this.durable.scope,
+                        kind: this.durable.kind,
+                    }),
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "memory save failed (" + r.status + ")");
+                this.durable.newStatement = "";
+                await this.loadDurable();
+            } catch (e) {
+                this.durable.error = String(e || "memory save failed");
+            }
+        },
+
+        async openMemory(memory) {
+            this.durable.selected = memory;
+            this.durable.detail = { loading: true };
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memories/" + encodeURIComponent(memory.id)
+                    + (session ? "?" + session : "")
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "memory detail failed (" + r.status + ")");
+                this.durable.detail = d;
+            } catch (e) {
+                this.durable.detail = { error: String(e || "memory detail failed") };
+            }
+        },
+
+        async editMemory(memory) {
+            const statement = window.prompt("Edit durable memory", memory.statement || "");
+            if (statement == null || !statement.trim() || statement.trim() === memory.statement) return;
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memories/" + encodeURIComponent(memory.id)
+                    + (session ? "?" + session : ""),
+                    {
+                        method: "PATCH",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "If-Match": memory.etag || "",
+                        },
+                        body: JSON.stringify({
+                            changes: { statement: statement.trim() },
+                            reason: "Memory Center edit",
+                        }),
+                    }
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(
+                    typeof d.detail === "string" ? d.detail : JSON.stringify(d.detail)
+                );
+                await this.loadDurable();
+            } catch (e) {
+                this.durable.error = String(e || "memory edit failed");
+            }
+        },
+
+        async memoryAction(memory, action) {
+            if (action === "forget" && !window.confirm(
+                "Forget permanently? Memory content, revisions and search indexes will be purged."
+            )) return;
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memories/" + encodeURIComponent(memory.id) + "/actions"
+                    + (session ? "?" + session : ""),
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "If-Match": memory.etag || "",
+                        },
+                        body: JSON.stringify({ action: action }),
+                    }
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(
+                    d.detail || "memory " + action + " failed (" + r.status + ")"
+                );
+                this.durable.detail = null;
+                this.durable.selected = null;
+                await this.loadDurable();
+            } catch (e) {
+                this.durable.error = String(e || "memory " + action + " failed");
+            }
+        },
+
+        async loadRecall() {
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memory-recalls/last" + (session ? "?" + session : "")
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "no recall receipt yet");
+                this.durable.recall = d.receipt;
+            } catch (e) {
+                this.durable.error = String(e || "recall receipt unavailable");
+            }
+        },
 
         bindCanvas(canvas) {
             this._canvas = canvas;
@@ -3024,10 +3180,16 @@ ${problem.text}`, "error", 16000);
         },
 
         async load() {
+            await Promise.all([this.loadDurable(), this.loadContext()]);
+        },
+
+        async loadContext() {
             const res = this.resolution || 128;
             try {
+                const session = this._sessionParam();
                 const r = await fetch(
-                    `/api/memory/state?cols=${res}&rows=${res}`
+                    "/api/memory/state?cols=" + res + "&rows=" + res
+                    + (session ? "&" + session : "")
                 );
                 const d = await r.json();
                 this._apply(d);
@@ -4671,6 +4833,13 @@ function routeEvent(ev) {
             const mode = Alpine.store("mode");
             if (isFocused && mode && mode.active === "memory") {
                 Alpine.store("memory").applySnapshot(ev);
+            }
+            break;
+        }
+        case "memory_updated": {
+            const mode = Alpine.store("mode");
+            if (isFocused && mode && mode.active === "memory") {
+                Alpine.store("memory").loadDurable();
             }
             break;
         }

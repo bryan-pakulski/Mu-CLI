@@ -85,7 +85,7 @@ const PANEL_SCREENS: {
   { name: 'Debug', title: 'Debug', component: DebugScreen },
   { name: 'History', title: 'History', component: HistoryScreen },
   { name: 'SystemPrompts', title: 'System prompts', component: SystemPromptsScreen },
-  { name: 'Memory', title: 'Memory', component: MemoryScreen },
+  { name: 'Memory', title: 'Memory Center', component: MemoryScreen },
   { name: 'Files', title: 'Files', component: FilesScreen },
   { name: 'Skills', title: 'Skills', component: SkillsScreen },
   { name: 'Audio', title: 'Audio', component: AudioScreen },

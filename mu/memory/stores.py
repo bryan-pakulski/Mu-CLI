@@ -39,6 +39,10 @@ class MemoryEntry:
     status: str = ACTIVE
     superseded_by: Optional[int] = None
     supersedes: Optional[int] = None
+    # Stable UUID in the cross-session Memory Ledger. Empty means this
+    # working-memory entry has not yet been promoted; "rejected" means the
+    # safety floor refused credential-like content and must not retry it.
+    durable_id: str = ""
     # Turn index of the last explicit retrieval/save (active reliance), used
     # by staleness decay (`apply_staleness_decay`). 0 = never touched since
     # load. Passive L3 injection does NOT bump this (injection is not active
@@ -59,6 +63,7 @@ class MemoryEntry:
             "status": self.status,
             "superseded_by": self.superseded_by,
             "supersedes": self.supersedes,
+            "durable_id": self.durable_id,
             "last_hit_turn": self.last_hit_turn,
         }
 
@@ -76,6 +81,7 @@ class MemoryEntry:
             status=str(data.get("status") or ACTIVE),
             superseded_by=data.get("superseded_by"),
             supersedes=data.get("supersedes"),
+            durable_id=str(data.get("durable_id", "") or ""),
             last_hit_turn=int(data.get("last_hit_turn", 0)),
         )
 
@@ -378,6 +384,44 @@ class BaseNoteStore:
             if entry.status == STALE:
                 entry.status = ACTIVE
         return results
+
+    def search_readonly(
+        self,
+        query: str = "",
+        limit: int = 5,
+        status_filter: str | list[str] | None = None,
+        kind_filter: str | list[str] | None = None,
+        tags_exclude: list[str] | None = None,
+        include_all: bool = False,
+    ) -> List[MemoryEntry]:
+        """Pure search for human browsing and API reads.
+
+        Unlike ``search`` this never increments hits, changes timestamps or
+        reactivates stale entries. Only committed model reliance may mutate
+        working-memory usage metadata.
+        """
+
+        if status_filter is None and not include_all:
+            status_set = {ACTIVE, STALE}
+        elif status_filter is None:
+            status_set = None
+        elif isinstance(status_filter, str):
+            status_set = {status_filter}
+        else:
+            status_set = set(status_filter)
+        if kind_filter is None:
+            kind_set = None
+        elif isinstance(kind_filter, str):
+            kind_set = {kind_filter}
+        else:
+            kind_set = set(kind_filter)
+        ranked = self._rank_by_relevance(
+            query,
+            status_set=status_set,
+            kind_set=kind_set,
+            exclude_tags=set(tags_exclude or []),
+        )
+        return [entry for score, _, entry in ranked if score > 0][: max(1, limit)]
 
     def list_entries(
         self, limit: int = 10, status_filter: str | list[str] | None = None

@@ -4,9 +4,221 @@
        x-transition.opacity.duration.200ms
        x-data="{}">
 
+    <div class="memory-center-tabs" role="tablist" aria-label="Memory Center">
+        <button type="button"
+                :class="{ active: $store.memory.tab === 'knowledge' }"
+                @click="$store.memory.tab='knowledge'; $store.memory.loadDurable()"
+                role="tab">memories</button>
+        <button type="button"
+                :class="{ active: $store.memory.tab === 'context' }"
+                @click="$store.memory.tab='context'; $store.memory.loadContext()"
+                role="tab">context map</button>
+    </div>
+
+    <section class="memory-knowledge" x-show="$store.memory.tab === 'knowledge'">
+        <div class="panel-head">
+            <div>
+                <div class="panel-subject">cross-session memory</div>
+                <div class="mono muted"
+                     x-text="($store.memory.durable.stats.total || 0) + ' scoped memories · automatic · no approval prompts'"></div>
+            </div>
+            <button class="memory-refresh"
+                    @click="$store.memory.loadDurable()"
+                    title="Refresh memories">↻</button>
+        </div>
+
+        <div class="memory-capture">
+            <textarea x-model="$store.memory.durable.newStatement"
+                      @keydown.meta.enter.prevent="$store.memory.addMemory()"
+                      @keydown.ctrl.enter.prevent="$store.memory.addMemory()"
+                      placeholder="Remember something explicitly…"></textarea>
+            <div class="memory-capture-controls">
+                <select x-model="$store.memory.durable.scope" aria-label="Memory scope">
+                    <option value="auto">auto scope</option>
+                    <option value="repository">repository</option>
+                    <option value="workspace">workspace</option>
+                    <option value="branch">branch</option>
+                    <option value="feature">feature</option>
+                    <option value="personal">personal</option>
+                </select>
+                <select x-model="$store.memory.durable.kind" aria-label="Memory kind">
+                    <option value="observation">observation</option>
+                    <option value="decision">decision</option>
+                    <option value="finding">finding</option>
+                    <option value="constraint">constraint</option>
+                    <option value="preference">preference</option>
+                    <option value="convention">convention</option>
+                    <option value="procedure">procedure</option>
+                    <option value="lesson">lesson</option>
+                </select>
+                <button @click="$store.memory.addMemory()"
+                        :disabled="!$store.memory.durable.newStatement.trim()">remember</button>
+            </div>
+        </div>
+
+        <div class="memory-search-row">
+            <input type="search"
+                   x-model.debounce.250ms="$store.memory.durable.query"
+                   @input.debounce.250ms="$store.memory.loadDurable()"
+                   placeholder="Search memories, sources and tags…">
+            <button @click="$store.memory.loadRecall()"
+                    title="Explain the last model recall">why last</button>
+        </div>
+
+        <div class="memory-ledger-status muted"
+             x-show="$store.memory.durable.loading">loading memory ledger…</div>
+        <div class="memory-ledger-status memory-layer-error"
+             x-show="$store.memory.durable.error"
+             x-text="$store.memory.durable.error"></div>
+
+        <div class="memory-ledger-list" x-show="!$store.memory.durable.loading">
+            <template x-for="m in $store.memory.durable.items" :key="m.id">
+                <article class="memory-ledger-card"
+                         :class="{ selected: $store.memory.durable.selected && $store.memory.durable.selected.id === m.id }">
+                    <button class="memory-ledger-main" @click="$store.memory.openMemory(m)">
+                        <div class="memory-ledger-meta mono">
+                            <span x-text="m.scope.type"></span>
+                            <span x-text="m.kind"></span>
+                            <span x-text="m.lifecycle"></span>
+                            <span x-show="m.pinned">pinned</span>
+                        </div>
+                        <div class="memory-ledger-statement" x-text="m.statement"></div>
+                        <div class="memory-ledger-foot mono muted">
+                            <span x-text="m.id.slice(0,8)"></span>
+                            <span x-text="'recalled ' + (m.recall_count || 0)"></span>
+                            <span x-text="'v' + m.version"></span>
+                        </div>
+                    </button>
+                    <div class="memory-ledger-actions">
+                        <button @click="$store.memory.memoryAction(m, m.pinned ? 'unpin' : 'pin')"
+                                x-text="m.pinned ? 'unpin' : 'pin'"></button>
+                        <button @click="$store.memory.editMemory(m)">edit</button>
+                        <button @click="$store.memory.memoryAction(m, 'archive')">archive</button>
+                        <button class="danger"
+                                @click="$store.memory.memoryAction(m, 'forget')">forget</button>
+                    </div>
+                </article>
+            </template>
+            <div class="panel-empty" x-show="!$store.memory.durable.items.length">
+                <h3>no durable memories yet</h3>
+                <p class="muted">The model will save useful decisions, findings and
+                conventions automatically. Its writes and recalls remain visible here.</p>
+            </div>
+        </div>
+
+        <section class="memory-detail" x-show="$store.memory.durable.detail">
+            <div class="panel-head">
+                <div class="panel-subject">provenance and timeline</div>
+                <button @click="$store.memory.durable.detail=null">close</button>
+            </div>
+            <div class="memory-detail-body"
+                 x-show="$store.memory.durable.detail && $store.memory.durable.detail.loading">
+                loading memory provenance…
+            </div>
+            <div class="memory-detail-body memory-layer-error"
+                 x-show="$store.memory.durable.detail && $store.memory.durable.detail.error"
+                 x-text="$store.memory.durable.detail && $store.memory.durable.detail.error"></div>
+            <template x-if="$store.memory.durable.detail && $store.memory.durable.detail.memory">
+                <div class="memory-detail-body">
+                    <div class="memory-detail-tags mono">
+                        <span x-text="$store.memory.durable.detail.memory.scope.type"></span>
+                        <span x-text="$store.memory.durable.detail.memory.kind"></span>
+                        <span x-text="$store.memory.durable.detail.memory.lifecycle"></span>
+                        <span x-text="'confidence ' + $store.memory.durable.detail.memory.trust.confidence.toFixed(2)"></span>
+                    </div>
+                    <p class="memory-detail-statement"
+                       x-text="$store.memory.durable.detail.memory.statement"></p>
+
+                    <h4>source trail</h4>
+                    <div class="memory-source-list">
+                        <template x-for="(source, index) in $store.memory.durable.detail.memory.source_refs"
+                                  :key="index">
+                            <div class="memory-source-chip mono"
+                                 x-text="source.type + ' · ' + (source.path || source.source || source.session_name || 'captured')"></div>
+                        </template>
+                        <div class="muted"
+                             x-show="!$store.memory.durable.detail.memory.source_refs.length">No source references.</div>
+                    </div>
+
+                    <h4>one-hop relationship map</h4>
+                    <div class="memory-ego-graph">
+                        <div class="memory-ego-node center mono"
+                             x-text="$store.memory.durable.detail.memory.id.slice(0,8)"></div>
+                        <template x-for="(edge, index) in $store.memory.durable.detail.graph.edges"
+                                  :key="edge.source + edge.target + index">
+                            <div class="memory-ego-edge">
+                                <span class="mono" x-text="edge.type"></span>
+                                <span aria-hidden="true">→</span>
+                                <span class="memory-ego-node mono" x-text="edge.target.slice(0,8)"></span>
+                            </div>
+                        </template>
+                        <div class="muted"
+                             x-show="!$store.memory.durable.detail.graph.edges.length">No linked memories.</div>
+                    </div>
+
+                    <h4>timeline</h4>
+                    <ol class="memory-timeline">
+                        <template x-for="event in $store.memory.durable.detail.events"
+                                  :key="event.event_id">
+                            <li>
+                                <span class="memory-timeline-dot" aria-hidden="true"></span>
+                                <div>
+                                    <strong x-text="event.type"></strong>
+                                    <span class="mono muted"
+                                          x-text="' v' + event.version + ' · ' + event.actor"></span>
+                                    <div class="mono muted"
+                                         x-text="new Date(event.created_at * 1000).toLocaleString()"></div>
+                                    <div x-show="event.reason" x-text="event.reason"></div>
+                                </div>
+                            </li>
+                        </template>
+                    </ol>
+                </div>
+            </template>
+        </section>
+
+        <section class="memory-detail" x-show="$store.memory.durable.recall">
+            <div class="panel-head">
+                <div class="panel-subject">last recall receipt</div>
+                <button @click="$store.memory.durable.recall=null">close</button>
+            </div>
+            <template x-if="$store.memory.durable.recall">
+                <div class="memory-detail-body">
+                    <div class="memory-recall-summary mono muted">
+                        <span x-text="$store.memory.durable.recall.included.length + ' used'"></span>
+                        <span x-text="$store.memory.durable.recall.excluded.length + ' skipped'"></span>
+                        <span x-text="$store.memory.durable.recall.token_count + ' tokens'"></span>
+                        <span x-text="$store.memory.durable.recall.id.slice(0,8)"></span>
+                    </div>
+                    <h4>used</h4>
+                    <template x-for="candidate in $store.memory.durable.recall.included"
+                              :key="candidate.memory.id">
+                        <div class="memory-recall-candidate used">
+                            <div class="mono"
+                                 x-text="candidate.memory.id.slice(0,8) + ' · score ' + candidate.score"></div>
+                            <div x-text="candidate.memory.statement || '(content forgotten)'"></div>
+                            <div class="mono muted"
+                                 x-text="Object.entries(candidate.reasons).map(([key,value]) => key + '=' + value).join(' · ')"></div>
+                        </div>
+                    </template>
+                    <h4>skipped</h4>
+                    <template x-for="candidate in $store.memory.durable.recall.excluded"
+                              :key="candidate.memory.id">
+                        <div class="memory-recall-candidate">
+                            <span class="mono"
+                                  x-text="candidate.memory.id.slice(0,8) + ' · ' + candidate.exclusion_reason"></span>
+                            <span x-text="candidate.memory.statement || '(content forgotten)'"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </section>
+    </section>
+
+    <section x-show="$store.memory.tab === 'context'">
     <!-- empty state -->
     <div class="panel-empty" x-show="!$store.memory.active">
-        <h3>no context yet</h3>
+        <h3>no context map yet</h3>
         <p class="muted">Send a prompt in chat. The map fills with one
         color-banded row per context layer (system, workspace, skills,
         summary, goal, history) and updates live as the model runs.</p>
@@ -122,5 +334,6 @@
             <span x-text="'height = total context capacity · grey = free · hue = layer · brightness = change frequency · live per iteration'"></span>
         </div>
     </div>
+    </section>
 
 </aside>

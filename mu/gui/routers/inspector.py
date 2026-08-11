@@ -395,17 +395,18 @@ def _entry_dict(entry) -> Dict[str, Any]:
         "kind": getattr(entry, "kind", "observation") or "observation",
         "superseded_by": getattr(entry, "superseded_by", None),
         "supersedes": getattr(entry, "supersedes", None),
+        "durable_id": getattr(entry, "durable_id", "") or "",
     }
 
 
 @router.get("/memory")
-async def list_memory(request: Request) -> Dict[str, Any]:
+async def list_memory(
+    request: Request,
+    session=Depends(require_session),
+) -> Dict[str, Any]:
     """Return all task_memory entries plus a separate view of the
     per-turn scratchpad. Both are surfaced because the user can't
     inspect them from chat without typing /memory commands."""
-    session = request.app.state.session_by_name()
-    if session is None:
-        return {"task_memory": [], "scratchpad": []}
     sm = session.session_manager
     task = [_entry_dict(e) for e in sm.task_memory.list_entries(limit=200)]
     scratch = [_entry_dict(e) for e in sm.turn_scratchpad.list_entries(limit=200)]
@@ -417,12 +418,10 @@ async def search_memory(
     request: Request,
     q: str = "",
     limit: int = 20,
+    session=Depends(require_session),
 ) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
-    if session is None:
-        return {"results": []}
     sm = session.session_manager
-    results = sm.task_memory.search(q, limit=max(1, min(limit, 100)))
+    results = sm.task_memory.search_readonly(q, limit=max(1, min(limit, 100)))
     return {"results": [_entry_dict(e) for e in results]}
 
 

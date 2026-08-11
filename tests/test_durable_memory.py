@@ -298,6 +298,7 @@ def test_memory_center_contract_present_in_all_clients():
     assert "/api/v1/memories" in js
     assert "Why last recall" in mobile
     assert "Context Observatory" in mobile
+    assert "const { colors, isDark } = useTheme()" in mobile
 
 
 def test_tui_memory_center_supports_compact_model_managed_workflow(tmp_path):

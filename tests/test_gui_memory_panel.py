@@ -159,6 +159,15 @@ def test_app_js_has_temporal_context_renderers():
     assert "_drawContextChurn" in content
 
 
+def test_app_js_context_canvases_are_theme_aware_and_redraw():
+    with open(APP_JS_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "_contextPalette()" in content
+    assert 'getAttribute("data-theme") === "light"' in content
+    assert "palette.light" in content
+    assert "memory._scheduleRender()" in content
+
+
 def test_app_js_panel_modes_includes_memory():
     with open(APP_JS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
@@ -262,6 +271,20 @@ def test_css_has_memory_panel_classes():
         ".memory-legend-row",
     ):
         assert cls in content, f"CSS class {cls} not found in app.css"
+
+
+def test_css_has_context_observatory_light_theme_palette():
+    with open(CSS_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert 'html[data-theme="light"] .context-observatory' in content
+    for token in (
+        "--context-card-surface",
+        "--context-control-surface",
+        "--context-plot-surface",
+        "--context-tooltip-surface",
+    ):
+        assert token in content
+    assert 'html[data-theme="light"] .context-pressure-pill' in content
 
 
 # ============================================================ backend wiring

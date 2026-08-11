@@ -39,7 +39,7 @@ type ContextView = 'heatmap' | 'churn';
 
 
 export function MemoryScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [tab, setTab] = useState<MemoryTab>('memories');
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null);
   const [contextTimeline, setContextTimeline] = useState<ContextTimeline | null>(null);
@@ -444,7 +444,7 @@ export function MemoryScreen() {
                         style={{
                           flex: Math.max(1, layer.tokens),
                           borderRadius: 999,
-                          backgroundColor: `hsl(${layer.hue}, 72%, 56%)`,
+                          backgroundColor: `hsl(${layer.hue}, 72%, ${isDark ? 56 : 47}%)`,
                         }}
                       />
                     ))}
@@ -528,7 +528,9 @@ export function MemoryScreen() {
                               const measured = point.layers.find(item => item.id === layer.id);
                               const changed = !!measured?.changed;
                               const ratio = measured?.change_ratio || 0;
-                              const alpha = changed ? Math.min(0.96, 0.28 + ratio * 0.68) : (measured?.tokens ? 0.12 : 0.035);
+                              const alpha = changed
+                                ? Math.min(0.96, (isDark ? 0.28 : 0.38) + ratio * (isDark ? 0.68 : 0.58))
+                                : (measured?.tokens ? (isDark ? 0.12 : 0.19) : (isDark ? 0.035 : 0.055));
                               return (
                                 <TouchableOpacity
                                   key={point.id}
@@ -540,7 +542,7 @@ export function MemoryScreen() {
                                     borderRadius: 2,
                                     borderWidth: activeContextPoint?.id === point.id ? 1 : 0,
                                     borderColor: colors.text,
-                                    backgroundColor: `hsla(${layer.hue}, 78%, ${changed ? 60 : 46}%, ${alpha})`,
+                                    backgroundColor: `hsla(${layer.hue}, 78%, ${changed ? (isDark ? 60 : 44) : (isDark ? 46 : 67)}%, ${alpha})`,
                                   }}
                                 />
                               );
@@ -561,7 +563,9 @@ export function MemoryScreen() {
                             width: 8,
                             height: Math.max(3, (point.churn_score || 0) / maxChurn * 128),
                             borderRadius: 4,
-                            backgroundColor: point.compaction ? '#2dd4bf' : '#f471a5',
+                            backgroundColor: point.compaction
+                              ? (isDark ? '#2dd4bf' : colors.success)
+                              : (isDark ? '#f471a5' : '#b83269'),
                             opacity: activeContextPoint?.id === point.id ? 1 : 0.68,
                           }}
                         />
@@ -607,7 +611,7 @@ export function MemoryScreen() {
                             height: 8,
                             borderRadius: 3,
                             marginRight: spacing.sm,
-                            backgroundColor: `hsl(${layer.hue}, 72%, 56%)`,
+                            backgroundColor: `hsl(${layer.hue}, 72%, ${isDark ? 56 : 47}%)`,
                           }}
                         />
                         <Text variant="xs" style={{ width: 34, fontFamily: 'monospace', color: colors.textDim }}>

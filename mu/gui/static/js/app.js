@@ -3330,6 +3330,25 @@ ${problem.text}`, "error", 16000);
             return m;
         },
 
+        _contextPalette() {
+            const light = document.documentElement.getAttribute("data-theme") === "light";
+            const styles = getComputedStyle(document.documentElement);
+            const css = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+            return {
+                light,
+                text: css("--text", light ? "#171a20" : "#f2f4f7"),
+                textDim: css("--text-dim", light ? "#667080" : "#8b94a3"),
+                plotStart: light ? "rgba(89, 109, 255, .055)" : "rgba(99, 113, 255, .055)",
+                plotEnd: light ? "rgba(83, 99, 120, .012)" : "rgba(5, 8, 18, .02)",
+                grid: light ? "rgba(17, 24, 39, .105)" : "rgba(148, 163, 184, .10)",
+                selection: light ? "rgba(23, 26, 32, .68)" : "rgba(255, 255, 255, .78)",
+                churnTop: light ? "rgba(198, 51, 108, .27)" : "rgba(245, 92, 146, .48)",
+                churnBottom: light ? "rgba(89, 109, 255, .025)" : "rgba(99, 102, 241, .03)",
+                churnLine: light ? "rgba(179, 39, 94, .88)" : "rgba(248, 113, 163, .92)",
+                compaction: light ? "rgba(16, 132, 111, .76)" : "rgba(45, 212, 191, .72)",
+            };
+        },
+
         render() {
             const canvas = this._canvas;
             if (!canvas || !this.grid || !this.grid.length) return;
@@ -3343,6 +3362,7 @@ ${problem.text}`, "error", 16000);
             ctx.clearRect(0, 0, cols, rows);
             const rowHue = this._rowHueMap();
             const heat = this.view !== "layer";
+            const palette = this._contextPalette();
             for (let ri = 0; ri < rows; ri++) {
                 const row = this.grid[ri];
                 if (!row) continue;
@@ -3354,12 +3374,17 @@ ${problem.text}`, "error", 16000);
                         // Empty space is still space: a column with no text
                         // renders as a dim, desaturated layer hue so the
                         // band's full extent stays visible.
-                        ctx.fillStyle = `hsl(${hue},30%,11%)`;
+                        ctx.fillStyle = palette.light
+                            ? `hsl(${hue},22%,96%)`
+                            : `hsl(${hue},30%,11%)`;
                     } else {
                         // v is 1..255: 1 = present & stable, 255 = churning.
                         const t = (v - 1) / 254;     // 0..1 change frequency
-                        const light = heat ? (16 + 44 * t) : 42;
-                        ctx.fillStyle = `hsl(${hue},68%,${light.toFixed(1)}%)`;
+                        const cellLight = palette.light
+                            ? (heat ? 91 - 48 * t : 52)
+                            : (heat ? 16 + 44 * t : 42);
+                        const saturation = palette.light ? 62 : 68;
+                        ctx.fillStyle = `hsl(${hue},${saturation}%,${cellLight.toFixed(1)}%)`;
                     }
                     ctx.fillRect(ci, ri, 1, 1);
                 }
@@ -3392,19 +3417,20 @@ ${problem.text}`, "error", 16000);
 
         _timelineBase(g, points) {
             const { ctx, width, height, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
             ctx.clearRect(0, 0, width, height);
             const bg = ctx.createLinearGradient(0, top, 0, top + plotHeight);
-            bg.addColorStop(0, "rgba(99, 113, 255, .055)");
-            bg.addColorStop(1, "rgba(5, 8, 18, .02)");
+            bg.addColorStop(0, palette.plotStart);
+            bg.addColorStop(1, palette.plotEnd);
             ctx.fillStyle = bg;
             ctx.fillRect(left, top, plotWidth, plotHeight);
-            ctx.strokeStyle = "rgba(148, 163, 184, .10)";
+            ctx.strokeStyle = palette.grid;
             ctx.lineWidth = 1;
             for (let i = 0; i <= 4; i++) {
                 const y = top + plotHeight * i / 4 + .5;
                 ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + plotWidth, y); ctx.stroke();
             }
-            ctx.fillStyle = "rgba(148, 163, 184, .62)";
+            ctx.fillStyle = palette.textDim;
             ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
             ctx.textAlign = "left";
             if (points.length) {
@@ -3422,7 +3448,7 @@ ${problem.text}`, "error", 16000);
             const points = this._visibleTimelinePoints(g.width);
             this._timelineBase(g, points);
             if (!points.length) {
-                g.ctx.fillStyle = "rgba(148, 163, 184, .7)";
+                g.ctx.fillStyle = this._contextPalette().textDim;
                 g.ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
                 g.ctx.textAlign = "center";
                 g.ctx.fillText("waiting for the first provider call", g.left + g.plotWidth / 2, g.top + g.plotHeight / 2);
@@ -3436,6 +3462,7 @@ ${problem.text}`, "error", 16000);
 
         _drawContextHeatmap(g, points) {
             const { ctx, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
             const rows = this.layers.length || 8;
             const rowHeight = plotHeight / rows;
             const cellWidth = plotWidth / points.length;
@@ -3449,7 +3476,7 @@ ${problem.text}`, "error", 16000);
             for (let row = 0; row < legend.length; row++) {
                 const layerMeta = legend[row];
                 const y = top + row * rowHeight;
-                ctx.fillStyle = "rgba(203, 213, 225, .72)";
+                ctx.fillStyle = palette.textDim;
                 ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
                 ctx.textAlign = "right";
                 ctx.fillText(layerMeta.id, left - 8, y + rowHeight * .62);
@@ -3457,9 +3484,14 @@ ${problem.text}`, "error", 16000);
                     const pointLayer = (points[col].layers || []).find(item => item.id === layerMeta.id) || {};
                     const ratio = Number(pointLayer.change_ratio || 0);
                     const occupied = Number(pointLayer.tokens || 0) > 0;
-                    const alpha = pointLayer.changed ? Math.min(.96, .28 + ratio * .68) : (occupied ? .105 : .035);
+                    const alpha = pointLayer.changed
+                        ? Math.min(.96, (palette.light ? .38 : .28) + ratio * (palette.light ? .58 : .68))
+                        : (occupied ? (palette.light ? .18 : .105) : (palette.light ? .055 : .035));
                     const inset = Math.min(1.5, cellWidth * .14);
-                    ctx.fillStyle = `hsla(${layerMeta.hue || 0}, 82%, ${pointLayer.changed ? 63 : 48}%, ${alpha})`;
+                    const lightness = palette.light
+                        ? (pointLayer.changed ? 45 : 68)
+                        : (pointLayer.changed ? 63 : 48);
+                    ctx.fillStyle = `hsla(${layerMeta.hue || 0}, 82%, ${lightness}%, ${alpha})`;
                     ctx.fillRect(
                         left + col * cellWidth + inset,
                         y + 1.5,
@@ -3472,6 +3504,7 @@ ${problem.text}`, "error", 16000);
 
         _drawContextStream(g, points) {
             const { ctx, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
             const layerIds = ["L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"];
             const hueById = {};
             for (const layer of this.layers) hueById[layer.id] = layer.hue;
@@ -3497,12 +3530,16 @@ ${problem.text}`, "error", 16000);
                 ctx.closePath();
                 const hue = hueById[layerId] == null ? 210 : hueById[layerId];
                 const fill = ctx.createLinearGradient(0, top, 0, top + plotHeight);
-                fill.addColorStop(0, `hsla(${hue}, 78%, 62%, .72)`);
-                fill.addColorStop(1, `hsla(${hue}, 72%, 42%, .30)`);
+                fill.addColorStop(0, palette.light
+                    ? `hsla(${hue}, 72%, 46%, .66)`
+                    : `hsla(${hue}, 78%, 62%, .72)`);
+                fill.addColorStop(1, palette.light
+                    ? `hsla(${hue}, 66%, 72%, .25)`
+                    : `hsla(${hue}, 72%, 42%, .30)`);
                 ctx.fillStyle = fill;
                 ctx.fill();
             }
-            ctx.fillStyle = "rgba(203, 213, 225, .68)";
+            ctx.fillStyle = palette.textDim;
             ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
             ctx.textAlign = "left";
             ctx.fillText(peak.toLocaleString() + " tok peak", left + 6, top + 13);
@@ -3510,12 +3547,13 @@ ${problem.text}`, "error", 16000);
 
         _drawContextChurn(g, points) {
             const { ctx, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
             const maxChurn = Math.max(10, ...points.map(point => point.churn_score || 0));
             const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
             const yAt = value => top + plotHeight - (value / maxChurn) * plotHeight;
             const gradient = ctx.createLinearGradient(0, top, 0, top + plotHeight);
-            gradient.addColorStop(0, "rgba(245, 92, 146, .48)");
-            gradient.addColorStop(1, "rgba(99, 102, 241, .03)");
+            gradient.addColorStop(0, palette.churnTop);
+            gradient.addColorStop(1, palette.churnBottom);
             ctx.beginPath();
             ctx.moveTo(xAt(0), top + plotHeight);
             points.forEach((point, index) => ctx.lineTo(xAt(index), yAt(point.churn_score || 0)));
@@ -3528,18 +3566,18 @@ ${problem.text}`, "error", 16000);
                 const x = xAt(index), y = yAt(point.churn_score || 0);
                 if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             });
-            ctx.strokeStyle = "rgba(248, 113, 163, .92)";
+            ctx.strokeStyle = palette.churnLine;
             ctx.lineWidth = 2;
             ctx.stroke();
             for (let index = 0; index < points.length; index++) {
                 if (!points[index].compaction) continue;
                 const x = xAt(index);
-                ctx.strokeStyle = "rgba(45, 212, 191, .72)";
+                ctx.strokeStyle = palette.compaction;
                 ctx.setLineDash([3, 4]);
                 ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotHeight); ctx.stroke();
                 ctx.setLineDash([]);
             }
-            ctx.fillStyle = "rgba(203, 213, 225, .68)";
+            ctx.fillStyle = palette.textDim;
             ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
             ctx.textAlign = "left";
             ctx.fillText(maxChurn.toFixed(1) + "% peak churn", left + 6, top + 13);
@@ -3550,7 +3588,7 @@ ${problem.text}`, "error", 16000);
             if (index < 0) return;
             const cellWidth = g.plotWidth / points.length;
             const x = g.left + (index + .5) * cellWidth;
-            g.ctx.strokeStyle = "rgba(255, 255, 255, .78)";
+            g.ctx.strokeStyle = this._contextPalette().selection;
             g.ctx.lineWidth = 1;
             g.ctx.beginPath(); g.ctx.moveTo(x, g.top); g.ctx.lineTo(x, g.top + g.plotHeight); g.ctx.stroke();
         },
@@ -5641,6 +5679,15 @@ function applyTheme(theme) {
     const light = document.getElementById("hljs-light");
     if (dark)  dark.disabled  = (theme === "light");
     if (light) light.disabled = (theme === "dark");
+    // Canvas pixels do not inherit CSS variables. Redraw observability
+    // visualisations after a theme switch so labels, grids, fills and the
+    // current fingerprint use the matching contrast palette immediately.
+    requestAnimationFrame(() => {
+        try {
+            const memory = window.Alpine && Alpine.store("memory");
+            if (memory) memory._scheduleRender();
+        } catch (e) { /* Alpine may not be initialised during first paint. */ }
+    });
 }
 
 function toggleTheme() {

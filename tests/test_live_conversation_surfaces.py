@@ -110,8 +110,9 @@ def test_mobile_has_first_class_live_subagent_surface():
 
     for kind in ("subagent_start", "subagent_progress", "subagent_end", "subagent_snapshot"):
         assert kind in hook
-    assert "subagents," in hook
-    assert "<SubagentActivityPanel agents={subagents}" in screen
+    assert "subagents?: LiveSubagent[]" in hook
+    assert "<SubagentActivityPanel agents={item.subagents}" in screen
+    assert "item.role === 'subagent_panel'" in screen
     assert "Iteration" in panel
     assert "Context" in panel
     assert "elapsedAt" in panel
@@ -121,6 +122,8 @@ def test_mobile_has_first_class_live_subagent_surface():
     assert "agentMark" not in panel
     assert "ACTION TIMELINE" in panel
     assert "agent.actions.map" in panel
+    assert "Collapse subagent history" in panel
+    assert "setPanelOpen(false)" in panel
 
 
 def test_mobile_input_required_banner_is_centered_and_prominent():

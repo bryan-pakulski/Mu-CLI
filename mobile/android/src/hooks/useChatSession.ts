@@ -18,12 +18,14 @@ const MOBILE_HISTORY_PAGE_SIZE = 20;
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'visualization' | 'collapse';
+  role: 'user' | 'assistant' | 'visualization' | 'subagent_panel' | 'collapse';
   text: string;
   turnId?: string;
   streaming?: boolean;
   origin?: 'history' | 'local' | 'stream';
   artifact?: ArtifactDescriptor;
+  subagents?: LiveSubagent[];
+  subagentBatchId?: string;
   attachments?: AttachmentDescriptor[];
   childTurns?: ChatMessage[];
   collapseCount?: number;
@@ -119,6 +121,27 @@ export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
         continue;
       }
       const artifact = asVisualization(part.artifact);
+      if (part.type === 'subagent_panel' && Array.isArray(part.agents)) {
+        flushText();
+        const agents = part.agents
+          .map(value => subagentFromEvent(value as StreamEvent))
+          .filter((value): value is LiveSubagent => Boolean(value));
+        if (agents.length > 0) {
+          const batchId = typeof part.batch_id === 'string'
+            ? part.batch_id
+            : (agents[0].batch_id || agents[0].task_id);
+          messages.push({
+            id: `subagent-${batchId}`,
+            role: 'subagent_panel',
+            text: '',
+            streaming: false,
+            origin: 'history',
+            subagents: agents,
+            subagentBatchId: batchId,
+          });
+        }
+        continue;
+      }
       if (!artifact) continue;
       flushText();
       messages.push({
@@ -246,7 +269,48 @@ function collapseGroupKey(user: ChatMessage, finalResponse: ChatMessage): string
 }
 
 function isTimelineAnchor(message: ChatMessage): boolean {
-  return message.role === 'visualization';
+  return message.role === 'visualization' || message.role === 'subagent_panel';
+}
+
+function upsertSubagentPanelMessage(
+  messages: ChatMessage[],
+  event: StreamEvent,
+): ChatMessage[] {
+  const taskId = typeof event.task_id === 'string' ? event.task_id : '';
+  if (!taskId) return messages;
+  const suppliedBatch = typeof event.batch_id === 'string' ? event.batch_id : '';
+  let index = messages.findIndex(message => (
+    message.role === 'subagent_panel'
+    && (
+      (suppliedBatch && message.subagentBatchId === suppliedBatch)
+      || (message.subagents || []).some(agent => agent.task_id === taskId)
+    )
+  ));
+  const currentPanel = index >= 0 ? messages[index] : null;
+  const currentAgents = currentPanel?.subagents || [];
+  const agentIndex = currentAgents.findIndex(agent => agent.task_id === taskId);
+  const nextAgent = subagentFromEvent(event, agentIndex >= 0 ? currentAgents[agentIndex] : undefined);
+  if (!nextAgent) return messages;
+  const nextAgents = [...currentAgents];
+  if (agentIndex >= 0) nextAgents[agentIndex] = nextAgent;
+  else nextAgents.push(nextAgent);
+  const batchId = suppliedBatch || currentPanel?.subagentBatchId || nextAgent.batch_id || taskId;
+  const panel: ChatMessage = {
+    id: currentPanel?.id || `subagent-${batchId}`,
+    role: 'subagent_panel',
+    text: '',
+    streaming: nextAgents.some(agent => isSubagentActive(agent.status)),
+    origin: currentPanel?.origin || 'stream',
+    subagents: nextAgents,
+    subagentBatchId: batchId,
+  };
+  const updated = [...messages];
+  if (index >= 0) updated[index] = panel;
+  else {
+    index = updated.length;
+    updated.push(panel);
+  }
+  return updated;
 }
 
 function appendCollapsedSegments(
@@ -434,7 +498,6 @@ export function useChatSession(activeSessionName: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
   const [artifactRevision, setArtifactRevision] = useState(0);
-  const [subagents, setSubagents] = useState<LiveSubagent[]>([]);
   // MUCLI_SLIDING_WINDOW_V1: track whether older turns exist on the server
   // and whether a backward-pagination request is in flight. Mobile ChatScreen
   // triggers loadOlderHistory when the user scrolls near the top.
@@ -455,7 +518,6 @@ export function useChatSession(activeSessionName: string | null) {
   const externalWriteAtRef = useRef(0);
   const completionProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const subagentDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Fallback: if history_refresh doesn't arrive within 3s after
   // turn_complete, force a history reload. Safety net for server
   // bugs or network issues that drop the event.
@@ -562,53 +624,21 @@ export function useChatSession(activeSessionName: string | null) {
     ));
   }, []);
 
-  const cancelSubagentDismiss = useCallback(() => {
-    if (subagentDismissRef.current) clearTimeout(subagentDismissRef.current);
-    subagentDismissRef.current = null;
-  }, []);
-
-  const scheduleSubagentDismiss = useCallback((delay = 6000) => {
-    cancelSubagentDismiss();
-    subagentDismissRef.current = setTimeout(() => {
-      subagentDismissRef.current = null;
-      setSubagents(current => current.some(agent => isSubagentActive(agent.status)) ? current : []);
-    }, delay);
-  }, [cancelSubagentDismiss]);
-
   const upsertSubagent = useCallback((event: StreamEvent) => {
-    setSubagents(current => {
-      const index = current.findIndex(agent => agent.task_id === event.task_id);
-      const next = subagentFromEvent(event, index >= 0 ? current[index] : undefined);
-      if (!next) return current;
-      const updated = [...current];
-      if (index >= 0) updated[index] = next;
-      else updated.push(next);
-      return updated;
-    });
-    const status = typeof event.status === 'string' ? event.status : 'running';
-    if (isSubagentActive(status)) cancelSubagentDismiss();
-    else scheduleSubagentDismiss();
-  }, [cancelSubagentDismiss, scheduleSubagentDismiss]);
+    setMessages(current => upsertSubagentPanelMessage(current, event));
+  }, []);
 
   const replaceSubagentSnapshot = useCallback((event: StreamEvent) => {
     const children = Array.isArray(event.children)
       ? event.children.filter(value => value && typeof value === 'object') as StreamEvent[]
       : [];
     const active = children.filter(child => isSubagentActive(String(child.status || 'running')));
-    if (active.length === 0) {
-      scheduleSubagentDismiss();
-      return;
-    }
-    cancelSubagentDismiss();
-    setSubagents(current => {
-      const terminal = current.filter(agent => !isSubagentActive(agent.status));
-      const rows = active.map(child => {
-        const existing = current.find(agent => agent.task_id === child.task_id);
-        return subagentFromEvent(child, existing);
-      }).filter((agent): agent is LiveSubagent => Boolean(agent));
-      return [...terminal, ...rows];
-    });
-  }, [cancelSubagentDismiss, scheduleSubagentDismiss]);
+    if (active.length === 0) return;
+    setMessages(current => active.reduce(
+      (updated, child) => upsertSubagentPanelMessage(updated, child),
+      current,
+    ));
+  }, []);
 
   const loadHistory = useCallback(async (preserveLive = true) => {
     if (!activeSessionName) {
@@ -668,7 +698,9 @@ export function useChatSession(activeSessionName: string | null) {
               && prev.text === next.text
               && (next.role === 'visualization'
                 ? prev.artifact?.artifact_id === next.artifact?.artifact_id
-                : true);
+                : (next.role === 'subagent_panel'
+                  ? prev.subagentBatchId === next.subagentBatchId
+                  : true));
             if (contentMatches) return { ...next, id: prev.id };
             return next;
           });
@@ -925,7 +957,6 @@ export function useChatSession(activeSessionName: string | null) {
         );
         return groupIntermediateTurns(retired, current);
       });
-      scheduleSubagentDismiss();
       setArtifactRevision(value => value + 1);
       // Do NOT call loadHistory here. The server may not have persisted
       // the final assistant message yet, so loadHistory would replace
@@ -1030,7 +1061,6 @@ export function useChatSession(activeSessionName: string | null) {
     finalizeAssistant,
     loadHistory,
     replaceSubagentSnapshot,
-    scheduleSubagentDismiss,
     syncSessionState,
     upsertSubagent,
   ]);
@@ -1047,7 +1077,6 @@ export function useChatSession(activeSessionName: string | null) {
     lastSessionRef.current = activeSessionName;
     if (sessionChanged) {
       setMessages([]);
-      setSubagents([]);
       setError(null);
       setActivityLabel('Thinking');
       busyRef.current = false;
@@ -1067,7 +1096,6 @@ export function useChatSession(activeSessionName: string | null) {
         clearTimeout(handoffTimerRef.current);
         handoffTimerRef.current = null;
       }
-      cancelSubagentDismiss();
       if (historyFallbackRef.current) {
         clearTimeout(historyFallbackRef.current);
         historyFallbackRef.current = null;
@@ -1127,7 +1155,6 @@ export function useChatSession(activeSessionName: string | null) {
         clearTimeout(handoffTimerRef.current);
         handoffTimerRef.current = null;
       }
-      cancelSubagentDismiss();
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
       historyAbortRef.current?.abort();
@@ -1135,7 +1162,7 @@ export function useChatSession(activeSessionName: string | null) {
       stateAbortRef.current?.abort();
       stateAbortRef.current = null;
     };
-  }, [activeSessionName, cancelSubagentDismiss, handleEvent, loadHistory, reconnectKey, syncSessionState]);
+  }, [activeSessionName, handleEvent, loadHistory, reconnectKey, syncSessionState]);
 
   const sendMessage = useCallback(async (text: string, attachments: AttachmentDescriptor[] = []) => {
     let trimmed = text.trim();
@@ -1187,7 +1214,6 @@ export function useChatSession(activeSessionName: string | null) {
     sseConnected,
     error,
     artifactRevision,
-    subagents,
     hasMore,
     loadingOlder,
     sendMessage,

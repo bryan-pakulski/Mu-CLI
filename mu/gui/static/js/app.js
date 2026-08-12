@@ -474,12 +474,6 @@ document.addEventListener("alpine:init", () => {
             const previousIds = (previous && previous.attachments || []).map(item => item.attachment_id).join(",");
             if (previous && previous.role === "user" && previous.text === text && incomingIds === previousIds) return;
             this._closeTrace(slot);
-            // Drop a finished sub-agent panel so a new turn starts clean.
-            // A panel whose agents are still running (outliving the parent
-            // turn) is kept until they finish.
-            slot.turns = slot.turns.filter(
-                turn => turn.role !== "subagent_panel" || this._panelRunning(turn)
-            );
             slot.turns.push({
                 id: this._id("u"),
                 role: "user",
@@ -781,8 +775,34 @@ document.addEventListener("alpine:init", () => {
                 observed_at: Date.now(),
             };
         },
-        // MUCLI_SUBAGENT_DURABLE_RESULTS_V1: live panel is an exact view of the current
-        // delegation window. Completed history remains in durable artifacts.
+        _historySubagentPanel(part) {
+            if (!part || !Array.isArray(part.agents) || !part.agents.length) return null;
+            const panel = {
+                id: `sap-history-${String(part.batch_id || part.agents[0]?.task_id || "batch")}`,
+                role: "subagent_panel",
+                batch_id: String(part.batch_id || ""),
+                agents: [],
+                running: false,
+                open: false,
+                ephemeral: false,
+                durable: true,
+                dismissTimer: null,
+            };
+            for (const value of part.agents) {
+                if (!value || !value.task_id) continue;
+                const row = this._newAgentRow(String(value.task_id));
+                const fields = { ...value };
+                delete fields.actions;
+                this._mergeDefined(row, fields);
+                this._mergeSubagentActions(row, { actions: value.actions || [] });
+                panel.agents.push(row);
+            }
+            panel.running = this._panelRunning(panel);
+            panel.open = panel.running;
+            return panel.agents.length ? panel : null;
+        },
+        // Each delegation batch owns one stable timeline card. Completed cards
+        // remain at their original history location and can be reopened later.
         _findPanel(slot, batchId = "") {
             for (let i = slot.turns.length - 1; i >= 0; i--) {
                 const turn = slot.turns[i];
@@ -800,8 +820,7 @@ document.addEventListener("alpine:init", () => {
                     agents: [],
                     running: false,
                     open: true,
-                    ephemeral: true,
-                    leaving: false,
+                    ephemeral: false,
                     dismissTimer: null,
                 };
                 slot.turns.push(p);
@@ -815,9 +834,8 @@ document.addEventListener("alpine:init", () => {
             if (!p) return;
             if (p.dismissTimer) clearTimeout(p.dismissTimer);
             p.dismissTimer = null;
-            p.leaving = false;
         },
-        _schedulePanelDismiss(slot, p, delay = 6000) {
+        _schedulePanelDismiss(p, delay = 6000) {
             if (!p || this._panelRunning(p)) return;
             if (p.agents.some(a => a.details_open)) return;
             this._cancelPanelDismiss(p);
@@ -825,11 +843,9 @@ document.addEventListener("alpine:init", () => {
             p.open = true;
             p.dismissTimer = setTimeout(() => {
                 p.dismissTimer = null;
-                p.leaving = true;
-                setTimeout(() => {
-                    const index = slot.turns.indexOf(p);
-                    if (index >= 0 && !this._panelRunning(p)) slot.turns.splice(index, 1);
-                }, 240);
+                if (!this._panelRunning(p) && !p.agents.some(a => a.details_open)) {
+                    p.open = false;
+                }
             }, delay);
         },
         _mergeDefined(target, patch) {
@@ -871,7 +887,7 @@ document.addEventListener("alpine:init", () => {
                 panel.open = true;
                 this._cancelPanelDismiss(panel);
             } else if (!this._panelRunning(panel)) {
-                this._schedulePanelDismiss(slot, panel);
+                this._schedulePanelDismiss(panel);
             }
         },
         upsertSubagent(name, agent) {
@@ -898,7 +914,7 @@ document.addEventListener("alpine:init", () => {
                 p.open = true;
                 this._cancelPanelDismiss(p);
             } else {
-                this._schedulePanelDismiss(slot, p);
+                this._schedulePanelDismiss(p);
             }
             if (!name || name === this.currentName) this.scroll();
         },
@@ -907,7 +923,7 @@ document.addEventListener("alpine:init", () => {
             const active = (children || []).filter(child => child && child.task_id && (child.status === "running" || child.status === "stuck" || child.status === "stall"));
             let p = this._findPanel(slot, batchId);
             if (!active.length) {
-                if (p) this._schedulePanelDismiss(slot, p);
+                if (p) this._schedulePanelDismiss(p);
                 return;
             }
             if (!p) p = this._ensurePanel(slot, batchId);
@@ -949,7 +965,7 @@ document.addEventListener("alpine:init", () => {
             const p = this._lastByRole(slot, "subagent_panel");
             if (!p) return;
             p.running = this._panelRunning(p);
-            if (!p.running) this._schedulePanelDismiss(slot, p);
+            if (!p.running) this._schedulePanelDismiss(p);
         },
 
         finishTurn(name) {
@@ -966,7 +982,7 @@ document.addEventListener("alpine:init", () => {
             this._closeTrace(slot);
             for (const turn of slot.turns) {
                 if (turn.role === "subagent_panel" && !this._panelRunning(turn)) {
-                    this._schedulePanelDismiss(slot, turn);
+                    this._schedulePanelDismiss(turn);
                 }
             }
             // Group intermediate assistant + trace turns into a collapsible
@@ -1205,6 +1221,14 @@ document.addEventListener("alpine:init", () => {
                                 item.artifact?.artifact_id === visualization.artifact.artifact_id
                             )) {
                                 rebuiltTurns.push(visualization);
+                            }
+                        } else if (part.type === "subagent_panel") {
+                            traceForTurn = null;
+                            const panel = this._historySubagentPanel(part);
+                            if (panel && !rebuiltTurns.some((item) =>
+                                item.role === "subagent_panel" && item.batch_id === panel.batch_id
+                            )) {
+                                rebuiltTurns.push(panel);
                             }
                         }
                     }
@@ -5897,6 +5921,11 @@ function applyTheme(theme) {
     const light = document.getElementById("hljs-light");
     if (dark)  dark.disabled  = (theme === "light");
     if (light) light.disabled = (theme === "dark");
+    document.querySelectorAll("iframe.visualization-frame").forEach((frame) => {
+        try {
+            frame.contentWindow?.postMessage({ type: "mucli-theme", theme }, "*");
+        } catch (e) { /* Sandboxed frames may be between navigations. */ }
+    });
     // Canvas pixels do not inherit CSS variables. Redraw observability
     // visualisations after a theme switch so labels, grids, fills and the
     // current fingerprint use the matching contrast palette immediately.
@@ -5906,6 +5935,19 @@ function applyTheme(theme) {
             if (memory) memory._scheduleRender();
         } catch (e) { /* Alpine may not be initialised during first paint. */ }
     });
+}
+
+function visualizationThemeUrl(value, theme) {
+    if (!value) return "";
+    try {
+        const url = new URL(value, window.location.origin);
+        url.searchParams.set("mucli_theme", theme === "light" ? "light" : "dark");
+        return url.origin === window.location.origin
+            ? `${url.pathname}${url.search}${url.hash}`
+            : url.toString();
+    } catch (e) {
+        return value;
+    }
 }
 
 function toggleTheme() {

@@ -61,6 +61,9 @@ class SubagentRecord:
     child: Any
     lifecycle: Any
     title: str = ""
+    parent_history_index: int = -1
+    parent_turn_index: int = -1
+    parent_turn_id: str = ""
     thread: Optional[threading.Thread] = None
     tracker_agent_id: Optional[str] = None
     started_at: float = field(default_factory=time.monotonic)
@@ -189,6 +192,9 @@ class SubagentRegistry:
                     event.setdefault("task", record.task)
                     event.setdefault("title", record.title)
                     event.setdefault("depth", record.depth)
+                    event.setdefault("parent_history_index", record.parent_history_index)
+                    event.setdefault("parent_turn_index", record.parent_turn_index)
+                    event.setdefault("parent_turn_id", record.parent_turn_id)
                     event.setdefault("model", record.model)
                     event.setdefault("batch_id", record.batch_id)
                     event.setdefault("specialist_key", record.specialist_key)
@@ -214,7 +220,7 @@ class SubagentRegistry:
                             del record.actions[:-100]
                     recent_actions = [dict(item) for item in record.actions]
         if task_id and self._artifact_store is not None:
-            patch = {k: event[k] for k in ("task", "title", "depth", "model", "status", "tool_count", "last_tool", "stuck", "stall", "repeat_count", "elapsed", "context_pct", "iter", "max_iter", "tokens_in", "summary", "error", "kill_reason", "batch_id", "specialist_key", "worker_id") if k in event and event[k] is not None}
+            patch = {k: event[k] for k in ("task", "title", "depth", "model", "status", "tool_count", "last_tool", "stuck", "stall", "repeat_count", "elapsed", "context_pct", "iter", "max_iter", "tokens_in", "summary", "error", "kill_reason", "batch_id", "specialist_key", "worker_id", "parent_history_index", "parent_turn_index", "parent_turn_id") if k in event and event[k] is not None}
             if recent_actions is not None:
                 patch["actions"] = recent_actions
             try:
@@ -352,7 +358,7 @@ class SubagentRegistry:
                 self.acknowledge_completion(str(item.get("task_id") or ""))
         return "\n".join(lines)
 
-    def register(self, child: Any, *, task: str, title: str = "", depth: int, lifecycle: Any, tracker_agent_id: Optional[str] = None, model: Optional[str] = None, specialist_key: str = "general", worker_id: str = "", reused_specialist: bool = False, max_iterations: int = 0) -> SubagentRecord:
+    def register(self, child: Any, *, task: str, title: str = "", depth: int, lifecycle: Any, tracker_agent_id: Optional[str] = None, model: Optional[str] = None, specialist_key: str = "general", worker_id: str = "", reused_specialist: bool = False, max_iterations: int = 0, parent_history_index: int = -1, parent_turn_index: int = -1, parent_turn_id: str = "") -> SubagentRecord:
         with self._lock:
             task_id = "sa-" + uuid.uuid4().hex[:8]
             if not any(r.status == "running" for r in self._records.values()):
@@ -363,17 +369,17 @@ class SubagentRegistry:
                 tracker_agent_id = self.tracker.open(depth=depth, task=task)
             except Exception:
                 tracker_agent_id = None
-        record = SubagentRecord(task_id=task_id, task=task, title=str(title or ""), depth=depth, child=child, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=model or "", batch_id=batch_id, specialist_key=specialist_key, worker_id=worker_id, reused_specialist=bool(reused_specialist), max_iter=max(0, int(max_iterations or 0)))
+        record = SubagentRecord(task_id=task_id, task=task, title=str(title or ""), depth=depth, child=child, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=model or "", batch_id=batch_id, specialist_key=specialist_key, worker_id=worker_id, reused_specialist=bool(reused_specialist), max_iter=max(0, int(max_iterations or 0)), parent_history_index=int(parent_history_index), parent_turn_index=int(parent_turn_index), parent_turn_id=str(parent_turn_id or ""))
         lifecycle.on_signal = lambda lc, r=record: self._on_lifecycle_signal(r, lc)
         with self._lock:
             self._records[task_id] = record; self._order.append(task_id)
         self._link_tracker_task_id(tracker_agent_id, task_id)
         if self._artifact_store is not None:
             try:
-                self._artifact_store.start(task_id, {"task": task, "title": record.title, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist)})
+                self._artifact_store.start(task_id, {"task": task, "title": record.title, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist), "parent_history_index": record.parent_history_index, "parent_turn_index": record.parent_turn_index, "parent_turn_id": record.parent_turn_id})
             except Exception:
                 pass
-        self._emit({"kind": "subagent_start", "task_id": task_id, "task": task, "title": record.title, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist), "iter": 0, "max_iter": record.max_iter})
+        self._emit({"kind": "subagent_start", "task_id": task_id, "task": task, "title": record.title, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist), "iter": 0, "max_iter": record.max_iter, "parent_history_index": record.parent_history_index, "parent_turn_index": record.parent_turn_index, "parent_turn_id": record.parent_turn_id})
         return record
 
     def launch(self, record: SubagentRecord, task: str) -> None:
@@ -399,10 +405,13 @@ class SubagentRegistry:
             except Exception:
                 tool_calls = 0
             with self._lock:
-                record.status, record.summary, record.error, record.tool_calls, record.history_length = "error", summary, str(exc), tool_calls, len(history)
+                record.summary, record.error, record.tool_calls, record.history_length = summary, str(exc), tool_calls, len(history)
                 record.finished_at, record.finished_wall_at = time.monotonic(), time.time()
-            self._persist_finish(record, history); record.done_event.set(); lifecycle.close(); self._release_specialist(record, failed=True); self._queue_completion(record)
+            self._persist_finish(record, history, status="error"); lifecycle.close(); self._release_specialist(record, failed=True)
             self._close_tracker(record, tool_count=tool_calls, summary=summary, error=str(exc), status="error")
+            with self._lock:
+                record.status = "error"
+            self._queue_completion(record); record.done_event.set()
             return
         raw_status = str(result.get("status") or ""); final_text = str(result.get("assistant_text") or "").strip(); kill_reason = None
         if raw_status == "killed" or getattr(child, "_subagent_cancelled", False):
@@ -420,11 +429,14 @@ class SubagentRegistry:
             lc = {}
         tool_calls = max(len(result.get("tool_calls") or []), int(lc.get("tool_count", 0) or 0)); history = list(getattr(child.session_manager, "history", []) or [])
         with self._lock:
-            record.status, record.summary, record.tokens, record.tool_calls = status, final_text, tokens, tool_calls
+            record.summary, record.tokens, record.tool_calls = final_text, tokens, tool_calls
             record.error, record.kill_reason, record.history_length = (None if status != "error" else str(result.get("error") or final_text)), kill_reason, len(history)
             record.finished_at, record.finished_wall_at = time.monotonic(), time.time()
-        self._persist_finish(record, history); record.done_event.set(); lifecycle.close(); self._release_specialist(record, failed=(status == "error")); self._queue_completion(record)
+        self._persist_finish(record, history, status=status); lifecycle.close(); self._release_specialist(record, failed=(status == "error"))
         self._close_tracker(record, tool_count=tool_calls, summary=final_text, error=record.error, status=status, kill_reason=kill_reason)
+        with self._lock:
+            record.status = status
+        self._queue_completion(record); record.done_event.set()
 
     def _queue_completion(self, record: SubagentRecord) -> None:
         # The just-finished task already exists in durable storage. Mark it seen
@@ -433,11 +445,11 @@ class SubagentRegistry:
             self._durable_mailbox_seen.add(record.task_id)
         self._queue_mailbox_event({"kind": "completion", "task_id": record.task_id, "specialist": record.specialist_key, "status": record.status, "summary": record.summary, "importance": "high" if record.status == "error" else "normal", "artifact": dict(record.artifact), "result_path": self._artifact_store.relative_path(record.task_id, "result.json") if self._artifact_store is not None else None})
 
-    def _persist_finish(self, record: SubagentRecord, history: List[Dict[str, Any]]) -> None:
+    def _persist_finish(self, record: SubagentRecord, history: List[Dict[str, Any]], *, status: Optional[str] = None) -> None:
         if self._artifact_store is None:
             return
         try:
-            state = self._artifact_store.finish(record.task_id, {"task": record.task, "title": record.title, "depth": record.depth, "model": record.model, "batch_id": record.batch_id, "status": record.status, "summary": record.summary, "tokens": dict(record.tokens), "tool_calls": record.tool_calls, "error": record.error, "kill_reason": record.kill_reason, "history_length": record.history_length, "started_at": record.started_wall_at, "finished_at": record.finished_wall_at or time.time(), "specialist_key": record.specialist_key, "worker_id": record.worker_id, "reused_specialist": record.reused_specialist, "parent_notified": False}, history)
+            state = self._artifact_store.finish(record.task_id, {"task": record.task, "title": record.title, "depth": record.depth, "model": record.model, "batch_id": record.batch_id, "status": str(status or record.status), "summary": record.summary, "tokens": dict(record.tokens), "tool_calls": record.tool_calls, "error": record.error, "kill_reason": record.kill_reason, "history_length": record.history_length, "started_at": record.started_wall_at, "finished_at": record.finished_wall_at or time.time(), "specialist_key": record.specialist_key, "worker_id": record.worker_id, "reused_specialist": record.reused_specialist, "parent_notified": False, "parent_history_index": record.parent_history_index, "parent_turn_index": record.parent_turn_index, "parent_turn_id": record.parent_turn_id}, history)
             if isinstance(state.get("artifact"), dict):
                 record.artifact = dict(state["artifact"])
         except Exception:
@@ -469,7 +481,7 @@ class SubagentRegistry:
             if rec is None:
                 durable = self._artifact_store.load(task_id) if self._artifact_store is not None else None
                 return durable or {"status": "missing", "task_id": task_id}
-            base = {"task_id": rec.task_id, "task": rec.task, "title": rec.title, "depth": rec.depth, "status": rec.status, "summary": rec.summary, "tokens": dict(rec.tokens), "tool_calls": rec.tool_calls, "error": rec.error, "kill_reason": rec.kill_reason, "history_length": rec.history_length, "context_pct": round(float(rec.context_pct), 1), "iter": rec.iter, "max_iter": rec.max_iter, "tokens_in": rec.tokens_in, "model": rec.model, "batch_id": rec.batch_id, "started_at": rec.started_wall_at, "finished_at": rec.finished_wall_at, "artifact": dict(rec.artifact), "durable": bool(self._artifact_store), "state_path": self._artifact_store.relative_path(rec.task_id) if self._artifact_store is not None else None, "result_path": self._artifact_store.relative_path(rec.task_id, "result.json") if self._artifact_store is not None else None, "specialist_key": rec.specialist_key, "worker_id": rec.worker_id, "reused_specialist": rec.reused_specialist, "actions": [dict(item) for item in rec.actions]}
+            base = {"task_id": rec.task_id, "task": rec.task, "title": rec.title, "depth": rec.depth, "status": rec.status, "summary": rec.summary, "tokens": dict(rec.tokens), "tool_calls": rec.tool_calls, "error": rec.error, "kill_reason": rec.kill_reason, "history_length": rec.history_length, "context_pct": round(float(rec.context_pct), 1), "iter": rec.iter, "max_iter": rec.max_iter, "tokens_in": rec.tokens_in, "model": rec.model, "batch_id": rec.batch_id, "started_at": rec.started_wall_at, "finished_at": rec.finished_wall_at, "artifact": dict(rec.artifact), "durable": bool(self._artifact_store), "state_path": self._artifact_store.relative_path(rec.task_id) if self._artifact_store is not None else None, "result_path": self._artifact_store.relative_path(rec.task_id, "result.json") if self._artifact_store is not None else None, "specialist_key": rec.specialist_key, "worker_id": rec.worker_id, "reused_specialist": rec.reused_specialist, "actions": [dict(item) for item in rec.actions], "parent_history_index": rec.parent_history_index, "parent_turn_index": rec.parent_turn_index, "parent_turn_id": rec.parent_turn_id}
         try:
             lc = rec.lifecycle.snapshot() if rec.lifecycle is not None else {}
         except Exception:

@@ -133,13 +133,13 @@ function VisualizationCardImpl({
   sessionName,
   onInteractionChange,
 }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { height: windowHeight } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const uri = useMemo(
-    () => artifactsApi.viewUrl(sessionName, artifact.artifact_id),
-    [artifact.artifact_id, sessionName],
+    () => `${artifactsApi.viewUrl(sessionName, artifact.artifact_id)}?mucli_theme=${isDark ? 'dark' : 'light'}`,
+    [artifact.artifact_id, isDark, sessionName],
   );
   const frameHeight = Math.max(
     220,

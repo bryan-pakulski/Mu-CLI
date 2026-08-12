@@ -40,6 +40,7 @@ import random
 import re
 import time
 import traceback
+import uuid
 from typing import Any
 
 from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
@@ -814,7 +815,11 @@ def run_turn(session, text):
     if effective_text:
         parts.append({"type": "text", "text": effective_text})
 
-    new_user_message = {"role": "user", "parts": parts}
+    new_user_message = {
+        "role": "user",
+        "parts": parts,
+        "timeline_id": "turn-" + uuid.uuid4().hex,
+    }
 
     # Teacher watcher: classify the user's message as a learner reply
     # against the active lesson's most recent check, BEFORE the agent

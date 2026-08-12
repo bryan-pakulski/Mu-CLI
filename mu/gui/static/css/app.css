@@ -2615,13 +2615,6 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     color: var(--text-dim);
     animation: rise 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.subagent-panel.leaving {
-    animation: subagent-panel-out .24s ease both;
-    pointer-events: none;
-}
-@keyframes subagent-panel-out {
-    to { opacity: 0; transform: translateY(-4px); }
-}
 .sap-header {
     display: flex;
     align-items: center;

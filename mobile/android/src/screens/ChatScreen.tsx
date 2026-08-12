@@ -23,6 +23,7 @@ import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
 import { CodeBlock } from '../components/CodeBlock';
 import { VisualizationCard } from '../components/VisualizationCard';
+import { SubagentActivityPanel } from '../components/SubagentActivityPanel';
 import { AttachmentSheet } from '../components/AttachmentSheet';
 import type { AttachmentDescriptor } from '../api/attachments';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
@@ -377,6 +378,10 @@ export function ChatScreen() {
           onInteractionChange={onVisualizationInteractionChange}
         />
       );
+    }
+
+    if (item.role === 'subagent_panel' && item.subagents?.length) {
+      return <SubagentActivityPanel agents={item.subagents} />;
     }
 
     // Collapsible heading for all interim agent output.

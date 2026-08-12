@@ -2,14 +2,49 @@
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from mu.artifact import ArtifactRegistry
 from utils.config import HISTORY_DIR
 
 router = APIRouter()
+
+_THEME_BOOTSTRAP = r"""<script id="mucli-visualization-theme">
+(() => {
+  const allowed = new Set(['light', 'dark']);
+  const requested = new URLSearchParams(location.search).get('mucli_theme');
+  const initial = allowed.has(requested)
+    ? requested
+    : (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  const apply = (theme) => {
+    if (!allowed.has(theme)) return;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.__MUCLI_THEME__ = theme;
+    window.dispatchEvent(new CustomEvent('mucli-theme-change', { detail: { theme } }));
+  };
+  apply(initial);
+  addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'mucli-theme') apply(event.data.theme);
+  });
+})();
+</script>"""
+
+
+def _inject_visualization_theme(html: str) -> str:
+    """Install the shared theme contract before visualization content runs."""
+    if 'id="mucli-visualization-theme"' in html:
+        return html
+    head = re.search(r"<head(?:\s[^>]*)?>", html, flags=re.IGNORECASE)
+    if head:
+        return html[: head.end()] + _THEME_BOOTSTRAP + html[head.end() :]
+    root = re.search(r"<html(?:\s[^>]*)?>", html, flags=re.IGNORECASE)
+    if root:
+        return html[: root.end()] + _THEME_BOOTSTRAP + html[root.end() :]
+    return _THEME_BOOTSTRAP + html
 
 
 def _registry(session_name: str) -> ArtifactRegistry:
@@ -65,6 +100,20 @@ async def view_artifact(name: str, artifact_id: str):
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "SAMEORIGIN",
     }
+    # Inline the tiny bootstrap for normal visualization documents so every
+    # artifact receives MuCLI's current light/dark contract. Very large HTML
+    # remains streamed; conforming visualizations can still read the same
+    # ``mucli_theme`` query parameter without loading the file into memory.
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    # Keep XHTML byte-for-byte valid: the JavaScript bootstrap is authored for
+    # HTML parsing (for example, it contains raw ``&&`` tokens).
+    if mime_type == "text/html" and size <= 10 * 1024 * 1024:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            html = _inject_visualization_theme(handle.read())
+        return HTMLResponse(html, media_type=mime_type, headers=headers)
     return FileResponse(path, media_type=mime_type, headers=headers)
 
 

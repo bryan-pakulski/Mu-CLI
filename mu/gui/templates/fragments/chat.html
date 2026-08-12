@@ -55,7 +55,7 @@
                         </div>
                     </div>
                     <iframe class="visualization-frame"
-                            :src="t.artifact.view_url"
+                            :src="visualizationThemeUrl(t.artifact.view_url, $store.theme.current)"
                             :title="t.artifact.title || t.artifact.name || 'Interactive visualization'"
                             :style="'height:' + t.height + 'px'"
                             loading="lazy"
@@ -212,7 +212,7 @@
                  feed. Expanded while agents run (tool / context / tokens),
                  collapses to a one-line summary when all finish. -->
             <template x-if="t.role === 'subagent_panel'">
-                <div class="subagent-panel" :class="{ open: t.open, running: t.running, leaving: t.leaving }">
+                <div class="subagent-panel" :class="{ open: t.open, running: t.running }">
                     <div class="sap-header"
                          @click="t.open = !t.open"
                          :aria-expanded="t.open"

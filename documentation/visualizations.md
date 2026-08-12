@@ -8,6 +8,13 @@ each client:
 - Mobile: sandboxed server document rendered in a native WebView card.
 - Terminal: compact Rich panel containing a clickable browser link.
 
+All new visualizations should follow the built-in `visualization-design` skill
+and [MuCLI visualization style guide](visualization_style_guide.md). The skill
+contains the shared light/dark tokens and is automatically expanded for chart,
+graph, plot, heatmap, timeline, diagram, dashboard, and visualization requests.
+Its reusable HTML scaffold lives at
+`mu/skills/visualization-design/assets/template.html`.
+
 ## Container sessions
 
 Container workers send visualization bytes and metadata to the host over the
@@ -52,6 +59,15 @@ storage, or call authenticated same-origin APIs as the user.
 External network access is allowed for chart libraries and public datasets.
 Do not place secrets in visualization HTML or fetch private data directly from
 the embedded page.
+
+## Theme contract
+
+Web appends the active `mucli-theme` setting to the artifact URL; mobile does
+the same from `useTheme()`. The artifact response installs a small sandbox-local
+bootstrap that sets `data-theme` and `window.__MUCLI_THEME__` before the visual
+runs and dispatches `mucli-theme-change` on live updates. CSS and SVG should use
+the skill's `--mu-*` variables. Canvas/WebGL views should resolve those variables
+and redraw on the event while preserving zoom, filters, and selection.
 
 ## Mobile dependency
 

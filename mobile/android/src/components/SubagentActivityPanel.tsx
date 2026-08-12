@@ -77,6 +77,7 @@ export function SubagentActivityPanel({ agents }: Props) {
   const [now, setNow] = useState(Date.now());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const activeCount = agents.filter(agent => isActive(agent.status)).length;
+  const [panelOpen, setPanelOpen] = useState(activeCount > 0);
   const totalElapsed = useMemo(
     () => Math.max(0, ...agents.map(agent => elapsedAt(agent, now))),
     [agents, now],
@@ -86,6 +87,15 @@ export function SubagentActivityPanel({ agents }: Props) {
     if (activeCount === 0) return undefined;
     const timer = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(timer);
+  }, [activeCount]);
+
+  useEffect(() => {
+    if (activeCount > 0) {
+      setPanelOpen(true);
+      return undefined;
+    }
+    const timer = setTimeout(() => setPanelOpen(false), 6000);
+    return () => clearTimeout(timer);
   }, [activeCount]);
 
   if (agents.length === 0) return null;
@@ -111,7 +121,14 @@ export function SubagentActivityPanel({ agents }: Props) {
         },
       ]}
     >
-      <View style={styles.header}>
+      <TouchableOpacity
+        style={styles.header}
+        activeOpacity={0.72}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: panelOpen }}
+        accessibilityLabel={panelOpen ? 'Collapse subagent history' : 'Expand subagent history'}
+        onPress={() => setPanelOpen(value => !value)}
+      >
         <View style={[styles.headerIcon, { backgroundColor: colors.accentSoft }]}>
           <Ionicons name="git-network-outline" size={17} color={colors.accent} />
         </View>
@@ -124,14 +141,16 @@ export function SubagentActivityPanel({ agents }: Props) {
           </Text>
         </View>
         <Text variant="xs" style={{ color: colors.textDim }}>{duration(totalElapsed)}</Text>
-      </View>
+        <Ionicons name={panelOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textDim} />
+      </TouchableOpacity>
 
-      <ScrollView
-        style={styles.rowsViewport}
-        contentContainerStyle={styles.rows}
-        nestedScrollEnabled
-        showsVerticalScrollIndicator={agents.length > 2}
-      >
+      {panelOpen ? (
+        <ScrollView
+          style={styles.rowsViewport}
+          contentContainerStyle={styles.rows}
+          nestedScrollEnabled
+          showsVerticalScrollIndicator={agents.length > 2}
+        >
         {agents.map(agent => {
           const isExpanded = expanded.has(agent.task_id);
           const statusColor = agent.status === 'done'
@@ -231,7 +250,8 @@ export function SubagentActivityPanel({ agents }: Props) {
             </View>
           );
         })}
-      </ScrollView>
+        </ScrollView>
+      ) : null}
     </View>
   );
 }

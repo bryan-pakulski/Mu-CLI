@@ -56,7 +56,6 @@ export function ChatScreenProduct() {
     sseConnected,
     error,
     artifactRevision,
-    subagents,
     hasMore,
     loadingOlder,
     sendMessage,
@@ -231,6 +230,14 @@ export function ChatScreenProduct() {
       );
     }
 
+    if (item.role === 'subagent_panel' && item.subagents?.length) {
+      return (
+        <View style={styles.visualizationWrap}>
+          <SubagentActivityPanel agents={item.subagents} />
+        </View>
+      );
+    }
+
     if (item.role === 'collapse') {
       const count = item.collapseCount || item.childTurns?.length || 0;
       return (
@@ -399,12 +406,6 @@ export function ChatScreenProduct() {
             </View>
           }
         />
-
-        {subagents.length > 0 ? (
-          <View style={styles.liveSubagentDock}>
-            <SubagentActivityPanel agents={subagents} />
-          </View>
-        ) : null}
 
         <ArtifactStrip sessionName={activeSessionName} refreshKey={artifactRevision} />
         <CommandSuggestionBar
@@ -738,7 +739,6 @@ const styles = StyleSheet.create({
   historyLoading: { paddingTop: 22, paddingHorizontal: 4 },
   loadingOlderIndicator: { paddingVertical: 8, alignItems: 'center' },
   listFooter: { minHeight: 10, paddingTop: 2 },
-  liveSubagentDock: { paddingHorizontal: 14 },
   composerArea: { paddingHorizontal: 12, paddingTop: 4 },
   composerUtilities: { minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, paddingHorizontal: 2, marginBottom: 8 },
   utilityButton: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7 },

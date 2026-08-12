@@ -41,8 +41,8 @@ function statusIcon(status: string): keyof typeof Ionicons.glyphMap {
 }
 
 function taskTitle(agent: LiveSubagent): string {
-  const task = agent.task.replace(/\s+/g, ' ').trim();
-  if (task) return task;
+  const title = agent.title.replace(/\s+/g, ' ').trim();
+  if (title) return title;
   const specialist = agent.specialist_key.replace(/[_-]+/g, ' ').trim();
   return specialist ? `${specialist} task` : 'Delegated task';
 }
@@ -148,12 +148,8 @@ export function SubagentActivityPanel({ agents }: Props) {
             <View key={agent.task_id} style={[styles.row, { borderColor: colors.hairline, backgroundColor: colors.bgLift }]}>
               <View style={[styles.accentRail, { backgroundColor: statusColor }]} />
               <View style={styles.rowHead}>
-                <View style={[styles.agentMark, { borderColor: colors.hairline, backgroundColor: colors.accentSoft }]}>
-                  <View style={[styles.agentDot, { backgroundColor: statusColor, borderColor: colors.bgLift }]} />
-                  <Text variant="xs" style={{ color: colors.textDim }}>{String(agent.depth).padStart(2, '0')}</Text>
-                </View>
                 <View style={styles.identity}>
-                  <Text variant="sm" numberOfLines={3} style={{ color: colors.text, fontWeight: '700', lineHeight: 19 }}>
+                  <Text variant="sm" style={{ color: colors.text, fontWeight: '700', lineHeight: 19 }}>
                     {taskTitle(agent)}
                   </Text>
                   <Text variant="xs" numberOfLines={1} style={{ color: colors.textDim, textTransform: 'capitalize' }}>
@@ -178,10 +174,10 @@ export function SubagentActivityPanel({ agents }: Props) {
               {agent.max_iter > 0 ? (
                 <Meter
                   label="Iteration progress"
-                  value={`${agent.iter} of ${agent.max_iter}`}
+                  value={`${agent.iter} / ${agent.max_iter} · ${Math.round(iterationPct)}%`}
                   percent={iterationPct}
-                  color={colors.accent}
-                  track={colors.bgHover}
+                  color={colors.accentStrong}
+                  track={colors.borderStrong}
                   text={colors.textDim}
                 />
               ) : null}
@@ -295,22 +291,20 @@ const styles = StyleSheet.create({
   rows: { gap: 9, paddingBottom: 1 },
   row: { position: 'relative', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 12 },
   accentRail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 2 },
-  rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  agentMark: { width: 30, height: 30, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  agentDot: { position: 'absolute', width: 8, height: 8, borderRadius: 99, borderWidth: 2, right: -3, top: -3 },
+  rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   identity: { flex: 1, gap: 2 },
   stateColumn: { alignItems: 'flex-end', gap: 4 },
   status: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 125, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999 },
-  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 13, marginTop: 10, marginLeft: 39 },
+  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 13, marginTop: 10 },
   metric: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-  meter: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10, marginLeft: 39 },
+  meter: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10 },
   meterLabel: { width: 82 },
-  meterTrack: { flex: 1, height: 6, borderRadius: 999, overflow: 'hidden' },
+  meterTrack: { flex: 1, height: 10, borderRadius: 999, overflow: 'hidden' },
   meterFill: { height: '100%', borderRadius: 999 },
-  meterValue: { width: 48, textAlign: 'right' },
-  activityToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, marginLeft: 34, alignSelf: 'flex-start', paddingVertical: 3, paddingHorizontal: 5 },
+  meterValue: { width: 76, textAlign: 'right' },
+  activityToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, marginLeft: -5, alignSelf: 'flex-start', paddingVertical: 3, paddingHorizontal: 5 },
   countBadge: { minWidth: 20, height: 18, borderRadius: 99, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  activity: { marginTop: 7, marginLeft: 39, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, overflow: 'hidden' },
+  activity: { marginTop: 7, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, overflow: 'hidden' },
   activityHead: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 9, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth },
   actionScroll: { maxHeight: 190 },
   action: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 9, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth },

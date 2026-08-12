@@ -65,13 +65,19 @@ def test_web_subagent_surface_lingers_and_exposes_live_progress():
 def test_web_subagent_cards_have_titles_iteration_progress_and_activity_drilldown():
     source = read("mu/gui/static/js/app.js")
     template = read("mu/gui/templates/fragments/chat.html")
+    css = read("mu/gui/static/css/app.css")
 
     assert "subagentTitle(a)" in template
     assert "Iteration progress" in template
+    assert "sap-progress-fill" in template
     assert "Action timeline" in template
     assert "toggleSubagentDetails" in source
     assert "_mergeSubagentActions" in source
     assert "d=\" + a.depth" not in template
+    assert "sap-agent-mark" not in template
+    assert "height: 10px" in css
+    task_css = css.split(".sap-task", 1)[1].split("}", 1)[0]
+    assert "text-overflow: ellipsis" not in task_css
 
 
 def test_mobile_handoff_does_not_fold_on_tool_or_thinking_activity():
@@ -112,6 +118,7 @@ def test_mobile_has_first_class_live_subagent_surface():
     assert "tool_count" in panel and "tokens_in" in panel
     assert "taskTitle(agent)" in panel
     assert "Iteration progress" in panel
+    assert "agentMark" not in panel
     assert "ACTION TIMELINE" in panel
     assert "agent.actions.map" in panel
 

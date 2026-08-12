@@ -419,6 +419,7 @@ def test_progress_events_are_self_describing_and_snapshot_keeps_actions():
     record = reg.register(
         _fake_child(),
         task="Inspect authentication middleware",
+        title="Auth inspection",
         depth=2,
         lifecycle=lc,
         model="qwen3",
@@ -430,11 +431,13 @@ def test_progress_events_are_self_describing_and_snapshot_keeps_actions():
 
     progress = [e for e in events if e.get("kind") == "subagent_progress"]
     assert progress[-1]["task"] == "Inspect authentication middleware"
+    assert progress[-1]["title"] == "Auth inspection"
     assert progress[-1]["depth"] == 2
     assert progress[-1]["model"] == "qwen3"
     assert progress[-1]["specialist_key"] == "code_research"
     assert progress[-1]["max_iter"] == 40
     snap = reg.snapshot(record.task_id)
+    assert snap["title"] == "Auth inspection"
     assert len(snap["actions"]) == 1
     assert snap["actions"][0]["seq"] == 1
     assert snap["actions"][0]["tool"] == "read_file"

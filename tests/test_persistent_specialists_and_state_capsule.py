@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from mu.agent.registry import SubagentRecord, SubagentRegistry
 from mu.session.state_capsule import build_state_capsule
-from mu.tools.agent.spawn import _build_system_prompt, _infer_specialist_key
+from mu.tools.agent.spawn import _build_system_prompt, _infer_specialist_key, _short_task_title
 
 
 class _Lifecycle:
@@ -38,6 +38,24 @@ class _SM:
     def force_progress_checkpoint(self, provider=None, *, min_new_entries=6):
         self._legacy_calls.append(provider)
         return True
+
+
+def test_subagent_titles_are_concise_complete_action_labels():
+    assert _short_task_title(
+        "Security audit of the rsq-mgmt-cluster repository. Review tenant isolation."
+    ) == "Security audit"
+    assert _short_task_title(
+        "Code quality review of rsq-mgmt-cluster-management-ui. Focus on server.js."
+    ) == "Code quality review"
+    assert _short_task_title(
+        "Infrastructure & K8s audit of rsq-mgmt-cluster. Review manifests."
+    ) == "Infrastructure & K8s audit"
+    assert _short_task_title("A long task body", "API contract review") == "API contract review"
+    assert _short_task_title(
+        "Review the API",
+        "Review every endpoint in the entire public API surface",
+        "code_review",
+    ) == "Review the API"
 
 
 def test_persistent_specialist_pool_reuses_exact_profile_only():

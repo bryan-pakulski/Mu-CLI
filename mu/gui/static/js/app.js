@@ -772,7 +772,7 @@ document.addEventListener("alpine:init", () => {
         _newAgentRow(task_id) {
             return {
                 task_id,
-                task: "", depth: 1, model: "", specialist_key: "", status: "running",
+                task: "", title: "", depth: 1, model: "", specialist_key: "", status: "running",
                 tool_count: 0, last_tool: null,
                 stuck: false, stall: false, repeat_count: 0,
                 elapsed: 0, context_pct: 0, iter: 0, max_iter: 0, tokens_in: 0,
@@ -920,6 +920,7 @@ document.addEventListener("alpine:init", () => {
                 }
                 this._mergeDefined(row, {
                     task: c.task || "",
+                    title: c.title || "",
                     depth: c.depth || 1,
                     model: c.model || "",
                     specialist_key: c.specialist_key || "",
@@ -5354,6 +5355,7 @@ function routeEvent(ev) {
         case "subagent_start":
             chat.upsertSubagent(name, {
                 task_id: ev.task_id, task: ev.task || "", depth: ev.depth || 1,
+                title: ev.title || "",
                 model: ev.model || "", status: "running",
                 specialist_key: ev.specialist_key || "",
                 iter: ev.iter, max_iter: ev.max_iter,
@@ -5365,6 +5367,7 @@ function routeEvent(ev) {
             chat.upsertSubagent(name, {
                 task_id: ev.task_id,
                 task: ev.task,
+                title: ev.title,
                 depth: ev.depth,
                 model: ev.model,
                 specialist_key: ev.specialist_key,
@@ -5387,6 +5390,7 @@ function routeEvent(ev) {
             chat.upsertSubagent(name, {
                 task_id: ev.task_id,
                 task: ev.task,
+                title: ev.title,
                 depth: ev.depth,
                 model: ev.model,
                 specialist_key: ev.specialist_key,
@@ -5581,8 +5585,8 @@ function subagentElapsed(a, _tick) {
 }
 
 function subagentTitle(a) {
-    const task = String((a && a.task) || "").replace(/\s+/g, " ").trim();
-    if (task) return task;
+    const title = String((a && a.title) || "").replace(/\s+/g, " ").trim();
+    if (title) return title;
     const specialist = String((a && a.specialist_key) || "").replace(/[_-]+/g, " ").trim();
     if (specialist) return specialist.replace(/\b\w/g, c => c.toUpperCase()) + " task";
     return "Delegated task";

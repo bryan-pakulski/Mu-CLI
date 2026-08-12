@@ -233,10 +233,6 @@
                         <template x-for="a in t.agents" :key="a.task_id">
                             <div class="sap-row" :class="'is-' + a.status">
                                 <div class="sap-row-head">
-                                    <div class="sap-agent-mark" aria-hidden="true">
-                                        <span class="sap-agent-dot"></span>
-                                        <span x-text="String(a.depth || 1).padStart(2, '0')"></span>
-                                    </div>
                                     <div class="sap-identity">
                                         <strong class="sap-task" x-text="subagentTitle(a)"></strong>
                                         <span class="sap-roleline">
@@ -261,9 +257,15 @@
                                 <div class="sap-progress" x-show="a.max_iter > 0">
                                     <div class="sap-progress-head">
                                         <span>Iteration progress</span>
-                                        <b x-text="(a.iter || 0) + ' of ' + (a.max_iter || 0)"></b>
+                                        <b x-text="(a.iter || 0) + ' / ' + (a.max_iter || 0) + ' · ' + Math.round(((a.iter || 0) / Math.max(1, a.max_iter || 1)) * 100) + '%'"></b>
                                     </div>
-                                    <div class="sap-progress-track"><i :style="'width:' + Math.min(100, ((a.iter || 0) / Math.max(1, a.max_iter || 1)) * 100) + '%'"></i></div>
+                                    <div class="sap-progress-track"
+                                         role="progressbar"
+                                         :aria-valuenow="a.iter || 0"
+                                         aria-valuemin="0"
+                                         :aria-valuemax="a.max_iter || 0">
+                                        <span class="sap-progress-fill" :style="'width:' + Math.min(100, ((a.iter || 0) / Math.max(1, a.max_iter || 1)) * 100) + '%'"></span>
+                                    </div>
                                 </div>
                                 <button class="sap-detail-toggle"
                                         type="button"

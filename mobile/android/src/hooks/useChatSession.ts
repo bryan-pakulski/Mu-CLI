@@ -49,6 +49,7 @@ export interface LiveSubagent {
   task_id: string;
   batch_id: string;
   task: string;
+  title: string;
   depth: number;
   model: string;
   specialist_key: string;
@@ -206,6 +207,7 @@ function subagentFromEvent(
     task_id: taskId,
     batch_id: readString('batch_id', existing?.batch_id || ''),
     task: readString('task', existing?.task || ''),
+    title: readString('title', existing?.title || ''),
     depth: numberOr(event.depth, existing?.depth || 1),
     model: readString('model', existing?.model || ''),
     specialist_key: readString('specialist_key', existing?.specialist_key || ''),

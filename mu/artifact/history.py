@@ -20,6 +20,9 @@ _ALLOWED_FIELDS = {
     "height",
     "view_url",
     "download_url",
+    "timeline_turn_id",
+    "timeline_history_index",
+    "timeline_part_index",
 }
 
 

@@ -83,6 +83,9 @@ class ArtifactRegistry:
         display: str = "download",
         title: str | None = None,
         height: int | None = None,
+        timeline_turn_id: str | None = None,
+        timeline_history_index: int | None = None,
+        timeline_part_index: int | None = None,
     ) -> dict[str, Any]:
         descriptor = {
             "artifact_id": artifact_id,
@@ -108,6 +111,19 @@ class ArtifactRegistry:
                     ),
                 }
             )
+            turn_id = str(timeline_turn_id or "").strip()[:200]
+            if turn_id:
+                descriptor["timeline_turn_id"] = turn_id
+            for key, value in (
+                ("timeline_history_index", timeline_history_index),
+                ("timeline_part_index", timeline_part_index),
+            ):
+                try:
+                    parsed = int(value) if value is not None else -1
+                except (TypeError, ValueError):
+                    parsed = -1
+                if parsed >= 0:
+                    descriptor[key] = parsed
         return descriptor
 
     @staticmethod
@@ -144,6 +160,9 @@ class ArtifactRegistry:
         display: str = "download",
         title: str | None = None,
         height: int | None = None,
+        timeline_turn_id: str | None = None,
+        timeline_history_index: int | None = None,
+        timeline_part_index: int | None = None,
     ) -> dict[str, Any]:
         if (source_path is None) == (content is None):
             raise ArtifactError("provide exactly one of source_path or content")
@@ -201,6 +220,9 @@ class ArtifactRegistry:
                     display=resolved_display,
                     title=title,
                     height=height,
+                    timeline_turn_id=timeline_turn_id,
+                    timeline_history_index=timeline_history_index,
+                    timeline_part_index=timeline_part_index,
                 )
                 entries = self._read()
                 entries.append(descriptor)

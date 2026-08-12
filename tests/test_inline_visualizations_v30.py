@@ -82,6 +82,11 @@ def test_history_replays_visualization_descriptors():
     mobile = read("mobile/android/src/hooks/useChatSession.ts")
     assert "_visualization_from_tool_result" in sessions
     assert 'result_part["artifact"] = visualization' in sessions
+    assert 'part.type === "visualization"' in web
+    assert '"type": "visualization", "artifact": visualization' in sessions
+    assert 'tool_result_part["artifact"] = visualization' in read(
+        "mu/agent/loop_body.py"
+    )
     assert "part.artifact" in web
     assert "asVisualization(part.artifact)" in mobile
 

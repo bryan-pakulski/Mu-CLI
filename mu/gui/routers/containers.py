@@ -625,6 +625,9 @@ async def worker_artifact(
     display: str = "download",
     title: str | None = None,
     height: int = 480,
+    timeline_turn_id: str | None = None,
+    timeline_history_index: int = -1,
+    timeline_part_index: int = -1,
     x_mucli_worker_token: str | None = Header(default=None),
 ):
     """Persist a worker artifact directly into the host session registry.
@@ -677,6 +680,9 @@ async def worker_artifact(
             display=display,
             title=title,
             height=height,
+            timeline_turn_id=timeline_turn_id,
+            timeline_history_index=timeline_history_index,
+            timeline_part_index=timeline_part_index,
         )
     finally:
         try:

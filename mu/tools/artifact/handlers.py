@@ -59,6 +59,72 @@ def _registry(context):
     return registry
 
 
+def _visualization_timeline_anchor(
+    context, args: dict[str, Any]
+) -> tuple[str, int, int]:
+    """Locate this publish call in durable history without trusting indexes alone.
+
+    The stable user-turn id survives session reload and completed-turn
+    compaction. Numeric indexes are stored only to retain the exact live tool
+    boundary while that boundary still exists; replay validates them against
+    the stable turn before using them.
+    """
+    session = getattr(context, "session", None)
+    manager = getattr(session, "session_manager", None)
+    history = list(getattr(manager, "history", []) or [])
+    if not history:
+        return "", -1, -1
+
+    try:
+        turn_index = int(getattr(manager, "_active_turn_start_index", -1))
+    except (TypeError, ValueError):
+        turn_index = -1
+    if not (0 <= turn_index < len(history)):
+        turn_index = -1
+    if turn_index < 0 or history[turn_index].get("role") != "user":
+        turn_index = next(
+            (
+                index
+                for index in range(len(history) - 1, -1, -1)
+                if history[index].get("role") == "user"
+                and history[index].get("timeline_id")
+            ),
+            -1,
+        )
+    turn_id = (
+        str(history[turn_index].get("timeline_id") or "")
+        if turn_index >= 0
+        else ""
+    )
+    if not turn_id:
+        return "", -1, -1
+
+    wanted_name = str(args.get("name") or "")
+    history_index = -1
+    part_index = -1
+    for candidate_index in range(len(history) - 1, turn_index, -1):
+        parts = history[candidate_index].get("parts", []) or []
+        for candidate_part_index in range(len(parts) - 1, -1, -1):
+            part = parts[candidate_part_index]
+            if part.get("type") != "tool_call":
+                continue
+            if str(part.get("tool_name") or "") != "publish_visualization":
+                continue
+            tool_args = (
+                part.get("tool_args")
+                if isinstance(part.get("tool_args"), dict)
+                else {}
+            )
+            if wanted_name and str(tool_args.get("name") or "") != wanted_name:
+                continue
+            history_index = candidate_index
+            part_index = candidate_part_index
+            break
+        if history_index >= 0:
+            break
+    return turn_id, history_index, part_index
+
+
 @tool(
     name="upload_artifact",
     description=(
@@ -219,6 +285,9 @@ def publish_visualization_tool(args: dict[str, Any], context) -> str:
         name = str(args.get("name") or "visualization.html")
         title = str(args.get("title") or name)
         height = max(180, min(1200, int(args.get("height") or 480)))
+        timeline_turn_id, timeline_history_index, timeline_part_index = (
+            _visualization_timeline_anchor(context, args)
+        )
         host_published = (
             ui is not None
             and hasattr(ui, "publish_artifact")
@@ -239,6 +308,9 @@ def publish_visualization_tool(args: dict[str, Any], context) -> str:
                 display="inline",
                 title=title,
                 height=height,
+                timeline_turn_id=timeline_turn_id,
+                timeline_history_index=timeline_history_index,
+                timeline_part_index=timeline_part_index,
             )
         else:
             registry = _registry(context)
@@ -251,6 +323,9 @@ def publish_visualization_tool(args: dict[str, Any], context) -> str:
                 display="inline",
                 title=title,
                 height=height,
+                timeline_turn_id=timeline_turn_id,
+                timeline_history_index=timeline_history_index,
+                timeline_part_index=timeline_part_index,
             )
 
         if not host_published:

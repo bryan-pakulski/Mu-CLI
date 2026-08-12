@@ -461,6 +461,81 @@ def _visualization_from_tool_result(value: Any) -> Dict[str, Any] | None:
     return extract_visualization(value)
 
 
+_VISUALIZATION_TOOL_NAMES = frozenset(
+    {"publish_visualization", "create_visualization", "render_visualization"}
+)
+
+
+def _visualization_registry_anchors(
+    history: list[Dict[str, Any]],
+    visualizations: list[Dict[str, Any]],
+) -> tuple[
+    Dict[tuple[int, int], list[Dict[str, Any]]],
+    Dict[int, list[Dict[str, Any]]],
+]:
+    """Resolve durable visualization anchors against the current transcript.
+
+    Numeric locations are accepted only when they still point to a publish
+    tool call inside the matching stable user turn. If compaction removed that
+    exact boundary, the stable turn id remains a safe fallback. This prevents
+    an old artifact from moving to a different conversation after history was
+    cleared or rewritten.
+    """
+    turn_by_id: Dict[str, int] = {}
+    user_indexes: list[int] = []
+    for index, message in enumerate(history):
+        if message.get("role") != "user":
+            continue
+        user_indexes.append(index)
+        turn_id = str(message.get("timeline_id") or "")
+        if turn_id:
+            turn_by_id[turn_id] = index
+
+    next_user: Dict[int, int] = {}
+    for offset, index in enumerate(user_indexes):
+        next_user[index] = (
+            user_indexes[offset + 1]
+            if offset + 1 < len(user_indexes)
+            else len(history)
+        )
+
+    exact: Dict[tuple[int, int], list[Dict[str, Any]]] = {}
+    fallback: Dict[int, list[Dict[str, Any]]] = {}
+    for visualization in sorted(
+        visualizations,
+        key=lambda item: float(item.get("created_at", 0) or 0),
+    ):
+        turn_id = str(visualization.get("timeline_turn_id") or "")
+        turn_index = turn_by_id.get(turn_id)
+        if turn_index is None:
+            continue
+        try:
+            history_index = int(visualization.get("timeline_history_index", -1))
+            part_index = int(visualization.get("timeline_part_index", -1))
+        except (TypeError, ValueError):
+            history_index = part_index = -1
+
+        valid_exact = (
+            turn_index < history_index < next_user[turn_index]
+            and 0 <= history_index < len(history)
+        )
+        if valid_exact:
+            parts = history[history_index].get("parts", []) or []
+            valid_exact = 0 <= part_index < len(parts)
+            if valid_exact:
+                part = parts[part_index]
+                valid_exact = (
+                    part.get("type") == "tool_call"
+                    and str(part.get("tool_name") or "").strip().lower()
+                    in _VISUALIZATION_TOOL_NAMES
+                )
+        if valid_exact:
+            exact.setdefault((history_index, part_index), []).append(visualization)
+        else:
+            fallback.setdefault(turn_index, []).append(visualization)
+    return exact, fallback
+
+
 def _history_preview(value: Any, limit: int = 6000) -> str:
     """Return a bounded, readable trace preview for durable history replay."""
     if isinstance(value, str):
@@ -604,6 +679,15 @@ async def get_history(
         for item in registry_visualizations
         if item.get("artifact_id")
     }
+    anchored_visualization_ids = {
+        str(item.get("artifact_id") or "")
+        for item in registry_visualizations
+        if item.get("artifact_id") and item.get("timeline_turn_id")
+    }
+    visualization_exact, visualization_fallback = _visualization_registry_anchors(
+        sm.history,
+        registry_visualizations,
+    )
 
     turns = []
     seen_visualization_ids: set[str] = set()
@@ -646,7 +730,8 @@ async def get_history(
                 }
 
                 visualization = merge_registry_descriptor(
-                    extract_visualization(raw_result),
+                    extract_visualization(part.get("artifact"))
+                    or extract_visualization(raw_result),
                     registry_by_id,
                 )
                 if visualization is None:
@@ -658,28 +743,41 @@ async def get_history(
 
                 if visualization is not None:
                     artifact_id = str(visualization.get("artifact_id") or "")
-                    if artifact_id and artifact_id not in seen_visualization_ids:
+                    if (
+                        artifact_id
+                        and artifact_id not in anchored_visualization_ids
+                        and artifact_id not in seen_visualization_ids
+                    ):
                         result_part["artifact"] = visualization
                         seen_visualization_ids.add(artifact_id)
-                elif tool_name.strip().lower() in {
-                    "publish_visualization",
-                    "create_visualization",
-                    "render_visualization",
-                }:
+                elif tool_name.strip().lower() in _VISUALIZATION_TOOL_NAMES:
                     # Keep the exact history location. If an older worker omitted
                     # the descriptor but retained the publish result, fill this
                     # slot from the registry in chronological order below.
                     publish_slots.append(result_part)
 
                 parts_out.append(result_part)
+            for visualization in visualization_exact.get(
+                (idx, source_part_index), []
+            ):
+                artifact_id = str(visualization.get("artifact_id") or "")
+                if artifact_id and artifact_id not in seen_visualization_ids:
+                    parts_out.append(
+                        {"type": "visualization", "artifact": visualization}
+                    )
+                    seen_visualization_ids.add(artifact_id)
             parts_out.extend(subagent_exact.get((idx, source_part_index), []))
         parts_out.extend(subagent_fallback.get(idx, []))
         turns.append({"index": idx, "role": role, "parts": parts_out})
 
+    # Legacy artifacts predate stable timeline anchors. Preserve their old
+    # publish-result matching path, but do not let them consume a slot that
+    # belongs to a new, explicitly anchored visualization.
     unplaced = [
         item
         for item in reversed(registry_visualizations)
         if str(item.get("artifact_id") or "") not in seen_visualization_ids
+        and not item.get("timeline_turn_id")
     ]
     for slot, visualization in zip(publish_slots, unplaced):
         artifact_id = str(visualization.get("artifact_id") or "")
@@ -687,6 +785,20 @@ async def get_history(
             continue
         slot["artifact"] = visualization
         seen_visualization_ids.add(artifact_id)
+
+    # Compaction intentionally removes intermediate tool messages. Reattach
+    # every remaining anchored card to its stable user turn, after the user
+    # content and before the surviving final assistant response.
+    for turn_index, visualizations in visualization_fallback.items():
+        if not (start_index <= turn_index < window_end):
+            continue
+        target = turns[turn_index - start_index]["parts"]
+        for visualization in visualizations:
+            artifact_id = str(visualization.get("artifact_id") or "")
+            if not artifact_id or artifact_id in seen_visualization_ids:
+                continue
+            target.append({"type": "visualization", "artifact": visualization})
+            seen_visualization_ids.add(artifact_id)
 
     # Do not append remaining registry artifacts to the timeline. Their original
     # turn is outside this history window or no durable anchor exists. They remain

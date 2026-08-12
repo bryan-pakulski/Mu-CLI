@@ -85,6 +85,9 @@ class WorkerBridgeUI(BaseUI):
         display: str = "download",
         title: str | None = None,
         height: int | None = None,
+        timeline_turn_id: str | None = None,
+        timeline_history_index: int | None = None,
+        timeline_part_index: int | None = None,
     ) -> dict[str, Any]:
         if not self.supervisor_url:
             raise RuntimeError("container supervisor URL is unavailable")
@@ -103,6 +106,15 @@ class WorkerBridgeUI(BaseUI):
             params["title"] = str(title)
         if height is not None:
             params["height"] = str(int(height))
+        if timeline_turn_id:
+            params["timeline_turn_id"] = str(timeline_turn_id)
+        if (
+            timeline_history_index is not None
+            and int(timeline_history_index) >= 0
+        ):
+            params["timeline_history_index"] = str(int(timeline_history_index))
+        if timeline_part_index is not None and int(timeline_part_index) >= 0:
+            params["timeline_part_index"] = str(int(timeline_part_index))
         headers = {"X-MuCLI-Worker-Token": self.token}
         if source_path is not None:
             with open(source_path, "rb") as handle:

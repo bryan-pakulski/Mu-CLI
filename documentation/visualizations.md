@@ -8,6 +8,13 @@ each client:
 - Mobile: sandboxed server document rendered in a native WebView card.
 - Terminal: compact Rich panel containing a clickable browser link.
 
+Visualization descriptors also carry a stable conversation-turn anchor. On a
+normal reload the card returns at its exact publish-tool boundary. If history
+compaction removes that intermediate tool metadata, the card falls back to the
+same stable user turn, before the surviving final response. Page refresh,
+session unload/reload, and mobile history pagination therefore preserve the
+card in chat as well as in the Artifacts panel.
+
 All new visualizations should follow the built-in `visualization-design` skill
 and [MuCLI visualization style guide](visualization_style_guide.md). The skill
 contains the shared light/dark tokens and is automatically expanded for chart,

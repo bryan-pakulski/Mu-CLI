@@ -2483,15 +2483,34 @@ def run_turn(session, text):
                 except Exception:  # noqa: BLE001
                     pass
 
-                tool_result_parts.append(
-                    {
-                        "type": "tool_result",
-                        "tool_name": part.tool_name,
-                        "tool_result": result,
-                        "thought_signature": part.thought_signature,
-                        "cache_key": cache_key,
-                    }
-                )
+                tool_result_part = {
+                    "type": "tool_result",
+                    "tool_name": part.tool_name,
+                    "tool_result": result,
+                    "thought_signature": part.thought_signature,
+                    "cache_key": cache_key,
+                }
+                # Keep a compact, first-class visualization descriptor beside
+                # the tool result. Structured observation transforms and older
+                # transports may reshape the result body; history replay should
+                # not have to rediscover the chat card inside that envelope.
+                if part.tool_name in {
+                    "publish_visualization",
+                    "create_visualization",
+                    "render_visualization",
+                }:
+                    try:
+                        from mu.artifact.history import extract_visualization
+
+                        visualization = extract_visualization(source_result)
+                        if visualization is not None:
+                            tool_result_part["artifact"] = visualization
+                    except Exception:
+                        logger.debug(
+                            "visualization history descriptor capture failed",
+                            exc_info=True,
+                        )
+                tool_result_parts.append(tool_result_part)
                 # --- Trace: per-tool capture (latency, cache hit, result size) ---
                 try:
                     _t_start = _tool_start_times.pop(i, None)

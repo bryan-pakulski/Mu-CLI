@@ -1206,6 +1206,15 @@ document.addEventListener("alpine:init", () => {
                                 jsonHtml: renderJSON(part.tool_args),
                                 at: 0,
                             });
+                        } else if (part.type === "visualization") {
+                            traceForTurn = null;
+                            const visualization = this._visualizationTurn(part.artifact, skey);
+                            if (visualization && !rebuiltTurns.some((item) =>
+                                item.role === "visualization" &&
+                                item.artifact?.artifact_id === visualization.artifact.artifact_id
+                            )) {
+                                rebuiltTurns.push(visualization);
+                            }
                         } else if (part.type === "tool_result") {
                             ensureHistoryTrace().events.push({
                                 id: `h-ev-${turn.index}-${stablePartIndex}`,

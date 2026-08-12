@@ -85,6 +85,7 @@ class SubagentRecord:
     specialist_key: str = "general"
     worker_id: str = ""
     reused_specialist: bool = False
+    actions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class SubagentRegistry:
@@ -176,8 +177,44 @@ class SubagentRegistry:
 
     def _emit(self, event: Dict[str, Any]) -> None:
         task_id = str(event.get("task_id") or "")
+        recent_actions: Optional[List[Dict[str, Any]]] = None
+        if task_id:
+            # Progress can beat the start event to a newly connected SSE
+            # client. Make every event self-describing so a row never degrades
+            # to only ``d=1`` and a tool count.
+            with self._lock:
+                record = self._records.get(task_id)
+                if record is not None:
+                    event.setdefault("task", record.task)
+                    event.setdefault("depth", record.depth)
+                    event.setdefault("model", record.model)
+                    event.setdefault("batch_id", record.batch_id)
+                    event.setdefault("specialist_key", record.specialist_key)
+                    event.setdefault("worker_id", record.worker_id)
+                    event.setdefault("iter", record.iter)
+                    event.setdefault("max_iter", record.max_iter)
+                    action = event.get("action")
+                    if isinstance(action, dict):
+                        seq = int(action.get("seq") or 0)
+                        existing = next(
+                            (
+                                item
+                                for item in record.actions
+                                if int(item.get("seq") or 0) == seq
+                            ),
+                            None,
+                        )
+                        if existing is None:
+                            record.actions.append(dict(action))
+                        else:
+                            existing.update(action)
+                        if len(record.actions) > 100:
+                            del record.actions[:-100]
+                    recent_actions = [dict(item) for item in record.actions]
         if task_id and self._artifact_store is not None:
-            patch = {k: event[k] for k in ("status", "tool_count", "last_tool", "stuck", "stall", "repeat_count", "elapsed", "context_pct", "iter", "max_iter", "tokens_in", "summary", "error", "kill_reason", "batch_id", "specialist_key", "worker_id") if k in event and event[k] is not None}
+            patch = {k: event[k] for k in ("task", "depth", "model", "status", "tool_count", "last_tool", "stuck", "stall", "repeat_count", "elapsed", "context_pct", "iter", "max_iter", "tokens_in", "summary", "error", "kill_reason", "batch_id", "specialist_key", "worker_id") if k in event and event[k] is not None}
+            if recent_actions is not None:
+                patch["actions"] = recent_actions
             try:
                 self._artifact_store.record_event(task_id, event, state_patch=patch or None)
             except Exception:
@@ -313,7 +350,7 @@ class SubagentRegistry:
                 self.acknowledge_completion(str(item.get("task_id") or ""))
         return "\n".join(lines)
 
-    def register(self, child: Any, *, task: str, depth: int, lifecycle: Any, tracker_agent_id: Optional[str] = None, model: Optional[str] = None, specialist_key: str = "general", worker_id: str = "", reused_specialist: bool = False) -> SubagentRecord:
+    def register(self, child: Any, *, task: str, depth: int, lifecycle: Any, tracker_agent_id: Optional[str] = None, model: Optional[str] = None, specialist_key: str = "general", worker_id: str = "", reused_specialist: bool = False, max_iterations: int = 0) -> SubagentRecord:
         with self._lock:
             task_id = "sa-" + uuid.uuid4().hex[:8]
             if not any(r.status == "running" for r in self._records.values()):
@@ -324,7 +361,7 @@ class SubagentRegistry:
                 tracker_agent_id = self.tracker.open(depth=depth, task=task)
             except Exception:
                 tracker_agent_id = None
-        record = SubagentRecord(task_id=task_id, task=task, depth=depth, child=child, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=model or "", batch_id=batch_id, specialist_key=specialist_key, worker_id=worker_id, reused_specialist=bool(reused_specialist))
+        record = SubagentRecord(task_id=task_id, task=task, depth=depth, child=child, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=model or "", batch_id=batch_id, specialist_key=specialist_key, worker_id=worker_id, reused_specialist=bool(reused_specialist), max_iter=max(0, int(max_iterations or 0)))
         lifecycle.on_signal = lambda lc, r=record: self._on_lifecycle_signal(r, lc)
         with self._lock:
             self._records[task_id] = record; self._order.append(task_id)
@@ -334,7 +371,7 @@ class SubagentRegistry:
                 self._artifact_store.start(task_id, {"task": task, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist)})
             except Exception:
                 pass
-        self._emit({"kind": "subagent_start", "task_id": task_id, "task": task, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist)})
+        self._emit({"kind": "subagent_start", "task_id": task_id, "task": task, "depth": depth, "model": model or "", "batch_id": batch_id, "specialist_key": specialist_key, "worker_id": worker_id, "reused_specialist": bool(reused_specialist), "iter": 0, "max_iter": record.max_iter})
         return record
 
     def launch(self, record: SubagentRecord, task: str) -> None:
@@ -430,7 +467,7 @@ class SubagentRegistry:
             if rec is None:
                 durable = self._artifact_store.load(task_id) if self._artifact_store is not None else None
                 return durable or {"status": "missing", "task_id": task_id}
-            base = {"task_id": rec.task_id, "task": rec.task, "depth": rec.depth, "status": rec.status, "summary": rec.summary, "tokens": dict(rec.tokens), "tool_calls": rec.tool_calls, "error": rec.error, "kill_reason": rec.kill_reason, "history_length": rec.history_length, "context_pct": round(float(rec.context_pct), 1), "iter": rec.iter, "max_iter": rec.max_iter, "tokens_in": rec.tokens_in, "model": rec.model, "batch_id": rec.batch_id, "started_at": rec.started_wall_at, "finished_at": rec.finished_wall_at, "artifact": dict(rec.artifact), "durable": bool(self._artifact_store), "state_path": self._artifact_store.relative_path(rec.task_id) if self._artifact_store is not None else None, "result_path": self._artifact_store.relative_path(rec.task_id, "result.json") if self._artifact_store is not None else None, "specialist_key": rec.specialist_key, "worker_id": rec.worker_id, "reused_specialist": rec.reused_specialist}
+            base = {"task_id": rec.task_id, "task": rec.task, "depth": rec.depth, "status": rec.status, "summary": rec.summary, "tokens": dict(rec.tokens), "tool_calls": rec.tool_calls, "error": rec.error, "kill_reason": rec.kill_reason, "history_length": rec.history_length, "context_pct": round(float(rec.context_pct), 1), "iter": rec.iter, "max_iter": rec.max_iter, "tokens_in": rec.tokens_in, "model": rec.model, "batch_id": rec.batch_id, "started_at": rec.started_wall_at, "finished_at": rec.finished_wall_at, "artifact": dict(rec.artifact), "durable": bool(self._artifact_store), "state_path": self._artifact_store.relative_path(rec.task_id) if self._artifact_store is not None else None, "result_path": self._artifact_store.relative_path(rec.task_id, "result.json") if self._artifact_store is not None else None, "specialist_key": rec.specialist_key, "worker_id": rec.worker_id, "reused_specialist": rec.reused_specialist, "actions": [dict(item) for item in rec.actions]}
         try:
             lc = rec.lifecycle.snapshot() if rec.lifecycle is not None else {}
         except Exception:

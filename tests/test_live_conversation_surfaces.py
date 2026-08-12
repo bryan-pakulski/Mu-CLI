@@ -55,11 +55,23 @@ def test_web_subagent_surface_lingers_and_exposes_live_progress():
 
     assert "_schedulePanelDismiss" in source
     assert "subagentElapsed(a, $store.chat.clock)" in template
-    assert "sap-meters" in template
+    assert "sap-progress" in template
     assert "a.iter" in template and "a.max_iter" in template
     assert "a.context_pct" in template
     for field in ("context_pct: ev.context_pct", "iter: ev.iter", "max_iter: ev.max_iter", "tokens_in: ev.tokens_in"):
         assert field in source
+
+
+def test_web_subagent_cards_have_titles_iteration_progress_and_activity_drilldown():
+    source = read("mu/gui/static/js/app.js")
+    template = read("mu/gui/templates/fragments/chat.html")
+
+    assert "subagentTitle(a)" in template
+    assert "Iteration progress" in template
+    assert "Action timeline" in template
+    assert "toggleSubagentDetails" in source
+    assert "_mergeSubagentActions" in source
+    assert "d=\" + a.depth" not in template
 
 
 def test_mobile_handoff_does_not_fold_on_tool_or_thinking_activity():
@@ -98,6 +110,10 @@ def test_mobile_has_first_class_live_subagent_surface():
     assert "Context" in panel
     assert "elapsedAt" in panel
     assert "tool_count" in panel and "tokens_in" in panel
+    assert "taskTitle(agent)" in panel
+    assert "Iteration progress" in panel
+    assert "ACTION TIMELINE" in panel
+    assert "agent.actions.map" in panel
 
 
 def test_mobile_input_required_banner_is_centered_and_prominent():

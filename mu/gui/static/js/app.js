@@ -772,11 +772,12 @@ document.addEventListener("alpine:init", () => {
         _newAgentRow(task_id) {
             return {
                 task_id,
-                task: "", depth: 1, model: "", status: "running",
+                task: "", depth: 1, model: "", specialist_key: "", status: "running",
                 tool_count: 0, last_tool: null,
                 stuck: false, stall: false, repeat_count: 0,
                 elapsed: 0, context_pct: 0, iter: 0, max_iter: 0, tokens_in: 0,
                 summary: "", kill_reason: null, error: null,
+                actions: [], details_open: false,
                 observed_at: Date.now(),
             };
         },
@@ -816,8 +817,9 @@ document.addEventListener("alpine:init", () => {
             p.dismissTimer = null;
             p.leaving = false;
         },
-        _schedulePanelDismiss(slot, p, delay = 2200) {
+        _schedulePanelDismiss(slot, p, delay = 6000) {
             if (!p || this._panelRunning(p)) return;
+            if (p.agents.some(a => a.details_open)) return;
             this._cancelPanelDismiss(p);
             p.running = false;
             p.open = true;
@@ -837,6 +839,41 @@ document.addEventListener("alpine:init", () => {
             target.observed_at = Date.now();
             return target;
         },
+        _mergeSubagentActions(row, patch) {
+            const incoming = [];
+            if (Array.isArray(patch && patch.actions)) incoming.push(...patch.actions);
+            if (patch && patch.action && typeof patch.action === "object") incoming.push(patch.action);
+            for (const raw of incoming) {
+                const seq = Number(raw && raw.seq) || 0;
+                const tool = String((raw && raw.tool) || "tool");
+                if (!seq) continue;
+                let action = row.actions.find(item => Number(item.seq) === seq);
+                if (!action) {
+                    action = { seq, tool, detail: "", status: "running", elapsed: 0, at: Date.now() / 1000 };
+                    row.actions.push(action);
+                }
+                this._mergeDefined(action, {
+                    tool,
+                    detail: raw.detail !== undefined ? String(raw.detail || "") : undefined,
+                    status: raw.status !== undefined ? String(raw.status || "running") : undefined,
+                    elapsed: raw.elapsed !== undefined ? Number(raw.elapsed) || 0 : undefined,
+                    at: raw.at !== undefined ? Number(raw.at) || action.at : undefined,
+                });
+            }
+            row.actions.sort((left, right) => Number(left.seq) - Number(right.seq));
+            if (row.actions.length > 100) row.actions.splice(0, row.actions.length - 100);
+        },
+        toggleSubagentDetails(panel, agent) {
+            if (!panel || !agent) return;
+            agent.details_open = !agent.details_open;
+            const slot = this._slot(this.currentName);
+            if (agent.details_open) {
+                panel.open = true;
+                this._cancelPanelDismiss(panel);
+            } else if (!this._panelRunning(panel)) {
+                this._schedulePanelDismiss(slot, panel);
+            }
+        },
         upsertSubagent(name, agent) {
             const tid = agent && agent.task_id;
             if (!tid) return;
@@ -851,7 +888,11 @@ document.addEventListener("alpine:init", () => {
                 row = this._newAgentRow(tid);
                 p.agents.push(row);
             }
-            this._mergeDefined(row, agent);
+            this._mergeSubagentActions(row, agent);
+            const fields = { ...agent };
+            delete fields.action;
+            delete fields.actions;
+            this._mergeDefined(row, fields);
             p.running = this._panelRunning(p);
             if (p.running) {
                 p.open = true;
@@ -881,6 +922,7 @@ document.addEventListener("alpine:init", () => {
                     task: c.task || "",
                     depth: c.depth || 1,
                     model: c.model || "",
+                    specialist_key: c.specialist_key || "",
                     batch_id: c.batch_id || batchId,
                     status: c.status || "running",
                     tool_count: c.tool_count ?? 0,
@@ -893,7 +935,9 @@ document.addEventListener("alpine:init", () => {
                     iter: c.iter ?? 0,
                     max_iter: c.max_iter ?? 0,
                     tokens_in: c.tokens_in ?? 0,
+                    actions: Array.isArray(c.actions) ? c.actions : [],
                 });
+                this._mergeSubagentActions(row, c);
             }
             p.running = true;
             p.open = true;
@@ -5311,6 +5355,8 @@ function routeEvent(ev) {
             chat.upsertSubagent(name, {
                 task_id: ev.task_id, task: ev.task || "", depth: ev.depth || 1,
                 model: ev.model || "", status: "running",
+                specialist_key: ev.specialist_key || "",
+                iter: ev.iter, max_iter: ev.max_iter,
                 batch_id: ev.batch_id || "",
             });
             break;
@@ -5318,6 +5364,10 @@ function routeEvent(ev) {
             // Merge live fields onto the matching agent row.
             chat.upsertSubagent(name, {
                 task_id: ev.task_id,
+                task: ev.task,
+                depth: ev.depth,
+                model: ev.model,
+                specialist_key: ev.specialist_key,
                 tool_count: ev.tool_count,
                 last_tool: ev.last_tool,
                 status: ev.status,
@@ -5329,12 +5379,17 @@ function routeEvent(ev) {
                 iter: ev.iter,
                 max_iter: ev.max_iter,
                 tokens_in: ev.tokens_in,
+                action: ev.action,
                 batch_id: ev.batch_id || "",
             });
             break;
         case "subagent_end":
             chat.upsertSubagent(name, {
                 task_id: ev.task_id,
+                task: ev.task,
+                depth: ev.depth,
+                model: ev.model,
+                specialist_key: ev.specialist_key,
                 status: ev.status || "done",
                 summary: ev.summary || "",
                 kill_reason: ev.kill_reason || null,
@@ -5525,6 +5580,38 @@ function subagentElapsed(a, _tick) {
     return elapsed + Math.max(0, Date.now() - observedAt) / 1000;
 }
 
+function subagentTitle(a) {
+    const task = String((a && a.task) || "").replace(/\s+/g, " ").trim();
+    if (task) return task;
+    const specialist = String((a && a.specialist_key) || "").replace(/[_-]+/g, " ").trim();
+    if (specialist) return specialist.replace(/\b\w/g, c => c.toUpperCase()) + " task";
+    return "Delegated task";
+}
+
+function subagentToolLabel(tool) {
+    const value = String(tool || "").trim();
+    const labels = {
+        apply_patch: "Edit files",
+        bash: "Run command",
+        get_chunk: "Read source chunk",
+        list_dir: "Inspect directory",
+        read_file: "Read file",
+        search_for_string: "Search code",
+        spawn_agent: "Delegate task",
+        web_search: "Search the web",
+    };
+    if (labels[value]) return labels[value];
+    if (!value) return "Working";
+    return value.replace(/[_-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function subagentActionStatus(action) {
+    if (!action) return "";
+    if (action.status === "error") return "Failed";
+    if (action.status === "done") return "Completed";
+    return "In progress";
+}
+
 function summarizeSubagentPanel(p, _tick) {
     if (!p || !p.agents || !p.agents.length) return "subagents";
     const n = p.agents.length;
@@ -5551,11 +5638,11 @@ function summarizeSubagentPanel(p, _tick) {
 
 function subagentStatusText(a) {
     switch (a.status) {
-        case "running": return a.last_tool ? `🔨 ${a.last_tool}` : "running";
-        case "stuck":   return `⚠ stuck${a.repeat_count ? ` ${a.repeat_count}x` : ""}`;
-        case "killed":  return `⏹ killed${a.kill_reason ? ` (${a.kill_reason})` : ""}`;
-        case "error":   return "✗ error";
-        case "done":    return a.summary ? `✓ done` : "✓ done";
+        case "running": return a.last_tool ? subagentToolLabel(a.last_tool) : "Starting";
+        case "stuck":   return `Stuck${a.repeat_count ? ` · ${a.repeat_count} repeats` : ""}`;
+        case "killed":  return `Stopped${a.kill_reason ? ` · ${a.kill_reason}` : ""}`;
+        case "error":   return "Failed";
+        case "done":    return "Completed";
         default:        return a.status;
     }
 }

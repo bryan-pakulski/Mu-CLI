@@ -42,6 +42,7 @@ class _AgentState:
     finished_at: Optional[float] = None
     kill_reason: Optional[str] = None
     repeat_count: int = 0  # consecutive same-tool+args (stuck signal)
+    actions: List[Dict[str, Any]] = field(default_factory=list)
     # The registry task_id for this row, set after register() allocates it.
     # Lets per-tool / state-change emits carry the GUI panel's upsert key.
     task_id: Optional[str] = None
@@ -78,7 +79,9 @@ class SubagentProgressTracker:
             self._order.append(agent_id)
             return agent_id
 
-    def update_tool(self, agent_id: str, tool_name: str) -> None:
+    def update_tool(
+        self, agent_id: str, tool_name: str, detail: str = ""
+    ) -> None:
         """Record that this sub-agent is now running `tool_name`."""
         with self._lock:
             state = self._agents.get(agent_id)
@@ -86,7 +89,59 @@ class SubagentProgressTracker:
                 return
             state.current_tool = tool_name
             state.tool_count += 1
-        self._emit_progress(agent_id)
+            action = {
+                "seq": state.tool_count,
+                "tool": str(tool_name or "tool"),
+                "detail": str(detail or "")[:240],
+                "status": "running",
+                "at": time.time(),
+                "started_at": time.monotonic(),
+                "elapsed": 0.0,
+            }
+            state.actions.append(action)
+            if len(state.actions) > 100:
+                del state.actions[:-100]
+        self._emit_progress(agent_id, action=action)
+
+    def complete_tool(
+        self,
+        agent_id: str,
+        tool_name: str,
+        *,
+        ok: bool = True,
+    ) -> None:
+        """Mark the newest matching tool action as completed.
+
+        This is driven by ``SubagentUI.emit_tool_trace`` after the tool result
+        exists, giving GUI/mobile a small, ordered action ledger instead of
+        only a volatile "last tool" label.
+        """
+        with self._lock:
+            state = self._agents.get(agent_id)
+            if state is None:
+                return
+            action = next(
+                (
+                    item
+                    for item in reversed(state.actions)
+                    if item.get("tool") == tool_name
+                    and item.get("status") == "running"
+                ),
+                None,
+            )
+            if action is None:
+                return
+            action["status"] = "done" if ok else "error"
+            action["elapsed"] = round(
+                max(0.0, time.monotonic() - float(action.get("started_at") or 0.0)),
+                2,
+            )
+            public_action = {
+                key: value
+                for key, value in action.items()
+                if key != "started_at"
+            }
+        self._emit_progress(agent_id, action=public_action)
 
     def set_state(
         self,
@@ -128,7 +183,9 @@ class SubagentProgressTracker:
             if state is not None:
                 state.task_id = task_id
 
-    def _emit_progress(self, agent_id: str) -> None:
+    def _emit_progress(
+        self, agent_id: str, *, action: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Push a ``subagent_progress`` event for one row to the GUI bus.
 
         No-op when no ``_publish`` is attached or the row has no linked
@@ -155,6 +212,12 @@ class SubagentProgressTracker:
                 "repeat_count": s.repeat_count,
                 "elapsed": round(max(0.0, end_time - s.started_at), 2),
             }
+            if action is not None:
+                payload["action"] = {
+                    key: value
+                    for key, value in action.items()
+                    if key != "started_at"
+                }
         try:
             fn(payload)
         except Exception:  # noqa: BLE001
@@ -209,6 +272,14 @@ class SubagentProgressTracker:
                     kill_reason=a.kill_reason,
                     repeat_count=a.repeat_count,
                     task_id=a.task_id,
+                    actions=[
+                        {
+                            key: value
+                            for key, value in action.items()
+                            if key != "started_at"
+                        }
+                        for action in a.actions
+                    ],
                 )
                 for a in (self._agents[aid] for aid in self._order)
             ]

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import type { LiveSubagent } from '../hooks/useChatSession';
@@ -40,9 +40,42 @@ function statusIcon(status: string): keyof typeof Ionicons.glyphMap {
   return 'ellipse-outline';
 }
 
+function taskTitle(agent: LiveSubagent): string {
+  const task = agent.task.replace(/\s+/g, ' ').trim();
+  if (task) return task;
+  const specialist = agent.specialist_key.replace(/[_-]+/g, ' ').trim();
+  return specialist ? `${specialist} task` : 'Delegated task';
+}
+
+function toolLabel(tool: string | null): string {
+  const labels: Record<string, string> = {
+    apply_patch: 'Edit files',
+    bash: 'Run command',
+    get_chunk: 'Read source chunk',
+    list_dir: 'Inspect directory',
+    read_file: 'Read file',
+    search_for_string: 'Search code',
+    spawn_agent: 'Delegate task',
+    web_search: 'Search the web',
+  };
+  if (!tool) return 'Starting';
+  return labels[tool] || tool.replace(/[_-]+/g, ' ').replace(/\b\w/g, value => value.toUpperCase());
+}
+
+function statusLabel(agent: LiveSubagent): string {
+  if (agent.status === 'running') return toolLabel(agent.last_tool);
+  if (agent.status === 'done') return 'Completed';
+  if (agent.status === 'error') return 'Failed';
+  if (agent.status === 'killed') return 'Stopped';
+  if (agent.status === 'stall') return 'Stalled';
+  if (agent.status === 'stuck') return 'Stuck';
+  return agent.status;
+}
+
 export function SubagentActivityPanel({ agents }: Props) {
   const { colors } = useTheme();
   const [now, setNow] = useState(Date.now());
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const activeCount = agents.filter(agent => isActive(agent.status)).length;
   const totalElapsed = useMemo(
     () => Math.max(0, ...agents.map(agent => elapsedAt(agent, now))),
@@ -57,6 +90,15 @@ export function SubagentActivityPanel({ agents }: Props) {
 
   if (agents.length === 0) return null;
 
+  const toggleExpanded = (taskId: string) => {
+    setExpanded(current => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
   return (
     <View
       accessibilityLiveRegion="polite"
@@ -64,7 +106,7 @@ export function SubagentActivityPanel({ agents }: Props) {
         styles.panel,
         {
           backgroundColor: colors.glassStrong,
-          borderColor: activeCount > 0 ? colors.accent : colors.hairline,
+          borderColor: activeCount > 0 ? colors.accentSoft : colors.hairline,
           opacity: activeCount > 0 ? 1 : 0.82,
         },
       ]}
@@ -84,9 +126,14 @@ export function SubagentActivityPanel({ agents }: Props) {
         <Text variant="xs" style={{ color: colors.textDim }}>{duration(totalElapsed)}</Text>
       </View>
 
-      <View style={styles.rows}>
+      <ScrollView
+        style={styles.rowsViewport}
+        contentContainerStyle={styles.rows}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={agents.length > 2}
+      >
         {agents.map(agent => {
-          const active = isActive(agent.status);
+          const isExpanded = expanded.has(agent.task_id);
           const statusColor = agent.status === 'done'
             ? colors.success
             : (agent.status === 'error' || agent.status === 'killed')
@@ -97,53 +144,107 @@ export function SubagentActivityPanel({ agents }: Props) {
           const iterationPct = agent.max_iter > 0
             ? Math.min(100, Math.max(0, (agent.iter / agent.max_iter) * 100))
             : 0;
-          const contextPct = Math.min(100, Math.max(0, agent.context_pct));
           return (
             <View key={agent.task_id} style={[styles.row, { borderColor: colors.hairline, backgroundColor: colors.bgLift }]}>
+              <View style={[styles.accentRail, { backgroundColor: statusColor }]} />
               <View style={styles.rowHead}>
-                <View style={[styles.depthBadge, { borderColor: colors.hairline }]}>
-                  <Text variant="xs" style={{ color: colors.textDim }}>d{agent.depth}</Text>
+                <View style={[styles.agentMark, { borderColor: colors.hairline, backgroundColor: colors.accentSoft }]}>
+                  <View style={[styles.agentDot, { backgroundColor: statusColor, borderColor: colors.bgLift }]} />
+                  <Text variant="xs" style={{ color: colors.textDim }}>{String(agent.depth).padStart(2, '0')}</Text>
                 </View>
-                <Text variant="sm" numberOfLines={2} style={{ color: colors.textSoft, flex: 1 }}>
-                  {agent.task || agent.task_id}
-                </Text>
-                <View style={styles.status}>
-                  <Ionicons name={statusIcon(agent.status)} size={14} color={statusColor} />
-                  <Text variant="xs" style={{ color: statusColor }}>{active ? (agent.last_tool || agent.status) : agent.status}</Text>
+                <View style={styles.identity}>
+                  <Text variant="sm" numberOfLines={3} style={{ color: colors.text, fontWeight: '700', lineHeight: 19 }}>
+                    {taskTitle(agent)}
+                  </Text>
+                  <Text variant="xs" numberOfLines={1} style={{ color: colors.textDim, textTransform: 'capitalize' }}>
+                    {(agent.specialist_key || 'subagent').replace(/[_-]+/g, ' ')} · Depth {agent.depth}{agent.model ? ` · ${agent.model}` : ''}
+                  </Text>
+                </View>
+                <View style={styles.stateColumn}>
+                  <View style={[styles.status, { backgroundColor: colors.accentSoft }]}>
+                    <Ionicons name={statusIcon(agent.status)} size={13} color={statusColor} />
+                    <Text variant="xs" numberOfLines={1} style={{ color: statusColor, maxWidth: 98 }}>{statusLabel(agent)}</Text>
+                  </View>
+                  <Text variant="xs" style={{ color: colors.textDim }}>{duration(elapsedAt(agent, now))}</Text>
                 </View>
               </View>
 
               <View style={styles.meta}>
-                <Text variant="xs" style={{ color: colors.textDim }}>{duration(elapsedAt(agent, now))}</Text>
-                {agent.model ? <Text variant="xs" numberOfLines={1} style={{ color: colors.textDim, maxWidth: 110 }}>{agent.model}</Text> : null}
-                {agent.tool_count > 0 ? <Text variant="xs" style={{ color: colors.textDim }}>{agent.tool_count} calls</Text> : null}
-                {agent.tokens_in > 0 ? <Text variant="xs" style={{ color: colors.textDim }}>{tokens(agent.tokens_in)} tok</Text> : null}
+                <Metric value={String(agent.tool_count)} label="actions" color={colors.textDim} strong={colors.textSoft} />
+                {agent.tokens_in > 0 ? <Metric value={tokens(agent.tokens_in)} label="tokens" color={colors.textDim} strong={colors.textSoft} /> : null}
+                {agent.context_pct > 0 ? <Metric value={`${Math.round(agent.context_pct)}%`} label="context" color={colors.textDim} strong={colors.textSoft} /> : null}
               </View>
 
               {agent.max_iter > 0 ? (
                 <Meter
-                  label="Iteration"
-                  value={`${agent.iter}/${agent.max_iter}`}
+                  label="Iteration progress"
+                  value={`${agent.iter} of ${agent.max_iter}`}
                   percent={iterationPct}
                   color={colors.accent}
                   track={colors.bgHover}
                   text={colors.textDim}
                 />
               ) : null}
-              {agent.context_pct > 0 ? (
-                <Meter
-                  label="Context"
-                  value={`${Math.round(contextPct)}%`}
-                  percent={contextPct}
-                  color={contextPct > 80 ? colors.warning : colors.info}
-                  track={colors.bgHover}
-                  text={colors.textDim}
-                />
+              <TouchableOpacity
+                activeOpacity={0.72}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isExpanded }}
+                onPress={() => toggleExpanded(agent.task_id)}
+                style={styles.activityToggle}
+              >
+                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textDim} />
+                <Text variant="xs" style={{ color: colors.textSoft }}>{isExpanded ? 'Hide activity' : 'View activity'}</Text>
+                <View style={[styles.countBadge, { backgroundColor: colors.bgHover }]}>
+                  <Text variant="xs" style={{ color: colors.textDim }}>{agent.actions.length}</Text>
+                </View>
+              </TouchableOpacity>
+
+              {isExpanded ? (
+                <View style={[styles.activity, { borderColor: colors.hairline, backgroundColor: colors.glass }]}>
+                  <View style={[styles.activityHead, { borderBottomColor: colors.hairline }]}>
+                    <Text variant="xs" style={{ color: colors.textDim, fontWeight: '700', letterSpacing: 0.4 }}>ACTION TIMELINE</Text>
+                    <Text variant="xs" style={{ color: colors.textDim }}>oldest → newest</Text>
+                  </View>
+                  {agent.actions.length === 0 ? (
+                    <Text variant="xs" style={[styles.emptyActivity, { color: colors.textDim }]}>Waiting for the first tool action…</Text>
+                  ) : (
+                    <ScrollView style={styles.actionScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+                      {agent.actions.map(action => {
+                        const actionColor = action.status === 'error'
+                          ? colors.error
+                          : (action.status === 'done' ? colors.success : colors.accent);
+                        return (
+                          <View key={`${agent.task_id}-${action.seq}`} style={[styles.action, { borderBottomColor: colors.hairline }]}>
+                            <Text variant="xs" style={{ color: colors.textDim, width: 22 }}>{String(action.seq).padStart(2, '0')}</Text>
+                            <View style={[styles.actionDot, { backgroundColor: actionColor }]} />
+                            <View style={styles.actionCopy}>
+                              <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>{toolLabel(action.tool)}</Text>
+                              {action.detail ? <Text variant="xs" numberOfLines={2} style={{ color: colors.textDim }}>{action.detail}</Text> : null}
+                            </View>
+                            <View style={styles.actionState}>
+                              <Text variant="xs" style={{ color: actionColor }}>{action.status === 'done' ? 'Done' : (action.status === 'error' ? 'Failed' : 'Running')}</Text>
+                              {action.elapsed > 0 ? <Text variant="xs" style={{ color: colors.textDim }}>{action.elapsed.toFixed(1)}s</Text> : null}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                </View>
               ) : null}
             </View>
           );
         })}
-      </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function Metric({ value, label, color, strong }: { value: string; label: string; color: string; strong: string }) {
+  return (
+    <View style={styles.metric}>
+      <Text variant="xs" style={{ color: strong, fontWeight: '700' }}>{value}</Text>
+      <Text variant="xs" style={{ color }}>{label}</Text>
     </View>
   );
 }
@@ -179,8 +280,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 15,
-    padding: 11,
+    borderRadius: 18,
+    padding: 12,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 14,
@@ -190,15 +291,31 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center' },
   headerIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   headerCopy: { flex: 1, marginLeft: 9 },
-  rows: { gap: 7, marginTop: 9 },
-  row: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, padding: 9 },
-  rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
-  depthBadge: { minWidth: 28, borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, alignItems: 'center', paddingHorizontal: 5, paddingVertical: 1 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 115 },
-  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 7 },
-  meter: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 7 },
-  meterLabel: { width: 50 },
-  meterTrack: { flex: 1, height: 4, borderRadius: 999, overflow: 'hidden' },
+  rowsViewport: { maxHeight: 380, marginTop: 10 },
+  rows: { gap: 9, paddingBottom: 1 },
+  row: { position: 'relative', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 12 },
+  accentRail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 2 },
+  rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
+  agentMark: { width: 30, height: 30, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  agentDot: { position: 'absolute', width: 8, height: 8, borderRadius: 99, borderWidth: 2, right: -3, top: -3 },
+  identity: { flex: 1, gap: 2 },
+  stateColumn: { alignItems: 'flex-end', gap: 4 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 125, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999 },
+  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 13, marginTop: 10, marginLeft: 39 },
+  metric: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  meter: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10, marginLeft: 39 },
+  meterLabel: { width: 82 },
+  meterTrack: { flex: 1, height: 6, borderRadius: 999, overflow: 'hidden' },
   meterFill: { height: '100%', borderRadius: 999 },
-  meterValue: { width: 42, textAlign: 'right' },
+  meterValue: { width: 48, textAlign: 'right' },
+  activityToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, marginLeft: 34, alignSelf: 'flex-start', paddingVertical: 3, paddingHorizontal: 5 },
+  countBadge: { minWidth: 20, height: 18, borderRadius: 99, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  activity: { marginTop: 7, marginLeft: 39, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, overflow: 'hidden' },
+  activityHead: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 9, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth },
+  actionScroll: { maxHeight: 190 },
+  action: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 9, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  actionDot: { width: 7, height: 7, borderRadius: 99, marginTop: 5 },
+  actionCopy: { flex: 1, gap: 2 },
+  actionState: { alignItems: 'flex-end', gap: 1 },
+  emptyActivity: { padding: 12 },
 });

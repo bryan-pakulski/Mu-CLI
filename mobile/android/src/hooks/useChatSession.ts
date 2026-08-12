@@ -36,12 +36,22 @@ export interface ChatMessage {
   handoff?: 'entering' | 'leaving';
 }
 
+export interface LiveSubagentAction {
+  seq: number;
+  tool: string;
+  detail: string;
+  status: string;
+  elapsed: number;
+  at: number;
+}
+
 export interface LiveSubagent {
   task_id: string;
   batch_id: string;
   task: string;
   depth: number;
   model: string;
+  specialist_key: string;
   status: string;
   tool_count: number;
   last_tool: string | null;
@@ -52,6 +62,7 @@ export interface LiveSubagent {
   tokens_in: number;
   summary: string;
   error: string | null;
+  actions: LiveSubagentAction[];
   observed_at: number;
 }
 
@@ -147,6 +158,35 @@ function isSubagentActive(status: string): boolean {
   return status === 'running' || status === 'stuck' || status === 'stall';
 }
 
+function mergeSubagentActions(
+  existing: LiveSubagentAction[],
+  event: StreamEvent,
+): LiveSubagentAction[] {
+  const incoming: Record<string, unknown>[] = [];
+  if (Array.isArray(event.actions)) {
+    incoming.push(...event.actions.filter(value => value && typeof value === 'object') as Record<string, unknown>[]);
+  }
+  if (event.action && typeof event.action === 'object') {
+    incoming.push(event.action as Record<string, unknown>);
+  }
+  if (incoming.length === 0) return existing;
+  const merged = new Map(existing.map(action => [action.seq, action]));
+  for (const raw of incoming) {
+    const seq = numberOr(raw.seq, 0);
+    if (seq <= 0) continue;
+    const previous = merged.get(seq);
+    merged.set(seq, {
+      seq,
+      tool: typeof raw.tool === 'string' ? raw.tool : (previous?.tool || 'tool'),
+      detail: typeof raw.detail === 'string' ? raw.detail : (previous?.detail || ''),
+      status: typeof raw.status === 'string' ? raw.status : (previous?.status || 'running'),
+      elapsed: numberOr(raw.elapsed, previous?.elapsed || 0),
+      at: numberOr(raw.at, previous?.at || Date.now() / 1000),
+    });
+  }
+  return [...merged.values()].sort((left, right) => left.seq - right.seq).slice(-100);
+}
+
 function subagentFromEvent(
   event: StreamEvent,
   existing?: LiveSubagent,
@@ -168,6 +208,7 @@ function subagentFromEvent(
     task: readString('task', existing?.task || ''),
     depth: numberOr(event.depth, existing?.depth || 1),
     model: readString('model', existing?.model || ''),
+    specialist_key: readString('specialist_key', existing?.specialist_key || ''),
     status: readString('status', existing?.status || 'running'),
     tool_count: numberOr(event.tool_count ?? event.tool_calls, existing?.tool_count || 0),
     last_tool: readNullableString('last_tool', existing?.last_tool || null),
@@ -178,6 +219,7 @@ function subagentFromEvent(
     tokens_in: numberOr(event.tokens_in ?? tokens?.['in'], existing?.tokens_in || 0),
     summary: readString('summary', existing?.summary || ''),
     error: readNullableString('error', existing?.error || null),
+    actions: mergeSubagentActions(existing?.actions || [], event),
     observed_at: Date.now(),
   };
 }
@@ -523,7 +565,7 @@ export function useChatSession(activeSessionName: string | null) {
     subagentDismissRef.current = null;
   }, []);
 
-  const scheduleSubagentDismiss = useCallback((delay = 2400) => {
+  const scheduleSubagentDismiss = useCallback((delay = 6000) => {
     cancelSubagentDismiss();
     subagentDismissRef.current = setTimeout(() => {
       subagentDismissRef.current = null;

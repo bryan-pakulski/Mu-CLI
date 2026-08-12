@@ -250,7 +250,7 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
         "enabled": bool(parent.variables.get("subagent_lifecycle_enabled", True)),
     })
     child._subagent_lifecycle = lifecycle
-    record = registry.register(child, task=task, depth=child_depth, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=resolved_model, specialist_key=specialist_key, worker_id=worker.worker_id, reused_specialist=reused)
+    record = registry.register(child, task=task, depth=child_depth, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=resolved_model, specialist_key=specialist_key, worker_id=worker.worker_id, reused_specialist=reused, max_iterations=max_iterations)
     child.variables["subagent_parent_task_id"] = record.task_id
     child._parent_registry = registry
     registry.launch(record, _delegation_prompt(task, explicit_context))

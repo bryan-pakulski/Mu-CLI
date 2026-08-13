@@ -21,6 +21,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Request
 
 from ..mode_workspace import research_workspace
+from ..mode_session import mode_session
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def _memory_entry_to_dict(entry) -> Dict[str, Any]:
 
 @router.get("/state")
 async def get_research_state(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return {
             "active": False,

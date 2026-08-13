@@ -99,16 +99,22 @@ def mode_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
     if arg and arg.lower() in AGENT_MODE_METADATA:
         chosen = arg.lower()
         if chosen != "default":
+            from mu.tools.capabilities import normalize_session_type
+
             fc = getattr(session, "folder_context", None)
             folders = getattr(fc, "folders", []) if fc else []
             sm_fc = getattr(session.session_manager, "folder_context", None)
             sm_folders = getattr(sm_fc, "folders", []) if sm_fc else []
-            if not folders and not sm_folders:
+            session_type = normalize_session_type(
+                session.variables.get("session_type", "workspace")
+            )
+            if not folders and not sm_folders and session_type != "container":
                 return CommandResult(
                     ok=False,
                     message=(
-                        f"Mode '{chosen}' requires a workspace. "
-                        "Add one with /workspace folder <path> first."
+                        f"Mode '{chosen}' requires a workspace or container. "
+                        "Add one with /workspace folder <path>, or create a "
+                        "container session first."
                     ),
                 )
         session.variables["agent_mode"] = chosen

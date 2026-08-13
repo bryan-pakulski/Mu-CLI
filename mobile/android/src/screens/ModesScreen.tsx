@@ -27,6 +27,8 @@ export function ModesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selecting, setSelecting] = useState<string | null>(null);
   const [hasWorkspace, setHasWorkspace] = useState(false);
+  const [hasExecutionWorkspace, setHasExecutionWorkspace] = useState(false);
+  const [sessionType, setSessionType] = useState<'chat' | 'workspace' | 'container'>('workspace');
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +37,8 @@ export function ModesScreen() {
       setModes(res.modes);
       setCurrent(res.current);
       setHasWorkspace(res.has_workspace);
+      setHasExecutionWorkspace(res.has_execution_workspace);
+      setSessionType(res.session_type || 'workspace');
     } catch (e) {
       setError(String(e));
     } finally {
@@ -102,7 +106,10 @@ export function ModesScreen() {
           <Card elevated style={{ marginBottom: spacing.md }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
               <Text variant="xs" style={{ color: colors.accent, fontWeight: '700', letterSpacing: 1.3 }}>MODE OS</Text>
-              <Badge label={hasWorkspace ? 'workspace attached' : 'chat only'} variant={hasWorkspace ? 'success' : 'warning'} />
+              <Badge
+                label={sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
+                variant={hasExecutionWorkspace ? 'success' : 'warning'}
+              />
             </View>
             <Text variant="lg" style={{ color: colors.text, fontWeight: '600', marginTop: spacing.md }}>Choose the operating harness</Text>
             <Text variant="xs" style={{ color: colors.textSoft, marginTop: 5, lineHeight: 18 }}>
@@ -124,7 +131,7 @@ export function ModesScreen() {
                 <View style={{ position: 'absolute', top: 13, bottom: 13, left: 0, width: 2, borderRadius: 1, backgroundColor: accent, opacity: isActive ? 1 : .45 }} />
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm }}>
                   <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}><Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>{surface.title}</Text>{isActive && <Badge label="active" variant="accent" />}{item.disabled && <Badge label="workspace required" variant="warning" />}</View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}><Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>{surface.title}</Text>{isActive && <Badge label="active" variant="accent" />}{item.disabled && <Badge label="workspace or container required" variant="warning" />}</View>
                     <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4, lineHeight: 18 }}>{surface.purpose}</Text>
                     <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: spacing.sm }}>{surface.lenses.map(lens => <View key={lens} style={{ paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999, backgroundColor: colors.bgHover }}><Text variant="xs" style={{ color: colors.textDim }}>{lens}</Text></View>)}</View>
                   </View>

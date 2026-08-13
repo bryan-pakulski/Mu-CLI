@@ -601,6 +601,20 @@ async def worker_event(
     event = dict(payload)
     event.pop("container_name", None)
     session_name = str(event.get("session_name") or "")
+    if session_name and event.get("kind") == "context_snapshot":
+        try:
+            from ..memory_snapshot import ingest_context_timeline_point
+
+            mirrored = ingest_context_timeline_point(
+                request.app.state.session_by_name(session_name),
+                event.get("timeline_point"),
+            )
+            if mirrored:
+                event["timeline_point"] = mirrored
+        except Exception:
+            # Observability mirroring is best-effort; never reject a worker
+            # callback or interrupt the underlying model turn.
+            pass
     if session_name:
         busy = request.app.state.session_busy_for(session_name)
         if event.get("kind") in {

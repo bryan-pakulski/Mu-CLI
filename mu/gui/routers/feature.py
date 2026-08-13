@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..mode_workspace import feature_workspace
+from ..mode_session import mode_session, mode_session_lock
 
 from mu.feature.engine import (
     FeaturePlan,
@@ -209,7 +210,7 @@ def _features_list(sm) -> List[Dict[str, Any]]:
 
 @router.get("/state")
 async def get_feature_state(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return {
             "active": False,
@@ -269,7 +270,7 @@ async def transition_task(
     the transition; we surface invalid moves as 409 so the UI can snap
     the dragged card back to its origin.
     """
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -279,7 +280,7 @@ async def transition_task(
     if plan is None:
         raise HTTPException(status_code=404, detail="no active feature plan")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         try:
             transition_task_status(
@@ -331,7 +332,7 @@ async def toggle_exit_criterion(
     engine stores `verified_exit_criteria` as a list of criterion
     strings; toggling adds/removes the indexed criterion from that list.
     """
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -341,7 +342,7 @@ async def toggle_exit_criterion(
     if plan is None:
         raise HTTPException(status_code=404, detail="no active feature plan")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         task = next((t for t in plan.tasks if t.id == task_id), None)
         if task is None:
@@ -377,7 +378,7 @@ async def toggle_exit_criterion(
 @router.post("/{feature_id}/approve")
 async def approve_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Approve the feature plan so implementation can begin."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -393,7 +394,7 @@ async def approve_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     if plan.approved:
         return {"ok": True, "features": _features_list(sm)}
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         plan.approved = True
         save_feature_plan("", plan)
@@ -413,7 +414,7 @@ async def approve_feature(request: Request, feature_id: str) -> Dict[str, Any]:
 async def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Delete a feature from the registry. Refuses if the feature is
     currently active (loaded) — the user must unload it first."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -429,7 +430,7 @@ async def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     if record is None:
         raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         sm.delete_feature(feature_id)
 
@@ -439,7 +440,7 @@ async def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
 @router.post("/{feature_id}/load")
 async def load_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Load (activate) a feature plan so the kanban view shows it."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -451,7 +452,7 @@ async def load_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     if record.get("archived"):
         raise HTTPException(status_code=409, detail="Unarchive the feature first.")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         sm.activate_feature(feature_id)
 
@@ -462,7 +463,7 @@ async def load_feature(request: Request, feature_id: str) -> Dict[str, Any]:
 async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Unload the active feature plan. Clears active_feature_id and
     feature_state so the feature list view is shown again."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -476,7 +477,7 @@ async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
             detail=f"Feature '{feature_id}' is not the active feature.",
         )
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         sm.active_feature_id = None
         sm.feature_state = None
@@ -488,7 +489,7 @@ async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
 @router.post("/{feature_id}/archive")
 async def archive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Archive a feature — hides it from the active list."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -502,7 +503,7 @@ async def archive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     if record is None:
         raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         sm.archive_feature(feature_id)
 
@@ -512,7 +513,7 @@ async def archive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
 @router.post("/{feature_id}/unarchive")
 async def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Restore a feature from the archive."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -522,7 +523,7 @@ async def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]
     if record is None:
         raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         sm.unarchive_feature(feature_id)
 
@@ -532,7 +533,7 @@ async def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]
 @router.get("/{feature_id}/preview")
 async def preview_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     """Read-only preview of any feature (including archived) without activating it."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -589,7 +590,7 @@ class CreateFeatureBody(BaseModel):
 @router.post("/create")
 async def create_feature(request: Request, body: CreateFeatureBody) -> Dict[str, Any]:
     """Create a new feature with optional phases and tasks."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
     sm = session.session_manager
@@ -600,7 +601,7 @@ async def create_feature(request: Request, body: CreateFeatureBody) -> Dict[str,
 
     directory = body.directory.strip() or os.getcwd()
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         record = sm.create_feature_record(
             name,

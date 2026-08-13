@@ -2022,12 +2022,16 @@ ${problem.text}`, "error", 16000);
         realMode: "default",
         modes: [],
         views: [],
+        sessionType: "workspace",
+        hasExecutionWorkspace: false,
         panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files", "artifacts", "shell"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
             this.modes = data.modes || [];
             this.views = data.views || [];
+            this.sessionType = data.session_type || "workspace";
+            this.hasExecutionWorkspace = !!data.has_execution_workspace;
             this.realMode = data.current || "default";
             this.active = this.realMode;
             const store = this.panelModes.includes(this.active)
@@ -5551,6 +5555,16 @@ function routeEvent(ev) {
             }
             break;
         }
+        case "mode_changed": {
+            if (isFocused) {
+                const mode = Alpine.store("mode");
+                mode.realMode = ev.mode || "default";
+                mode.active = mode.realMode;
+                mode.sessionType = ev.session_type || mode.sessionType;
+                mode.load();
+            }
+            break;
+        }
         case "assistant_start": chat.startAssistant(ev.turn_id, name); break;
         case "assistant_delta": chat.appendDelta(ev.turn_id, ev.text || "", name); break;
         case "assistant_end":
@@ -5681,6 +5695,13 @@ function routeEvent(ev) {
             // panel state without triggering a model turn, so the
             // turn_complete hook never fires. Refresh here too.
             if (isFocused) {
+                if (ev.result && ev.result.data && ev.result.data.current_mode) {
+                    // `/mode <name>` mutates the session directly rather than
+                    // passing through POST /api/modes, so it has no separate
+                    // mode_changed event. Reload the execution boundary and
+                    // the matching Mode OS workspace immediately.
+                    Alpine.store("mode").load();
+                }
                 refreshActivePanel();
                 Alpine.store("yolo").load();
                 Alpine.store("skills").load();

@@ -300,7 +300,7 @@ function welcomeView() {
         sessionTypes: [
             {value:'chat', label:'Chat', icon:'chatbubble-ellipses-outline', detail:'Conversation and research without local execution.'},
             {value:'workspace', label:'Workspace', icon:'folder-open-outline', detail:'Host tools scoped to an attached folder.'},
-            {value:'container', label:'Container', icon:'cube-outline', detail:'Isolated Docker tools with controlled egress.'},
+            {value:'container', label:'Container', icon:'cube-outline', detail:'Full Mode OS in isolated Docker with controlled egress.'},
         ],
         form: {},
         get stepTitle() { return ['','Choose a boundary','Select a provider','Configure access','Review and create'][this.step]; },

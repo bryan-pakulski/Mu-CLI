@@ -33,6 +33,20 @@ The shared contract contains:
 The native payload supplies the explorable records and actions. This prevents
 the shared shell from collapsing all modes back into generic memory cards.
 
+### Workspace and container parity
+
+`session_type` is an execution boundary, while `agent_mode` is the strategy
+harness. A Docker-backed session therefore supports every Mode OS workspace;
+it is not a separate or reduced set of modes. The host securely proxies mode
+state and control requests to the attached worker, which runs the same router
+and presentation adapter against the container's actual `/workspace` and
+in-memory session. The worker also emits the same context snapshots,
+sub-agent timelines, tool progress, and artifact descriptors to web and mobile.
+
+Every client request carries `session_name`. This matters when a mobile-selected
+container is not the web daemon's currently focused session: mode reads and
+mutations must never fall through to another session's state.
+
 ## Evidence semantics
 
 Mode workspaces must never manufacture precision. Use these terms deliberately:
@@ -101,4 +115,3 @@ should be designed for the domain rather than forced into one universal card.
 6. Persist exploration state, not domain state, in the client.
 7. Test that no missing measurement is rendered as a score and that both
    light and dark theme tokens are used.
-

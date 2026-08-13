@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..mode_workspace import security_workspace
+from ..mode_session import mode_session, mode_session_lock
 
 from mu.security.engine import (
     SEVERITY_LEVELS,
@@ -103,7 +104,7 @@ def _finding_payload(f) -> Dict[str, Any]:
 
 @router.get("/state")
 async def get_security_state(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return {
             "active": False,
@@ -159,7 +160,7 @@ class RefuteBody(BaseModel):
 
 @router.post("/findings/{finding_id}/approve")
 async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
 
@@ -167,7 +168,7 @@ async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
     if report is None:
         raise HTTPException(status_code=404, detail="no active security report")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         finding = report.find(finding_id)
         if finding is None:
@@ -183,7 +184,7 @@ async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
 
 @router.post("/findings/{finding_id}/refute")
 async def refute(request: Request, finding_id: str, body: RefuteBody) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
 
@@ -191,7 +192,7 @@ async def refute(request: Request, finding_id: str, body: RefuteBody) -> Dict[st
     if report is None:
         raise HTTPException(status_code=404, detail="no active security report")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         finding = report.find(finding_id)
         if finding is None:

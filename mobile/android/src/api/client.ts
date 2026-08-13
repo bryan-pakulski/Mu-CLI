@@ -40,10 +40,11 @@ async function request<T>(
   const base = baseUrl();
   let url = `${base}${path}`;
 
-  // Append the active session only when the caller did not provide an
-  // explicit session. This prevents stale store state from competing
-  // with session-switch and history requests.
-  if (method === 'GET' || method === 'DELETE') {
+  // Append the active session for reads and mutations when the caller did not
+  // provide one explicitly. Mode controls are session-scoped too; limiting
+  // this to GET/DELETE made mobile POSTs mutate whichever session happened to
+  // be focused in the web daemon instead of the mobile-selected container.
+  {
     const sep = url.includes('?') ? '&' : '?';
     const sn = useConnectionStore.getState().activeSessionName;
     const explicitSession = Object.prototype.hasOwnProperty.call(

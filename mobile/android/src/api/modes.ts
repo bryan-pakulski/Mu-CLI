@@ -25,6 +25,10 @@ export interface ModesResponse {
   modes: ModeInfo[];
   views: ViewPanelInfo[];
   has_workspace: boolean;
+  has_execution_workspace: boolean;
+  has_container: boolean;
+  session_type: 'chat' | 'workspace' | 'container';
+  execution_boundary: 'host' | 'container';
 }
 
 export const modesApi = {

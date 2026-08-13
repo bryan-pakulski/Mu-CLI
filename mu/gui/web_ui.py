@@ -95,6 +95,10 @@ class WebUI(BaseUI):
         self._flush_deltas(force=True)
         self._publish_raw(event)
 
+    def publish_event(self, event: Dict[str, Any]) -> None:
+        """Public event transport shared with the container worker bridge."""
+        self._publish(event)
+
     def _flush_deltas(self, *, force: bool = False) -> None:
         """Publish + clear the buffered assistant/thinking deltas if the
         time or size threshold is met (or ``force``). One batched

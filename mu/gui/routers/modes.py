@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from mu.tools.capabilities import normalize_session_type
 
 from utils.config import AGENT_MODE_METADATA, AGENTIC_MODES, GUI_VIEW_PANELS
 
@@ -24,14 +28,30 @@ def _is_container_session(session) -> bool:
     return getattr(session, "container_ref", None) is not None
 
 
+def _session_type(session) -> str:
+    if session is None:
+        return "workspace"
+    return normalize_session_type(session.variables.get("session_type"))
+
+
+def _has_execution_workspace(session) -> bool:
+    """Whether strategy modes have an execution filesystem to operate on."""
+    return _has_workspace(session) or _session_type(session) == "container"
+
+
 @router.get("")
-async def list_modes(request: Request):
-    session = request.app.state.session_by_name()
+async def list_modes(
+    request: Request,
+    session_name: Optional[str] = Query(default=None),
+):
+    session = request.app.state.session_by_name(session_name)
     current = session.variables.get("agent_mode", "default") if session else None
     has_ws = _has_workspace(session)
+    has_execution_ws = _has_execution_workspace(session)
+    session_type = _session_type(session)
     modes = []
-    # Only `default` works without a workspace attached — every other real
-    # agent mode operates on workspace files. (history/memory/systemPrompts
+    # Only `default` works without an execution workspace — every other real
+    # agent mode operates on host workspace or container files. (history/memory/systemPrompts
     # are view-only panels, not agent modes — surfaced separately as `views`.)
     _NO_WORKSPACE_NEEDED = {"default"}
 
@@ -45,7 +65,7 @@ async def list_modes(request: Request):
                 "description": meta.get("description", ""),
                 "is_current": key == current,
                 "needs_workspace": needs_workspace,
-                "disabled": needs_workspace and not has_ws,
+                "disabled": needs_workspace and not has_execution_ws,
             }
         )
     # GUI-only view panels — read-only, never settable as agent_mode. Most
@@ -81,7 +101,10 @@ async def list_modes(request: Request):
         "modes": modes,
         "views": views,
         "has_workspace": has_ws,
+        "has_execution_workspace": has_execution_ws,
         "has_container": has_container,
+        "session_type": session_type,
+        "execution_boundary": "container" if session_type == "container" else "host",
     }
 
 
@@ -89,15 +112,34 @@ async def list_modes(request: Request):
 async def set_mode(name: str, request: Request, session=Depends(require_session)):
     if name not in AGENTIC_MODES:
         raise HTTPException(status_code=400, detail=f"Unknown mode: {name}")
-    if name != "default" and not _has_workspace(session):
+    if name != "default" and not _has_execution_workspace(session):
         raise HTTPException(
             status_code=400,
-            detail=f"Mode '{name}' requires a workspace. Add one via the inspector or /workspace folder <path>.",
+            detail=(
+                f"Mode '{name}' requires an attached workspace or a container "
+                "session. Add a folder via the inspector or create a container session."
+            ),
         )
-    with request.app.state.session_lock_for():
+    session_name = session.session_manager.current_session_name
+    with request.app.state.session_lock_for(session_name):
         session.variables["agent_mode"] = name
         try:
             session.session_manager.save_history(session.folder_context)
         except Exception:
             pass
-    return {"ok": True, "current": name}
+    bus = getattr(request.app.state, "bus", None)
+    if bus is not None:
+        await bus.publish(
+            {
+                "kind": "mode_changed",
+                "mode": name,
+                "session_type": _session_type(session),
+                "session_name": session_name,
+            }
+        )
+    return {
+        "ok": True,
+        "current": name,
+        "session_type": _session_type(session),
+        "has_execution_workspace": _has_execution_workspace(session),
+    }

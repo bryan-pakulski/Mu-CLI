@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from ..mode_workspace import teacher_workspace
+from ..mode_session import mode_session
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -323,7 +324,7 @@ def _course_payload(course: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]
 
 @router.get("/state")
 async def get_teacher_state(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return {
             "active": False,
@@ -394,7 +395,7 @@ async def get_teacher_state(request: Request) -> Dict[str, Any]:
 
 def _resolve_course_dir(request: Request) -> Optional[str]:
     """Resolve the active course directory from the session."""
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return None
     sm = session.session_manager

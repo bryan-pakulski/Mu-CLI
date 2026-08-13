@@ -493,13 +493,13 @@
                     <button class="mode-option"
                             :class="{ active: $store.mode.realMode === m.name, disabled: m.disabled }"
                             @click="!m.disabled && ($store.mode.set(m.name), modeOpen = false)"
-                            :title="m.disabled ? 'Requires a workspace' : (m.description || m.name)"
+                            :title="m.disabled ? 'Requires an attached workspace or container session' : (m.description || m.name)"
                             :disabled="m.disabled">
                         <div class="mode-name">
                             <span x-text="m.display_name"></span>
                             <span class="mode-key mono muted" x-text="m.name"></span>
                         </div>
-                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
+                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace or container' : m.description"></div>
                     </button>
                 </template>
             </div>

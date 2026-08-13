@@ -482,6 +482,82 @@ def get_context_timeline(session: Any, *, limit: int = 240) -> Dict[str, Any]:
     return {"active": True, "points": points, "summary": summary}
 
 
+def ingest_context_timeline_point(
+    session: Any,
+    point: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Mirror a content-free observation produced by a container worker.
+
+    The worker owns the real prompt and computes churn there.  The host keeps a
+    bounded public copy so page refreshes and the normal `/api/memory/timeline`
+    endpoint behave exactly like a host workspace while the session remains
+    loaded. Raw prompt text and private comparison hashes are never accepted.
+    """
+    if session is None or not isinstance(point, dict) or not point.get("id"):
+        return {}
+    layers = []
+    for raw in point.get("layers", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        layers.append(
+            {
+                "id": str(raw.get("id") or ""),
+                "name": str(raw.get("name") or raw.get("id") or ""),
+                "hue": int(raw.get("hue") or 0),
+                "tokens": int(raw.get("tokens") or 0),
+                "token_delta": int(raw.get("token_delta") or 0),
+                "changed": bool(raw.get("changed")),
+                "changed_chunks": int(raw.get("changed_chunks") or 0),
+                "sampled_chunks": int(raw.get("sampled_chunks") or 0),
+                "change_ratio": float(raw.get("change_ratio") or 0.0),
+            }
+        )
+    safe = {
+        "id": int(point.get("id") or 0),
+        "at": float(point.get("at") or time.time()),
+        "phase": str(point.get("phase") or "provider_call"),
+        "total_tokens": int(point.get("total_tokens") or 0),
+        "total_delta": int(point.get("total_delta") or 0),
+        "context_limit": int(point.get("context_limit") or 0),
+        "free_tokens": int(point.get("free_tokens") or 0),
+        "fill_pct": float(point.get("fill_pct") or 0.0),
+        "token_source": str(point.get("token_source") or "layer_estimate"),
+        "churn_score": float(point.get("churn_score") or 0.0),
+        "changed_layers": int(point.get("changed_layers") or 0),
+        "compaction": bool(point.get("compaction")),
+        "layers": layers,
+    }
+    with _TIMELINE_LOCK:
+        history = _TIMELINES.get(session)
+        if history is None:
+            history = deque(maxlen=_TIMELINE_MAX_POINTS)
+            _TIMELINES[session] = history
+        existing_index = next(
+            (
+                index
+                for index, value in enumerate(history)
+                if int(value.get("id") or 0) == safe["id"]
+            ),
+            None,
+        )
+        if existing_index is not None and abs(
+            float(history[existing_index].get("at") or 0.0) - safe["at"]
+        ) > 0.001:
+            # A rebuilt worker starts its local counter at one. Preserve the
+            # earlier host timeline and assign the incoming observation the
+            # next session-wide id instead of overwriting history.
+            safe["id"] = max(
+                (int(value.get("id") or 0) for value in history),
+                default=0,
+            ) + 1
+            existing_index = None
+        if existing_index is None:
+            history.append(safe)
+        else:
+            history[existing_index] = safe
+    return dict(safe)
+
+
 def build_memory_snapshot(
     session: Any,
     cols: int = _DEFAULT_RES,
@@ -717,6 +793,7 @@ def build_memory_snapshot(
 __all__ = [
     "build_memory_snapshot",
     "get_context_timeline",
+    "ingest_context_timeline_point",
     "record_context_snapshot",
     "LIVE_RESOLUTION",
     "LAYER_HUES",

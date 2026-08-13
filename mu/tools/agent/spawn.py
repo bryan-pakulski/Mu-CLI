@@ -227,7 +227,12 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     root_ui = parent.ui
     while isinstance(root_ui, SubagentUI):
         root_ui = root_ui._parent
-    if root_ui is not None and hasattr(root_ui, "_publish"):
+    publish_event = getattr(root_ui, "publish_event", None)
+    if callable(publish_event):
+        registry._publish = publish_event
+    elif root_ui is not None and hasattr(root_ui, "_publish"):
+        # Compatibility for third-party UIs that implemented the original
+        # private WebUI hook before ``publish_event`` became public.
         registry._publish = lambda ev: root_ui._publish(ev)
     tracker_agent_id = None
     try:

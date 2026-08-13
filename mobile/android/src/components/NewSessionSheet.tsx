@@ -38,7 +38,7 @@ type ContainerSource = 'new' | 'existing';
 const SESSION_TYPES: Array<{ type: SessionType; label: string; detail: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { type: 'chat', label: 'Chat', detail: 'Conversation and research without local execution.', icon: 'chatbubble-ellipses-outline' },
   { type: 'workspace', label: 'Workspace', detail: 'Host tools scoped to an attached folder.', icon: 'folder-open-outline' },
-  { type: 'container', label: 'Container', detail: 'Isolated Docker tools with controlled egress.', icon: 'cube-outline' },
+  { type: 'container', label: 'Container', detail: 'Full Mode OS in isolated Docker with controlled egress.', icon: 'cube-outline' },
 ];
 
 export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheetProps) {

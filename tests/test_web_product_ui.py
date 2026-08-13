@@ -76,9 +76,11 @@ def test_rhs_panel_uses_exactly_two_dropdowns_not_scrollable_tabs():
     assert 'class="panel-tab"' not in text
     assert '$event.target.value && $store.mode.setView($event.target.value)' in text
     assert '$store.layout.panelOpen = false' in text
-    assert '--panel-tabs-h: 58px' in css
+    assert '--panel-tabs-h: 64px' in css
     assert '.panel-selectors' in css
     assert '.panel-selector-label' in css
+    assert 'border-bottom: 1px solid var(--hairline)' in css
+    assert 'background-color: transparent' in css
     assert 'inset: var(--panel-tabs-h) 0 0 0 !important' in css
 
 

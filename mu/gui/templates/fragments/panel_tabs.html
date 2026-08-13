@@ -1,7 +1,7 @@
 <nav class="panel-tabs panel-select-nav" aria-label="Workspace views">
     <div class="panel-selectors">
         <label class="panel-selector">
-            <span class="panel-selector-label">View mode</span>
+            <span class="panel-selector-label">Modes</span>
             <select class="panel-view-select panel-mode-select"
                     :value="$store.mode.modes.some(item => item.name === $store.mode.active) ? $store.mode.active : ''"
                     @change="$event.target.value && $store.mode.setView($event.target.value)"
@@ -14,7 +14,7 @@
         </label>
 
         <label class="panel-selector">
-            <span class="panel-selector-label">Tooling</span>
+            <span class="panel-selector-label">Tools</span>
             <select class="panel-view-select panel-tool-select"
                     :value="$store.mode.views.some(item => !item.external && item.name === $store.mode.active) ? $store.mode.active : ''"
                     @change="$event.target.value && $store.mode.setView($event.target.value)"

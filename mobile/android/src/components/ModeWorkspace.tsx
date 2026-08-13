@@ -63,50 +63,43 @@ export function ModeWorkspaceHeader({
   selectedView: string;
   onSelectView: (view: string) => void;
 }) {
-  const { colors, spacing, radii } = useTheme();
+  const { colors, spacing } = useTheme();
   const [qualityOpen, setQualityOpen] = useState(false);
   const modeAccent = workspaceAccent(workspace.mode, colors);
 
   return (
     <View
       style={{
-        marginBottom: spacing.md,
-        padding: spacing.base,
-        borderRadius: radii.lg,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: colors.borderStrong,
-        backgroundColor: colors.glass,
-        overflow: 'hidden',
+        marginBottom: spacing.xl,
+        paddingBottom: spacing.lg,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: colors.hairline,
       }}
     >
-      <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, backgroundColor: modeAccent }} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-        <Text variant="xs" style={{ color: modeAccent, fontWeight: '700', letterSpacing: 1.4 }}>MODE OS</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: colors.accentSoft }}>
-          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: toneColor(workspace.status.tone, colors, modeAccent) }} />
-          <Text variant="xs" style={{ color: colors.textSoft }}>{workspace.status.label}</Text>
-        </View>
+        <Text variant="xs" style={{ color: modeAccent, fontWeight: '700', letterSpacing: 1.4 }}>MODE</Text>
+        <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
+        <Text variant="xs" style={{ color: toneColor(workspace.status.tone, colors, modeAccent) }}>{workspace.status.label}</Text>
       </View>
 
-      <Text variant="lg" style={{ marginTop: spacing.md, color: colors.text, fontWeight: '600', letterSpacing: -0.35 }}>
+      <Text variant="lg" style={{ marginTop: spacing.lg, color: colors.text, fontWeight: '600', letterSpacing: -0.35 }}>
         {workspace.title}
       </Text>
       <Text variant="xs" style={{ marginTop: 5, color: colors.textSoft, lineHeight: 18 }}>
         {workspace.objective}
       </Text>
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md, borderRadius: 12, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
-        {workspace.metrics.map((metric, index) => (
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.lg, marginTop: spacing.lg }}>
+        {workspace.metrics.map(metric => (
           <View
             key={metric.id}
             style={{
-              width: '50%',
-              paddingHorizontal: spacing.md,
-              paddingVertical: 10,
-              borderRightWidth: index % 2 === 0 ? StyleSheet.hairlineWidth : 0,
-              borderBottomWidth: index < workspace.metrics.length - 2 ? StyleSheet.hairlineWidth : 0,
-              borderColor: colors.border,
-              backgroundColor: colors.bgLift,
+              flexBasis: '44%',
+              flexGrow: 1,
+              paddingTop: spacing.sm,
+              paddingBottom: spacing.md,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: colors.hairline,
             }}
           >
             <Text variant="base" style={{ color: toneColor(metric.tone, colors, modeAccent), fontFamily: 'monospace', fontWeight: '600' }}>
@@ -119,7 +112,7 @@ export function ModeWorkspaceHeader({
         ))}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4, paddingVertical: spacing.md }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.lg, paddingTop: spacing.md }}>
         {workspace.views.map(view => {
           const active = selectedView === view.id;
           return (
@@ -133,15 +126,14 @@ export function ModeWorkspaceHeader({
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 5,
-                paddingHorizontal: 11,
-                borderRadius: 9,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: active ? colors.borderStrong : 'transparent',
-                backgroundColor: active ? colors.accentSoft : colors.bgHover,
+                paddingHorizontal: 1,
+                paddingBottom: 5,
+                borderBottomWidth: 1,
+                borderBottomColor: active ? modeAccent : 'transparent',
               }}
             >
               <Text variant="xs" style={{ color: active ? colors.text : colors.textDim, fontWeight: active ? '600' : '400' }}>{view.label}</Text>
-              {view.count !== undefined && <Text variant="xs" style={{ color: modeAccent, fontFamily: 'monospace' }}>{view.count}</Text>}
+              {view.count !== undefined && <Text variant="xs" style={{ color: modeAccent, fontFamily: 'monospace' }}>· {view.count}</Text>}
             </Pressable>
           );
         })}
@@ -151,15 +143,15 @@ export function ModeWorkspaceHeader({
         onPress={() => setQualityOpen(value => !value)}
         accessibilityRole="button"
         accessibilityState={{ expanded: qualityOpen }}
-        style={{ minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+        style={{ minHeight: 42, marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
       >
         <Text variant="xs" style={{ color: colors.textDim }}>How accuracy, relevance, and evidence are assessed</Text>
         <Ionicons name={qualityOpen ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textDim} />
       </Pressable>
       {qualityOpen && (
-        <View style={{ gap: spacing.sm, paddingTop: spacing.xs }}>
+        <View style={{ paddingTop: spacing.sm }}>
           {workspace.quality.map(item => (
-            <View key={item.id} style={{ padding: spacing.md, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.bgLift }}>
+            <View key={item.id} style={{ paddingVertical: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
                 <Text variant="xs" style={{ color: colors.text, fontWeight: '600' }}>{item.label}</Text>
                 <Text variant="xs" style={{ color: modeAccent, textTransform: 'uppercase', letterSpacing: .5 }}>{item.state.replace(/-/g, ' ')}</Text>
@@ -170,8 +162,8 @@ export function ModeWorkspaceHeader({
         </View>
       )}
 
-      <Text variant="xs" numberOfLines={1} style={{ marginTop: spacing.xs, color: colors.textDim, fontFamily: 'monospace' }}>
-        ↳ {workspace.provenance}
+      <Text variant="xs" numberOfLines={1} style={{ marginTop: spacing.md, color: colors.textDim, fontFamily: 'monospace' }}>
+        Source · {workspace.provenance}
       </Text>
     </View>
   );

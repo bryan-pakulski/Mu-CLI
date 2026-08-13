@@ -34,7 +34,7 @@ html[data-theme="light"] .composer-settings-popout {
     width: auto !important;
     min-width: min(310px, calc(100vw - 20px));
     max-width: min(420px, calc(100vw - 20px));
-    padding: 8px !important;
+    padding: 10px 18px !important;
 }
 
 .composer-mode-popout .mode-option {
@@ -43,9 +43,9 @@ html[data-theme="light"] .composer-settings-popout {
     width: 100%;
     min-height: 0;
     margin: 0 !important;
-    padding: 11px 12px 10px !important;
+    padding: 13px 2px 12px !important;
     border: 0 !important;
-    border-radius: 9px !important;
+    border-radius: 0 !important;
     background: transparent !important;
     color: var(--text-soft);
     text-align: left;
@@ -54,33 +54,34 @@ html[data-theme="light"] .composer-settings-popout {
 }
 
 .composer-mode-popout .mode-option + .mode-option {
-    margin-top: 1px !important;
+    margin-top: 0 !important;
+    border-top: 1px solid color-mix(in srgb, var(--hairline) 68%, transparent) !important;
 }
 
 .composer-mode-popout .mode-option:hover {
-    background: rgba(255,255,255,.034) !important;
+    background: transparent !important;
     color: var(--text);
 }
 
 html[data-theme="light"] .composer-mode-popout .mode-option:hover {
-    background: rgba(48,73,95,.042) !important;
+    background: transparent !important;
 }
 
 .composer-mode-popout .mode-option.active {
-    background: rgba(255,255,255,.027) !important;
+    background: transparent !important;
     color: var(--text);
 }
 
 html[data-theme="light"] .composer-mode-popout .mode-option.active {
-    background: rgba(48,73,95,.034) !important;
+    background: transparent !important;
 }
 
 .composer-mode-popout .mode-option.active::before {
     content: "";
     position: absolute;
-    left: 3px;
-    top: 12px;
-    bottom: 12px;
+    left: -10px;
+    top: 13px;
+    bottom: 13px;
     width: 1px;
     border-radius: 1px;
     background: var(--accent);

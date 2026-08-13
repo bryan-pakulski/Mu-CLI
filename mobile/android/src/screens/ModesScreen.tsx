@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge } from '../components';
+import { Text, Skeleton, ErrorState, EmptyState } from '../components';
 import { modesApi, ModeInfo } from '../api/modes';
 import { spacing } from '../theme/tokens';
 
@@ -103,19 +103,19 @@ export function ModesScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}
         ListHeaderComponent={
-          <Card elevated style={{ marginBottom: spacing.md }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-              <Text variant="xs" style={{ color: colors.accent, fontWeight: '700', letterSpacing: 1.3 }}>MODE OS</Text>
-              <Badge
-                label={sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
-                variant={hasExecutionWorkspace ? 'success' : 'warning'}
-              />
+          <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
+            <View style={styles.eyebrowRow}>
+              <Text variant="xs" style={{ color: colors.accent, fontWeight: '700', letterSpacing: 1.3 }}>MODES</Text>
+              <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
+              <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.success : colors.warning }}>
+                {sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
+              </Text>
             </View>
-            <Text variant="lg" style={{ color: colors.text, fontWeight: '600', marginTop: spacing.md }}>Choose the operating harness</Text>
-            <Text variant="xs" style={{ color: colors.textSoft, marginTop: 5, lineHeight: 18 }}>
-              A mode changes how the model investigates and acts. Its explorer then presents the facts, evidence, and controls that belong to that workflow.
+            <Text variant="lg" style={styles.headerTitle}>Choose the operating harness</Text>
+            <Text variant="xs" style={[styles.headerCopy, { color: colors.textSoft }]}>
+              A mode changes how the model investigates and acts. Its explorer presents the facts, evidence, and controls that belong to that workflow.
             </Text>
-          </Card>
+          </View>
         }
         renderItem={({ item }) => {
           const isActive = current === item.name;
@@ -126,19 +126,23 @@ export function ModesScreen() {
               onPress={() => !item.disabled && selectMode(item.name)}
               disabled={item.disabled || selecting !== null}
               activeOpacity={0.7}
+              style={[
+                styles.modeRow,
+                { borderBottomColor: colors.hairline, opacity: item.disabled ? 0.42 : 1 },
+              ]}
             >
-              <Card elevated={isActive} style={{ marginBottom: spacing.sm, minHeight: 44, opacity: item.disabled ? 0.48 : 1, borderColor: isActive ? accent : colors.border }}>
-                <View style={{ position: 'absolute', top: 13, bottom: 13, left: 0, width: 2, borderRadius: 1, backgroundColor: accent, opacity: isActive ? 1 : .45 }} />
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm }}>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}><Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>{surface.title}</Text>{isActive && <Badge label="active" variant="accent" />}{item.disabled && <Badge label="workspace or container required" variant="warning" />}</View>
-                    <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4, lineHeight: 18 }}>{surface.purpose}</Text>
-                    <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: spacing.sm }}>{surface.lenses.map(lens => <View key={lens} style={{ paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999, backgroundColor: colors.bgHover }}><Text variant="xs" style={{ color: colors.textDim }}>{lens}</Text></View>)}</View>
-                  </View>
-                  {isActive && <Ionicons name="checkmark-circle" size={20} color={accent} />}
-                  {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={18} color={colors.textDim} />}
+              <View style={[styles.modeRail, { backgroundColor: isActive ? accent : 'transparent' }]} />
+              <View style={styles.modeCopy}>
+                <View style={styles.modeTitleRow}>
+                  <Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>{surface.title}</Text>
+                  {isActive && <Text variant="xs" style={{ color: accent }}>Current</Text>}
+                  {item.disabled && <Text variant="xs" style={{ color: colors.warning }}>Workspace required</Text>}
                 </View>
-              </Card>
+                <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4, lineHeight: 18 }}>{surface.purpose}</Text>
+                <Text variant="xs" style={[styles.lenses, { color: colors.textDim }]}>{surface.lenses.join('  ·  ')}</Text>
+              </View>
+              {isActive && <Ionicons name="checkmark" size={18} color={accent} />}
+              {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={17} color={colors.textDim} />}
             </TouchableOpacity>
           );
         }}
@@ -146,6 +150,18 @@ export function ModesScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  header: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth },
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  headerTitle: { fontWeight: '600', marginTop: spacing.lg, letterSpacing: -0.3 },
+  headerCopy: { marginTop: 5, lineHeight: 18, maxWidth: 430 },
+  modeRow: { minHeight: 108, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base, borderBottomWidth: StyleSheet.hairlineWidth },
+  modeRail: { alignSelf: 'stretch', width: 1, marginRight: spacing.md },
+  modeCopy: { flex: 1 },
+  modeTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' },
+  lenses: { marginTop: spacing.sm, fontFamily: 'monospace', letterSpacing: 0.15 },
+});
 
 function modeAccent(mode: string, colors: ReturnType<typeof useTheme>['colors']) {
   if (mode === 'research') return colors.info;

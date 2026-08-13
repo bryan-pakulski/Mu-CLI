@@ -50,61 +50,98 @@ export function FeatureExplorerScreen() {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
   const selectedIdRef = useRef<string | null>(null);
+  const requestEpochRef = useRef(0);
   const workspaceView = useModeWorkspaceView(workspace);
 
   const previewFeature = useCallback(async (featureId: string, quiet = false) => {
+    const requestId = ++requestEpochRef.current;
     if (!quiet) setPreviewLoading(true);
     setError(null);
     try {
       const response = await featureApi.preview(featureId);
+      if (requestId !== requestEpochRef.current) return;
       setWorkspace(response.workspace);
       selectedIdRef.current = featureId;
       setSelectedId(featureId);
       setSelectedPlan(response.plan);
+      setExpandedTasks(new Set());
+      setExpandedRecords(new Set());
       if (response.plan?.phase_columns?.length) {
         setExpandedPhases(new Set([String(response.plan.phase_columns[0].id)]));
+      } else {
+        setExpandedPhases(new Set());
       }
     } catch (cause) {
+      if (requestId !== requestEpochRef.current) return;
       setError(String(cause));
     } finally {
-      if (!quiet) setPreviewLoading(false);
+      if (requestId === requestEpochRef.current) {
+        if (!quiet) setPreviewLoading(false);
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   const load = useCallback(async (preserveSelection = true) => {
+    const requestId = ++requestEpochRef.current;
     try {
       setError(null);
       const response = await featureApi.getState();
+      if (requestId !== requestEpochRef.current) return;
       setState(response);
       setWorkspace(response.workspace);
 
       const currentSelectedId = preserveSelection ? selectedIdRef.current : null;
       if (currentSelectedId && response.features.some(item => item.feature_id === currentSelectedId)) {
-        await previewFeature(currentSelectedId, true);
+        const preview = await featureApi.preview(currentSelectedId);
+        if (requestId !== requestEpochRef.current) return;
+        setWorkspace(preview.workspace);
+        setSelectedId(currentSelectedId);
+        setSelectedPlan(preview.plan);
+        setExpandedPhases(
+          preview.plan?.phase_columns?.length
+            ? new Set([String(preview.plan.phase_columns[0].id)])
+            : new Set(),
+        );
       } else if (response.plan) {
         selectedIdRef.current = response.plan.feature_id;
         setSelectedId(response.plan.feature_id);
         setSelectedPlan(response.plan);
         if (response.plan.phase_columns?.length) {
           setExpandedPhases(new Set([String(response.plan.phase_columns[0].id)]));
+        } else {
+          setExpandedPhases(new Set());
         }
       } else {
         selectedIdRef.current = null;
         setSelectedId(null);
         setSelectedPlan(null);
+        setExpandedPhases(new Set());
       }
+      setExpandedTasks(new Set());
+      setExpandedRecords(new Set());
     } catch (cause) {
+      if (requestId !== requestEpochRef.current) return;
       setError(String(cause));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestEpochRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [previewFeature]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
       load(true);
+      return () => {
+        // Ignore late preview/state responses after navigating away. Without
+        // this guard a slower archived-plan response can repaint the screen
+        // after a newer feature has already been selected.
+        requestEpochRef.current += 1;
+      };
     }, [load]),
   );
 
@@ -263,7 +300,7 @@ export function FeatureExplorerScreen() {
             ) : (
               (selectedPlan.phase_columns || []).map(phase => (
                 <PhaseDetail
-                  key={String(phase.id)}
+                  key={`${selectedPlan.feature_id}:${phase.id}`}
                   phase={phase}
                   activeFeature={Boolean(selectedItem?.is_active)}
                   expanded={expandedPhases.has(String(phase.id))}

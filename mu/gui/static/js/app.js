@@ -2646,29 +2646,80 @@ ${problem.text}`, "error", 16000);
         searchQuery: '',
         showFeatureBrowser: false,
         previewMode: false,
+        previewArchived: false,
+        previewingFeatureId: null,
+        planIdentity: null,
+        sessionName: null,
+        loadRevision: 0,
+        navigationRevision: 0,
 
-        async load() {
-            this.previewMode = false;
+        _currentSessionName() {
+            const chat = Alpine.store("chat");
+            return String((chat && chat.currentName) || "");
+        },
+        _applyPlan(plan, { preview = false, archived = false } = {}) {
+            const nextIdentity = String((plan && plan.feature_id) || "");
+            if (nextIdentity !== this.planIdentity) {
+                // Phase/task ids start at one for most feature plans. Reset
+                // view-local expansion state when the plan changes so Alpine
+                // cannot carry a similarly-numbered task from another feature
+                // into the newly-rendered detail view.
+                this.openPhases = {};
+                this.expandedTaskId = null;
+                this.dragTaskId = null;
+                this.planIdentity = nextIdentity || null;
+            }
+            this.plan = plan || null;
+            this.previewMode = !!preview;
+            this.previewArchived = !!(preview && archived);
+
+            const phases = (this.plan && this.plan.phase_columns) || [];
+            phases.forEach((phase, index) => {
+                const key = String(phase.id);
+                if (this.openPhases[key] !== undefined) return;
+                const status = (phase.status || "").toLowerCase();
+                this.openPhases[key] = status === "in_progress"
+                    || status === "blocked"
+                    || (!!preview && index === 0);
+            });
+        },
+        async load({ forcePlan = false, resetView = false } = {}) {
+            const currentSession = this._currentSessionName();
+            const sessionChanged = this.sessionName !== null
+                && this.sessionName !== currentSession;
+            if (sessionChanged || resetView) {
+                this.navigationRevision += 1;
+                this.showFeatureBrowser = false;
+                this.previewMode = false;
+                this.previewArchived = false;
+                this.previewingFeatureId = null;
+                this._applyPlan(null);
+            }
+            this.sessionName = currentSession;
+            if (forcePlan) {
+                this.navigationRevision += 1;
+                this.previewMode = false;
+                this.previewArchived = false;
+                this.previewingFeatureId = null;
+            }
+
+            const loadId = ++this.loadRevision;
+            const navigationAtStart = this.navigationRevision;
             try {
                 const r = await fetch("/api/feature/state");
                 const d = await r.json();
+                if (loadId !== this.loadRevision) return;
                 this.active = !!d.active;
-                this.plan = d.plan || null;
                 this.features = d.features || [];
-                this.metadataPath = d.metadata_path || null;
-                this.workspace = d.workspace || null;
-                // Seed open/closed defaults for new phases without
-                // disturbing whatever the user has already toggled.
-                const phases = (this.plan && this.plan.phase_columns) || [];
-                for (const phase of phases) {
-                    const key = String(phase.id);
-                    if (this.openPhases[key] === undefined) {
-                        const status = (phase.status || "").toLowerCase();
-                        // Open whichever phase is currently in flight;
-                        // leave done/pending phases closed.
-                        this.openPhases[key] = status === "in_progress"
-                            || status === "blocked";
-                    }
+                const navigationIsStable = navigationAtStart === this.navigationRevision;
+                if (forcePlan || (
+                    navigationIsStable
+                    && !this.previewMode
+                    && !this.previewingFeatureId
+                )) {
+                    this.metadataPath = d.metadata_path || null;
+                    this.workspace = d.workspace || null;
+                    this._applyPlan(d.plan || null);
                 }
                 this.loaded = true;
             } catch (e) {
@@ -2690,6 +2741,28 @@ ${problem.text}`, "error", 16000);
         },
         isTaskExpanded(id) {
             return this.expandedTaskId === id;
+        },
+        isBrowserView() {
+            return this.showFeatureBrowser || !this.plan;
+        },
+        isDetailView() {
+            return !!this.plan && !this.showFeatureBrowser;
+        },
+        activePlanAvailable() {
+            if (!this.plan || this.previewMode) return false;
+            const id = String(this.plan.feature_id || "");
+            return (this.features || []).some(feature =>
+                String(feature.feature_id || "") === id && feature.is_active
+            );
+        },
+        planRenderKey() {
+            return String((this.plan && this.plan.feature_id) || "feature");
+        },
+        phaseRenderKey(phase) {
+            return `${this.planRenderKey()}:phase:${phase && phase.id}`;
+        },
+        taskRenderKey(phase, task) {
+            return `${this.phaseRenderKey(phase)}:task:${task && task.id}`;
         },
 
         // ---- view helpers ----
@@ -2736,7 +2809,7 @@ ${problem.text}`, "error", 16000);
         progressPct() {
             if (!this.plan || !this.plan.task_count) return 0;
             return Math.round(
-                ((this.plan.tasks_completed_count || 0) /
+                (this.tasksCompletedCount() /
                     (this.plan.task_count || 1)) * 100
             );
         },
@@ -2823,20 +2896,33 @@ ${problem.text}`, "error", 16000);
         archivedCount() {
             return (this.features || []).filter(f => f.archived).length;
         },
+        currentCount() {
+            return (this.features || []).filter(f => !f.archived).length;
+        },
+        openFeatureBrowser() {
+            this.navigationRevision += 1;
+            this.previewingFeatureId = null;
+            this.showFeatureBrowser = true;
+        },
+        closeFeatureBrowser() {
+            if (this.activePlanAvailable()) this.showFeatureBrowser = false;
+        },
         async _action(featureId, path, method, verb) {
-            if (!featureId) return;
+            if (!featureId) return false;
             try {
                 const r = await fetch(`/api/feature/${encodeURIComponent(featureId)}${path}`, { method });
                 if (!r.ok) {
                     const data = await r.json().catch(() => ({}));
                     Alpine.store("toast").show(data.detail || `${verb} failed (${r.status})`, "error");
-                    return;
+                    return false;
                 }
-                Alpine.store("toast").show(`Feature '${featureId}' ${verb.toLowerCase()}d`, "success");
-                await this.load();
+                Alpine.store("toast").show(`Feature '${featureId}': ${verb.toLowerCase()} complete`, "success");
+                await this.load({ forcePlan: true });
+                return true;
             } catch (e) {
                 console.error(`feature.${verb}`, e);
                 Alpine.store("toast").show(`${verb} failed — network error`, "error");
+                return false;
             }
         },
         async deleteFeature(id)    { return this._action(id, "",           "DELETE", "Delete");    },
@@ -2871,11 +2957,13 @@ ${problem.text}`, "error", 16000);
         async approveFeature(id)   { return this._action(id, "/approve",   "POST",   "Approve");   },
         async switchFeature(featureId) {
             if (!featureId) return;
-            await this.loadFeature(featureId);
-            this.showFeatureBrowser = false;
+            const loaded = await this.loadFeature(featureId);
+            if (loaded) this.showFeatureBrowser = false;
         },
         async previewFeature(id) {
             if (!id) return;
+            const navigationId = ++this.navigationRevision;
+            this.previewingFeatureId = id;
             try {
                 const r = await fetch(`/api/feature/${encodeURIComponent(id)}/preview`);
                 if (!r.ok) {
@@ -2884,29 +2972,38 @@ ${problem.text}`, "error", 16000);
                     return;
                 }
                 const d = await r.json();
-                this.plan = d.plan || null;
+                if (navigationId !== this.navigationRevision) return;
                 this.active = !!d.active;
+                this.features = d.features || this.features;
                 this.metadataPath = d.metadata_path || null;
                 this.workspace = d.workspace || this.workspace;
-                this.previewMode = true;
-                // Seed phase open/closed defaults for preview
-                const phases = (this.plan && this.plan.phase_columns) || [];
-                for (const phase of phases) {
-                    const key = String(phase.id);
-                    if (this.openPhases[key] === undefined) {
-                        this.openPhases[key] = true;
-                    }
-                }
+                const item = (this.features || []).find(feature =>
+                    String(feature.feature_id || "") === String(id)
+                );
+                this._applyPlan(d.plan || null, {
+                    preview: true,
+                    archived: !!(item && item.archived),
+                });
+                // A preview is a peer view, not another layer beneath the
+                // feature browser. Closing the browser here guarantees that
+                // only one Mode OS surface is mounted at a time.
+                this.showFeatureBrowser = false;
             } catch (e) {
                 console.error("feature.previewFeature", e);
                 Alpine.store("toast").show("Preview failed — network error", "error");
+            } finally {
+                if (navigationId === this.navigationRevision) {
+                    this.previewingFeatureId = null;
+                }
             }
         },
-        exitPreview() {
+        async exitPreview() {
+            this.navigationRevision += 1;
             this.previewMode = false;
-            this.plan = null;
+            this.previewArchived = false;
+            this.previewingFeatureId = null;
             this.showFeatureBrowser = true;
-            this.load();
+            await this.load({ forcePlan: true });
         },
 
         showCreateModal: false,

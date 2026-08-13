@@ -157,6 +157,7 @@ See `documentation/`:
 - [`tooling_harness_architecture.md`](documentation/tooling_harness_architecture.md) — tool lifecycle
 - [`tracing.md`](documentation/tracing.md) — run tracing & the Trace Analyzer dashboard (per-iteration context/drift/compaction/nudge/tool telemetry)
 - [`memory_guide.md`](documentation/memory_guide.md) — memory vs scratchpad
+- [`mode_workspaces.md`](documentation/mode_workspaces.md) — Mode OS contract, evidence semantics, lenses, and web/mobile interaction rules
 - [`session_guide.md`](documentation/session_guide.md) — session memory architecture, history search, context-preservation (compaction floors, oversized-message handling)
 - [`harness-investigation.md`](documentation/harness-investigation.md) — context-management roadmap (R1–R12) with implementation status
 

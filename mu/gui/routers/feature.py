@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..mode_workspace import feature_workspace
+
 from mu.feature.engine import (
     FeaturePlan,
     FeaturePhase,
@@ -215,8 +217,10 @@ async def get_feature_state(request: Request) -> Dict[str, Any]:
             "plan": None,
             "features": [],
             "metadata_path": None,
+            "workspace": feature_workspace(None, [], active=False),
         }
     sm = session.session_manager
+    mode_active = sm.variables.get("agent_mode", "default") == "feature"
 
     record = sm.feature_state
     if record is None and sm.active_feature_id:
@@ -224,12 +228,14 @@ async def get_feature_state(request: Request) -> Dict[str, Any]:
 
     plan = _hydrate_plan(record)
     if plan is None:
+        features = _features_list(sm)
         return {
             "active": True,
             "active_feature_id": sm.active_feature_id,
             "plan": None,
-            "features": _features_list(sm),
+            "features": features,
             "metadata_path": None,
+            "workspace": feature_workspace(None, features, active=mode_active),
         }
 
     summary = summarize_feature_plan(plan)
@@ -238,12 +244,14 @@ async def get_feature_state(request: Request) -> Dict[str, Any]:
     # by summarize_feature_plan, but it's small enough that pruning is
     # premature optimization. Leave the full summary for now.
 
+    features = _features_list(sm)
     return {
         "active": True,
         "active_feature_id": sm.active_feature_id,
         "plan": summary,
-        "features": _features_list(sm),
+        "features": features,
         "metadata_path": plan.metadata_path or None,
+        "workspace": feature_workspace(summary, features, active=mode_active),
     }
 
 
@@ -542,14 +550,20 @@ async def preview_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     summary["phase_columns"] = _kanban_phases(summary)
     summary["read_only"] = True
     summary["preview_feature_id"] = feature_id
+    features = _features_list(sm)
 
     return {
         "active": True,
         "active_feature_id": sm.active_feature_id,
         "plan": summary,
-        "features": _features_list(sm),
+        "features": features,
         "metadata_path": plan.metadata_path or None,
         "read_only": True,
+        "workspace": feature_workspace(
+            summary,
+            features,
+            active=sm.variables.get("agent_mode", "default") == "feature",
+        ),
     }
 
 

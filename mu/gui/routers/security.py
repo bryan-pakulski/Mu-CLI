@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..mode_workspace import security_workspace
+
 from mu.security.engine import (
     SEVERITY_LEVELS,
     SecurityReport,
@@ -108,35 +110,42 @@ async def get_security_state(request: Request) -> Dict[str, Any]:
             "report": None,
             "findings": [],
             "summary": None,
+            "workspace": security_workspace(None, [], active=False),
         }
 
     report = _discover_report(session)
+    mode_active = session.variables.get("agent_mode", "default") == "security"
     if report is None:
         return {
             "active": True,
             "report": None,
             "findings": [],
             "summary": None,
+            "workspace": security_workspace(None, [], active=mode_active),
         }
 
     findings = [_finding_payload(f) for f in report.findings]
     summary = summarize_report(report)
 
+    report_payload = {
+        "scan_id": report.scan_id,
+        "title": report.title,
+        "summary": report.summary,
+        "status": report.status,
+        "directory": report.directory,
+        "metadata_path": report.metadata_path,
+        "findings_total": len(report.findings),
+        "created_at": report.created_at,
+        "updated_at": report.updated_at,
+    }
     return {
         "active": True,
-        "report": {
-            "scan_id": report.scan_id,
-            "title": report.title,
-            "summary": report.summary,
-            "status": report.status,
-            "directory": report.directory,
-            "metadata_path": report.metadata_path,
-            "findings_total": len(report.findings),
-            "created_at": report.created_at,
-            "updated_at": report.updated_at,
-        },
+        "report": report_payload,
         "findings": findings,
         "summary": summary,
+        "workspace": security_workspace(
+            report_payload, findings, active=mode_active
+        ),
     }
 
 

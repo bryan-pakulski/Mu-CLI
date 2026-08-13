@@ -3,6 +3,8 @@
        x-show="$store.mode.active === 'debug'"
        x-transition.opacity.duration.200ms>
 
+    {% include "fragments/mode_workspace_header.html" %}
+
     <!-- empty state -->
     <div class="panel-empty" x-show="!$store.debug.hypotheses.length && !$store.debug.debugTarget && !$store.debug.findings.length && !$store.debug.notes.length && !$store.debug.suspects.length">
         <h3>no debug state</h3>
@@ -24,7 +26,7 @@
 
     <!-- hypothesis stack -->
     <section class="panel-section"
-             x-show="$store.debug.hypotheses.length"
+             x-show="$store.debug.hypotheses.length && $store.modeWorkspace.shows('hypotheses')"
              :class="{ open: $store.debug.openSections.hypotheses }">
         <button class="panel-section-head"
                 @click="$store.debug.toggleSection('hypotheses')"
@@ -36,7 +38,7 @@
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.hypotheses"
              x-transition.opacity.duration.150ms>
-            <template x-for="h in $store.debug.hypotheses" :key="h.id">
+            <template x-for="h in $store.debug.filtered($store.debug.hypotheses)" :key="h.id">
                 <div class="hypothesis-item"
                      :class="{ expanded: $store.debug.isHypothesisExpanded(h.id) }"
                      @click="$store.debug.toggleHypothesis(h.id)">
@@ -65,7 +67,7 @@
 
     <!-- suspect locations -->
     <section class="panel-section"
-             x-show="$store.debug.suspects.length"
+             x-show="$store.debug.suspects.length && $store.modeWorkspace.shows('evidence')"
              :class="{ open: $store.debug.openSections.suspects }">
         <button class="panel-section-head"
                 @click="$store.debug.toggleSection('suspects')"
@@ -77,7 +79,7 @@
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.suspects"
              x-transition.opacity.duration.150ms>
-            <template x-for="s in $store.debug.suspects" :key="s.id">
+            <template x-for="s in $store.debug.filtered($store.debug.suspects)" :key="s.id">
                 <div class="suspect-row">
                     <span class="mono" x-text="s.content"></span>
                 </div>
@@ -87,7 +89,7 @@
 
     <!-- scratchpad notes (unclassified entries) -->
     <section class="panel-section"
-             x-show="$store.debug.notes.length"
+             x-show="$store.debug.notes.length && $store.modeWorkspace.shows('evidence')"
              :class="{ open: $store.debug.openSections.notes }">
         <button class="panel-section-head"
                 @click="$store.debug.toggleSection('notes')"
@@ -99,7 +101,7 @@
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.notes"
              x-transition.opacity.duration.150ms>
-            <template x-for="n in $store.debug.notes" :key="n.id">
+            <template x-for="n in $store.debug.filtered($store.debug.notes)" :key="n.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + n.id"></span>
@@ -115,7 +117,7 @@
 
     <!-- past root causes / findings -->
     <section class="panel-section"
-             x-show="$store.debug.findings.length"
+             x-show="$store.debug.findings.length && $store.modeWorkspace.shows('findings')"
              :class="{ open: $store.debug.openSections.findings }">
         <button class="panel-section-head"
                 @click="$store.debug.toggleSection('findings')"
@@ -127,7 +129,7 @@
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.findings"
              x-transition.opacity.duration.150ms>
-            <template x-for="f in $store.debug.findings" :key="f.id">
+            <template x-for="f in $store.debug.filtered($store.debug.findings)" :key="f.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + f.id"></span>

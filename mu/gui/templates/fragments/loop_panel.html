@@ -3,6 +3,8 @@
        x-show="$store.mode.active === 'loop'"
        x-transition.opacity.duration.200ms>
 
+    {% include "fragments/mode_workspace_header.html" %}
+
     <!-- empty state -->
     <div class="panel-empty" x-show="!$store.loop.loopGoal && !$store.loop.backlog.length">
         <h3>no loop active</h3>
@@ -17,12 +19,16 @@
                   :style="$store.loop.loopActive ? 'background: var(--accent-soft); color: var(--accent)' : ''"
                   x-text="$store.loop.loopActive ? 'active' : 'paused'"></span>
             <span x-text="$store.loop.backlog.length + ' tasks'"></span>
+            <button class="mode-control-btn"
+                    x-show="$store.loop.loopGoal"
+                    @click="$store.loop.setActive(!$store.loop.loopActive)"
+                    x-text="$store.loop.loopActive ? 'pause' : 'resume'"></button>
         </div>
     </div>
 
     <!-- backlog (todos) -->
     <section class="panel-section"
-             x-show="$store.loop.backlog.length || $store.loop.loopGoal"
+             x-show="($store.loop.backlog.length || $store.loop.loopGoal) && $store.modeWorkspace.shows('backlog')"
              :class="{ open: $store.loop.openSections.backlog }">
         <div class="panel-section-header-row">
             <button class="panel-section-head"
@@ -39,7 +45,7 @@
         </div>
         <div class="panel-section-body" x-show="$store.loop.openSections.backlog"
              x-transition.opacity.duration.150ms>
-            <template x-for="item in $store.loop.backlog" :key="item.id">
+            <template x-for="item in $store.loop.filteredBacklog()" :key="item.id">
                 <div class="loop-todo-item"
                      :class="{ expanded: $store.loop.isItemExpanded(item.id) }">
                     <div class="loop-todo-row"
@@ -76,7 +82,7 @@
 
     <!-- spawned features -->
     <section class="panel-section"
-             x-show="$store.loop.loopFeatures.length"
+             x-show="$store.loop.loopFeatures.length && $store.modeWorkspace.shows('features')"
              :class="{ open: $store.loop.openSections.features }">
         <button class="panel-section-head"
                 @click="$store.loop.toggleSection('features')"
@@ -98,7 +104,7 @@
 
     <!-- memory snapshot -->
     <section class="panel-section"
-             x-show="$store.loop.memory.length"
+             x-show="$store.loop.memory.length && $store.modeWorkspace.shows('memory')"
              :class="{ open: $store.loop.openSections.memory }">
         <button class="panel-section-head"
                 @click="$store.loop.toggleSection('memory')"
@@ -110,7 +116,7 @@
         </button>
         <div class="panel-section-body" x-show="$store.loop.openSections.memory"
              x-transition.opacity.duration.150ms>
-            <template x-for="m in $store.loop.memory" :key="m.id">
+            <template x-for="m in $store.loop.filteredMemory()" :key="m.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + m.id"></span>

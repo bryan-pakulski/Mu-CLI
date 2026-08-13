@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ModeWorkspaceContract } from './modeWorkspace';
 
 export interface TeacherCourseSummary {
   course_id: string;
@@ -60,6 +61,7 @@ export interface TeacherState {
   courses: TeacherCourseSummary[];
   raw_teacher_state_present: boolean;
   registry_size: number;
+  workspace: ModeWorkspaceContract;
 }
 
 export const teacherApi = {

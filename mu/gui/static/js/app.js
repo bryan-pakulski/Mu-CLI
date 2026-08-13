@@ -2055,6 +2055,78 @@ ${problem.text}`, "error", 16000);
         },
     });
 
+    // Shared chrome for the mode operating surfaces.  The native mode stores
+    // still own their data and actions; this store only keeps exploration
+    // state (lens, query, evidence-guide disclosure) stable across refreshes.
+    Alpine.store("modeWorkspace", {
+        selected: {},
+        queries: {},
+        qualityOpen: {},
+        _storageKey: "mucli.mode-workspace.v1",
+        init() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(this._storageKey) || "{}");
+                this.selected = saved.selected || {};
+                this.queries = saved.queries || {};
+                this.qualityOpen = saved.qualityOpen || {};
+            } catch (_) { /* private browsing / corrupt state */ }
+        },
+        _persist() {
+            try {
+                localStorage.setItem(this._storageKey, JSON.stringify({
+                    selected: this.selected,
+                    queries: this.queries,
+                    qualityOpen: this.qualityOpen,
+                }));
+            } catch (_) { /* exploration state is best-effort */ }
+        },
+        modeName() {
+            return (Alpine.store("mode") || {}).active || "default";
+        },
+        current() {
+            const store = Alpine.store(this.modeName());
+            return (store && store.workspace) || null;
+        },
+        selectedView(modeName) {
+            const mode = modeName || this.modeName();
+            const workspace = this.current();
+            const available = (workspace && workspace.views || []).map(v => v.id);
+            const saved = this.selected[mode];
+            return available.includes(saved) ? saved : "overview";
+        },
+        select(viewId) {
+            const mode = this.modeName();
+            this.selected[mode] = viewId || "overview";
+            this._persist();
+        },
+        shows(...viewIds) {
+            const selected = this.selectedView();
+            return selected === "overview" || viewIds.includes(selected);
+        },
+        query(modeName) {
+            return this.queries[modeName || this.modeName()] || "";
+        },
+        setQuery(value) {
+            this.queries[this.modeName()] = value || "";
+            this._persist();
+        },
+        matches(...values) {
+            const q = this.query().trim().toLowerCase();
+            if (!q) return true;
+            return values.flat(Infinity).some(value =>
+                String(value == null ? "" : value).toLowerCase().includes(q)
+            );
+        },
+        toggleQuality() {
+            const mode = this.modeName();
+            this.qualityOpen[mode] = !this.qualityOpen[mode];
+            this._persist();
+        },
+        isQualityOpen() {
+            return !!this.qualityOpen[this.modeName()];
+        },
+    });
+
     Alpine.store("prompts", {
         queue: [],
         // `active` returns the head prompt FOR THE FOCUSED SESSION.
@@ -2407,6 +2479,7 @@ ${problem.text}`, "error", 16000);
         active: false,
         loaded: false,
         coursePath: null,    // debugging breadcrumb: where the data was read
+        workspace: null,
         openSections: {
             profile: true,
             curriculum: true,
@@ -2423,6 +2496,7 @@ ${problem.text}`, "error", 16000);
                 this.course = d.course || null;
                 this.courses = d.courses || [];
                 this.coursePath = d.course_path || null;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
                 if (window.__mucliTeacherDebug) {
                     console.log("teacher.load", {
@@ -2475,11 +2549,34 @@ ${problem.text}`, "error", 16000);
         },
         allAssignments() {
             if (!this.course) return [];
-            return (this.course.assignments || []);
+            return (this.course.assignments || []).filter(a =>
+                Alpine.store("modeWorkspace").matches(
+                    a.assignment_id, a.kind, a.status, a.prompt, a.rubric,
+                    a.grade && a.grade.feedback
+                )
+            );
         },
         scheduledReviews() {
             if (!this.course) return [];
-            return (this.course.scheduled_reviews || []);
+            return (this.course.scheduled_reviews || []).filter(r =>
+                Alpine.store("modeWorkspace").matches(
+                    r.source_lesson_id, r.source_lesson_title, r.status, r.notes
+                )
+            );
+        },
+        filteredModules() {
+            if (!this.course) return [];
+            const ws = Alpine.store("modeWorkspace");
+            return (this.course.modules || []).map(module => {
+                if (ws.matches(module.title, module.goal, module.module_id)) return module;
+                const lessons = (module.lessons || []).filter(lesson => ws.matches(
+                    lesson.title, lesson.lesson_id, lesson.concept_brief,
+                    lesson.learning_objectives, lesson.lecture_gaps
+                ));
+                return { ...module, lessons };
+            }).filter(module => module.lessons.length || ws.matches(
+                module.title, module.goal, module.module_id
+            ));
         },
         // Map learner_profile keys → which fields are array-of-tags
         // versus solo-text. Surfacing both shapes in one helper keeps
@@ -2529,6 +2626,7 @@ ${problem.text}`, "error", 16000);
         active: false,
         loaded: false,
         metadataPath: null,
+        workspace: null,
         openSections: {
             events: false,
             reviews: false,
@@ -2554,6 +2652,7 @@ ${problem.text}`, "error", 16000);
                 this.plan = d.plan || null;
                 this.features = d.features || [];
                 this.metadataPath = d.metadata_path || null;
+                this.workspace = d.workspace || null;
                 // Seed open/closed defaults for new phases without
                 // disturbing whatever the user has already toggled.
                 const phases = (this.plan && this.plan.phase_columns) || [];
@@ -2617,7 +2716,18 @@ ${problem.text}`, "error", 16000);
             return active.length ? active[0] : null;
         },
         phaseColumns() {
-            return (this.plan && this.plan.phase_columns) || [];
+            const phases = (this.plan && this.plan.phase_columns) || [];
+            const ws = Alpine.store("modeWorkspace");
+            return phases.map(phase => {
+                if (ws.matches(phase.title, phase.goal, phase.status)) return phase;
+                const tasks = (phase.tasks || []).filter(task => ws.matches(
+                    task.title, task.status, task.objectives, task.action_points,
+                    task.exit_criteria, task.blocked_reason, task.notes
+                ));
+                return { ...phase, tasks };
+            }).filter(phase => phase.tasks.length || ws.matches(
+                phase.title, phase.goal, phase.status
+            ));
         },
         progressPct() {
             if (!this.plan || !this.plan.task_count) return 0;
@@ -2636,11 +2746,19 @@ ${problem.text}`, "error", 16000);
         },
         recentEvents(limit = 5) {
             if (!this.plan || !this.plan.event_log) return [];
-            return this.plan.event_log.slice(-limit).reverse();
+            return this.plan.event_log.slice().reverse().filter(ev =>
+                Alpine.store("modeWorkspace").matches(
+                    ev.kind, ev.entity, ev.entity_id, ev.actor, ev.payload
+                )
+            ).slice(0, limit);
         },
         reviews() {
             if (!this.plan) return [];
-            return this.plan.review_records || [];
+            return (this.plan.review_records || []).filter(review =>
+                Alpine.store("modeWorkspace").matches(
+                    review.task_id, review.summary, review.limitations, review.issues
+                )
+            );
         },
         // ---- mutating actions ----
         async transitionTask(taskId, toStatus) {
@@ -2765,6 +2883,7 @@ ${problem.text}`, "error", 16000);
                 this.plan = d.plan || null;
                 this.active = !!d.active;
                 this.metadataPath = d.metadata_path || null;
+                this.workspace = d.workspace || this.workspace;
                 this.previewMode = true;
                 // Seed phase open/closed defaults for preview
                 const phases = (this.plan && this.plan.phase_columns) || [];
@@ -2871,6 +2990,7 @@ ${problem.text}`, "error", 16000);
         findingCount: 0,
         active: false,
         loaded: false,
+        workspace: null,
         openSections: {
             sources: true,
             bibliography: false,
@@ -2893,6 +3013,7 @@ ${problem.text}`, "error", 16000);
                 this.bibliography = d.bibliography || "";
                 this.findings = d.findings || [];
                 this.findingCount = d.finding_count || 0;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) {
                 console.error("research.load", e);
@@ -2919,8 +3040,16 @@ ${problem.text}`, "error", 16000);
             return this.sources.filter(s => {
                 if (this.typeFilter.length && !this.typeFilter.includes(s.source_type)) return false;
                 if (this.credibilityMin > 0 && (s.credibility_score || 0) < this.credibilityMin) return false;
+                if (!Alpine.store("modeWorkspace").matches(
+                    s.title, s.url, s.source_type, s.authors, Object.keys(s.metadata || {})
+                )) return false;
                 return true;
             });
+        },
+        filteredFindings() {
+            return this.findings.filter(f => Alpine.store("modeWorkspace").matches(
+                f.content, f.tags, f.source
+            ));
         },
         sourceTypes() {
             const types = new Set(this.sources.map(s => s.source_type));
@@ -2949,6 +3078,7 @@ ${problem.text}`, "error", 16000);
         summary: null,
         active: false,
         loaded: false,
+        workspace: null,
         openSections: {
             findings: true,
             stats: false,
@@ -2964,6 +3094,7 @@ ${problem.text}`, "error", 16000);
                 this.report = d.report || null;
                 this.findings = d.findings || [];
                 this.summary = d.summary || null;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) {
                 console.error("security.load", e);
@@ -2987,8 +3118,13 @@ ${problem.text}`, "error", 16000);
             return this.expandedFindingId === id;
         },
         filteredFindings() {
-            if (!this.severityFilter.length) return this.findings;
-            return this.findings.filter(f => this.severityFilter.includes(f.severity));
+            return this.findings.filter(f => {
+                if (this.severityFilter.length && !this.severityFilter.includes(f.severity)) return false;
+                return Alpine.store("modeWorkspace").matches(
+                    f.title, f.summary, f.vulnerability_class, f.affected_paths,
+                    f.exploit_path, f.references, f.status
+                );
+            });
         },
         severities() {
             const s = new Set(this.findings.map(f => f.severity));
@@ -3010,9 +3146,9 @@ ${problem.text}`, "error", 16000);
         severityColor(sev) {
             switch ((sev || "").toLowerCase()) {
                 case "critical": return "var(--err)";
-                case "high":     return "#e0af68";
-                case "medium":   return "#ff9e64";
-                case "low":      return "#7aa2f7";
+                case "high":     return "var(--risk-high)";
+                case "medium":   return "var(--risk-medium)";
+                case "low":      return "var(--risk-low)";
                 case "info":     return "var(--text-dimmer)";
                 default:         return "var(--text-dim)";
             }
@@ -3068,6 +3204,7 @@ ${problem.text}`, "error", 16000);
         memory: [],
         active: false,
         loaded: false,
+        workspace: null,
         openSections: { backlog: true, features: false, memory: false },
 
         async load() {
@@ -3080,6 +3217,7 @@ ${problem.text}`, "error", 16000);
                 this.loopFeatures = d.loop_features || [];
                 this.backlog = d.backlog || [];
                 this.memory = d.memory || [];
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) { console.error("loop.load", e); }
         },
@@ -3101,6 +3239,34 @@ ${problem.text}`, "error", 16000);
         expandedItemId: null,
         toggleItem(id) { this.expandedItemId = this.expandedItemId === id ? null : id; },
         isItemExpanded(id) { return this.expandedItemId === id; },
+        filteredBacklog() {
+            return this.backlog.filter(item => Alpine.store("modeWorkspace").matches(
+                item.content, item.tags, item.source, item.status
+            ));
+        },
+        filteredMemory() {
+            return this.memory.filter(item => Alpine.store("modeWorkspace").matches(
+                item.content, item.tags, item.source, item.kind
+            ));
+        },
+        async setActive(active) {
+            try {
+                const r = await fetch('/api/loop/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: !!active, goal: this.loopGoal || '' }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store('toast').show(d.detail || `Loop control failed (${r.status})`, 'error');
+                    return;
+                }
+                await this.load();
+                Alpine.store('toast').show(active ? 'Loop resumed' : 'Loop paused', 'success');
+            } catch (e) {
+                Alpine.store('toast').show('Loop control failed — network error', 'error');
+            }
+        },
 
         showAddItem: false,
         newItemContent: '',
@@ -3143,6 +3309,7 @@ ${problem.text}`, "error", 16000);
         scratchpadCount: 0,
         active: false,
         loaded: false,
+        workspace: null,
         openSections: { hypotheses: true, suspects: true, notes: true, findings: false },
         expandedHypothesisId: null,
 
@@ -3157,6 +3324,7 @@ ${problem.text}`, "error", 16000);
                 this.notes = d.notes || [];
                 this.findings = d.findings || [];
                 this.scratchpadCount = d.scratchpad_count || 0;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) { console.error("debug.load", e); }
         },
@@ -3166,6 +3334,11 @@ ${problem.text}`, "error", 16000);
         },
         isHypothesisExpanded(id) {
             return this.expandedHypothesisId === id;
+        },
+        filtered(items) {
+            return (items || []).filter(item => Alpine.store("modeWorkspace").matches(
+                item.content, item.tags, item.source, item.kind, item.status
+            ));
         },
         statusGlyph(status) {
             switch ((status || "").toLowerCase()) {

@@ -3,23 +3,24 @@ import { FlatList, View, RefreshControl, TouchableOpacity, Alert } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button } from '../components';
-import { securityApi, SecurityFinding } from '../api/security';
+import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
+import { securityApi, SecurityFinding, SecurityState } from '../api/security';
 import { spacing } from '../theme/tokens';
 
 export function SecurityScreen() {
   const { colors } = useTheme();
-  const [findings, setFindings] = useState<SecurityFinding[]>([]);
+  const [state, setState] = useState<SecurityState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<SecurityFinding | null>(null);
+  const workspaceView = useModeWorkspaceView(state?.workspace);
 
   const load = useCallback(async () => {
     try {
       setError(null);
       const res = await securityApi.getState();
-      setFindings(res.findings);
+      setState(res);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -78,7 +79,7 @@ export function SecurityScreen() {
     );
   }
 
-  if (findings.length === 0) {
+  if (!state || (!state.report && state.findings.length === 0)) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
         <EmptyState title="No security findings" message="No security scan or findings available" />
@@ -86,13 +87,31 @@ export function SecurityScreen() {
     );
   }
 
+  const findings = state.findings.filter(item => {
+    if (workspaceView.selectedView === 'evidence') return item.has_proof;
+    if (workspaceView.selectedView === 'remediation') return item.has_remediation;
+    return true;
+  });
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <FlatList
         data={findings}
         keyExtractor={item => item.finding_id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-        contentContainerStyle={{ padding: spacing.base }}
+        contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}
+        ListHeaderComponent={
+          <>
+            <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
+            {state.report && (
+              <Card style={{ marginBottom: spacing.sm }}>
+                <Text variant="xs" style={{ color: colors.textDim, textTransform: 'uppercase', letterSpacing: .7 }}>Scan brief</Text>
+                <Text variant="sm" style={{ color: colors.textSoft, marginTop: 5, lineHeight: 20 }}>{state.report.summary || 'No report summary recorded.'}</Text>
+              </Card>
+            )}
+          </>
+        }
+        ListEmptyComponent={<Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No records match this evidence lens.</Text>}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>

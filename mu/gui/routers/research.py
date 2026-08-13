@@ -20,6 +20,8 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Request
 
+from ..mode_workspace import research_workspace
+
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 
@@ -39,11 +41,21 @@ def _source_to_dict(source) -> Dict[str, Any]:
 
 
 def _memory_entry_to_dict(entry) -> Dict[str, Any]:
+    tags = list(entry.tags or [])
+    normalized_tags = {str(tag).lower() for tag in tags}
+    record_type = (
+        "claim"
+        if normalized_tags.intersection({"research", "claim", "finding"})
+        else "legacy_note"
+    )
     return {
         "id": entry.id,
         "content": entry.content,
-        "tags": list(entry.tags or []),
+        "tags": tags,
         "source": entry.source,
+        "kind": getattr(entry, "kind", "") or "",
+        "record_type": record_type,
+        "evidence_state": "source_linked" if entry.source else "evidence_gap",
         "created_at": entry.created_at,
         "updated_at": entry.updated_at,
         "hits": entry.hits,
@@ -61,8 +73,10 @@ async def get_research_state(request: Request) -> Dict[str, Any]:
             "bibliography": "",
             "findings": [],
             "finding_count": 0,
+            "workspace": research_workspace([], [], active=False),
         }
     sm = session.session_manager
+    mode_active = sm.variables.get("agent_mode", "default") == "research"
 
     # Sources from the CitationManager.  Hydrate the singleton from the
     # active session's persisted snapshot first, so the GUI always sees
@@ -97,4 +111,5 @@ async def get_research_state(request: Request) -> Dict[str, Any]:
         "bibliography": bibliography,
         "findings": findings,
         "finding_count": len(findings),
+        "workspace": research_workspace(sources, findings, active=mode_active),
     }

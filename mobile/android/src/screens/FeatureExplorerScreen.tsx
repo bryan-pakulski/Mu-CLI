@@ -23,7 +23,7 @@ import {
   FeatureTask,
 } from '../api/feature';
 import { useTheme } from '../theme/ThemeContext';
-import { Card, EmptyState, ErrorState, Skeleton, Text } from '../components';
+import { Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
 import { spacing } from '../theme/tokens';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
@@ -38,6 +38,7 @@ const FILTERS: Array<{ key: FeatureFilter; label: string }> = [
 export function FeatureExplorerScreen() {
   const { colors } = useTheme();
   const [state, setState] = useState<FeatureState | null>(null);
+  const [workspace, setWorkspace] = useState<FeatureState['workspace'] | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<FeatureSummary | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeatureFilter>('features');
@@ -49,12 +50,14 @@ export function FeatureExplorerScreen() {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
   const selectedIdRef = useRef<string | null>(null);
+  const workspaceView = useModeWorkspaceView(workspace);
 
   const previewFeature = useCallback(async (featureId: string, quiet = false) => {
     if (!quiet) setPreviewLoading(true);
     setError(null);
     try {
       const response = await featureApi.preview(featureId);
+      setWorkspace(response.workspace);
       selectedIdRef.current = featureId;
       setSelectedId(featureId);
       setSelectedPlan(response.plan);
@@ -73,6 +76,7 @@ export function FeatureExplorerScreen() {
       setError(null);
       const response = await featureApi.getState();
       setState(response);
+      setWorkspace(response.workspace);
 
       const currentSelectedId = preserveSelection ? selectedIdRef.current : null;
       if (currentSelectedId && response.features.some(item => item.feature_id === currentSelectedId)) {
@@ -178,6 +182,7 @@ export function FeatureExplorerScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {workspace ? <ModeWorkspaceHeader workspace={workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} /> : null}
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderCopy}>
             <Text variant="xl" style={styles.pageTitle}>Features</Text>
@@ -186,7 +191,7 @@ export function FeatureExplorerScreen() {
           {previewLoading ? <ActivityIndicator color={colors.accent} /> : null}
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {workspaceView.shows('overview') ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
           {FILTERS.map(item => {
             const active = filter === item.key;
             const count = countForFilter(state?.features || [], item.key);
@@ -205,9 +210,9 @@ export function FeatureExplorerScreen() {
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </ScrollView> : null}
 
-        {(state?.features.length || 0) === 0 ? (
+        {workspaceView.shows('overview') && ((state?.features.length || 0) === 0 ? (
           <EmptyState title="No feature plans" message="Feature plans created in this session will appear here." />
         ) : visibleFeatures.length === 0 ? (
           <Card style={styles.emptyFilterCard}>
@@ -224,7 +229,7 @@ export function FeatureExplorerScreen() {
               />
             ))}
           </View>
-        )}
+        ))}
 
         {error ? (
           <View style={[styles.errorBox, { backgroundColor: colors.bgLift }]}>
@@ -235,7 +240,7 @@ export function FeatureExplorerScreen() {
 
         {selectedPlan ? (
           <View style={styles.detailSection}>
-            <FeatureOverview
+            {workspaceView.shows('overview') ? <FeatureOverview
               plan={selectedPlan}
               item={selectedItem}
               onApprove={() => runAction(() => featureApi.approve(selectedPlan.feature_id))}
@@ -249,9 +254,10 @@ export function FeatureExplorerScreen() {
                 { title: 'Archive feature?', message: 'Archived features remain available for preview and can be restored.' },
               )}
               onUnarchive={() => runAction(() => featureApi.unarchive(selectedPlan.feature_id))}
-            />
+            /> : null}
 
-            <SectionHeader title="Progress" detail={`${selectedPlan.task_count || 0} tasks across ${selectedPlan.phase_columns?.length || 0} phases`} />
+            {workspaceView.shows('board', 'verification') ? <>
+            <SectionHeader title={workspaceView.selectedView === 'verification' ? 'Acceptance criteria' : 'Progress'} detail={`${selectedPlan.task_count || 0} tasks across ${selectedPlan.phase_columns?.length || 0} phases`} />
             {(selectedPlan.phase_columns || []).length === 0 ? (
               <Card><Text variant="sm" dim>No phases or tasks recorded.</Text></Card>
             ) : (
@@ -270,7 +276,9 @@ export function FeatureExplorerScreen() {
             )}
 
             <ExecutionSection execution={selectedPlan.execution || {}} nextPhase={selectedPlan.next_phase} nextTask={selectedPlan.next_task} />
+            </> : null}
 
+            {workspaceView.shows('reviews') ? <>
             <SectionHeader title="Reviews" detail={`${selectedPlan.review_count || selectedPlan.review_records?.length || 0} review records`} />
             <ReviewSection
               records={selectedPlan.review_records || []}
@@ -291,6 +299,7 @@ export function FeatureExplorerScreen() {
               expanded={expandedRecords}
               onToggle={id => toggleSet(setExpandedRecords, `event:${id}`)}
             />
+            </> : null}
           </View>
         ) : null}
       </ScrollView>

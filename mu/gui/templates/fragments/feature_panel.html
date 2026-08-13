@@ -3,6 +3,8 @@
        x-show="$store.mode.active === 'feature'"
        x-transition.opacity.duration.200ms>
 
+    {% include "fragments/mode_workspace_header.html" %}
+
     <!-- feature list (no plan active) -->
     <div class="panel-empty" x-show="!$store.feature.plan">
         <div class="feature-list-title-row">
@@ -214,7 +216,7 @@
 
     <!-- vertical phase kanban: each phase is a collapsible row, tasks
          stack inside, click a task to drill into its detail -->
-    <div class="phase-kanban" x-show="$store.feature.plan && !$store.feature.showFeatureBrowser">
+    <div class="phase-kanban" x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.modeWorkspace.shows('board', 'verification')">
         <div class="empty-row"
              x-show="!$store.feature.phaseColumns().length">
             no phases proposed yet
@@ -318,7 +320,7 @@
 
     <!-- event log -->
     <section class="panel-section"
-             x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.feature.recentEvents().length"
+             x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.feature.recentEvents().length && $store.modeWorkspace.shows('reviews')"
              :class="{ open: $store.feature.openSections.events }">
         <button class="panel-section-head"
                 @click="$store.feature.toggleSection('events')"
@@ -343,7 +345,7 @@
 
     <!-- review records -->
     <section class="panel-section"
-             x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.feature.reviews().length"
+             x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.feature.reviews().length && $store.modeWorkspace.shows('reviews')"
              :class="{ open: $store.feature.openSections.reviews }">
         <button class="panel-section-head"
                 @click="$store.feature.toggleSection('reviews')"

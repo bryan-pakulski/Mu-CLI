@@ -846,7 +846,7 @@ The user wants to *understand*, not necessarily change. Your output is a synthes
 
 5. **Read primary sources.** `url_grounding` for landing pages, `read_document` for PDFs, `read_file` for in-repo files. Don't synthesize from snippets when full text is available.
 
-6. **Persist findings as you go.** `save_memory` with discovered invariants, gotchas, key numbers — multi-turn research compounds. Tag with the topic.
+6. **Persist typed claims as you go.** For a durable source-backed claim, call `save_memory` with tags=["research", "claim", "<topic>"] and set `source` to the citation id or URL that supports it. Keep an unsupported lead in scratchpad with tags=["research", "evidence-gap"] until evidence is attached; do not promote an unsupported lead as a finding. Discovered invariants, gotchas, and key numbers should retain this claim/source shape so the Research workspace can distinguish evidence from generic memory.
 
 7. **Synthesize, cite, deliver.** Cross-reference, weight by credibility, and write the answer:
 

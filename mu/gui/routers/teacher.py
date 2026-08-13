@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..mode_workspace import teacher_workspace
+
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 
@@ -330,8 +332,10 @@ async def get_teacher_state(request: Request) -> Dict[str, Any]:
             "courses": [],
             "raw_teacher_state_present": False,
             "registry_size": 0,
+            "workspace": teacher_workspace(None, [], active=False),
         }
     sm = session.session_manager
+    mode_active = sm.variables.get("agent_mode", "default") == "teacher"
 
     # Pick the active course's metadata stub. SessionManager keeps a
     # registry; the active id points into it.
@@ -381,6 +385,7 @@ async def get_teacher_state(request: Request) -> Dict[str, Any]:
             if isinstance(teacher_state, dict) and teacher_state.get("directory")
             else None
         ),
+        "workspace": teacher_workspace(course, courses, active=mode_active),
     }
 
 

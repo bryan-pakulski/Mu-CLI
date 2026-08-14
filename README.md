@@ -99,7 +99,7 @@ The most common day-to-day commands — see [documentation/commands.md](document
 | `/tool <list\|enable\|disable> [name]` | Show or toggle tools |
 | `/skills [<name>\|reload\|enable <name>\|disable <name>]` | List, inspect, reload, or toggle skills |
 | `/docs [<name>]` | List or render bundled documentation (Tab autocompletes names) |
-| `/memory [status\|list <target>\|clear <target>\|save <name>\|load <name>]` | Inspect / wipe stores, inspect any prompt layer (`L0`, `L1`, `L1B`, `L2`, `L3`, `L5`), or snapshot/restore memory across sessions |
+| `/remember <text>` / `/memory ...` | Automatic scoped cross-session Memory Ledger plus a Context Observatory with provider-call heatmap, layer flow, churn and compaction views across web and mobile |
 | `/research <query>` | Web search + synthesis |
 | `/set <key> <value>` / `/get <key>` / `/unset <key>` / `/variables` | Manage session variables |
 | `/model [name]` / `/provider <name>` | Show or switch model / provider |
@@ -157,6 +157,7 @@ See `documentation/`:
 - [`tooling_harness_architecture.md`](documentation/tooling_harness_architecture.md) — tool lifecycle
 - [`tracing.md`](documentation/tracing.md) — run tracing & the Trace Analyzer dashboard (per-iteration context/drift/compaction/nudge/tool telemetry)
 - [`memory_guide.md`](documentation/memory_guide.md) — memory vs scratchpad
+- [`mode_workspaces.md`](documentation/mode_workspaces.md) — Mode OS contract, evidence semantics, lenses, and web/mobile interaction rules
 - [`session_guide.md`](documentation/session_guide.md) — session memory architecture, history search, context-preservation (compaction floors, oversized-message handling)
 - [`harness-investigation.md`](documentation/harness-investigation.md) — context-management roadmap (R1–R12) with implementation status
 

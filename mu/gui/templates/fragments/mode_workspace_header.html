@@ -1,0 +1,75 @@
+<!-- Shared Mode OS chrome. Domain content stays in the surrounding mode
+     fragment. This header deliberately uses type, space, and hairlines rather
+     than nested surfaces so the parent panel remains the single glass plane. -->
+<header class="mode-os" x-show="$store.modeWorkspace.current()">
+    <div class="mode-os-topline">
+        <span class="mode-os-mark">mode</span>
+        <span class="mode-os-status"
+              :data-tone="($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral'">
+            <span x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().status.label"></span>
+        </span>
+        <span class="mode-os-provenance"
+              :title="$store.modeWorkspace.current() && $store.modeWorkspace.current().provenance"
+              x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().provenance"></span>
+    </div>
+
+    <div class="mode-os-heading">
+        <div>
+            <h2 x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().title"></h2>
+            <p x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().objective"></p>
+        </div>
+    </div>
+
+    <dl class="mode-os-metrics">
+        <template x-for="metric in (($store.modeWorkspace.current() && $store.modeWorkspace.current().metrics) || [])"
+                  :key="metric.id">
+            <div class="mode-os-metric" :data-tone="metric.tone" :title="metric.detail">
+                <dd x-text="metric.value"></dd>
+                <dt x-text="metric.label"></dt>
+            </div>
+        </template>
+    </dl>
+
+    <div class="mode-os-commandbar">
+        <nav class="mode-os-lenses" aria-label="Workspace views">
+            <template x-for="view in (($store.modeWorkspace.current() && $store.modeWorkspace.current().views) || [])"
+                      :key="view.id">
+                <button type="button"
+                        :class="{ active: $store.modeWorkspace.selectedView() === view.id }"
+                        @click="$store.modeWorkspace.select(view.id)">
+                    <span x-text="view.label"></span>
+                    <span class="count" x-show="view.count !== undefined" x-text="view.count"></span>
+                </button>
+            </template>
+        </nav>
+        <label class="mode-os-search">
+            <span aria-hidden="true">⌕</span>
+            <input type="search"
+                   :placeholder="$store.modeWorkspace.current() && $store.modeWorkspace.current().search_placeholder"
+                   :value="$store.modeWorkspace.query()"
+                   @input="$store.modeWorkspace.setQuery($event.target.value)" />
+        </label>
+    </div>
+
+    <section class="mode-os-quality" :class="{ open: $store.modeWorkspace.isQualityOpen() }">
+        <button type="button" class="mode-os-quality-toggle"
+                @click="$store.modeWorkspace.toggleQuality()"
+                :aria-expanded="$store.modeWorkspace.isQualityOpen()">
+            <span>How to read confidence, accuracy, and relevance</span>
+            <span class="caret">›</span>
+        </button>
+        <div class="mode-os-quality-grid" x-show="$store.modeWorkspace.isQualityOpen()"
+             x-transition.opacity.duration.120ms>
+            <template x-for="item in (($store.modeWorkspace.current() && $store.modeWorkspace.current().quality) || [])"
+                      :key="item.id">
+                <div class="mode-os-quality-item" :data-state="item.state">
+                    <div>
+                        <strong x-text="item.label"></strong>
+                        <span class="mode-os-quality-state" x-text="item.state.replace(/-/g, ' ')"></span>
+                    </div>
+                    <p x-text="item.detail"></p>
+                </div>
+            </template>
+        </div>
+    </section>
+</header>

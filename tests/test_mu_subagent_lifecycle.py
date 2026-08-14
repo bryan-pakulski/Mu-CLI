@@ -413,6 +413,38 @@ def test_registry_tracker_emits_progress_per_tool():
     assert progress[-1]["last_tool"] == "search_for_string"
 
 
+def test_progress_events_are_self_describing_and_snapshot_keeps_actions():
+    reg, events = _make_registry_with_publish()
+    lc = SubagentLifecycleManager(thresholds={"enabled": False})
+    record = reg.register(
+        _fake_child(),
+        task="Inspect authentication middleware",
+        title="Auth inspection",
+        depth=2,
+        lifecycle=lc,
+        model="qwen3",
+        specialist_key="code_research",
+        max_iterations=40,
+    )
+    reg.tracker.update_tool(record.tracker_agent_id, "read_file", "auth.py")
+    reg.tracker.complete_tool(record.tracker_agent_id, "read_file", ok=True)
+
+    progress = [e for e in events if e.get("kind") == "subagent_progress"]
+    assert progress[-1]["task"] == "Inspect authentication middleware"
+    assert progress[-1]["title"] == "Auth inspection"
+    assert progress[-1]["depth"] == 2
+    assert progress[-1]["model"] == "qwen3"
+    assert progress[-1]["specialist_key"] == "code_research"
+    assert progress[-1]["max_iter"] == 40
+    snap = reg.snapshot(record.task_id)
+    assert snap["title"] == "Auth inspection"
+    assert len(snap["actions"]) == 1
+    assert snap["actions"][0]["seq"] == 1
+    assert snap["actions"][0]["tool"] == "read_file"
+    assert snap["actions"][0]["detail"] == "auth.py"
+    assert snap["actions"][0]["status"] == "done"
+
+
 def test_snapshot_carries_live_context_fields():
     """update_child_live writes context_pct/iter/max_iter/tokens_in under the
     lock; snapshot() surfaces them so the GUI context bar + trace render."""

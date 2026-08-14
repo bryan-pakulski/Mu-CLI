@@ -3,6 +3,8 @@
        x-show="$store.mode.active === 'research'"
        x-transition.opacity.duration.200ms>
 
+    {% include "fragments/mode_workspace_header.html" %}
+
     <!-- empty state -->
     <div class="panel-empty" x-show="!$store.research.sourceCount && !$store.research.findingCount">
         <h3>no sources yet</h3>
@@ -12,7 +14,7 @@
 
     <!-- sources section -->
     <section class="panel-section"
-             x-show="$store.research.sourceCount"
+             x-show="$store.research.sourceCount && $store.modeWorkspace.shows('sources')"
              :class="{ open: $store.research.openSections.sources }">
         <button class="panel-section-head"
                 @click="$store.research.toggleSection('sources')"
@@ -99,7 +101,7 @@
 
     <!-- bibliography preview -->
     <section class="panel-section"
-             x-show="$store.research.bibliography"
+             x-show="$store.research.bibliography && $store.modeWorkspace.shows('bibliography')"
              :class="{ open: $store.research.openSections.bibliography }">
         <button class="panel-section-head"
                 @click="$store.research.toggleSection('bibliography')"
@@ -120,7 +122,7 @@
 
     <!-- saved findings (task_memory) -->
     <section class="panel-section"
-             x-show="$store.research.findingCount"
+             x-show="$store.research.findingCount && $store.modeWorkspace.shows('claims')"
              :class="{ open: $store.research.openSections.findings }">
         <button class="panel-section-head"
                 @click="$store.research.toggleSection('findings')"
@@ -132,10 +134,16 @@
         </button>
         <div class="panel-section-body" x-show="$store.research.openSections.findings"
              x-transition.opacity.duration.150ms>
-            <template x-for="f in $store.research.findings" :key="f.id">
+            <template x-for="f in $store.research.filteredFindings()" :key="f.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + f.id"></span>
+                        <span class="tag"
+                              :class="{ 'typed-claim': f.record_type === 'claim' }"
+                              x-text="f.record_type === 'claim' ? 'research claim' : 'legacy note'"></span>
+                        <span class="tag"
+                              :class="{ 'evidence-linked': f.evidence_state === 'source_linked' }"
+                              x-text="f.evidence_state === 'source_linked' ? 'source linked' : 'evidence gap'"></span>
                         <template x-for="(tag, ti) in (f.tags || [])" :key="ti">
                             <span class="tag" x-text="tag"></span>
                         </template>

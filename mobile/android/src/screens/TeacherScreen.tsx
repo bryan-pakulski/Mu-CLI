@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button } from '../components';
+import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { teacherApi, TeacherState, TeacherModule, TeacherLesson } from '../api/teacher';
 import { spacing } from '../theme/tokens';
 
@@ -15,6 +15,7 @@ export function TeacherScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
+  const workspaceView = useModeWorkspaceView(state?.workspace);
 
   const load = useCallback(async () => {
     try {
@@ -65,16 +66,23 @@ export function TeacherScreen() {
   }
 
   const course = state.course;
+  const modules = workspaceView.selectedView === 'mastery' || workspaceView.selectedView === 'reviews'
+    ? []
+    : (course?.modules || []);
+  const assignments = (course?.assignments || []) as Array<Record<string, any>>;
+  const reviews = (course?.scheduled_reviews || []) as Array<Record<string, any>>;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <FlatList
-        data={course?.modules || []}
+        data={modules}
         keyExtractor={item => String(item.module_id)}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         contentContainerStyle={{ padding: spacing.base }}
         ListHeaderComponent={
-          course ? (
+          <>
+          <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
+          {course ? (
             <Card style={{ marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: '600' }}>{course.subject}</Text>
               <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
@@ -100,8 +108,36 @@ export function TeacherScreen() {
                 </>
               )}
             </Card>
-          )
+          )}
+          </>
         }
+        ListFooterComponent={course ? (
+          <View style={{ marginTop: spacing.sm }}>
+            {workspaceView.shows('mastery') && (
+              <View style={{ marginBottom: spacing.md }}>
+                <SectionLabel title="Demonstrated mastery" count={assignments.length} />
+                {assignments.map((assignment, index) => {
+                  const grade = assignment.grade as Record<string, any> | undefined;
+                  return <Card key={String(assignment.assignment_id || index)} style={{ marginBottom: spacing.sm }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Badge label={String(assignment.kind || assignment.status || 'assignment')} variant="neutral" />{grade && <Badge label={`${grade.score_pct ?? '—'}%`} variant={grade.passed ? 'success' : 'warning'} />}</View>
+                    <Text variant="sm" style={{ color: colors.text, fontWeight: '600', marginTop: spacing.sm }}>{String(assignment.assignment_id || 'Assignment')}</Text>
+                    {!!assignment.prompt && <Text variant="xs" style={{ color: colors.textSoft, marginTop: 5, lineHeight: 18 }}>{String(assignment.prompt)}</Text>}
+                    {!!grade?.feedback && <Text variant="xs" style={{ color: colors.textDim, marginTop: 6 }}>Evidence: {String(grade.feedback)}</Text>}
+                    {!grade && <Text variant="xs" style={{ color: colors.warning, marginTop: 6 }}>Mastery not assessed yet.</Text>}
+                  </Card>;
+                })}
+                {!assignments.length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No mastery checks recorded.</Text>}
+              </View>
+            )}
+            {workspaceView.shows('reviews') && (
+              <View>
+                <SectionLabel title="Retention schedule" count={reviews.length} />
+                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Badge label={String(review.status || 'scheduled')} variant={review.status === 'done' ? 'success' : 'neutral'} /><Text variant="xs" style={{ color: colors.textDim, fontFamily: 'monospace' }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.success, marginTop: 5 }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.textDim, marginTop: 5 }}>{String(review.notes)}</Text>}</Card>)}
+                {!reviews.length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No spaced reviews scheduled.</Text>}
+              </View>
+            )}
+          </View>
+        ) : null}
         renderItem={({ item: module }) => (
           <ModuleCard
             module={module}
@@ -113,6 +149,11 @@ export function TeacherScreen() {
       />
     </SafeAreaView>
   );
+}
+
+function SectionLabel({ title, count }: { title: string; count: number }) {
+  const { colors } = useTheme();
+  return <View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: '700', letterSpacing: .8, textTransform: 'uppercase' }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: 'monospace' }}>{count}</Text></View>;
 }
 
 function ModuleCard({ module, expanded, onToggle, colors }: {

@@ -26,6 +26,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..mode_workspace import security_workspace
+from ..mode_session import mode_session, mode_session_lock
+
 from mu.security.engine import (
     SEVERITY_LEVELS,
     SecurityReport,
@@ -101,42 +104,49 @@ def _finding_payload(f) -> Dict[str, Any]:
 
 @router.get("/state")
 async def get_security_state(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return {
             "active": False,
             "report": None,
             "findings": [],
             "summary": None,
+            "workspace": security_workspace(None, [], active=False),
         }
 
     report = _discover_report(session)
+    mode_active = session.variables.get("agent_mode", "default") == "security"
     if report is None:
         return {
             "active": True,
             "report": None,
             "findings": [],
             "summary": None,
+            "workspace": security_workspace(None, [], active=mode_active),
         }
 
     findings = [_finding_payload(f) for f in report.findings]
     summary = summarize_report(report)
 
+    report_payload = {
+        "scan_id": report.scan_id,
+        "title": report.title,
+        "summary": report.summary,
+        "status": report.status,
+        "directory": report.directory,
+        "metadata_path": report.metadata_path,
+        "findings_total": len(report.findings),
+        "created_at": report.created_at,
+        "updated_at": report.updated_at,
+    }
     return {
         "active": True,
-        "report": {
-            "scan_id": report.scan_id,
-            "title": report.title,
-            "summary": report.summary,
-            "status": report.status,
-            "directory": report.directory,
-            "metadata_path": report.metadata_path,
-            "findings_total": len(report.findings),
-            "created_at": report.created_at,
-            "updated_at": report.updated_at,
-        },
+        "report": report_payload,
         "findings": findings,
         "summary": summary,
+        "workspace": security_workspace(
+            report_payload, findings, active=mode_active
+        ),
     }
 
 
@@ -150,7 +160,7 @@ class RefuteBody(BaseModel):
 
 @router.post("/findings/{finding_id}/approve")
 async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
 
@@ -158,7 +168,7 @@ async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
     if report is None:
         raise HTTPException(status_code=404, detail="no active security report")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         finding = report.find(finding_id)
         if finding is None:
@@ -174,7 +184,7 @@ async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
 
 @router.post("/findings/{finding_id}/refute")
 async def refute(request: Request, finding_id: str, body: RefuteBody) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         raise HTTPException(status_code=412, detail="no session active")
 
@@ -182,7 +192,7 @@ async def refute(request: Request, finding_id: str, body: RefuteBody) -> Dict[st
     if report is None:
         raise HTTPException(status_code=404, detail="no active security report")
 
-    lock = request.app.state.session_lock_for()
+    lock = mode_session_lock(request, session)
     with lock:
         finding = report.find(finding_id)
         if finding is None:

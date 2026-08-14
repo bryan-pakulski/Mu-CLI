@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ModeWorkspaceContract } from './modeWorkspace';
 
 export interface FeatureTask {
   id: number;
@@ -101,6 +102,7 @@ export interface FeatureState {
   features: FeatureListItem[];
   metadata_path: string | null;
   read_only?: boolean;
+  workspace: ModeWorkspaceContract;
 }
 
 export const featureApi = {

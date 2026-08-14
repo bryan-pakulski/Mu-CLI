@@ -2,7 +2,10 @@
 
 ## Overview
 
-Mu-CLI implements a multi-layered memory architecture designed to optimize context management for agentic AI workflows. The system consists of four primary memory stores plus a collation buffer for deferred context delivery.
+Mu-CLI implements a multi-layered memory architecture designed to optimize
+context management for agentic AI workflows. Session working memory is kept
+separate from the cross-session **Memory Ledger**, and the UI distinguishes
+durable knowledge from the provider-visible **Context Observatory**.
 
 ---
 
@@ -26,7 +29,8 @@ Mu-CLI implements a multi-layered memory architecture designed to optimize conte
 
 **Location:** `mu/memory/stores.py`
 
-**Purpose:** Persistent, durable memory that survives across turns and sessions.
+**Purpose:** Working memory that survives turns and process restarts when the
+same named session is reopened.
 
 **Key features:**
 - **Max entries:** Configurable (effective default 64 via the `memory_max_entries` config variable, applied at turn start in `mu/agent/loop_body.py`; the `TaskMemoryStore` class default is 1024 when constructed directly)
@@ -54,6 +58,73 @@ class MemoryEntry:
 **Why implemented:** Prevents the AI from re-reading large files or re-executing expensive searches. Critical findings (file locations, search results, workspace structure) are preserved for quick recall.
 
 **Lifecycle fields** (`status`, `superseded_by`, `supersedes`) let the agent distinguish active work from completed, superseded, or archived entries. `kind` drives eviction priority (decisions > findings > observations > goals). See the [Memory Lifecycle](#memory-lifecycle) section below.
+
+---
+
+### 2a. Cross-session Memory Ledger
+
+**Locations:** mu/memory/models.py, mu/memory/ledger.py,
+mu/memory/service.py
+
+**Purpose:** Automatic, scoped knowledge shared by new sessions without
+replaying full conversation history.
+
+**Behaviour:**
+
+- Enabled by default. The model calls save_memory autonomously for useful
+  non-secret decisions, findings, conventions, preferences, procedures and
+  lessons. Eligible entries are promoted automatically; Mu-CLI does not pause
+  to request approval.
+- Before each user turn, the service resolves personal/workspace/repository/
+  branch/feature scope, runs a pure FTS5-backed retrieval, applies a fixed
+  token budget, and injects the result once as LAYER 2M.
+- Every write, revision, lifecycle change and provider injection has an
+  append-only event. Every recall has a receipt listing included and excluded
+  candidates, score factors and token cost.
+- The canonical store is ~/.mucli/memory/memory.db (SQLite WAL, mode 0600).
+  FTS is a derived search index; immutable revisions and current-state records
+  remain the source of truth.
+- Search and browsing do not change truth timestamps or reactivate records.
+  Only actual model injection records recall use.
+- Secret-pattern detection runs before persistence. Credential-like memory is
+  rejected rather than redacted into a misleading durable claim.
+
+**User experience:** Normal chat is uninterrupted. TUI, web and mobile show
+compact “recalled N” / “stored N” receipts. The Memory Center provides search,
+provenance, timeline, relationship, edit, pin, archive, restore and permanent
+Forget controls. /memory why last explains the last injection.
+
+**Precedence:** Current system policy and the current user request always win.
+Recalled memory is reference data, not an instruction channel.
+
+---
+
+### 2b. Context Observatory
+
+**Locations:** `mu/gui/memory_snapshot.py`, `mu/gui/routers/memory.py`
+
+**Purpose:** Show what the model is actually carrying, and how it changes
+during a session run, without persisting another copy of prompt content.
+
+Each pre-provider call records one bounded timeline point with per-layer token
+counts, token deltas, fixed-slice content hashes, churn ratios, context pressure
+and compaction detection. The timeline retains at most 360 points in runtime
+and never includes raw layer text. Opening or searching the view is read-only;
+only real provider calls advance it.
+
+The web and mobile Memory Center expose complementary views:
+
+- **Evolution heatmap:** provider calls on the x-axis, L0-L5 layers on the
+  y-axis, and brightness proportional to content replacement.
+- **Layer flow:** a stacked stream of provider-visible tokens, making growth,
+  redistribution and summary/history transitions visible.
+- **Churn pulse:** aggregate replacement rate with compaction markers.
+- **Current fingerprint:** the detailed slice-level map for inspecting the
+  latest assembled context and opening current layer contents.
+
+All Context Observatory APIs honor explicit session context from web and
+mobile clients, preventing a read from showing the focused desktop session
+while an action targets a different session.
 
 ---
 
@@ -195,7 +266,7 @@ driven by the SELF-MANAGEMENT block in `AGENTIC_SYSTEM_BASE` (rule 7).
   `stale_todos` (completed todos not yet cleared), `in_progress_todos`, and
   `memory_pressure_pct` (entries vs max — curate before a silent eviction).
   Reuses `collect_context_layers` so the numbers agree with `/memory` and
-  the Memory Map panel. Call before big gathers or when a turn feels long.
+  the Context Observatory. Call before big gathers or when a turn feels long.
 - **`checkpoint_progress(min_new_entries=6)`** — agent-callable wrapper
   around `HistoryMixin.force_progress_checkpoint`. Folds recent history
   into L2 *without* compacting (the anchor doesn't advance, entries stay

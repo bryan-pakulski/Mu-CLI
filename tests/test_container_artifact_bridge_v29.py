@@ -107,6 +107,20 @@ def test_container_upload_tool_uses_host_bridge():
     assert ui.calls[0]["content"] == "contents"
 
 
+def test_worker_bridge_source_forwards_visualization_timeline_anchor():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "mu/container/worker.py").read_text(encoding="utf-8")
+    endpoint = (root / "mu/gui/routers/containers.py").read_text(encoding="utf-8")
+
+    for field in (
+        "timeline_turn_id",
+        "timeline_history_index",
+        "timeline_part_index",
+    ):
+        assert f'params["{field}"]' in source
+        assert f"{field}={field}" in endpoint
+
+
 def test_structured_tool_result_preserves_artifacts(monkeypatch):
     artifact = {"artifact_id": "abc123", "name": "report.md", "size": 3}
     envelope = {

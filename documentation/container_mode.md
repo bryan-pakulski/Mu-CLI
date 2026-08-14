@@ -17,6 +17,13 @@ installation are normal process and filesystem operations inside the worker.
 
 An existing session without `session_type` loads as `workspace`.
 
+Container sessions support the complete strategy-mode surface. Selecting
+Feature, Research, Debug, Security, Loop, or Teacher changes the harness used
+inside the worker on the next turn. Web and mobile proxy the same mode
+explorer APIs into the worker, so container-only plans, reports, proofs,
+curricula, controls, sub-agent progress, context snapshots, and published
+artifacts appear through the same Mode OS used by host workspaces.
+
 Use the CLI:
 
 ```text

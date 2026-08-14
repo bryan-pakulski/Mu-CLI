@@ -81,6 +81,22 @@ describe('API client', () => {
         }),
       );
     });
+
+    it('scopes mutations to the active session', async () => {
+      useConnectionStore.getState().setActiveSession('container-feature');
+      (fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      await api.post('/api/modes/feature');
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('session_name=container-feature'),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
   });
 
   describe('checkHealth', () => {

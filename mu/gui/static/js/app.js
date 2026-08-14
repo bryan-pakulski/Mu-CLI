@@ -102,6 +102,11 @@ document.addEventListener("alpine:init", () => {
                 // response"). Defer the reload until the turn completes.
                 pendingReload: false,
                 historyHydrated: false,
+                // A response hand-off waits for replacement text before
+                // retiring the previous readable response.  Keeping the
+                // timer per session prevents background sessions from
+                // disturbing the focused transcript.
+                handoffTimer: null,
             };
         },
         _slot(name) {
@@ -239,7 +244,63 @@ document.addEventListener("alpine:init", () => {
                 || (turn.role === "subagent_panel" && turn.running)
             );
         },
-        _foldLiveInterim(slot) {
+        _isTimelineAnchor(turn) {
+            return turn && (
+                turn.role === "visualization"
+                || turn.role === "subagent_panel"
+            );
+        },
+        _collapseSummary(childTurns) {
+            let totalElapsed = 0;
+            let totalTokens = 0;
+            for (const child of childTurns) {
+                if (child.elapsed) totalElapsed += parseFloat(child.elapsed) || 0;
+                if (child.tokens) totalTokens += Number(child.tokens) || 0;
+            }
+            return {
+                count: childTurns.length,
+                elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
+                tokens: totalTokens > 0
+                    ? (totalTokens >= 1000
+                        ? `${(totalTokens / 1000).toFixed(1)}k`
+                        : String(totalTokens))
+                    : "",
+            };
+        },
+        _pushCollapsedSegments(target, turns, options) {
+            const opts = options || {};
+            let segment = [];
+            let segmentIndex = 0;
+            const flush = () => {
+                if (!segment.length) return;
+                const childTurns = segment;
+                segment = [];
+                const groupKey = `${opts.groupKey || "group"}:${segmentIndex++}`;
+                const summary = this._collapseSummary(childTurns);
+                target.push({
+                    id: `${opts.idPrefix || "collapse"}-${segmentIndex}`,
+                    role: "collapse",
+                    groupKey,
+                    userId: opts.userId || "",
+                    live: Boolean(opts.live),
+                    childTurns,
+                    ...summary,
+                    open: opts.openByKey && opts.openByKey.has(groupKey)
+                        ? Boolean(opts.openByKey.get(groupKey))
+                        : Boolean(opts.defaultOpen),
+                });
+            };
+            for (const turn of turns) {
+                if (this._isTimelineAnchor(turn)) {
+                    flush();
+                    target.push(turn);
+                } else {
+                    segment.push(turn);
+                }
+            }
+            flush();
+        },
+        _foldLiveInterim(slot, currentId = null) {
             let userIndex = -1;
             for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
                 if (slot.turns[index].role === "user") {
@@ -250,53 +311,69 @@ document.addEventListener("alpine:init", () => {
             if (userIndex < 0) return;
 
             const userTurn = slot.turns[userIndex];
-            const tail = slot.turns.slice(userIndex + 1);
-            const existing = tail.find(turn =>
-                turn.role === "collapse"
-                && turn.live
-                && turn.userId === userTurn.id
-            );
-            const movable = [];
-            const retained = [];
-            for (const turn of tail) {
-                if (turn === existing) continue;
-                if (this._isLiveTimelineTurn(turn)) retained.push(turn);
-                else movable.push(turn);
+            const openByKey = new Map();
+            const flatten = (items) => {
+                const flattened = [];
+                for (const item of items) {
+                    if (item.role === "collapse") {
+                        if (item.groupKey) openByKey.set(item.groupKey, Boolean(item.open));
+                        flattened.push(...flatten(item.childTurns || []));
+                    } else {
+                        flattened.push(item);
+                    }
+                }
+                return flattened;
+            };
+            const tail = flatten(slot.turns.slice(userIndex + 1));
+            let currentIndex = -1;
+            for (let index = tail.length - 1; index >= 0; index -= 1) {
+                const turn = tail[index];
+                if (
+                    turn.role === "assistant"
+                    && ((currentId && turn.id === currentId) || (!currentId && turn.streaming))
+                ) {
+                    currentIndex = index;
+                    break;
+                }
             }
-            if (!movable.length) return;
+            // No successor response exists yet. The previous response stays
+            // fully readable while tools/thinking continue in the background.
+            if (currentIndex < 0) return;
 
-            const childTurns = [
-                ...((existing && existing.childTurns) || []),
-                ...movable,
-            ];
-            let totalElapsed = 0;
-            let totalTokens = 0;
-            for (const child of childTurns) {
-                if (child.elapsed) totalElapsed += parseFloat(child.elapsed) || 0;
-                if (child.tokens) totalTokens += Number(child.tokens) || 0;
-            }
-            const collapse = {
-                id: (existing && existing.id) || `live-collapse-${userTurn.id}`,
-                role: "collapse",
+            const regrouped = [];
+            this._pushCollapsedSegments(regrouped, tail.slice(0, currentIndex), {
+                idPrefix: `live-collapse-${userTurn.id}`,
                 groupKey: `live:${userTurn.id}`,
                 userId: userTurn.id,
                 live: true,
-                childTurns,
-                count: childTurns.length,
-                elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
-                tokens: totalTokens > 0
-                    ? (totalTokens >= 1000
-                        ? `${(totalTokens / 1000).toFixed(1)}k`
-                        : String(totalTokens))
-                    : "",
-                open: Boolean(existing && existing.open),
-            };
-            slot.turns.splice(
-                userIndex + 1,
-                tail.length,
-                collapse,
-                ...retained,
-            );
+                openByKey,
+            });
+            regrouped.push(...tail.slice(currentIndex));
+            slot.turns.splice(userIndex + 1, slot.turns.length - userIndex - 1, ...regrouped);
+        },
+        _beginAssistantHandoff(slot, current, name) {
+            if (!current || !current.text) return;
+            let currentIndex = slot.turns.indexOf(current);
+            if (currentIndex < 0) return;
+            let hasPrevious = false;
+            for (let index = currentIndex - 1; index >= 0; index -= 1) {
+                const turn = slot.turns[index];
+                if (turn.role === "user") break;
+                if (turn.role === "assistant" && turn.text && !turn.streaming) {
+                    turn.leaving = true;
+                    hasPrevious = true;
+                }
+            }
+            if (!hasPrevious) return;
+            current.entering = true;
+            if (slot.handoffTimer) clearTimeout(slot.handoffTimer);
+            slot.handoffTimer = setTimeout(() => {
+                slot.handoffTimer = null;
+                current.entering = false;
+                for (const turn of slot.turns) turn.leaving = false;
+                this._foldLiveInterim(slot, current.id);
+                if (!name || name === this.currentName) this.scroll();
+            }, 260);
         },
 
         // ---------- collapse intermediate turns ----------------------
@@ -354,29 +431,23 @@ document.addEventListener("alpine:init", () => {
                 }
 
                 if (finalOffset > 0) {
-                    const childTurns = exchange.slice(0, finalOffset);
                     const finalResponse = exchange[finalOffset];
                     const groupKey = JSON.stringify([userTurn.text || "", finalResponse.text || ""]);
-                    let totalElapsed = 0;
-                    let totalTokens = 0;
-                    for (const child of childTurns) {
-                        if (child.elapsed) totalElapsed += parseFloat(child.elapsed) || 0;
-                        if (child.tokens) totalTokens += Number(child.tokens) || 0;
-                    }
-                    grouped.push({
-                        id: `collapse-${userTurn.id}-${finalResponse.id}`,
-                        role: "collapse",
+                    const openByKey = new Map(previousOpen);
+                    // Compatibility with the former one-collapse-per-exchange
+                    // shape: carry its disclosure state into every segment.
+                    const defaultOpen = (
+                        previousOpen.get(groupKey)
+                        ?? previousLiveOpen.get(userTurn.id)
+                        ?? false
+                    );
+                    this._pushCollapsedSegments(grouped, exchange.slice(0, finalOffset), {
+                        idPrefix: `collapse-${userTurn.id}-${finalResponse.id}`,
                         groupKey,
-                        childTurns,
-                        count: childTurns.length,
-                        elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
-                        tokens: totalTokens > 0 ? (totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : String(totalTokens)) : "",
-                        open:
-                            previousOpen.get(groupKey)
-                            ?? previousLiveOpen.get(userTurn.id)
-                            ?? false,
-                        live: false,
                         userId: userTurn.id,
+                        live: false,
+                        openByKey,
+                        defaultOpen,
                     });
                     grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
                 } else {
@@ -403,12 +474,6 @@ document.addEventListener("alpine:init", () => {
             const previousIds = (previous && previous.attachments || []).map(item => item.attachment_id).join(",");
             if (previous && previous.role === "user" && previous.text === text && incomingIds === previousIds) return;
             this._closeTrace(slot);
-            // Drop a finished sub-agent panel so a new turn starts clean.
-            // A panel whose agents are still running (outliving the parent
-            // turn) is kept until they finish.
-            slot.turns = slot.turns.filter(
-                turn => turn.role !== "subagent_panel" || this._panelRunning(turn)
-            );
             slot.turns.push({
                 id: this._id("u"),
                 role: "user",
@@ -425,7 +490,6 @@ document.addEventListener("alpine:init", () => {
             const existing = this._findById(slot, id);
             this._closeStreamingAssistants(slot, id);
             this._closeTrace(slot);
-            this._foldLiveInterim(slot);
             if (existing && existing.role === "assistant") {
                 existing.streaming = true;
             } else {
@@ -452,7 +516,9 @@ document.addEventListener("alpine:init", () => {
             if (!t) return;
             this._closeStreamingAssistants(slot, t.id);
             t.streaming = true;
+            const startsSuccessor = !t.text;
             t.text += text;
+            if (startsSuccessor && t.text) this._beginAssistantHandoff(slot, t, name);
             if (this._renderRaf) cancelAnimationFrame(this._renderRaf);
             const turnRef = t;
             this._renderRaf = requestAnimationFrame(() => {
@@ -484,7 +550,6 @@ document.addEventListener("alpine:init", () => {
         addToolCall(toolName, args, name) {
             const slot = this._slot(name);
             this._closeStreamingAssistants(slot);
-            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             t.events.push({
                 id: this._id("ev"),
@@ -498,7 +563,6 @@ document.addEventListener("alpine:init", () => {
         addToolResult(toolName, text, name) {
             const slot = this._slot(name);
             this._closeStreamingAssistants(slot);
-            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             t.events.push({
                 id: this._id("ev"),
@@ -514,7 +578,6 @@ document.addEventListener("alpine:init", () => {
             if (!text) return;
             const slot = this._slot(name);
             this._closeStreamingAssistants(slot);
-            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             const last = t.events[t.events.length - 1];
             if (last && last.kind === "thinking") {
@@ -542,7 +605,6 @@ document.addEventListener("alpine:init", () => {
                 return;
             }
             this._closeStreamingAssistants(slot);
-            this._foldLiveInterim(slot);
             const t = this._ensureTrace(slot);
             t.events.push({
                 id: this._id("ev"),
@@ -616,7 +678,6 @@ document.addEventListener("alpine:init", () => {
                 }
                 slot.turns.splice(insertAt, 0, turn);
             }
-            this._foldLiveInterim(slot);
             if (!name || name === this.currentName) this.scroll(shouldFollow);
         },
 
@@ -705,15 +766,43 @@ document.addEventListener("alpine:init", () => {
         _newAgentRow(task_id) {
             return {
                 task_id,
-                task: "", depth: 1, model: "", status: "running",
+                task: "", title: "", depth: 1, model: "", specialist_key: "", status: "running",
                 tool_count: 0, last_tool: null,
                 stuck: false, stall: false, repeat_count: 0,
                 elapsed: 0, context_pct: 0, iter: 0, max_iter: 0, tokens_in: 0,
                 summary: "", kill_reason: null, error: null,
+                actions: [], details_open: false,
+                observed_at: Date.now(),
             };
         },
-        // MUCLI_SUBAGENT_DURABLE_RESULTS_V1: live panel is an exact view of the current
-        // delegation window. Completed history remains in durable artifacts.
+        _historySubagentPanel(part) {
+            if (!part || !Array.isArray(part.agents) || !part.agents.length) return null;
+            const panel = {
+                id: `sap-history-${String(part.batch_id || part.agents[0]?.task_id || "batch")}`,
+                role: "subagent_panel",
+                batch_id: String(part.batch_id || ""),
+                agents: [],
+                running: false,
+                open: false,
+                ephemeral: false,
+                durable: true,
+                dismissTimer: null,
+            };
+            for (const value of part.agents) {
+                if (!value || !value.task_id) continue;
+                const row = this._newAgentRow(String(value.task_id));
+                const fields = { ...value };
+                delete fields.actions;
+                this._mergeDefined(row, fields);
+                this._mergeSubagentActions(row, { actions: value.actions || [] });
+                panel.agents.push(row);
+            }
+            panel.running = this._panelRunning(panel);
+            panel.open = panel.running;
+            return panel.agents.length ? panel : null;
+        },
+        // Each delegation batch owns one stable timeline card. Completed cards
+        // remain at their original history location and can be reopened later.
         _findPanel(slot, batchId = "") {
             for (let i = slot.turns.length - 1; i >= 0; i--) {
                 const turn = slot.turns[i];
@@ -731,7 +820,8 @@ document.addEventListener("alpine:init", () => {
                     agents: [],
                     running: false,
                     open: true,
-                    ephemeral: true,
+                    ephemeral: false,
+                    dismissTimer: null,
                 };
                 slot.turns.push(p);
             }
@@ -739,6 +829,66 @@ document.addEventListener("alpine:init", () => {
         },
         _panelRunning(p) {
             return p.agents.some(a => a.status === "running" || a.status === "stuck" || a.status === "stall");
+        },
+        _cancelPanelDismiss(p) {
+            if (!p) return;
+            if (p.dismissTimer) clearTimeout(p.dismissTimer);
+            p.dismissTimer = null;
+        },
+        _schedulePanelDismiss(p, delay = 6000) {
+            if (!p || this._panelRunning(p)) return;
+            if (p.agents.some(a => a.details_open)) return;
+            this._cancelPanelDismiss(p);
+            p.running = false;
+            p.open = true;
+            p.dismissTimer = setTimeout(() => {
+                p.dismissTimer = null;
+                if (!this._panelRunning(p) && !p.agents.some(a => a.details_open)) {
+                    p.open = false;
+                }
+            }, delay);
+        },
+        _mergeDefined(target, patch) {
+            for (const [key, value] of Object.entries(patch || {})) {
+                if (value !== undefined) target[key] = value;
+            }
+            target.observed_at = Date.now();
+            return target;
+        },
+        _mergeSubagentActions(row, patch) {
+            const incoming = [];
+            if (Array.isArray(patch && patch.actions)) incoming.push(...patch.actions);
+            if (patch && patch.action && typeof patch.action === "object") incoming.push(patch.action);
+            for (const raw of incoming) {
+                const seq = Number(raw && raw.seq) || 0;
+                const tool = String((raw && raw.tool) || "tool");
+                if (!seq) continue;
+                let action = row.actions.find(item => Number(item.seq) === seq);
+                if (!action) {
+                    action = { seq, tool, detail: "", status: "running", elapsed: 0, at: Date.now() / 1000 };
+                    row.actions.push(action);
+                }
+                this._mergeDefined(action, {
+                    tool,
+                    detail: raw.detail !== undefined ? String(raw.detail || "") : undefined,
+                    status: raw.status !== undefined ? String(raw.status || "running") : undefined,
+                    elapsed: raw.elapsed !== undefined ? Number(raw.elapsed) || 0 : undefined,
+                    at: raw.at !== undefined ? Number(raw.at) || action.at : undefined,
+                });
+            }
+            row.actions.sort((left, right) => Number(left.seq) - Number(right.seq));
+            if (row.actions.length > 100) row.actions.splice(0, row.actions.length - 100);
+        },
+        toggleSubagentDetails(panel, agent) {
+            if (!panel || !agent) return;
+            agent.details_open = !agent.details_open;
+            const slot = this._slot(this.currentName);
+            if (agent.details_open) {
+                panel.open = true;
+                this._cancelPanelDismiss(panel);
+            } else if (!this._panelRunning(panel)) {
+                this._schedulePanelDismiss(panel);
+            }
         },
         upsertSubagent(name, agent) {
             const tid = agent && agent.task_id;
@@ -754,38 +904,58 @@ document.addEventListener("alpine:init", () => {
                 row = this._newAgentRow(tid);
                 p.agents.push(row);
             }
-            Object.assign(row, agent);
+            this._mergeSubagentActions(row, agent);
+            const fields = { ...agent };
+            delete fields.action;
+            delete fields.actions;
+            this._mergeDefined(row, fields);
             p.running = this._panelRunning(p);
-            if (p.running) p.open = true;
+            if (p.running) {
+                p.open = true;
+                this._cancelPanelDismiss(p);
+            } else {
+                this._schedulePanelDismiss(p);
+            }
             if (!name || name === this.currentName) this.scroll();
         },
         replaceSubagentSnapshot(name, children, batchId = "") {
             const slot = this._slot(name);
             const active = (children || []).filter(child => child && child.task_id && (child.status === "running" || child.status === "stuck" || child.status === "stall"));
-            slot.turns = slot.turns.filter(turn => {
-                if (turn.role !== "subagent_panel") return true;
-                if (!active.length) return false;
-                return !batchId || turn.batch_id === batchId;
-            });
-            if (!active.length) return;
-            const p = this._ensurePanel(slot, batchId);
-            p.agents = active.map(c => Object.assign(this._newAgentRow(c.task_id), {
-                task: c.task || "",
-                depth: c.depth || 1,
-                model: c.model || "",
-                batch_id: c.batch_id || batchId,
-                status: c.status || "running",
-                tool_count: c.tool_count ?? 0,
-                last_tool: c.last_tool ?? null,
-                stuck: !!c.stuck,
-                stall: !!c.stall,
-                repeat_count: c.consecutive_repeats ?? 0,
-                elapsed: c.elapsed ?? 0,
-                context_pct: c.context_pct ?? 0,
-                iter: c.iter ?? 0,
-                max_iter: c.max_iter ?? 0,
-                tokens_in: c.tokens_in ?? 0,
-            }));
+            let p = this._findPanel(slot, batchId);
+            if (!active.length) {
+                if (p) this._schedulePanelDismiss(p);
+                return;
+            }
+            if (!p) p = this._ensurePanel(slot, batchId);
+            this._cancelPanelDismiss(p);
+            for (const c of active) {
+                let row = p.agents.find(a => a.task_id === c.task_id);
+                if (!row) {
+                    row = this._newAgentRow(c.task_id);
+                    p.agents.push(row);
+                }
+                this._mergeDefined(row, {
+                    task: c.task || "",
+                    title: c.title || "",
+                    depth: c.depth || 1,
+                    model: c.model || "",
+                    specialist_key: c.specialist_key || "",
+                    batch_id: c.batch_id || batchId,
+                    status: c.status || "running",
+                    tool_count: c.tool_count ?? 0,
+                    last_tool: c.last_tool ?? null,
+                    stuck: !!c.stuck,
+                    stall: !!c.stall,
+                    repeat_count: c.consecutive_repeats ?? 0,
+                    elapsed: c.elapsed ?? 0,
+                    context_pct: c.context_pct ?? 0,
+                    iter: c.iter ?? 0,
+                    max_iter: c.max_iter ?? 0,
+                    tokens_in: c.tokens_in ?? 0,
+                    actions: Array.isArray(c.actions) ? c.actions : [],
+                });
+                this._mergeSubagentActions(row, c);
+            }
             p.running = true;
             p.open = true;
             if (!name || name === this.currentName) this.scroll();
@@ -795,19 +965,26 @@ document.addEventListener("alpine:init", () => {
             const p = this._lastByRole(slot, "subagent_panel");
             if (!p) return;
             p.running = this._panelRunning(p);
-            if (!p.running) {
-                const index = slot.turns.indexOf(p);
-                if (index >= 0) slot.turns.splice(index, 1);
-            }
+            if (!p.running) this._schedulePanelDismiss(p);
         },
 
         finishTurn(name) {
             const slot = this._slot(name);
+            if (slot.handoffTimer) {
+                clearTimeout(slot.handoffTimer);
+                slot.handoffTimer = null;
+            }
+            for (const turn of slot.turns) {
+                turn.entering = false;
+                turn.leaving = false;
+            }
             this._closeStreamingAssistants(slot);
             this._closeTrace(slot);
-            slot.turns = slot.turns.filter(
-                turn => turn.role !== "subagent_panel" || this._panelRunning(turn)
-            );
+            for (const turn of slot.turns) {
+                if (turn.role === "subagent_panel" && !this._panelRunning(turn)) {
+                    this._schedulePanelDismiss(turn);
+                }
+            }
             // Group intermediate assistant + trace turns into a collapsible
             // heading so the conversation flow reads:
             //   User → Q, ... <collapsible N responses>, Agent → Final
@@ -1029,6 +1206,15 @@ document.addEventListener("alpine:init", () => {
                                 jsonHtml: renderJSON(part.tool_args),
                                 at: 0,
                             });
+                        } else if (part.type === "visualization") {
+                            traceForTurn = null;
+                            const visualization = this._visualizationTurn(part.artifact, skey);
+                            if (visualization && !rebuiltTurns.some((item) =>
+                                item.role === "visualization" &&
+                                item.artifact?.artifact_id === visualization.artifact.artifact_id
+                            )) {
+                                rebuiltTurns.push(visualization);
+                            }
                         } else if (part.type === "tool_result") {
                             ensureHistoryTrace().events.push({
                                 id: `h-ev-${turn.index}-${stablePartIndex}`,
@@ -1044,6 +1230,14 @@ document.addEventListener("alpine:init", () => {
                                 item.artifact?.artifact_id === visualization.artifact.artifact_id
                             )) {
                                 rebuiltTurns.push(visualization);
+                            }
+                        } else if (part.type === "subagent_panel") {
+                            traceForTurn = null;
+                            const panel = this._historySubagentPanel(part);
+                            if (panel && !rebuiltTurns.some((item) =>
+                                item.role === "subagent_panel" && item.batch_id === panel.batch_id
+                            )) {
+                                rebuiltTurns.push(panel);
                             }
                         }
                     }
@@ -1828,12 +2022,16 @@ ${problem.text}`, "error", 16000);
         realMode: "default",
         modes: [],
         views: [],
+        sessionType: "workspace",
+        hasExecutionWorkspace: false,
         panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files", "artifacts", "shell"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
             this.modes = data.modes || [];
             this.views = data.views || [];
+            this.sessionType = data.session_type || "workspace";
+            this.hasExecutionWorkspace = !!data.has_execution_workspace;
             this.realMode = data.current || "default";
             this.active = this.realMode;
             const store = this.panelModes.includes(this.active)
@@ -1858,6 +2056,78 @@ ${problem.text}`, "error", 16000);
                 ? Alpine.store(name)
                 : null;
             if (store && typeof store.load === "function") store.load();
+        },
+    });
+
+    // Shared chrome for the mode operating surfaces.  The native mode stores
+    // still own their data and actions; this store only keeps exploration
+    // state (lens, query, evidence-guide disclosure) stable across refreshes.
+    Alpine.store("modeWorkspace", {
+        selected: {},
+        queries: {},
+        qualityOpen: {},
+        _storageKey: "mucli.mode-workspace.v1",
+        init() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(this._storageKey) || "{}");
+                this.selected = saved.selected || {};
+                this.queries = saved.queries || {};
+                this.qualityOpen = saved.qualityOpen || {};
+            } catch (_) { /* private browsing / corrupt state */ }
+        },
+        _persist() {
+            try {
+                localStorage.setItem(this._storageKey, JSON.stringify({
+                    selected: this.selected,
+                    queries: this.queries,
+                    qualityOpen: this.qualityOpen,
+                }));
+            } catch (_) { /* exploration state is best-effort */ }
+        },
+        modeName() {
+            return (Alpine.store("mode") || {}).active || "default";
+        },
+        current() {
+            const store = Alpine.store(this.modeName());
+            return (store && store.workspace) || null;
+        },
+        selectedView(modeName) {
+            const mode = modeName || this.modeName();
+            const workspace = this.current();
+            const available = (workspace && workspace.views || []).map(v => v.id);
+            const saved = this.selected[mode];
+            return available.includes(saved) ? saved : "overview";
+        },
+        select(viewId) {
+            const mode = this.modeName();
+            this.selected[mode] = viewId || "overview";
+            this._persist();
+        },
+        shows(...viewIds) {
+            const selected = this.selectedView();
+            return selected === "overview" || viewIds.includes(selected);
+        },
+        query(modeName) {
+            return this.queries[modeName || this.modeName()] || "";
+        },
+        setQuery(value) {
+            this.queries[this.modeName()] = value || "";
+            this._persist();
+        },
+        matches(...values) {
+            const q = this.query().trim().toLowerCase();
+            if (!q) return true;
+            return values.flat(Infinity).some(value =>
+                String(value == null ? "" : value).toLowerCase().includes(q)
+            );
+        },
+        toggleQuality() {
+            const mode = this.modeName();
+            this.qualityOpen[mode] = !this.qualityOpen[mode];
+            this._persist();
+        },
+        isQualityOpen() {
+            return !!this.qualityOpen[this.modeName()];
         },
     });
 
@@ -2213,6 +2483,7 @@ ${problem.text}`, "error", 16000);
         active: false,
         loaded: false,
         coursePath: null,    // debugging breadcrumb: where the data was read
+        workspace: null,
         openSections: {
             profile: true,
             curriculum: true,
@@ -2229,6 +2500,7 @@ ${problem.text}`, "error", 16000);
                 this.course = d.course || null;
                 this.courses = d.courses || [];
                 this.coursePath = d.course_path || null;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
                 if (window.__mucliTeacherDebug) {
                     console.log("teacher.load", {
@@ -2281,11 +2553,34 @@ ${problem.text}`, "error", 16000);
         },
         allAssignments() {
             if (!this.course) return [];
-            return (this.course.assignments || []);
+            return (this.course.assignments || []).filter(a =>
+                Alpine.store("modeWorkspace").matches(
+                    a.assignment_id, a.kind, a.status, a.prompt, a.rubric,
+                    a.grade && a.grade.feedback
+                )
+            );
         },
         scheduledReviews() {
             if (!this.course) return [];
-            return (this.course.scheduled_reviews || []);
+            return (this.course.scheduled_reviews || []).filter(r =>
+                Alpine.store("modeWorkspace").matches(
+                    r.source_lesson_id, r.source_lesson_title, r.status, r.notes
+                )
+            );
+        },
+        filteredModules() {
+            if (!this.course) return [];
+            const ws = Alpine.store("modeWorkspace");
+            return (this.course.modules || []).map(module => {
+                if (ws.matches(module.title, module.goal, module.module_id)) return module;
+                const lessons = (module.lessons || []).filter(lesson => ws.matches(
+                    lesson.title, lesson.lesson_id, lesson.concept_brief,
+                    lesson.learning_objectives, lesson.lecture_gaps
+                ));
+                return { ...module, lessons };
+            }).filter(module => module.lessons.length || ws.matches(
+                module.title, module.goal, module.module_id
+            ));
         },
         // Map learner_profile keys → which fields are array-of-tags
         // versus solo-text. Surfacing both shapes in one helper keeps
@@ -2335,6 +2630,7 @@ ${problem.text}`, "error", 16000);
         active: false,
         loaded: false,
         metadataPath: null,
+        workspace: null,
         openSections: {
             events: false,
             reviews: false,
@@ -2350,28 +2646,80 @@ ${problem.text}`, "error", 16000);
         searchQuery: '',
         showFeatureBrowser: false,
         previewMode: false,
+        previewArchived: false,
+        previewingFeatureId: null,
+        planIdentity: null,
+        sessionName: null,
+        loadRevision: 0,
+        navigationRevision: 0,
 
-        async load() {
-            this.previewMode = false;
+        _currentSessionName() {
+            const chat = Alpine.store("chat");
+            return String((chat && chat.currentName) || "");
+        },
+        _applyPlan(plan, { preview = false, archived = false } = {}) {
+            const nextIdentity = String((plan && plan.feature_id) || "");
+            if (nextIdentity !== this.planIdentity) {
+                // Phase/task ids start at one for most feature plans. Reset
+                // view-local expansion state when the plan changes so Alpine
+                // cannot carry a similarly-numbered task from another feature
+                // into the newly-rendered detail view.
+                this.openPhases = {};
+                this.expandedTaskId = null;
+                this.dragTaskId = null;
+                this.planIdentity = nextIdentity || null;
+            }
+            this.plan = plan || null;
+            this.previewMode = !!preview;
+            this.previewArchived = !!(preview && archived);
+
+            const phases = (this.plan && this.plan.phase_columns) || [];
+            phases.forEach((phase, index) => {
+                const key = String(phase.id);
+                if (this.openPhases[key] !== undefined) return;
+                const status = (phase.status || "").toLowerCase();
+                this.openPhases[key] = status === "in_progress"
+                    || status === "blocked"
+                    || (!!preview && index === 0);
+            });
+        },
+        async load({ forcePlan = false, resetView = false } = {}) {
+            const currentSession = this._currentSessionName();
+            const sessionChanged = this.sessionName !== null
+                && this.sessionName !== currentSession;
+            if (sessionChanged || resetView) {
+                this.navigationRevision += 1;
+                this.showFeatureBrowser = false;
+                this.previewMode = false;
+                this.previewArchived = false;
+                this.previewingFeatureId = null;
+                this._applyPlan(null);
+            }
+            this.sessionName = currentSession;
+            if (forcePlan) {
+                this.navigationRevision += 1;
+                this.previewMode = false;
+                this.previewArchived = false;
+                this.previewingFeatureId = null;
+            }
+
+            const loadId = ++this.loadRevision;
+            const navigationAtStart = this.navigationRevision;
             try {
                 const r = await fetch("/api/feature/state");
                 const d = await r.json();
+                if (loadId !== this.loadRevision) return;
                 this.active = !!d.active;
-                this.plan = d.plan || null;
                 this.features = d.features || [];
-                this.metadataPath = d.metadata_path || null;
-                // Seed open/closed defaults for new phases without
-                // disturbing whatever the user has already toggled.
-                const phases = (this.plan && this.plan.phase_columns) || [];
-                for (const phase of phases) {
-                    const key = String(phase.id);
-                    if (this.openPhases[key] === undefined) {
-                        const status = (phase.status || "").toLowerCase();
-                        // Open whichever phase is currently in flight;
-                        // leave done/pending phases closed.
-                        this.openPhases[key] = status === "in_progress"
-                            || status === "blocked";
-                    }
+                const navigationIsStable = navigationAtStart === this.navigationRevision;
+                if (forcePlan || (
+                    navigationIsStable
+                    && !this.previewMode
+                    && !this.previewingFeatureId
+                )) {
+                    this.metadataPath = d.metadata_path || null;
+                    this.workspace = d.workspace || null;
+                    this._applyPlan(d.plan || null);
                 }
                 this.loaded = true;
             } catch (e) {
@@ -2393,6 +2741,28 @@ ${problem.text}`, "error", 16000);
         },
         isTaskExpanded(id) {
             return this.expandedTaskId === id;
+        },
+        isBrowserView() {
+            return this.showFeatureBrowser || !this.plan;
+        },
+        isDetailView() {
+            return !!this.plan && !this.showFeatureBrowser;
+        },
+        activePlanAvailable() {
+            if (!this.plan || this.previewMode) return false;
+            const id = String(this.plan.feature_id || "");
+            return (this.features || []).some(feature =>
+                String(feature.feature_id || "") === id && feature.is_active
+            );
+        },
+        planRenderKey() {
+            return String((this.plan && this.plan.feature_id) || "feature");
+        },
+        phaseRenderKey(phase) {
+            return `${this.planRenderKey()}:phase:${phase && phase.id}`;
+        },
+        taskRenderKey(phase, task) {
+            return `${this.phaseRenderKey(phase)}:task:${task && task.id}`;
         },
 
         // ---- view helpers ----
@@ -2423,12 +2793,23 @@ ${problem.text}`, "error", 16000);
             return active.length ? active[0] : null;
         },
         phaseColumns() {
-            return (this.plan && this.plan.phase_columns) || [];
+            const phases = (this.plan && this.plan.phase_columns) || [];
+            const ws = Alpine.store("modeWorkspace");
+            return phases.map(phase => {
+                if (ws.matches(phase.title, phase.goal, phase.status)) return phase;
+                const tasks = (phase.tasks || []).filter(task => ws.matches(
+                    task.title, task.status, task.objectives, task.action_points,
+                    task.exit_criteria, task.blocked_reason, task.notes
+                ));
+                return { ...phase, tasks };
+            }).filter(phase => phase.tasks.length || ws.matches(
+                phase.title, phase.goal, phase.status
+            ));
         },
         progressPct() {
             if (!this.plan || !this.plan.task_count) return 0;
             return Math.round(
-                ((this.plan.tasks_completed_count || 0) /
+                (this.tasksCompletedCount() /
                     (this.plan.task_count || 1)) * 100
             );
         },
@@ -2442,11 +2823,19 @@ ${problem.text}`, "error", 16000);
         },
         recentEvents(limit = 5) {
             if (!this.plan || !this.plan.event_log) return [];
-            return this.plan.event_log.slice(-limit).reverse();
+            return this.plan.event_log.slice().reverse().filter(ev =>
+                Alpine.store("modeWorkspace").matches(
+                    ev.kind, ev.entity, ev.entity_id, ev.actor, ev.payload
+                )
+            ).slice(0, limit);
         },
         reviews() {
             if (!this.plan) return [];
-            return this.plan.review_records || [];
+            return (this.plan.review_records || []).filter(review =>
+                Alpine.store("modeWorkspace").matches(
+                    review.task_id, review.summary, review.limitations, review.issues
+                )
+            );
         },
         // ---- mutating actions ----
         async transitionTask(taskId, toStatus) {
@@ -2507,20 +2896,33 @@ ${problem.text}`, "error", 16000);
         archivedCount() {
             return (this.features || []).filter(f => f.archived).length;
         },
+        currentCount() {
+            return (this.features || []).filter(f => !f.archived).length;
+        },
+        openFeatureBrowser() {
+            this.navigationRevision += 1;
+            this.previewingFeatureId = null;
+            this.showFeatureBrowser = true;
+        },
+        closeFeatureBrowser() {
+            if (this.activePlanAvailable()) this.showFeatureBrowser = false;
+        },
         async _action(featureId, path, method, verb) {
-            if (!featureId) return;
+            if (!featureId) return false;
             try {
                 const r = await fetch(`/api/feature/${encodeURIComponent(featureId)}${path}`, { method });
                 if (!r.ok) {
                     const data = await r.json().catch(() => ({}));
                     Alpine.store("toast").show(data.detail || `${verb} failed (${r.status})`, "error");
-                    return;
+                    return false;
                 }
-                Alpine.store("toast").show(`Feature '${featureId}' ${verb.toLowerCase()}d`, "success");
-                await this.load();
+                Alpine.store("toast").show(`Feature '${featureId}': ${verb.toLowerCase()} complete`, "success");
+                await this.load({ forcePlan: true });
+                return true;
             } catch (e) {
                 console.error(`feature.${verb}`, e);
                 Alpine.store("toast").show(`${verb} failed — network error`, "error");
+                return false;
             }
         },
         async deleteFeature(id)    { return this._action(id, "",           "DELETE", "Delete");    },
@@ -2555,11 +2957,13 @@ ${problem.text}`, "error", 16000);
         async approveFeature(id)   { return this._action(id, "/approve",   "POST",   "Approve");   },
         async switchFeature(featureId) {
             if (!featureId) return;
-            await this.loadFeature(featureId);
-            this.showFeatureBrowser = false;
+            const loaded = await this.loadFeature(featureId);
+            if (loaded) this.showFeatureBrowser = false;
         },
         async previewFeature(id) {
             if (!id) return;
+            const navigationId = ++this.navigationRevision;
+            this.previewingFeatureId = id;
             try {
                 const r = await fetch(`/api/feature/${encodeURIComponent(id)}/preview`);
                 if (!r.ok) {
@@ -2568,28 +2972,38 @@ ${problem.text}`, "error", 16000);
                     return;
                 }
                 const d = await r.json();
-                this.plan = d.plan || null;
+                if (navigationId !== this.navigationRevision) return;
                 this.active = !!d.active;
+                this.features = d.features || this.features;
                 this.metadataPath = d.metadata_path || null;
-                this.previewMode = true;
-                // Seed phase open/closed defaults for preview
-                const phases = (this.plan && this.plan.phase_columns) || [];
-                for (const phase of phases) {
-                    const key = String(phase.id);
-                    if (this.openPhases[key] === undefined) {
-                        this.openPhases[key] = true;
-                    }
-                }
+                this.workspace = d.workspace || this.workspace;
+                const item = (this.features || []).find(feature =>
+                    String(feature.feature_id || "") === String(id)
+                );
+                this._applyPlan(d.plan || null, {
+                    preview: true,
+                    archived: !!(item && item.archived),
+                });
+                // A preview is a peer view, not another layer beneath the
+                // feature browser. Closing the browser here guarantees that
+                // only one Mode OS surface is mounted at a time.
+                this.showFeatureBrowser = false;
             } catch (e) {
                 console.error("feature.previewFeature", e);
                 Alpine.store("toast").show("Preview failed — network error", "error");
+            } finally {
+                if (navigationId === this.navigationRevision) {
+                    this.previewingFeatureId = null;
+                }
             }
         },
-        exitPreview() {
+        async exitPreview() {
+            this.navigationRevision += 1;
             this.previewMode = false;
-            this.plan = null;
+            this.previewArchived = false;
+            this.previewingFeatureId = null;
             this.showFeatureBrowser = true;
-            this.load();
+            await this.load({ forcePlan: true });
         },
 
         showCreateModal: false,
@@ -2677,6 +3091,7 @@ ${problem.text}`, "error", 16000);
         findingCount: 0,
         active: false,
         loaded: false,
+        workspace: null,
         openSections: {
             sources: true,
             bibliography: false,
@@ -2699,6 +3114,7 @@ ${problem.text}`, "error", 16000);
                 this.bibliography = d.bibliography || "";
                 this.findings = d.findings || [];
                 this.findingCount = d.finding_count || 0;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) {
                 console.error("research.load", e);
@@ -2725,8 +3141,16 @@ ${problem.text}`, "error", 16000);
             return this.sources.filter(s => {
                 if (this.typeFilter.length && !this.typeFilter.includes(s.source_type)) return false;
                 if (this.credibilityMin > 0 && (s.credibility_score || 0) < this.credibilityMin) return false;
+                if (!Alpine.store("modeWorkspace").matches(
+                    s.title, s.url, s.source_type, s.authors, Object.keys(s.metadata || {})
+                )) return false;
                 return true;
             });
+        },
+        filteredFindings() {
+            return this.findings.filter(f => Alpine.store("modeWorkspace").matches(
+                f.content, f.tags, f.source
+            ));
         },
         sourceTypes() {
             const types = new Set(this.sources.map(s => s.source_type));
@@ -2755,6 +3179,7 @@ ${problem.text}`, "error", 16000);
         summary: null,
         active: false,
         loaded: false,
+        workspace: null,
         openSections: {
             findings: true,
             stats: false,
@@ -2770,6 +3195,7 @@ ${problem.text}`, "error", 16000);
                 this.report = d.report || null;
                 this.findings = d.findings || [];
                 this.summary = d.summary || null;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) {
                 console.error("security.load", e);
@@ -2793,8 +3219,13 @@ ${problem.text}`, "error", 16000);
             return this.expandedFindingId === id;
         },
         filteredFindings() {
-            if (!this.severityFilter.length) return this.findings;
-            return this.findings.filter(f => this.severityFilter.includes(f.severity));
+            return this.findings.filter(f => {
+                if (this.severityFilter.length && !this.severityFilter.includes(f.severity)) return false;
+                return Alpine.store("modeWorkspace").matches(
+                    f.title, f.summary, f.vulnerability_class, f.affected_paths,
+                    f.exploit_path, f.references, f.status
+                );
+            });
         },
         severities() {
             const s = new Set(this.findings.map(f => f.severity));
@@ -2816,9 +3247,9 @@ ${problem.text}`, "error", 16000);
         severityColor(sev) {
             switch ((sev || "").toLowerCase()) {
                 case "critical": return "var(--err)";
-                case "high":     return "#e0af68";
-                case "medium":   return "#ff9e64";
-                case "low":      return "#7aa2f7";
+                case "high":     return "var(--risk-high)";
+                case "medium":   return "var(--risk-medium)";
+                case "low":      return "var(--risk-low)";
                 case "info":     return "var(--text-dimmer)";
                 default:         return "var(--text-dim)";
             }
@@ -2874,6 +3305,7 @@ ${problem.text}`, "error", 16000);
         memory: [],
         active: false,
         loaded: false,
+        workspace: null,
         openSections: { backlog: true, features: false, memory: false },
 
         async load() {
@@ -2886,6 +3318,7 @@ ${problem.text}`, "error", 16000);
                 this.loopFeatures = d.loop_features || [];
                 this.backlog = d.backlog || [];
                 this.memory = d.memory || [];
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) { console.error("loop.load", e); }
         },
@@ -2907,6 +3340,34 @@ ${problem.text}`, "error", 16000);
         expandedItemId: null,
         toggleItem(id) { this.expandedItemId = this.expandedItemId === id ? null : id; },
         isItemExpanded(id) { return this.expandedItemId === id; },
+        filteredBacklog() {
+            return this.backlog.filter(item => Alpine.store("modeWorkspace").matches(
+                item.content, item.tags, item.source, item.status
+            ));
+        },
+        filteredMemory() {
+            return this.memory.filter(item => Alpine.store("modeWorkspace").matches(
+                item.content, item.tags, item.source, item.kind
+            ));
+        },
+        async setActive(active) {
+            try {
+                const r = await fetch('/api/loop/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: !!active, goal: this.loopGoal || '' }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store('toast').show(d.detail || `Loop control failed (${r.status})`, 'error');
+                    return;
+                }
+                await this.load();
+                Alpine.store('toast').show(active ? 'Loop resumed' : 'Loop paused', 'success');
+            } catch (e) {
+                Alpine.store('toast').show('Loop control failed — network error', 'error');
+            }
+        },
 
         showAddItem: false,
         newItemContent: '',
@@ -2949,6 +3410,7 @@ ${problem.text}`, "error", 16000);
         scratchpadCount: 0,
         active: false,
         loaded: false,
+        workspace: null,
         openSections: { hypotheses: true, suspects: true, notes: true, findings: false },
         expandedHypothesisId: null,
 
@@ -2963,6 +3425,7 @@ ${problem.text}`, "error", 16000);
                 this.notes = d.notes || [];
                 this.findings = d.findings || [];
                 this.scratchpadCount = d.scratchpad_count || 0;
+                this.workspace = d.workspace || null;
                 this.loaded = true;
             } catch (e) { console.error("debug.load", e); }
         },
@@ -2972,6 +3435,11 @@ ${problem.text}`, "error", 16000);
         },
         isHypothesisExpanded(id) {
             return this.expandedHypothesisId === id;
+        },
+        filtered(items) {
+            return (items || []).filter(item => Alpine.store("modeWorkspace").matches(
+                item.content, item.tags, item.source, item.kind, item.status
+            ));
         },
         statusGlyph(status) {
             switch ((status || "").toLowerCase()) {
@@ -2989,7 +3457,7 @@ ${problem.text}`, "error", 16000);
         },
     });
 
-    // Memory Map — a live color-grid fingerprint of the context window.
+    // Context Observatory — current fingerprint + provider-call evolution.
     // One horizontal band per layer (L0..L5); each band gets a fixed hue
     // (so you can tell layers apart) and each cell's *brightness* encodes
     // how often that slice of the layer's text has changed between
@@ -3002,8 +3470,9 @@ ${problem.text}`, "error", 16000);
     Alpine.store("memory", {
         active: false,
         loaded: false,
+        tab: "knowledge",     // durable Memory Ledger | live context observatory
         resolution: 128,
-        view: "heat",        // "heat" | "layer" — pure client-side choice
+        view: "timeline",    // timeline | stream | churn | fingerprint
         cols: 128,
         rows: 128,
         layers: [],
@@ -3014,23 +3483,207 @@ ${problem.text}`, "error", 16000);
         freeTokens: 0,
         fillPct: 0,
         _canvas: null,
+        _timelineCanvas: null,
+        _timelineObserver: null,
         _renderPending: false,
+        timeline: { points: [], summary: {}, selectedId: null },
+        timelineHover: { visible: false, x: 0, y: 0, point: null, layer: null },
         cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
         _hoverTimer: null,
+        durable: {
+            items: [],
+            stats: {},
+            query: "",
+            scope: "auto",
+            kind: "observation",
+            newStatement: "",
+            loading: false,
+            error: "",
+            selected: null,
+            detail: null,
+            recall: null,
+        },
+
+        _sessionParam() {
+            const chat = Alpine.store("chat");
+            const name = chat && chat.currentName ? chat.currentName : "";
+            return name ? "session_name=" + encodeURIComponent(name) : "";
+        },
+
+        async loadDurable() {
+            this.durable.loading = true;
+            this.durable.error = "";
+            try {
+                const params = new URLSearchParams();
+                const chat = Alpine.store("chat");
+                if (chat && chat.currentName) params.set("session_name", chat.currentName);
+                if (this.durable.query) params.set("q", this.durable.query);
+                params.set("limit", "200");
+                const r = await fetch("/api/v1/memories?" + params.toString());
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "memory load failed (" + r.status + ")");
+                this.durable.items = d.memories || [];
+                this.durable.stats = d.stats || {};
+            } catch (e) {
+                this.durable.error = String(e || "memory load failed");
+            } finally {
+                this.durable.loading = false;
+            }
+        },
+
+        async addMemory() {
+            const statement = (this.durable.newStatement || "").trim();
+            if (!statement) return;
+            this.durable.error = "";
+            try {
+                const session = this._sessionParam();
+                const r = await fetch("/api/v1/memories" + (session ? "?" + session : ""), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        statement: statement,
+                        scope: this.durable.scope,
+                        kind: this.durable.kind,
+                    }),
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "memory save failed (" + r.status + ")");
+                this.durable.newStatement = "";
+                await this.loadDurable();
+            } catch (e) {
+                this.durable.error = String(e || "memory save failed");
+            }
+        },
+
+        async openMemory(memory) {
+            this.durable.selected = memory;
+            this.durable.detail = { loading: true };
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memories/" + encodeURIComponent(memory.id)
+                    + (session ? "?" + session : "")
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "memory detail failed (" + r.status + ")");
+                this.durable.detail = d;
+            } catch (e) {
+                this.durable.detail = { error: String(e || "memory detail failed") };
+            }
+        },
+
+        async editMemory(memory) {
+            const statement = window.prompt("Edit durable memory", memory.statement || "");
+            if (statement == null || !statement.trim() || statement.trim() === memory.statement) return;
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memories/" + encodeURIComponent(memory.id)
+                    + (session ? "?" + session : ""),
+                    {
+                        method: "PATCH",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "If-Match": memory.etag || "",
+                        },
+                        body: JSON.stringify({
+                            changes: { statement: statement.trim() },
+                            reason: "Memory Center edit",
+                        }),
+                    }
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(
+                    typeof d.detail === "string" ? d.detail : JSON.stringify(d.detail)
+                );
+                await this.loadDurable();
+            } catch (e) {
+                this.durable.error = String(e || "memory edit failed");
+            }
+        },
+
+        async memoryAction(memory, action) {
+            if (action === "forget" && !window.confirm(
+                "Forget permanently? Memory content, revisions and search indexes will be purged."
+            )) return;
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memories/" + encodeURIComponent(memory.id) + "/actions"
+                    + (session ? "?" + session : ""),
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "If-Match": memory.etag || "",
+                        },
+                        body: JSON.stringify({ action: action }),
+                    }
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(
+                    d.detail || "memory " + action + " failed (" + r.status + ")"
+                );
+                this.durable.detail = null;
+                this.durable.selected = null;
+                await this.loadDurable();
+            } catch (e) {
+                this.durable.error = String(e || "memory " + action + " failed");
+            }
+        },
+
+        async loadRecall() {
+            try {
+                const session = this._sessionParam();
+                const r = await fetch(
+                    "/api/v1/memory-recalls/last" + (session ? "?" + session : "")
+                );
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || "no recall receipt yet");
+                this.durable.recall = d.receipt;
+            } catch (e) {
+                this.durable.error = String(e || "recall receipt unavailable");
+            }
+        },
 
         bindCanvas(canvas) {
             this._canvas = canvas;
             this.render();
         },
 
+        bindTimelineCanvas(canvas) {
+            this._timelineCanvas = canvas;
+            if (window.ResizeObserver) {
+                if (this._timelineObserver) this._timelineObserver.disconnect();
+                this._timelineObserver = new ResizeObserver(() => this._scheduleRender());
+                this._timelineObserver.observe(canvas);
+            }
+            this._scheduleRender();
+        },
+
         async load() {
+            await Promise.all([this.loadDurable(), this.loadContext()]);
+        },
+
+        async loadContext() {
             const res = this.resolution || 128;
             try {
-                const r = await fetch(
-                    `/api/memory/state?cols=${res}&rows=${res}`
-                );
-                const d = await r.json();
+                const session = this._sessionParam();
+                const suffix = session ? "&" + session : "";
+                const [stateResponse, timelineResponse] = await Promise.all([
+                    fetch("/api/memory/state?cols=" + res + "&rows=" + res + suffix),
+                    fetch("/api/memory/timeline?limit=360" + suffix),
+                ]);
+                const d = await stateResponse.json();
+                if (!stateResponse.ok) throw new Error(d.detail || "context state unavailable");
+                const history = await timelineResponse.json();
+                if (!timelineResponse.ok) throw new Error(history.detail || "context timeline unavailable");
                 this._apply(d);
+                this.timeline.points = history.points || [];
+                this.timeline.summary = history.summary || {};
+                if (!this.timeline.selectedId && this.timeline.points.length) {
+                    this.timeline.selectedId = this.timeline.points[this.timeline.points.length - 1].id;
+                }
                 this.loaded = true;
                 this._scheduleRender();
             } catch (e) { console.error("memory.load", e); }
@@ -3039,7 +3692,7 @@ ${problem.text}`, "error", 16000);
         // Switch render mode without a re-fetch — same int grid, different
         // lightness mapping. Triggers a redraw.
         setView(v) {
-            if (v !== "heat" && v !== "layer") return;
+            if (!["timeline", "stream", "churn", "fingerprint"].includes(v)) return;
             this.view = v;
             this._scheduleRender();
         },
@@ -3049,7 +3702,62 @@ ${problem.text}`, "error", 16000);
         // requestAnimationFrame so we never draw more than once per frame.
         applySnapshot(snap) {
             this._apply(snap);
+            if (snap.timeline_point && snap.timeline_point.id) {
+                this.mergeTimelinePoint(snap.timeline_point);
+            }
             this._scheduleRender();
+        },
+
+        mergeTimelinePoint(point) {
+            const points = this.timeline.points || [];
+            const index = points.findIndex(item => item.id === point.id);
+            if (index >= 0) points.splice(index, 1, point);
+            else points.push(point);
+            if (points.length > 360) points.splice(0, points.length - 360);
+            this.timeline.points = points;
+            this.timeline.selectedId = point.id;
+            this.recomputeTimelineSummary();
+        },
+
+        recomputeTimelineSummary() {
+            const points = this.timeline.points || [];
+            if (!points.length) {
+                this.timeline.summary = { samples: 0, net_delta: 0, compactions: 0 };
+                return;
+            }
+            const churn = {};
+            for (const point of points) {
+                for (const layer of (point.layers || [])) {
+                    churn[layer.id] = (churn[layer.id] || 0) + (layer.changed_chunks || 0);
+                }
+            }
+            let hottest = null;
+            for (const id of Object.keys(churn)) {
+                if (!hottest || churn[id] > churn[hottest]) hottest = id;
+            }
+            this.timeline.summary = {
+                samples: points.length,
+                first_tokens: points[0].total_tokens || 0,
+                last_tokens: points[points.length - 1].total_tokens || 0,
+                net_delta: (points[points.length - 1].total_tokens || 0) - (points[0].total_tokens || 0),
+                peak_tokens: Math.max(...points.map(p => p.total_tokens || 0)),
+                peak_fill_pct: Math.max(...points.map(p => p.fill_pct || 0)),
+                compactions: points.filter(p => p.compaction).length,
+                hottest_layer: hottest && churn[hottest] ? hottest : null,
+                hottest_layer_changes: hottest ? churn[hottest] : 0,
+                max_churn_score: Math.max(...points.map(p => p.churn_score || 0)),
+            };
+        },
+
+        selectedTimelinePoint() {
+            const points = this.timeline.points || [];
+            return points.find(point => point.id === this.timeline.selectedId)
+                || points[points.length - 1]
+                || null;
+        },
+
+        selectTimelinePoint(point) {
+            if (point) this.timeline.selectedId = point.id;
         },
 
         _apply(d) {
@@ -3071,6 +3779,7 @@ ${problem.text}`, "error", 16000);
             const run = () => {
                 this._renderPending = false;
                 this.render();
+                this.renderTimeline();
             };
             (window.requestAnimationFrame || setTimeout)(run);
         },
@@ -3089,6 +3798,25 @@ ${problem.text}`, "error", 16000);
             return m;
         },
 
+        _contextPalette() {
+            const light = document.documentElement.getAttribute("data-theme") === "light";
+            const styles = getComputedStyle(document.documentElement);
+            const css = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+            return {
+                light,
+                text: css("--text", light ? "#171a20" : "#f2f4f7"),
+                textDim: css("--text-dim", light ? "#667080" : "#8b94a3"),
+                plotStart: light ? "rgba(89, 109, 255, .055)" : "rgba(99, 113, 255, .055)",
+                plotEnd: light ? "rgba(83, 99, 120, .012)" : "rgba(5, 8, 18, .02)",
+                grid: light ? "rgba(17, 24, 39, .105)" : "rgba(148, 163, 184, .10)",
+                selection: light ? "rgba(23, 26, 32, .68)" : "rgba(255, 255, 255, .78)",
+                churnTop: light ? "rgba(198, 51, 108, .27)" : "rgba(245, 92, 146, .48)",
+                churnBottom: light ? "rgba(89, 109, 255, .025)" : "rgba(99, 102, 241, .03)",
+                churnLine: light ? "rgba(179, 39, 94, .88)" : "rgba(248, 113, 163, .92)",
+                compaction: light ? "rgba(16, 132, 111, .76)" : "rgba(45, 212, 191, .72)",
+            };
+        },
+
         render() {
             const canvas = this._canvas;
             if (!canvas || !this.grid || !this.grid.length) return;
@@ -3102,6 +3830,7 @@ ${problem.text}`, "error", 16000);
             ctx.clearRect(0, 0, cols, rows);
             const rowHue = this._rowHueMap();
             const heat = this.view !== "layer";
+            const palette = this._contextPalette();
             for (let ri = 0; ri < rows; ri++) {
                 const row = this.grid[ri];
                 if (!row) continue;
@@ -3113,17 +3842,257 @@ ${problem.text}`, "error", 16000);
                         // Empty space is still space: a column with no text
                         // renders as a dim, desaturated layer hue so the
                         // band's full extent stays visible.
-                        ctx.fillStyle = `hsl(${hue},30%,11%)`;
+                        ctx.fillStyle = palette.light
+                            ? `hsl(${hue},22%,96%)`
+                            : `hsl(${hue},30%,11%)`;
                     } else {
                         // v is 1..255: 1 = present & stable, 255 = churning.
                         const t = (v - 1) / 254;     // 0..1 change frequency
-                        const light = heat ? (16 + 44 * t) : 42;
-                        ctx.fillStyle = `hsl(${hue},68%,${light.toFixed(1)}%)`;
+                        const cellLight = palette.light
+                            ? (heat ? 91 - 48 * t : 52)
+                            : (heat ? 16 + 44 * t : 42);
+                        const saturation = palette.light ? 62 : 68;
+                        ctx.fillStyle = `hsl(${hue},${saturation}%,${cellLight.toFixed(1)}%)`;
                     }
                     ctx.fillRect(ci, ri, 1, 1);
                 }
             }
         },
+
+        _timelineGeometry(canvas) {
+            const rect = canvas.getBoundingClientRect();
+            const width = Math.max(280, Math.round(rect.width || 0));
+            const height = Math.max(220, Math.round(rect.height || 0));
+            const dpr = Math.min(2, window.devicePixelRatio || 1);
+            if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+                canvas.width = Math.round(width * dpr);
+                canvas.height = Math.round(height * dpr);
+            }
+            const ctx = canvas.getContext("2d");
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return {
+                ctx, width, height,
+                left: 48, right: 12, top: 14, bottom: 28,
+                plotWidth: width - 60, plotHeight: height - 42,
+            };
+        },
+
+        _visibleTimelinePoints(width) {
+            const points = this.timeline.points || [];
+            const maxPoints = Math.max(16, Math.floor((width - 60) / 7));
+            return points.slice(-maxPoints);
+        },
+
+        _timelineBase(g, points) {
+            const { ctx, width, height, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
+            ctx.clearRect(0, 0, width, height);
+            const bg = ctx.createLinearGradient(0, top, 0, top + plotHeight);
+            bg.addColorStop(0, palette.plotStart);
+            bg.addColorStop(1, palette.plotEnd);
+            ctx.fillStyle = bg;
+            ctx.fillRect(left, top, plotWidth, plotHeight);
+            ctx.strokeStyle = palette.grid;
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = top + plotHeight * i / 4 + .5;
+                ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + plotWidth, y); ctx.stroke();
+            }
+            ctx.fillStyle = palette.textDim;
+            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.textAlign = "left";
+            if (points.length) {
+                ctx.fillText("call " + points[0].id, left, height - 8);
+                const end = "call " + points[points.length - 1].id;
+                ctx.textAlign = "right";
+                ctx.fillText(end, left + plotWidth, height - 8);
+            }
+        },
+
+        renderTimeline() {
+            const canvas = this._timelineCanvas;
+            if (!canvas || this.view === "fingerprint") return;
+            const g = this._timelineGeometry(canvas);
+            const points = this._visibleTimelinePoints(g.width);
+            this._timelineBase(g, points);
+            if (!points.length) {
+                g.ctx.fillStyle = this._contextPalette().textDim;
+                g.ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+                g.ctx.textAlign = "center";
+                g.ctx.fillText("waiting for the first provider call", g.left + g.plotWidth / 2, g.top + g.plotHeight / 2);
+                return;
+            }
+            if (this.view === "stream") this._drawContextStream(g, points);
+            else if (this.view === "churn") this._drawContextChurn(g, points);
+            else this._drawContextHeatmap(g, points);
+            this._drawTimelineSelection(g, points);
+        },
+
+        _drawContextHeatmap(g, points) {
+            const { ctx, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
+            const rows = this.layers.length || 8;
+            const rowHeight = plotHeight / rows;
+            const cellWidth = plotWidth / points.length;
+            const fallback = [
+                { id: "L0", hue: 210 }, { id: "L1", hue: 135 },
+                { id: "L1C", hue: 150 }, { id: "L1B", hue: 168 },
+                { id: "L2", hue: 280 }, { id: "L3", hue: 25 },
+                { id: "L4B", hue: 50 }, { id: "L5", hue: 358 },
+            ];
+            const legend = this.layers.length ? this.layers : fallback;
+            for (let row = 0; row < legend.length; row++) {
+                const layerMeta = legend[row];
+                const y = top + row * rowHeight;
+                ctx.fillStyle = palette.textDim;
+                ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+                ctx.textAlign = "right";
+                ctx.fillText(layerMeta.id, left - 8, y + rowHeight * .62);
+                for (let col = 0; col < points.length; col++) {
+                    const pointLayer = (points[col].layers || []).find(item => item.id === layerMeta.id) || {};
+                    const ratio = Number(pointLayer.change_ratio || 0);
+                    const occupied = Number(pointLayer.tokens || 0) > 0;
+                    const alpha = pointLayer.changed
+                        ? Math.min(.96, (palette.light ? .38 : .28) + ratio * (palette.light ? .58 : .68))
+                        : (occupied ? (palette.light ? .18 : .105) : (palette.light ? .055 : .035));
+                    const inset = Math.min(1.5, cellWidth * .14);
+                    const lightness = palette.light
+                        ? (pointLayer.changed ? 45 : 68)
+                        : (pointLayer.changed ? 63 : 48);
+                    ctx.fillStyle = `hsla(${layerMeta.hue || 0}, 82%, ${lightness}%, ${alpha})`;
+                    ctx.fillRect(
+                        left + col * cellWidth + inset,
+                        y + 1.5,
+                        Math.max(1, cellWidth - inset * 2),
+                        Math.max(1, rowHeight - 3),
+                    );
+                }
+            }
+        },
+
+        _drawContextStream(g, points) {
+            const { ctx, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
+            const layerIds = ["L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"];
+            const hueById = {};
+            for (const layer of this.layers) hueById[layer.id] = layer.hue;
+            const peak = Math.max(1, ...points.map(point => point.total_tokens || 0));
+            const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
+            const cumulative = points.map(() => 0);
+            for (const layerId of layerIds) {
+                const lower = cumulative.slice();
+                const upper = points.map((point, index) => {
+                    const layer = (point.layers || []).find(item => item.id === layerId);
+                    cumulative[index] += layer ? (layer.tokens || 0) : 0;
+                    return cumulative[index];
+                });
+                ctx.beginPath();
+                for (let i = 0; i < points.length; i++) {
+                    const y = top + plotHeight - upper[i] / peak * plotHeight;
+                    if (i === 0) ctx.moveTo(xAt(i), y); else ctx.lineTo(xAt(i), y);
+                }
+                for (let i = points.length - 1; i >= 0; i--) {
+                    const y = top + plotHeight - lower[i] / peak * plotHeight;
+                    ctx.lineTo(xAt(i), y);
+                }
+                ctx.closePath();
+                const hue = hueById[layerId] == null ? 210 : hueById[layerId];
+                const fill = ctx.createLinearGradient(0, top, 0, top + plotHeight);
+                fill.addColorStop(0, palette.light
+                    ? `hsla(${hue}, 72%, 46%, .66)`
+                    : `hsla(${hue}, 78%, 62%, .72)`);
+                fill.addColorStop(1, palette.light
+                    ? `hsla(${hue}, 66%, 72%, .25)`
+                    : `hsla(${hue}, 72%, 42%, .30)`);
+                ctx.fillStyle = fill;
+                ctx.fill();
+            }
+            ctx.fillStyle = palette.textDim;
+            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(peak.toLocaleString() + " tok peak", left + 6, top + 13);
+        },
+
+        _drawContextChurn(g, points) {
+            const { ctx, left, top, plotWidth, plotHeight } = g;
+            const palette = this._contextPalette();
+            const maxChurn = Math.max(10, ...points.map(point => point.churn_score || 0));
+            const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
+            const yAt = value => top + plotHeight - (value / maxChurn) * plotHeight;
+            const gradient = ctx.createLinearGradient(0, top, 0, top + plotHeight);
+            gradient.addColorStop(0, palette.churnTop);
+            gradient.addColorStop(1, palette.churnBottom);
+            ctx.beginPath();
+            ctx.moveTo(xAt(0), top + plotHeight);
+            points.forEach((point, index) => ctx.lineTo(xAt(index), yAt(point.churn_score || 0)));
+            ctx.lineTo(xAt(points.length - 1), top + plotHeight);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            ctx.beginPath();
+            points.forEach((point, index) => {
+                const x = xAt(index), y = yAt(point.churn_score || 0);
+                if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.strokeStyle = palette.churnLine;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            for (let index = 0; index < points.length; index++) {
+                if (!points[index].compaction) continue;
+                const x = xAt(index);
+                ctx.strokeStyle = palette.compaction;
+                ctx.setLineDash([3, 4]);
+                ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotHeight); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            ctx.fillStyle = palette.textDim;
+            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(maxChurn.toFixed(1) + "% peak churn", left + 6, top + 13);
+        },
+
+        _drawTimelineSelection(g, points) {
+            const index = points.findIndex(point => point.id === this.timeline.selectedId);
+            if (index < 0) return;
+            const cellWidth = g.plotWidth / points.length;
+            const x = g.left + (index + .5) * cellWidth;
+            g.ctx.strokeStyle = this._contextPalette().selection;
+            g.ctx.lineWidth = 1;
+            g.ctx.beginPath(); g.ctx.moveTo(x, g.top); g.ctx.lineTo(x, g.top + g.plotHeight); g.ctx.stroke();
+        },
+
+        hoverTimeline(event) {
+            const canvas = this._timelineCanvas;
+            if (!canvas || !(this.timeline.points || []).length) return;
+            const rect = canvas.getBoundingClientRect();
+            const width = Math.max(280, rect.width);
+            const points = this._visibleTimelinePoints(width);
+            const plotLeft = 48;
+            const plotWidth = width - 60;
+            const localX = event.clientX - rect.left;
+            if (localX < plotLeft || localX > plotLeft + plotWidth) return this.clearTimelineHover();
+            const index = Math.min(points.length - 1, Math.max(0, Math.floor((localX - plotLeft) / plotWidth * points.length)));
+            const point = points[index];
+            let layer = null;
+            if (this.view === "timeline") {
+                const localY = event.clientY - rect.top;
+                const row = Math.floor((localY - 14) / ((Math.max(220, rect.height) - 42) / 8));
+                if (row >= 0 && row < 8) layer = (point.layers || [])[row] || null;
+            }
+            this.timelineHover = {
+                visible: true,
+                x: Math.min(width - 210, Math.max(8, localX + 12)),
+                y: Math.max(8, event.clientY - rect.top + 12),
+                point,
+                layer,
+            };
+        },
+
+        selectTimelineHover() {
+            if (this.timelineHover.point) this.selectTimelinePoint(this.timelineHover.point);
+        },
+
+        clearTimelineHover() { this.timelineHover.visible = false; },
 
         hoverCell(event) {
             const canvas = this._canvas;
@@ -3141,7 +4110,8 @@ ${problem.text}`, "error", 16000);
             if (region.id === "FREE") return;
             this._hoverTimer = setTimeout(async () => {
                 try {
-                    const r = await fetch(`/api/memory/cell?layer=${encodeURIComponent(region.id)}&cols=${this.cols}&rows=${this.rows}&row=${row}&col=${col}`);
+                    const session = this._sessionParam();
+                    const r = await fetch(`/api/memory/cell?layer=${encodeURIComponent(region.id)}&cols=${this.cols}&rows=${this.rows}&row=${row}&col=${col}${session ? "&" + session : ""}`);
                     const d = await r.json();
                     if (this.cellHover.key === key) Object.assign(this.cellHover, { content: d.content || "", chars: d.chars || 0, loading: false });
                 } catch (e) { if (this.cellHover.key === key) this.cellHover.loading = false; }
@@ -3188,8 +4158,9 @@ ${problem.text}`, "error", 16000);
                 copied: false,
             };
             try {
+                const session = this._sessionParam();
                 const r = await fetch(
-                    `/api/memory/content?layer=${encodeURIComponent(l.id || "")}`
+                    `/api/memory/content?layer=${encodeURIComponent(l.id || "")}${session ? "&" + session : ""}`
                 );
                 const d = await r.json();
                 this.layerModal.content = d.content || "";
@@ -4664,13 +5635,30 @@ function routeEvent(ev) {
             if (isFocused) Alpine.store("attachments").load(name);
             break;
         case "context_snapshot": {
-            // Live Memory Map push from the pre_provider_call hook —
+            // Live Context Observatory push from the pre_provider_call hook —
             // one per iteration. Only act when the Memory view is the
             // active panel for the focused session, so background turns
             // and other views pay nothing.
             const mode = Alpine.store("mode");
             if (isFocused && mode && mode.active === "memory") {
                 Alpine.store("memory").applySnapshot(ev);
+            }
+            break;
+        }
+        case "memory_updated": {
+            const mode = Alpine.store("mode");
+            if (isFocused && mode && mode.active === "memory") {
+                Alpine.store("memory").loadDurable();
+            }
+            break;
+        }
+        case "mode_changed": {
+            if (isFocused) {
+                const mode = Alpine.store("mode");
+                mode.realMode = ev.mode || "default";
+                mode.active = mode.realMode;
+                mode.sessionType = ev.session_type || mode.sessionType;
+                mode.load();
             }
             break;
         }
@@ -4684,7 +5672,10 @@ function routeEvent(ev) {
         case "subagent_start":
             chat.upsertSubagent(name, {
                 task_id: ev.task_id, task: ev.task || "", depth: ev.depth || 1,
+                title: ev.title || "",
                 model: ev.model || "", status: "running",
+                specialist_key: ev.specialist_key || "",
+                iter: ev.iter, max_iter: ev.max_iter,
                 batch_id: ev.batch_id || "",
             });
             break;
@@ -4692,6 +5683,11 @@ function routeEvent(ev) {
             // Merge live fields onto the matching agent row.
             chat.upsertSubagent(name, {
                 task_id: ev.task_id,
+                task: ev.task,
+                title: ev.title,
+                depth: ev.depth,
+                model: ev.model,
+                specialist_key: ev.specialist_key,
                 tool_count: ev.tool_count,
                 last_tool: ev.last_tool,
                 status: ev.status,
@@ -4699,12 +5695,22 @@ function routeEvent(ev) {
                 stall: ev.stall,
                 repeat_count: ev.repeat_count,
                 elapsed: ev.elapsed,
+                context_pct: ev.context_pct,
+                iter: ev.iter,
+                max_iter: ev.max_iter,
+                tokens_in: ev.tokens_in,
+                action: ev.action,
                 batch_id: ev.batch_id || "",
             });
             break;
         case "subagent_end":
             chat.upsertSubagent(name, {
                 task_id: ev.task_id,
+                task: ev.task,
+                title: ev.title,
+                depth: ev.depth,
+                model: ev.model,
+                specialist_key: ev.specialist_key,
                 status: ev.status || "done",
                 summary: ev.summary || "",
                 kill_reason: ev.kill_reason || null,
@@ -4786,6 +5792,13 @@ function routeEvent(ev) {
             // panel state without triggering a model turn, so the
             // turn_complete hook never fires. Refresh here too.
             if (isFocused) {
+                if (ev.result && ev.result.data && ev.result.data.current_mode) {
+                    // `/mode <name>` mutates the session directly rather than
+                    // passing through POST /api/modes, so it has no separate
+                    // mode_changed event. Reload the execution boundary and
+                    // the matching Mode OS workspace immediately.
+                    Alpine.store("mode").load();
+                }
                 refreshActivePanel();
                 Alpine.store("yolo").load();
                 Alpine.store("skills").load();
@@ -4888,7 +5901,46 @@ function _fmtTok(n) {
     return String(n);
 }
 
-function summarizeSubagentPanel(p) {
+function subagentElapsed(a, _tick) {
+    const elapsed = Number(a && a.elapsed) || 0;
+    if (!a || !["running", "stuck", "stall"].includes(a.status)) return elapsed;
+    const observedAt = Number(a.observed_at) || Date.now();
+    return elapsed + Math.max(0, Date.now() - observedAt) / 1000;
+}
+
+function subagentTitle(a) {
+    const title = String((a && a.title) || "").replace(/\s+/g, " ").trim();
+    if (title) return title;
+    const specialist = String((a && a.specialist_key) || "").replace(/[_-]+/g, " ").trim();
+    if (specialist) return specialist.replace(/\b\w/g, c => c.toUpperCase()) + " task";
+    return "Delegated task";
+}
+
+function subagentToolLabel(tool) {
+    const value = String(tool || "").trim();
+    const labels = {
+        apply_patch: "Edit files",
+        bash: "Run command",
+        get_chunk: "Read source chunk",
+        list_dir: "Inspect directory",
+        read_file: "Read file",
+        search_for_string: "Search code",
+        spawn_agent: "Delegate task",
+        web_search: "Search the web",
+    };
+    if (labels[value]) return labels[value];
+    if (!value) return "Working";
+    return value.replace(/[_-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function subagentActionStatus(action) {
+    if (!action) return "";
+    if (action.status === "error") return "Failed";
+    if (action.status === "done") return "Completed";
+    return "In progress";
+}
+
+function summarizeSubagentPanel(p, _tick) {
     if (!p || !p.agents || !p.agents.length) return "subagents";
     const n = p.agents.length;
     const parts = [`${n} subagent${n > 1 ? "s" : ""}`];
@@ -4905,7 +5957,7 @@ function summarizeSubagentPanel(p) {
         if (errored) bits.push("errored");
         parts.push(bits.join("/") || "done");
     }
-    const elapsed = Math.max(0, ...p.agents.map(a => a.elapsed || 0));
+    const elapsed = Math.max(0, ...p.agents.map(a => subagentElapsed(a, _tick)));
     if (elapsed) parts.push(`${elapsed.toFixed(1)}s`);
     const tok = p.agents.reduce((s, a) => s + (a.tokens_in || 0), 0);
     if (tok) parts.push(`${_fmtTok(tok)} tok`);
@@ -4914,11 +5966,11 @@ function summarizeSubagentPanel(p) {
 
 function subagentStatusText(a) {
     switch (a.status) {
-        case "running": return a.last_tool ? `🔨 ${a.last_tool}` : "running";
-        case "stuck":   return `⚠ stuck${a.repeat_count ? ` ${a.repeat_count}x` : ""}`;
-        case "killed":  return `⏹ killed${a.kill_reason ? ` (${a.kill_reason})` : ""}`;
-        case "error":   return "✗ error";
-        case "done":    return a.summary ? `✓ done` : "✓ done";
+        case "running": return a.last_tool ? subagentToolLabel(a.last_tool) : "Starting";
+        case "stuck":   return `Stuck${a.repeat_count ? ` · ${a.repeat_count} repeats` : ""}`;
+        case "killed":  return `Stopped${a.kill_reason ? ` · ${a.kill_reason}` : ""}`;
+        case "error":   return "Failed";
+        case "done":    return "Completed";
         default:        return a.status;
     }
 }
@@ -5169,6 +6221,33 @@ function applyTheme(theme) {
     const light = document.getElementById("hljs-light");
     if (dark)  dark.disabled  = (theme === "light");
     if (light) light.disabled = (theme === "dark");
+    document.querySelectorAll("iframe.visualization-frame").forEach((frame) => {
+        try {
+            frame.contentWindow?.postMessage({ type: "mucli-theme", theme }, "*");
+        } catch (e) { /* Sandboxed frames may be between navigations. */ }
+    });
+    // Canvas pixels do not inherit CSS variables. Redraw observability
+    // visualisations after a theme switch so labels, grids, fills and the
+    // current fingerprint use the matching contrast palette immediately.
+    requestAnimationFrame(() => {
+        try {
+            const memory = window.Alpine && Alpine.store("memory");
+            if (memory) memory._scheduleRender();
+        } catch (e) { /* Alpine may not be initialised during first paint. */ }
+    });
+}
+
+function visualizationThemeUrl(value, theme) {
+    if (!value) return "";
+    try {
+        const url = new URL(value, window.location.origin);
+        url.searchParams.set("mucli_theme", theme === "light" ? "light" : "dark");
+        return url.origin === window.location.origin
+            ? `${url.pathname}${url.search}${url.hash}`
+            : url.toString();
+    } catch (e) {
+        return value;
+    }
 }
 
 function toggleTheme() {

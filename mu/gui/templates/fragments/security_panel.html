@@ -3,6 +3,8 @@
        x-show="$store.mode.active === 'security'"
        x-transition.opacity.duration.200ms>
 
+    {% include "fragments/mode_workspace_header.html" %}
+
     <!-- empty state -->
     <div class="panel-empty" x-show="!$store.security.report">
         <h3>no scan active</h3>
@@ -33,7 +35,7 @@
 
     <!-- findings list -->
     <section class="panel-section"
-             x-show="$store.security.findings.length"
+             x-show="$store.security.findings.length && $store.modeWorkspace.shows('findings', 'evidence', 'remediation')"
              :class="{ open: $store.security.openSections.findings }">
         <button class="panel-section-head"
                 @click="$store.security.toggleSection('findings')"
@@ -116,7 +118,7 @@
                             </div>
 
                             <!-- proof section -->
-                            <div class="finding-proof" x-show="f.has_proof">
+                            <div class="finding-proof" x-show="f.has_proof && $store.modeWorkspace.shows('findings', 'evidence')">
                                 <h5>proof of concept</h5>
                                 <pre class="proof-cmd" x-show="f.proof_command"><code x-text="f.proof_command"></code></pre>
                                 <p class="muted" x-show="f.proof_description" x-text="f.proof_description"></p>
@@ -125,7 +127,7 @@
                             </div>
 
                             <!-- remediation section -->
-                            <div class="finding-remediation" x-show="f.has_remediation">
+                            <div class="finding-remediation" x-show="f.has_remediation && $store.modeWorkspace.shows('findings', 'remediation')">
                                 <h5>remediation</h5>
                                 <p class="muted" x-show="f.remediation_description" x-text="f.remediation_description"></p>
                                 <pre class="patch-diff" x-show="f.patch_diff"><code x-text="f.patch_diff"></code></pre>
@@ -159,7 +161,7 @@
 
     <!-- scan stats -->
     <section class="panel-section"
-             x-show="$store.security.summary"
+             x-show="$store.security.summary && $store.modeWorkspace.shows('findings')"
              :class="{ open: $store.security.openSections.stats }">
         <button class="panel-section-head"
                 @click="$store.security.toggleSection('stats')"

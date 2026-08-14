@@ -4,7 +4,11 @@
 
             <!-- user / assistant message bubbles -->
             <template x-if="t.role === 'user' || t.role === 'assistant'">
-                <div :class="'msg ' + t.role + (t.streaming ? ' streaming' : '')">
+                <div :class="'msg ' + t.role
+                    + (t.streaming ? ' streaming' : '')
+                    + (t.entering ? ' interim-entering' : '')
+                    + (t.leaving ? ' interim-leaving' : '')"
+                     x-show="t.role === 'user' || !!t.text">
                     <div class="role" x-text="t.role"></div>
                     <div class="body" x-html="t.html"></div>
                     <div class="message-attachments" x-show="t.attachments && t.attachments.length">
@@ -51,7 +55,7 @@
                         </div>
                     </div>
                     <iframe class="visualization-frame"
-                            :src="t.artifact.view_url"
+                            :src="visualizationThemeUrl(t.artifact.view_url, $store.theme.current)"
                             :title="t.artifact.title || t.artifact.name || 'Interactive visualization'"
                             :style="'height:' + t.height + 'px'"
                             loading="lazy"
@@ -66,7 +70,8 @@
             <!-- collapsed intermediate turns: groups intermediate assistant +
                  trace + tool events between a user msg and the final response.
                  Shows "N interim updates · Xs · Yk tokens" heading. Expanded shows
-                 child turns inline, including visualizations. -->
+                 child turns inline. Visualizations and live subagent panels
+                 are timeline anchors and are never nested here. -->
             <template x-if="t.role === 'collapse'">
                 <div class="collapse-group" :class="{ open: t.open }">
                     <div class="collapse-header"
@@ -90,27 +95,6 @@
                          x-transition.opacity.duration.180ms>
                         <template x-for="ct in t.childTurns" :key="ct.id">
                             <div class="turn-wrap">
-                                <template x-if="ct.role === 'visualization'">
-                                    <section class="msg visualization collapsed-child">
-                                        <div class="visualization-head">
-                                            <div>
-                                                <div class="role">visualization</div>
-                                                <strong x-text="ct.artifact.title || ct.artifact.name"></strong>
-                                            </div>
-                                            <div class="visualization-actions">
-                                                <a :href="ct.artifact.view_url" target="_blank" rel="noopener noreferrer">Open</a>
-                                                <a :href="ct.artifact.download_url" download>Download</a>
-                                            </div>
-                                        </div>
-                                        <iframe class="visualization-frame"
-                                                :src="ct.artifact.view_url"
-                                                :title="ct.artifact.title || ct.artifact.name || 'Interactive visualization'"
-                                                :style="'height:' + (ct.height || 420) + 'px'"
-                                                loading="lazy"
-                                                referrerpolicy="no-referrer"
-                                                sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
-                                    </section>
-                                </template>
                                 <template x-if="ct.role === 'assistant'">
                                     <div class="msg assistant collapsed-child">
                                         <div class="role">assistant</div>
@@ -168,31 +152,6 @@
                                         <template x-if="!ct.isPreformatted && ct.body">
                                             <div class="cmd-body" x-html="ct.html"></div>
                                         </template>
-                                    </div>
-                                </template>
-                                <template x-if="ct.role === 'subagent_panel'">
-                                    <div class="subagent-panel collapsed-child" :class="{ open: ct.open, running: ct.running }">
-                                        <div class="sap-header"
-                                             @click="ct.open = !ct.open"
-                                             :aria-expanded="ct.open"
-                                             role="button" tabindex="0"
-                                             @keydown.enter.prevent="ct.open = !ct.open"
-                                             @keydown.space.prevent="ct.open = !ct.open">
-                                            <span class="caret">›</span>
-                                            <span class="label">subagents</span>
-                                            <span class="summary" x-text="summarizeSubagentPanel(ct)"></span>
-                                        </div>
-                                        <div class="sap-rows" x-show="ct.open" x-transition.opacity.duration.180ms>
-                                            <template x-for="a in ct.agents" :key="a.task_id">
-                                                <div class="sap-row" :class="'is-' + a.status">
-                                                    <div class="sap-row-head">
-                                                        <span class="sap-depth" x-text="'d=' + a.depth"></span>
-                                                        <span class="sap-task" x-text="a.task"></span>
-                                                        <span class="sap-status" x-text="subagentStatusText(a)"></span>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                        </div>
                                     </div>
                                 </template>
                                 <template x-if="ct.role === 'prompt_resolved'">
@@ -263,7 +222,7 @@
                          @keydown.space.prevent="t.open = !t.open">
                         <span class="caret">›</span>
                         <span class="label">subagents</span>
-                        <span class="summary" x-text="summarizeSubagentPanel(t)"></span>
+                        <span class="summary" x-text="summarizeSubagentPanel(t, $store.chat.clock)"></span>
                         <span x-show="t.running" class="thinking-dots" aria-hidden="true">
                             <span></span><span></span><span></span>
                         </span>
@@ -274,30 +233,68 @@
                         <template x-for="a in t.agents" :key="a.task_id">
                             <div class="sap-row" :class="'is-' + a.status">
                                 <div class="sap-row-head">
-                                    <span class="sap-depth" x-text="'d=' + a.depth"></span>
-                                    <span class="sap-task" x-text="a.task"></span>
-                                    <span class="sap-status" x-text="subagentStatusText(a)"></span>
-                                    <span class="sap-elapsed"
-                                          x-show="a.elapsed"
-                                          x-text="(a.elapsed || 0).toFixed(1) + 's'"></span>
+                                    <div class="sap-identity">
+                                        <strong class="sap-task" x-text="subagentTitle(a)"></strong>
+                                        <span class="sap-roleline">
+                                            <span x-text="a.specialist_key ? a.specialist_key.replace(/[_-]+/g, ' ') : 'subagent'"></span>
+                                            <span>·</span>
+                                            <span x-text="'Depth ' + (a.depth || 1)"></span>
+                                            <span x-show="a.model">·</span>
+                                            <span x-show="a.model" x-text="a.model"></span>
+                                        </span>
+                                    </div>
+                                    <div class="sap-state">
+                                        <span class="sap-status"><i></i><span x-text="subagentStatusText(a)"></span></span>
+                                        <span class="sap-elapsed"
+                                              x-text="subagentElapsed(a, $store.chat.clock).toFixed(1) + 's'"></span>
+                                    </div>
                                 </div>
                                 <div class="sap-meta">
-                                    <span class="sap-tools"
-                                          x-show="a.tool_count > 0"
-                                          x-text="a.tool_count + ' call' + (a.tool_count > 1 ? 's' : '')"></span>
-                                    <span class="sap-tokens"
-                                          x-show="a.tokens_in > 0"
-                                          x-text="_fmtTok(a.tokens_in) + ' in'"></span>
-                                    <span class="sap-iter"
-                                          x-show="a.max_iter > 0"
-                                          x-text="'iter ' + a.iter + '/' + a.max_iter"></span>
-                                    <div class="sap-ctx"
-                                         x-show="a.context_pct > 0"
-                                         :title="'context ' + (a.context_pct || 0).toFixed(1) + '%'">
-                                        <div class="sap-ctx-fill"
-                                             :class="{ warn: (a.context_pct || 0) > 80 }"
-                                             :style="'width:' + Math.min(100, a.context_pct || 0) + '%'"></div>
+                                    <span><b x-text="a.tool_count || 0"></b> actions</span>
+                                    <span x-show="a.tokens_in > 0"><b x-text="_fmtTok(a.tokens_in)"></b> tokens</span>
+                                    <span x-show="a.context_pct > 0"><b x-text="(a.context_pct || 0).toFixed(0) + '%'"></b> context</span>
+                                </div>
+                                <div class="sap-progress" x-show="a.max_iter > 0">
+                                    <div class="sap-progress-head">
+                                        <span>Iteration progress</span>
+                                        <b x-text="(a.iter || 0) + ' / ' + (a.max_iter || 0) + ' · ' + Math.round(((a.iter || 0) / Math.max(1, a.max_iter || 1)) * 100) + '%'"></b>
                                     </div>
+                                    <div class="sap-progress-track"
+                                         role="progressbar"
+                                         :aria-valuenow="a.iter || 0"
+                                         aria-valuemin="0"
+                                         :aria-valuemax="a.max_iter || 0">
+                                        <span class="sap-progress-fill" :style="'width:' + Math.min(100, ((a.iter || 0) / Math.max(1, a.max_iter || 1)) * 100) + '%'"></span>
+                                    </div>
+                                </div>
+                                <button class="sap-detail-toggle"
+                                        type="button"
+                                        @click.stop="$store.chat.toggleSubagentDetails(t, a)"
+                                        :aria-expanded="a.details_open">
+                                    <span class="caret" :class="{ open: a.details_open }">›</span>
+                                    <span x-text="a.details_open ? 'Hide activity' : 'View activity'"></span>
+                                    <b x-text="(a.actions || []).length"></b>
+                                </button>
+                                <div class="sap-activity" x-show="a.details_open" x-transition.opacity.duration.140ms>
+                                    <div class="sap-activity-head">
+                                        <span>Action timeline</span>
+                                        <span>oldest → newest</span>
+                                    </div>
+                                    <p class="sap-empty" x-show="!(a.actions || []).length">Waiting for the first tool action…</p>
+                                    <template x-for="action in (a.actions || [])" :key="a.task_id + '-' + action.seq">
+                                        <div class="sap-action" :class="'is-' + (action.status || 'running')">
+                                            <span class="sap-action-index" x-text="String(action.seq).padStart(2, '0')"></span>
+                                            <i class="sap-action-dot"></i>
+                                            <div class="sap-action-copy">
+                                                <strong x-text="subagentToolLabel(action.tool)"></strong>
+                                                <code x-show="action.detail" x-text="action.detail"></code>
+                                            </div>
+                                            <div class="sap-action-state">
+                                                <span x-text="subagentActionStatus(action)"></span>
+                                                <small x-show="action.elapsed > 0" x-text="Number(action.elapsed).toFixed(1) + 's'"></small>
+                                            </div>
+                                        </div>
+                                    </template>
                                 </div>
                             </div>
                         </template>
@@ -496,13 +493,13 @@
                     <button class="mode-option"
                             :class="{ active: $store.mode.realMode === m.name, disabled: m.disabled }"
                             @click="!m.disabled && ($store.mode.set(m.name), modeOpen = false)"
-                            :title="m.disabled ? 'Requires a workspace' : (m.description || m.name)"
+                            :title="m.disabled ? 'Requires an attached workspace or container session' : (m.description || m.name)"
                             :disabled="m.disabled">
                         <div class="mode-name">
                             <span x-text="m.display_name"></span>
                             <span class="mode-key mono muted" x-text="m.name"></span>
                         </div>
-                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
+                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace or container' : m.description"></div>
                     </button>
                 </template>
             </div>

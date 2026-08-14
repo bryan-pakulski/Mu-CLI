@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import time
 from typing import Any, Dict
 
@@ -46,6 +47,10 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
 
     task_stats = _build_stats(session.task_memory)
     scratch_stats = _build_stats(session.turn_scratchpad)
+    try:
+        durable_stats = session.get_durable_memory_service().stats_for_session(session)
+    except Exception:
+        durable_stats = {"total": 0, "pinned": 0, "by_lifecycle": {}, "scopes": []}
     layer_stats = collect_context_layers(session)
     # The raw provider window vs. the compactor's *effective* ceiling.
     # The compactor fires on `drift_corrected_context_limit` — the raw
@@ -102,6 +107,16 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                     str(scratch_stats["total_hits"]),
                     f"{scratch_stats['avg_hits']:.2f}",
                     "Short-term turn context",
+                )
+                table.add_row(
+                    "Memory Ledger",
+                    str(durable_stats.get("total", 0)),
+                    "-",
+                    "-",
+                    (
+                        f"Cross-session scoped knowledge · "
+                        f"{durable_stats.get('pinned', 0)} pinned"
+                    ),
                 )
                 console.print(table)
 
@@ -258,6 +273,7 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
         ok=True,
         message=(
             f"Task memory: {task_stats['entries']} entries · "
+            f"Ledger: {durable_stats.get('total', 0)} entries · "
             f"Scratchpad: {scratch_stats['entries']} entries · "
             f"Context: {total_tokens}/{context_limit} tokens ({total_pct}%)"
         ),
@@ -266,6 +282,7 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
             "scratchpad_count": scratch_stats["entries"],
             "task_memory_stats": task_stats,
             "scratchpad_stats": scratch_stats,
+            "durable_memory_stats": durable_stats,
             "context_layers": layer_stats,
             "context_total_tokens": total_tokens,
             "context_limit_tokens": context_limit,
@@ -274,6 +291,217 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
             "context_fill_pct": total_pct,
         },
     )
+
+
+def _durable_service(session: Any):
+    return session.get_durable_memory_service()
+
+
+def _print_durable_table(console, items, title: str = "Cross-session Memory Ledger") -> None:
+    if console is None:
+        return
+    from rich import box
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table(title=title, box=box.SIMPLE)
+    table.add_column("ID", style="dim")
+    table.add_column("Scope", style="cyan")
+    table.add_column("Kind", style="magenta")
+    table.add_column("State", style="yellow")
+    table.add_column("Use", justify="right")
+    table.add_column("Statement")
+    for item in items:
+        table.add_row(
+            item.id.split("-")[0],
+            item.scope_type,
+            item.kind,
+            ("📌 " if item.pinned else "") + item.lifecycle,
+            str(item.recall_count),
+            Text(item.statement or "(content forgotten)"),
+        )
+    if not items:
+        console.print("[dim]No durable memories matched.[/dim]")
+    else:
+        console.print(table)
+
+
+def _parse_remember_args(raw: str) -> tuple[str, Dict[str, Any]]:
+    tokens = shlex.split(raw or "")
+    options: Dict[str, Any] = {
+        "scope": "auto",
+        "kind": "observation",
+        "pinned": False,
+        "egress_policy": "any",
+        "tags": [],
+    }
+    text_parts = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--pin":
+            options["pinned"] = True
+            index += 1
+            continue
+        if token in {"--scope", "--kind", "--egress", "--tags"} and index + 1 < len(tokens):
+            value = tokens[index + 1]
+            if token == "--scope":
+                options["scope"] = value
+            elif token == "--kind":
+                options["kind"] = value
+            elif token == "--egress":
+                options["egress_policy"] = value
+            else:
+                options["tags"] = [part.strip() for part in value.split(",") if part.strip()]
+            index += 2
+            continue
+        text_parts.append(token)
+        index += 1
+    return " ".join(text_parts).strip(), options
+
+
+@command(
+    "/remember",
+    help=(
+        "Store an explicit durable memory without an approval prompt: "
+        "/remember <text> [--scope repo] [--kind decision] [--pin]."
+    ),
+)
+def remember_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
+    try:
+        statement, options = _parse_remember_args(args)
+    except ValueError as exc:
+        return CommandResult(ok=False, message=f"Invalid /remember arguments: {exc}")
+    if not statement:
+        return CommandResult(
+            ok=False,
+            message=(
+                "Usage: /remember <text> [--scope personal|workspace|repository|"
+                "branch|feature] [--kind decision|finding|preference|procedure] [--pin]"
+            ),
+        )
+    try:
+        item, created = _durable_service(session).remember(
+            session,
+            statement,
+            kind=options["kind"],
+            scope=options["scope"],
+            tags=options["tags"],
+            actor="user",
+            trust_origin="user_explicit",
+            verification="user_confirmed",
+            confidence=1.0,
+            pinned=options["pinned"],
+            egress_policy=options["egress_policy"],
+            reason="explicit /remember command",
+        )
+    except Exception as exc:
+        return CommandResult(ok=False, message=f"Memory not stored: {exc}")
+    verb = "Stored" if created else "Reinforced"
+    message = (
+        f"{verb} durable memory {item.id} "
+        f"[{item.scope_type}/{item.kind}] · visible in Memory Center."
+    )
+    console = _console(session) if allow_prompt else None
+    if console is not None:
+        console.print(f"[green]{safe_markup(message)}[/green]")
+    return CommandResult(ok=True, message=message, data={"memory": item.to_dict()})
+
+
+def _durable_list(
+    session: Any, query: str, allow_prompt: bool, *, lifecycle: str | None = None
+) -> CommandResult:
+    try:
+        items = _durable_service(session).list_for_session(
+            session, query=query, lifecycle=lifecycle, limit=200
+        )
+    except Exception as exc:
+        return CommandResult(ok=False, message=f"Memory ledger unavailable: {exc}")
+    _print_durable_table(_console(session) if allow_prompt else None, items)
+    return CommandResult(
+        ok=True,
+        message=f"{len(items)} durable memories",
+        data={"memories": [item.to_dict() for item in items]},
+    )
+
+
+def _durable_show(session: Any, memory_id: str, allow_prompt: bool) -> CommandResult:
+    try:
+        item = _durable_service(session).get_for_session(session, memory_id)
+    except Exception as exc:
+        return CommandResult(ok=False, message=f"Memory lookup failed: {exc}")
+    if item is None:
+        return CommandResult(ok=False, message=f"Durable memory {memory_id!r} not found.")
+    memory_id = item.id
+    data = item.to_dict()
+    data["events"] = _durable_service(session).ledger.events(
+        memory_id=memory_id, limit=50
+    )
+    data["revisions"] = _durable_service(session).ledger.revisions(
+        memory_id, limit=50
+    )
+    if allow_prompt and _console(session) is not None:
+        _print_durable_table(_console(session), [item], title="Memory detail")
+        _console(session).print_json(data=data)
+    return CommandResult(ok=True, message=item.statement, data=data)
+
+
+def _durable_why(session: Any, receipt_id: str, allow_prompt: bool) -> CommandResult:
+    session_name = str(session.session_manager.current_session_name or "")
+    receipt = _durable_service(session).ledger.get_recall(
+        receipt_id, session_name=session_name
+    )
+    if receipt is None:
+        return CommandResult(ok=False, message="No recall receipt is available yet.")
+    if allow_prompt and _console(session) is not None:
+        console = _console(session)
+        console.print(
+            f"[bold cyan]Recall {receipt['id']}[/bold cyan] · "
+            f"{len(receipt['included'])} included · {receipt['token_count']} tokens"
+        )
+        for candidate in receipt["included"]:
+            memory = candidate.get("memory", {})
+            reasons = candidate.get("reasons", {})
+            console.print(
+                f"[green]used[/green] {str(memory.get('id', ''))[:8]} "
+                f"[{memory.get('scope', {}).get('type', '')}] "
+                f"score={candidate.get('score')} · {memory.get('statement', '')}"
+            )
+            console.print(f"  [dim]{safe_markup(json.dumps(reasons, sort_keys=True))}[/dim]")
+        for candidate in receipt["excluded"][:10]:
+            memory = candidate.get("memory", {})
+            console.print(
+                f"[dim]skip {str(memory.get('id', ''))[:8]} · "
+                f"{candidate.get('exclusion_reason', '')} · "
+                f"{memory.get('statement', '')}[/dim]"
+            )
+    return CommandResult(ok=True, message=f"Recall receipt {receipt['id']}", data=receipt)
+
+
+def _durable_action(
+    session: Any, action: str, memory_id: str, allow_prompt: bool
+) -> CommandResult:
+    if not memory_id:
+        return CommandResult(ok=False, message=f"Usage: /memory {action} <uuid>")
+    try:
+        resolved = _durable_service(session).get_for_session(session, memory_id)
+        if resolved is None:
+            return CommandResult(
+                ok=False, message=f"Durable memory {memory_id!r} not found."
+            )
+        memory_id = resolved.id
+        item = _durable_service(session).ledger.action(
+            memory_id,
+            action,
+            actor="user",
+            reason=f"TUI /memory {action}",
+        )
+    except Exception as exc:
+        return CommandResult(ok=False, message=f"Memory action failed: {exc}")
+    message = f"Memory {memory_id} → {item.lifecycle}"
+    if allow_prompt and _console(session) is not None:
+        _console(session).print(f"[green]{safe_markup(message)}[/green]")
+    return CommandResult(ok=True, message=message, data={"memory": item.to_dict()})
 
 
 # --------------------------------------------------------------- /memory list
@@ -707,23 +935,116 @@ def _clear_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
 @command(
     "/memory",
     help=(
-        "Inspect the harness state: /memory [status|list <target>|clear <target>]. "
-        "List targets: all, task, scratchpad, L1, L1B, L2, L3, L5. "
-        "Cross-session: /memory save <name>, /memory load <name>, "
-        "/memory list saved, /memory clear saved."
+        "Memory Center: /memory list durable, search, show, why, timeline, "
+        "graph, pin, archive, restore or forget. Existing task/scratchpad/"
+        "context-layer and snapshot commands remain available."
     ),
 )
 def memory_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
-    parts = (args or "").split()
+    try:
+        parts = shlex.split(args or "")
+    except ValueError as exc:
+        return CommandResult(ok=False, message=f"Invalid /memory arguments: {exc}")
     sub = parts[0].lower() if parts else "status"
-    rest = parts[1] if len(parts) > 1 else ""
+    rest_parts = parts[1:]
+    rest = rest_parts[0] if rest_parts else ""
+    rest_text = " ".join(rest_parts).strip()
 
     if sub in ("status", ""):
         return _status(session, allow_prompt)
     if sub == "list":
         if rest.lower() == "saved":
             return _list_saved_memory(session, allow_prompt)
+        if rest.lower() in {"durable", "ledger", "memories"}:
+            return _durable_list(
+                session, " ".join(rest_parts[1:]).strip(), allow_prompt
+            )
         return _list(session, rest, allow_prompt)
+    if sub in {"durable", "search"}:
+        return _durable_list(session, rest_text, allow_prompt)
+    if sub == "show":
+        return _durable_show(session, rest, allow_prompt)
+    if sub == "why":
+        receipt_id = "" if rest.lower() in {"", "last"} else rest
+        return _durable_why(session, receipt_id, allow_prompt)
+    if sub == "timeline":
+        if not rest:
+            return CommandResult(ok=False, message="Usage: /memory timeline <uuid>")
+        try:
+            item = _durable_service(session).get_for_session(session, rest)
+        except Exception as exc:
+            return CommandResult(ok=False, message=f"Memory lookup failed: {exc}")
+        if item is None:
+            return CommandResult(ok=False, message=f"Durable memory {rest!r} not found.")
+        events = _durable_service(session).ledger.events(
+            memory_id=item.id, limit=200
+        )
+        if allow_prompt and _console(session) is not None:
+            _console(session).print_json(data=events)
+        return CommandResult(
+            ok=True, message=f"{len(events)} memory events", data={"events": events}
+        )
+    if sub == "graph":
+        if not rest:
+            return CommandResult(ok=False, message="Usage: /memory graph <uuid>")
+        try:
+            item = _durable_service(session).get_for_session(session, rest)
+            if item is None:
+                return CommandResult(
+                    ok=False, message=f"Durable memory {rest!r} not found."
+                )
+            graph = _durable_service(session).ledger.graph(item.id)
+        except Exception as exc:
+            return CommandResult(ok=False, message=f"Memory graph failed: {exc}")
+        if allow_prompt and _console(session) is not None:
+            _console(session).print_json(data=graph)
+        return CommandResult(ok=True, message=f"Memory graph for {rest}", data=graph)
+    if sub == "edit":
+        if len(rest_parts) < 2:
+            return CommandResult(
+                ok=False, message="Usage: /memory edit <uuid> <new statement>"
+            )
+        memory_id = rest_parts[0]
+        statement = " ".join(rest_parts[1:]).strip()
+        try:
+            resolved = _durable_service(session).get_for_session(session, memory_id)
+            if resolved is None:
+                return CommandResult(
+                    ok=False, message=f"Durable memory {memory_id!r} not found."
+                )
+            memory_id = resolved.id
+            item = _durable_service(session).revise_for_session(
+                session,
+                memory_id,
+                {"statement": statement},
+                actor="user",
+                reason="TUI /memory edit",
+            )
+        except Exception as exc:
+            return CommandResult(ok=False, message=f"Memory edit failed: {exc}")
+        return CommandResult(
+            ok=True,
+            message=f"Memory {memory_id} revised to v{item.version}",
+            data={"memory": item.to_dict()},
+        )
+    if sub in {"pin", "unpin", "archive", "restore", "forget"}:
+        return _durable_action(session, sub, rest, allow_prompt)
+    if sub == "policy":
+        data = {
+            key: session.variables.get(key)
+            for key in (
+                "durable_memory_enabled",
+                "durable_memory_auto_capture",
+                "durable_memory_max_items",
+                "durable_memory_token_budget",
+                "durable_memory_default_scope",
+                "durable_memory_show_receipts",
+            )
+        }
+        data["scopes"] = _durable_service(session).resolve_context(session).eligible()
+        if allow_prompt and _console(session) is not None:
+            _console(session).print_json(data=data)
+        return CommandResult(ok=True, message="Durable memory policy", data=data)
     if sub == "clear":
         if rest.lower() == "saved":
             return _clear_saved_memory(session, allow_prompt)
@@ -735,5 +1056,9 @@ def memory_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Command
 
     return CommandResult(
         ok=False,
-        message=f"Unknown subcommand {sub!r}. Usage: /memory [status|list|clear|save|load]"
+        message=(
+            f"Unknown subcommand {sub!r}. Usage: /memory "
+            "[status|list durable|search|show|why|timeline|graph|edit|pin|"
+            "archive|restore|forget|policy|clear|save|load]"
+        )
     )

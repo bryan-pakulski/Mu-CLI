@@ -82,6 +82,11 @@ def test_history_replays_visualization_descriptors():
     mobile = read("mobile/android/src/hooks/useChatSession.ts")
     assert "_visualization_from_tool_result" in sessions
     assert 'result_part["artifact"] = visualization' in sessions
+    assert 'part.type === "visualization"' in web
+    assert '"type": "visualization", "artifact": visualization' in sessions
+    assert 'tool_result_part["artifact"] = visualization' in read(
+        "mu/agent/loop_body.py"
+    )
     assert "part.artifact" in web
     assert "asVisualization(part.artifact)" in mobile
 
@@ -165,7 +170,7 @@ def test_container_protocol_requires_visualization_bridge_upgrade():
     worker = read("mu/container/worker.py")
     supervisor = read("mu/container/supervisor.py")
     endpoint = read("mu/gui/routers/containers.py")
-    assert "WORKER_PROTOCOL_VERSION = 6" in read("mu/container/ref.py")
+    assert "WORKER_PROTOCOL_VERSION = 8" in read("mu/container/ref.py")
     assert '"worker_protocol": WORKER_PROTOCOL_VERSION' in worker
     assert "did not preserve visualization metadata" in worker
     assert "actual_protocol == WORKER_PROTOCOL_VERSION" in supervisor

@@ -21,7 +21,7 @@ export const VIEW_PANELS: { id: ViewPanel; label: string; icon: keyof typeof Ion
   { id: 'loop', label: 'Loop', icon: 'repeat' as const },
   { id: 'debug', label: 'Debug', icon: 'terminal' as const },
   { id: 'history', label: 'History', icon: 'time' as const },
-  { id: 'memory', label: 'Memory', icon: 'layers' as const },
+  { id: 'memory', label: 'Memory Center', icon: 'layers' as const },
   { id: 'files', label: 'Files', icon: 'folder' as const },
   { id: 'skills', label: 'Skills', icon: 'sparkles' as const },
   { id: 'audio', label: 'Audio', icon: 'mic' as const },

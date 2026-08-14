@@ -18,8 +18,9 @@ from fastapi.templating import Jinja2Templates
 from starlette.types import Scope
 
 from .bus import EventBus
+from .container_mode_proxy import proxy_container_mode_request
 from .deps import require_session
-from .memory_snapshot import LIVE_RESOLUTION, build_memory_snapshot
+from .live_observability import register_live_observability_hooks
 from .prompts import PromptStore
 from .routers import (
     artifacts as artifacts_router,
@@ -34,6 +35,7 @@ from .routers import (
     jobs as jobs_router,
     loop as loop_router,
     memory as memory_router,
+    memories as memories_router,
     modes,
     prompts as prompts_router,
     providers as providers_router,
@@ -47,75 +49,19 @@ from .routers import (
 )
 from .watcher import SessionWatcher
 from .web_ui import WebUI
-from mu.agent.hooks import HookContext, default_registry
 from mu.container import ContainerSupervisor
 from mu.jobs import get_default_job_service
 from mu.jobs.controller import JobController
 
-_MEMORY_HOOK_NAME = "gui_memory_snapshot"
-_SUBAGENT_HOOK_NAME = "gui_subagent_snapshot"
-
 
 def _register_memory_snapshot_hook() -> None:
-    if any(spec.name == _MEMORY_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
-        return
-
-    def _snapshot(ctx: HookContext):
-        ui = getattr(ctx.session, "ui", None)
-        if not isinstance(ui, WebUI):
-            return None
-        try:
-            from mu.agent.loop_body import _estimate_messages_tokens, _estimate_tools_tokens
-            from utils.token_estimator import estimate_tokens
-            request_tokens = (
-                estimate_tokens(ctx.system_prompt or "")
-                + _estimate_messages_tokens(ctx.messages or [])
-                + _estimate_tools_tokens(ctx.tools or [])
-            )
-            ctx.session._memory_map_request_token_estimate = int(request_tokens)
-            snap = build_memory_snapshot(
-                ctx.session,
-                cols=LIVE_RESOLUTION,
-                rows=LIVE_RESOLUTION,
-                request_token_estimate=request_tokens,
-            )
-        except Exception as exc:
-            _logger.warning("memory snapshot hook failed: %s", exc)
-            return None
-        ui._publish({"kind": "context_snapshot", **snap})
-        return None
-
-    default_registry.register("pre_provider_call", name=_MEMORY_HOOK_NAME)(_snapshot)
+    """Backward-compatible name for extensions importing the old hook."""
+    register_live_observability_hooks()
 
 
 def _register_subagent_snapshot_hook() -> None:
-    if any(spec.name == _SUBAGENT_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
-        return
-
-    def _snapshot(ctx: HookContext):
-        ui = getattr(ctx.session, "ui", None)
-        if not isinstance(ui, WebUI):
-            return None
-        registry = getattr(ctx.session, "_subagent_registry", None)
-        if registry is None:
-            return None
-        try:
-            children = registry.snapshot_active()
-        except Exception as exc:
-            _logger.warning("subagent snapshot hook failed: %s", exc)
-            return None
-        ui._publish({
-            "kind": "subagent_snapshot",
-            "children": children,
-            "active": sum(1 for c in children if c.get("status") == "running"),
-            "stuck": sum(1 for c in children if c.get("stuck")),
-            "stall": sum(1 for c in children if c.get("stall")),
-            "batch_id": registry.active_batch_id(),
-        })
-        return None
-
-    default_registry.register("pre_provider_call", name=_SUBAGENT_HOOK_NAME)(_snapshot)
-
+    """Backward-compatible name for extensions importing the old hook."""
+    register_live_observability_hooks()
 
 GUI_ROOT = Path(__file__).parent
 TEMPLATES_DIR = GUI_ROOT / "templates"
@@ -160,6 +106,7 @@ def web_ui_for(app: FastAPI, name: Optional[str]) -> Optional[WebUI]:
 
 def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> FastAPI:
     app = FastAPI(title="mucli", version="1.0", docs_url=None, redoc_url=None)
+    app.middleware("http")(proxy_container_mode_request)
     bus = EventBus()
     prompts = PromptStore()
 
@@ -221,14 +168,14 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
     app.include_router(memory_router.router, prefix="/api/memory", tags=["memory"])
+    app.include_router(memories_router.router, prefix="/api/v1", tags=["memory-ledger"])
     app.include_router(files_router.router, prefix="/api/files", tags=["files"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
     app.include_router(traces_router.router, prefix="/api/traces", tags=["traces"])
     app.include_router(chat.events_router, tags=["events"])
 
-    _register_memory_snapshot_hook()
-    _register_subagent_snapshot_hook()
+    register_live_observability_hooks()
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):

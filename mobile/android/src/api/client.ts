@@ -24,6 +24,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
   query?: Record<string, QueryValue>;
   timeoutMs?: number;
+  headers?: Record<string, string>;
 }
 
 function timeoutMessage(timeoutMs: number): string {
@@ -32,17 +33,18 @@ function timeoutMessage(timeoutMs: number): string {
 }
 
 async function request<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   opts?: RequestOptions,
 ): Promise<T> {
   const base = baseUrl();
   let url = `${base}${path}`;
 
-  // Append the active session only when the caller did not provide an
-  // explicit session. This prevents stale store state from competing
-  // with session-switch and history requests.
-  if (method === 'GET' || method === 'DELETE') {
+  // Append the active session for reads and mutations when the caller did not
+  // provide one explicitly. Mode controls are session-scoped too; limiting
+  // this to GET/DELETE made mobile POSTs mutate whichever session happened to
+  // be focused in the web daemon instead of the mobile-selected container.
+  {
     const sep = url.includes('?') ? '&' : '?';
     const sn = useConnectionStore.getState().activeSessionName;
     const explicitSession = Object.prototype.hasOwnProperty.call(
@@ -63,7 +65,7 @@ async function request<T>(
     }
   }
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(opts?.headers || {}) };
   let bodyStr: string | undefined;
   if (opts?.body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -144,6 +146,9 @@ export const api = {
   },
   put<T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('PUT', path, { ...opts, body });
+  },
+  patch<T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
+    return request<T>('PATCH', path, { ...opts, body });
   },
   delete<T>(path: string, opts?: Omit<RequestOptions, 'body'>): Promise<T> {
     return request<T>('DELETE', path, opts);

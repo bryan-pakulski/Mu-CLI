@@ -337,6 +337,7 @@ class Session:
             self.attachment_registry = AttachmentRegistry(session_dir)
         except Exception:
             self.attachment_registry = None
+
         try:
             from mu.container.registry import ContainerRegistry
 
@@ -360,6 +361,11 @@ class Session:
             "feature_metadata_index",
             self.session_manager.get_feature_metadata_index(),
         )
+
+    def get_durable_memory_service(self):
+        """Shared Memory Ledger used by TUI, web, mobile and agent loop."""
+
+        return self.session_manager.get_durable_memory_service()
 
     def _derive_feature_state_status(self, feature_plan: dict | None) -> str:
         return derive_feature_state_status(feature_plan)
@@ -1455,6 +1461,33 @@ class Session:
                         }
                     )
 
+        # Model-managed memory promotion is automatic and non-blocking. The
+        # model decides what deserves save_memory; the harness commits the
+        # eligible, non-secret records and surfaces a compact receipt instead
+        # of interrupting the normal conversation with approval prompts.
+        durable_writes = list(getattr(self, "_turn_durable_writes", []) or [])
+        if self.variables.get("durable_memory_enabled", True):
+            try:
+                service = self.get_durable_memory_service()
+                promoted = service.capture_task_entries(self)
+                seen_write_ids = {item.id for item in durable_writes}
+                durable_writes.extend(
+                    item for item in promoted if item.id not in seen_write_ids
+                )
+                self._last_durable_writes = [item.to_dict() for item in durable_writes]
+                if durable_writes:
+                    self.session_manager.save_history(self.folder_context)
+                    if (
+                        self.ui
+                        and self.variables.get("durable_memory_show_receipts", True)
+                    ):
+                        self.ui.show_info(
+                            f"Memory · stored {len(durable_writes)} cross-session "
+                            f"record{'s' if len(durable_writes) != 1 else ''}"
+                        )
+            except Exception:
+                logger.debug("durable memory capture failed", exc_info=True)
+
         response = {
             "ok": error is None and status not in {"error"},
             "status": status,
@@ -1474,6 +1507,26 @@ class Session:
                 "estimated_cost": total_cost,
             },
             "session_totals": dict(self.session_manager.token_counts),
+            "memory": {
+                "recall_receipt_id": str(
+                    getattr(
+                        getattr(self, "_last_durable_recall_receipt", None),
+                        "id",
+                        "",
+                    )
+                    or ""
+                ),
+                "recalled": len(
+                    getattr(
+                        getattr(self, "_last_durable_recall_receipt", None),
+                        "included",
+                        [],
+                    )
+                    or []
+                ),
+                "stored": len(durable_writes),
+                "writes": [item.to_dict() for item in durable_writes],
+            },
         }
         # Stash a compact turn summary for the run tracer. The `send_message`
         # finally block reads this and emits the `turn_end` line + flushes the
@@ -1488,6 +1541,7 @@ class Session:
                 "tool_results": len(tool_results),
                 "error": error,
                 "session_totals": dict(self.session_manager.token_counts),
+                "memory": dict(response.get("memory", {})),
             }
         except Exception:  # noqa: BLE001 — telemetry must never break a turn
             pass
@@ -1566,6 +1620,7 @@ class Session:
                             "tool_results": _summary.get("tool_results", 0),
                             "error": _summary.get("error"),
                             "session_totals": _summary.get("session_totals", {}),
+                            "memory": _summary.get("memory", {}),
                             "iters": _em.iter_count,
                             "efficiency": _eff,
                         }

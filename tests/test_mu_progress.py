@@ -10,7 +10,7 @@ import pytest
 from mu.session.session import Session, SessionManager
 from mu.workspace.folder_context import FolderContext
 from mu.ui.progress import SubagentProgressTracker
-from mu.ui.subagent import SubagentUI, _extract_tool_name
+from mu.ui.subagent import SubagentUI, _extract_tool_detail, _extract_tool_name
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
 
@@ -35,6 +35,21 @@ def test_update_tool_increments_count_and_sets_current():
     [state] = t.snapshot()
     assert state.tool_count == 3
     assert state.current_tool == "list_dir"
+
+
+def test_tracker_keeps_ordered_action_ledger_and_completion_state():
+    t = SubagentProgressTracker()
+    aid = t.open(depth=1, task="inspect auth")
+    t.update_tool(aid, "read_file", "{'filename': 'auth.py'}")
+    t.complete_tool(aid, "read_file", ok=True)
+    t.update_tool(aid, "bash", "{'command': 'pytest -q'}")
+    t.complete_tool(aid, "bash", ok=False)
+
+    [state] = t.snapshot()
+    assert [action["seq"] for action in state.actions] == [1, 2]
+    assert [action["tool"] for action in state.actions] == ["read_file", "bash"]
+    assert [action["status"] for action in state.actions] == ["done", "error"]
+    assert state.actions[0]["detail"] == "{'filename': 'auth.py'}"
 
 
 def test_close_sets_status_done_clears_current_tool():
@@ -129,6 +144,16 @@ def test_extract_tool_name_returns_none_for_non_matching():
     assert _extract_tool_name("some random message") is None
 
 
+def test_extract_tool_detail_is_bounded_and_secret_scrubbed():
+    token = "ghp_" + "a" * 36
+    detail = _extract_tool_detail(
+        f"Running tool: bash({{'command': 'use {token}'}})", "bash"
+    )
+    assert token not in detail
+    assert "REDACTED" in detail
+    assert len(detail) <= 240
+
+
 # ============================================================ unit: subagent UI with tracker
 
 
@@ -159,6 +184,19 @@ def test_subagent_ui_routes_tool_lines_to_tracker_when_attached():
     assert state.current_tool == "search_for_string"
     # Parent UI received neither — they were routed to the panel instead.
     assert parent.info_calls == []
+
+
+def test_subagent_ui_marks_tracked_action_complete_after_tool_trace():
+    parent = _RecordingUI()
+    tracker = SubagentProgressTracker()
+    aid = tracker.open(depth=1, task="x")
+    ui = SubagentUI(parent, depth=1, tracker=tracker, agent_id=aid)
+
+    ui.show_info("Running tool: read_file({'filename': '/x'})")
+    ui.emit_tool_trace("read_file", {"filename": "/x"}, "ok", "ok")
+
+    [state] = tracker.snapshot()
+    assert state.actions[-1]["status"] == "done"
 
 
 def test_subagent_ui_without_tracker_still_bubbles_tool_lines():

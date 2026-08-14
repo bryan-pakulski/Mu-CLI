@@ -85,12 +85,21 @@ workflow, tools, and quality bar.
 | Command | Description |
 | --- | --- |
 | `/memory status` | Show task memory + scratchpad stats and per-layer context fill (with global-cap total). |
+| `/remember <text> [--scope repository] [--kind decision] [--pin]` | Store explicit durable memory immediately. Model-managed writes use same ledger automatically and do not request approval. |
+| `/memory list durable [query]` | Browse cross-session memory in current personal/workspace/repository/branch scopes. |
+| `/memory search <query>` | Search durable memory without changing recall counters or freshness. |
+| `/memory show <uuid>` | Show record, provenance, immutable revisions and event timeline. |
+| `/memory why [last|receipt-id]` | Explain exactly which memories were injected or skipped and why. |
+| `/memory edit <uuid> <statement>` | Create a new immutable revision. |
+| `/memory pin|unpin|archive|restore|forget <uuid>` | Curate lifecycle. Forget purges content and derived indexes, leaving a content-free tombstone. |
+| `/memory timeline|graph <uuid>` | Inspect audit history or one-hop relationships. |
+| `/memory policy` | Show automatic capture, recall budget, receipt and scope policy. |
 | `/memory list <target>` | Inspect a store or a layer. Targets: `all`, `task`, `scratchpad`, `L0`, `L1`, `L1B`, `L2`, `L3`, `L5` (L4/L4B have no inspectable slab). Tab-completes. |
 | `/memory list saved` | List cross-session memory snapshots saved with `/memory save`. |
 | `/memory clear <target>` | Wipe a store. Targets: `task`, `scratchpad`, `all`. |
 | `/memory clear saved` | Delete every saved memory snapshot. |
-| `/memory save <name>` | Snapshot task memory + scratchpad to a file under `~/.mucli/memory/` for reuse across sessions. |
-| `/memory load <name>` | Restore a saved snapshot into the current session's task memory + scratchpad. |
+| `/memory save <name>` | Legacy/export command: snapshot task memory to JSON under `~/.mucli/memory/`. |
+| `/memory load <name>` | Legacy/import command: merge task-memory JSON into current session. Eligible entries promote automatically on next turn. |
 
 The collation buffer is drained by the model via the `flush` tool — there is no user-facing flush command.
 

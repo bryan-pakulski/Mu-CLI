@@ -13,6 +13,9 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Request
 
+from ..mode_workspace import debug_workspace
+from ..mode_session import mode_session
+
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 
@@ -31,7 +34,7 @@ def _entry_dict(entry) -> Dict[str, Any]:
 
 @router.get("/state")
 async def get_debug_state(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+    session = mode_session(request)
     if session is None:
         return {
             "active": False,
@@ -40,8 +43,10 @@ async def get_debug_state(request: Request) -> Dict[str, Any]:
             "suspects": [],
             "findings": [],
             "scratchpad_count": 0,
+            "workspace": debug_workspace("", [], [], [], [], active=False),
         }
     sm = session.session_manager
+    mode_active = sm.variables.get("agent_mode", "default") == "debug"
 
     debug_target = str(sm.variables.get("debug_target", "") or "").strip()
 
@@ -94,4 +99,12 @@ async def get_debug_state(request: Request) -> Dict[str, Any]:
         "notes": notes,
         "findings": findings,
         "scratchpad_count": scratchpad_count,
+        "workspace": debug_workspace(
+            debug_target,
+            hypotheses,
+            suspects,
+            notes,
+            findings,
+            active=mode_active,
+        ),
     }

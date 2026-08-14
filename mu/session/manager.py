@@ -125,6 +125,17 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
     def _get_session_dir(self, name):
         return os.path.join(_history_dir(), "sessions", name)
 
+    def get_durable_memory_service(self):
+        """Return the process-shared cross-session memory service lazily.
+
+        Resolving HISTORY_DIR at call time preserves the existing test and
+        deployment behaviour where MUCLI_HOME may be changed after import.
+        """
+
+        from mu.memory.service import get_memory_service
+
+        return get_memory_service(_history_dir())
+
     def _load_session(self, name):
         filepath = self._get_filepath(name)
         legacy_filepath = os.path.join(_history_dir(), f"{name}.json")

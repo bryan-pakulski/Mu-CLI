@@ -646,6 +646,93 @@ class ContainerSupervisor:
         value = response.json()
         return value if isinstance(value, dict) else {"ok": True}
 
+    def proxy_mode_api(
+        self,
+        session_name: str,
+        path: str,
+        *,
+        method: str = "GET",
+        query: list[tuple[str, str]] | None = None,
+        body: bytes = b"",
+        content_type: str = "application/json",
+        provider: str,
+        model: str,
+        agent_mode: str = "default",
+        system_instruction: str = "You are a helpful assistant.",
+    ) -> dict[str, Any]:
+        """Forward one Mode OS request to the owning container worker.
+
+        Only the six versioned mode surfaces are accepted.  Runtime sync runs
+        first so a freshly restarted worker can serve an explorer before the
+        next model turn and so cached workers always use the host-selected
+        strategy.
+        """
+        allowed = (
+            "/api/feature",
+            "/api/research",
+            "/api/security",
+            "/api/debug",
+            "/api/loop",
+            "/api/teacher",
+            "/api/memory",
+        )
+        clean_path = str(path or "")
+        if not any(
+            clean_path == prefix or clean_path.startswith(prefix + "/")
+            for prefix in allowed
+        ):
+            raise ContainerRuntimeError("refusing to proxy a non-mode worker path")
+        verb = str(method or "GET").upper()
+        if verb not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            raise ContainerRuntimeError(f"unsupported mode API method: {verb}")
+        if len(body or b"") > 2 * 1024 * 1024:
+            raise ContainerRuntimeError("mode API request exceeds 2 MiB")
+
+        ref = self.container_for_session(session_name)
+        if ref is None:
+            raise ContainerRuntimeError(
+                f"no container attached to session {session_name!r}"
+            )
+        self.ensure_running(ref)
+        headers = {"X-MuCLI-Worker-Token": ref.worker_token}
+        base_url = self.worker_url(ref)
+        with httpx.Client(
+            timeout=max(30.0, float(self.request_timeout)), trust_env=False
+        ) as client:
+            synchronized = client.post(
+                f"{base_url}/runtime/sync",
+                json={
+                    "session_name": session_name,
+                    "provider": provider,
+                    "model": model,
+                    "agent_mode": agent_mode,
+                    "system_instruction": system_instruction,
+                },
+                headers=headers,
+            )
+            if synchronized.status_code >= 400:
+                self._raise_worker_response(ref, synchronized)
+
+            forwarded_headers = dict(headers)
+            if body:
+                forwarded_headers["Content-Type"] = str(
+                    content_type or "application/json"
+                )
+            response = client.request(
+                verb,
+                f"{base_url}{clean_path}",
+                params=query or [],
+                content=body or None,
+                headers=forwarded_headers,
+            )
+        return {
+            "status_code": int(response.status_code),
+            "content": bytes(response.content),
+            "content_type": str(
+                response.headers.get("content-type") or "application/json"
+            ),
+        }
+
     def interrupt(self, session_name: str) -> dict[str, Any]:
         ref = self.container_for_session(session_name)
         if ref is None:

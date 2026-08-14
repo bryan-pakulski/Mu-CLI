@@ -40,6 +40,7 @@ import random
 import re
 import time
 import traceback
+import uuid
 from typing import Any
 
 from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
@@ -814,7 +815,11 @@ def run_turn(session, text):
     if effective_text:
         parts.append({"type": "text", "text": effective_text})
 
-    new_user_message = {"role": "user", "parts": parts}
+    new_user_message = {
+        "role": "user",
+        "parts": parts,
+        "timeline_id": "turn-" + uuid.uuid4().hex,
+    }
 
     # Teacher watcher: classify the user's message as a learner reply
     # against the active lesson's most recent check, BEFORE the agent
@@ -1068,6 +1073,50 @@ def run_turn(session, text):
     # Reset to 0 in `_collect_turn_response` when the turn finishes.
     session._compaction_watermark = len(session.session_manager.history)
     session._pending_user_text = effective_text or text or ""
+    # Cross-session recall runs once per user turn, not once per provider
+    # iteration. The resulting block and receipt are reused by retries and
+    # tool-call iterations so browsing/looping cannot inflate recall counts.
+    session._turn_durable_recall_block = ""
+    session._last_durable_recall_receipt = None
+    session._turn_durable_writes = []
+    if (
+        effective_text
+        and session.variables.get("durable_memory_enabled", True)
+        and not str(text or "").lstrip().startswith("/")
+    ):
+        try:
+            _memory_service = session.get_durable_memory_service()
+            _memory_receipt = _memory_service.recall(
+                session,
+                effective_text,
+                limit=max(
+                    1,
+                    int(session.variables.get("durable_memory_max_items", 6) or 6),
+                ),
+                budget_tokens=max(
+                    64,
+                    int(
+                        session.variables.get("durable_memory_token_budget", 1200)
+                        or 1200
+                    ),
+                ),
+            )
+            session._last_durable_recall_receipt = _memory_receipt
+            session._turn_durable_recall_block = _memory_service.render_recall(
+                _memory_receipt
+            )
+            if (
+                _memory_receipt.included
+                and session.ui
+                and session.variables.get("durable_memory_show_receipts", True)
+            ):
+                session.ui.show_info(
+                    f"Memory · recalled {len(_memory_receipt.included)} · "
+                    f"{_memory_receipt.token_count} tokens · "
+                    f"receipt {_memory_receipt.id.split('-')[0]}"
+                )
+        except Exception:
+            logger.debug("durable memory recall failed", exc_info=True)
     # Resumption briefings: queued by /teach load, /feature load, and
     # session-switch paths. Drained here so the agent's next provider
     # call sees them once, then the queue clears.
@@ -1338,6 +1387,14 @@ def run_turn(session, text):
                 cached_skills=session._turn_skills_block,
                 cached_folder_context=session._turn_folder_context_block,
             )
+            _durable_recall = str(
+                getattr(session, "_turn_durable_recall_block", "") or ""
+            ).strip()
+            if _durable_recall:
+                dynamic_system_prompt += (
+                    "\n\nLAYER 2M — Durable cross-session recall:\n"
+                    f"{_durable_recall}"
+                )
             if session.variables.get("memory_enabled", True):
                 active_mode_for_mem = str(
                     session.variables.get("agent_mode", "default")
@@ -2426,15 +2483,34 @@ def run_turn(session, text):
                 except Exception:  # noqa: BLE001
                     pass
 
-                tool_result_parts.append(
-                    {
-                        "type": "tool_result",
-                        "tool_name": part.tool_name,
-                        "tool_result": result,
-                        "thought_signature": part.thought_signature,
-                        "cache_key": cache_key,
-                    }
-                )
+                tool_result_part = {
+                    "type": "tool_result",
+                    "tool_name": part.tool_name,
+                    "tool_result": result,
+                    "thought_signature": part.thought_signature,
+                    "cache_key": cache_key,
+                }
+                # Keep a compact, first-class visualization descriptor beside
+                # the tool result. Structured observation transforms and older
+                # transports may reshape the result body; history replay should
+                # not have to rediscover the chat card inside that envelope.
+                if part.tool_name in {
+                    "publish_visualization",
+                    "create_visualization",
+                    "render_visualization",
+                }:
+                    try:
+                        from mu.artifact.history import extract_visualization
+
+                        visualization = extract_visualization(source_result)
+                        if visualization is not None:
+                            tool_result_part["artifact"] = visualization
+                    except Exception:
+                        logger.debug(
+                            "visualization history descriptor capture failed",
+                            exc_info=True,
+                        )
+                tool_result_parts.append(tool_result_part)
                 # --- Trace: per-tool capture (latency, cache hit, result size) ---
                 try:
                     _t_start = _tool_start_times.pop(i, None)

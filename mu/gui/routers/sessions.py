@@ -7,6 +7,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import shutil
 import time
 from typing import Any, Dict, Optional
@@ -17,6 +18,7 @@ from mu.artifact.history import (
     match_visualization_reference,
     merge_registry_descriptor,
 )  # MUCLI_VISUALIZATION_TIMELINE_V2
+from mu.agent.subagent_artifacts import SubagentArtifactStore
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.load_errors import describe_container_load_error
 from mu.container.network import DEFAULT_EGRESS_ALLOW
@@ -28,6 +30,130 @@ from fastapi.responses import JSONResponse
 import utils.config as _config
 
 router = APIRouter()
+
+_SUBAGENT_TASK_ID_RE = re.compile(r"\bsa-[A-Za-z0-9._-]{1,120}\b")
+
+
+def _subagent_task_ids(value: Any) -> list[str]:
+    """Extract durable task ids from structured or serialized tool results."""
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, default=str)
+    else:
+        text = str(value or "")
+    return list(dict.fromkeys(_SUBAGENT_TASK_ID_RE.findall(text)))
+
+
+def _subagent_history_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the bounded, client-safe state used by historical cards."""
+    started = float(state.get("started_at") or 0.0)
+    finished = float(state.get("finished_at") or 0.0)
+    elapsed = float(state.get("elapsed") or 0.0)
+    if elapsed <= 0 and started > 0:
+        elapsed = max(0.0, (finished or time.time()) - started)
+    tokens = state.get("tokens") if isinstance(state.get("tokens"), dict) else {}
+    actions = state.get("actions") if isinstance(state.get("actions"), list) else []
+    return {
+        "task_id": str(state.get("task_id") or ""),
+        "batch_id": str(state.get("batch_id") or state.get("task_id") or ""),
+        "task": str(state.get("task") or ""),
+        "title": str(state.get("title") or ""),
+        "depth": int(state.get("depth") or 1),
+        "model": str(state.get("model") or ""),
+        "specialist_key": str(state.get("specialist_key") or "general"),
+        "status": str(state.get("status") or "done"),
+        "tool_count": int(state.get("tool_count") or state.get("tool_calls") or 0),
+        "last_tool": state.get("last_tool"),
+        "elapsed": round(elapsed, 3),
+        "context_pct": float(state.get("context_pct") or 0.0),
+        "iter": int(state.get("iter") or 0),
+        "max_iter": int(state.get("max_iter") or 0),
+        "tokens_in": int(state.get("tokens_in") or tokens.get("in") or 0),
+        "summary": str(state.get("summary") or ""),
+        "error": state.get("error"),
+        "actions": [dict(item) for item in actions[-100:] if isinstance(item, dict)],
+        "started_at": started,
+        "finished_at": finished or None,
+    }
+
+
+def _subagent_history_anchors(
+    session_dir: str,
+    history: list[Dict[str, Any]],
+) -> tuple[Dict[tuple[int, int], list[Dict[str, Any]]], Dict[int, list[Dict[str, Any]]]]:
+    """Map durable delegation batches back to their original history slot.
+
+    Exact anchors are recovered from the persisted ``spawn_agent`` tool result.
+    The stored parent user index is only a fallback for compacted turns whose
+    tool metadata was intentionally removed.
+    """
+    if not os.path.isdir(os.path.join(session_dir, "subagents")):
+        return {}, {}
+    try:
+        states = SubagentArtifactStore(session_dir).list()
+    except OSError:
+        states = []
+    state_by_task = {
+        str(state.get("task_id") or ""): state
+        for state in states
+        if state.get("task_id")
+    }
+    states_by_batch: Dict[str, list[Dict[str, Any]]] = {}
+    for state in states:
+        task_id = str(state.get("task_id") or "")
+        if not task_id:
+            continue
+        batch_id = str(state.get("batch_id") or task_id)
+        states_by_batch.setdefault(batch_id, []).append(state)
+    for batch_states in states_by_batch.values():
+        batch_states.sort(key=lambda item: float(item.get("started_at") or 0.0))
+
+    exact: Dict[tuple[int, int], list[Dict[str, Any]]] = {}
+    placed: set[str] = set()
+    for turn_index, turn in enumerate(history):
+        for part_index, part in enumerate(turn.get("parts", []) or []):
+            if part.get("type") != "tool_result" or str(part.get("tool_name") or "") != "spawn_agent":
+                continue
+            for task_id in _subagent_task_ids(part.get("tool_result")):
+                state = state_by_task.get(task_id)
+                if state is None:
+                    continue
+                batch_id = str(state.get("batch_id") or task_id)
+                if batch_id in placed:
+                    continue
+                exact.setdefault((turn_index, part_index), []).append({
+                    "type": "subagent_panel",
+                    "batch_id": batch_id,
+                    "agents": [_subagent_history_snapshot(item) for item in states_by_batch[batch_id]],
+                    "durable": True,
+                })
+                placed.add(batch_id)
+
+    history_by_timeline_id = {
+        str(turn.get("timeline_id") or ""): index
+        for index, turn in enumerate(history)
+        if turn.get("timeline_id")
+    }
+    fallback: Dict[int, list[Dict[str, Any]]] = {}
+    for batch_id, batch_states in states_by_batch.items():
+        if batch_id in placed:
+            continue
+        anchor_ids = [
+            str(item.get("parent_turn_id") or "")
+            for item in batch_states
+            if item.get("parent_turn_id")
+        ]
+        if not anchor_ids:
+            continue
+        anchor = history_by_timeline_id.get(anchor_ids[0])
+        if anchor is None:
+            continue
+        fallback.setdefault(anchor, []).append({
+            "type": "subagent_panel",
+            "batch_id": batch_id,
+            "agents": [_subagent_history_snapshot(item) for item in batch_states],
+            "durable": True,
+        })
+    return exact, fallback
 
 
 def _set_container_creation_status(
@@ -335,6 +461,81 @@ def _visualization_from_tool_result(value: Any) -> Dict[str, Any] | None:
     return extract_visualization(value)
 
 
+_VISUALIZATION_TOOL_NAMES = frozenset(
+    {"publish_visualization", "create_visualization", "render_visualization"}
+)
+
+
+def _visualization_registry_anchors(
+    history: list[Dict[str, Any]],
+    visualizations: list[Dict[str, Any]],
+) -> tuple[
+    Dict[tuple[int, int], list[Dict[str, Any]]],
+    Dict[int, list[Dict[str, Any]]],
+]:
+    """Resolve durable visualization anchors against the current transcript.
+
+    Numeric locations are accepted only when they still point to a publish
+    tool call inside the matching stable user turn. If compaction removed that
+    exact boundary, the stable turn id remains a safe fallback. This prevents
+    an old artifact from moving to a different conversation after history was
+    cleared or rewritten.
+    """
+    turn_by_id: Dict[str, int] = {}
+    user_indexes: list[int] = []
+    for index, message in enumerate(history):
+        if message.get("role") != "user":
+            continue
+        user_indexes.append(index)
+        turn_id = str(message.get("timeline_id") or "")
+        if turn_id:
+            turn_by_id[turn_id] = index
+
+    next_user: Dict[int, int] = {}
+    for offset, index in enumerate(user_indexes):
+        next_user[index] = (
+            user_indexes[offset + 1]
+            if offset + 1 < len(user_indexes)
+            else len(history)
+        )
+
+    exact: Dict[tuple[int, int], list[Dict[str, Any]]] = {}
+    fallback: Dict[int, list[Dict[str, Any]]] = {}
+    for visualization in sorted(
+        visualizations,
+        key=lambda item: float(item.get("created_at", 0) or 0),
+    ):
+        turn_id = str(visualization.get("timeline_turn_id") or "")
+        turn_index = turn_by_id.get(turn_id)
+        if turn_index is None:
+            continue
+        try:
+            history_index = int(visualization.get("timeline_history_index", -1))
+            part_index = int(visualization.get("timeline_part_index", -1))
+        except (TypeError, ValueError):
+            history_index = part_index = -1
+
+        valid_exact = (
+            turn_index < history_index < next_user[turn_index]
+            and 0 <= history_index < len(history)
+        )
+        if valid_exact:
+            parts = history[history_index].get("parts", []) or []
+            valid_exact = 0 <= part_index < len(parts)
+            if valid_exact:
+                part = parts[part_index]
+                valid_exact = (
+                    part.get("type") == "tool_call"
+                    and str(part.get("tool_name") or "").strip().lower()
+                    in _VISUALIZATION_TOOL_NAMES
+                )
+        if valid_exact:
+            exact.setdefault((history_index, part_index), []).append(visualization)
+        else:
+            fallback.setdefault(turn_index, []).append(visualization)
+    return exact, fallback
+
+
 def _history_preview(value: Any, limit: int = 6000) -> str:
     """Return a bounded, readable trace preview for durable history replay."""
     if isinstance(value, str):
@@ -456,6 +657,10 @@ async def get_history(
     session_dir = os.path.join(
         _config.HISTORY_DIR, "sessions", sm.current_session_name
     )
+    subagent_exact, subagent_fallback = _subagent_history_anchors(
+        session_dir,
+        sm.history,
+    )
     registry_visualizations: list[Dict[str, Any]] = []
     try:
         for artifact in ArtifactRegistry(session_dir).list():
@@ -474,6 +679,15 @@ async def get_history(
         for item in registry_visualizations
         if item.get("artifact_id")
     }
+    anchored_visualization_ids = {
+        str(item.get("artifact_id") or "")
+        for item in registry_visualizations
+        if item.get("artifact_id") and item.get("timeline_turn_id")
+    }
+    visualization_exact, visualization_fallback = _visualization_registry_anchors(
+        sm.history,
+        registry_visualizations,
+    )
 
     turns = []
     seen_visualization_ids: set[str] = set()
@@ -482,7 +696,7 @@ async def get_history(
     for idx, turn in enumerate(history_window, start=start_index):
         role = turn.get("role")
         parts_out = []
-        for part in turn.get("parts", []):
+        for source_part_index, part in enumerate(turn.get("parts", [])):
             ptype = part.get("type")
             if ptype == "text":
                 parts_out.append({"type": "text", "text": part.get("text", "")})
@@ -516,7 +730,8 @@ async def get_history(
                 }
 
                 visualization = merge_registry_descriptor(
-                    extract_visualization(raw_result),
+                    extract_visualization(part.get("artifact"))
+                    or extract_visualization(raw_result),
                     registry_by_id,
                 )
                 if visualization is None:
@@ -528,26 +743,41 @@ async def get_history(
 
                 if visualization is not None:
                     artifact_id = str(visualization.get("artifact_id") or "")
-                    if artifact_id and artifact_id not in seen_visualization_ids:
+                    if (
+                        artifact_id
+                        and artifact_id not in anchored_visualization_ids
+                        and artifact_id not in seen_visualization_ids
+                    ):
                         result_part["artifact"] = visualization
                         seen_visualization_ids.add(artifact_id)
-                elif tool_name.strip().lower() in {
-                    "publish_visualization",
-                    "create_visualization",
-                    "render_visualization",
-                }:
+                elif tool_name.strip().lower() in _VISUALIZATION_TOOL_NAMES:
                     # Keep the exact history location. If an older worker omitted
                     # the descriptor but retained the publish result, fill this
                     # slot from the registry in chronological order below.
                     publish_slots.append(result_part)
 
                 parts_out.append(result_part)
+            for visualization in visualization_exact.get(
+                (idx, source_part_index), []
+            ):
+                artifact_id = str(visualization.get("artifact_id") or "")
+                if artifact_id and artifact_id not in seen_visualization_ids:
+                    parts_out.append(
+                        {"type": "visualization", "artifact": visualization}
+                    )
+                    seen_visualization_ids.add(artifact_id)
+            parts_out.extend(subagent_exact.get((idx, source_part_index), []))
+        parts_out.extend(subagent_fallback.get(idx, []))
         turns.append({"index": idx, "role": role, "parts": parts_out})
 
+    # Legacy artifacts predate stable timeline anchors. Preserve their old
+    # publish-result matching path, but do not let them consume a slot that
+    # belongs to a new, explicitly anchored visualization.
     unplaced = [
         item
         for item in reversed(registry_visualizations)
         if str(item.get("artifact_id") or "") not in seen_visualization_ids
+        and not item.get("timeline_turn_id")
     ]
     for slot, visualization in zip(publish_slots, unplaced):
         artifact_id = str(visualization.get("artifact_id") or "")
@@ -555,6 +785,20 @@ async def get_history(
             continue
         slot["artifact"] = visualization
         seen_visualization_ids.add(artifact_id)
+
+    # Compaction intentionally removes intermediate tool messages. Reattach
+    # every remaining anchored card to its stable user turn, after the user
+    # content and before the surviving final assistant response.
+    for turn_index, visualizations in visualization_fallback.items():
+        if not (start_index <= turn_index < window_end):
+            continue
+        target = turns[turn_index - start_index]["parts"]
+        for visualization in visualizations:
+            artifact_id = str(visualization.get("artifact_id") or "")
+            if not artifact_id or artifact_id in seen_visualization_ids:
+                continue
+            target.append({"type": "visualization", "artifact": visualization})
+            seen_visualization_ids.add(artifact_id)
 
     # Do not append remaining registry artifacts to the timeline. Their original
     # turn is outside this history window or no durable anchor exists. They remain

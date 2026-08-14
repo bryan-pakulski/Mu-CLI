@@ -1,4 +1,5 @@
 import { api } from './client';
+import { useConnectionStore } from '../store/connection';
 
 export interface MemoryLayer {
   id: string;
@@ -27,15 +28,163 @@ export interface MemorySnapshot {
   fill_pct: number;
 }
 
+export interface ContextTimelineLayer {
+  id: string;
+  name: string;
+  hue: number;
+  tokens: number;
+  token_delta: number;
+  changed: boolean;
+  changed_chunks: number;
+  sampled_chunks: number;
+  change_ratio: number;
+}
+
+export interface ContextTimelinePoint {
+  id: number;
+  at: number;
+  phase: string;
+  total_tokens: number;
+  total_delta: number;
+  context_limit: number;
+  free_tokens: number;
+  fill_pct: number;
+  churn_score: number;
+  changed_layers: number;
+  compaction: boolean;
+  layers: ContextTimelineLayer[];
+}
+
+export interface ContextTimeline {
+  active: boolean;
+  points: ContextTimelinePoint[];
+  summary: {
+    samples: number;
+    first_tokens?: number;
+    last_tokens?: number;
+    net_delta?: number;
+    peak_tokens?: number;
+    peak_fill_pct?: number;
+    compactions?: number;
+    hottest_layer?: string | null;
+    hottest_layer_changes?: number;
+    max_churn_score?: number;
+  };
+}
+
+export interface DurableMemoryScope {
+  type: 'personal' | 'workspace' | 'repository' | 'branch' | 'feature';
+  key: string;
+  label: string;
+}
+
+export interface DurableMemory {
+  id: string;
+  version: number;
+  statement: string;
+  kind: string;
+  scope: DurableMemoryScope;
+  lifecycle: string;
+  pinned: boolean;
+  trust: { origin: string; verification: string; confidence: number };
+  sensitivity: string;
+  egress_policy: string;
+  tags: string[];
+  source_refs: Array<Record<string, unknown>>;
+  relations: Array<Record<string, unknown>>;
+  created_at: number;
+  updated_at: number;
+  last_recalled_at?: number | null;
+  recall_count: number;
+  etag: string;
+}
+
+export interface DurableMemoryList {
+  memories: DurableMemory[];
+  stats: {
+    total: number;
+    pinned: number;
+    by_lifecycle: Record<string, number>;
+    scopes: DurableMemoryScope[];
+  };
+}
+
+export interface DurableMemoryDetail {
+  memory: DurableMemory;
+  events: Array<Record<string, unknown>>;
+  revisions: Array<Record<string, unknown>>;
+  graph: {
+    center: string;
+    nodes: DurableMemory[];
+    edges: Array<{ source: string; target: string; type: string }>;
+  };
+}
+
+export interface RecallReceipt {
+  id: string;
+  query: string;
+  token_count: number;
+  budget_tokens: number;
+  included: Array<Record<string, unknown>>;
+  excluded: Array<Record<string, unknown>>;
+  created_at: number;
+}
+
+const sessionQuery = () => ({
+  session_name: useConnectionStore.getState().activeSessionName || undefined,
+});
+
 export const memoryApi = {
   getState: (cols?: number, rows?: number) =>
-    api.get<MemorySnapshot>('/api/memory/state', { query: { cols, rows } }),
+    api.get<MemorySnapshot>('/api/memory/state', { query: { ...sessionQuery(), cols, rows } }),
+  getTimeline: (limit = 360) =>
+    api.get<ContextTimeline>('/api/memory/timeline', {
+      query: { ...sessionQuery(), limit },
+    }),
   getLayerContent: (layer: string) =>
     api.get<{ layer: string; name: string; hue: number; content: string; tokens: number; chars: number; error: string }>(
-      '/api/memory/content', { query: { layer } },
+      '/api/memory/content', { query: { ...sessionQuery(), layer } },
     ),
   getCell: (layer: string, row: number, col: number, cols?: number, rows?: number) =>
     api.get<{ error: string; content: string; chars: number; tokens: number; cell_index: number; cell_count: number }>(
-      '/api/memory/cell', { query: { layer, row, col, cols, rows } },
+      '/api/memory/cell', { query: { ...sessionQuery(), layer, row, col, cols, rows } },
     ),
+  listDurable: (q = '', lifecycle?: string) =>
+    api.get<DurableMemoryList>('/api/v1/memories', {
+      query: { ...sessionQuery(), q: q || undefined, lifecycle, limit: 200 },
+    }),
+  getDurable: (id: string) =>
+    api.get<DurableMemoryDetail>('/api/v1/memories/' + encodeURIComponent(id), {
+      query: sessionQuery(),
+    }),
+  createDurable: (
+    statement: string,
+    scope = 'auto',
+    kind = 'observation',
+    pinned = false,
+  ) =>
+    api.post<{ ok: boolean; created: boolean; memory: DurableMemory }>(
+      '/api/v1/memories',
+      { statement, scope, kind, pinned },
+      { query: sessionQuery() },
+    ),
+  reviseDurable: (memory: DurableMemory, statement: string) =>
+    api.patch<{ ok: boolean; memory: DurableMemory }>(
+      '/api/v1/memories/' + encodeURIComponent(memory.id),
+      { changes: { statement }, reason: 'Mobile Memory Center edit' },
+      { query: sessionQuery(), headers: { 'If-Match': memory.etag } },
+    ),
+  actionDurable: (
+    memory: DurableMemory,
+    action: 'pin' | 'unpin' | 'archive' | 'restore' | 'forget',
+  ) =>
+    api.post<{ ok: boolean; memory: DurableMemory }>(
+      '/api/v1/memories/' + encodeURIComponent(memory.id) + '/actions',
+      { action, reason: 'Mobile Memory Center ' + action },
+      { query: sessionQuery(), headers: { 'If-Match': memory.etag } },
+    ),
+  getLastRecall: () =>
+    api.get<{ receipt: RecallReceipt }>('/api/v1/memory-recalls/last', {
+      query: sessionQuery(),
+    }),
 };

@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ModeWorkspaceContract } from './modeWorkspace';
 
 export interface SecurityFinding {
   finding_id: string;
@@ -49,6 +50,7 @@ export interface SecurityState {
   report: SecurityReportInfo | null;
   findings: SecurityFinding[];
   summary: SecuritySummary | null;
+  workspace: ModeWorkspaceContract;
 }
 
 export const securityApi = {

@@ -23,6 +23,7 @@ import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
 import { CodeBlock } from '../components/CodeBlock';
 import { VisualizationCard } from '../components/VisualizationCard';
+import { SubagentActivityPanel } from '../components/SubagentActivityPanel';
 import { AttachmentSheet } from '../components/AttachmentSheet';
 import type { AttachmentDescriptor } from '../api/attachments';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
@@ -379,6 +380,10 @@ export function ChatScreen() {
       );
     }
 
+    if (item.role === 'subagent_panel' && item.subagents?.length) {
+      return <SubagentActivityPanel agents={item.subagents} />;
+    }
+
     // Collapsible heading for all interim agent output.
     if (item.role === 'collapse') {
       const count = item.collapseCount || (item.childTurns?.length || 0);
@@ -410,16 +415,6 @@ export function ChatScreen() {
           {item.collapseOpen ? (
             <View style={styles.interimBody}>
               {item.childTurns?.map(child => {
-                if (child.role === 'visualization' && child.artifact && activeSessionName) {
-                  return (
-                    <VisualizationCard
-                      key={child.id}
-                      artifact={child.artifact}
-                      sessionName={activeSessionName}
-                      onInteractionChange={onVisualizationInteractionChange}
-                    />
-                  );
-                }
                 if (child.role !== 'assistant') return null;
                 return (
                   <View key={child.id} style={[styles.msgRow, { justifyContent: 'flex-start' }]}>

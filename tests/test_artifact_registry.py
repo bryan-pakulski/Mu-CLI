@@ -40,3 +40,22 @@ def test_size_limit_and_name_sanitization(tmp_path):
         registry.add("x.txt", content="abc")
     item = ArtifactRegistry(str(tmp_path / "other")).add("../../safe.txt", content="x")
     assert item["name"] == "safe.txt"
+
+
+def test_visualization_registry_persists_chat_timeline_anchor(tmp_path):
+    registry = ArtifactRegistry(str(tmp_path / "demo"))
+
+    artifact = registry.add(
+        "trend.html",
+        content="<!doctype html><p>trend</p>",
+        mime_type="text/html",
+        kind="visualization",
+        timeline_turn_id="turn-stable",
+        timeline_history_index=4,
+        timeline_part_index=1,
+    )
+
+    assert artifact["timeline_turn_id"] == "turn-stable"
+    assert artifact["timeline_history_index"] == 4
+    assert artifact["timeline_part_index"] == 1
+    assert registry.get(artifact["artifact_id"])["timeline_turn_id"] == "turn-stable"

@@ -23,7 +23,7 @@ import {
   FeatureTask,
 } from '../api/feature';
 import { useTheme } from '../theme/ThemeContext';
-import { Card, EmptyState, ErrorState, Skeleton, Text } from '../components';
+import { Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
 import { spacing } from '../theme/tokens';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
@@ -38,6 +38,7 @@ const FILTERS: Array<{ key: FeatureFilter; label: string }> = [
 export function FeatureExplorerScreen() {
   const { colors } = useTheme();
   const [state, setState] = useState<FeatureState | null>(null);
+  const [workspace, setWorkspace] = useState<FeatureState['workspace'] | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<FeatureSummary | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeatureFilter>('features');
@@ -49,58 +50,98 @@ export function FeatureExplorerScreen() {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
   const selectedIdRef = useRef<string | null>(null);
+  const requestEpochRef = useRef(0);
+  const workspaceView = useModeWorkspaceView(workspace);
 
   const previewFeature = useCallback(async (featureId: string, quiet = false) => {
+    const requestId = ++requestEpochRef.current;
     if (!quiet) setPreviewLoading(true);
     setError(null);
     try {
       const response = await featureApi.preview(featureId);
+      if (requestId !== requestEpochRef.current) return;
+      setWorkspace(response.workspace);
       selectedIdRef.current = featureId;
       setSelectedId(featureId);
       setSelectedPlan(response.plan);
+      setExpandedTasks(new Set());
+      setExpandedRecords(new Set());
       if (response.plan?.phase_columns?.length) {
         setExpandedPhases(new Set([String(response.plan.phase_columns[0].id)]));
+      } else {
+        setExpandedPhases(new Set());
       }
     } catch (cause) {
+      if (requestId !== requestEpochRef.current) return;
       setError(String(cause));
     } finally {
-      if (!quiet) setPreviewLoading(false);
+      if (requestId === requestEpochRef.current) {
+        if (!quiet) setPreviewLoading(false);
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   const load = useCallback(async (preserveSelection = true) => {
+    const requestId = ++requestEpochRef.current;
     try {
       setError(null);
       const response = await featureApi.getState();
+      if (requestId !== requestEpochRef.current) return;
       setState(response);
+      setWorkspace(response.workspace);
 
       const currentSelectedId = preserveSelection ? selectedIdRef.current : null;
       if (currentSelectedId && response.features.some(item => item.feature_id === currentSelectedId)) {
-        await previewFeature(currentSelectedId, true);
+        const preview = await featureApi.preview(currentSelectedId);
+        if (requestId !== requestEpochRef.current) return;
+        setWorkspace(preview.workspace);
+        setSelectedId(currentSelectedId);
+        setSelectedPlan(preview.plan);
+        setExpandedPhases(
+          preview.plan?.phase_columns?.length
+            ? new Set([String(preview.plan.phase_columns[0].id)])
+            : new Set(),
+        );
       } else if (response.plan) {
         selectedIdRef.current = response.plan.feature_id;
         setSelectedId(response.plan.feature_id);
         setSelectedPlan(response.plan);
         if (response.plan.phase_columns?.length) {
           setExpandedPhases(new Set([String(response.plan.phase_columns[0].id)]));
+        } else {
+          setExpandedPhases(new Set());
         }
       } else {
         selectedIdRef.current = null;
         setSelectedId(null);
         setSelectedPlan(null);
+        setExpandedPhases(new Set());
       }
+      setExpandedTasks(new Set());
+      setExpandedRecords(new Set());
     } catch (cause) {
+      if (requestId !== requestEpochRef.current) return;
       setError(String(cause));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestEpochRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [previewFeature]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
       load(true);
+      return () => {
+        // Ignore late preview/state responses after navigating away. Without
+        // this guard a slower archived-plan response can repaint the screen
+        // after a newer feature has already been selected.
+        requestEpochRef.current += 1;
+      };
     }, [load]),
   );
 
@@ -178,6 +219,7 @@ export function FeatureExplorerScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {workspace ? <ModeWorkspaceHeader workspace={workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} /> : null}
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderCopy}>
             <Text variant="xl" style={styles.pageTitle}>Features</Text>
@@ -186,7 +228,7 @@ export function FeatureExplorerScreen() {
           {previewLoading ? <ActivityIndicator color={colors.accent} /> : null}
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {workspaceView.shows('overview') ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
           {FILTERS.map(item => {
             const active = filter === item.key;
             const count = countForFilter(state?.features || [], item.key);
@@ -205,9 +247,9 @@ export function FeatureExplorerScreen() {
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </ScrollView> : null}
 
-        {(state?.features.length || 0) === 0 ? (
+        {workspaceView.shows('overview') && ((state?.features.length || 0) === 0 ? (
           <EmptyState title="No feature plans" message="Feature plans created in this session will appear here." />
         ) : visibleFeatures.length === 0 ? (
           <Card style={styles.emptyFilterCard}>
@@ -224,7 +266,7 @@ export function FeatureExplorerScreen() {
               />
             ))}
           </View>
-        )}
+        ))}
 
         {error ? (
           <View style={[styles.errorBox, { backgroundColor: colors.bgLift }]}>
@@ -235,7 +277,7 @@ export function FeatureExplorerScreen() {
 
         {selectedPlan ? (
           <View style={styles.detailSection}>
-            <FeatureOverview
+            {workspaceView.shows('overview') ? <FeatureOverview
               plan={selectedPlan}
               item={selectedItem}
               onApprove={() => runAction(() => featureApi.approve(selectedPlan.feature_id))}
@@ -249,15 +291,16 @@ export function FeatureExplorerScreen() {
                 { title: 'Archive feature?', message: 'Archived features remain available for preview and can be restored.' },
               )}
               onUnarchive={() => runAction(() => featureApi.unarchive(selectedPlan.feature_id))}
-            />
+            /> : null}
 
-            <SectionHeader title="Progress" detail={`${selectedPlan.task_count || 0} tasks across ${selectedPlan.phase_columns?.length || 0} phases`} />
+            {workspaceView.shows('board', 'verification') ? <>
+            <SectionHeader title={workspaceView.selectedView === 'verification' ? 'Acceptance criteria' : 'Progress'} detail={`${selectedPlan.task_count || 0} tasks across ${selectedPlan.phase_columns?.length || 0} phases`} />
             {(selectedPlan.phase_columns || []).length === 0 ? (
               <Card><Text variant="sm" dim>No phases or tasks recorded.</Text></Card>
             ) : (
               (selectedPlan.phase_columns || []).map(phase => (
                 <PhaseDetail
-                  key={String(phase.id)}
+                  key={`${selectedPlan.feature_id}:${phase.id}`}
                   phase={phase}
                   activeFeature={Boolean(selectedItem?.is_active)}
                   expanded={expandedPhases.has(String(phase.id))}
@@ -270,7 +313,9 @@ export function FeatureExplorerScreen() {
             )}
 
             <ExecutionSection execution={selectedPlan.execution || {}} nextPhase={selectedPlan.next_phase} nextTask={selectedPlan.next_task} />
+            </> : null}
 
+            {workspaceView.shows('reviews') ? <>
             <SectionHeader title="Reviews" detail={`${selectedPlan.review_count || selectedPlan.review_records?.length || 0} review records`} />
             <ReviewSection
               records={selectedPlan.review_records || []}
@@ -291,6 +336,7 @@ export function FeatureExplorerScreen() {
               expanded={expandedRecords}
               onToggle={id => toggleSet(setExpandedRecords, `event:${id}`)}
             />
+            </> : null}
           </View>
         ) : null}
       </ScrollView>

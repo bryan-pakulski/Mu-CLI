@@ -3,6 +3,8 @@
        x-show="$store.mode.active === 'teacher'"
        x-transition.opacity.duration.200ms>
 
+    {% include "fragments/mode_workspace_header.html" %}
+
     <!-- empty state when no course is active -->
     <div class="panel-empty" x-show="!$store.teacher.course">
         <h3>no course active</h3>
@@ -53,7 +55,7 @@
 
     <!-- learner profile -->
     <section class="panel-section"
-             x-show="$store.teacher.course"
+             x-show="$store.teacher.course && $store.modeWorkspace.shows('curriculum', 'mastery')"
              :class="{ open: $store.teacher.openSections.profile }">
         <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('profile')"
@@ -116,7 +118,7 @@
 
     <!-- curriculum tree -->
     <section class="panel-section"
-             x-show="$store.teacher.course"
+             x-show="$store.teacher.course && $store.modeWorkspace.shows('curriculum')"
              :class="{ open: $store.teacher.openSections.curriculum }">
         <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('curriculum')"
@@ -130,7 +132,7 @@
              x-transition.opacity.duration.150ms>
             <template x-if="$store.teacher.course && ($store.teacher.course.modules || []).length">
                 <div class="curriculum-tree">
-                    <template x-for="m in $store.teacher.course.modules"
+                    <template x-for="m in $store.teacher.filteredModules()"
                               :key="m.module_id">
                         <div class="curriculum-module"
                              :class="{ current: m.module_id === $store.teacher.course.current_module_id }">
@@ -177,7 +179,7 @@
 
     <!-- current lesson detail -->
     <section class="panel-section"
-             x-show="$store.teacher.course && $store.teacher.currentLesson()"
+             x-show="$store.teacher.course && $store.teacher.currentLesson() && $store.modeWorkspace.shows('curriculum', 'mastery')"
              :class="{ open: $store.teacher.openSections.current }">
         <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('current')"
@@ -236,7 +238,7 @@
 
     <!-- all assignments (not just graded) -->
     <section class="panel-section"
-             x-show="$store.teacher.course && $store.teacher.allAssignments().length"
+             x-show="$store.teacher.course && $store.teacher.allAssignments().length && $store.modeWorkspace.shows('mastery')"
              :class="{ open: $store.teacher.openSections.assignments }">
         <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('assignments')"
@@ -312,7 +314,7 @@
 
     <!-- scheduled reviews -->
     <section class="panel-section"
-             x-show="$store.teacher.course && $store.teacher.scheduledReviews().length"
+             x-show="$store.teacher.course && $store.teacher.scheduledReviews().length && $store.modeWorkspace.shows('reviews')"
              :class="{ open: $store.teacher.openSections.reviews }">
         <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('reviews')"

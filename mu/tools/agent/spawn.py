@@ -49,6 +49,40 @@ def _infer_specialist_key(task: str, explicit: str = "") -> str:
     return "general"
 
 
+def _short_task_title(task: str, explicit: str = "", specialist: str = "general") -> str:
+    """Return a complete, compact action label without UI truncation.
+
+    Models are encouraged to provide a 2–5 word ``title``. The fallback
+    extracts the leading action phrase and removes repository/object scope,
+    producing labels such as ``Security audit`` or ``Code quality review``.
+    """
+    supplied = re.sub(r"\s+", " ", str(explicit or "")).strip(" .:-")
+    if supplied and len(supplied) <= 48 and len(supplied.split()) <= 5:
+        return supplied
+
+    text = re.sub(r"\s+", " ", str(task or "")).strip()
+    first = re.split(r"[.!?](?:\s|$)|\b(?:focus|scope|review|inspect|check):\s*", text, maxsplit=1, flags=re.IGNORECASE)[0].strip(" .:-")
+    scoped = re.split(r"\s+(?:of|for|across|within)\s+(?:the\s+)?", first, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    if 2 <= len(scoped.split()) <= 5 and len(scoped) <= 48:
+        return scoped
+
+    lowered = text.lower()
+    routes = (
+        ("Security audit", ("security", "vulnerability", "threat")),
+        ("Infrastructure audit", ("k8s", "kubernetes", "infrastructure", "deployment")),
+        ("Code quality review", ("code quality", "lint", "maintainability")),
+        ("Test review", ("test", "pytest", "regression", "ci ")),
+        ("Documentation review", ("docs", "documentation", "readme")),
+        ("Root-cause analysis", ("root cause", "investigate", "trace why")),
+        ("Implementation", ("implement", "refactor", "fix", "migrate")),
+    )
+    for label, needles in routes:
+        if any(needle in lowered for needle in needles):
+            return label
+    specialist_label = re.sub(r"[_-]+", " ", str(specialist or "general")).strip()
+    return f"{specialist_label.title()} task"
+
+
 _SPECIALIST_SYSTEM_TEMPLATE = """ROLE: persistent SUB-AGENT specialist \"{specialist}\" (depth={depth}).
 You retain your own history and durable memory across related delegations in this parent session.
 The latest user message is the current delegation; execute it with available tools and return one concise self-contained result.
@@ -133,6 +167,7 @@ def _tool_profile(parent, requested_tools, remaining_depth: int) -> list[str]:
     description=("Delegate focused work asynchronously to a persistent specialist. Compatible specialists are reused across delegations, retaining their private repository context. Returns a task_id. Use await_subagent to block, poll_subagent only for occasional status checks, and kill_subagent to cancel."),
     parameters={"type": "object", "properties": {
         "task": {"type": "string", "description": "Focused delegation."},
+        "title": {"type": "string", "description": "Short 2–5 word action label for the UI, such as 'Security audit' or 'API test review'. Never repeat the full task."},
         "specialist": {"type": "string", "description": "Optional stable specialist key; otherwise inferred from the task."},
         "tools": {"type": "array", "items": {"type": "string"}, "description": "Optional execution-tool whitelist."},
         "max_iterations": {"type": "integer", "description": "Delegation iteration cap."},
@@ -168,6 +203,7 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     child_depth = current_depth + 1
     remaining_depth = MAX_SUBAGENT_DEPTH - child_depth
     specialist_key = _infer_specialist_key(task, args.get("specialist") or "")
+    title = _short_task_title(task, args.get("title") or "", specialist_key)
     explicit_context = str(args.get("context") or "").strip()
     handoff = _build_handoff(parent)
 
@@ -191,7 +227,12 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     root_ui = parent.ui
     while isinstance(root_ui, SubagentUI):
         root_ui = root_ui._parent
-    if root_ui is not None and hasattr(root_ui, "_publish"):
+    publish_event = getattr(root_ui, "publish_event", None)
+    if callable(publish_event):
+        registry._publish = publish_event
+    elif root_ui is not None and hasattr(root_ui, "_publish"):
+        # Compatibility for third-party UIs that implemented the original
+        # private WebUI hook before ``publish_event`` became public.
         registry._publish = lambda ev: root_ui._publish(ev)
     tracker_agent_id = None
     try:
@@ -250,13 +291,30 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
         "enabled": bool(parent.variables.get("subagent_lifecycle_enabled", True)),
     })
     child._subagent_lifecycle = lifecycle
-    record = registry.register(child, task=task, depth=child_depth, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=resolved_model, specialist_key=specialist_key, worker_id=worker.worker_id, reused_specialist=reused)
+    parent_history = list(getattr(parent.session_manager, "history", []) or [])
+    parent_history_index = len(parent_history) - 1
+    parent_turn_index = next(
+        (
+            index
+            for index in range(len(parent_history) - 1, -1, -1)
+            if parent_history[index].get("role") == "user"
+            and parent_history[index].get("timeline_id")
+        ),
+        -1,
+    )
+    parent_turn_id = (
+        str(parent_history[parent_turn_index].get("timeline_id") or "")
+        if parent_turn_index >= 0
+        else ""
+    )
+    record = registry.register(child, task=task, title=title, depth=child_depth, lifecycle=lifecycle, tracker_agent_id=tracker_agent_id, model=resolved_model, specialist_key=specialist_key, worker_id=worker.worker_id, reused_specialist=reused, max_iterations=max_iterations, parent_history_index=parent_history_index, parent_turn_index=parent_turn_index, parent_turn_id=parent_turn_id)
     child.variables["subagent_parent_task_id"] = record.task_id
     child._parent_registry = registry
     registry.launch(record, _delegation_prompt(task, explicit_context))
 
     return _envelope(ok=True, message=f"Dispatched {specialist_key} specialist ({'reused' if reused else 'new'} worker {worker.worker_id}); task_id={record.task_id}.", data={
         "task_id": record.task_id, "status": "running", "depth": child_depth, "task": task,
+        "title": title,
         "specialist": specialist_key, "worker_id": worker.worker_id, "reused_specialist": reused,
         "batch_id": record.batch_id, "state_path": registry.snapshot(record.task_id).get("state_path"),
         "result_path": registry.snapshot(record.task_id).get("result_path"),

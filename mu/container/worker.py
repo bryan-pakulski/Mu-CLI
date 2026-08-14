@@ -2,20 +2,23 @@
 from __future__ import annotations
 
 import argparse
+import contextvars
 import ctypes
 import json
 import logging
 import os
 import socket
 import threading
+import time
 import traceback
 import uuid
 from contextlib import AbstractContextManager
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from mu.container.ref import WORKER_PROTOCOL_VERSION
@@ -23,6 +26,9 @@ from mu.ui.base import BaseUI
 
 
 logger = logging.getLogger("mucli.container.worker")
+
+_DELTAS_FLUSH_MS = 50.0
+_DELTAS_MAX_CHARS = 8192
 
 
 class _Status(AbstractContextManager):
@@ -35,8 +41,12 @@ class _Status(AbstractContextManager):
         return self
 
     def __exit__(self, *_args):
-        self.ui.publish({"kind": "status_end", "text": self.text})
+        self.ui.publish_event({"kind": "status_end", "text": self.text})
         return False
+
+    def update(self, message: str) -> None:
+        self.text = str(message)
+        self.ui.publish_event({"kind": "status_update", "text": self.text})
 
 
 class WorkerBridgeUI(BaseUI):
@@ -49,20 +59,31 @@ class WorkerBridgeUI(BaseUI):
         self.token = os.getenv("MUCLI_WORKER_TOKEN", "")
         self.variables: dict[str, Any] = {}
         self.turn_id: str | None = None
-        self._client = httpx.Client(timeout=10.0)
+        # Worker → supervisor traffic is a control-plane callback on the
+        # internal bridge. It must never inherit HTTP(S)_PROXY/SOCKS settings
+        # intended for provider egress.
+        self._client = httpx.Client(timeout=10.0, trust_env=False)
         # Dedup flag: when True, assistant text was already streamed via
         # assistant_delta events, so the post-stream render_message call
         # from loop_body must be suppressed to avoid a duplicate bubble.
         self._streamed_any_text = False
+        self._delta_lock = threading.Lock()
+        self._assistant_buffer: list[str] = []
+        self._thinking_buffer: list[str] = []
+        self._last_delta_flush = 0.0
 
-    def publish(self, event: dict[str, Any]) -> None:
+    def _publish_raw(self, event: dict[str, Any]) -> None:
         if not self.supervisor_url:
             return
         payload = {
             **event,
             "session_name": self.session_name,
             "container_name": self.container_name,
+            "session_type": "container",
         }
+        active_mode = str(self.variables.get("agent_mode") or "").strip()
+        if active_mode:
+            payload.setdefault("agent_mode", active_mode)
         try:
             self._client.post(
                 f"{self.supervisor_url}/api/container-worker/events",
@@ -73,6 +94,45 @@ class WorkerBridgeUI(BaseUI):
             # A temporary GUI disconnect must not abort an agent turn.  Session
             # history remains authoritative and will be recovered on reconnect.
             pass
+
+    def _flush_deltas(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        with self._delta_lock:
+            size = sum(map(len, self._assistant_buffer)) + sum(
+                map(len, self._thinking_buffer)
+            )
+            if not (
+                force
+                or size >= _DELTAS_MAX_CHARS
+                or (now - self._last_delta_flush) * 1000.0 >= _DELTAS_FLUSH_MS
+            ):
+                return
+            assistant = "".join(self._assistant_buffer)
+            thinking = "".join(self._thinking_buffer)
+            self._assistant_buffer.clear()
+            self._thinking_buffer.clear()
+            self._last_delta_flush = now
+        if thinking:
+            self._publish_raw(
+                {"kind": "thinking_delta", "turn_id": self.turn_id, "text": thinking}
+            )
+        if assistant:
+            self._publish_raw(
+                {"kind": "assistant_delta", "turn_id": self.turn_id, "text": assistant}
+            )
+
+    def publish_event(self, event: dict[str, Any]) -> None:
+        """Publish an ordered boundary event to the host event bus."""
+        self._flush_deltas(force=True)
+        self._publish_raw(event)
+
+    def publish(self, event: dict[str, Any]) -> None:
+        """Compatibility alias used by artifact and extension handlers."""
+        self.publish_event(event)
+
+    def _publish(self, event: dict[str, Any]) -> None:
+        """Compatibility with integrations built against WebUI's old hook."""
+        self.publish_event(event)
 
     def publish_artifact(
         self,
@@ -85,6 +145,9 @@ class WorkerBridgeUI(BaseUI):
         display: str = "download",
         title: str | None = None,
         height: int | None = None,
+        timeline_turn_id: str | None = None,
+        timeline_history_index: int | None = None,
+        timeline_part_index: int | None = None,
     ) -> dict[str, Any]:
         if not self.supervisor_url:
             raise RuntimeError("container supervisor URL is unavailable")
@@ -103,6 +166,15 @@ class WorkerBridgeUI(BaseUI):
             params["title"] = str(title)
         if height is not None:
             params["height"] = str(int(height))
+        if timeline_turn_id:
+            params["timeline_turn_id"] = str(timeline_turn_id)
+        if (
+            timeline_history_index is not None
+            and int(timeline_history_index) >= 0
+        ):
+            params["timeline_history_index"] = str(int(timeline_history_index))
+        if timeline_part_index is not None and int(timeline_part_index) >= 0:
+            params["timeline_part_index"] = str(int(timeline_part_index))
         headers = {"X-MuCLI-Worker-Token": self.token}
         if source_path is not None:
             with open(source_path, "rb") as handle:
@@ -166,9 +238,9 @@ class WorkerBridgeUI(BaseUI):
             if self._streamed_any_text:
                 return
             turn_id = uuid.uuid4().hex[:12]
-            self.publish({"kind": "assistant_start", "turn_id": turn_id})
-            self.publish({"kind": "assistant_delta", "turn_id": turn_id, "text": text})
-            self.publish({"kind": "assistant_end", "turn_id": turn_id})
+            self.publish_event({"kind": "assistant_start", "turn_id": turn_id})
+            self.publish_event({"kind": "assistant_delta", "turn_id": turn_id, "text": text})
+            self.publish_event({"kind": "assistant_end", "turn_id": turn_id})
         elif role == "user":
             self.publish({"kind": "user_message", "text": text})
         else:
@@ -178,16 +250,16 @@ class WorkerBridgeUI(BaseUI):
         return ""
 
     def show_error(self, message):
-        self.publish({"kind": "error", "text": str(message)})
+        self.publish_event({"kind": "error", "text": str(message)})
 
     def show_info(self, message):
-        self.publish({"kind": "info", "text": str(message)})
+        self.publish_event({"kind": "info", "text": str(message)})
 
     def show_status(self, message):
         return _Status(self, str(message))
 
     def show_tool_result(self, result_str):
-        self.publish({"kind": "tool_result", "text": str(result_str)})
+        self.publish_event({"kind": "tool_result", "text": str(result_str)})
 
     def stream_assistant_delta(self, text: str):
         if not text:
@@ -196,20 +268,28 @@ class WorkerBridgeUI(BaseUI):
             # New turn — reset the dedup flag from the previous turn.
             self._streamed_any_text = False
             self.turn_id = uuid.uuid4().hex[:12]
-            self.publish({"kind": "assistant_start", "turn_id": self.turn_id})
+            self._publish_raw({"kind": "assistant_start", "turn_id": self.turn_id})
         self._streamed_any_text = True
-        self.publish({"kind": "assistant_delta", "turn_id": self.turn_id, "text": text})
+        with self._delta_lock:
+            self._assistant_buffer.append(text)
+        self._flush_deltas()
 
     def stream_thinking_delta(self, text: str):
-        if text:
-            self.publish({"kind": "thinking_delta", "turn_id": self.turn_id, "text": text})
+        if not text:
+            return
+        if self.turn_id is None:
+            self._publish_raw({"kind": "thinking_delta", "turn_id": None, "text": text})
+            return
+        with self._delta_lock:
+            self._thinking_buffer.append(text)
+        self._flush_deltas()
 
     def stream_tool_call(self, tool_name: str):
-        self.publish({"kind": "tool_call", "turn_id": self.turn_id, "tool_name": tool_name})
+        self.publish_event({"kind": "tool_call", "turn_id": self.turn_id, "tool_name": tool_name})
 
     def stream_assistant_end(self):
         if self.turn_id is not None:
-            self.publish({"kind": "assistant_end", "turn_id": self.turn_id})
+            self.publish_event({"kind": "assistant_end", "turn_id": self.turn_id})
             self.turn_id = None
 
     def set_variables(self, variables_dict):
@@ -315,6 +395,18 @@ class SendRequest(BaseModel):
     system_instruction: str = "You are a helpful assistant."
 
 
+class RuntimeRequest(BaseModel):
+    session_name: str
+    provider: str
+    model: str
+    agent_mode: str = "default"
+    system_instruction: str = "You are a helpful assistant."
+
+    def as_send_request(self) -> SendRequest:
+        values = self.model_dump() if hasattr(self, "model_dump") else self.dict()
+        return SendRequest(text="__runtime_sync__", **values)
+
+
 class InterruptRequest(BaseModel):
     session_name: str
 
@@ -324,6 +416,81 @@ _sessions: dict[str, Any] = {}
 _locks: dict[str, threading.Lock] = {}
 _busy: dict[str, threading.Event] = {}
 _threads: dict[str, int] = {}
+_request_session_name: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "mucli_worker_request_session", default=""
+)
+
+
+def _session_by_name(name: str | None = None):
+    return _sessions.get(str(name or _request_session_name.get() or ""))
+
+
+def _session_lock_for(name: str | None = None):
+    resolved = str(name or _request_session_name.get() or "")
+    return _locks.setdefault(resolved, threading.Lock())
+
+
+app.state.session_by_name = _session_by_name
+app.state.session_lock_for = _session_lock_for
+app.state.is_container_worker = True
+
+
+_MODE_API_PREFIXES = (
+    "/api/feature",
+    "/api/research",
+    "/api/security",
+    "/api/debug",
+    "/api/loop",
+    "/api/teacher",
+    "/api/memory",
+)
+
+
+@app.middleware("http")
+async def _authorize_mode_api(request: Request, call_next):
+    """Authenticate and scope the GUI mode routers mounted in the worker."""
+    if not any(
+        request.url.path == prefix or request.url.path.startswith(prefix + "/")
+        for prefix in _MODE_API_PREFIXES
+    ):
+        return await call_next(request)
+    try:
+        _authorize(request.headers.get("X-MuCLI-Worker-Token"))
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    session_name = str(request.query_params.get("session_name") or "").strip()
+    if not session_name or session_name not in _sessions:
+        return JSONResponse(
+            status_code=412,
+            content={"detail": "container session runtime is not loaded"},
+        )
+    token = _request_session_name.set(session_name)
+    try:
+        return await call_next(request)
+    finally:
+        _request_session_name.reset(token)
+
+
+# The exact same domain routers power host workspaces and container workers.
+# The host exposes them publicly; the worker copy is reachable only through
+# the authenticated supervisor bridge above.
+from mu.gui.routers import (  # noqa: E402  (app/state must exist first)
+    debug as debug_router,
+    feature as feature_router,
+    loop as loop_router,
+    memory as memory_router,
+    research as research_router,
+    security as security_router,
+    teacher as teacher_router,
+)
+
+app.include_router(feature_router.router, prefix="/api/feature")
+app.include_router(research_router.router, prefix="/api/research")
+app.include_router(security_router.router, prefix="/api/security")
+app.include_router(debug_router.router, prefix="/api/debug")
+app.include_router(loop_router.router, prefix="/api/loop")
+app.include_router(teacher_router.router, prefix="/api/teacher")
+app.include_router(memory_router.router, prefix="/api/memory")
 
 
 def _authorize(token: str | None) -> None:
@@ -353,8 +520,12 @@ def _proxy_readiness() -> tuple[bool, str]:
 def _build_session(request: SendRequest):
     existing = _sessions.get(request.session_name)
     if existing is not None:
+        _sync_request_context(existing, request)
         return existing
+    from mu.gui.live_observability import register_live_observability_hooks
     from mucli import build_session
+
+    register_live_observability_hooks()
 
     ui = WorkerBridgeUI(request.session_name)
     try:
@@ -379,20 +550,36 @@ def _build_session(request: SendRequest):
         mode_prompt=[],
     )
     session = build_session(args, ui, allow_prompt=False)
-    session.variables["session_type"] = "container"
-    session.variables["agent_mode"] = request.agent_mode or "default"
-    session.variables["yolo"] = True
-    session.variables["strict_mode"] = False
-    session.variables["plan_mode"] = False
-    session.variables["lazy_tools_enabled"] = False
-    session.variables["security_allow_secret_paths"] = False
-    session.disabled_tools = []
+    _sync_request_context(session, request)
     session.session_manager.save_history(session.folder_context)
     session.sync_runtime_state()
     _sessions[request.session_name] = session
     _locks[request.session_name] = threading.Lock()
     _busy[request.session_name] = threading.Event()
     return session
+
+
+def _sync_request_context(session: Any, request: SendRequest) -> None:
+    """Apply host-controlled runtime state to a cached worker session.
+
+    The host sends the selected strategy on every turn.  Without this seam a
+    worker created in default mode kept running the default harness forever,
+    even though web/mobile showed Feature, Security, or another mode as active.
+    """
+    mode = str(request.agent_mode or "default").strip().lower() or "default"
+    session.variables["session_type"] = "container"
+    session.variables["agent_mode"] = mode
+    session.variables["yolo"] = True
+    session.variables["strict_mode"] = False
+    session.variables["plan_mode"] = False
+    session.variables["lazy_tools_enabled"] = False
+    session.variables["security_allow_secret_paths"] = False
+    session.disabled_tools = []
+    if getattr(session, "provider", None) is not None:
+        session.provider.model_name = request.model
+    session.system_instruction = request.system_instruction
+    if getattr(session, "ui", None) is not None:
+        session.ui.set_variables(session.variables)
 
 
 def _run_turn(session, request: SendRequest) -> None:
@@ -438,6 +625,29 @@ def health(x_mucli_worker_token: str | None = Header(default=None)):
         "sessions": sorted(_sessions),
         "busy": sorted(name for name, event in _busy.items() if event.is_set()),
         "proxy": proxy_detail,
+    }
+
+
+@app.post("/runtime/sync")
+def sync_runtime(
+    request: RuntimeRequest,
+    x_mucli_worker_token: str | None = Header(default=None),
+):
+    """Load a session and synchronize the host-selected strategy/runtime."""
+    _authorize(x_mucli_worker_token)
+    try:
+        session = _build_session(request.as_send_request())
+    except Exception as exc:
+        logger.exception("failed to synchronize container session %s", request.session_name)
+        raise HTTPException(
+            status_code=500,
+            detail=f"worker session synchronization failed: {type(exc).__name__}: {exc}",
+        ) from exc
+    return {
+        "ok": True,
+        "session_name": request.session_name,
+        "agent_mode": session.variables.get("agent_mode", "default"),
+        "session_type": "container",
     }
 
 

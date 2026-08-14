@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Card, Text } from '../components';
+import { Text } from '../components';
 import { WorkspaceSettingsSheet } from '../components/WorkspaceSettingsSheet';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
@@ -39,16 +39,15 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
-        <Text variant="xl" style={styles.pageTitle}>Workspace</Text>
+        <Text variant="xs" style={[styles.kicker, { color: colors.accent }]}>WORKSPACE</Text>
+        <Text variant="xl" style={styles.pageTitle}>Tools</Text>
         <Text variant="sm" dim style={styles.pageSubtitle}>
           Tools are grouped by intent so the chat remains focused.
         </Text>
 
-        <Card style={styles.sessionCard}>
+        <View style={[styles.sessionSection, { borderBottomColor: colors.hairline }]}>
           <View style={styles.sessionHeader}>
-            <View style={[styles.brandMark, { backgroundColor: colors.accentSoft }]}>
-              <Text style={[styles.brandGlyph, { color: colors.accent }]}>μ</Text>
-            </View>
+            <Text style={[styles.brandGlyph, { color: colors.accent }]}>μ</Text>
             <View style={styles.sessionCopy}>
               <Text variant="base" style={styles.sessionName} numberOfLines={1}>
                 {activeSessionName || 'New session'}
@@ -57,14 +56,14 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 {[activeProvider, activeModel].filter(Boolean).join(' · ') || 'Provider not selected'}
               </Text>
             </View>
-            <View style={[styles.statusPill, { backgroundColor: isConnected ? colors.accentSoft : colors.bgHover }]}>
+            <View style={styles.status}>
               <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.success : colors.textDim }]} />
-              <Text variant="xs" style={{ color: isConnected ? colors.accent : colors.textDim }}>
+              <Text variant="xs" style={{ color: isConnected ? colors.success : colors.textDim }}>
                 {isConnected ? 'Online' : 'Offline'}
               </Text>
             </View>
           </View>
-          <View style={[styles.workspaceRow, { borderTopColor: colors.border }]}>
+          <View style={[styles.workspaceRow, { borderTopColor: colors.hairline }]}>
             <Ionicons name="folder-outline" size={17} color={colors.textDim} />
             <Text variant="xs" dim style={styles.workspacePath} numberOfLines={1} ellipsizeMode="middle">
               {workspaces.length > 0
@@ -72,31 +71,31 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 : 'No workspace attached'}
             </Text>
             {activeSessionName ? (
-              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} style={[styles.editButton, { backgroundColor: colors.bgHover }]}>
-                <Text variant="xs" style={{ fontWeight: '600' }}>Edit</Text>
+              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} style={[styles.editButton, { borderBottomColor: colors.accent }]}>
+                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>Edit</Text>
               </TouchableOpacity>
             ) : null}
           </View>
-        </Card>
+        </View>
 
-        <View style={styles.categoryList}>
+        <Text variant="xs" style={[styles.sectionLabel, { color: colors.textDim }]}>TOOL GROUPS</Text>
+        <View>
           {WORKSPACE_CATEGORIES.filter(category => category.id !== 'review').map(category => (
             <TouchableOpacity
               key={category.id}
               activeOpacity={0.72}
               onPress={() => navigation.navigate('WorkspaceCategory', { categoryId: category.id, title: category.title })}
+              style={[styles.categoryRow, { borderBottomColor: colors.hairline }]}
             >
-              <Card style={styles.categoryCard}>
-                <View style={[styles.categoryIcon, { backgroundColor: colors.bgHover }]}>
-                  <Ionicons name={category.icon} size={22} color={colors.text} />
-                </View>
-                <View style={styles.categoryCopy}>
+              <Ionicons name={category.icon} size={20} color={colors.textDim} />
+              <View style={styles.categoryCopy}>
+                <View style={styles.categoryTitleRow}>
                   <Text variant="base" style={styles.categoryTitle}>{category.title}</Text>
-                  <Text variant="sm" dim>{category.description}</Text>
-                  <Text variant="xs" dim style={styles.itemCount}>{category.items.length} tools</Text>
+                  <Text variant="xs" dim>{category.items.length} tools</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textDim} />
-              </Card>
+                <Text variant="sm" dim>{category.description}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
             </TouchableOpacity>
           ))}
         </View>
@@ -114,23 +113,22 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { paddingBottom: 40 },
+  kicker: { fontWeight: '700', letterSpacing: 1.3, marginBottom: 5 },
   pageTitle: { fontWeight: '700', letterSpacing: -0.5 },
-  pageSubtitle: { marginTop: 4, marginBottom: 24, maxWidth: 320 },
-  sessionCard: { marginBottom: 24 },
+  pageSubtitle: { marginTop: 4, marginBottom: 30, maxWidth: 320 },
+  sessionSection: { paddingBottom: 22, marginBottom: 28, borderBottomWidth: StyleSheet.hairlineWidth },
   sessionHeader: { flexDirection: 'row', alignItems: 'center' },
   workspaceRow: { marginTop: 15, paddingTop: 13, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 8 },
   workspacePath: { flex: 1 },
-  editButton: { minHeight: 34, borderRadius: 11, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
-  brandMark: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  brandGlyph: { fontSize: 22, fontWeight: '700' },
+  editButton: { minHeight: 28, paddingHorizontal: 2, borderBottomWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  brandGlyph: { width: 28, fontSize: 22, fontWeight: '700' },
   sessionCopy: { flex: 1, marginHorizontal: 12 },
   sessionName: { fontWeight: '600' },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
-  categoryList: { gap: 12 },
-  categoryCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18 },
-  categoryIcon: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  sectionLabel: { fontFamily: 'monospace', fontWeight: '600', letterSpacing: 1.1, marginBottom: 4 },
+  categoryRow: { minHeight: 86, flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   categoryCopy: { flex: 1, marginHorizontal: 14 },
+  categoryTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 },
   categoryTitle: { fontWeight: '600', marginBottom: 2 },
-  itemCount: { marginTop: 8 },
 });

@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from mu.security.secret_paths import redact_secrets
+
 
 def _extract_tool_name(text: str) -> Optional[str]:
     """Parse the tool name out of the 'Running tool: X(args)' UI format.
@@ -41,6 +43,24 @@ def _extract_tool_name(text: str) -> Optional[str]:
     else:
         candidate = rest[:paren].strip()
     return candidate or None
+
+
+def _extract_tool_detail(text: str, tool_name: str) -> str:
+    """Return the already-shortened display args for an action row.
+
+    The agent loop shortens large ``content``/``diff`` values before this UI
+    boundary. We additionally run the non-bypassable secret scrubber and cap
+    the result so the activity drill-down remains safe and compact.
+    """
+    marker = f"{tool_name}("
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    detail = text[start + len(marker):]
+    if detail.endswith(")"):
+        detail = detail[:-1]
+    detail, _ = redact_secrets(detail.strip())
+    return detail[:240]
 
 
 class _NoopStatus:
@@ -116,7 +136,11 @@ class SubagentUI:
             tool_name = _extract_tool_name(text)
             if tool_name is not None:
                 try:
-                    self._tracker.update_tool(self._agent_id, tool_name)
+                    self._tracker.update_tool(
+                        self._agent_id,
+                        tool_name,
+                        _extract_tool_detail(text, tool_name),
+                    )
                 except Exception:
                     pass
                 return
@@ -143,8 +167,25 @@ class SubagentUI:
         return _NoopStatus()
 
     def emit_tool_trace(self, *args: Any, **kwargs: Any) -> None:
-        # Telemetry hook. Don't bubble up by default — the per-tool
-        # show_info already announces what's running.
+        # The loop invokes this after a tool result exists. Complete the
+        # matching action without bubbling full tool output into the parent.
+        if self._tracker is None or self._agent_id is None or not args:
+            return None
+        tool_name = str(args[0] or "")
+        raw_result = args[3] if len(args) > 3 else None
+        if isinstance(raw_result, dict):
+            ok = bool(raw_result.get("ok", not raw_result.get("error_code")))
+        else:
+            result_text = str(raw_result or "").lstrip().lower()
+            ok = not (
+                result_text.startswith(("error", "refused"))
+                or '"ok": false' in result_text[:240]
+                or "'ok': false" in result_text[:240]
+            )
+        try:
+            self._tracker.complete_tool(self._agent_id, tool_name, ok=ok)
+        except Exception:
+            pass
         return None
 
     # -------------------------------------------------- silenced surface

@@ -14,7 +14,6 @@ def build_container_context(session) -> str:
     ] or ["- /workspace (managed persistent volume)"]
     allow = ", ".join(getattr(ref, "egress_allow", []) or []) or "none"
     return (
-        "LAYER 1C — Container runtime:\n"
         f"Container: {getattr(ref, 'name', 'unknown')}\n"
         f"Image: {getattr(ref, 'image', 'unknown')}\n"
         f"Status: {getattr(ref, 'status', 'unknown')}\n"

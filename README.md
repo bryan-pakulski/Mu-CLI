@@ -115,8 +115,6 @@ The most common day-to-day commands — see [documentation/commands.md](document
 
 `.mu/hooks.json` — shell-command hooks fired at five lifecycle points (`pre_provider_call`, `post_provider_call`, `pre_tool`, `post_tool`, `on_stop`). Exit 0 = continue; non-zero with `on_failure: short_circuit` at `pre_tool` denies the call. Full reference, env vars, and the Python decorator path in [documentation/hooks.md](documentation/hooks.md).
 
-**Workspace context files** — by default mucli auto-loads any of `AGENTS.md`, `CLAUDE.md`, `MUCLI.md`, and `.mu/CONTEXT.md` from each attached workspace folder, injecting them as LAYER 1 of the system prompt (up to `workspace_context_max_chars`, default `40000` chars at the default `context_token_limit`; scales with it). Customize the list via `/set workspace_context_files <comma-separated>`.
-
 **Session variables** — every knob (memory limits, context budgets, skill mode, Ollama parameters, etc.) is a session variable settable via `/set <key> <value>`. See [documentation/configuration.md](documentation/configuration.md) for the full reference.
 
 ## Architecture
@@ -176,7 +174,4 @@ make test
 ```
 
 ## ROADMAP
-
-- Android app integration
-- Docker environment mode, sessions => image 
 - Authentication for hosting

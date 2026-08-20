@@ -38,31 +38,29 @@ def _make_session():
 
 
 def test_inject_accepts_cached_layers():
-    """`_inject_hierarchical_context` accepts cached L1/L1B so the loop can
+    """`_inject_hierarchical_context` accepts cached L1B so the loop can
     rebuild L2/L3 each iteration without disk reads."""
     session = _make_session()
-    ws = session._build_workspace_context_files()
     sk = session._build_skills_block(announce=False)
     out = session._inject_hierarchical_context(
-        "base", cached_workspace=ws, cached_skills=sk
+        "base", cached_skills=sk
     )
     assert isinstance(out, str)
     assert "base" in out
 
 
 def test_l2_refreshes_between_inject_calls_with_cache():
-    """The core fix: two inject calls with the same cached L1/L1B but a
+    """The core fix: two inject calls with the same cached L1B but a
     changed conversation_summary produce different L2 — proving the loop
     now sees mid-turn progress updates instead of a frozen turn-start L2."""
     session = _make_session()
-    ws = session._build_workspace_context_files()
     sk = session._build_skills_block(announce=False)
 
     session.session_manager.conversation_summary = (
         "### Progress\ndid thing X\n### Open items\nfinish Y"
     )
     before = session._inject_hierarchical_context(
-        "base", cached_workspace=ws, cached_skills=sk
+        "base", cached_skills=sk
     )
     assert "did thing X" in before
 
@@ -70,7 +68,7 @@ def test_l2_refreshes_between_inject_calls_with_cache():
         "### Progress\ndid thing Z\n### Open items\nfinish W"
     )
     after = session._inject_hierarchical_context(
-        "base", cached_workspace=ws, cached_skills=sk
+        "base", cached_skills=sk
     )
     assert "did thing Z" in after
     assert "did thing X" not in after
@@ -80,48 +78,36 @@ def test_l3_refreshes_session_goal_between_inject_calls():
     """L3 (active goal) must reflect a freshly-set session_goal without a
     turn restart."""
     session = _make_session()
-    ws = session._build_workspace_context_files()
     sk = session._build_skills_block(announce=False)
 
     before = session._inject_hierarchical_context(
-        "base", cached_workspace=ws, cached_skills=sk
+        "base", cached_skills=sk
     )
     assert "ship the feature" not in before
 
     session.variables["session_goal"] = "ship the feature"
     after = session._inject_hierarchical_context(
-        "base", cached_workspace=ws, cached_skills=sk
+        "base", cached_skills=sk
     )
     assert "ship the feature" in after
 
 
 def test_cached_layers_skip_rebuild(monkeypatch):
-    """When cached L1/L1B are passed, inject must NOT re-read files /
-    rediscover skills — that's the whole point of the per-turn cache."""
+    """When cached L1B is passed, inject must NOT rediscover skills —
+    that's the whole point of the per-turn cache."""
     session = _make_session()
 
-    calls = {"workspace": 0, "skills": 0}
-    from mu.session import context as ctx_mod
-
-    orig_ws = ctx_mod.build_workspace_context_files
-
-    def counting_ws(s):
-        calls["workspace"] += 1
-        return orig_ws(s)
-
-    monkeypatch.setattr(ctx_mod, "build_workspace_context_files", counting_ws)
+    calls = {"skills": 0}
     monkeypatch.setattr(
         session, "_build_skills_block", lambda *, announce=False: (
             calls.__setitem__("skills", calls["skills"] + 1) or ""
         )
     )
 
-    ws = orig_ws(session)
     sk = ""
     session._inject_hierarchical_context(
-        "base", cached_workspace=ws, cached_skills=sk
+        "base", cached_skills=sk
     )
-    assert calls["workspace"] == 0, "cached_workspace must skip rebuild"
     assert calls["skills"] == 0, "cached_skills must skip rebuild"
 
 

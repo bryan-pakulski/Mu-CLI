@@ -72,14 +72,13 @@ _logger = logging.getLogger(__name__)
 
 # Canonical layer order — matches the assembly in
 # mu/session/context.py:inject_hierarchical_context.
-_LAYER_ORDER: Tuple[str, ...] = ("L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5")
+_LAYER_ORDER: Tuple[str, ...] = ("L0", "L1A", "L1B", "L2", "L3", "L4B", "L5")
 
 # A distinct hue per layer (HSL degrees) so bands are visually identifiable.
 # Spread around the wheel; L5 (the volatile history) lands on red.
 LAYER_HUES: Dict[str, int] = {
     "L0": 210,  # blue  — system prompt (stable)
-    "L1": 135,  # green — workspace files
-    "L1C": 150,  # green-teal — workspace file tree (paths only)
+
     "L1B": 168,  # teal  — installed skills
     "L2": 280,  # purple — conversation summary
     "L3": 25,  # orange — active goal

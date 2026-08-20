@@ -360,7 +360,7 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
     # --- context growth (total_est vs prompt_tokens_actual) + per-layer ---
     context = []
     layers_stacked: Dict[str, List[float]] = {
-        "l0": [], "l1": [], "l1c": [], "l1b": [], "l2": [], "l3": [], "l4b": [], "l5": []
+        "l0": [], "l1a": [], "l1c": [], "l1b": [], "l2": [], "l3": [], "l4b": [], "l5": []
     }
     drift: List[Dict[str, Any]] = []
     for i in iters:

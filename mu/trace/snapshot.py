@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Tuple
 from .parser import TraceRun, _num
 
 # Layer order top-to-bottom as assembled by the harness.
-LAYER_ROWS: Tuple[str, ...] = ("l0", "l1", "l1c", "l1b", "l2", "l3", "l4b", "l5")
+LAYER_ROWS: Tuple[str, ...] = ("l0", "l1a", "l1b", "l2", "l3", "l4b", "l5")
 LAYER_LABELS: Dict[str, str] = {
-    "l0": "L0 system", "l1": "L1 workspace", "l1c": "L1C tree/diffs",
+    "l0": "L0 system",
     "l1b": "L1B skills",
     "l2": "L2 summary", "l3": "L3 memory", "l4b": "L4B compressed", "l5": "L5 history",
 }

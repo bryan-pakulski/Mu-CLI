@@ -1,7 +1,7 @@
 google-genai
 openai>=1.40.0
-rich
 prompt-toolkit
+rich
 Pillow
 pytest
 black
@@ -14,8 +14,10 @@ tiktoken
 fastapi
 uvicorn[standard]
 jinja2
-sse-starlette
 python-multipart
-kokoro
-faster-whisper
+
+# For voice / audio capabilities (optional)
+sse-starlette
+kokoro>=0.9.2
+faster-whisper>=1.0.0
 soundfile

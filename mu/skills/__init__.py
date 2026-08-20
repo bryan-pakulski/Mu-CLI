@@ -18,9 +18,9 @@ Frontmatter schema:
 message; a match auto-expands the skill body inline for that turn.
 
 v2 design:
-  * compact-by-default: only name + description + trigger hint go into
-    the system prompt under `### AVAILABLE SKILLS`;
-  * `### AUTO-EXPANDED SKILLS` carries full bodies for skills whose
+  * compact-by-default: only name + description go into
+    the system prompt under `# AVAILABLE SKILLS`;
+  * `# AUTO-EXPANDED SKILLS` carries full bodies for skills whose
     trigger matched the latest user message;
   * model can call `invoke_skill(name)` to expand any other skill;
   * both activation paths print a visible `🎯 SKILL ACTIVE` banner via
@@ -251,10 +251,7 @@ def get_skill(name: str, workspace_folders: Optional[List[str]] = None) -> Optio
 
 
 def _index_line(skill: Skill) -> str:
-    line = f"#### SKILL: {skill.name}\n{skill.description}".strip()
-    if skill.trigger:
-        line = f"{line}\n[trigger: {skill.trigger}]"
-    return line
+    return f"## SKILL: {skill.name}\n{skill.description}".strip()
 
 
 def announce_skill(ui: Any, skill_name: str, via: Optional[str] = None) -> None:
@@ -295,7 +292,7 @@ def announce_skill(ui: Any, skill_name: str, via: Optional[str] = None) -> None:
 
 def render_skills_expanded(skill: Skill) -> str:
     """Format a single skill's full body for inclusion in context."""
-    header = f"#### SKILL: {skill.name}\n{skill.description}".strip()
+    header = f"## SKILL: {skill.name}\n{skill.description}".strip()
     if skill.body:
         return f"{header}\n\n{skill.body}".strip()
     return header
@@ -305,7 +302,7 @@ def _render_full(skills: List[Skill], budget: int) -> str:
     """v1-style rendering: name + description + body for every skill, up to budget."""
     if not skills or budget <= 0:
         return ""
-    lines: List[str] = ["### AVAILABLE SKILLS"]
+    lines: List[str] = ["# AVAILABLE SKILLS"]
     used = len(lines[0]) + 2
     rendered = 0
     for skill in skills:
@@ -341,7 +338,7 @@ def _render_compact(
     # Auto-expanded skills get budget priority so a triggered skill is
     # never dropped in favor of an inert index line.
     if expanded:
-        header = "### AUTO-EXPANDED SKILLS"
+        header = "# AUTO-EXPANDED SKILLS"
         out.append(header)
         used += len(header) + 2
         for skill in expanded:
@@ -352,7 +349,7 @@ def _render_compact(
             used += len(block) + 2
 
     if indexed:
-        header = "### AVAILABLE SKILLS"
+        header = "# AVAILABLE SKILLS"
         out.append(header)
         used += len(header) + 2
         rendered = 0

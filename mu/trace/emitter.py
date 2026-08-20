@@ -396,8 +396,8 @@ def _layer_tokens(session: Any) -> Dict[str, Any]:
         total += val
     return {
         "l0": out.get("l0", 0),
-        "l1": out.get("l1", 0),
         "l1c": out.get("l1c", 0),
+        "l1a": out.get("l1a", 0),
         "l1b": out.get("l1b", 0),
         "l2": out.get("l2", 0),
         "l3": out.get("l3", 0),
@@ -577,7 +577,7 @@ def build_iter_record(
         "wall_ms": wall_ms,
         "context": {
             "l0": layers["l0"],
-            "l1": layers["l1"],
+            "l1a": layers.get("l1a", 0),
             "l1c": layers["l1c"],
             "l1b": layers["l1b"],
             "l2": layers["l2"],

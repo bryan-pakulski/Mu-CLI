@@ -51,8 +51,7 @@ def test_list_targets_export_matches_layers_and_stores():
         "task",
         "scratchpad",
         "L0",
-        "L1",
-        "L1C",
+        "L1A",
         "L1B",
         "L2",
         "L3",
@@ -84,7 +83,7 @@ def test_list_scratchpad_omits_task(session):
 # ----------------------------------------------- layer listing
 
 
-@pytest.mark.parametrize("layer", ["L0", "L1", "L1C", "L1B", "L2", "L3", "L5"])
+@pytest.mark.parametrize("layer", ["L0", "L1B", "L2", "L3", "L5"])
 def test_list_each_layer_returns_content_field(session, layer):
     """Every layer ID must resolve. Content may be empty in a fresh
     session but the data shape must be consistent."""
@@ -96,12 +95,12 @@ def test_list_each_layer_returns_content_field(session, layer):
 
 
 def test_list_layer_is_case_insensitive(session):
-    """`/memory list l1` and `/memory list L1` should both work."""
-    upper = memory_cmd(session, "list L1", allow_prompt=False)
-    lower = memory_cmd(session, "list l1", allow_prompt=False)
+    """`/memory list l1b` and `/memory list L1B` should both work."""
+    upper = memory_cmd(session, "list L1B", allow_prompt=False)
+    lower = memory_cmd(session, "list l1b", allow_prompt=False)
     assert upper.ok
     assert lower.ok
-    assert upper.data["layer"] == lower.data["layer"] == "L1"
+    assert upper.data["layer"] == lower.data["layer"] == "L1B"
 
 
 def test_list_l5_reflects_conversation_history(session):
@@ -148,10 +147,12 @@ def test_list_l5_summarizes_tool_calls_inline(session):
         },
     ]
     body = memory_cmd(session, "list L5", allow_prompt=False).data["content"]
-    # Tool call arrow + name + JSON args.
-    assert "→ list_dir(" in body
-    # Tool result arrow + name + preview.
-    assert "← list_dir:" in body
+    # Tool call arrow + name + args (compact ref format).
+    assert "→ tool call - name: list_dir" in body
+    assert '"path": "."' in body
+    # Tool result arrow + name + result state.
+    assert "← tool call - name: list_dir" in body
+    assert "success" in body
     assert "a.py" in body
     assert "Two files." in body
 
@@ -283,7 +284,7 @@ def test_clear_all_wipes_both(session):
 
 
 def test_dispatch_through_registry(session):
-    result = mc.dispatch(session, "/memory list L1", allow_prompt=False)
+    result = mc.dispatch(session, "/memory list L1B", allow_prompt=False)
     assert result is not None
     assert result.ok
-    assert result.data["layer"] == "L1"
+    assert result.data["layer"] == "L1B"

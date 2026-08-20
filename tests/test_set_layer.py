@@ -38,9 +38,9 @@ def session():
 
 
 def test_layer_budget_vars_cover_l1_through_l4b():
-    """Every layer with a per-layer budget (L1, L1C, L1B, L2, L3, L4B)
+    """Every layer with a per-layer budget (L1, L1B, L2, L3, L4B)
     has an entry. L4 removed from system prompt; L5 intentionally absent."""
-    assert set(LAYER_BUDGET_VARS.keys()) == {"L1", "L1C", "L1B", "L2", "L3", "L4B"}
+    assert set(LAYER_BUDGET_VARS.keys()) == {"L1A", "L1B", "L2", "L3", "L4B"}
     for layer_id, (var_name, _label, _desc) in LAYER_BUDGET_VARS.items():
         assert var_name, f"{layer_id} has empty variable name"
 
@@ -86,8 +86,6 @@ def test_set_layer_is_case_insensitive(session):
 @pytest.mark.parametrize(
     "layer,expected_var",
     [
-        ("L1", "workspace_context_max_chars"),
-        ("L1C", "folder_context_max_chars"),
         ("L1B", "skills_max_chars"),
         ("L2", "conversation_summary_char_limit"),
         ("L3", "active_goal_context_char_limit"),
@@ -144,23 +142,23 @@ def test_set_layer_rejects_zero_or_negative(session):
     """A zero-token budget would disable the layer entirely — make
     users state that explicitly via the underlying variable, not as a
     typo on the shortcut."""
-    assert not mc.dispatch(session, "/set layer L1 0", allow_prompt=False).ok
-    assert not mc.dispatch(session, "/set layer L1 -100", allow_prompt=False).ok
+    assert not mc.dispatch(session, "/set layer L1B 0", allow_prompt=False).ok
+    assert not mc.dispatch(session, "/set layer L1B -100", allow_prompt=False).ok
 
 
 def test_set_layer_round_trip_in_tokens(session):
     """The user-facing flow: type a token count, see the same number
     back via /get layer + the /memory table denominator."""
-    mc.dispatch(session, "/set layer L1 4096", allow_prompt=False)
-    result = mc.dispatch(session, "/get layer L1", allow_prompt=False)
+    mc.dispatch(session, "/set layer L1B 4096", allow_prompt=False)
+    result = mc.dispatch(session, "/get layer L1B", allow_prompt=False)
     assert result.data["tokens"] == 4096
-    # And the /memory table's "maximum" for L1 should match.
+    # And the /memory table's "maximum" for L1B should match.
     from utils.runtime_metrics import collect_context_layers
 
     layers = collect_context_layers(session)
-    l1 = next(layer for layer in layers if layer["layer"] == "L1")
-    assert l1["maximum"] == 4096, (
-        f"L1 maximum in /memory is {l1['maximum']} tokens but user set 4096"
+    l1b = next(layer for layer in layers if layer["layer"] == "L1B")
+    assert l1b["maximum"] == 4096, (
+        f"L1B maximum in /memory is {l1b['maximum']} tokens but user set 4096"
     )
 
 
@@ -182,9 +180,9 @@ def test_get_layer_no_id_lists_all_budgets(session):
     result = mc.dispatch(session, "/get layer", allow_prompt=False)
     assert result.ok
     budgets = result.data["layer_budgets"]
-    assert len(budgets) == 6
+    assert len(budgets) == 5
     layer_ids = {row["layer"] for row in budgets}
-    assert layer_ids == {"L1", "L1C", "L1B", "L2", "L3", "L4B"}
+    assert layer_ids == {"L1A", "L1B", "L2", "L3", "L4B"}
 
 
 def test_get_layer_l5_explains_no_budget(session):
@@ -256,7 +254,7 @@ def test_autocomplete_set_layer_id_suggestions():
     """`/set layer <Tab>` should offer the 5 layer IDs (no L4, no L5)."""
     handler = InputHandler()
     completions = _completion_texts(handler, "/set layer ")
-    for layer_id in ("L1", "L1B", "L2", "L3", "L4B"):
+    for layer_id in ("L1A", "L1B", "L2", "L3", "L4B"):
         assert layer_id in completions, f"missing {layer_id}"
     assert "L4" not in completions
     assert "L5" not in completions
@@ -266,7 +264,7 @@ def test_autocomplete_set_layer_prefix_filter():
     """`/set layer L1<Tab>` should narrow to L1 and L1B."""
     handler = InputHandler()
     completions = _completion_texts(handler, "/set layer L1")
-    assert "L1" in completions
+    assert "L1B" in completions
     assert "L1B" in completions
     assert "L2" not in completions
 
@@ -275,6 +273,6 @@ def test_autocomplete_get_layer_id_suggestions():
     """`/get layer <Tab>` should suggest layer IDs too (no L4)."""
     handler = InputHandler()
     completions = _completion_texts(handler, "/get layer ")
-    for layer_id in ("L1", "L1B", "L2", "L3", "L4B"):
+    for layer_id in ("L1A", "L1B", "L2", "L3", "L4B"):
         assert layer_id in completions, f"missing {layer_id}"
     assert "L4" not in completions

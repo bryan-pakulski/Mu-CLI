@@ -105,7 +105,7 @@ def test_render_skills_block_compact_index_excludes_bodies():
     s1 = Skill(name="alpha", description="A first skill.", body="A body.", source="/a")
     s2 = Skill(name="beta", description="A second skill.", body="B body.", source="/b")
     block = render_skills_block([s1, s2], budget=10000)
-    assert "### AVAILABLE SKILLS" in block
+    assert "# AVAILABLE SKILLS" in block
     assert "SKILL: alpha" in block
     assert "SKILL: beta" in block
     # Compact index never inlines bodies.
@@ -117,7 +117,7 @@ def test_render_skills_block_full_mode_includes_bodies():
     s1 = Skill(name="alpha", description="A first skill.", body="A body.", source="/a")
     s2 = Skill(name="beta", description="A second skill.", body="B body.", source="/b")
     block = render_skills_block([s1, s2], budget=10000, mode="full")
-    assert "### AVAILABLE SKILLS" in block
+    assert "# AVAILABLE SKILLS" in block
     assert "A body." in block
     assert "B body." in block
 
@@ -160,7 +160,7 @@ def test_render_skills_block_auto_expands_on_trigger_match():
     )
     s2 = Skill(name="beta", description="Other.", body="B body.", source="/b")
     block = render_skills_block([s1, s2], budget=10000, user_text="hello world")
-    assert "### AUTO-EXPANDED SKILLS" in block
+    assert "# AUTO-EXPANDED SKILLS" in block
     assert "A body." in block  # alpha was triggered
     assert "B body." not in block  # beta stays in index
     assert "SKILL: beta" in block
@@ -178,7 +178,7 @@ def test_render_skills_block_no_auto_expand_without_user_text():
         trigger_regex=_re.compile("hello", _re.IGNORECASE),
     )
     block = render_skills_block([s1], budget=10000, user_text=None)
-    assert "### AUTO-EXPANDED SKILLS" not in block
+    assert "# AUTO-EXPANDED SKILLS" not in block
     assert "A body." not in block
 
 
@@ -279,7 +279,7 @@ def test_session_full_mode_inlines_bodies():
     # In full mode the bundled commit-message skill's body should be inlined.
     # The body mentions "commit" (it's a commit-drafting skill prompt).
     assert "LAYER 1B — Installed skills" in full
-    # Should not show "[trigger:" prefix because full mode inlines bodies, not the compact index.
+    # Full mode inlines bodies, no auto-expansion section.
     assert "AUTO-EXPANDED SKILLS" not in full
 
 

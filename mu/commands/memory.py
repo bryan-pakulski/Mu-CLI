@@ -510,12 +510,11 @@ def _durable_action(
 # Stores are ones the model writes to via tools; layers are slabs of the
 # system prompt the harness assembles each turn.
 LIST_TARGETS = (
+    "L1A",
     "all",
     "task",
     "scratchpad",
     "L0",
-    "L1",
-    "L1C",
     "L1B",
     "L2",
     "L3",
@@ -524,9 +523,8 @@ LIST_TARGETS = (
 _LIST_TARGETS_LOWER = {t.lower(): t for t in LIST_TARGETS}
 
 _LAYER_BUILDERS = {
+    "L1A": ("_build_context_files_block", "Context files"),
     "L0": (None, "System prompt"),  # composed via compose_base_system_prompt()
-    "L1": ("_build_workspace_context_files", "Workspace files"),
-    "L1C": ("_build_folder_context_block", "Workspace file tree"),
     "L1B": ("_build_skills_block", "Installed skills"),
     "L2": (None, "Conversation summary"),  # straight off session_manager
     "L3": ("_build_active_goal_context", "Active goal"),
@@ -568,19 +566,33 @@ def _render_conversation_history(history: list) -> str:
                     arg_str = str(args)
                 if len(arg_str) > _TOOL_RESULT_PREVIEW:
                     arg_str = arg_str[:_TOOL_RESULT_PREVIEW] + "…"
-                out.append(f"→ {name}({arg_str})")
+                out.append(f"→ tool call - name: {name}, args: {arg_str}")
             elif ptype == "tool_result":
                 name = part.get("tool_name", "tool")
+                cache_key = part.get("cache_key")
                 raw = part.get("tool_result")
-                if not isinstance(raw, str):
-                    try:
-                        raw = json.dumps(raw, default=str)
-                    except Exception:
-                        raw = str(raw)
-                preview = raw.replace("\n", " ").strip()
-                if len(preview) > _TOOL_RESULT_PREVIEW:
-                    preview = preview[:_TOOL_RESULT_PREVIEW] + "…"
-                out.append(f"← {name}: {preview}")
+                # Structured envelope dict — extract ok/summary for compact ref
+                if isinstance(raw, dict):
+                    ok = raw.get("ok")
+                    result_state = "success" if ok else "error"
+                    summary = str(raw.get("summary") or "").strip().replace("\n", " ")
+                    if len(summary) > _TOOL_RESULT_PREVIEW:
+                        summary = summary[:_TOOL_RESULT_PREVIEW] + "…"
+                else:
+                    ok = not str(raw or "").startswith("Error")
+                    result_state = "success" if ok else "error"
+                    summary = str(raw or "").replace("\n", " ").strip()
+                    if len(summary) > _TOOL_RESULT_PREVIEW:
+                        summary = summary[:_TOOL_RESULT_PREVIEW] + "…"
+                if cache_key:
+                    out.append(
+                        f"← tool call - name: {name}, result: {result_state}, ref: {cache_key}"
+                    )
+                else:
+                    # No cache_key — include short preview since no ref to recall
+                    out.append(
+                        f"← tool call - name: {name}, result: {result_state}: {summary}"
+                    )
             elif ptype == "file":
                 fr = part.get("file_ref") or {}
                 name = fr.get("display_name") or fr.get("uri") or "file"

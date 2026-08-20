@@ -278,7 +278,7 @@ def test_memory_list_completion_includes_layers():
         # from the layered context architecture — tool activity now lives
         # in messages and retrieval is on-demand via retrieve_relevant_context.
         "all", "task", "scratchpad",
-        "L0", "L1", "L1C", "L1B", "L2", "L3", "L5",
+        "L0", "L1B", "L2", "L3", "L5",
     ):
         assert target in completion_texts, f"/memory list {target!r} not suggested"
 

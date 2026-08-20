@@ -3,7 +3,7 @@
 # Runs detached so mucli shutdown won't kill it.
 set -euo pipefail
 
-MUCLI="$(command -v mucli || echo /home/bryanp/dev/tools/Mu-CLI/mucli.py)"
+MUCLI="$(command -v mucli)"
 
 # detach from parent process group entirely
 setsid --wait "$MUCLI" --gui-stop >/dev/null 2>&1 || true

@@ -904,12 +904,8 @@ def run_turn(session, text):
             logger.debug(
                 f"Using agent_mode={session.variables.get('agent_mode', 'default')}"
             )
-            # L1C now carries the workspace file tree (paths only) as a
-            # budgeted layer (see _inject_hierarchical_context), so the
-            # non-agentic branch no longer appends a raw folder dump to the
-            # system-prompt base (L0) — that was the unbounded growth that
-            # bloated L0. workspace_context stays empty here; the L1C layer
-            # is cached per turn alongside _turn_workspace_block below.
+            # Workspace file tree (L1C) removed — agent retrieves files on
+            # demand via list_dir/read_file/search_for_string instead.
 
     base_system_prompt = session.system_instruction
     if active_mode == "feature":
@@ -1130,24 +1126,15 @@ def run_turn(session, text):
     # (active goal) fresh each iteration without the disk cost — closing
     # the frozen-at-turn-start gap that starved the model of mid-turn
     # progress updates. See _inject_hierarchical_context(cached_*).
-    from mu.session.context import build_workspace_context_files
-
-    session._turn_workspace_block = build_workspace_context_files(session)
     session._turn_skills_block = session._build_skills_block(announce=True)
-    # L1C (workspace file tree, paths only) — cached per turn and refreshed
-    # mid-turn only when a tool adds/removes files (see the in-loop refresh
-    # below). Bounded by folder_context_max_chars; no diffs are injected,
-    # so it can no longer balloon the system-prompt base.
-    session._turn_folder_context_block = session._build_folder_context_block()
+    session._turn_context_files_block = session._build_context_files_block()
     # The pre-injection persona text (system_instruction + mode prompt +
     # workspace_context + resumption block). Reused as the base for every
     # per-iteration system-prompt rebuild.
     base_persona_prompt = base_system_prompt
     base_system_prompt = session._inject_hierarchical_context(
         base_persona_prompt,
-        cached_workspace=session._turn_workspace_block,
         cached_skills=session._turn_skills_block,
-        cached_folder_context=session._turn_folder_context_block,
     )
 
     recent_history = session._prepare_runtime_history()
@@ -1379,13 +1366,11 @@ def run_turn(session, text):
             # scratchpad) reflect mid-turn updates — auto-compaction can
             # rewrite the summary via the pre_provider_call hook, and tools
             # can update feature_state / the scratchpad between iterations.
-            # L1 / L1B are reused from the per-turn cache (no disk reads).
+            # L1B is reused from the per-turn cache (no disk reads).
             # The memory + scratchpad snapshots are appended below as before.
             dynamic_system_prompt = session._inject_hierarchical_context(
                 base_persona_prompt,
-                cached_workspace=session._turn_workspace_block,
                 cached_skills=session._turn_skills_block,
-                cached_folder_context=session._turn_folder_context_block,
             )
             _durable_recall = str(
                 getattr(session, "_turn_durable_recall_block", "") or ""
@@ -2511,6 +2496,18 @@ def run_turn(session, text):
                             exc_info=True,
                         )
                 tool_result_parts.append(tool_result_part)
+                # Emit cache_key to the GUI so clicking the tool_result trace
+                # event can fetch the full content from the cache endpoint
+                # (the L5 history only carries a compact ref now).
+                if cache_key and hasattr(session.ui, "_publish"):
+                    try:
+                        session.ui._publish({
+                            "kind": "tool_result_cache",
+                            "tool_name": part.tool_name,
+                            "cache_key": cache_key,
+                        })
+                    except Exception:
+                        pass
                 # --- Trace: per-tool capture (latency, cache hit, result size) ---
                 try:
                     _t_start = _tool_start_times.pop(i, None)
@@ -2673,28 +2670,7 @@ def run_turn(session, text):
                         "recoverage stall check failed", exc_info=True
                     )
 
-            # --- Event-driven L1C (workspace file tree) refresh ---
-            # L1C is now tree-only (paths, no diffs). The tree only changes
-            # when files are added or removed, so a content-only edit makes
-            # this rebuild a no-op (the path set is unchanged) — but a write
-            # to a NEW path adds it to the tree, and a delete removes it, so
-            # we still rebuild on any file-modifying tool result to keep the
-            # model's file map current. Bounded by folder_context_max_chars;
-            # no more unbounded L0 growth from injected diffs.
-            _files_changed_this_iter = False
-            for _part in tool_result_parts:
-                _res = _part.get("tool_result")
-                if isinstance(_res, dict) and _res.get("modified_files"):
-                    _files_changed_this_iter = True
-                    break
-            if _files_changed_this_iter and session.folder_context:
-                try:
-                    session._turn_folder_context_block = (
-                        session._build_folder_context_block()
-                    )
-                except Exception:
-                    pass
-            # --- End event-driven L1C refresh ---
+
 
             if loop_detection_enabled and iteration_tool_exact_fingerprints:
                 exact_seq = " -> ".join(iteration_tool_exact_fingerprints)
@@ -3019,10 +2995,9 @@ def run_turn(session, text):
             session.session_manager.save_history(session.folder_context)
 
             # Fresh L2/L3 for the consolidation call (cheap; reuses per-turn
-            # cached L1/L1B).
+            # cached L1B).
             _consol_prompt = session._inject_hierarchical_context(
                 base_persona_prompt,
-                cached_workspace=session._turn_workspace_block,
                 cached_skills=session._turn_skills_block,
             )
             _consol_messages = session._build_messages_from_history(

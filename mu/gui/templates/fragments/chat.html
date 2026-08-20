@@ -116,10 +116,13 @@
                                         </div>
                                         <div class="trace-events" x-show="ct.open" x-transition.opacity.duration.180ms>
                                             <template x-for="ev in ct.events" :key="ev.id">
-                                                <div :class="'trace-event te-' + ev.kind">
+                                                <div :class="'trace-event te-' + ev.kind"
+                                                     @click="ev.kind === 'tool_result' && ev.cacheKey ? $store.chat.openCachePopup(ev.cacheKey, ev.name) : null"
+                                                     :style="ev.kind === 'tool_result' && ev.cacheKey ? 'cursor: pointer;' : ''">
                                                     <div class="te-line">
                                                         <span class="te-label" x-text="eventLabel(ev)"></span>
                                                         <span class="te-name" x-show="ev.name" x-text="ev.name || ''"></span>
+                                                        <span class="te-cache-badge" x-show="ev.kind === 'tool_result' && ev.cacheKey" x-text="'ref: ' + ev.cacheKey"></span>
                                                     </div>
                                                     <div class="te-text" x-show="ev.text" x-text="ev.text || ''"></div>
                                                     <pre class="te-json" x-show="ev.jsonHtml" x-html="ev.jsonHtml || ''"></pre>
@@ -193,10 +196,13 @@
                          x-show="t.open"
                          x-transition.opacity.duration.180ms>
                         <template x-for="ev in t.events" :key="ev.id">
-                            <div :class="'trace-event te-' + ev.kind">
+                            <div :class="'trace-event te-' + ev.kind"
+                                 @click="ev.kind === 'tool_result' && ev.cacheKey ? $store.chat.openCachePopup(ev.cacheKey, ev.name) : null"
+                                 :style="ev.kind === 'tool_result' && ev.cacheKey ? 'cursor: pointer;' : ''">
                                 <div class="te-line">
                                     <span class="te-label" x-text="eventLabel(ev)"></span>
                                     <span class="te-name" x-show="ev.name" x-text="ev.name || ''"></span>
+                                    <span class="te-cache-badge" x-show="ev.kind === 'tool_result' && ev.cacheKey" x-text="'ref: ' + ev.cacheKey"></span>
                                 </div>
                                 <div class="te-text" x-show="ev.text" x-text="ev.text || ''"></div>
                                 <pre class="te-json"

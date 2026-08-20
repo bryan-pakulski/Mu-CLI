@@ -91,7 +91,7 @@ class GetCompleter(Completer):
 
             self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
         except Exception:
-            self._layer_ids = ("L1", "L1C", "L1B", "L2", "L3", "L5")
+            self._layer_ids = ("L1A", "L1B", "L2", "L3", "L5")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -214,7 +214,7 @@ class SetCompleter(Completer):
 
             self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
         except Exception:
-            self._layer_ids = ("L1", "L1C", "L1B", "L2", "L3", "L5")
+            self._layer_ids = ("L1A", "L1B", "L2", "L3", "L5")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -370,7 +370,7 @@ class InputHandler:
         except ImportError:
             _MEMORY_LIST_TARGETS = (
                 "all", "task", "scratchpad",
-                "L1", "L1B", "L2", "L3", "L5",
+                "L1A", "L1B", "L2", "L3", "L5",
             )
         memory_completer = NestedCompleter.from_nested_dict(
             {

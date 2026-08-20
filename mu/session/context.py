@@ -6,7 +6,6 @@ semantic residue for information that cannot be derived structurally.
 """
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
 _MAX_SUBAGENT_DEPTH = 2
@@ -37,48 +36,6 @@ def _build_role_layer(role: str, session: Any) -> str:
     return ""
 
 
-def build_workspace_context_files(session: Any) -> str:
-    folder_context = session.folder_context
-    if not folder_context or not folder_context.folders:
-        return ""
-    raw_names = str(session.variables.get("workspace_context_files", "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md") or "")
-    candidates = [n.strip() for n in raw_names.split(",") if n.strip()]
-    budget = max(0, int(session.variables.get("workspace_context_max_chars", 16384) or 16384))
-    if not candidates or budget <= 0:
-        return ""
-    blocks: list[str] = []
-    used = 0
-    seen: set[str] = set()
-    for folder in folder_context.folders:
-        for name in candidates:
-            path = os.path.normpath(os.path.join(folder, name))
-            if path in seen:
-                continue
-            seen.add(path)
-            if not os.path.isfile(path):
-                continue
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    body = fh.read().strip()
-            except OSError:
-                continue
-            if not body:
-                continue
-            entry = f"### {os.path.relpath(path, folder)}  (from {folder})\n{body}"
-            remaining = budget - used
-            if remaining <= 0:
-                break
-            if len(entry) > remaining:
-                entry = entry[:remaining].rstrip() + "\n...[truncated]"
-            blocks.append(entry)
-            used += len(entry) + 2
-            if used >= budget:
-                break
-        if used >= budget:
-            break
-    return "\n\n".join(blocks).strip()
-
-
 def build_attachment_context(session: Any) -> str:
     registry = getattr(session, "attachment_registry", None)
     if registry is None:
@@ -99,7 +56,7 @@ def build_attachment_context(session: Any) -> str:
     return "\n".join(lines)[:6000]
 
 
-def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_workspace: Optional[str] = None, cached_skills: Optional[str] = None, cached_folder_context: Optional[str] = None) -> str:
+def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skills: Optional[str] = None, cached_context_files: Optional[str] = None) -> str:
     try:
         from utils.runtime_metrics import _current_time_prelude
         system_prompt = f"{_current_time_prelude()}\n\n{system_prompt}".strip()
@@ -128,30 +85,26 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_work
     goal_context = session._build_active_goal_context()
     layers: list[str] = []
 
-    workspace_files = cached_workspace if cached_workspace is not None else build_workspace_context_files(session)
-    if workspace_files:
-        limit = max(0, int(session.variables.get("workspace_context_max_chars", 16384) or 8192))
-        layers.append(f"LAYER 1 — Workspace context files (user-curated, authoritative):\n[budget: {limit} chars | eviction: truncate-after-budget]\n{workspace_files}")
-
     session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
     if session_type == "container":
         from mu.container.context import build_container_context
-        folder_context_block = build_container_context(session)
-    else:
-        folder_context_block = cached_folder_context if cached_folder_context is not None else session._build_folder_context_block()
-    if folder_context_block:
-        limit = max(0, int(session.variables.get("folder_context_max_chars", 8192) or 8192))
-        title = "LAYER 1C — Container sandbox:" if session_type == "container" else "LAYER 1C — Workspace file tree:"
-        layers.append(f"{title}\n[budget: {limit} chars | tree-only, no diffs]\n{folder_context_block}")
+        container_block = build_container_context(session)
+        if container_block:
+            layers.append(f"LAYER 1C \u2014 Container sandbox:\n{container_block}")
 
     attachment_context = build_attachment_context(session)
     if attachment_context:
-        layers.append("LAYER 1D — User-uploaded attachment registry (metadata only):\n[budget: 6000 chars | contents retrieved on demand]\n" + attachment_context)
+        layers.append("LAYER 1D \u2014 User-uploaded attachment registry (metadata only):\n[budget: 6000 chars | contents retrieved on demand]\n" + attachment_context)
+
+    context_files_block = cached_context_files if cached_context_files is not None else session._build_context_files_block()
+    if context_files_block:
+        cf_limit = max(0, int(session.variables.get("context_files_max_chars", 8000) or 8000))
+        layers.append(f"LAYER 1A \u2014 Workspace context files (AGENTS.md/CLAUDE.md/MUCLI.md/.mu/CONTEXT.md):\n[budget: {cf_limit} chars | whole-file-or-skip, no truncation]\n{context_files_block}")
 
     skills_block = cached_skills if cached_skills is not None else session._build_skills_block(announce=True)
     if skills_block:
         limit = max(0, int(session.variables.get("skills_max_chars", 6144) or 6144))
-        layers.append(f"LAYER 1B — Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n[budget: {limit} chars | eviction: drop-tail after auto-expand]\n{skills_block}")
+        layers.append(f"LAYER 1B \u2014 Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n[budget: {limit} chars | eviction: drop-tail after auto-expand]\n{skills_block}")
 
     if state_capsule or semantic_residue:
         parts = [f"[budget: {summary_limit} chars | eviction: keep newest]"]
@@ -159,19 +112,19 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_work
             parts.append(state_capsule)
         if semantic_residue:
             parts.append("Semantic residue from compacted older conversation (non-authoritative where structured state disagrees):\n" + semantic_residue)
-        layers.append("LAYER 2 — Conversation summary:\n" + "\n\n".join(parts))
+        layers.append("LAYER 2 \u2014 Conversation summary:\n" + "\n\n".join(parts))
 
     if goal_context:
-        layers.append("LAYER 3 — Active task plan / current goal:\n" + goal_context)
+        layers.append("LAYER 3 \u2014 Active task plan / current goal:\n" + goal_context)
 
     session_role = str(session.variables.get("session_role", "") or "").strip()
     if session_role:
         role_block = _build_role_layer(session_role, session)
         if role_block:
-            layers.append("LAYER 3B — Agent role:\n" + role_block)
+            layers.append("LAYER 3B \u2014 Agent role:\n" + role_block)
 
-    layers.append("LAYER 5 — Current turn:\nAlways prioritize the live user message and current-turn tool results. Structured L2 state is authoritative; older semantic residue is fallback context only.")
+    layers.append("LAYER 5 \u2014 Current turn:\nAlways prioritize the live user message and current-turn tool results. Structured L2 state is authoritative; older semantic residue is fallback context only.")
     return f"{system_prompt}\n\nHierarchical runtime context (layered with independent budgets/eviction):\n" + "\n\n".join(layers)
 
 
-__all__ = ["build_attachment_context", "build_workspace_context_files", "inject_hierarchical_context"]
+__all__ = ["build_attachment_context", "inject_hierarchical_context"]

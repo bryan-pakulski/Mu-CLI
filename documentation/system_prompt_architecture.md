@@ -36,7 +36,7 @@ count, and responsibility. Char counts are the source literal lengths
 | Loop-mode dynamic block | `loop_body.py:490-503` | ~700 | Appended when `active_mode == "loop"`: LOOP MODE SYSTEM PROMPT + the locked `loop_goal`. |
 | Teacher learner-profile block | `loop_body.py:504-507` | variable | Appended when `active_mode == "teacher"` via `_render_learner_profile_block(session)` — the auto-injected LEARNER PROFILE. |
 | Resumption block | `loop_body.py:531` | variable | Appended for resumed sessions with in-flight teacher/feature state. |
-| L0–L5 hierarchical context | `mu/session/context.py:94` | variable | `inject_hierarchical_context` assembles L0 time prelude, L1 workspace files, L1B skills, L2 conversation summary, L3 active goal, L4/L4B retrieval, L5 history. |
+| L0–L5 hierarchical context | `mu/session/context.py:94` | variable | `inject_hierarchical_context` assembles L0 time prelude, L1B skills, L2 conversation summary, L3 active goal, L4/L4B retrieval, L5 history. |
 | L3 memory snapshot | `loop_body.py:655-663` | variable | Persisted working-memory snapshot + eviction notices (per turn). |
 | L3 scratchpad snapshot | `loop_body.py:678-690` | variable | Turn scratchpad snapshot + eviction notices (per turn). |
 
@@ -66,11 +66,11 @@ summary) and L3 (active goal / memory / scratchpad) reflect mid-turn updates
 the scratchpad) instead of being frozen at their turn-start value — the
 long-horizon amnesia bug. To keep this cheap:
 
-- L1 (workspace files) and L1B (skills) are built **once per turn**
-  (`session._turn_workspace_block` / `session._turn_skills_block`,
+- L1B (skills) is built **once per turn**
+  (`session._turn_skills_block`,
   `loop_body.py:541-544`) and passed to `inject_hierarchical_context` as
-  `cached_workspace=` / `cached_skills=`, so each iteration's rebuild skips
-  the disk reads / skills-tree walk.
+  `cached_skills=`, so each iteration's rebuild skips
+  the skills-tree walk.
 - L2 and L3 are always reassembled from in-memory state.
 
 A periodic **L2 progress checkpoint** (`HistoryMixin.force_progress_checkpoint`,

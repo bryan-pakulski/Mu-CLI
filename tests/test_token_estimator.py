@@ -96,15 +96,15 @@ def test_layers_include_l1_and_l1b(session):
     what's actually in the system prompt."""
     layers = collect_context_layers(session)
     layer_ids = {layer["layer"] for layer in layers}
-    assert "L1" in layer_ids
+    assert "L1B" in layer_ids
     assert "L1B" in layer_ids
 
 
 def test_layers_include_all_seven_slots(session):
     """L0 (system prompt) added; L4 removed from system prompt; L1C
-    (workspace tree & diffs) added; total is now 8 layers."""
+    (workspace tree) removed — total is now 7 layers."""
     layers = collect_context_layers(session)
-    expected = {"L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"}
+    expected = {"L0", "L1A", "L1B", "L2", "L3", "L4B", "L5"}
     assert {layer["layer"] for layer in layers} == expected
 
 
@@ -249,17 +249,17 @@ def test_compaction_budget_shrinks_when_non_l5_layers_grow(session):
     session.variables["context_trim_threshold"] = 0.85
     baseline = session._compaction_token_budget()
 
-    # Now fake a giant L1: 200kB of workspace context. The compactor's
+    # Now fake a giant L1B: 200kB of skills. The compactor's
     # L5 budget should drop accordingly.
-    original_build = session._build_workspace_context_files
-    session._build_workspace_context_files = lambda: "x" * 200_000
+    original_build = session._build_skills_block
+    session._build_skills_block = lambda: "x" * 200_000
     try:
         tightened = session._compaction_token_budget()
     finally:
-        session._build_workspace_context_files = original_build
+        session._build_skills_block = original_build
 
     assert tightened < baseline, (
-        f"L5 budget should shrink when L1 grows; baseline={baseline}, "
+        f"L5 budget should shrink when L1B grows; baseline={baseline}, "
         f"tightened={tightened}"
     )
 
@@ -269,7 +269,7 @@ def test_compaction_budget_has_floor(session):
     return at least its 512-token floor so callers don't divide by
     zero or get into pathological trim loops."""
     session.variables["context_token_limit"] = 10_000
-    session._build_workspace_context_files = lambda: "x" * 1_000_000
+    session._build_skills_block = lambda: "x" * 1_000_000
     assert session._compaction_token_budget() >= 512
 
 
@@ -284,8 +284,6 @@ def test_all_layer_budget_variables_are_in_schema():
     from utils.config import VARIABLE_SCHEMA
 
     layer_vars = {
-        "workspace_context_max_chars",
-        "workspace_context_files",
         "skills_max_chars",
         "skills_mode",
         "conversation_summary_char_limit",

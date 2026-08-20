@@ -560,7 +560,7 @@ document.addEventListener("alpine:init", () => {
             });
             if (!name || name === this.currentName) this.scroll();
         },
-        addToolResult(toolName, text, name) {
+        addToolResult(toolName, text, name, cacheKey) {
             const slot = this._slot(name);
             this._closeStreamingAssistants(slot);
             const t = this._ensureTrace(slot);
@@ -570,9 +570,57 @@ document.addEventListener("alpine:init", () => {
                 name: toolName || "",
                 jsonHtml: renderJSON(text),
                 rawText: typeof text === "string" ? text : null,
+                cacheKey: cacheKey || "",
                 at: Date.now(),
             });
             if (!name || name === this.currentName) this.scroll();
+        },
+        setLastToolResultCache(toolName, cacheKey, name) {
+            const slot = this._slot(name);
+            const t = this._ensureTrace(slot);
+            // Find the last tool_result event matching toolName and attach cache_key.
+            for (let i = t.events.length - 1; i >= 0; i--) {
+                const ev = t.events[i];
+                if (ev.kind === "tool_result" && (!toolName || ev.name === toolName)) {
+                    ev.cacheKey = cacheKey;
+                    break;
+                }
+            }
+        },
+
+        // --- Tool result cache popup ----------------------------------
+        // Clicking a tool_result trace event that has a cacheKey opens a
+        // popup showing the full cached content fetched on demand from the
+        // backend cache endpoint. Keeps L5 context lean — the full result
+        // is only loaded when the user explicitly clicks.
+        cachePopup: { open: false, loading: false, toolName: "", cacheKey: "", result: null, error: "" },
+        async openCachePopup(cacheKey, toolName) {
+            if (!cacheKey) return;
+            this.cachePopup = {
+                open: true, loading: true, toolName: toolName || "",
+                cacheKey, result: null, error: "",
+            };
+            try {
+                const name = this.currentName || "";
+                const resp = await fetch(`/api/sessions/${encodeURIComponent(name)}/cache/${encodeURIComponent(cacheKey)}`);
+                if (!resp.ok) {
+                    const detail = await resp.text();
+                    this.cachePopup.error = `Failed (${resp.status}): ${detail}`;
+                    this.cachePopup.loading = false;
+                    return;
+                }
+                const data = await resp.json();
+                this.cachePopup.result = data.result;
+                this.cachePopup.loading = false;
+            } catch (e) {
+                this.cachePopup.error = String(e || "Network error");
+                this.cachePopup.loading = false;
+            }
+        },
+        closeCachePopup() {
+            this.cachePopup.open = false;
+            this.cachePopup.result = null;
+            this.cachePopup.error = "";
         },
         addThinking(text, name) {
             if (!text) return;
@@ -3935,8 +3983,8 @@ ${problem.text}`, "error", 16000);
             const rowHeight = plotHeight / rows;
             const cellWidth = plotWidth / points.length;
             const fallback = [
-                { id: "L0", hue: 210 }, { id: "L1", hue: 135 },
-                { id: "L1C", hue: 150 }, { id: "L1B", hue: 168 },
+                { id: "L0", hue: 210 },
+                { id: "L1B", hue: 168 },
                 { id: "L2", hue: 280 }, { id: "L3", hue: 25 },
                 { id: "L4B", hue: 50 }, { id: "L5", hue: 358 },
             ];
@@ -3973,7 +4021,7 @@ ${problem.text}`, "error", 16000);
         _drawContextStream(g, points) {
             const { ctx, left, top, plotWidth, plotHeight } = g;
             const palette = this._contextPalette();
-            const layerIds = ["L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"];
+            const layerIds = ["L0", "L1B", "L2", "L3", "L4B", "L5"];
             const hueById = {};
             for (const layer of this.layers) hueById[layer.id] = layer.hue;
             const peak = Math.max(1, ...points.map(point => point.total_tokens || 0));
@@ -5729,6 +5777,9 @@ function routeEvent(ev) {
         case "thinking_delta": chat.addThinking(ev.text || "", name); break;
         case "tool_result":
             chat.addToolResult(ev.tool_name || "", ev.text || "", name);
+            break;
+        case "tool_result_cache":
+            chat.setLastToolResultCache(ev.tool_name || "", ev.cache_key || "", name);
             break;
         case "artifact_created":
             Alpine.store("artifacts").add(ev.artifact, name);

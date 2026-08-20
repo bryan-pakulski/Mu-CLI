@@ -211,7 +211,7 @@ async def completions_endpoint(request: Request, kind: str = ""):
             return {"items": list(LIST_TARGETS)}
         except Exception:
             return {"items": ["all", "task", "scratchpad",
-                              "L1", "L1B", "L2", "L3", "L4", "L4B", "L5"]}
+                              "L1A", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"]}
 
     if kind == "layer_ids":
         try:
@@ -219,7 +219,7 @@ async def completions_endpoint(request: Request, kind: str = ""):
 
             return {"items": list(LAYER_BUDGET_VARS.keys())}
         except Exception:
-            return {"items": ["L1", "L1B", "L2", "L3", "L4", "L4B"]}
+            return {"items": ["L1A", "L1B", "L2", "L3", "L4", "L4B"]}
 
     return {"items": []}
 
@@ -539,3 +539,29 @@ async def stream_events(request: Request):
             bus.unsubscribe(queue)
 
     return EventSourceResponse(generator())
+
+
+@router.get("/sessions/{name}/cache/{key}")
+async def recall_cached_tool_result(request: Request, name: str, key: str):
+    """Recall a full tool result from the session's ToolResultCache by key.
+
+    The GUI fires this when the user clicks a tool_result trace event that
+    has a cache_key — the L5 history only carries a compact ref, so the popup
+    fetches the full content on demand via this endpoint instead of keeping
+    it in the provider context. Falls back to the durable ResultStore on a
+    memory-miss (the cache's recall() handles that transparently).
+    """
+    session = _resolve_session(request, name)
+    cache = getattr(session, "tool_result_cache", None)
+    if cache is None:
+        raise HTTPException(status_code=404, detail="No tool result cache on this session.")
+    entry = cache.recall(key)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No cached result for key {key!r}.")
+    return {
+        "ok": True,
+        "cache_key": key,
+        "tool_name": entry.get("tool_name", ""),
+        "result": entry.get("result"),
+        "from_disk": bool(entry.get("from_disk", False)),
+    }

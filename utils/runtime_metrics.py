@@ -293,26 +293,6 @@ def collect_context_layers(session):
     # --- char-budgeted layers (the variable schema names them in chars) ---
     from utils.config import LAYER_CHAR_FLOORS
 
-    workspace_limit_chars = max(
-        1,
-        int(
-            session.variables.get(
-                "workspace_context_max_chars",
-                LAYER_CHAR_FLOORS["workspace_context_max_chars"],
-            )
-            or LAYER_CHAR_FLOORS["workspace_context_max_chars"]
-        ),
-    )
-    folder_context_limit_chars = max(
-        1,
-        int(
-            session.variables.get(
-                "folder_context_max_chars",
-                LAYER_CHAR_FLOORS["folder_context_max_chars"],
-            )
-            or LAYER_CHAR_FLOORS["folder_context_max_chars"]
-        ),
-    )
     skills_limit_chars = max(
         1,
         int(
@@ -354,19 +334,26 @@ def collect_context_layers(session):
         ),
     )
 
+    context_files_limit_chars = max(
+        1,
+        int(
+            session.variables.get(
+                "context_files_max_chars",
+                LAYER_CHAR_FLOORS["context_files_max_chars"],
+            )
+            or LAYER_CHAR_FLOORS["context_files_max_chars"]
+        ),
+    )
+
     # --- materialize the layer bodies the same way the prompt builder does ---
-    try:
-        workspace_text = str(session._build_workspace_context_files() or "")
-    except Exception:
-        workspace_text = ""
-    try:
-        folder_context_text = str(session._build_folder_context_block() or "")
-    except Exception:
-        folder_context_text = ""
     try:
         skills_text = str(session._build_skills_block() or "")
     except Exception:
         skills_text = ""
+    try:
+        context_files_text = str(session._build_context_files_block() or "")
+    except Exception:
+        context_files_text = ""
     summary_text = str(getattr(session.session_manager, "conversation_summary", "") or "")
     try:
         goal_text = str(session._build_active_goal_context() or "")
@@ -400,25 +387,18 @@ def collect_context_layers(session):
 
     layers = [
         {
+            "layer": "L1A",
+            "name": "Context files",
+            "current": _chars_to_tokens(context_files_text, model),
+            "maximum": _budget_chars_to_tokens(context_files_limit_chars),
+            "description": "AGENTS.md/CLAUDE.md/MUCLI.md/.mu/CONTEXT.md — whole-file-or-skip.",
+        },
+        {
             "layer": "L0",
             "name": "System prompt",
             "current": _chars_to_tokens(system_prompt_text, model),
             "maximum": history_limit_tokens,
             "description": "Base system prompt — persona + agentic harness + mode workflow.",
-        },
-        {
-            "layer": "L1",
-            "name": "Workspace files",
-            "current": _chars_to_tokens(workspace_text, model),
-            "maximum": _budget_chars_to_tokens(workspace_limit_chars),
-            "description": "AGENTS.md / CLAUDE.md / .mu/CONTEXT.md per attached folder.",
-        },
-        {
-            "layer": "L1C",
-            "name": "Workspace file tree",
-            "current": _chars_to_tokens(folder_context_text, model),
-            "maximum": _budget_chars_to_tokens(folder_context_limit_chars),
-            "description": "Workspace file tree (paths only, no diffs); contents read on demand.",
         },
         {
             "layer": "L1B",

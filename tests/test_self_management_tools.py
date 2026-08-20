@@ -121,7 +121,7 @@ def test_context_status_reports_layers_and_self_mgmt():
     assert "self_management" in data
     # Layer ids cover the canonical stack.
     ids = [l["layer"] for l in data["layers"]]
-    for lid in ("L0", "L1", "L1B", "L2", "L3", "L4B", "L5"):
+    for lid in ("L0", "L1B", "L2", "L3", "L4B", "L5"):
         assert lid in ids
     sm = data["self_management"]
     assert "uncheckpointed_entries" in sm

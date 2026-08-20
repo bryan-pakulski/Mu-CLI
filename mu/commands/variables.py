@@ -3,7 +3,7 @@
 `/set layer <id> <chars>` and `/get layer [<id>]` are ergonomic
 shortcuts over the underlying per-layer char-budget variables — short
 layer IDs (L1, L1B, L2, ...) are easier to remember than
-`workspace_context_max_chars` and friends.
+`skills_max_chars` and friends.
 """
 
 from typing import Any, Dict, Tuple
@@ -28,15 +28,10 @@ TOKEN_TO_CHAR_RATIO = 4
 # reserve minus all the non-L5 layers leaves over. Tighten it via
 # `context_token_limit` instead.
 LAYER_BUDGET_VARS: Dict[str, Tuple[str, str, str]] = {
-    "L1": (
-        "workspace_context_max_chars",
-        "Workspace files",
-        "AGENTS.md / CLAUDE.md / .mu/CONTEXT.md per attached folder",
-    ),
-    "L1C": (
-        "folder_context_max_chars",
-        "Workspace file tree",
-        "Workspace file tree (paths only, no diffs); contents read on demand",
+    "L1A": (
+        "context_files_max_chars",
+        "Context files",
+        "Budget for LAYER 1A (AGENTS.md/CLAUDE.md/MUCLI.md/.mu/CONTEXT.md). Whole-file-or-skip.",
     ),
     "L1B": (
         "skills_max_chars",

@@ -72,8 +72,7 @@ _REFERENCE_TOKEN_LIMIT = 480000
 
 # Target token budgets at the reference limit (in tokens, not chars).
 _LAYER_TOKEN_TARGETS = {
-    "workspace_context_max_chars": 10000,       # L1
-    "folder_context_max_chars": 8000,           # L1C (file tree + diffs)
+    "context_files_max_chars": 5000,             # L1A
     "skills_max_chars": 10000,                   # L1B
     "conversation_summary_char_limit": 20000,   # L2
     "active_goal_context_char_limit": 4096,     # L3
@@ -82,8 +81,7 @@ _LAYER_TOKEN_TARGETS = {
 
 # Absolute floors — historical defaults, never scale below these.
 LAYER_CHAR_FLOORS = {
-    "workspace_context_max_chars": 16384,
-    "folder_context_max_chars": 8192,
+    "context_files_max_chars": 4000,
     "skills_max_chars": 6144,
     "conversation_summary_char_limit": 24000,
     "active_goal_context_char_limit": 4000,
@@ -446,30 +444,13 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 30,
     },
-    # ----- LAYER 1 — Workspace context files -----
-    "workspace_context_max_chars": {
-        # Char budget for LAYER 1 (workspace files like AGENTS.md, CLAUDE.md,
-        # .mu/CONTEXT.md per attached folder). Scales with context_token_limit
-        # via compute_layer_char_budgets; never drops below LAYER_CHAR_FLOORS.
+    # ----- LAYER 1A — Workspace context files -----
+    "context_files_max_chars": {
+        # Total budget for LAYER 1A (AGENTS.md, CLAUDE.md, MUCLI.md, .mu/CONTEXT.md).
+        # Files included whole or skipped — no truncation. 0 disables L1A.
+        # Scales with context_token_limit via compute_layer_char_budgets.
         "type": int,
-        "default": _LAYER_CHAR_DEFAULTS["workspace_context_max_chars"],
-    },
-    "workspace_context_files": {
-        # Comma-separated list of filenames to auto-load from each attached
-        # workspace folder as LAYER 1 of the system prompt. Empty disables.
-        "type": str,
-        "default": "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md",
-    },
-    # ----- LAYER 1C — Workspace file tree & detected changes -----
-    "folder_context_max_chars": {
-        # Char budget for LAYER 1C (workspace file tree + per-file change
-        # diffs). The tree is always included; diffs fill the remainder with
-        # drop-oldest eviction. Bounds the system-prompt cost in long-horizon
-        # runs where the agent writes many files. Scales with
-        # context_token_limit via compute_layer_char_budgets; never drops
-        # below LAYER_CHAR_FLOORS.
-        "type": int,
-        "default": _LAYER_CHAR_DEFAULTS["folder_context_max_chars"],
+        "default": _LAYER_CHAR_DEFAULTS["context_files_max_chars"],
     },
     # ----- LAYER 1B — Installed skills -----
     "skills_max_chars": {
@@ -507,7 +488,7 @@ VARIABLE_SCHEMA = {
         "default": 5,
     },
     "skills_mode": {
-        # "compact" (default): name + description + trigger hint only;
+        # "compact" (default): name + description only;
         # bodies auto-expand when a skill's regex trigger matches the
         # latest user message, or on `invoke_skill(name)`. "full" reverts
         # to v1 behavior — every skill body is inlined up to the budget.

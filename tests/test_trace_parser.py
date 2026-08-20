@@ -38,7 +38,7 @@ def _fixture():
         {
             "type": "iter", "run_id": "run_abc123", "iter": 0, "max_iter": 1000,
             "wall_ms": 120,
-            "context": {"l0": 500, "l1": 200, "l1b": 100, "l2": 0, "l3": 0,
+            "context": {"l0": 500, "l1b": 100, "l2": 0, "l3": 0,
                         "l4b": 0, "l5": 800, "total_est": 1600,
                         "prompt_tokens_actual": 2000, "drift_pct": 20.0},
             "tokens": {"in": 2000, "out": 50, "cached": 0, "reasoning": 0,
@@ -57,7 +57,7 @@ def _fixture():
         {
             "type": "iter", "run_id": "run_abc123", "iter": 1, "max_iter": 1000,
             "wall_ms": 200,
-            "context": {"l0": 500, "l1": 200, "l1b": 100, "l2": 300, "l3": 0,
+            "context": {"l0": 500, "l1b": 100, "l2": 300, "l3": 0,
                         "l4b": 0, "l5": 400, "total_est": 1500,
                         "prompt_tokens_actual": 2400, "drift_pct": 37.5},
             "tokens": {"in": 2400, "out": 60, "cached": 0, "reasoning": 100,
@@ -84,7 +84,7 @@ def _fixture():
         {
             "type": "iter", "run_id": "run_abc123", "iter": 2, "max_iter": 1000,
             "wall_ms": 90,
-            "context": {"l0": 500, "l1": 200, "l1b": 100, "l2": 300, "l3": 0,
+            "context": {"l0": 500, "l1b": 100, "l2": 300, "l3": 0,
                         "l4b": 0, "l5": 500, "total_est": 1600,
                         "prompt_tokens_actual": 2200, "drift_pct": 27.27},
             "tokens": {"in": 2200, "out": 40, "cached": 0, "reasoning": 0,
@@ -130,9 +130,9 @@ def test_build_series_drift(run):
     assert [d["iter"] for d in drift] == [0, 1, 2]
     assert drift[0]["drift_pct"] == 20.0
     assert drift[1]["drift_pct"] == 37.5
-    # layers_stacked has all eight layer keys, length 3 each
+    # layers_stacked has all seven layer keys, length 3 each
     assert set(s["layers_stacked"].keys()) == {
-        "l0", "l1", "l1c", "l1b", "l2", "l3", "l4b", "l5"
+        "l0", "l1a", "l1c", "l1b", "l2", "l3", "l4b", "l5"
     }
     assert len(s["layers_stacked"]["l5"]) == 3
 
@@ -277,7 +277,7 @@ def test_build_trace_snapshot(run):
     snap = build_trace_snapshot(run, cols=128)
     # 3 iters < 128 → no downsample, 3 columns.
     assert snap["meta"]["rendered_cols"] == 3
-    assert len(snap["grid"]) == 8  # eight layers (incl. L1C)
+    assert len(snap["grid"]) == 7  # seven layers (L1A context files added)
     for row in snap["grid"]:
         assert len(row) == 3
     assert len(snap["drift_strip"]) == 3

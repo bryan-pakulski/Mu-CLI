@@ -3112,6 +3112,15 @@ html[data-theme="light"] {
 .trace-event.te-thinking .te-label    { color: var(--text-dimmer); }
 .trace-event.te-thinking .te-text     { font-style: italic; color: var(--text-dim); }
 .trace-event.te-info .te-label        { color: var(--text-dimmer); }
+.te-cache-badge {
+    font-size: 0.72rem;
+    color: var(--text-dimmer);
+    margin-left: auto;
+    font-family: var(--mono-font, monospace);
+    opacity: 0.7;
+}
+.cache-popup-loading { color: var(--text-dim); padding: 1rem; }
+.cache-popup-error  { color: var(--danger, #f59); padding: 1rem; }
 
 /* ------------------------------------------------------------ sub-agent panel
  *

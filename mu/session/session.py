@@ -479,9 +479,12 @@ class Session:
         self, recent_history_dicts, new_user_message_dict
     ) -> list[Message]:
         from mu.session.messages import build_messages_from_history
+        from mu.session.budgets import resolve_tool_result_floor
 
+        floor = resolve_tool_result_floor(self)
         return build_messages_from_history(
-            recent_history_dicts, new_user_message_dict
+            recent_history_dicts, new_user_message_dict,
+            tool_result_floor=floor,
         )
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:
@@ -740,67 +743,82 @@ class Session:
             return ""
         return "".join(lines).strip()
 
-    def _build_workspace_context_files(self) -> str:
-        """LAYER 1 context-file aggregator. Body moved to
-        `mu/session/context.py:build_workspace_context_files`."""
-        from mu.session.context import build_workspace_context_files
+    def _build_context_files_block(self) -> str:
+        """LAYER 1A — load context files (AGENTS.md, CLAUDE.md, MUCLI.md,
+        .mu/CONTEXT.md) from workspace folders and the global ~/.mu/CONTEXT.md.
 
-        return build_workspace_context_files(self)
+        Whole-file-or-skip: files that fit the remaining budget are included
+        in full; files that exceed the remaining budget are skipped with a
+        marker. No truncation — middle content is never lost.
 
-    def _build_folder_context_block(self) -> str:
-        """LAYER 1C — workspace file tree (paths only).
+        Discovery order per folder (first match wins):
+          1. AGENTS.md   2. CLAUDE.md   3. MUCLI.md   4. .mu/CONTEXT.md
 
-        Single source for the folder-context layer used by both
-        `inject_hierarchical_context` (the live system prompt) and
-        `collect_context_layers` (the `/memory` + trace accounting).
-        Replaces the old raw-append of folder diffs onto the system-prompt
-        base (L0), which grew unbounded in long-horizon runs and hid from
-        layer accounting.
-
-        Tree-only by design: the model gets the file *map* so it knows what
-        exists and can read files on demand, but per-file change diffs are
-        NOT injected into the system prompt. Diffs were the original L0
-        bloat source (~787k in long-horizon runs), and budgeting them with
-        drop-oldest eviction risked silently discarding relevant changes —
-        so the diffs are dropped entirely rather than trimmed. The file tree
-        is small and stable; `folder_context_max_chars` (default 8192) is a
-        tail-truncation guard for workspaces with thousands of tracked
-        files. Returns ``""`` when no folders are attached.
+        Global ~/.mu/CONTEXT.md is loaded first (broadest scope), then each
+        attached workspace folder (increasingly specific). Identical files
+        are deduplicated by content hash.
         """
-        fc = getattr(self, "folder_context", None)
-        if not fc or not getattr(fc, "folders", None):
-            return ""
-        budget = int(
-            self.variables.get("folder_context_max_chars", 8192) or 8192
-        )
-        if budget <= 0:
-            return ""
+        import hashlib
+        import os
+
+        raw_budget = self.variables.get("context_files_max_chars", 8000)
         try:
-            tree = fc.get_initial_context_xml(tree_only=True) or ""
-        except Exception:  # noqa: BLE001
-            tree = ""
-        if not tree:
+            budget = max(0, int(raw_budget)) if raw_budget is not None else 8000
+        except (TypeError, ValueError):
+            budget = 8000
+        if budget == 0:
             return ""
-        # Tail-truncate the tree to the char budget (path-only trees are
-        # small; this only bites on workspaces with many thousands of
-        # tracked files). Cut on a line boundary when possible so the
-        # closing </initial_folder_context> tag stays well-formed.
-        if len(tree) <= budget:
-            return tree
-        cut = tree.rfind("\n", 0, budget - 64)
-        if cut < 0:
-            cut = max(0, budget - 64)
-        marker = (
-            f"\n...[file tree truncated: {len(tree) - cut} chars dropped "
-            f"to fit {budget}-char budget]\n"
+
+        candidate_names = ["AGENTS.md", "CLAUDE.md", "MUCLI.md", ".mu/CONTEXT.md"]
+        seen_hashes: set[str] = set()
+        blocks: list[str] = []
+        remaining = budget
+
+        # Build search paths: global first, then each workspace folder.
+        search_paths: list[tuple[str, str]] = []
+        global_ctx = os.path.expanduser("~/.mu/CONTEXT.md")
+        if os.path.isfile(global_ctx):
+            search_paths.append(("~/.mu/CONTEXT.md", global_ctx))
+        folders = (
+            list(self.folder_context.folders)
+            if self.folder_context and self.folder_context.folders
+            else []
         )
-        # Preserve the closing tag if the truncation point landed inside
-        # the <initial_folder_context>…</initial_folder_context> block.
-        tail = ""
-        close_tag = "</initial_folder_context>"
-        if close_tag in tree:
-            tail = "\n" + close_tag
-        return tree[:cut] + marker + tail
+        for folder in folders:
+            folder_path = str(folder)
+            for name in candidate_names:
+                candidate = os.path.join(folder_path, name)
+                if os.path.isfile(candidate):
+                    search_paths.append((name, candidate))
+                    break  # first match per folder wins
+
+        for label, filepath in search_paths:
+            if remaining <= 0:
+                break
+            try:
+                with open(filepath, "r", errors="replace") as f:
+                    content_text = f.read()
+            except Exception:
+                continue
+            if not content_text.strip():
+                continue
+            content_hash = hashlib.md5(content_text.encode("utf-8", errors="replace")).hexdigest()
+            if content_hash in seen_hashes:
+                continue
+            seen_hashes.add(content_hash)
+            file_len = len(content_text)
+            if file_len > remaining:
+                over = file_len - remaining
+                blocks.append(f"## {label}\n[skipped: {file_len} chars, {over} over remaining budget]")
+                # Don't reduce remaining — skipped files don't consume budget.
+                # But stop if we've skipped — remaining stays, next file might fit.
+                continue
+            blocks.append(f"## {label}\n{content_text}")
+            remaining -= file_len
+
+        if not blocks:
+            return ""
+        return "\n\n".join(blocks)
 
     def _build_skills_block(self, *, announce: bool = False) -> str:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
@@ -898,27 +916,24 @@ class Session:
         self,
         system_prompt: str,
         *,
-        cached_workspace: str | None = None,
         cached_skills: str | None = None,
-        cached_folder_context: str | None = None,
+        cached_context_files: str | None = None,
     ) -> str:
         """Layered system-prompt assembly. Body moved to
         `mu/session/context.py:inject_hierarchical_context`.
 
-        ``cached_workspace`` / ``cached_skills`` forward per-turn-cached
-        L1 / L1B text so the agent loop can rebuild L2 / L3 fresh every
-        iteration without re-reading files from disk each time.
-        ``cached_folder_context`` does the same for L1C (workspace file tree
-        + diffs).
+        ``cached_skills`` forwards per-turn-cached L1B text so the agent
+        loop can rebuild L2 / L3 fresh every iteration without re-reading
+        the skills tree from disk each time. ``cached_context_files``
+        forwards per-turn-cached L1A context-files text for the same reason.
         """
         from mu.session.context import inject_hierarchical_context
 
         return inject_hierarchical_context(
             self,
             system_prompt,
-            cached_workspace=cached_workspace,
             cached_skills=cached_skills,
-            cached_folder_context=cached_folder_context,
+            cached_context_files=cached_context_files,
         )
 
     def queue_resumption_briefing(self, briefing: str) -> None:

@@ -10,7 +10,7 @@ The system prompt is composed of seven layers:
 
 - **L0** — Base system prompt (persona + agentic harness + mode workflow)
 - **L1** — Workspace context files (AGENTS.md, CLAUDE.md, .mu/CONTEXT.md)
-- **L1B** — Installed skills (compact index + auto-expanded bodies)
+- **L1A, L1B** — Installed skills (compact index + auto-expanded bodies)
 - **L2** — Conversation summary (rolling LLM-generated compression of older history)
 - **L3** — Active goal context (feature/task status + scratchpad snapshot + pinned session goal)
 - **L4** — Recent tool activity (compressed, or LLM-summarized, for budget)
@@ -51,11 +51,10 @@ is told the verbatim text is not in context.
 | `emergency_keep_recent` | 2 | Trailing messages kept verbatim by emergency (pre-flight) compaction — smaller than the normal keep-recent so budget is reclaimed fast; `tool_result_floor` still protects recent tool results. |
 | `compact_history` | false | Remove completed-turn tool metadata after a response. Disabled by default. |
 | `conversation_summary_char_limit` | 80000 | Char budget for L2 rolling summary (scales with `context_token_limit`, floor `24000`). |
-| `workspace_context_max_chars` | 40000 | Char budget for L1 workspace files (scales with `context_token_limit`, floor `16384`). |
 | `skills_max_chars` | 40000 | Char budget for L1B skills block (scales with `context_token_limit`, floor `6144`). |
 | `retrieval_context_char_limit` | 40000 | Char budget for L4B semantic-retrieval snippets (scales with `context_token_limit`, floor `10000`). |
 
-The four char-budget variables scale proportionally with
+The three char-budget variables scale proportionally with
 `context_token_limit` (`utils/config.py:compute_layer_char_budgets`);
 the "Default" column is the value at the default `context_token_limit =
 480000`, and each never drops below its floor. See

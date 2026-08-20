@@ -39,16 +39,59 @@ from providers.base import FileReference, ImageData, LLMProvider, Message, Messa
 from .helpers import _shorten_tool_args
 
 
+def _compact_tool_result_ref(part: dict) -> str:
+    """Render a compact one-line ref for a tool_result part that has
+    a cache_key, replacing the full structured envelope in provider
+    messages. The model can recall(cache_key) or use chunk retrieval
+    tools (result_range/head/tail/search/etc.) to fetch the full
+    content on demand — keeping L5 context lean without losing
+    retrievability.
+
+    Format: ← tool call - name: X, result: success, ref: KEY
+    """
+    name = part.get("tool_name", "tool")
+    cache_key = part.get("cache_key", "")
+    raw = part.get("tool_result")
+    if isinstance(raw, dict):
+        ok = raw.get("ok")
+        result_state = "success" if ok else "error"
+    else:
+        result_state = "success" if not str(raw or "").startswith("Error") else "error"
+    return f"← tool call - name: {name}, result: {result_state}, ref: {cache_key}"
+
+
 def build_messages_from_history(
     recent_history_dicts: List[dict],
     new_user_message_dict: dict,
+    *,
+    tool_result_floor: int = 0,
 ) -> List[Message]:
     """Rehydrate dict-shaped history records into provider-typed
     `Message` objects. Pass-through for text; decodes base64 image
     payloads back into `ImageData`; threads provider-supplied
-    `thought_signature` through tool_call / tool_result parts."""
+    `thought_signature` through tool_call / tool_result parts.
+
+    When ``tool_result_floor > 0``, the last ``floor`` tool-result-bearing
+    messages are kept verbatim (the model needs recent results in context
+    without an extra recall() round-trip). Tool results beyond the floor
+    that have a ``cache_key`` are replaced by a compact ref string — the
+    model can ``recall(KEY)`` or use chunk retrieval tools to fetch the
+    full content on demand. Results without a cache_key stay verbatim
+    (no ref to recall)."""
+    # Build the set of message indices (in recent_history_dicts only —
+    # the new user message is never compacted) that are within the floor.
+    floor_indices: set[int] = set()
+    if tool_result_floor > 0:
+        tr_indices = [
+            i for i, md in enumerate(recent_history_dicts)
+            if any(p.get("type") == "tool_result" for p in (md.get("parts") or []))
+        ]
+        if tr_indices:
+            floor_indices = set(tr_indices[-tool_result_floor:])
+
     messages: List[Message] = []
-    for msg_dict in recent_history_dicts + [new_user_message_dict]:
+    for hist_idx, msg_dict in enumerate(recent_history_dicts + [new_user_message_dict]):
+        is_within_floor = hist_idx in floor_indices
         parts: List[MessagePart] = []
         for p in msg_dict.get("parts", []):
             p_type = p.get("type")
@@ -108,14 +151,31 @@ def build_messages_from_history(
                     )
                 )
             elif p_type == "tool_result":
-                parts.append(
-                    MessagePart(
-                        type="tool_result",
-                        tool_name=p.get("tool_name", "tool"),
-                        tool_result=p.get("tool_result", ""),
-                        thought_signature=p.get("thought_signature"),
+                cache_key = p.get("cache_key")
+                # Beyond the tool_result_floor: replace full envelope with
+                # compact ref string when a cache_key is available. The model
+                # can recall(cache_key) or use chunk retrieval tools to fetch
+                # the full content on demand. Within the floor: keep verbatim
+                # so the model has recent results without an extra round-trip.
+                # No cache_key: keep verbatim (no ref to recall).
+                if cache_key and not is_within_floor:
+                    parts.append(
+                        MessagePart(
+                            type="tool_result",
+                            tool_name=p.get("tool_name", "tool"),
+                            tool_result=_compact_tool_result_ref(p),
+                            thought_signature=p.get("thought_signature"),
+                        )
                     )
-                )
+                else:
+                    parts.append(
+                        MessagePart(
+                            type="tool_result",
+                            tool_name=p.get("tool_name", "tool"),
+                            tool_result=p.get("tool_result", ""),
+                            thought_signature=p.get("thought_signature"),
+                        )
+                    )
         messages.append(Message(role=msg_dict["role"], parts=parts))
     return messages
 
@@ -429,4 +489,5 @@ __all__ = [
     "clip_preview",
     "summarize_message_parts",
     "prepare_runtime_history",
+    "_compact_tool_result_ref",
 ]

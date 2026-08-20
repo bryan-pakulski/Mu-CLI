@@ -6,7 +6,6 @@ Verifies:
   3. ScratchpadStore expanded to 128 entries / 4000 char render
   4. CollationBuffer expanded to 2MB
   5. retrieval_context_char_limit = 10000
-  6. workspace_context_max_chars = 16384
   7. _degrade_oldest uses LLM when provider available, 16000-char fallback when not
   8. All existing tests still pass
 """
@@ -183,14 +182,6 @@ def test_retrieval_context_char_limit_default_is_10000():
     from mu.session import session as sess_mod
     source = inspect.getsource(sess_mod)
     assert "10000" in source and "retrieval_context_char_limit" in source
-
-
-def test_workspace_context_max_chars_default_is_16384():
-    """workspace_context_max_chars default in context.py should be 16384."""
-    import inspect
-    from mu.session import context as ctx_mod
-    source = inspect.getsource(ctx_mod)
-    assert "16384" in source and "workspace_context_max_chars" in source
 
 
 # ============================================================ _degrade_oldest LLM path

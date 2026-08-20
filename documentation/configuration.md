@@ -73,21 +73,7 @@ Workspace-local skills shadow built-ins of the same name. See
 
 Optional plain-text file auto-loaded into LAYER 1 of the system prompt.
 Use it for project-specific instructions that should always be in
-context. See [Workspace context files](#workspace-context-files).
-
-## Workspace context files
-
-Controlled by the `workspace_context_files` variable. Default value:
-
-```
-AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md
-```
-
-For each attached workspace folder, mucli loads the first matching file
-(or all of them, in order) into LAYER 1 of the system prompt, capped by
-`workspace_context_max_chars` (default `40000` chars at the default
-`context_token_limit`; scales with it — see [Per-layer budgets](#per-layer-budgets)).
-Set `workspace_context_files` to an empty string to disable.
+context.
 
 ## Session variables
 
@@ -168,8 +154,7 @@ shrinks these toward their floors, and raising it grows them.
 
 | Variable | Type | Default | Floor | Layer | Description |
 | --- | --- | --- | --- | --- | --- |
-| `workspace_context_max_chars` | int | `40000` | `16384` | **L1** | Workspace files (AGENTS.md, CLAUDE.md, MUCLI.md, .mu/CONTEXT.md per attached folder). |
-| `workspace_context_files` | str | `AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md` | — | **L1** | Comma-separated list of files to auto-load per workspace. Empty disables. |
+| `context_files_max_chars` | int | `20000` | `4000` | **L1A** | Workspace context files (AGENTS.md/CLAUDE.md/MUCLI.md/.mu/CONTEXT.md). Whole-file-or-skip, no truncation. `0` disables L1A. |
 | `skills_max_chars` | int | `40000` | `6144` | **L1B** | AVAILABLE SKILLS block (compact index + auto-expanded bodies). `0` disables skills entirely. |
 | `skills_mode` | str | `compact` | — | **L1B** | `compact` (index + auto-expand on trigger) or `full` (every body inlined up to the budget). |
 | `conversation_summary_char_limit` | int | `80000` | `24000` | **L2** | Rolling conversation summary. Clipped from the tail when exceeded. |
@@ -191,7 +176,6 @@ Both `/set` and `/get` accept a `layer` subcommand:
 
 ```
 /set layer L1 6000         # 6000 tokens; stored as 24000 chars in
-                           # workspace_context_max_chars
 /get layer L1              # tokens + underlying chars
 /get layer                 # table of all five layer budgets
 ```
@@ -199,9 +183,8 @@ Both `/set` and `/get` accept a `layer` subcommand:
 The value is in **tokens** — matching the unit shown in `/memory` and
 the splash banner — and is converted to chars at a 4:1 ratio for the
 underlying `_chars` variable. (Setting the variable directly in chars
-via `/set workspace_context_max_chars 16384` still works.)
 
-Layer IDs autocomplete on Tab. Valid IDs are `L1`, `L1B`, `L2`, `L3`,
+Layer IDs autocomplete on Tab. Valid IDs are `L1A`, `L1B`, `L2`, `L3`,
 `L4B`. `L4` and `L5` are rejected — L4 is agent-managed and L5 is the
 global-cap remainder; use `context_status` / `compact` or adjust
 `context_token_limit` instead.

@@ -332,5 +332,34 @@
             </div>
         </template>
     </div>
+    <!-- Tool result cache popup -->
+    <div class="modal-backdrop"
+         x-data
+         x-show="$store.chat.cachePopup.open"
+         x-transition.opacity.duration.150ms
+         @keydown.escape.window="$store.chat.cachePopup.open && $store.chat.closeCachePopup()"
+         @click="$store.chat.closeCachePopup()">
+        <div class="modal" @click.stop style="max-width: 800px;">
+            <div class="modal-head">
+                <span class="modal-title">
+                    Tool result:
+                    <span class="mono" x-text="$store.chat.cachePopup.toolName"></span>
+                </span>
+                <button class="icon-btn" @click="$store.chat.closeCachePopup()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div x-show="$store.chat.cachePopup.loading" class="cache-popup-loading">
+                    Loading cached result…
+                </div>
+                <div x-show="!$store.chat.cachePopup.loading && $store.chat.cachePopup.error"
+                     class="cache-popup-error"
+                     x-text="$store.chat.cachePopup.error"></div>
+                <div x-show="!$store.chat.cachePopup.loading && !$store.chat.cachePopup.error && $store.chat.cachePopup.result"
+                     class="cache-popup-result">
+                    <pre class="te-json" x-html="renderJSON($store.chat.cachePopup.result)"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

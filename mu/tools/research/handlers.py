@@ -34,7 +34,9 @@ from utils.threads import NamedThread
     description=(
         "Rate a registered research source after evaluating its authority, "
         "methodology, relevance, and corroboration. Use 0.0–1.0; source "
-        "type supplies a hard safety cap, not a flat rating."
+        "type supplies a hard safety cap, not a flat rating. Always call "
+        "this after reading a source you intend to cite — the AI owns the "
+        "weighting decision; unassessed sources score 0.0."
     ),
     parameters={
         "type": "object",

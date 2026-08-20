@@ -104,10 +104,14 @@ def research_workspace(
     source_types = len(
         {str(source.get("source_type") or "unknown") for source in sources}
     )
+    topics = sorted({str(source.get("topic") or "general") for source in sources})
+    assessed = sum(
+        1 for source in sources if float(source.get("credibility_score") or 0) > 0
+    )
     return _workspace(
         "research",
         "Evidence desk",
-        "Turn sources into traceable claims, expose coverage gaps, and keep source quality separate from claim correctness.",
+        "Turn sources into traceable claims, expose coverage gaps, and keep source quality separate from claim correctness. Sources are grouped by research topic.",
         status_label="collecting" if active else "idle",
         status_tone="active" if active else "neutral",
         views=(
@@ -134,14 +138,20 @@ def research_workspace(
                 "sources",
                 "sources",
                 len(sources),
-                detail=f"Across {source_types} source type(s).",
+                detail=f"Across {source_types} source type(s) and {len(topics)} topic(s).",
             ),
             _metric(
-                "credible",
-                "high credibility",
-                high_credibility,
-                tone="good" if high_credibility else "neutral",
-                detail="Sources graded at 0.75 or above.",
+                "topics",
+                "research topics",
+                len(topics),
+                detail="Distinct rabbit holes / sub-questions with at least one source.",
+            ),
+            _metric(
+                "assessed",
+                "AI-assessed",
+                assessed,
+                tone="good" if assessed else "neutral",
+                detail="Sources the AI has graded via assess_source; unassessed score 0.0.",
             ),
         ),
         quality=(
@@ -154,18 +164,18 @@ def research_workspace(
             _quality(
                 "relevance",
                 "Relevance",
-                "unassessed",
-                "No claim-to-question relevance score is currently recorded.",
+                "topic-grouped",
+                "Sources are grouped by research topic so the bibliography stays organized by ask.",
             ),
             _quality(
                 "evidence",
                 "Evidence quality",
-                "measured",
-                "Credibility grades the source, not the truth of every claim it contains.",
+                "ai-assessed",
+                "Credibility is AI-assessed per source (assess_source), bounded by a per-type safety cap; unassessed sources score 0.0.",
             ),
         ),
-        search_placeholder="Filter claims, sources, authors, or tags",
-        provenance="Citation ledger + research-mode task memory",
+        search_placeholder="Filter claims, sources, authors, topics, or tags",
+        provenance="Citation ledger (topic-grouped) + research-mode task memory",
     )
 
 

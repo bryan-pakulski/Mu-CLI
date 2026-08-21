@@ -1,0 +1,65 @@
+name: Neovim extension
+
+on:
+  push:
+    branches: [main, nvim]
+    paths:
+      - "extensions/mucli.nvim/**"
+      - "mu/agent/loop_body.py"
+      - "mu/gui/routers/extensions.py"
+      - "mu/gui/routers/inspector.py"
+      - "mu/gui/routers/chat.py"
+      - "mu/gui/routers/providers.py"
+      - "mu/gui/web_ui.py"
+      - "mu/session/tools_glue.py"
+      - "tests/test_nvim_extension_bridge.py"
+      - ".github/workflows/neovim-extension.yml"
+  pull_request:
+    paths:
+      - "extensions/mucli.nvim/**"
+      - "mu/agent/loop_body.py"
+      - "mu/gui/routers/extensions.py"
+      - "mu/gui/routers/inspector.py"
+      - "mu/gui/routers/chat.py"
+      - "mu/gui/routers/providers.py"
+      - "mu/gui/web_ui.py"
+      - "mu/session/tools_glue.py"
+      - "tests/test_nvim_extension_bridge.py"
+
+jobs:
+  neovim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: ["0.10.4", "0.11.4", "0.12.4"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Neovim ${{ matrix.neovim }}
+        shell: bash
+        run: |
+          curl -fL --retry 3 \
+            "https://github.com/neovim/neovim-releases/releases/download/v${{ matrix.neovim }}/nvim-linux-x86_64.tar.gz" \
+            -o /tmp/nvim.tar.gz
+          mkdir -p /tmp/nvim
+          tar --no-same-owner -xzf /tmp/nvim.tar.gz -C /tmp/nvim --strip-components=1
+          echo "/tmp/nvim/bin" >> "$GITHUB_PATH"
+      - name: Run headless editor tests
+        run: extensions/mucli.nvim/scripts/test.sh
+
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install bridge test dependencies
+        run: python -m pip install pytest fastapi pathspec
+      - name: Run extension bridge tests
+        env:
+          PYTHONPATH: .
+          MUCLI_HOME: ${{ runner.temp }}/mucli-test
+        run: python -m pytest -q tests/test_nvim_extension_bridge.py

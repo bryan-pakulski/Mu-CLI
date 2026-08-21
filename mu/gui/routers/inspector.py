@@ -627,7 +627,9 @@ async def set_variable(
     session.variables[key] = casted
     _sync_provider_if_needed(session, key)
 
-    lock = request.app.state.session_lock_for()
+    lock = request.app.state.session_lock_for(
+        session.session_manager.current_session_name
+    )
 
     def _persist():
         if lock.acquire(timeout=2):
@@ -655,7 +657,9 @@ async def unset_variable(
     session.variables[key] = default
     _sync_provider_if_needed(session, key)
 
-    lock = request.app.state.session_lock_for()
+    lock = request.app.state.session_lock_for(
+        session.session_manager.current_session_name
+    )
 
     def _persist():
         if lock.acquire(timeout=2):

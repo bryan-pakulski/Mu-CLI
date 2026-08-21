@@ -288,6 +288,14 @@ class WebUI(BaseUI):
         description=None,
         risk=None,
         display_args=None,
+        count_info="",
+        can_approve=True,
+        modifications=None,
+        preview_error=None,
+        error_code=None,
+        prompt_text=None,
+        choices=None,
+        default="n",
         **_kwargs,
     ):
         result = self._ask_prompt(
@@ -295,18 +303,30 @@ class WebUI(BaseUI):
                 "shape": "tool_approval",
                 "tool_name": tool_name,
                 "tool_args": tool_args or display_args,
+                "display_args": display_args,
                 "description": description,
                 "risk": risk,
+                "count_info": count_info,
+                "can_approve": bool(can_approve),
+                "modifications": list(modifications or []),
+                "preview_error": preview_error,
+                "error_code": error_code,
+                "message": prompt_text,
+                "choices": list(choices or ["y", "n", "e"]),
+                "default": default,
             }
         )
         if isinstance(result, dict) and result.get("cancelled"):
-            return {"approved": False, "remember": False}
+            return "n", None
         if isinstance(result, dict):
-            return {
-                "approved": bool(result.get("approved", False)),
-                "remember": bool(result.get("remember", False)),
-            }
-        return {"approved": False, "remember": False}
+            choice = str(result.get("choice") or "").strip().lower()
+            if choice not in {"y", "n", "e"}:
+                choice = "y" if bool(result.get("approved", False)) else "n"
+            reason = str(result.get("reason") or "").strip() or None
+            if reason and choice == "n":
+                choice = "e"
+            return choice, reason
+        return "n", None
 
     def run_quiz(self, questions):
         result = self._ask_prompt(

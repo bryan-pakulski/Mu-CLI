@@ -1,187 +1,163 @@
 local M = {}
 
-local curl = require("plenary.curl")
 local config = require("mucli.config")
+local sse = require("mucli.sse")
 
--- SSE stream state
-M._sse_job_id = nil
-M._sse_callback = nil
-M._sse_buffer = ""
-M._sse_reconnect_delay = 1  -- seconds, doubles on each failure
-M._sse_max_reconnect_delay = 30
-M._sse_should_reconnect = false
+local stream = {
+  process = nil,
+  parser = nil,
+  enabled = false,
+  generation = 0,
+  delay = 500,
+  callback = nil,
+  status_callback = nil,
+}
 
---- Build full URL from path
---- @param path string API path (e.g. "/healthz")
---- @return string Full URL
-local function url(path)
-  return config.opts.host .. path
+local function endpoint(path)
+  return config.get().host .. path
 end
 
---- POST request via plenary.curl
---- @param path string API path
---- @param body table|nil Request body (will be JSON-encoded)
---- @param callback function|nil Called with {status, body} on completion
-function M.post(path, body, callback)
-  curl.post(url(path), {
-    headers = { content_type = "application/json" },
-    body = vim.json.encode(body or {}),
-    callback = function(response)
-      if callback then
-        vim.schedule(function()
-          callback({
-            status = response.status,
-            body = response.body,
-          })
-        end)
-      end
-    end,
-  })
+local function headers()
+  local result = { "Accept: application/json" }
+  local token = config.get().token
+  if token and token ~= "" then result[#result + 1] = "Authorization: Bearer " .. token end
+  return result
 end
 
---- GET request via plenary.curl
---- @param path string API path
---- @param callback function|nil Called with {status, body} on completion
-function M.get(path, callback)
-  curl.get(url(path), {
-    callback = function(response)
-      if callback then
-        vim.schedule(function()
-          callback({
-            status = response.status,
-            body = response.body,
-          })
-        end)
-      end
-    end,
-  })
+local function curl_args(method, path, body, streaming)
+  local args = {
+    "curl", "--silent", "--show-error", "--location",
+    "--connect-timeout", "3", "--max-time", streaming and "0" or "180",
+    "--request", method,
+  }
+  if streaming then
+    vim.list_extend(args, { "--no-buffer", "--header", "Accept: text/event-stream" })
+  else
+    vim.list_extend(args, { "--write-out", "\n%{http_code}" })
+  end
+  for _, header in ipairs(headers()) do
+    vim.list_extend(args, { "--header", header })
+  end
+  if body ~= nil then
+    vim.list_extend(args, { "--header", "Content-Type: application/json", "--data-binary", "@-" })
+  end
+  args[#args + 1] = endpoint(path)
+  return args
 end
 
---- POST request (synchronous, returns response)
---- @param path string API path
---- @param body table|nil Request body
---- @return table {status, body}
-function M.post_sync(path, body)
-  local response = curl.post(url(path), {
-    headers = { content_type = "application/json" },
-    body = vim.json.encode(body or {}),
-    sync = true,
-  })
+function M._parse_http(stdout, code, stderr)
+  stdout = stdout or ""
+  local body, status = stdout:match("^(.*)\n(%d%d%d)$")
+  status = tonumber(status) or 0
+  if not body then body = stdout end
+  local parsed
+  if body ~= "" then
+    local ok, value = pcall(vim.json.decode, body)
+    if ok then parsed = value end
+  end
+  local ok = code == 0 and status >= 200 and status < 300
+  local transport_error = stderr and stderr:gsub("%s+$", "") or ""
+  if transport_error == "" then
+    transport_error = status > 0 and ("HTTP " .. status) or ("curl exited with code " .. tostring(code))
+  end
   return {
-    status = response.status,
-    body = response.body,
+    ok = ok,
+    status = status,
+    body = body,
+    json = parsed,
+    error = ok and nil or ((parsed and parsed.detail) or transport_error),
   }
 end
 
---- GET request (synchronous, returns response)
---- @param path string API path
---- @return table {status, body}
-function M.get_sync(path)
-  local response = curl.get(url(path), { sync = true })
-  return {
-    status = response.status,
-    body = response.body,
-  }
+function M.request(method, path, body, callback)
+  local payload = body ~= nil and vim.json.encode(body) or nil
+  local process = vim.system(curl_args(method, path, body, false), {
+    text = true,
+    stdin = payload,
+  }, function(result)
+    vim.schedule(function()
+      if callback then callback(M._parse_http(result.stdout, result.code, result.stderr)) end
+    end)
+  end)
+  return process
 end
 
---- Parse a single SSE line and dispatch to callback
---- SSE format: "event: message\ndata: {json}"
---- @param line string
-local function parse_sse_line(line)
-  if line == "" then
-    return  -- blank line = event boundary
+function M.request_sync(method, path, body, timeout)
+  local payload = body ~= nil and vim.json.encode(body) or nil
+  local result = vim.system(curl_args(method, path, body, false), {
+    text = true,
+    stdin = payload,
+  }):wait(timeout or 5000)
+  return M._parse_http(result.stdout, result.code, result.stderr)
+end
+
+function M.get(path, callback) return M.request("GET", path, nil, callback) end
+function M.post(path, body, callback) return M.request("POST", path, body or {}, callback) end
+function M.put(path, body, callback) return M.request("PUT", path, body or {}, callback) end
+function M.get_sync(path, timeout) return M.request_sync("GET", path, nil, timeout) end
+function M.post_sync(path, body, timeout) return M.request_sync("POST", path, body or {}, timeout) end
+
+local function set_stream_status(status, detail)
+  if stream.status_callback then
+    vim.schedule(function() stream.status_callback(status, detail) end)
   end
-  if line:sub(1, 6) == "event:" then
-    return  -- event type line, not needed — we parse from data
-  end
-  if line:sub(1, 5) == "data:" then
-    local json_str = line:sub(7)  -- skip "data: "
-    if json_str and #json_str > 0 then
-      local ok, parsed = pcall(vim.json.decode, json_str)
-      if ok and M._sse_callback then
-        vim.schedule(function()
-          M._sse_callback(parsed)
-        end)
+end
+
+function M._connect_sse(generation)
+  if not stream.enabled or generation ~= stream.generation then return end
+  set_stream_status("connecting")
+  stream.parser = sse.Parser.new(function(event)
+    stream.delay = 500
+    vim.schedule(function()
+      if stream.enabled and generation == stream.generation and stream.callback then
+        stream.callback(event)
       end
-    end
-  end
-end
+    end)
+  end)
 
---- Process buffered SSE data — splits on newlines, dispatches complete lines
-local function process_sse_buffer()
-  while true do
-    local nl_pos = M._sse_buffer:find("\n")
-    if not nl_pos then break end
-    local line = M._sse_buffer:sub(1, nl_pos - 1)
-    M._sse_buffer = M._sse_buffer:sub(nl_pos + 1)
-    parse_sse_line(line)
-  end
-end
-
---- Start SSE stream connection to /api/events
---- @param callback function Called with parsed event data (JSON table)
-function M.start_sse(callback)
-  M._sse_callback = callback
-  M._sse_should_reconnect = true
-  M._connect_sse()
-end
-
---- Internal: connect to SSE endpoint via background job
-function M._connect_sse()
-  if not M._sse_should_reconnect then return end
-
-  -- Use curl with streaming via job
-  local sse_url = url("/api/events")
-  M._sse_buffer = ""
-
-  -- Use vim.fn.jobstart for SSE streaming
-  local cmd = { "curl", "-s", "-N", "--no-buffer", sse_url }
-  M._sse_job_id = vim.fn.jobstart(cmd, {
-    stdout_buffered = false,
-    on_stdout = function(_, data, _)
-      if data then
-        for _, line in ipairs(data) do
-          if line and #line > 0 then
-            M._sse_buffer = M._sse_buffer .. line .. "\n"
-          end
-        end
-        process_sse_buffer()
-      end
+  local stderr = {}
+  stream.process = vim.system(curl_args("GET", "/api/events", nil, true), {
+    text = true,
+    stdout = function(err, data)
+      if err then return end
+      if data and stream.parser then stream.parser:feed(data) end
     end,
-    on_exit = function(_, exit_code, _)
-      M._sse_job_id = nil
-      if M._sse_should_reconnect and exit_code ~= 0 then
-        -- Reconnect with backoff
-        vim.defer_fn(function()
-          M._connect_sse()
-        end, M._sse_reconnect_delay * 1000)
-        M._sse_reconnect_delay = math.min(
-          M._sse_reconnect_delay * 2,
-          M._sse_max_reconnect_delay
-        )
-      end
+    stderr = function(_, data)
+      if data then stderr[#stderr + 1] = data end
     end,
-  })
-
-  -- Reset reconnect delay on successful connection
-  M._sse_reconnect_delay = 1
+  }, function(result)
+    stream.process = nil
+    if not stream.enabled or generation ~= stream.generation then return end
+    if stream.parser then stream.parser:finish() end
+    set_stream_status("disconnected", table.concat(stderr):gsub("%s+$", ""))
+    local delay = stream.delay
+    stream.delay = math.min(stream.delay * 2, 30000)
+    vim.defer_fn(function() M._connect_sse(generation) end, delay)
+  end)
 end
 
---- Stop SSE stream
+function M.start_sse(callback, status_callback)
+  M.stop_sse()
+  stream.enabled = true
+  stream.callback = callback
+  stream.status_callback = status_callback
+  stream.delay = 500
+  stream.generation = stream.generation + 1
+  M._connect_sse(stream.generation)
+end
+
 function M.stop_sse()
-  M._sse_should_reconnect = false
-  if M._sse_job_id then
-    vim.fn.jobstop(M._sse_job_id)
-    M._sse_job_id = nil
+  stream.enabled = false
+  stream.generation = stream.generation + 1
+  if stream.process then
+    pcall(stream.process.kill, stream.process, 15)
+    stream.process = nil
   end
-  M._sse_callback = nil
-  M._sse_buffer = ""
+  stream.parser = nil
 end
 
---- Check if SSE is running
---- @return boolean
 function M.is_sse_running()
-  return M._sse_job_id ~= nil
+  return stream.enabled and stream.process ~= nil
 end
 
 return M

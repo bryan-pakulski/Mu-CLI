@@ -29,7 +29,9 @@ Tests covering these paths live in `tests/test_mu_agent_session_integration.py`
 
 from __future__ import annotations
 
+import json
 import threading
+import time
 import uuid
 from typing import Any, Dict, Optional
 
@@ -41,23 +43,162 @@ from typing import Any, Dict, Optional
 # Extension plugin POSTs result to /api/extensions/{ext_id}/tool_result.
 _EXTENSION_PENDING: Dict[str, Dict[str, Any]] = {}
 _EXTENSION_LOCK = threading.Lock()
+_EXTENSION_TTL_SECONDS = 90.0
+_EXTENSION_PATH_KEYS = frozenset({"file_path", "filename", "path"})
 
 
-def _find_extension_for_tool(session: Any, tool_name: str) -> Optional[str]:
-    """Check if tool_name matches any registered extension's tool_prefix.
+def _extension_is_fresh(data: dict) -> bool:
+    last_seen = data.get("last_seen")
+    if not last_seen:
+        return True
+    try:
+        return time.time() - float(last_seen) <= _EXTENSION_TTL_SECONDS
+    except (TypeError, ValueError):
+        return False
 
-    Returns the extension_id if found, None otherwise.
+
+def extension_system_prompts(session: Any) -> list[str]:
+    """Return prompt blocks belonging to live extension clients only."""
+
+    prompts = []
+    for _extension_id, data in sorted(
+        (getattr(session, "extensions", {}) or {}).items()
+    ):
+        prompt = str(data.get("system_prompt") or "").strip()
+        if prompt and _extension_is_fresh(data):
+            prompts.append(prompt)
+    return prompts
+
+
+def extension_tool_definitions(session: Any) -> list:
+    """Return validated provider tool definitions from live extensions.
+
+    Registration data is untrusted input from an HTTP client.  The router
+    validates it, and this seam validates again before it reaches a provider.
+    Built-in names always win and duplicate extension names are ignored.
     """
+
+    from providers.base import ToolDefinition
+    from mu.tools.descriptors import TOOLS
+
+    claimed = {tool.name for tool in TOOLS}
+    definitions = []
+    extensions = getattr(session, "extensions", {}) or {}
+    for _extension_id, data in sorted(extensions.items()):
+        if not _extension_is_fresh(data):
+            continue
+        prefix = str(data.get("tool_prefix") or "")
+        for raw in data.get("tools", []) or []:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or "").strip()
+            parameters = raw.get("parameters") or {}
+            execution_kind = str(raw.get("execution_kind") or "read")
+            if (
+                not name
+                or name in claimed
+                or (prefix and not name.startswith(prefix))
+                or not isinstance(parameters, dict)
+                or execution_kind not in {"read", "mutate"}
+            ):
+                continue
+            if (
+                execution_kind == "mutate"
+                and bool(getattr(session, "variables", {}).get("plan_mode"))
+            ):
+                continue
+            claimed.add(name)
+            definitions.append(
+                ToolDefinition(
+                    name=name,
+                    description=str(raw.get("description") or "")[:4000],
+                    parameters=parameters,
+                    # Editor-side mutation tools perform their own preview and
+                    # approval.  A second server prompt would deadlock the call.
+                    requires_approval=False,
+                )
+            )
+    return definitions
+
+
+def _extension_tool_is_mutating(data: dict, tool_name: str) -> bool:
+    for tool in data.get("tools", []) or []:
+        if isinstance(tool, dict) and tool.get("name") == tool_name:
+            return str(tool.get("execution_kind") or "read") == "mutate"
+    return False
+
+
+def _extension_secret_reason(session: Any, value: Any, depth: int = 0) -> str:
+    """Return a reason when extension arguments/results reference a denied path."""
+
+    if depth > 6:
+        return ""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _EXTENSION_PATH_KEYS and isinstance(item, str) and item:
+                try:
+                    from mu.security.secret_paths import is_denied_path
+
+                    denied, reason = is_denied_path(
+                        item, getattr(session, "variables", {}) or {}
+                    )
+                    if denied:
+                        return str(reason or "denied secret path")
+                except Exception:
+                    pass
+            nested = _extension_secret_reason(session, item, depth + 1)
+            if nested:
+                return nested
+    elif isinstance(value, (list, tuple)):
+        for item in value[:256]:
+            nested = _extension_secret_reason(session, item, depth + 1)
+            if nested:
+                return nested
+    return ""
+
+
+def _serialize_extension_result(result: Any) -> str:
+    if isinstance(result, str):
+        output = result
+    else:
+        try:
+            output = json.dumps(result, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            output = str(result)
+    try:
+        from mu.tools._scrub import scrub_and_annotate
+
+        return scrub_and_annotate(output)
+    except Exception:
+        return output
+
+
+def _find_extension_for_tool(session: Any, tool_name: str) -> Optional[tuple[str, dict]]:
+    """Return the extension that explicitly registered ``tool_name``.
+
+    Prefix-only interception allowed a client to hijack an unadvertised tool.
+    Exact membership keeps dispatch aligned with the provider schema.
+    """
+
     extensions = getattr(session, "extensions", {})
     for ext_id, data in extensions.items():
         prefix = data.get("tool_prefix", "")
-        if prefix and tool_name.startswith(prefix):
-            return ext_id
+        names = {
+            str(tool.get("name") or "")
+            for tool in (data.get("tools", []) or [])
+            if isinstance(tool, dict)
+        }
+        if tool_name in names and (not prefix or tool_name.startswith(prefix)):
+            return ext_id, data
     return None
 
 
 def _dispatch_extension_tool(
-    session: Any, extension_id: str, tool_name: str, tool_args: dict
+    session: Any,
+    extension_id: str,
+    extension_data: dict,
+    tool_name: str,
+    tool_args: dict,
 ) -> str:
     """Publish an extension_tool_call SSE event and wait for the plugin to respond.
 
@@ -68,33 +209,68 @@ def _dispatch_extension_tool(
 
     Returns the tool result string, or an error message on timeout.
     """
-    call_id = str(uuid.uuid4())
-    done = threading.Event()
-    with _EXTENSION_LOCK:
-        _EXTENSION_PENDING[call_id] = {"result": None, "error": None, "done": done}
-
-    # Get session name for routing
     session_name = ""
     try:
         session_name = session.session_manager.current_session_name
     except Exception:
         pass
 
-    # Publish SSE event via the session's UI bus
     ui = getattr(session, "ui", None)
     bus = getattr(ui, "_bus", None) if ui else None
-    if bus is not None:
-        bus.publish_threadsafe({
-            "kind": "extension_tool_call",
-            "extension_id": extension_id,
-            "tool_name": tool_name,
-            "tool_args": tool_args or {},
-            "call_id": call_id,
-            "session_name": session_name,
-        })
+    if bus is None:
+        return f"Error: extension {extension_id} is not connected to an event bus"
+    if not _extension_is_fresh(extension_data):
+        return f"Error: extension {extension_id} is no longer connected"
+    secret_reason = _extension_secret_reason(session, tool_args)
+    if secret_reason:
+        return f"Error: extension tool {tool_name} blocked: {secret_reason}"
 
-    # Wait for result (30s timeout)
-    if done.wait(timeout=30):
+    call_id = str(uuid.uuid4())
+    done = threading.Event()
+    client_id = str(extension_data.get("client_id") or "")
+    with _EXTENSION_LOCK:
+        _EXTENSION_PENDING[call_id] = {
+            "result": None,
+            "error": None,
+            "done": done,
+            "extension_id": extension_id,
+            "client_id": client_id,
+            "session_name": session_name,
+        }
+
+    bus.publish_threadsafe({
+        "kind": "extension_tool_call",
+        "extension_id": extension_id,
+        "client_id": client_id,
+        "tool_name": tool_name,
+        "tool_args": tool_args or {},
+        "call_id": call_id,
+        "session_name": session_name,
+    })
+
+    timeout = 300.0
+    try:
+        timeout = float(
+            getattr(session, "variables", {}).get(
+                "extension_tool_timeout_seconds", timeout
+            )
+        )
+    except (TypeError, ValueError):
+        timeout = 300.0
+    timeout = max(5.0, min(timeout, 600.0))
+
+    deadline = time.monotonic() + timeout
+    resolved = False
+    disconnected = False
+    while time.monotonic() < deadline:
+        if done.wait(timeout=min(5.0, max(0.0, deadline - time.monotonic()))):
+            resolved = True
+            break
+        if not _extension_is_fresh(extension_data):
+            disconnected = True
+            break
+
+    if resolved:
         with _EXTENSION_LOCK:
             entry = _EXTENSION_PENDING.pop(call_id, {})
         error = entry.get("error")
@@ -103,16 +279,29 @@ def _dispatch_extension_tool(
         result = entry.get("result")
         if result is None:
             return "Error: extension returned no result"
-        return result if isinstance(result, str) else str(result)
+        secret_reason = _extension_secret_reason(session, result)
+        if secret_reason:
+            return f"Error: extension tool {tool_name} blocked: {secret_reason}"
+        return _serialize_extension_result(result)
 
-    # Timeout
     with _EXTENSION_LOCK:
         _EXTENSION_PENDING.pop(call_id, None)
-    return f"Error: extension tool {tool_name} timed out (30s) — plugin did not respond"
+    if disconnected:
+        return f"Error: extension tool {tool_name} disconnected while the call was pending"
+    return (
+        f"Error: extension tool {tool_name} timed out after {timeout:g}s — "
+        "the editor did not respond"
+    )
 
 
 def resolve_extension_tool_result(
-    call_id: str, result: Any = None, error: str = ""
+    call_id: str,
+    result: Any = None,
+    error: str = "",
+    *,
+    extension_id: str = "",
+    client_id: str = "",
+    session_name: str = "",
 ) -> bool:
     """Resolve a pending extension tool call.
 
@@ -123,6 +312,12 @@ def resolve_extension_tool_result(
         entry = _EXTENSION_PENDING.get(call_id)
         if entry is None:
             return False
+        if extension_id and entry.get("extension_id") != extension_id:
+            return False
+        if client_id and entry.get("client_id") != client_id:
+            return False
+        if session_name and entry.get("session_name") != session_name:
+            return False
         entry["result"] = result
         entry["error"] = error or ""
         done: Optional[threading.Event] = entry.get("done")
@@ -130,6 +325,33 @@ def resolve_extension_tool_result(
     if done is not None:
         done.set()
     return True
+
+
+def cancel_extension_calls(
+    extension_id: str,
+    session_name: str,
+    *,
+    client_id: Optional[str] = None,
+    reason: str = "Editor extension disconnected",
+) -> int:
+    """Wake calls owned by a disconnected/replaced editor client."""
+
+    cancelled = 0
+    with _EXTENSION_LOCK:
+        entries = list(_EXTENSION_PENDING.values())
+        for entry in entries:
+            if entry.get("extension_id") != extension_id:
+                continue
+            if session_name and entry.get("session_name") != session_name:
+                continue
+            if client_id and entry.get("client_id") != client_id:
+                continue
+            entry["error"] = reason
+            done = entry.get("done")
+            if done is not None:
+                done.set()
+            cancelled += 1
+    return cancelled
 
 
 # ---------------------------------------------------------------- hook-fire dispatch
@@ -201,9 +423,20 @@ def execute_tool_with_memory(
     # --- Extension tool interception ---
     # When a registered extension's tool_prefix matches the invoked tool
     # name, dispatch via SSE to the extension plugin instead of local execute.
-    ext_id = _find_extension_for_tool(session, tool_name)
-    if ext_id is not None:
-        result = _dispatch_extension_tool(session, ext_id, tool_name, tool_args)
+    extension = _find_extension_for_tool(session, tool_name)
+    if extension is not None:
+        ext_id, ext_data = extension
+        if bool(session.variables.get("plan_mode")) and _extension_tool_is_mutating(
+            ext_data, tool_name
+        ):
+            result = (
+                f"Error: plan mode is active; extension mutation tool "
+                f"{tool_name} was blocked"
+            )
+        else:
+            result = _dispatch_extension_tool(
+                session, ext_id, ext_data, tool_name, tool_args
+            )
     else:
         # Memory and scratchpad tools used to short-circuit here; they now
         # route through the normal dispatcher to the `@tool`-registered
@@ -545,4 +778,8 @@ __all__ = [
     "execute_tool_with_memory",
     "build_structured_tool_result",
     "sync_feature_state_for_tool",
+    "extension_tool_definitions",
+    "extension_system_prompts",
+    "resolve_extension_tool_result",
+    "cancel_extension_calls",
 ]

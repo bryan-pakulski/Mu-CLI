@@ -1,0 +1,185 @@
+*mucli.nvim*                         MUCLI editor integration for Neovim
+
+==============================================================================
+CONTENTS                                                        *mucli-contents*
+
+1. Introduction ............................................. |mucli-intro|
+2. Setup ..................................................... |mucli-setup|
+3. Workflow ............................................... |mucli-workflow|
+4. Commands ............................................... |mucli-commands|
+5. Keymaps ................................................. |mucli-keymaps|
+6. Safety ................................................... |mucli-safety|
+7. Health ................................................... |mucli-health|
+
+==============================================================================
+INTRODUCTION                                                       *mucli-intro*
+
+MUCLI connects Neovim to a running MUCLI GUI server. It provides a persistent
+chat dock, staged and automatic editor context, diagnostic review hints,
+inline completion, native diff approval, and provider-visible editor tools.
+
+Requires Neovim 0.10+, curl, and a running `mucli --gui` server.
+
+==============================================================================
+SETUP                                                               *mucli-setup*
+
+Minimal setup: >lua
+
+  require("mucli").setup({})
+<
+The workspace root and a stable project session name are detected
+automatically. Use |:MucliSetup| if the session needs a provider and model.
+
+Common options: >lua
+
+  require("mucli").setup({
+    host = "http://127.0.0.1:30311",
+    session = nil,
+    provider = nil,
+    model = nil,
+    yolo = false,
+    workspace = {
+      root = nil,
+      allow_outside = false,
+      allow_secret_paths = false,
+    },
+    window = { position = "right", width = 56, input_height = 7 },
+    context = { automatic = true, cursor_lines = 80, max_chars = 48000 },
+    hints = { enabled = true, virtual_text = true },
+    completion = { enabled = true, context_lines = 60 },
+  })
+<
+==============================================================================
+WORKFLOW                                                         *mucli-workflow*
+
+Open |:Mucli| and write a multiline request. Stage exact selections, files, or
+diagnostics with |:MucliContext|. MUCLI also includes a bounded cursor snapshot,
+open-buffer metadata, and unsaved changedticks automatically.
+
+Use |:MucliActions| for explain, improve, fix, review, tests, documentation,
+completion, and context actions. File mutations arrive in a native diff tab:
+
+  a       approve the complete proposal
+  r, q    reject and close
+  e       reject with feedback
+  ]d      next proposed file
+  [d      previous proposed file
+
+Accepted editor-tool changes remain unsaved so normal write/autocommand and
+version-control workflows still apply.
+
+==============================================================================
+COMMANDS                                                         *mucli-commands*
+
+                                                     *:Mucli*
+:Mucli                  Toggle the conversation dock.
+
+                                                     *:MucliAsk*
+:MucliAsk [text]        Ask directly or open an input prompt.
+
+                                                     *:MucliActions*
+:[range]MucliActions    Open context-sensitive code actions.
+
+                                                     *:MucliSend*
+:[range]MucliSend [text]
+                        Stage a range and ask about it.
+
+                                                     *:MucliSendFile*
+:MucliSendFile [text]   Stage the current file and ask.
+
+                                                     *:MucliExplain*
+:[range]MucliExplain    Explain current or ranged code.
+
+                                                     *:MucliImprove*
+:[range]MucliImprove    Improve current or ranged code through diff review.
+
+                                                     *:MucliFix*
+:[range]MucliFix        Fix diagnostics or ranged code through diff review.
+
+                                                     *:MucliReview*
+:[range]MucliReview     Publish review hints as native diagnostics.
+
+                                                     *:MucliHints*
+:[range]MucliHints      Alias for |:MucliReview|.
+
+                                                     *:MucliHintsClear*
+:MucliHintsClear        Clear MUCLI diagnostics in the active buffer.
+
+                                                     *:MucliHintAction*
+:MucliHintAction        Explain, fix, or dismiss the nearest MUCLI hint.
+
+                                                     *:MucliComplete*
+:MucliComplete          Request inline completion at the cursor.
+
+                                                     *:MucliCompleteAccept*
+:MucliCompleteAccept [word]
+                        Accept the entire completion or one word.
+
+                                                     *:MucliCompleteDismiss*
+:MucliCompleteDismiss   Dismiss the current ghost completion.
+
+                                                     *:MucliContext*
+:MucliContext           Stage selection/file/diagnostics or clear context.
+
+                                                     *:MucliContextClear*
+:MucliContextClear      Clear all staged context.
+
+                                                     *:MucliDiff*
+:MucliDiff              Reopen the latest captured diff.
+
+                                                     *:MucliInterrupt*
+:MucliInterrupt         Interrupt the active session turn.
+
+                                                     *:MucliSetup*
+:MucliSetup             Pick or create a session, provider, and model.
+
+                                                     *:MucliConfig*
+:MucliConfig            Switch session, provider, or model.
+
+                                                     *:MucliSession*
+:MucliSession [name]    Pick or switch the project session.
+
+                                                     *:MucliProvider*
+:MucliProvider [name]   Pick or switch the session provider.
+
+                                                     *:MucliModel*
+:MucliModel [name]      Pick or switch the provider model.
+
+                                                     *:MucliHealth*
+:MucliHealth            Run |:checkhealth| for MUCLI.
+
+==============================================================================
+KEYMAPS                                                           *mucli-keymaps*
+
+  <leader>mm    toggle dock              <leader>ma    ask
+  <leader>mc    code actions             <leader>ms    stage visual selection
+  <leader>mf    stage current file       <leader>mh    generate hints
+  <M-\>         request completion        <M-l>         accept completion
+  <M-e>         dismiss completion       <leader>mx    interrupt
+  ]m / [m       next / previous hint
+
+Composer-local mappings:
+
+  CTRL-S        send multiline draft     CTRL-A        manage context
+  CTRL-C        interrupt                 CTRL-L        clear draft
+
+Set a keymap option to `false` or an empty string to disable it.
+
+==============================================================================
+SAFETY                                                             *mucli-safety*
+
+Write approvals are enabled by default (`yolo = false`). Editor proposals are
+guarded by changedtick, previewed in diff mode, and applied only to the live
+buffer without writing it. Tool paths remain inside the workspace unless
+`workspace.allow_outside = true`. Plan mode blocks editor mutations, and
+MUCLI's secret-path policy also covers editor tool arguments and results. Calls
+continue while the dock is closed.
+
+==============================================================================
+HEALTH                                                             *mucli-health*
+
+Run `:checkhealth mucli` or |:MucliHealth|. The check covers Neovim version,
+curl, server reachability, workspace, session identity, and editor-tool
+registration.
+
+vim:tw=78:ts=8:noet:ft=help:norl:

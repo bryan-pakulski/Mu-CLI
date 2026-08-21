@@ -51,7 +51,12 @@ def _safe_init(
 
 def _ollama_discovery_overrides(request: Request) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
-    sess = request.app.state.session_by_name()
+    session_name = request.query_params.get("session_name") or None
+    sess = (
+        request.app.state.session_by_name(session_name)
+        if session_name
+        else request.app.state.session_by_name()
+    )
     sess_vars = getattr(sess, "variables", None) if sess else None
     for key in ("ollama_mode", "ollama_host", "ollama_api_key"):
         qp = request.query_params.get(key)
@@ -67,6 +72,7 @@ def _ollama_discovery_overrides(request: Request) -> Dict[str, Any]:
 class SwitchRequest(BaseModel):
     provider: str
     model: str
+    session_name: Optional[str] = None
     ollama_host: Optional[str] = None
     ollama_mode: Optional[str] = None
     ollama_api_key: Optional[str] = None
@@ -146,8 +152,14 @@ async def list_models(name: str, request: Request) -> Dict[str, Any]:
 
 
 @router.get("/current")
-async def current_provider(request: Request) -> Dict[str, Any]:
-    session = request.app.state.session_by_name()
+async def current_provider(
+    request: Request, session_name: Optional[str] = None
+) -> Dict[str, Any]:
+    session = (
+        request.app.state.session_by_name(session_name)
+        if session_name
+        else request.app.state.session_by_name()
+    )
     if session is None:
         return {
             "provider": None,
@@ -172,9 +184,16 @@ async def switch_provider(req: SwitchRequest, request: Request) -> Dict[str, Any
             detail=f"Unknown provider: {req.provider}. Known: {KNOWN_PROVIDERS}",
         )
 
-    session = request.app.state.session_by_name()
+    session = request.app.state.session_by_name(req.session_name)
     if session is None:
-        raise HTTPException(status_code=409, detail="No active session to switch.")
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Session {req.session_name!r} is not loaded."
+                if req.session_name
+                else "No active session to switch."
+            ),
+        )
 
     provider = _safe_init(
         req.provider,

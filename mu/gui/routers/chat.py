@@ -419,8 +419,16 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                 }
             )
         except Exception as exc:
+            error_text = f"send failed: {exc}"
             await bus.publish(
-                {"kind": "error", "text": f"send failed: {exc}", "session_name": name}
+                {"kind": "error", "text": error_text, "session_name": name}
+            )
+            await bus.publish(
+                {
+                    "kind": "turn_complete",
+                    "result": {"ok": False, "status": "error", "error": error_text},
+                    "session_name": name,
+                }
             )
 
     asyncio.create_task(_drive())

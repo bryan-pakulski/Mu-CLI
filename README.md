@@ -33,6 +33,14 @@ Run `mucli` to start. You'll get a session picker — choose `[+ New Session]` (
 explain how authentication works in this codebase
 ```
 
+## Neovim
+
+The first-party [MUCLI Neovim extension](extensions/mucli.nvim/README.md)
+provides a persistent chat dock, exact live-buffer context, native multi-file
+diff approval, diagnostic review hints, inline completion, and editor tools the
+agent can call. Start `mucli --gui`, then point your Neovim plugin manager at
+`extensions/mucli.nvim`.
+
 ## Mobile app
 
 Mucli has a mobile sister app to interact with the --gui sse session. Can be built under `mobile/android` using:

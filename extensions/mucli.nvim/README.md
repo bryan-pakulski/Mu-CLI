@@ -1,298 +1,279 @@
-# mucli-neovim
+# MUCLI for Neovim
 
-Neovim extension for [mucli](https://github.com/bryanp/Mu-CLI) — AI coding agent side-panel chat with treesitter highlighting, visual selection context, side-by-side diff accept/reject, and custom neovim tools.
+MUCLI for Neovim turns the editor into a live frontend for the [MUCLI coding
+agent](https://github.com/bryan-pakulski/Mu-CLI). It combines a persistent
+conversation dock, deliberate context controls, native diff review, diagnostic
+hints, inline completion, and editor tools the model can call.
 
-Built for **AstroVim** and any lazy.nvim-compatible Neovim config. Requires Neovim 0.10+.
+This is an editor integration rather than an embedded web page. Buffers,
+diagnostics, selections, extmarks, windows, and diffs all use native Neovim
+APIs. The transport has no Lua plugin dependencies.
 
-## Features
+## What it does
 
-- **Side-panel chat** — vertical split, treesitter markdown highlighting, streaming SSE responses
-- **Visual selection context** — send highlighted code to the agent with `<leader>ms`
-- **Active file context** — send current file with `<leader>mf`
-- **Side-by-side diff view** — native `diff` mode, accept/reject hunks with `<leader>da` / `<leader>dr`
-- **Custom neovim tools** — agent can open files, jump to lines, read buffers, get visual selection, apply diffs via extension tool dispatch
-- **Model selection** — `:MucliModel` to switch provider/model from within neovim
-- **Session lifecycle** — explicit session config required, auto-registers extension with mucli backend
+- **Persistent chat dock** — streaming Markdown conversation plus a multiline
+  composer. Closing the dock does not disconnect the event stream or prevent an
+  approval/tool request from reaching Neovim.
+- **Live context** — exact visual selections, full files, LSP diagnostics, a
+  bounded cursor neighborhood, open-buffer metadata, changedticks, and unsaved
+  buffer text.
+- **Native code review** — request a focused review and receive navigable MUCLI
+  diagnostics with explain, fix, and dismiss actions. Structured review and
+  completion requests are history-free, so machine prompts never pollute chat.
+- **Inline completion** — request a manual completion at the cursor, preview it
+  as ghost text, accept all or one word, or dismiss it.
+- **Safe diff review** — inspect original and proposed content in Neovim diff
+  mode, move across a multi-file proposal, approve, reject, or return feedback.
+  Changedtick and unsaved-buffer conflicts block stale edits.
+- **Bidirectional editor tools** — the agent can read live buffers and
+  diagnostics, inspect workspace state and symbols, navigate, publish review
+  findings, and propose unsaved buffer edits.
+- **Project sessions** — a stable session name is derived from the workspace,
+  the workspace is attached automatically, and provider/model switching is
+  scoped to that session.
+- **Resilient transport** — dependency-free `curl` HTTP, a real incremental SSE
+  parser, reconnect backoff, heartbeats, client-bound tool results, and durable
+  history hydration.
 
 ## Requirements
 
-- [mucli](https://github.com/bryanp/Mu-CLI) running with GUI server (`mucli --gui` or `mucli gui`)
-- [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) — for HTTP client via `plenary.curl`
-- [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) — for markdown highlighting in chat buffer (optional but recommended)
-- Neovim 0.10+
+- Neovim 0.10 or newer
+- `curl`
+- MUCLI running in GUI/server mode
+- A configured MUCLI provider (`openai`, `gemini`, or `ollama`)
+
+Start the backend from the repository root:
+
+```sh
+./mucli --gui
+```
+
+The default endpoint is `http://127.0.0.1:30311`.
 
 ## Installation
 
-### lazy.nvim
+The plugin currently lives inside the MUCLI monorepo. Clone the repository,
+then point your plugin manager at its subdirectory.
+
+### lazy.nvim / AstroNvim
 
 ```lua
 {
-  "bryanp/Mu-CLI",
-  dir = "/path/to/Mu-CLI/extensions/mucli.nvim",
-  -- or use the repo directly:
-  -- url = "https://github.com/bryanp/Mu-CLI",
-  -- subdirectory = "extensions/mucli.nvim",
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",
-  },
+  dir = vim.fn.expand("~/src/Mu-CLI/extensions/mucli.nvim"),
+  name = "mucli.nvim",
   config = function()
-    require("mucli").setup({
-      session = "my-session",
-      provider = "openai",      -- optional, defaults to session's current provider
-      model = "gpt-4o",         -- optional, defaults to session's current model
-      host = "http://localhost:30311",  -- optional, defaults to localhost:30311
-      window = {
-        width = 60,
-        position = "right",     -- "right" or "left"
-      },
-      keymaps = {
-        send_visual = "<leader>ms",
-        send_file = "<leader>mf",
-        toggle_panel = "<leader>mt",
-        interrupt = "<leader>mi",
-        accept_hunk = "<leader>da",
-        reject_hunk = "<leader>dr",
-      },
-    })
+    require("mucli").setup({})
   end,
 }
 ```
 
-### AstroVim
+There are no required Neovim plugin dependencies. Treesitter-backed Markdown
+highlighting is used automatically when your existing setup provides it.
 
-Add `~/.config/nvin/lua/plugins/mucli_spec.lua`
+### Native packages
 
-```lua
-return {
-  "bryanp/Mu-CLI",
-  -- Change this path to the absolute path where your Mu-CLI repo is cloned
-  dir = "<PATH_TO_REPO>/extensions/mucli.nvim", 
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",
-  },
-  config = function()
-    require("mucli").setup({
-      window = {
-        width = 60,
-        position = "right",
-      },
-      keymaps = {
-        send_visual = "<leader>ms",
-        send_file = "<leader>mf",
-        toggle_panel = "<leader>mt",
-        interrupt = "<leader>mi",
-        accept_hunk = "<leader>da",
-        reject_hunk = "<leader>dr",
-      },
-    })
-  end,
-}
-```
-
-### Manual (packer.nvim)
+Link or copy `extensions/mucli.nvim` beneath a `pack/*/start` directory, then
+configure it in `init.lua`:
 
 ```lua
-use {
-  "bryanp/Mu-CLI",
-  dir = "/path/to/Mu-CLI/extensions/mucli.nvim",
-  requires = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",
-  },
-  config = function()
-    require("mucli").setup({
-      session = "my-session",
-    })
-  end,
-}
-```
-
-## Configuration
-
-### Interactive Setup (Recommended)
-
-If you call `setup()` without a `session` option, the plugin automatically
-launches an interactive setup wizard:
-
-1. **Session picker** — lists existing sessions from the mucli backend, or
-   choose "Create new session" and type a name
-2. **Provider picker** — select Gemini, Ollama, or OpenAI
-3. **Ollama local/cloud** — if Ollama selected, choose local daemon or
-   Ollama Cloud (prompts for API key if cloud)
-4. **Model picker** — fetches available models from the selected provider
-   and presents them for selection
-
-If you select an existing session that already has a provider and model
-configured, the wizard **skips re-prompting** and loads directly.
-
-```lua
--- No session configured — wizard launches on first use
 require("mucli").setup({})
 ```
 
-### Static Configuration
+On first use, MUCLI will load the workspace session or open a session/provider/
+model picker when more information is needed.
 
-To skip the wizard, provide all required options in `setup()`:
+## Recommended setup
 
 ```lua
 require("mucli").setup({
-  session = "my-session",
-  provider = "openai",
-  model = "gpt-4o",
+  host = "http://127.0.0.1:30311",
+  -- session = "my-project",       -- otherwise derived from the workspace
+  -- provider = "openai",          -- only needed to create/override a session
+  -- model = "your-model-name",
+
+  yolo = false,                     -- keep server write approvals enabled
+  workspace = {
+    -- root = "/absolute/project", -- auto-detected from project markers
+    allow_outside = false,
+    allow_secret_paths = false,
+  },
+  window = {
+    position = "right",
+    width = 56,
+    input_height = 7,
+  },
+  context = {
+    automatic = true,
+    cursor_lines = 80,
+    max_chars = 48000,
+    include_diagnostics = true,
+    include_open_buffers = true,
+    clear_staged_after_send = true,
+  },
+  hints = {
+    enabled = true,
+    max_items = 20,
+    virtual_text = true,
+  },
+  completion = {
+    enabled = true,
+    context_lines = 60,
+  },
 })
 ```
 
-### Required (when not using wizard)
+Providing both `provider` and `model` makes them authoritative for the selected
+session. Leave them unset to keep the session's saved provider configuration.
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `session` | `string` | mucli session name. Must match an existing session or one will be created. |
+## Everyday workflow
 
-### Optional
+1. Open `:Mucli` and write a multiline request in the composer.
+2. Use visual `<leader>ms`, normal `<leader>mf`, or `:MucliContext` to stage
+   exact context. A bounded live cursor snapshot is attached automatically.
+3. Use `<leader>mc` for focused explain/improve/fix/review/test/doc actions.
+4. Review file mutations in the native diff tab. Press `a` to approve, `r` to
+   reject, or `e` to send corrective feedback.
+5. Use `<leader>mh` for diagnostic hints or `<M-\>` for an inline completion.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `host` | `string` | `http://localhost:30311` | mucli GUI server URL |
-| `provider` | `string\|nil` | `nil` | Provider name (e.g. `"openai"`, `"anthropic"`, `"ollama"`) |
-| `model` | `string\|nil` | `nil` | Model name (e.g. `"gpt-4o"`, `"claude-sonnet-4-20250514"`) |
-| `window.width` | `number` | `60` | Panel width in columns |
-| `window.position` | `string` | `"right"` | Panel position: `"right"` or `"left"` |
+Inside the composer:
 
-### Keymaps
+| Key | Action |
+| --- | --- |
+| `Ctrl-s` | Send the multiline draft |
+| `Ctrl-a` | Add or clear staged context |
+| `Ctrl-c` | Interrupt the active turn |
+| `Ctrl-l` | Clear the draft |
+| `q` (normal mode) | Close the dock |
 
-| Keymap | Default | Action |
-|--------|---------|--------|
-| `toggle_panel` | `<leader>mt` | Toggle chat panel open/closed |
-| `send_visual` | `<leader>ms` | Send visual selection to agent as context |
-| `send_file` | `<leader>mf` | Send current file to agent as context |
-| `interrupt` | `<leader>mi` | Interrupt active agent turn |
-| `accept_hunk` | `<leader>da` | Accept diff hunk in diff view |
-| `reject_hunk` | `<leader>dr` | Reject diff hunk in diff view |
+Inside a diff:
+
+| Key | Action |
+| --- | --- |
+| `a` | Approve the complete proposal |
+| `r` / `q` | Reject and close |
+| `e` | Reject with feedback for the agent |
+| `]d` / `[d` | Next / previous proposed file |
+
+## Default global keymaps
+
+| Key | Action |
+| --- | --- |
+| `<leader>mm` | Toggle the MUCLI dock |
+| `<leader>ma` | Ask MUCLI |
+| `<leader>mc` | Open code actions |
+| `<leader>ms` (visual) | Stage the exact selection |
+| `<leader>mf` | Stage the active file |
+| `<leader>mh` | Generate review hints |
+| `<M-\>` | Request inline completion |
+| `<M-l>` | Accept completion |
+| `<M-e>` | Dismiss completion |
+| `<leader>mx` | Interrupt the turn |
+| `]m` / `[m` | Next / previous MUCLI hint |
+
+Set any keymap to `false` or an empty string to disable it. The proof-of-concept
+names `toggle_panel`, `send_visual`, and `send_file` remain accepted as aliases.
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `:Mucli` | Toggle chat panel |
-| `:MucliSend` | Send visual selection (use with range, e.g. `:'<,'>MucliSend`) |
-| `:MucliSendFile` | Send current file to agent |
-| `:MucliInterrupt` | Interrupt active turn |
-| `:MucliModel` | Switch model (with completion from available models) |
-| `:MucliSession` | Show session status |
-| `:MucliConfig` | Interactive configuration wizard (switch session, provider, model, or full setup) |
-| `:MucliProvider [name]` | Switch provider (`gemini`, `ollama`, `openai`). Without arg, shows interactive picker. Ollama prompts for local/cloud. |
+| Command | Purpose |
+| --- | --- |
+| `:Mucli` | Toggle the conversation dock |
+| `:MucliAsk [text]` | Ask directly or open a prompt |
+| `:[range]MucliActions` | Open context-sensitive code actions |
+| `:[range]MucliSend [text]` | Stage a range and ask about it |
+| `:MucliSendFile [text]` | Stage the active file and ask |
+| `:[range]MucliExplain` | Explain current/ranged code |
+| `:[range]MucliImprove` | Improve current/ranged code |
+| `:[range]MucliFix` | Fix current diagnostics or ranged code |
+| `:[range]MucliReview` | Publish review hints as diagnostics |
+| `:MucliHintsClear` | Clear MUCLI diagnostics |
+| `:MucliHintAction` | Act on the nearest hint |
+| `:MucliComplete` | Request an inline completion |
+| `:MucliCompleteAccept [word]` | Accept all or one word |
+| `:MucliCompleteDismiss` | Dismiss ghost text |
+| `:MucliContext` / `:MucliContextClear` | Manage staged context |
+| `:MucliDiff` | Reopen the latest captured diff |
+| `:MucliInterrupt` | Stop the active turn |
+| `:MucliSetup` / `:MucliConfig` | Configure session/provider/model |
+| `:MucliSession [name]` | Pick or switch session |
+| `:MucliProvider [name]` | Pick or switch provider |
+| `:MucliModel [name]` | Pick or switch model |
+| `:MucliHealth` | Run the integration health check |
 
-## Health Check
+Use `:help mucli.nvim` for the concise in-editor reference.
 
-Run `:checkhealth mucli` to verify:
-- plenary.nvim is loaded
-- mucli server is reachable (`GET /healthz`)
-- Session is configured
-- Neovim extension is registered with mucli
+## Editor tools exposed to MUCLI
 
-## Architecture
+| Tool | Capability |
+| --- | --- |
+| `nvim_get_buffer` | Read authoritative live text, ranges, modified state, and changedtick |
+| `nvim_list_buffers` | List loaded file buffers and editor state |
+| `nvim_get_selection` | Read the latest exact staged/visual selection |
+| `nvim_get_diagnostics` | Read LSP and Neovim diagnostics |
+| `nvim_get_workspace_state` | Read root, cursor, mode, filetype, LSP clients, and staged context |
+| `nvim_get_document_symbols` | Fetch document symbols asynchronously from LSP |
+| `nvim_open_location` | Reveal a workspace file and location |
+| `nvim_publish_diagnostics` | Publish structured findings in native diagnostic UI |
+| `nvim_propose_edit` | Preview and apply a changedtick-guarded, unsaved buffer edit |
 
-```
-extensions/neovim/
-├── lua/mucli/
-│   ├── init.lua          — setup() entry point, wires all modules
-│   ├── config.lua        — defaults, deep-merge, validation
-│   ├── client.lua        — plenary.curl HTTP client + SSE parser
-│   ├── session.lua       — session lifecycle, model selection, extension registration
-│   ├── context.lua       — visual selection + active file capture
-│   ├── diff.lua          — unified diff parsing, side-by-side diff view, accept/reject
-│   ├── tools.lua         — 5 neovim tool definitions + execution dispatch + SSE handler
-│   ├── health.lua        — check_health() for :checkhealth
-│   └── chat/
-│       ├── panel.lua     — side-panel window management
-│       ├── buffer.lua    — treesitter markdown, streaming, SSE event dispatcher
-│       └── input.lua     — input line handling, CR to send, Ctrl-C to interrupt
-├── plugin/
-│   └── mucli.lua         — user commands (:Mucli, :MucliSend, etc.) + which-key
-└── README.md
-```
+Registration is session- and client-bound. A stale editor stops contributing
+tools after its heartbeat expires, and a replaced editor cannot answer the new
+client's pending tool calls.
 
-### Extension Registration
+## Safety model
 
-On `setup()`, the plugin calls `POST /api/extensions/register` with:
+- `yolo` defaults to `false`; server-side file writes keep MUCLI's approval
+  workflow.
+- Editor-proposed changes are previewed before application and remain unsaved.
+- MUCLI plan mode hides and blocks editor mutation tools while keeping live
+  read-only context available.
+- Open modified buffers are never overwritten after a changedtick conflict.
+- Editor tool paths are restricted to the configured workspace by default,
+  with existing symlinks resolved before the containment check.
+- MUCLI's secret-path denylist and output redaction also apply to editor tool
+  arguments and results.
+- Tool calls continue to be handled while the chat dock is closed.
 
-```json
-{
-  "extension_id": "neovim",
-  "version": "1.0.0",
-  "tool_prefix": "nvim_",
-  "tools": [
-    {"name": "nvim_open_file", "description": "...", "parameters": {...}},
-    {"name": "nvim_jump_to_line", "description": "...", "parameters": {...}},
-    {"name": "nvim_get_buffer_content", "description": "...", "parameters": {...}},
-    {"name": "nvim_get_visual_selection", "description": "...", "parameters": {...}},
-    {"name": "nvim_apply_diff", "description": "...", "parameters": {...}}
-  ],
-  "system_prompt": "NEOVIM EXTENSION TOOLS\n\nYou are connected to a Neovim editor..."
-}
-```
+Only set `workspace.allow_outside = true` or `yolo = true` when that broader
+authority is intentional. `workspace.allow_secret_paths = true` also opts the
+session out of MUCLI's normal secret-path denylist; keep it disabled unless the
+specific file access is deliberate.
 
-The mucli backend stores this in `session.extensions["neovim"]` and:
-1. Appends the `system_prompt` to the agent's system prompt
-2. Intercepts tool calls matching `nvim_*` prefix
-3. Publishes `extension_tool_call` SSE events to the plugin
-4. Waits for `POST /api/extensions/neovim/tool_result` from the plugin
+## Health and troubleshooting
 
-This is a **generic extension registry** — other editor extensions (VS Code, JetBrains) can register using the same API with their own `extension_id`, `tool_prefix`, and `tools`.
+Run:
 
-### Neovim Tools
-
-The agent can call these tools when the neovim extension is active:
-
-| Tool | Parameters | Description |
-|------|-----------|-------------|
-| `nvim_open_file` | `file_path: str`, `line?: int` | Open file in editor, optionally jump to line |
-| `nvim_jump_to_line` | `line: int`, `col?: int` | Move cursor to line in current buffer |
-| `nvim_get_buffer_content` | `bufnr?: int` | Get all lines of a buffer (defaults to current) |
-| `nvim_get_visual_selection` | — | Get user's current visual selection text |
-| `nvim_apply_diff` | `file_path: str`, `diff_text: str` | Open diff view for accept/reject |
-
-## Troubleshooting
-
-### "setup() requires a session name"
-
-Set `session` in your config:
-```lua
-require("mucli").setup({
-  session = "my-session",
-})
-```
-
-### "mucli server not reachable"
-
-1. Start mucli GUI server: `mucli gui` or `mucli --gui`
-2. Check the host matches: `curl http://localhost:30311/healthz`
-3. If running on a different host/port, set `host` in config
-
-### "plenary.nvim not found"
-
-Add plenary as a dependency:
-```lua
-dependencies = { "nvim-lua/plenary.nvim" }
-```
-
-### Chat buffer has no syntax highlighting
-
-Install nvim-treesitter and ensure the markdown parser is installed:
 ```vim
-:TSInstall markdown
+:checkhealth mucli
 ```
 
-### Diff view doesn't open
+The check reports Neovim compatibility, `curl`, server reachability, workspace,
+session, and editor-tool registration.
 
-The agent must produce a unified diff (with `@@` hunk markers). The plugin detects diffs in `artifact_created` SSE events and assistant responses containing diff code blocks.
+If connection fails:
 
-### Extension not registered with mucli
+1. Confirm `./mucli --gui` is running.
+2. Confirm `host` matches the server bind address and port.
+3. Run `:MucliSetup` to choose or create a provider-backed workspace session.
+4. Run `:MucliHealth` and inspect the exact HTTP/registration error.
 
-Run `:checkhealth mucli` to diagnose. The plugin calls `POST /api/extensions/register` during `setup()`. If the server isn't running at setup time, the registration will fail silently — restart neovim after starting the mucli server.
+If a diff is blocked, return to the source buffer and reconcile unsaved changes;
+the proposal intentionally will not overwrite content that changed after it was
+generated.
+
+## Development
+
+The test runner is dependency-free apart from Neovim itself:
+
+```sh
+extensions/mucli.nvim/scripts/test.sh
+```
+
+It covers SSE fragmentation, HTTP parsing, unified diffs, structured hint and
+completion payloads, conversation streaming, exact selections, path safety,
+partial completion, the dock layout, and the command surface. CI runs it on
+Neovim 0.10, 0.11, and 0.12, plus Python tests for the backend extension bridge.
 
 ## License
 
-Same as mucli (MIT).
+Same as MUCLI.

@@ -1,168 +1,84 @@
---- plugin/mucli.lua — Neovim user commands for mucli.
--- Defines :Mucli, :MucliSend, :MucliSendFile, :MucliInterrupt, :MucliModel, :MucliSession.
--- Registers which-key groups if which-key is available.
--- This file is auto-loaded by Neovim when the plugin is on the runtime path.
+if vim.g.loaded_mucli_nvim then return end
+vim.g.loaded_mucli_nvim = true
 
-local function cmd(name, opts)
-  vim.api.nvim_create_user_command(name, opts[1], opts[2] or {})
+local function core() return require("mucli").ensure_setup() end
+
+local function command(name, fn, opts)
+  vim.api.nvim_create_user_command(name, fn, opts or {})
 end
 
-cmd("Mucli", {
-  function()
-    require("mucli.chat.panel").toggle()
-  end,
-  { desc = "Toggle mucli chat panel" },
-})
-
-cmd("MucliSend", {
-  function(args)
-    local context = require("mucli.context")
-    local prompt = args.args and args.args ~= "" and args.args or nil
-    if prompt then
-      -- User provided prompt as argument: :MucliSend "fix this code"
-      context.send_visual_with_prompt(prompt)
-    else
-      -- No prompt arg — prompt interactively
-      context.send_visual()
-    end
-  end,
-  { range = true, nargs = "*", desc = "Send visual selection + prompt to mucli" },
-})
-
-cmd("MucliSendFile", {
-  function(args)
-    local context = require("mucli.context")
-    local prompt = args.args and args.args ~= "" and args.args or nil
-    if prompt then
-      context.send_file_with_prompt(prompt)
-    else
-      context.send_file()
-    end
-  end,
-  { nargs = "*", desc = "Send current file + prompt to mucli" },
-})
-
-cmd("MucliInterrupt", {
-  function()
-    local config = require("mucli.config")
-    require("mucli.client").post("/api/chat/interrupt", { session_name = config.opts.session }, function(resp)
-      vim.schedule(function()
-        if resp and resp.ok then
-          vim.notify("mucli: interrupt sent", vim.log.levels.INFO)
-        else
-          vim.notify("mucli: failed to interrupt", vim.log.levels.ERROR)
-        end
-      end)
-    end)
-  end,
-  { desc = "Interrupt active mucli turn" },
-})
-
-cmd("MucliModel", {
-  function(args)
-    local session = require("mucli.session")
-    if args.args and args.args ~= "" then
-      -- Direct model name provided
-      session.switch_model(args.args)
-    else
-      -- Show model picker via completion
-      session.fetch_models(function(models)
-        if not models or #models == 0 then
-          vim.notify("mucli: no models available", vim.log.levels.WARN)
-          return
-        end
-        vim.ui.select(models, { prompt = "Select model:" }, function(choice)
-          if choice then
-            session.switch_model(choice)
-          end
-        end)
-      end)
-    end
-  end,
-  {
-    desc = "Switch mucli model",
-    nargs = "*",
-    complete = function()
-      -- Async completion — return empty, actual list shown via ui.select
-      return {}
-    end,
-  },
-})
-
-cmd("MucliSession", {
-  function()
-    local session = require("mucli.session")
-    local config = require("mucli.config")
-    session.get_active(function(info)
-      vim.schedule(function()
-        if info then
-          vim.notify(
-            string.format("mucli session: %s | model: %s | mode: %s", info.name or config.opts.session, info.model or "?", info.agent_mode or "?"),
-            vim.log.levels.INFO
-          )
-        else
-          vim.notify("mucli: no active session", vim.log.levels.WARN)
-        end
-      end)
-    end)
-  end,
-  { desc = "Show mucli session status" },
-})
-
-cmd("MucliConfig", {
-  function()
-    require("mucli.wizard").reconfigure()
-  end,
-  { desc = "Configure mucli session/provider/model" },
-})
-
-cmd("MucliProvider", {
-  function(args)
-    local session = require("mucli.session")
-    local config = require("mucli.config")
-    if args.args and args.args ~= "" then
-      -- Direct provider name provided — switch immediately
-      local providers = { gemini = true, ollama = true, openai = true }
-      if not providers[args.args] then
-        vim.notify("mucli: unknown provider '" .. args.args .. "'. Valid: gemini, ollama, openai", vim.log.levels.ERROR)
-        return
-      end
-      -- For ollama, prompt for local/cloud
-      if args.args == "ollama" then
-        require("mucli.wizard")._pick_ollama_mode(config.opts.session, true, args.args, function(opts)
-          vim.notify("[mucli] Provider switched to: " .. tostring(opts.provider), vim.log.levels.INFO)
-        end)
-      else
-        -- Fetch models for new provider and prompt
-        require("mucli.wizard")._pick_model(config.opts.session, true, args.args, nil, function(opts)
-          vim.notify("[mucli] Provider switched to: " .. tostring(opts.provider), vim.log.levels.INFO)
-        end)
-      end
-    else
-      -- Interactive provider picker
-      require("mucli.wizard")._pick_provider(config.opts.session, true, function(opts)
-        vim.notify("[mucli] Provider switched to: " .. tostring(opts.provider), vim.log.levels.INFO)
-      end)
-    end
-  end,
-  {
-    desc = "Switch mucli provider (gemini|ollama|openai)",
-    nargs = "?",
-    complete = function() return { "gemini", "ollama", "openai" } end,
-  },
-})
-
--- Register which-key groups if available
-local ok, wk = pcall(require, "which-key")
-if ok then
-  wk.add({
-    { "<leader>m", group = "mucli" },
-    { "<leader>mt", desc = "Toggle chat panel", cmd = require("mucli.chat.panel").toggle },
-    { "<leader>ms", desc = "Send visual selection", mode = "v" },
-    { "<leader>mf", desc = "Send current file" },
-    { "<leader>mi", desc = "Interrupt turn" },
-    { "<leader>d", group = "mucli diff" },
-    { "<leader>da", desc = "Accept hunk" },
-    { "<leader>dr", desc = "Reject hunk" },
-  })
+local function range(args)
+  if args.range and args.range > 0 then return args.line1, args.line2 end
+  return nil, nil
 end
+
+command("Mucli", function() core().with_ready(require("mucli.chat.panel").toggle) end, { desc = "Toggle MUCLI editor" })
+command("MucliAsk", function(args) core().with_ready(function() require("mucli.conversation").ask(args.args) end) end, { nargs = "*", desc = "Ask MUCLI" })
+command("MucliActions", function(args)
+  local first, last = range(args)
+  core().with_ready(function() require("mucli.actions").open(first, last) end)
+end, { range = true, desc = "Open MUCLI code actions" })
+command("MucliSend", function(args)
+  local first, last = range(args)
+  core().with_ready(function() require("mucli.conversation").send_selection(args.args, first, last) end)
+end, { range = true, nargs = "*", desc = "Send selection to MUCLI" })
+command("MucliSendFile", function(args) core().with_ready(function() require("mucli.conversation").send_file(args.args) end) end, { nargs = "*", desc = "Send current file to MUCLI" })
+command("MucliExplain", function(args)
+  local first, last = range(args); core().with_ready(function() require("mucli.actions").explain(first, last) end)
+end, { range = true, desc = "Explain selected/current code" })
+command("MucliImprove", function(args)
+  local first, last = range(args); core().with_ready(function() require("mucli.actions").improve(first, last) end)
+end, { range = true, desc = "Improve selected/current code" })
+command("MucliFix", function(args)
+  local first, last = range(args); core().with_ready(function() require("mucli.actions").fix(first, last) end)
+end, { range = true, desc = "Fix selected/current code" })
+command("MucliReview", function(args)
+  local first, last = range(args); core().with_ready(function() require("mucli.hints").analyze(first, last) end)
+end, { range = true, desc = "Publish MUCLI review hints" })
+command("MucliHints", function(args)
+  local first, last = range(args); core().with_ready(function() require("mucli.hints").analyze(first, last) end)
+end, { range = true, desc = "Publish MUCLI hints" })
+command("MucliHintsClear", function() require("mucli.hints").clear() end, { desc = "Clear MUCLI hints" })
+command("MucliHintAction", function() require("mucli.hints").action() end, { desc = "Act on nearest MUCLI hint" })
+command("MucliComplete", function() core().with_ready(require("mucli.completion").request) end, { desc = "Request inline MUCLI completion" })
+command("MucliCompleteAccept", function(args)
+  if args.args == "word" then require("mucli.completion").accept_word() else require("mucli.completion").accept() end
+end, { nargs = "?", complete = function() return { "word" } end, desc = "Accept MUCLI completion" })
+command("MucliCompleteDismiss", require("mucli.completion").clear, { desc = "Dismiss MUCLI completion" })
+command("MucliContext", require("mucli.context").picker, { desc = "Manage MUCLI context" })
+command("MucliContextClear", require("mucli.context").clear, { desc = "Clear MUCLI context" })
+command("MucliDiff", require("mucli.diff").open_last, { desc = "Open latest MUCLI diff" })
+command("MucliInterrupt", require("mucli.chat.input").interrupt, { desc = "Interrupt MUCLI turn" })
+command("MucliSetup", function() core(); require("mucli.wizard").start() end, { desc = "Configure MUCLI" })
+command("MucliConfig", function() core(); require("mucli.wizard").reconfigure() end, { desc = "Configure MUCLI" })
+command("MucliModel", function(args)
+  core()
+  if args.args == "" then require("mucli.wizard").switch_model(); return end
+  local provider = require("mucli.store").state.provider or require("mucli.config").get().provider
+  if not provider then require("mucli.wizard").switch_provider(); return end
+  require("mucli.session").switch_provider(provider, args.args, function(_, response)
+    if not response.ok then require("mucli.util").notify(response.error, vim.log.levels.ERROR) end
+  end)
+end, { nargs = "?", desc = "Switch MUCLI model" })
+command("MucliProvider", function(args)
+  core()
+  if args.args == "" then require("mucli.wizard").switch_provider(); return end
+  require("mucli.session").fetch_models(args.args, function(models)
+    vim.ui.select(models, { prompt = "MUCLI model" }, function(model)
+      if model then require("mucli.session").switch_provider(args.args, model, function() end) end
+    end)
+  end)
+end, { nargs = "?", complete = function() return { "openai", "gemini", "ollama" } end, desc = "Switch MUCLI provider" })
+command("MucliSession", function(args)
+  core()
+  if args.args == "" then require("mucli.wizard").start(); return end
+  local cfg = require("mucli.config").get()
+  cfg.session, cfg.provider, cfg.model = args.args, nil, nil
+  require("mucli").reconnect(function(success, err)
+    if not success then require("mucli.util").notify(err, vim.log.levels.ERROR) end
+  end)
+end, { nargs = "?", desc = "Switch MUCLI session" })
+command("MucliHealth", function() vim.cmd("checkhealth mucli") end, { desc = "Check MUCLI integration" })
+
+local ok, which_key = pcall(require, "which-key")
+if ok and which_key.add then which_key.add({ { "<leader>m", group = "MUCLI" } }) end

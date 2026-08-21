@@ -865,6 +865,16 @@ def run_turn(session, text):
                     active_tools = filter_tools_by_phase(active_tools, _phases)
                 except Exception:  # noqa: BLE001
                     pass
+            try:
+                from mu.session.tools_glue import extension_tool_definitions
+
+                active_tools.extend(
+                    tool
+                    for tool in extension_tool_definitions(session)
+                    if tool.name not in session.disabled_tools
+                )
+            except Exception:  # noqa: BLE001
+                pass
             tool_desc_str = "\n".join(
                 [f"{t.name} - {t.description}" for t in active_tools]
             )
@@ -942,13 +952,15 @@ def run_turn(session, text):
         profile_block = _render_learner_profile_block(session)
         if profile_block:
             base_system_prompt += profile_block
-    # Extension system prompts — each registered extension can augment
-    # the system prompt with tool descriptions or context. Iterates
-    # session.extensions dict (set by POST /api/extensions/register).
-    for _ext_id, _ext_data in getattr(session, "extensions", {}).items():
-        _ext_prompt = _ext_data.get("system_prompt", "")
-        if _ext_prompt:
+    # Only live clients can augment the prompt. A crashed editor's heartbeat
+    # expiry removes both its tools and its instructions from subsequent turns.
+    try:
+        from mu.session.tools_glue import extension_system_prompts
+
+        for _ext_prompt in extension_system_prompts(session):
             base_system_prompt += f"\n\n{_ext_prompt}"
+    except Exception:  # noqa: BLE001
+        pass
     if workspace_context:
         base_system_prompt += f"\n\n{workspace_context}"
     from mu.session.budgets import (
@@ -1170,7 +1182,6 @@ def run_turn(session, text):
     iteration = 0
     active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
     active_tools = filter_tools_for_session_type(active_tools, session_type)
-    provider_tools = active_tools if expose_tools else None
     # Spec #9: phased exposure (see the earlier filter site for details).
     if session.variables.get("lazy_tools_enabled", False):
         try:
@@ -1183,6 +1194,16 @@ def run_turn(session, text):
             active_tools = filter_tools_by_phase(active_tools, _phases)
         except Exception:  # noqa: BLE001
             pass
+    try:
+        from mu.session.tools_glue import extension_tool_definitions
+
+        active_tools.extend(
+            tool
+            for tool in extension_tool_definitions(session)
+            if tool.name not in session.disabled_tools
+        )
+    except Exception:  # noqa: BLE001
+        pass
     provider_tools = active_tools if expose_tools else None
 
     total_in = 0

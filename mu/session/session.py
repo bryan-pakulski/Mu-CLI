@@ -81,6 +81,10 @@ class Session:
         self.ui = ui
         self.debug = debug
         self.variables = session_manager.variables
+        # Extension registry: extension_id → {version, tools, system_prompt, tool_prefix}
+        # Populated by POST /api/extensions/register. Used by system prompt
+        # builder (loop_body.py) and tool dispatch (tools_glue.py).
+        self.extensions: dict = {}
         self.agentic = True
         self.staged_files = []  # legacy provider-native staged parts
         self.staged_attachments = []  # durable attachment descriptor parts

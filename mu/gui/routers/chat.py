@@ -166,12 +166,8 @@ async def completions_endpoint(request: Request, kind: str = ""):
         return {"items": names}
 
     if kind == "models":
-        try:
-            from utils.config import KNOWN_MODELS
-
-            return {"items": list(KNOWN_MODELS)}
-        except Exception:
-            return {"items": []}
+        # Deprecated: use GET /api/providers/{name}/models for per-provider discovery
+        return {"items": []}
 
     if kind == "modes":
         try:

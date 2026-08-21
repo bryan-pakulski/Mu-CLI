@@ -291,9 +291,16 @@ def _get_container_creation_status(
 
 
 def _session_dirs() -> list[str]:
-    return sorted(
+    """Glob session.json from both global HISTORY_DIR and local .mucli/sessions/ folders."""
+    paths = list(
         glob.glob(os.path.join(_config.HISTORY_DIR, "sessions", "*", "session.json"))
     )
+    # Also check for local .mucli/sessions/ in cwd
+    cwd = os.getcwd()
+    local_sessions = os.path.join(cwd, ".mucli", "sessions")
+    if os.path.isdir(local_sessions):
+        paths.extend(glob.glob(os.path.join(local_sessions, "*", "session.json")))
+    return sorted(paths)
 
 
 def _summarize(

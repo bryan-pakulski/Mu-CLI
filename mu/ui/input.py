@@ -19,7 +19,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.formatted_text import HTML
 
-from utils.config import HISTORY_DIR, KNOWN_MODELS, VARIABLE_SCHEMA
+from utils.config import HISTORY_DIR, VARIABLE_SCHEMA
 
 
 MODE_PROMPT_STYLES = {
@@ -320,8 +320,8 @@ class InputHandler:
         tool_name_completer = DynamicToolCompleter()
 
         model_completer = NestedCompleter.from_nested_dict(
-            {m: None for m in KNOWN_MODELS}
-        )
+            {}
+        )  # Dynamic — filled at runtime from provider.get_available_models()
 
         provider_completer = NestedCompleter.from_nested_dict(
             {"gemini": None, "ollama": None, "openai": None}

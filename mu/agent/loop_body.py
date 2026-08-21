@@ -942,6 +942,13 @@ def run_turn(session, text):
         profile_block = _render_learner_profile_block(session)
         if profile_block:
             base_system_prompt += profile_block
+    # Extension system prompts — each registered extension can augment
+    # the system prompt with tool descriptions or context. Iterates
+    # session.extensions dict (set by POST /api/extensions/register).
+    for _ext_id, _ext_data in getattr(session, "extensions", {}).items():
+        _ext_prompt = _ext_data.get("system_prompt", "")
+        if _ext_prompt:
+            base_system_prompt += f"\n\n{_ext_prompt}"
     if workspace_context:
         base_system_prompt += f"\n\n{workspace_context}"
     from mu.session.budgets import (

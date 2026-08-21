@@ -29,7 +29,107 @@ Tests covering these paths live in `tests/test_mu_agent_session_integration.py`
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import threading
+import uuid
+from typing import Any, Dict, Optional
+
+
+# ---------------------------------------------------------------- extension tool dispatch
+
+# Pending extension tool calls: call_id → {result, error, done}
+# Agent thread publishes SSE event, waits on threading.Event for result.
+# Extension plugin POSTs result to /api/extensions/{ext_id}/tool_result.
+_EXTENSION_PENDING: Dict[str, Dict[str, Any]] = {}
+_EXTENSION_LOCK = threading.Lock()
+
+
+def _find_extension_for_tool(session: Any, tool_name: str) -> Optional[str]:
+    """Check if tool_name matches any registered extension's tool_prefix.
+
+    Returns the extension_id if found, None otherwise.
+    """
+    extensions = getattr(session, "extensions", {})
+    for ext_id, data in extensions.items():
+        prefix = data.get("tool_prefix", "")
+        if prefix and tool_name.startswith(prefix):
+            return ext_id
+    return None
+
+
+def _dispatch_extension_tool(
+    session: Any, extension_id: str, tool_name: str, tool_args: dict
+) -> str:
+    """Publish an extension_tool_call SSE event and wait for the plugin to respond.
+
+    The agent thread calls this when a registered extension's tool_prefix
+    matches the invoked tool name. We publish the event via the session's
+    EventBus (thread-safe), then block on a threading.Event until the
+    extension plugin POSTs the result to /api/extensions/{ext_id}/tool_result.
+
+    Returns the tool result string, or an error message on timeout.
+    """
+    call_id = str(uuid.uuid4())
+    done = threading.Event()
+    with _EXTENSION_LOCK:
+        _EXTENSION_PENDING[call_id] = {"result": None, "error": None, "done": done}
+
+    # Get session name for routing
+    session_name = ""
+    try:
+        session_name = session.session_manager.current_session_name
+    except Exception:
+        pass
+
+    # Publish SSE event via the session's UI bus
+    ui = getattr(session, "ui", None)
+    bus = getattr(ui, "_bus", None) if ui else None
+    if bus is not None:
+        bus.publish_threadsafe({
+            "kind": "extension_tool_call",
+            "extension_id": extension_id,
+            "tool_name": tool_name,
+            "tool_args": tool_args or {},
+            "call_id": call_id,
+            "session_name": session_name,
+        })
+
+    # Wait for result (30s timeout)
+    if done.wait(timeout=30):
+        with _EXTENSION_LOCK:
+            entry = _EXTENSION_PENDING.pop(call_id, {})
+        error = entry.get("error")
+        if error:
+            return f"Error: {error}"
+        result = entry.get("result")
+        if result is None:
+            return "Error: extension returned no result"
+        return result if isinstance(result, str) else str(result)
+
+    # Timeout
+    with _EXTENSION_LOCK:
+        _EXTENSION_PENDING.pop(call_id, None)
+    return f"Error: extension tool {tool_name} timed out (30s) — plugin did not respond"
+
+
+def resolve_extension_tool_result(
+    call_id: str, result: Any = None, error: str = ""
+) -> bool:
+    """Resolve a pending extension tool call.
+
+    Called by the /api/extensions/{ext_id}/tool_result endpoint.
+    Returns True if the call_id was found and resolved, False if unknown.
+    """
+    with _EXTENSION_LOCK:
+        entry = _EXTENSION_PENDING.get(call_id)
+        if entry is None:
+            return False
+        entry["result"] = result
+        entry["error"] = error or ""
+        done: Optional[threading.Event] = entry.get("done")
+
+    if done is not None:
+        done.set()
+    return True
 
 
 # ---------------------------------------------------------------- hook-fire dispatch
@@ -98,19 +198,26 @@ def execute_tool_with_memory(
                 pass
     # --- End pre-write snapshot ---
 
-    # Memory and scratchpad tools used to short-circuit here; they now
-    # route through the normal dispatcher to the `@tool`-registered
-    # handlers in `mu/tools/memory/handlers.py`, which resolve the
-    # stores from `context.session`.
-    result = execute_tool(
-        tool_name,
-        tool_args,
-        session.folder_context,
-        session.ui,
-        session.variables,
-        invocation_source=invocation_source,
-        session=session,
-    )
+    # --- Extension tool interception ---
+    # When a registered extension's tool_prefix matches the invoked tool
+    # name, dispatch via SSE to the extension plugin instead of local execute.
+    ext_id = _find_extension_for_tool(session, tool_name)
+    if ext_id is not None:
+        result = _dispatch_extension_tool(session, ext_id, tool_name, tool_args)
+    else:
+        # Memory and scratchpad tools used to short-circuit here; they now
+        # route through the normal dispatcher to the `@tool`-registered
+        # handlers in `mu/tools/memory/handlers.py`, which resolve the
+        # stores from `context.session`.
+        result = execute_tool(
+            tool_name,
+            tool_args,
+            session.folder_context,
+            session.ui,
+            session.variables,
+            invocation_source=invocation_source,
+            session=session,
+        )
 
     post_ctx = HookContext(
         point="post_tool",

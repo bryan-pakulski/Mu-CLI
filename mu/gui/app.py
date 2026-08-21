@@ -37,6 +37,7 @@ from .routers import (
     memory as memory_router,
     memories as memories_router,
     modes,
+    extensions as extensions_router,
     prompts as prompts_router,
     providers as providers_router,
     research as research_router,
@@ -173,6 +174,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
     app.include_router(traces_router.router, prefix="/api/traces", tags=["traces"])
+    app.include_router(extensions_router.router, prefix="/api/extensions", tags=["extensions"])
     app.include_router(chat.events_router, tags=["events"])
 
     register_live_observability_hooks()

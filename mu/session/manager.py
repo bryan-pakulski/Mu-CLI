@@ -76,10 +76,11 @@ def _normalize_tool_stats(value: Any) -> dict[str, Any]:
 
 
 class SessionManager(HistoryMixin, HistorySearchMixin):
-    def __init__(self, ui=None, session_name=None):
+    def __init__(self, ui=None, session_name=None, workspace_path=None):
         self.ui = ui
         logger.info(f"Initializing SessionManager (session_name={session_name})")
         self.current_session_name = session_name or ""
+        self.workspace_path = workspace_path
         self.history = []
         self.conversation_summary = ""
         self.provider_config = {}
@@ -123,7 +124,9 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         return os.path.join(self._get_session_dir(name), "session.json")
 
     def _get_session_dir(self, name):
-        return os.path.join(_history_dir(), "sessions", name)
+        from utils.config import resolve_session_base
+        sessions_dir, _is_local = resolve_session_base(self.workspace_path)
+        return os.path.join(sessions_dir, name)
 
     def get_durable_memory_service(self):
         """Return the process-shared cross-session memory service lazily.

@@ -15,6 +15,53 @@ SESSION_DIR = os.path.join(HISTORY_DIR, "sessions")
 LOG_DIR = os.path.join(HISTORY_DIR, "logs")
 DEFAULT_SESSION_NAME = "default"
 
+
+def _config_dynamic_history_dir():
+    """Read HISTORY_DIR dynamically so monkeypatching at test time is respected."""
+    import utils.config as _cfg
+    return _cfg.HISTORY_DIR
+
+
+def resolve_session_base(workspace_path=None):
+    """Resolve session storage base directory.
+
+    If a workspace path is given and contains a .mucli/ folder, sessions are
+    stored locally at <workspace>/.mucli/sessions/. Otherwise falls back to
+    the global HISTORY_DIR/sessions.
+
+    This enables per-project session isolation for the neovim extension and
+    other workspace-scoped use cases.
+
+    Args:
+        workspace_path: Absolute path to a workspace directory (optional).
+
+    Returns:
+        (sessions_dir, is_local): Tuple of session directory path and whether
+        it is a local (workspace-scoped) directory.
+    """
+    if workspace_path:
+        local_mucli = os.path.join(workspace_path, ".mucli")
+        if os.path.isdir(local_mucli):
+            return os.path.join(local_mucli, "sessions"), True
+    # Fall back to global HISTORY_DIR/sessions — resolve dynamically so
+    # monkeypatching HISTORY_DIR at test time is respected.
+    return os.path.join(_config_dynamic_history_dir(), "sessions"), False
+
+
+def ensure_local_mucli(workspace_path):
+    """Create .mucli/sessions/ structure in a workspace directory.
+
+    Args:
+        workspace_path: Absolute path to a workspace directory.
+
+    Returns:
+        Path to the local sessions directory.
+    """
+    local_mucli = os.path.join(workspace_path, ".mucli")
+    local_sessions = os.path.join(local_mucli, "sessions")
+    os.makedirs(local_sessions, exist_ok=True)
+    return local_sessions
+
 VALID_SESSION_TYPES = ("chat", "workspace", "container")
 SESSION_TYPE_PROMPTS = {
     "chat": (
@@ -1204,15 +1251,8 @@ PRICING_DB = {
     },
 }
 
-# TODO: This should be done per provider, this should simply be a template config
-KNOWN_MODELS = [
-    "gemini-3.1-pro-preview",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-3-pro-image-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
+# KNOWN_MODELS removed — use per-provider discovery via provider.get_available_models()
+# See GET /api/providers/{name}/models endpoint
 
 
 def calculate_cost(model_name, input_tokens, output_tokens):

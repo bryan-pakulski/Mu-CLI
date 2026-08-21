@@ -6,8 +6,10 @@ Subcommands:
     /research <query>               — run a research query (flips to research mode)
     /research sources [filters]     — list every registered source w/ credibility
     /research show <id>             — full record for one source
-    /research bibliography          — emit the compiled markdown bibliography
+    /research bibliography [topic]  — emit the compiled markdown bibliography
     /research stats                 — counts by source type + averages
+    /research topic [name]          — show or set the active research topic
+    /research topics                — list all topics that have sources
     /research clear                 — wipe the current research trail
     /research new <query>           — start a fresh research trail
 
@@ -15,6 +17,7 @@ Filters for `/research sources`:
     --type <web|academic|social|forum|news|documentation|other>
     --min <0.0..1.0>                 minimum credibility score
     --query <substring>              case-insensitive match on title/url
+    --topic <substring>              case-insensitive match on topic
 """
 
 from __future__ import annotations
@@ -108,6 +111,7 @@ def _source_to_dict(source) -> Dict[str, Any]:
         "title": source.title,
         "url": source.url,
         "type": type_value,
+        "topic": source.topic,
         "credibility": round(source.credibility_score, 3),
         "authors": list(source.authors),
         "date": source.date,
@@ -117,13 +121,14 @@ def _source_to_dict(source) -> Dict[str, Any]:
 
 
 def _parse_source_filters(rest: str) -> Tuple[Optional[str], Optional[float], Optional[str], Optional[str]]:
-    """Parse `--type X --min 0.6 --query foo` style flags. Returns
-    (type_filter, min_credibility, query_substring, error). The error
+    """Parse `--type X --min 0.6 --query foo --topic bar` style flags. Returns
+    (type_filter, min_credibility, query_substring, topic_filter, error). The error
     string is populated when parsing fails — caller short-circuits."""
     tokens = rest.split() if rest else []
     type_filter: Optional[str] = None
     min_credibility: Optional[float] = None
     query: Optional[str] = None
+    topic_filter: Optional[str] = None
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -134,14 +139,17 @@ def _parse_source_filters(rest: str) -> Tuple[Optional[str], Optional[float], Op
             try:
                 min_credibility = float(tokens[i + 1])
             except ValueError:
-                return None, None, None, f"--min must be a number, got {tokens[i + 1]!r}"
+                return None, None, None, None, f"--min must be a number, got {tokens[i + 1]!r}"
             i += 2
         elif tok == "--query" and i + 1 < len(tokens):
             query = tokens[i + 1].lower()
             i += 2
+        elif tok == "--topic" and i + 1 < len(tokens):
+            topic_filter = tokens[i + 1].lower()
+            i += 2
         else:
-            return None, None, None, f"unknown flag {tok!r} — use --type/--min/--query"
-    return type_filter, min_credibility, query, None
+            return None, None, None, None, f"unknown flag {tok!r} — use --type/--min/--query"
+    return type_filter, min_credibility, query, topic_filter, None
 
 
 # ----------------------------------------------- subcommands
@@ -157,11 +165,17 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
         sum(s.credibility_score for s in sources) / len(sources) if sources else 0.0
     )
     active_mode = str(session.variables.get("agent_mode", "default"))
+    current_topic = engine.get_current_topic()
+    topics = engine.list_topics()
+    by_topic: Dict[str, int] = {}
+    for src in sources:
+        by_topic[src.topic] = by_topic.get(src.topic, 0) + 1
 
     msg = (
         f"Research mode: {active_mode} · "
         f"{len(sources)} source(s) collected · "
-        f"avg credibility {avg_cred:.2f}"
+        f"avg credibility {avg_cred:.2f} · "
+        f"topic: {current_topic}"
     )
     _emit(session, msg, allow_prompt)
     return CommandResult(
@@ -169,13 +183,18 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
         message=msg,
         data={
             "current_mode": active_mode,
+            "current_topic": current_topic,
             "available_tools": _research_tool_names(),
             "source_count": len(sources),
             "by_type": by_type,
+            "by_topic": by_topic,
+            "topics": topics,
             "avg_credibility": round(avg_cred, 3),
             "citation_policy": (
                 "Cite external claims with [^n] footnotes; end with "
-                "compile_bibliography(). Prefer ≥0.7 credibility for facts."
+                "compile_bibliography(). Use set_research_topic() before "
+                "a new rabbit hole so sources stay grouped by ask; call "
+                "assess_source() for each source you add to the bibliography."
             ),
         },
     )
@@ -184,7 +203,7 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
 def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
     engine, SourceType = _engine(session)
 
-    type_filter, min_cred, query, err = _parse_source_filters(rest)
+    type_filter, min_cred, query, topic_filter, err = _parse_source_filters(rest)
     if err:
         _emit(session, err, allow_prompt, error=True)
         return CommandResult(ok=False, message=err)
@@ -192,6 +211,8 @@ def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
     sources = engine.get_all_sources()
 
     # Apply filters.
+    if topic_filter:
+        sources = [s for s in sources if topic_filter in (s.topic or "").lower()]
     if type_filter:
         try:
             target = SourceType(type_filter)
@@ -255,7 +276,7 @@ def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
         ok=True,
         message=f"{len(sources)} source(s).",
         data={
-            "filters": {"type": type_filter, "min_credibility": min_cred, "query": query},
+            "filters": {"type": type_filter, "min_credibility": min_cred, "query": query, "topic": topic_filter},
             "count": len(sources),
             "sources": [_source_to_dict(s) for s in sources],
         },
@@ -316,9 +337,10 @@ def _show_source(session: Any, raw_id: str, allow_prompt: bool) -> CommandResult
     return CommandResult(ok=True, message=f"Source #{cid}.", data=body)
 
 
-def _bibliography(session: Any, allow_prompt: bool) -> CommandResult:
+def _bibliography(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
     engine, _ = _engine(session)
-    body = engine.compile_bibliography() or ""
+    topic = rest.strip() or None
+    body = engine.compile_bibliography(topic=topic) or ""
     if allow_prompt:
         console = _console(session)
         if console is not None and body:
@@ -336,7 +358,7 @@ def _bibliography(session: Any, allow_prompt: bool) -> CommandResult:
     return CommandResult(
         ok=True,
         message=("ok" if body else "empty"),
-        data={"bibliography": body, "source_count": engine.source_count},
+        data={"bibliography": body, "topic": topic, "source_count": engine.source_count},
     )
 
 
@@ -353,6 +375,9 @@ def _stats(session: Any, allow_prompt: bool) -> CommandResult:
         key = "★" * max(1, score) if score >= 1 else "☆"
         cred_buckets[key] = cred_buckets.get(key, 0) + 1
     avg = (total_cred / len(sources)) if sources else 0.0
+    by_topic: Dict[str, int] = {}
+    for src in sources:
+        by_topic[src.topic] = by_topic.get(src.topic, 0) + 1
 
     if allow_prompt:
         console = _console(session)
@@ -389,6 +414,60 @@ def _stats(session: Any, allow_prompt: bool) -> CommandResult:
             "credibility_tiers": cred_buckets,
             "avg_credibility": round(avg, 3),
         },
+    )
+
+
+def _topic(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
+    engine, _ = _engine(session)
+    name = rest.strip()
+    if not name:
+        current = engine.get_current_topic()
+        topics = engine.list_topics()
+        msg = f"Active research topic: {current}"
+        _emit(session, msg, allow_prompt)
+        return CommandResult(
+            ok=True,
+            message=msg,
+            data={"current_topic": current, "topics": topics},
+        )
+    previous = engine.get_current_topic()
+    engine.set_topic(name)
+    _save_sources(session)
+    msg = f"Research topic: {previous!r} -> {name!r}"
+    _emit(session, msg, allow_prompt)
+    return CommandResult(
+        ok=True,
+        message=msg,
+        data={"previous_topic": previous, "current_topic": name},
+    )
+
+
+def _topics(session: Any, allow_prompt: bool) -> CommandResult:
+    engine, _ = _engine(session)
+    topics = engine.list_topics()
+    counts: Dict[str, int] = {}
+    for src in engine.get_all_sources():
+        counts[src.topic] = counts.get(src.topic, 0) + 1
+    if allow_prompt:
+        console = _console(session)
+        if console is not None:
+            try:
+                from rich import box
+                from rich.table import Table
+                from rich.text import Text
+
+                t = Table(title="Research topics", box=box.SIMPLE)
+                t.add_column("Topic", style="cyan")
+                t.add_column("Sources", style="white", justify="right")
+                for topic in topics:
+                    t.add_row(Text(topic), Text(str(counts.get(topic, 0))))
+                console.print(t)
+            except Exception:
+                pass
+    return CommandResult(
+        ok=True,
+        message=f"{len(topics)} topic(s).",
+        data={"topics": topics, "counts": counts, "current_topic": engine.get_current_topic()},
     )
 
 
@@ -434,16 +513,16 @@ def _run_query(session: Any, query: str, allow_prompt: bool) -> CommandResult:
 # ----------------------------------------------- dispatch
 
 
-SUBCOMMANDS = ("sources", "show", "bibliography", "stats", "clear", "new", "status")
+SUBCOMMANDS = ("sources", "show", "bibliography", "stats", "topic", "topics", "clear", "new", "status")
 
 
 @command(
     "/research",
     help=(
         "Research workflow / citation engine. "
-        "Subcommands: status, sources [--type X --min N --query Q], "
-        "show <id>, bibliography, stats, clear, new <query>. "
-        "Anything else is treated as a query."
+        "Subcommands: status, sources [--type X --min N --query Q --topic T], "
+        "show <id>, bibliography [topic], stats, topic [name], topics, "
+        "clear, new <query>. Anything else is treated as a query."
     ),
 )
 def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
@@ -463,9 +542,13 @@ def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
     if sub == "show":
         return _show_source(session, rest, allow_prompt)
     if sub in ("bibliography", "biblio", "bib"):
-        return _bibliography(session, allow_prompt)
+        return _bibliography(session, rest, allow_prompt)
     if sub == "stats":
         return _stats(session, allow_prompt)
+    if sub == "topic":
+        return _topic(session, rest, allow_prompt)
+    if sub == "topics":
+        return _topics(session, allow_prompt)
     if sub == "clear":
         return _clear(session, allow_prompt)
     if sub == "new":

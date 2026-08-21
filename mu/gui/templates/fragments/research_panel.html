@@ -28,6 +28,19 @@
         </button>
         <div class="panel-section-body" x-show="$store.research.openSections.sources"
              x-transition.opacity.duration.150ms>
+            <!-- topic filter -->
+            <div class="source-topic-filter"
+                 x-show="$store.research.topics.length > 1">
+                <input type="text"
+                       class="topic-filter-input"
+                       placeholder="filter by topic…"
+                       x-model="$store.research.topicFilter">
+                <span class="mono muted small"
+                      x-text="$store.research.currentTopic
+                              ? 'active: ' + $store.research.currentTopic
+                              : ''"></span>
+            </div>
+
             <!-- type filter chips -->
             <div class="source-filters"
                  x-show="$store.research.sourceTypes().length > 1">
@@ -39,63 +52,78 @@
                 </template>
             </div>
 
-            <!-- source list -->
-            <ul class="source-list">
-                <template x-for="s in $store.research.filteredSources()" :key="s.id">
-                    <li class="source-item"
-                        :class="{ expanded: $store.research.isSourceExpanded(s.id) }">
-                        <div class="source-row"
-                             @click="$store.research.toggleSource(s.id)">
-                            <span class="source-type-dot"
-                                  :data-type="s.source_type"></span>
-                            <span class="source-title" x-text="s.title"></span>
-                            <span class="source-cred mono muted"
-                                  x-text="$store.research.credibilityPct(s.credibility_score) + '%'"></span>
+            <!-- source list grouped by topic -->
+            <div class="source-groups">
+                <template x-for="group in $store.research.groupedSources()" :key="group.topic">
+                    <div class="source-group">
+                        <div class="source-group-head">
+                            <span class="source-group-topic" x-text="group.topic"></span>
+                            <span class="source-group-count mono muted"
+                                  x-text="group.sources.length"></span>
                         </div>
-                        <!-- credibility bar -->
-                        <div class="source-cred-bar">
-                            <div class="source-cred-fill"
-                                 :style="'width: ' + $store.research.credibilityPct(s.credibility_score) + '%;'"></div>
-                        </div>
-                        <!-- detail drill-down -->
-                        <div class="source-detail"
-                             x-show="$store.research.isSourceExpanded(s.id)"
-                             x-transition.opacity.duration.120ms>
-                            <div class="source-url">
-                                <a :href="s.url" target="_blank" rel="noopener"
-                                   x-text="s.url"
-                                   @click.stop></a>
-                            </div>
-                            <div class="source-meta-grid">
-                                <template x-if="(s.authors || []).length">
-                                    <div class="source-meta-row">
-                                        <span class="source-meta-key">authors</span>
-                                        <span x-text="s.authors.join(', ')"></span>
+                        <ul class="source-list">
+                            <template x-for="s in group.sources" :key="s.id">
+                                <li class="source-item"
+                                    :class="{ expanded: $store.research.isSourceExpanded(s.id) }">
+                                    <div class="source-row"
+                                         @click="$store.research.toggleSource(s.id)">
+                                        <span class="source-type-dot"
+                                              :data-type="s.source_type"></span>
+                                        <span class="source-title" x-text="s.title"></span>
+                                        <span class="source-cred mono muted"
+                                              x-text="$store.research.credibilityPct(s.credibility_score) + '%'"></span>
                                     </div>
-                                </template>
-                                <template x-if="s.date">
-                                    <div class="source-meta-row">
-                                        <span class="source-meta-key">date</span>
-                                        <span x-text="s.date"></span>
+                                    <!-- credibility bar -->
+                                    <div class="source-cred-bar">
+                                        <div class="source-cred-fill"
+                                             :style="'width: ' + $store.research.credibilityPct(s.credibility_score) + '%;'"></div>
                                     </div>
-                                </template>
-                                <div class="source-meta-row">
-                                    <span class="source-meta-key">type</span>
-                                    <span class="tag" x-text="s.source_type"></span>
-                                </div>
-                                <div class="source-meta-row">
-                                    <span class="source-meta-key">accessed</span>
-                                    <span x-text="s.accessed_date || '?'"></span>
-                                </div>
-                                <div class="source-meta-row">
-                                    <span class="source-meta-key">credibility</span>
-                                    <span x-text="s.credibility_score.toFixed(2)"></span>
-                                </div>
-                            </div>
-                        </div>
-                    </li>
+                                    <!-- detail drill-down -->
+                                    <div class="source-detail"
+                                         x-show="$store.research.isSourceExpanded(s.id)"
+                                         x-transition.opacity.duration.120ms>
+                                        <div class="source-url">
+                                            <a :href="s.url" target="_blank" rel="noopener"
+                                               x-text="s.url"
+                                               @click.stop></a>
+                                        </div>
+                                        <div class="source-meta-grid">
+                                            <template x-if="(s.authors || []).length">
+                                                <div class="source-meta-row">
+                                                    <span class="source-meta-key">authors</span>
+                                                    <span x-text="s.authors.join(', ')"></span>
+                                                </div>
+                                            </template>
+                                            <template x-if="s.date">
+                                                <div class="source-meta-row">
+                                                    <span class="source-meta-key">date</span>
+                                                    <span x-text="s.date"></span>
+                                                </div>
+                                            </template>
+                                            <div class="source-meta-row">
+                                                <span class="source-meta-key">type</span>
+                                                <span class="tag" x-text="s.source_type"></span>
+                                            </div>
+                                            <div class="source-meta-row">
+                                                <span class="source-meta-key">topic</span>
+                                                <span class="tag" x-text="s.topic || 'general'"></span>
+                                            </div>
+                                            <div class="source-meta-row">
+                                                <span class="source-meta-key">accessed</span>
+                                                <span x-text="s.accessed_date || '?'"></span>
+                                            </div>
+                                            <div class="source-meta-row">
+                                                <span class="source-meta-key">credibility</span>
+                                                <span x-text="s.credibility_score.toFixed(2)"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
                 </template>
-            </ul>
+            </div>
         </div>
     </section>
 

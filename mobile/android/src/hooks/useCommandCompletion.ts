@@ -36,7 +36,7 @@ const SUB_TREE: Record<string, SubTree> = {
   '/verbose':       { subs: ['on', 'off', 'toggle'] },
   '/show-thinking': { subs: ['on', 'off', 'toggle'] },
   '/goal':          { subs: ['set', 'clear', 'show', 'help'] },
-  '/research':      { subs: ['status', 'sources', 'show', 'bibliography', 'biblio', 'bib', 'stats', 'clear'] },
+  '/research':      { subs: ['status', 'sources', 'show', 'bibliography', 'biblio', 'bib', 'stats', 'topic', 'topics', 'clear'] },
   '/memory':        { subs: ['status', 'list', 'clear'],
                       nested: {
                         list:  { dynamic: { '': 'memory_targets' } },

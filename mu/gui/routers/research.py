@@ -33,6 +33,7 @@ def _source_to_dict(source) -> Dict[str, Any]:
         "title": source.title,
         "url": source.url,
         "source_type": source.source_type.value if hasattr(source.source_type, "value") else str(source.source_type),
+        "topic": getattr(source, "topic", "general"),
         "authors": list(source.authors or []),
         "date": source.date,
         "accessed_date": source.accessed_date,
@@ -85,6 +86,7 @@ async def get_research_state(request: Request) -> Dict[str, Any]:
     # different session that happened to share the same Python process.
     sources: List[Dict[str, Any]] = []
     bibliography = ""
+    current_topic = "general"
     try:
         sm.restore_research_sources()
         from utils.citation_manager import get_citation_manager
@@ -92,6 +94,7 @@ async def get_research_state(request: Request) -> Dict[str, Any]:
         sources = [_source_to_dict(s) for s in cm.get_all_sources()]
         if sources:
             bibliography = cm.compile_bibliography()
+        current_topic = cm.get_current_topic()
     except Exception as exc:
         _logger.warning("research: citation manager unavailable: %s", exc)
 
@@ -110,6 +113,8 @@ async def get_research_state(request: Request) -> Dict[str, Any]:
         "sources": sources,
         "source_count": len(sources),
         "bibliography": bibliography,
+        "current_topic": current_topic,
+        "topics": sorted({s.get("topic", "general") for s in sources if s.get("topic")}),
         "findings": findings,
         "finding_count": len(findings),
         "workspace": research_workspace(sources, findings, active=mode_active),

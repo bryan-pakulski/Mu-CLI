@@ -214,11 +214,13 @@ the engine model.
 | Command | Description |
 | --- | --- |
 | `/research <query>` | Run web search + synthesis as a one-shot. Uses the same research tools the model has available. |
-| `/research status` | Source counts, by type, average credibility, current mode. |
-| `/research sources [--type X] [--min N] [--query Q]` | List every source the research tools have registered with the citation engine. Each row has id, type, credibility (★), title, URL. Filters: `--type web\|academic\|social\|forum\|news\|documentation\|other`, `--min <0..1>`, `--query <substring>`. |
-| `/research show <id>` | Full record for one source: title, URL, type, credibility score, authors, dates, metadata. |
-| `/research bibliography` (also `biblio`/`bib`) | Compile the markdown bibliography block (`[^n]:` footnotes with credibility ratings) ready to paste into a report. |
-| `/research stats` | Breakdown by source type + credibility-tier histogram. |
+| `/research status` | Source counts, by type, by topic, average credibility, current mode, active topic. |
+| `/research sources [--type X] [--min N] [--query Q] [--topic T]` | List every source the research tools have registered with the citation engine. Each row has id, type, topic, credibility (★), title, URL. Filters: `--type web\|academic\|social\|forum\|news\|documentation\|other`, `--min <0..1>`, `--query <substring>`, `--topic <substring>`. |
+| `/research show <id>` | Full record for one source: title, URL, type, topic, credibility score, authors, dates, metadata. |
+| `/research bibliography [topic]` (also `biblio`/`bib`) | Compile the markdown bibliography block (`[^n]:` footnotes with credibility ratings) grouped by topic. Optional topic arg emits just one bucket. |
+| `/research stats` | Breakdown by source type + topic + credibility-tier histogram. |
+| `/research topic [name]` | Show the active research topic, or set it to `name` so sources registered afterwards are grouped under that ask. |
+| `/research topics` | List all research topics that have at least one source, with per-topic counts. |
 | `/research clear` | Wipe the citation engine. Useful when starting a new research topic. |
 
 ## Shell escape

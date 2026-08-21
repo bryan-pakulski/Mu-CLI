@@ -1847,7 +1847,7 @@ ${problem.text}`, "error", 16000);
             "/show-thinking": { subs: ["on", "off", "toggle"] },
             "/goal":          { subs: ["set", "clear", "show", "help"] },
             "/research":      { subs: ["status", "sources", "show", "bibliography",
-                                       "biblio", "bib", "stats", "clear"] },
+                                       "biblio", "bib", "stats", "topic", "topics", "clear"] },
             "/memory":        { subs: ["status", "list", "clear"],
                                 nested: {
                                     list:  { dynamic: { "": "memory_targets" } },
@@ -3135,6 +3135,9 @@ ${problem.text}`, "error", 16000);
         sources: [],
         sourceCount: 0,
         bibliography: "",
+        currentTopic: "general",
+        topics: [],
+        topicFilter: "",
         findings: [],
         findingCount: 0,
         active: false,
@@ -3160,6 +3163,8 @@ ${problem.text}`, "error", 16000);
                 this.sources = d.sources || [];
                 this.sourceCount = d.source_count || 0;
                 this.bibliography = d.bibliography || "";
+                this.currentTopic = d.current_topic || "general";
+                this.topics = d.topics || [];
                 this.findings = d.findings || [];
                 this.findingCount = d.finding_count || 0;
                 this.workspace = d.workspace || null;
@@ -3187,6 +3192,7 @@ ${problem.text}`, "error", 16000);
         },
         filteredSources() {
             return this.sources.filter(s => {
+                if (this.topicFilter && !(s.topic || "general").toLowerCase().includes(this.topicFilter.toLowerCase())) return false;
                 if (this.typeFilter.length && !this.typeFilter.includes(s.source_type)) return false;
                 if (this.credibilityMin > 0 && (s.credibility_score || 0) < this.credibilityMin) return false;
                 if (!Alpine.store("modeWorkspace").matches(
@@ -3194,6 +3200,25 @@ ${problem.text}`, "error", 16000);
                 )) return false;
                 return true;
             });
+        },
+        // Sources grouped by topic for the grouped-sources view.
+        // Returns [{ topic, sources }] in first-seen order.
+        groupedSources() {
+            const filtered = this.filteredSources();
+            const order = [];
+            const buckets = {};
+            for (const s of filtered) {
+                const t = s.topic || "general";
+                if (!(t in buckets)) {
+                    buckets[t] = [];
+                    order.push(t);
+                }
+                buckets[t].push(s);
+            }
+            return order.map(t => ({ topic: t, sources: buckets[t] }));
+        },
+        sourceCountForTopic(topic) {
+            return this.sources.filter(s => (s.topic || "general") === topic).length;
         },
         filteredFindings() {
             return this.findings.filter(f => Alpine.store("modeWorkspace").matches(

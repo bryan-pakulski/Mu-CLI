@@ -48,56 +48,51 @@ def test_generate_citation():
 
 
 def test_credibility_score_web():
-    """Test credibility scoring for web sources."""
+    """Web sources default to 0.0 (unassessed)."""
     score = calculate_credibility_score(
         source_type=SourceType.WEB,
         metadata={}
     )
-    # Base score for WEB is 0.5
     assert 0.0 <= score <= 1.0
-    assert score == 0.5
+    assert score == 0.0  # unassessed default
 
 
 def test_credibility_score_academic():
-    """Test credibility scoring for academic sources."""
+    """Academic sources default to 0.0 (unassessed)."""
     score = calculate_credibility_score(
         source_type=SourceType.ACADEMIC,
         metadata={}
     )
-    # Base score for ACADEMIC is 0.8
     assert 0.0 <= score <= 1.0
-    assert score == 0.8
+    assert score == 0.0  # unassessed default
 
 
 def test_credibility_score_social():
-    """Test credibility scoring for social sources."""
+    """Social sources default to 0.0 (unassessed)."""
     score = calculate_credibility_score(
         source_type=SourceType.SOCIAL,
         metadata={}
     )
-    # Base score for SOCIAL is 0.3
     assert 0.0 <= score <= 1.0
-    assert score == 0.3
+    assert score == 0.0  # unassessed default
 
 
 def test_credibility_score_with_authors():
-    """Test credibility scoring with authors boost."""
+    """Authors no longer boost credibility; defaults 0.0."""
     score = calculate_credibility_score(
         source_type=SourceType.ACADEMIC,
         metadata={"authors": ["John Doe"]}
     )
-    # Base 0.8 + 0.1 for authors = 0.9
-    assert score == 0.9
+    assert score == 0.0  # no longer metadata-boosted
 
 
 def test_credibility_score_capped():
-    """Test credibility scoring is capped at 1.0."""
+    """Peer review no longer boosts; defaults 0.0."""
     score = calculate_credibility_score(
         source_type=SourceType.ACADEMIC,
         metadata={"authors": ["John Doe"], "peer_reviewed": True}
     )
-    # Base 0.8 + 0.1 for authors + 0.1 for peer review = 1.0 (capped)
-    assert score == 1.0
+    assert score == 0.0  # no longer metadata-boosted
 
 
 def test_source_dataclass():
@@ -125,7 +120,7 @@ def test_source_credibility_calculated():
         source_type=SourceType.ACADEMIC,
     )
     source = manager.get_source(citation_id)
-    assert source.credibility_score == 0.8  # Academic base score
+    assert source.credibility_score == 0.0  # unassessed until assess_source
 
 
 def test_model_assessment_varies_web_source_within_hard_cap():
@@ -144,11 +139,121 @@ def test_bibliography_includes_credibility():
     """Test that bibliography includes credibility indicators."""
     reset_citation_manager()
     manager = CitationManager()
-    manager.add_source(
+    cid = manager.add_source(
         title="Test Academic",
         url="https://arxiv.org/paper",
         source_type=SourceType.ACADEMIC,
     )
+    manager.assess_source(cid, 0.9, "Well-corroborated peer-reviewed paper")
     bibliography = manager.compile_bibliography()
     assert "Credibility:" in bibliography
     assert "★" in bibliography  # Stars for credibility visualization
+
+
+# --------------------------------------------------------------------------- topic grouping
+
+def test_set_topic_returns_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    assert manager.set_topic("rabbit hole A") == "rabbit hole A"
+    assert manager.get_current_topic() == "rabbit hole A"
+
+def test_set_topic_empty_falls_back_to_default():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("  ")
+    assert manager.get_current_topic() == "general"
+
+def test_source_inherits_active_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("schema world models")
+    cid = manager.add_source("Paper", "https://example.com/p", SourceType.ACADEMIC)
+    source = manager.get_source(cid)
+    assert source.topic == "schema world models"
+
+def test_source_explicit_topic_override():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("topic A")
+    cid = manager.add_source("Paper", "https://example.com/p", SourceType.ACADEMIC, topic="topic B")
+    source = manager.get_source(cid)
+    assert source.topic == "topic B"
+
+def test_list_topics_first_seen_order():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("alpha")
+    manager.add_source("A", "https://a.io", SourceType.WEB)
+    manager.set_topic("beta")
+    manager.add_source("B", "https://b.io", SourceType.WEB)
+    assert manager.list_topics() == ["alpha", "beta"]
+
+def test_get_sources_by_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("alpha")
+    manager.add_source("A1", "https://a1.io", SourceType.WEB)
+    manager.add_source("A2", "https://a2.io", SourceType.WEB)
+    manager.set_topic("beta")
+    manager.add_source("B1", "https://b1.io", SourceType.WEB)
+    assert len(manager.get_sources_by_topic("alpha")) == 2
+    assert len(manager.get_sources_by_topic("beta")) == 1
+    assert len(manager.get_sources_by_topic("gamma")) == 0
+
+def test_bibliography_grouped_by_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("alpha")
+    manager.add_source("A1", "https://a1.io", SourceType.WEB)
+    manager.set_topic("beta")
+    manager.add_source("B1", "https://b1.io", SourceType.WEB)
+    bib = manager.compile_bibliography()
+    assert "### alpha" in bib
+    assert "### beta" in bib
+    assert bib.index("### alpha") < bib.index("### beta")
+
+def test_bibliography_single_topic_filter():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("alpha")
+    manager.add_source("A1", "https://a1.io", SourceType.WEB)
+    manager.set_topic("beta")
+    manager.add_source("B1", "https://b1.io", SourceType.WEB)
+    bib = manager.compile_bibliography(topic="alpha")
+    assert "### alpha" in bib
+    assert "### beta" not in bib
+
+def test_unassessed_source_shows_unassessed_in_bibliography():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.add_source("S", "https://s.io", SourceType.WEB)
+    bib = manager.compile_bibliography()
+    assert "unassessed" in bib
+
+def test_clear_resets_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("alpha")
+    manager.add_source("A", "https://a.io", SourceType.WEB)
+    manager.clear()
+    assert manager.get_current_topic() == "general"
+    assert manager.list_topics() == []
+
+def test_load_dict_preserves_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.set_topic("alpha")
+    manager.add_source("A", "https://a.io", SourceType.WEB)
+    snapshot = manager.to_dict()
+    manager2 = CitationManager()
+    manager2.load_dict(snapshot)
+    assert manager2.get_source(1).topic == "alpha"
+    assert "alpha" in manager2.list_topics()
+
+def test_load_dict_legacy_record_without_topic():
+    reset_citation_manager()
+    manager = CitationManager()
+    manager.load_dict([{"id": 1, "title": "Old", "url": "https://old.io", "source_type": "web"}])
+    source = manager.get_source(1)
+    assert source.topic == "general"

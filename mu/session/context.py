@@ -123,6 +123,16 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
         if role_block:
             layers.append("LAYER 3B \u2014 Agent role:\n" + role_block)
 
+    editor_context = str(
+        getattr(session, "_turn_editor_context_block", "") or ""
+    ).strip()
+    if editor_context:
+        layers.append(
+            "LAYER 4 \u2014 Current Neovim state and explicit editor context "
+            "(ephemeral; never conversation memory):\n"
+            + editor_context
+        )
+
     layers.append("LAYER 5 \u2014 Current turn:\nAlways prioritize the live user message and current-turn tool results. Structured L2 state is authoritative; older semantic residue is fallback context only.")
     return f"{system_prompt}\n\nHierarchical runtime context (layered with independent budgets/eviction):\n" + "\n\n".join(layers)
 

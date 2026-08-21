@@ -713,8 +713,26 @@ def _render_learner_profile_block(session) -> str:
     )
 
 
-def run_turn(session, text):
+def run_turn(session, text, *, editor_context=None):
     logger.info(f"Sending message: {text[:100]}...")
+    from mu.session.editor_context import (
+        build_context_receipt,
+        normalise_editor_context,
+        render_editor_context,
+        sanitise_editor_tool_history,
+        sanitise_legacy_editor_history,
+    )
+
+    session._turn_editor_context = normalise_editor_context(editor_context)
+    session._turn_editor_context_block = render_editor_context(
+        session._turn_editor_context
+    )
+    # Migrate the v1 extension transport suffix even when this particular
+    # turn has automatic context disabled. This happens inside the session
+    # lock for both host and container turns.
+    sanitise_legacy_editor_history(session)
+    sanitise_editor_tool_history(session)
+    editor_context_receipt = build_context_receipt(session._turn_editor_context)
     session.paused_execution_text = None
     session._loop_blocker_raised = False  # fresh turn — last turn's pause doesn't apply
     session._hook_abort_requested = False
@@ -794,6 +812,15 @@ def run_turn(session, text):
                     session.ui.show_info(_notice)
 
     parts = list(session.staged_files) + list(getattr(session, "staged_attachments", []) or [])
+    if editor_context_receipt:
+        # Receipts are durable metadata without source content. Provider
+        # serialization deliberately ignores this part type.
+        parts.append(
+            {
+                "type": "editor_context_receipt",
+                "receipt": editor_context_receipt,
+            }
+        )
     effective_text = text
     if text and active_mode == "feature":
         effective_text = session._build_feature_mode_prompt(text)

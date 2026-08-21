@@ -14,9 +14,12 @@ APIs. The transport has no Lua plugin dependencies.
 - **Persistent chat dock** — streaming Markdown conversation plus a multiline
   composer. Closing the dock does not disconnect the event stream or prevent an
   approval/tool request from reaching Neovim.
-- **Live context** — exact visual selections, full files, LSP diagnostics, a
-  bounded cursor neighborhood, open-buffer metadata, changedticks, and unsaved
-  buffer text.
+- **Context v2** — the actual visible viewport and last-focused editor window,
+  multiple extmark-backed pinned snippets across files, one-turn action context,
+  LSP diagnostics, open-buffer metadata, changedticks, and unsaved text.
+- **Truthful history** — source snapshots are a structured, turn-scoped payload;
+  only a content-free context receipt enters conversation history. Old code can
+  no longer masquerade as the current editor state on later turns.
 - **Native code review** — request a focused review and receive navigable MUCLI
   diagnostics with explain, fix, and dismiss actions. Structured review and
   completion requests are history-free, so machine prompts never pollute chat.
@@ -104,11 +107,9 @@ require("mucli").setup({
   },
   context = {
     automatic = true,
-    cursor_lines = 80,
     max_chars = 48000,
     include_diagnostics = true,
     include_open_buffers = true,
-    clear_staged_after_send = true,
   },
   hints = {
     enabled = true,
@@ -128,8 +129,9 @@ session. Leave them unset to keep the session's saved provider configuration.
 ## Everyday workflow
 
 1. Open `:Mucli` and write a multiline request in the composer.
-2. Use visual `<leader>ms`, normal `<leader>mf`, or `:MucliContext` to stage
-   exact context. A bounded live cursor snapshot is attached automatically.
+2. Use visual `<leader>ms` or normal `<leader>mf` repeatedly to pin snippets or
+   files. `:MucliContext` opens the context drawer; the exact live viewport is
+   attached automatically.
 3. Use `<leader>mc` for focused explain/improve/fix/review/test/doc actions.
 4. Review file mutations in the native diff tab. Press `a` to approve, `r` to
    reject, or `e` to send corrective feedback.
@@ -140,7 +142,7 @@ Inside the composer:
 | Key | Action |
 | --- | --- |
 | `Ctrl-s` | Send the multiline draft |
-| `Ctrl-a` | Add or clear staged context |
+| `Ctrl-a` | Open the context drawer |
 | `Ctrl-c` | Interrupt the active turn |
 | `Ctrl-l` | Clear the draft |
 | `q` (normal mode) | Close the dock |
@@ -161,8 +163,8 @@ Inside a diff:
 | `<leader>mm` | Toggle the MUCLI dock |
 | `<leader>ma` | Ask MUCLI |
 | `<leader>mc` | Open code actions |
-| `<leader>ms` (visual) | Stage the exact selection |
-| `<leader>mf` | Stage the active file |
+| `<leader>ms` (visual) | Pin the exact selection; repeat across files |
+| `<leader>mf` | Pin the active file |
 | `<leader>mh` | Generate review hints |
 | `<M-\>` | Request inline completion |
 | `<M-l>` | Accept completion |
@@ -191,7 +193,10 @@ names `toggle_panel`, `send_visual`, and `send_file` remain accepted as aliases.
 | `:MucliComplete` | Request an inline completion |
 | `:MucliCompleteAccept [word]` | Accept all or one word |
 | `:MucliCompleteDismiss` | Dismiss ghost text |
-| `:MucliContext` / `:MucliContextClear` | Manage staged context |
+| `:MucliContext` | Open the live/turn/pinned context drawer |
+| `:MucliContextAdd` | Pin a selection, file, or diagnostics |
+| `:MucliContextInspect` | Inspect the exact structured payload before send |
+| `:MucliContextClear[Turn/Pinned]` | Clear all, turn-only, or pinned context |
 | `:MucliDiff` | Reopen the latest captured diff |
 | `:MucliInterrupt` | Stop the active turn |
 | `:MucliSetup` / `:MucliConfig` | Configure session/provider/model |
@@ -201,6 +206,7 @@ names `toggle_panel`, `send_visual`, and `send_file` remain accepted as aliases.
 | `:MucliHealth` | Run the integration health check |
 
 Use `:help mucli.nvim` for the concise in-editor reference.
+The product priorities and acceptance target live in [ROADMAP.md](ROADMAP.md).
 
 ## Editor tools exposed to MUCLI
 
@@ -208,9 +214,10 @@ Use `:help mucli.nvim` for the concise in-editor reference.
 | --- | --- |
 | `nvim_get_buffer` | Read authoritative live text, ranges, modified state, and changedtick |
 | `nvim_list_buffers` | List loaded file buffers and editor state |
-| `nvim_get_selection` | Read the latest exact staged/visual selection |
+| `nvim_get_selection` | Read the latest explicit or currently active visual selection |
+| `nvim_get_context_items` | Read every current turn and pinned item plus the live viewport |
 | `nvim_get_diagnostics` | Read LSP and Neovim diagnostics |
-| `nvim_get_workspace_state` | Read root, cursor, mode, filetype, LSP clients, and staged context |
+| `nvim_get_workspace_state` | Read root, viewport, cursor, mode, LSP clients, and context summaries |
 | `nvim_get_document_symbols` | Fetch document symbols asynchronously from LSP |
 | `nvim_open_location` | Reveal a workspace file and location |
 | `nvim_publish_diagnostics` | Publish structured findings in native diagnostic UI |
@@ -219,6 +226,30 @@ Use `:help mucli.nvim` for the concise in-editor reference.
 Registration is session- and client-bound. A stale editor stops contributing
 tools after its heartbeat expires, and a replaced editor cannot answer the new
 client's pending tool calls.
+
+## Context model
+
+MUCLI keeps editor state in deliberately separate lifetimes:
+
+- **Live** is recomputed at send time from the last-focused normal editor window.
+  It contains the real `w0`/`w$` viewport, cursor, diagnostics, and unsaved text.
+- **Turn** is created by focused actions such as Explain/Fix and is consumed only
+  after the server accepts that turn.
+- **Pinned** is created with `<leader>ms`, `<leader>mf`, or `:MucliContextAdd` and
+  persists until explicitly removed. Selection extmarks follow buffer edits and
+  show a `changed` badge until refreshed.
+- **Conversation** stores the user's request, assistant output, and a lightweight
+  receipt containing paths/ranges/counts. Raw source snapshots never enter the
+  retained history, goal, compaction, or durable-memory stream. Source-bearing
+  editor tool calls/results expire to path/range receipts at the turn boundary.
+
+When the payload reaches its budget, MUCLI preserves explicit one-turn context
+first, then the live viewport, then persistent pins, and finally diagnostics.
+Excluded content remains visible in the receipt instead of disappearing silently.
+
+The drawer supports `<CR>` jump, `d` remove, `r` refresh, `a` add, `t` clear
+turn-only context, `p` clear pins, and `i` inspect the exact outgoing payload.
+Context receipts in chat are also inspectable with `<CR>`.
 
 ## Safety model
 

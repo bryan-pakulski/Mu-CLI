@@ -15,7 +15,7 @@ CONTENTS                                                        *mucli-contents*
 INTRODUCTION                                                       *mucli-intro*
 
 MUCLI connects Neovim to a running MUCLI GUI server. It provides a persistent
-chat dock, staged and automatic editor context, diagnostic review hints,
+chat dock, live/turn/pinned editor context, diagnostic review hints,
 inline completion, native diff approval, and provider-visible editor tools.
 
 Requires Neovim 0.10+, curl, and a running `mucli --gui` server.
@@ -44,7 +44,7 @@ Common options: >lua
       allow_secret_paths = false,
     },
     window = { position = "right", width = 56, input_height = 7 },
-    context = { automatic = true, cursor_lines = 80, max_chars = 48000 },
+    context = { automatic = true, max_chars = 48000 },
     hints = { enabled = true, virtual_text = true },
     completion = { enabled = true, context_lines = 60 },
   })
@@ -52,9 +52,17 @@ Common options: >lua
 ==============================================================================
 WORKFLOW                                                         *mucli-workflow*
 
-Open |:Mucli| and write a multiline request. Stage exact selections, files, or
-diagnostics with |:MucliContext|. MUCLI also includes a bounded cursor snapshot,
-open-buffer metadata, and unsaved changedticks automatically.
+Open |:Mucli| and write a multiline request. Pin multiple exact selections,
+files, or diagnostics with |:MucliContextAdd|. |:MucliContext| opens a drawer
+showing the live viewport, one-turn action context, and persistent pins. Live
+context follows the last-focused editor window and actual visible lines.
+
+Raw source snapshots are turn-scoped transport and never enter conversation
+history. History retains only a context receipt with paths, ranges, counts, and
+budget information. Press `i` in the drawer or use |:MucliContextInspect| to see
+the exact outgoing payload. Budget order is one-turn context, live viewport,
+persistent pins, then diagnostics. Source-bearing editor tool observations also
+expire to metadata-only receipts when their turn ends.
 
 Use |:MucliActions| for explain, improve, fix, review, tests, documentation,
 completion, and context actions. File mutations arrive in a native diff tab:
@@ -119,10 +127,23 @@ COMMANDS                                                         *mucli-commands
 :MucliCompleteDismiss   Dismiss the current ghost completion.
 
                                                      *:MucliContext*
-:MucliContext           Stage selection/file/diagnostics or clear context.
+:MucliContext           Open the live/turn/pinned context drawer.
+
+                                                     *:MucliContextAdd*
+:MucliContextAdd        Pin a selection, file, or diagnostics.
+
+                                                     *:MucliContextInspect*
+:MucliContextInspect    Inspect the exact structured context payload.
 
                                                      *:MucliContextClear*
-:MucliContextClear      Clear all staged context.
+:MucliContextClear      Clear all editor context.
+
+                                                     *:MucliContextClearTurn*
+:MucliContextClearTurn  Clear action context for the next turn.
+
+                                                     *:MucliContextClearPinned*
+:MucliContextClearPinned
+                        Clear persistent pinned context.
 
                                                      *:MucliDiff*
 :MucliDiff              Reopen the latest captured diff.
@@ -152,15 +173,15 @@ COMMANDS                                                         *mucli-commands
 KEYMAPS                                                           *mucli-keymaps*
 
   <leader>mm    toggle dock              <leader>ma    ask
-  <leader>mc    code actions             <leader>ms    stage visual selection
-  <leader>mf    stage current file       <leader>mh    generate hints
+  <leader>mc    code actions             <leader>ms    pin visual selection
+  <leader>mf    pin current file         <leader>mh    generate hints
   <M-\>         request completion        <M-l>         accept completion
   <M-e>         dismiss completion       <leader>mx    interrupt
   ]m / [m       next / previous hint
 
 Composer-local mappings:
 
-  CTRL-S        send multiline draft     CTRL-A        manage context
+  CTRL-S        send multiline draft     CTRL-A        open context drawer
   CTRL-C        interrupt                 CTRL-L        clear draft
 
 Set a keymap option to `false` or an empty string to disable it.

@@ -22,6 +22,7 @@ from mu.agent.subagent_artifacts import SubagentArtifactStore
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.load_errors import describe_container_load_error
 from mu.container.network import DEFAULT_EGRESS_ALLOW
+from mu.session.editor_context import strip_legacy_editor_context_text
 from mu.tools.capabilities import normalize_session_type
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -706,7 +707,27 @@ async def get_history(
         for source_part_index, part in enumerate(turn.get("parts", [])):
             ptype = part.get("type")
             if ptype == "text":
-                parts_out.append({"type": "text", "text": part.get("text", "")})
+                text = part.get("text", "")
+                if role == "user":
+                    text = strip_legacy_editor_context_text(text)
+                parts_out.append({"type": "text", "text": text})
+            elif ptype == "editor_context_receipt":
+                receipt = part.get("receipt")
+                if isinstance(receipt, dict):
+                    parts_out.append(
+                        {"type": "editor_context_receipt", "receipt": receipt}
+                    )
+            elif ptype == "editor_tool_receipt":
+                tools = part.get("tools")
+                if isinstance(tools, list):
+                    parts_out.append(
+                        {
+                            "type": "editor_tool_receipt",
+                            "expired": True,
+                            "count": int(part.get("count") or len(tools)),
+                            "tools": tools[:64],
+                        }
+                    )
             elif ptype == "attachment":
                 attachment = part.get("attachment")
                 if isinstance(attachment, dict) and attachment.get("attachment_id"):

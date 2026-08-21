@@ -264,6 +264,104 @@ def test_send_message_injects_hierarchical_context_layers():
     assert "turn 1" in sm.conversation_summary
 
 
+def test_editor_context_is_current_turn_only_and_history_stores_receipt():
+    class CaptureProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = []
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls.append(
+                {
+                    "system_prompt": system_prompt or "",
+                    "messages": [
+                        "\n".join(
+                            str(part.text or "")
+                            for part in message.parts
+                            if part.type == "text"
+                        )
+                        for message in messages
+                    ],
+                }
+            )
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    marker = "SOURCE_ONLY_IN_CURRENT_EDITOR_TURN"
+    context = {
+        "version": 2,
+        "revision": "rev-integration",
+        "workspace": "/workspace/project",
+        "live": {
+            "path": "main.py",
+            "filetype": "python",
+            "cursor": {"line": 1, "column": 0},
+            "viewport": {
+                "start_line": 1,
+                "end_line": 1,
+                "content": marker,
+            },
+        },
+        "turn": [],
+        "pinned": [],
+        "budget": {"included_chars": len(marker), "approx_tokens": 8},
+    }
+    provider = CaptureProvider()
+    sm = SessionManager(session_name="ephemeral-editor-context")
+    sm.history = [
+        {
+            "role": "user",
+            "parts": [
+                {
+                    "type": "text",
+                    "text": "Earlier intent\n\n## MUCLI editor context\nLEGACY_SOURCE",
+                }
+            ],
+        }
+    ]
+    session = Session(provider, False, "system instruction", sm)
+    session.variables["durable_memory_enabled"] = False
+    session.variables["memory_enabled"] = False
+
+    session.send_message("Explain the visible code", editor_context=context)
+
+    assert marker in provider.calls[0]["system_prompt"]
+    assert sm.history[0]["parts"][0]["text"] == "Earlier intent"
+    persisted = json.dumps(sm.history)
+    assert marker not in persisted
+    assert "LEGACY_SOURCE" not in persisted
+    user_turn = next(
+        message
+        for message in reversed(sm.history)
+        if message.get("role") == "user"
+    )
+    assert any(
+        part.get("type") == "editor_context_receipt"
+        for part in user_turn["parts"]
+    )
+    assert any(
+        part.get("type") == "text"
+        and part.get("text") == "Explain the visible code"
+        for part in user_turn["parts"]
+    )
+
+    session.send_message("Continue without editor context")
+
+    assert marker not in provider.calls[-1]["system_prompt"]
+    assert marker not in "\n".join(provider.calls[-1]["messages"])
+
+
 def test_layered_context_no_longer_injects_l4b_retrieval(tmp_path):
     """L4B auto-retrieval removed — model uses retrieve_relevant_context
     tool on demand instead of pre-injected snippets."""

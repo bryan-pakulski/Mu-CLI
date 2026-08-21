@@ -14,7 +14,12 @@ end
 function M.submit(buf)
   local text = M.text(buf)
   if text == "" then return end
-  if require("mucli.conversation").send(text) then M.clear(buf) end
+  require("mucli.conversation").send(text, {
+    on_accepted = function()
+      -- Keep a failed or subsequently edited draft intact.
+      if M.text(buf) == text then M.clear(buf) end
+    end,
+  })
 end
 
 function M.interrupt()
@@ -33,8 +38,8 @@ function M.setup(buf)
   vim.keymap.set({ "i", "n" }, "<C-c>", M.interrupt, vim.tbl_extend("force", opts, { desc = "Interrupt MUCLI" }))
   vim.keymap.set({ "i", "n" }, "<C-a>", function()
     vim.cmd("stopinsert")
-    require("mucli.context").picker()
-  end, vim.tbl_extend("force", opts, { desc = "Add MUCLI context" }))
+    require("mucli.context_panel").toggle()
+  end, vim.tbl_extend("force", opts, { desc = "Inspect MUCLI context" }))
   vim.keymap.set("n", "<C-l>", function() M.clear(buf) end, vim.tbl_extend("force", opts, { desc = "Clear MUCLI draft" }))
   vim.keymap.set("n", "q", require("mucli.chat.panel").close, vim.tbl_extend("force", opts, { desc = "Close MUCLI" }))
 end

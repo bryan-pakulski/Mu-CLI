@@ -6,7 +6,11 @@
 :MucliCompleteDismiss	mucli.txt	/*:MucliCompleteDismiss*
 :MucliConfig	mucli.txt	/*:MucliConfig*
 :MucliContext	mucli.txt	/*:MucliContext*
+:MucliContextAdd	mucli.txt	/*:MucliContextAdd*
 :MucliContextClear	mucli.txt	/*:MucliContextClear*
+:MucliContextClearPinned	mucli.txt	/*:MucliContextClearPinned*
+:MucliContextClearTurn	mucli.txt	/*:MucliContextClearTurn*
+:MucliContextInspect	mucli.txt	/*:MucliContextInspect*
 :MucliDiff	mucli.txt	/*:MucliDiff*
 :MucliExplain	mucli.txt	/*:MucliExplain*
 :MucliFix	mucli.txt	/*:MucliFix*

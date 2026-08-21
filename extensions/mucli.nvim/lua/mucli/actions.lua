@@ -4,9 +4,9 @@ local context = require("mucli.context")
 local conversation = require("mucli.conversation")
 
 local function stage(first, last, whole_file, captured)
-  if captured then return context.stage(captured) end
-  if first and last then return context.add_selection(first, last) end
-  if whole_file then return context.add_file() end
+  if captured then return context.stage(captured, "turn") end
+  if first and last then return context.add_selection(first, last, nil, { scope = "turn" }) end
+  if whole_file then return context.add_file(nil, { scope = "turn" }) end
   return nil
 end
 
@@ -21,7 +21,12 @@ function M.improve(first, last, captured)
 end
 
 function M.fix(first, last, captured)
-  if first or captured then stage(first, last, false, captured) else context.add_diagnostics(); context.add_file() end
+  if first or captured then
+    stage(first, last, false, captured)
+  else
+    context.add_diagnostics(nil, { scope = "turn" })
+    context.add_file(nil, { scope = "turn" })
+  end
   conversation.send("Fix the selected code or active diagnostics. Identify the root cause, make the smallest complete change, update relevant tests, and present modifications through the native diff approval flow.")
 end
 

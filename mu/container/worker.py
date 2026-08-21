@@ -393,6 +393,7 @@ class SendRequest(BaseModel):
     model: str
     agent_mode: str = "default"
     system_instruction: str = "You are a helpful assistant."
+    editor_context: dict[str, Any] | None = None
 
 
 class RuntimeRequest(BaseModel):
@@ -590,7 +591,13 @@ def _run_turn(session, request: SendRequest) -> None:
     _threads[name] = threading.current_thread().ident or 0
     try:
         with _locks[name]:
-            result = session.send_message(request.text)
+            result = (
+                session.send_message(
+                    request.text, editor_context=request.editor_context
+                )
+                if request.editor_context
+                else session.send_message(request.text)
+            )
             session.session_manager.save_history(session.folder_context)
         ui.publish(
             {
@@ -688,7 +695,13 @@ def send_sync(request: SendRequest, x_mucli_worker_token: str | None = Header(de
     start_index = len(session.session_manager.history)
     try:
         with _locks[name]:
-            result = session.send_message(request.text)
+            result = (
+                session.send_message(
+                    request.text, editor_context=request.editor_context
+                )
+                if request.editor_context
+                else session.send_message(request.text)
+            )
             session.session_manager.save_history(session.folder_context)
         return jsonable_encoder({
             "ok": bool(not isinstance(result, dict) or result.get("status") != "error"),

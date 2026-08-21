@@ -93,6 +93,8 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
+        self._turn_editor_context = None
+        self._turn_editor_context_block = ""
         # Per-turn dedup for skill auto-expansion banners: which skills we
         # already announced for the current `_pending_user_text`, so a
         # re-assembly of the system prompt (retry / re-inject) doesn't
@@ -1566,7 +1568,7 @@ class Session:
             pass
         return response
 
-    def send_message(self, text):
+    def send_message(self, text, *, editor_context=None):
         """Body moved to `mu/agent/loop_body.py:run_turn`.
 
         Wraps the turn in a `finally` that strips the pinned
@@ -1581,8 +1583,19 @@ class Session:
         from mu.agent.loop_body import run_turn
 
         try:
-            return run_turn(self, text)
+            if editor_context is None:
+                return run_turn(self, text)
+            return run_turn(self, text, editor_context=editor_context)
         finally:
+            # Editor tool observations are useful inside this agent loop but
+            # must not become stale source context on a later turn.
+            from mu.session.editor_context import sanitise_editor_tool_history
+
+            sanitise_editor_tool_history(self)
+            # Live editor source is intentionally turn-scoped. Clearing it in
+            # the outermost finally also covers failures and interrupts.
+            self._turn_editor_context = None
+            self._turn_editor_context_block = ""
             self._strip_session_goal_after_turn()
             # Lazy LAYER 3B: clear the orchestrator role once no children are
             # active so a session that spawned sub-agents earlier doesn't keep

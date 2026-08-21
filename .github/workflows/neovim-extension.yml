@@ -6,24 +6,38 @@ on:
     paths:
       - "extensions/mucli.nvim/**"
       - "mu/agent/loop_body.py"
+      - "mu/container/supervisor.py"
+      - "mu/container/worker.py"
       - "mu/gui/routers/extensions.py"
       - "mu/gui/routers/inspector.py"
       - "mu/gui/routers/chat.py"
+      - "mu/gui/routers/sessions.py"
       - "mu/gui/routers/providers.py"
       - "mu/gui/web_ui.py"
+      - "mu/session/context.py"
+      - "mu/session/editor_context.py"
+      - "mu/session/session.py"
       - "mu/session/tools_glue.py"
+      - "tests/test_editor_context.py"
       - "tests/test_nvim_extension_bridge.py"
       - ".github/workflows/neovim-extension.yml"
   pull_request:
     paths:
       - "extensions/mucli.nvim/**"
       - "mu/agent/loop_body.py"
+      - "mu/container/supervisor.py"
+      - "mu/container/worker.py"
       - "mu/gui/routers/extensions.py"
       - "mu/gui/routers/inspector.py"
       - "mu/gui/routers/chat.py"
+      - "mu/gui/routers/sessions.py"
       - "mu/gui/routers/providers.py"
       - "mu/gui/web_ui.py"
+      - "mu/session/context.py"
+      - "mu/session/editor_context.py"
+      - "mu/session/session.py"
       - "mu/session/tools_glue.py"
+      - "tests/test_editor_context.py"
       - "tests/test_nvim_extension_bridge.py"
 
 jobs:
@@ -62,4 +76,7 @@ jobs:
         env:
           PYTHONPATH: .
           MUCLI_HOME: ${{ runner.temp }}/mucli-test
-        run: python -m pytest -q tests/test_nvim_extension_bridge.py
+        run: >-
+          python -m pytest -q
+          tests/test_editor_context.py
+          tests/test_nvim_extension_bridge.py

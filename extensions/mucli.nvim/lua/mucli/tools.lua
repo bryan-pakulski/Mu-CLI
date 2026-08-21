@@ -5,8 +5,11 @@ local util = require("mucli.util")
 M.SYSTEM_PROMPT = [[
 NEOVIM EDITOR BRIDGE
 
-The user is working through a live Neovim client. Editor context in the user
-message may contain unsaved text and is authoritative over the filesystem.
+The user is working through a live Neovim client. The turn-scoped Layer 4
+editor state may contain unsaved text and is authoritative over the filesystem.
+Current editor state supersedes older conversation references to source code.
+Editor tool observations expire after this turn, so read the editor again on a
+later turn instead of relying on an earlier tool result.
 Use nvim_get_buffer before reasoning about an open or modified file. Prefer
 nvim_propose_edit with the returned changedtick when changing an open buffer;
 the user receives a native diff and the accepted edit remains unsaved until
@@ -32,7 +35,12 @@ M.DEFINITIONS = {
   },
   {
     name = "nvim_get_selection",
-    description = "Read the most recent visual selection, including its path and exact line range.",
+    description = "Read the latest explicitly staged or currently active visual selection. Consumed historical selections are never returned.",
+    parameters = { type = "object", properties = {} },
+  },
+  {
+    name = "nvim_get_context_items",
+    description = "Read all current turn-only and pinned Neovim context items, including multiple snippets across files and their stale state.",
     parameters = { type = "object", properties = {} },
   },
   {
@@ -44,7 +52,7 @@ M.DEFINITIONS = {
   },
   {
     name = "nvim_get_workspace_state",
-    description = "Get workspace root, active buffer, cursor, editor mode, attached LSP clients and staged MUCLI context.",
+    description = "Get workspace root, active buffer, exact viewport, cursor, editor mode, attached LSP clients and MUCLI context summaries.",
     parameters = { type = "object", properties = {} },
   },
   {
@@ -181,10 +189,23 @@ function M.get_selection()
   local context = require("mucli.context")
   local selection = context.latest_selection()
   if not selection then return failure("No visual selection is available") end
-  if selection.path and selection.path ~= "" and not path_allowed(selection.path) then
-    return failure("Selection is outside the configured workspace")
+  if selection.path and selection.path ~= "" then
+    local _, err = resolve_path(selection.path)
+    if err then return failure(err) end
   end
   return ok(selection)
+end
+
+function M.get_context_items()
+  local context = require("mucli.context")
+  local payload = context.build()
+  return ok({
+    revision = payload.revision,
+    live = payload.live,
+    turn = payload.turn,
+    pinned = payload.pinned,
+    budget = payload.budget,
+  })
 end
 
 local flatten_symbols
@@ -238,13 +259,18 @@ function M.workspace_state()
   for _, lsp in ipairs(vim.lsp.get_clients({ bufnr = buf })) do clients[#clients + 1] = lsp.name end
   local path = vim.api.nvim_buf_get_name(buf)
   local allowed = path == "" or path_allowed(path)
+  local view = require("mucli.editor").view(win)
   return ok({
     root = util.workspace_root(), active_file = allowed and util.relative(path) or nil,
     active_file_outside_workspace = not allowed,
     cursor = { line = cursor[1], column = cursor[2] }, mode = vim.api.nvim_get_mode().mode,
     filetype = vim.bo[buf].filetype, modified = vim.bo[buf].modified,
     changedtick = vim.api.nvim_buf_get_changedtick(buf), lsp_clients = clients,
-    staged_context = require("mucli.context").summary(),
+    viewport = view and { start_line = view.top_line, end_line = view.bottom_line } or nil,
+    context = {
+      turn = require("mucli.context").summary("turn"),
+      pinned = require("mucli.context").summary("pinned"),
+    },
   })
 end
 
@@ -311,6 +337,7 @@ local handlers = {
   nvim_get_buffer = M.get_buffer,
   nvim_list_buffers = M.list_buffers,
   nvim_get_selection = M.get_selection,
+  nvim_get_context_items = M.get_context_items,
   nvim_get_diagnostics = M.get_diagnostics,
   nvim_get_workspace_state = M.workspace_state,
   nvim_get_document_symbols = M.document_symbols,

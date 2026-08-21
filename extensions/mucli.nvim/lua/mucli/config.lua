@@ -22,12 +22,11 @@ M.defaults = {
   },
   context = {
     automatic = true,
-    cursor_lines = 80,
+    cursor_lines = 80, -- compatibility only; Context v2 uses the visible viewport.
     max_chars = 48000,
     max_file_chars = 24000,
     include_diagnostics = true,
     include_open_buffers = true,
-    clear_staged_after_send = true,
   },
   hints = {
     enabled = true,

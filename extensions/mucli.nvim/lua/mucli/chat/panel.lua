@@ -31,13 +31,7 @@ local function scratch(name, filetype, modifiable)
 end
 
 function M.editor_window()
-  if valid_win(state.editor_win) and not plugin_buffer(vim.api.nvim_win_get_buf(state.editor_win)) then return state.editor_win end
-  local current = vim.api.nvim_get_current_win()
-  if not plugin_buffer(vim.api.nvim_win_get_buf(current)) then state.editor_win = current; return current end
-  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if not plugin_buffer(vim.api.nvim_win_get_buf(win)) then state.editor_win = win; return win end
-  end
-  return nil
+  return require("mucli.editor").window()
 end
 
 local function width()
@@ -72,9 +66,8 @@ function M.refresh()
     vim.wo[state.chat_win].winbar = (" MUCLI  %s %s%s"):format(status_icon(), identity, model)
   end
   if valid_win(state.input_win) then
-    local labels = require("mucli.context").labels()
-    local context = #labels > 0 and ("context: " .. table.concat(labels, " · ")) or "automatic context"
-    vim.wo[state.input_win].winbar = " COMPOSE  " .. context .. "  ·  C-s send  C-a context  C-c stop"
+    local context = require("mucli.context").status()
+    vim.wo[state.input_win].winbar = " COMPOSE  " .. context .. "  ·  C-s send  C-a inspect  C-c stop"
   end
 end
 
@@ -107,7 +100,12 @@ function M.open(focus)
     return
   end
   local current = vim.api.nvim_get_current_win()
-  if not plugin_buffer(vim.api.nvim_win_get_buf(current)) then state.editor_win = current end
+  if not plugin_buffer(vim.api.nvim_win_get_buf(current)) then
+    require("mucli.editor").track(current)
+    state.editor_win = current
+  else
+    state.editor_win = M.editor_window()
+  end
   local opts = config.get().window
   local command = opts.position == "left" and ("topleft %dvnew"):format(width()) or ("botright %dvnew"):format(width())
   vim.cmd(command)
@@ -136,10 +134,11 @@ function M.open(focus)
 end
 
 function M.close()
+  local target = M.editor_window() or state.editor_win
   if valid_win(state.input_win) then pcall(vim.api.nvim_win_close, state.input_win, true) end
   if valid_win(state.chat_win) then pcall(vim.api.nvim_win_close, state.chat_win, true) end
   state.input_win, state.chat_win = nil, nil
-  if valid_win(state.editor_win) then pcall(vim.api.nvim_set_current_win, state.editor_win) end
+  if valid_win(target) then pcall(vim.api.nvim_set_current_win, target) end
 end
 
 function M.toggle()

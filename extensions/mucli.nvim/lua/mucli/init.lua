@@ -100,6 +100,7 @@ function M.setup(opts)
   if vim.fn.has("nvim-0.10") ~= 1 then error("mucli.nvim requires Neovim 0.10+") end
   config.setup(opts)
   require("mucli.session").configure_identity()
+  require("mucli.editor").setup()
   highlights()
   keymaps()
   autocmds()

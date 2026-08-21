@@ -47,13 +47,19 @@ def _run_send(
     lock: threading.Lock,
     busy: threading.Event,
     session_name: str = "",
+    editor_context: Optional[dict[str, Any]] = None,
 ):
     _agent_threads[session_name] = threading.current_thread().ident
     busy.set()
     try:
         with lock:
             try:
-                result = session.send_message(text)
+                if editor_context:
+                    result = session.send_message(
+                        text, editor_context=editor_context
+                    )
+                else:
+                    result = session.send_message(text)
             except KeyboardInterrupt:
                 result = {"status": "interrupted", "error": "User interrupted execution."}
             except Exception as exc:
@@ -271,6 +277,20 @@ async def send_message(request: Request, payload: Dict[str, Any]):
         text = "Please review the attached document(s)."
     if text.startswith("/") and attachments:
         raise HTTPException(status_code=400, detail="attachments cannot be sent with slash commands")
+    if text.startswith("/") and payload.get("editor_context"):
+        raise HTTPException(status_code=400, detail="editor_context cannot be sent with slash commands")
+
+    from mu.session.editor_context import (
+        build_context_receipt,
+        normalise_editor_context,
+    )
+
+    try:
+        editor_context = normalise_editor_context(payload.get("editor_context"))
+    except ValueError as exc:
+        status = 413 if "too large" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    context_receipt = build_context_receipt(editor_context)
     session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
 
     # Commands are deliberately permitted while the model works: they are
@@ -291,7 +311,13 @@ async def send_message(request: Request, payload: Dict[str, Any]):
     # Echo the user's message to the per-session stream so the browser
     # can render it immediately without waiting for the agent loop.
     await bus.publish(
-        {"kind": "user_message", "text": text, "attachments": attachments, "session_name": name}
+        {
+            "kind": "user_message",
+            "text": text,
+            "attachments": attachments,
+            "context_receipt": context_receipt,
+            "session_name": name,
+        }
     )
 
     if text.startswith("/"):
@@ -323,6 +349,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                     model=session.provider.model_name,
                     agent_mode=str(session.variables.get("agent_mode", "default")),
                     system_instruction=session.system_instruction,
+                    editor_context=editor_context,
                     timeout=None,
                 )
                 result = response.get("result") if isinstance(response, dict) else None
@@ -401,12 +428,24 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                 busy.clear()
 
         asyncio.create_task(_drive_container())
-        return {"accepted": True, "kind": "container", "session_name": name}
+        return {
+            "accepted": True,
+            "kind": "container",
+            "session_name": name,
+            "context_receipt": context_receipt,
+        }
 
     lock = request.app.state.session_lock_for(name)
 
     def _run():
-        return _run_send(session, text, lock=lock, busy=busy, session_name=name)
+        return _run_send(
+            session,
+            text,
+            lock=lock,
+            busy=busy,
+            session_name=name,
+            editor_context=editor_context,
+        )
 
     async def _drive():
         try:
@@ -432,7 +471,12 @@ async def send_message(request: Request, payload: Dict[str, Any]):
             )
 
     asyncio.create_task(_drive())
-    return {"accepted": True, "kind": "chat", "session_name": name}
+    return {
+        "accepted": True,
+        "kind": "chat",
+        "session_name": name,
+        "context_receipt": context_receipt,
+    }
 
 
 @router.post("/interrupt")

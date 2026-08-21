@@ -49,6 +49,22 @@ function M.build(state)
         if item.kind == "diff" then actions[activity_line + 1] = function() require("mucli.diff").open_last() end end
       end
       if message.text and message.text ~= "" then append_text(lines, message.text) end
+      if message.context_receipt then
+        local receipt = message.context_receipt
+        local live = receipt.live or {}
+        local path = live.path and live.path ~= "" and live.path or "no live file"
+        local range = live.start_line and (":" .. live.start_line .. "-" .. live.end_line) or ""
+        local receipt_line = #lines
+        lines[#lines + 1] = ("  ◉ context · %s%s · pinned %d · turn %d · ~%d tokens%s"):format(
+          path, range, receipt.pinned_count or 0, receipt.turn_count or 0,
+          receipt.approx_tokens or 0,
+          receipt.truncated and " · truncated" or ""
+        )
+        add_mark(marks, receipt_line, receipt.truncated and "DiagnosticWarn" or "Comment")
+        actions[receipt_line + 1] = function()
+          require("mucli.context_panel").inspect_receipt(receipt)
+        end
+      end
     end
   end
   if state.busy then

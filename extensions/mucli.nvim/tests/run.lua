@@ -33,7 +33,6 @@ require("mucli.config").setup({
   auto_connect = false,
   session = "nvim-tests",
   workspace = { root = root },
-  context = { clear_staged_after_send = true },
 })
 
 test("SSE parser handles fragmented CRLF events", function()
@@ -177,6 +176,18 @@ test("conversation store streams one assistant turn", function()
   eq(store.state.busy, true)
   store.handle({ kind = "command_result", result = { ok = true } })
   eq(store.state.busy, false)
+
+  store.reset()
+  store.add_local_user("Explain this", "Explain this", {
+    context_receipt = { revision = "local" },
+  })
+  store.handle({
+    kind = "user_message", text = "Explain this",
+    context_receipt = { revision = "server" },
+  })
+  eq(#store.state.messages, 1)
+  eq(store.state.messages[1].context_receipt.revision, "server")
+  eq(store.state.pending_echoes["Explain this"], nil)
 end)
 
 test("editor intelligence requests stay out of chat history", function()
@@ -207,7 +218,7 @@ test("editor intelligence requests stay out of chat history", function()
   eq(store.state.busy, false)
 end)
 
-test("staged context survives failed sends and clears after acceptance", function()
+test("turn context is structured, survives failure, and clears after acceptance", function()
   local client = require("mucli.client")
   local context = require("mucli.context")
   local conversation = require("mucli.conversation")
@@ -220,13 +231,22 @@ test("staged context survives failed sends and clears after acceptance", functio
     type = "file", path = root .. "/retry.lua", relative_path = "retry.lua",
     content = "return true", filetype = "lua", changedtick = 1,
   })
-  client.post = function(_, _, callback) callback({ ok = false, error = "offline" }) end
+  local captured
+  client.post = function(path, body, callback)
+    captured = { path = path, body = body }
+    callback({ ok = false, error = "offline" })
+  end
   truthy(conversation.send("First attempt", { open_panel = false }))
-  eq(#context.items, 1)
+  eq(captured.body.text, "First attempt")
+  eq(captured.body.editor_context.turn[1].content, "return true")
+  truthy(not captured.body.text:match("MUCLI editor context"))
+  eq(#context.turn_items, 1)
+  eq(#store.state.messages, 0)
+  eq(store.state.pending_echoes["First attempt"], nil)
 
   client.post = function(_, _, callback) callback({ ok = true, json = { accepted = true } }) end
   truthy(conversation.send("Retry", { open_panel = false }))
-  eq(#context.items, 0)
+  eq(#context.turn_items, 0)
   client.post = original_post
 end)
 
@@ -268,9 +288,9 @@ test("choice prompts support multi-select and quiz payloads", function()
   eq(answers[2].body.answers, { one = "A", two = "typed answer" })
 end)
 
-test("exact visual selection and staged-count metadata are preserved", function()
+test("exact visual selection is turn scoped and never leaks after consumption", function()
   local context = require("mucli.context")
-  context.items = {}
+  context.clear()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_name(buf, root .. "/selection_fixture.lua")
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "alpha beta gamma", "second" })
@@ -279,13 +299,112 @@ test("exact visual selection and staged-count metadata are preserved", function(
   vim.fn.setpos("'>", { buf, 1, 10, 0 })
   local selection = context.capture_selection()
   eq(selection.content, "beta")
-  context.stage(selection)
-  local _, metadata = context.compose("question")
-  eq(metadata.staged_count, 1)
-  eq(#context.items, 1)
-  context.consume(metadata.staged_ids)
-  eq(#context.items, 0)
-  eq(context.latest_selection().content, "beta")
+  context.stage(selection, "turn")
+  local payload, metadata = context.build()
+  eq(#payload.turn, 1)
+  eq(payload.turn[1].content, "beta")
+  eq(#context.turn_items, 1)
+  context.consume(metadata.turn_ids)
+  eq(#context.turn_items, 0)
+  eq(context.latest_selection(), nil)
+
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "alpha λ omega" })
+  vim.fn.setpos("'<", { buf, 1, 7, 0 })
+  vim.fn.setpos("'>", { buf, 1, 7, 0 })
+  eq(context.capture_selection().content, "λ")
+end)
+
+test("multiple pinned snippets span buffers and survive turn consumption", function()
+  local context = require("mucli.context")
+  context.clear()
+  local first = vim.api.nvim_create_buf(true, false)
+  local second = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(first, root .. "/multi_first.lua")
+  vim.api.nvim_buf_set_name(second, root .. "/multi_second.lua")
+  vim.api.nvim_buf_set_lines(first, 0, -1, false, { "first one", "first two" })
+  vim.api.nvim_buf_set_lines(second, 0, -1, false, { "second one", "second two" })
+  context.stage(context.capture_selection(1, 1, first), "pinned")
+  context.stage(context.capture_selection(2, 2, second), "pinned")
+  context.stage(context.capture_selection(2, 2, first), "turn")
+
+  local payload, metadata = context.build()
+  eq(#payload.pinned, 2)
+  eq(payload.pinned[1].content, "first one")
+  eq(payload.pinned[2].content, "second two")
+  eq(#payload.turn, 1)
+
+  context.consume(metadata.turn_ids)
+  eq(#context.turn_items, 0)
+  eq(#context.pinned_items, 2)
+  eq(#require("mucli.tools").get_context_items().data.pinned, 2)
+  local latest = require("mucli.tools").get_selection().data
+  eq(latest.path, "multi_second.lua")
+  eq(latest._buf, nil)
+end)
+
+test("pinned extmarks follow edits and report stale source", function()
+  local context = require("mucli.context")
+  context.clear()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(buf, root .. "/anchor_fixture.lua")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "target", "three" })
+  context.stage(context.capture_selection(2, 2, buf), "pinned")
+  vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "inserted" })
+  local payload = context.build()
+  eq(payload.pinned[1].start_line, 3)
+  eq(payload.pinned[1].content, "target")
+  eq(payload.pinned[1].stale, true)
+end)
+
+test("live context follows the current editor window and visible viewport", function()
+  local context = require("mucli.context")
+  local editor = require("mucli.editor")
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(buf, root .. "/live_view.lua")
+  local lines = {}
+  for index = 1, 120 do lines[index] = "line " .. index end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_set_current_buf(buf)
+  vim.api.nvim_win_set_cursor(0, { 80, 0 })
+  vim.cmd("normal! zt")
+  editor.track(vim.api.nvim_get_current_win())
+  local payload = context.build()
+  eq(payload.live.path, "live_view.lua")
+  eq(payload.live.cursor.line, 80)
+  truthy(payload.live.viewport.start_line <= 80)
+  truthy(payload.live.viewport.end_line >= 80)
+  truthy(payload.live.viewport.end_line - payload.live.viewport.start_line < 120)
+end)
+
+test("context budget protects turn context and live viewport before pins", function()
+  local cfg = require("mucli.config").get()
+  local context = require("mucli.context")
+  local editor = require("mucli.editor")
+  local previous_max = cfg.context.max_chars
+  context.clear()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(buf, root .. "/budget_fixture.lua")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "LIVE" })
+  vim.api.nvim_set_current_buf(buf)
+  editor.track(vim.api.nvim_get_current_win())
+  context.stage({
+    type = "selection", path = root .. "/turn_budget.lua",
+    relative_path = "turn_budget.lua", start_line = 1, end_line = 1,
+    content = "T",
+  }, "turn")
+  context.stage({
+    type = "selection", path = root .. "/pin_budget.lua",
+    relative_path = "pin_budget.lua", start_line = 1, end_line = 1,
+    content = "PIN",
+  }, "pinned")
+  cfg.context.max_chars = 5
+  local ok, payload = pcall(context.build)
+  cfg.context.max_chars = previous_max
+  if not ok then error(payload) end
+  eq(payload.turn[1].content, "T")
+  eq(payload.live.viewport.content, "LIVE")
+  eq(payload.pinned[1].content, "")
+  eq(payload.budget.truncated, true)
 end)
 
 test("editor buffer tool returns changedtick and blocks outside paths", function()
@@ -359,7 +478,9 @@ test("plugin command surface loads on Neovim 0.10+", function()
   vim.cmd("runtime plugin/mucli.lua")
   for _, name in ipairs({
     "Mucli", "MucliAsk", "MucliActions", "MucliReview", "MucliComplete",
-    "MucliContext", "MucliDiff", "MucliInterrupt", "MucliHealth",
+    "MucliContext", "MucliContextAdd", "MucliContextInspect",
+    "MucliContextClearTurn", "MucliContextClearPinned", "MucliDiff",
+    "MucliInterrupt", "MucliHealth",
   }) do
     eq(vim.fn.exists(":" .. name), 2, name .. " was not registered")
   end

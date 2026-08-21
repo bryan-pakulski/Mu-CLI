@@ -40,7 +40,8 @@ local function history_text(role, text)
   if role == "user" then
     -- Live context is transport data, not part of the user's visible message.
     -- Keep history hydration as clean as the optimistic local echo.
-    text = text:match("^(.-)\n\n## MUCLI editor context") or text
+    local marker = text:find("## MUCLI editor context", 1, true)
+    if marker then text = text:sub(1, marker - 1):gsub("%s+$", "") end
   end
   return text
 end
@@ -82,10 +83,34 @@ function M.add_message(role, text, extra)
   return message
 end
 
-function M.add_local_user(display_text, wire_text)
+function M.add_local_user(display_text, wire_text, extra)
   wire_text = wire_text or display_text
   M.state.pending_echoes[wire_text] = (M.state.pending_echoes[wire_text] or 0) + 1
-  return M.add_message("user", display_text)
+  return M.add_message("user", display_text, vim.tbl_extend("force", extra or {}, {
+    _wire_text = wire_text,
+    _pending_echo = true,
+  }))
+end
+
+function M.reject_local_user(message)
+  if type(message) ~= "table" or not message._pending_echo then return false end
+  local wire = tostring(message._wire_text or message.text or "")
+  local count = M.state.pending_echoes[wire] or 0
+  M.state.pending_echoes[wire] = count <= 1 and nil or count - 1
+  for index, current in ipairs(M.state.messages) do
+    if current == message then
+      table.remove(M.state.messages, index)
+      changed()
+      return true
+    end
+  end
+  return false
+end
+
+function M.accept_local_user(message, receipt)
+  if type(message) ~= "table" or type(receipt) ~= "table" then return end
+  message.context_receipt = receipt
+  changed()
 end
 
 local function assistant(turn_id)
@@ -124,10 +149,19 @@ function M.handle(event)
     local count = M.state.pending_echoes[text] or 0
     if count > 0 then
       M.state.pending_echoes[text] = count == 1 and nil or count - 1
+      for _, message in ipairs(M.state.messages) do
+        if message.role == "user" and message._pending_echo
+          and message._wire_text == text then
+          message._pending_echo = false
+          message.context_receipt = event.context_receipt or message.context_receipt
+          break
+        end
+      end
     else
-      M.add_message("user", text)
+      M.add_message("user", text, { context_receipt = event.context_receipt })
     end
     M.state.busy = true
+    changed()
   elseif kind == "assistant_start" then
     assistant(event.turn_id)
     M.state.busy = true
@@ -183,7 +217,7 @@ function M.load_history(payload)
   if type(payload) ~= "table" or type(payload.turns) ~= "table" then return end
   local messages = {}
   for _, turn in ipairs(payload.turns) do
-    local chunks, activities, thinking = {}, {}, {}
+    local chunks, activities, thinking, context_receipt = {}, {}, {}, nil
     for _, part in ipairs(turn.parts or {}) do
       if part.type == "text" then
         chunks[#chunks + 1] = tostring(part.text or "")
@@ -198,6 +232,15 @@ function M.load_history(payload)
       elseif part.type == "attachment" then
         local attachment = part.attachment or {}
         activities[#activities + 1] = { kind = "artifact", label = attachment.name or "Attachment", detail = attachment }
+      elseif part.type == "editor_context_receipt" then
+        context_receipt = part.receipt
+      elseif part.type == "editor_tool_receipt" then
+        local count = tonumber(part.count) or #(part.tools or {})
+        activities[#activities + 1] = {
+          kind = "result",
+          label = ("%d editor observation(s) expired"):format(count),
+          detail = part.tools,
+        }
       end
     end
     if #chunks > 0 or #activities > 0 then
@@ -206,6 +249,7 @@ function M.load_history(payload)
         text = history_text(turn.role, table.concat(chunks, "\n\n")),
         thinking = table.concat(thinking, "\n"),
         activities = activities,
+        context_receipt = context_receipt,
       }
     end
   end

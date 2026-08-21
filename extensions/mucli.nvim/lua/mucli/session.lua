@@ -6,7 +6,7 @@ local store = require("mucli.store")
 local util = require("mucli.util")
 
 M.EXTENSION_ID = "neovim"
-M.VERSION = "2.0.0"
+M.VERSION = "2.1.0"
 M.client_id = nil
 M.heartbeat = nil
 M.registered_session = nil
@@ -169,7 +169,8 @@ function M.register(callback)
     capabilities = {
       "chat", "context", "diagnostics", "diff_review", "inline_hints",
       "inline_completion", "unsaved_buffers", "ephemeral_requests",
-      "interactive_prompts",
+      "interactive_prompts", "structured_context_v2", "context_receipts",
+      "multi_context", "viewport_context",
     },
   }
   client.post("/api/extensions/register", body, function(response)

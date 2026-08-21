@@ -96,7 +96,11 @@ function M.reject_local_user(message)
   if type(message) ~= "table" or not message._pending_echo then return false end
   local wire = tostring(message._wire_text or message.text or "")
   local count = M.state.pending_echoes[wire] or 0
-  M.state.pending_echoes[wire] = count <= 1 and nil or count - 1
+  if count <= 1 then
+    M.state.pending_echoes[wire] = nil
+  else
+    M.state.pending_echoes[wire] = count - 1
+  end
   for index, current in ipairs(M.state.messages) do
     if current == message then
       table.remove(M.state.messages, index)
@@ -148,7 +152,11 @@ function M.handle(event)
     local text = tostring(event.text or "")
     local count = M.state.pending_echoes[text] or 0
     if count > 0 then
-      M.state.pending_echoes[text] = count == 1 and nil or count - 1
+      if count == 1 then
+        M.state.pending_echoes[text] = nil
+      else
+        M.state.pending_echoes[text] = count - 1
+      end
       for _, message in ipairs(M.state.messages) do
         if message.role == "user" and message._pending_echo
           and message._wire_text == text then

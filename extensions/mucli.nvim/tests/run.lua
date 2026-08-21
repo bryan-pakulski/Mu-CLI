@@ -241,7 +241,8 @@ test("turn context is structured, survives failure, and clears after acceptance"
   eq(captured.body.editor_context.turn[1].content, "return true")
   truthy(not captured.body.text:match("MUCLI editor context"))
   eq(#context.turn_items, 1)
-  eq(#store.state.messages, 0)
+  eq(#store.state.messages, 1)
+  eq(store.state.messages[1].role, "error")
   eq(store.state.pending_echoes["First attempt"], nil)
 
   client.post = function(_, _, callback) callback({ ok = true, json = { accepted = true } }) end

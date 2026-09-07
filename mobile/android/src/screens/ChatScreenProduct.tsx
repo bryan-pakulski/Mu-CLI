@@ -14,7 +14,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import Markdown from 'react-native-markdown-display';
+import MarkdownRenderer from 'react-native-markdown-display';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
@@ -44,6 +44,10 @@ import {
  * brings mobile presentation in line with the reviewed web UI: flat transcript,
  * compact interim disclosures and one glass composer pane with utilities outside.
  */
+// Completed messages keep their parsed Markdown while new tokens arrive in
+// another row. Streaming messages still use the lightweight Text path.
+const Markdown = React.memo(MarkdownRenderer);
+
 export function ChatScreenProduct() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -309,6 +313,7 @@ export function ChatScreenProduct() {
     ),
   }), [colors]);
   const mdStyles = useMemo(() => markdownStyles(colors), [colors]);
+  const compactMdStyles = useMemo(() => compactMarkdownStyles(colors), [colors]);
 
   const renderAssistantBody = useCallback((message: ChatMessage, compact = false) => {
     if (message.streaming) {
@@ -319,11 +324,11 @@ export function ChatScreenProduct() {
       );
     }
     return (
-      <Markdown style={compact ? compactMarkdownStyles(colors) : mdStyles} rules={markdownRules} onLinkPress={handleMarkdownLinkPress}>
+      <Markdown style={compact ? compactMdStyles : mdStyles} rules={markdownRules} onLinkPress={handleMarkdownLinkPress}>
         {message.text}
       </Markdown>
     );
-  }, [colors, markdownRules, mdStyles]);
+  }, [colors, compactMdStyles, handleMarkdownLinkPress, markdownRules, mdStyles]);
 
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     if (item.role === 'visualization' && item.artifact && activeSessionName) {
@@ -895,7 +900,7 @@ const styles = StyleSheet.create({
   utilityIconButton: { width: 34, height: 30, alignItems: 'center', justifyContent: 'center' },
   composerPane: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, padding: 5, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14 },
   composerIconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 1 },
-  input: { flex: 1, borderWidth: 0, paddingHorizontal: 7, paddingVertical: 8, maxHeight: 130, minHeight: 40, fontSize: 15, lineHeight: 22 },
+  input: { flex: 1, borderWidth: 0, paddingHorizontal: 7, paddingVertical: 8, maxHeight: 130, minHeight: 40, fontSize: 15, lineHeight: 22, textAlignVertical: 'top' },
   sendButton: { width: 36, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 1 },
   selectedAttachments: { paddingHorizontal: 2, paddingBottom: 7, gap: 6 },
   selectedAttachment: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 5, paddingHorizontal: 8, paddingVertical: 5 },

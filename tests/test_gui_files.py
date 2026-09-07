@@ -430,7 +430,9 @@ def test_todos_are_not_offered_as_a_separate_view():
     assert "$store.mode.setView('loop'); open = false" not in index
     assert 'class="todo-field"' not in index
     assert 'Alpine.store("loop").load();' in js
-    assert 'setInterval(() => Alpine.store("loop").load(), 5000)' in js
+    # The todo snapshot still refreshes independently of the active view;
+    # background tabs now pause polling and refresh when made visible.
+    assert "pollVisible('loop', 5000)" in js
 
 
 def test_shell_animates_side_panels_and_centers_settings_modal():

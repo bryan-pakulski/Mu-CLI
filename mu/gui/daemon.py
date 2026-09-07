@@ -42,6 +42,53 @@ def log_file() -> Path:
     return _home() / "logs" / "gui.log"
 
 
+def _procfs_uses_local_pids() -> bool:
+    """A container can inherit procfs mounted in an ancestor PID namespace."""
+    try:
+        return int(os.readlink("/proc/self")) == os.getpid()
+    except (OSError, ValueError):
+        return False
+
+
+def _pid_in_current_namespace(proc_pid: int) -> int | None:
+    """Translate a procfs PID only when it belongs to our PID namespace.
+
+    Sibling containers can reuse the same inner PID, so NSpid alone is
+    insufficient: the namespace identity must match before using that PID
+    with kill(). Unreadable or incomplete metadata must fail closed.
+    """
+    try:
+        namespace = os.readlink("/proc/self/ns/pid")
+        if os.readlink(f"/proc/{proc_pid}/ns/pid") != namespace:
+            return None
+        with open(f"/proc/{proc_pid}/status") as fh:
+            for line in fh:
+                if line.startswith("NSpid:"):
+                    pids = [int(value) for value in line.split()[1:]]
+                    if pids and pids[0] == proc_pid and pids[-1] > 0:
+                        return pids[-1]
+                    return None
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _procfs_pid(pid: int) -> int | None:
+    """Resolve a local PID to a procfs directory without crossing namespaces."""
+    if pid <= 0:
+        return None
+    if _procfs_uses_local_pids():
+        return pid
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    for entry in entries:
+        if entry.isdigit() and _pid_in_current_namespace(int(entry)) == pid:
+            return int(entry)
+    return None
+
+
 def _cmdline_is_mucli(pid: int) -> bool | None:
     """Round-27 F1: does the target's command line look like mucli?
 
@@ -51,8 +98,11 @@ def _cmdline_is_mucli(pid: int) -> bool | None:
     avoid SIGTERM/SIGKILL-ing an unrelated process after PID reuse or
     when the port fallback resolves a foreign listener.
     """
+    proc_pid = _procfs_pid(pid)
+    if proc_pid is None:
+        return None
     try:
-        with open("/proc/%d/cmdline" % pid, "rb") as fh:
+        with open("/proc/%d/cmdline" % proc_pid, "rb") as fh:
             raw = fh.read()
     except (OSError, ValueError):
         return None
@@ -145,6 +195,7 @@ def pid_for_port(port: int) -> int | None:
     if not inodes:
         return None
     self_pid = os.getpid()
+    local_pids = _procfs_uses_local_pids()
     try:
         entries = os.listdir("/proc")
     except OSError:
@@ -152,10 +203,11 @@ def pid_for_port(port: int) -> int | None:
     for entry in entries:
         if not entry.isdigit():
             continue
-        pid = int(entry)
-        if pid == self_pid:
+        proc_pid = int(entry)
+        pid = proc_pid if local_pids else _pid_in_current_namespace(proc_pid)
+        if pid is None or pid == self_pid:
             continue
-        fd_dir = f"/proc/{pid}/fd"
+        fd_dir = f"/proc/{proc_pid}/fd"
         try:
             fds = os.listdir(fd_dir)
         except OSError:

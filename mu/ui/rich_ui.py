@@ -904,6 +904,7 @@ class _GenerationLive:
         self._lock = threading.Lock()
         self._watcher_stop = threading.Event()
         self._watcher = None
+        self._spinner = Spinner("dots")
 
     # ---------------------------------------------------------- lifecycle
 
@@ -918,7 +919,7 @@ class _GenerationLive:
         # rich Markdown (otherwise `**bold**` / headers / code fences
         # would land in scrollback as raw markdown characters).
         self._live = Live(
-            self._render(),
+            get_renderable=self._render,
             console=self.ui.console,
             refresh_per_second=10,
             transient=True,
@@ -984,32 +985,22 @@ class _GenerationLive:
     def append_text(self, text: str) -> None:
         with self._lock:
             self._text_buf.append(text)
-        self._refresh()
 
     def append_thinking(self, text: str) -> None:
         with self._lock:
             self._thinking_buf.append(text)
-        self._refresh()
 
     def note_tool_call(self, tool_name: str) -> None:
         with self._lock:
             self._tool_call_log.append(str(tool_name or ""))
-        self._refresh()
 
     def update(self, new_message: str) -> None:
         """Compat with the old `console.status` API + the YOLO watcher."""
         self._status_message = str(new_message or "")
-        self._refresh()
 
     # ------------------------------------------------- render
 
-    def _refresh(self) -> None:
-        if self._live is not None:
-            try:
-                self._live.update(self._render())
-            except Exception:
-                pass
-
+    # Live pulls the buffer at 10 Hz; token producers never rebuild it.
     def _render(self, *, final: bool = False):
         with self._lock:
             text = "".join(self._text_buf)
@@ -1028,6 +1019,6 @@ class _GenerationLive:
         # scrollback, so including the footer here leaks a duplicate
         # "Generating ... it N/1000 | ..." stub on every turn.
         if not final and self._status_message:
-            spinner = Spinner("dots", text=Text(f" {self._status_message}", style="dim"))
-            parts.append(spinner)
+            self._spinner.text = Text(f" {self._status_message}", style="dim")
+            parts.append(self._spinner)
         return Group(*parts) if parts else Text("")

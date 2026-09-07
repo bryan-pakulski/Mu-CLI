@@ -57,17 +57,11 @@
     }
 
     function preserveOverlayGeometry() {
-        const overlays = [
-            ['.product-app > .inspector-backdrop', 120],
-            ['.product-app > .file-browser-backdrop', 220],
-            ['.product-app > .modal-backdrop', 240],
-        ];
-        for (const [selector, zIndex] of overlays) {
-            document.querySelectorAll(selector).forEach(node => {
-                node.style.position = 'fixed';
-                node.style.zIndex = String(zIndex);
-            });
-        }
+        // Teleported overlays are direct body children. Preserve viewport
+        // positioning without replacing their shared CSS stacking order.
+        document.querySelectorAll('.inspector-backdrop,.file-browser-backdrop,.modal-backdrop').forEach(node => {
+            node.style.position = 'fixed';
+        });
     }
 
     function refineComposerGeometry() {
@@ -79,7 +73,12 @@
         toolbar.style.removeProperty('bottom');
         toolbar.style.removeProperty('gap');
         const composer = toolbar.closest('.composer');
-        if (composer) composer.style.removeProperty('padding-top');
+        if (composer) {
+            composer.style.removeProperty('padding-top');
+            const updateHeight = () => composer.parentElement.style.setProperty('--composer-height', `${composer.offsetHeight}px`);
+            updateHeight();
+            if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateHeight).observe(composer);
+        }
         const value = toolbar.querySelector('.composer-mode-pill .value');
         if (value) value.style.textTransform = 'capitalize';
     }
@@ -125,13 +124,16 @@
         const viewportHeight = viewport ? viewport.height : window.innerHeight;
         const viewportRight = viewportLeft + viewportWidth;
         const viewportBottom = viewportTop + viewportHeight;
-        const viewportMaxWidth = Math.max(220, viewportWidth - FLOAT_MARGIN * 2);
+        const viewportMaxWidth = Math.max(1, viewportWidth - FLOAT_MARGIN * 2);
         const effectiveMaxWidth = Math.min(profile.maxWidth, viewportMaxWidth);
         const effectiveMinWidth = Math.min(profile.minWidth, effectiveMaxWidth);
         const naturalWidth = Math.max(layerRect.width || 0, layer.scrollWidth || 0, effectiveMinWidth);
         const width = clamp(naturalWidth, effectiveMinWidth, effectiveMaxWidth);
 
-        const naturalHeight = Math.max(layerRect.height || 0, layer.scrollHeight || 0);
+        // Constrain width before measuring height: wrapped labels may make
+        // the menu taller on phones or under browser zoom.
+        layer.style.width = `${Math.round(width)}px`;
+        const naturalHeight = layer.scrollHeight;
         const roomAbove = anchorRect.top - viewportTop - FLOAT_MARGIN;
         const roomBelow = viewportBottom - anchorRect.bottom - FLOAT_MARGIN;
         const preferAbove = roomAbove >= Math.min(naturalHeight + FLOAT_GAP, 340) || roomAbove > roomBelow;
@@ -166,7 +168,14 @@
         const anchor = wrapper.querySelector(anchorSelector);
         if (!layer || !anchor) return;
 
-        const reposition = () => requestAnimationFrame(() => positionFloatingLayer(layer, anchor));
+        let frame = 0;
+        const reposition = () => {
+            if (frame) return;
+            frame = requestAnimationFrame(() => {
+                frame = 0;
+                positionFloatingLayer(layer, anchor);
+            });
+        };
         anchor.addEventListener('click', reposition);
         window.addEventListener('resize', reposition, { passive: true });
         if (window.visualViewport) {
@@ -174,6 +183,8 @@
             window.visualViewport.addEventListener('scroll', reposition, { passive: true });
         }
         document.addEventListener('scroll', reposition, { passive: true, capture: true });
+        // x-show changes style without necessarily resizing the anchor. A
+        // ResizeObserver also covers content arriving after the menu opens.
         if (typeof ResizeObserver !== 'undefined') new ResizeObserver(reposition).observe(layer);
     }
 

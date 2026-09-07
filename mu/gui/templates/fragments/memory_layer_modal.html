@@ -1,15 +1,17 @@
+<template x-teleport="body">
 <!-- Layer-content modal for the Context Observatory. Clicking a layer in the
      legend opens this overlay with the actual text the harness injects for
      that layer, shown as selectable + copyable preformatted text (the
      model's real view — the assembled system prompt for L0, the rendered
      conversation for L5, workspace files for L1, etc.). Lives outside the
      panel's x-show so it stays open even if the panel view changes. -->
-<div class="modal-backdrop"
-     x-show="$store.memory.layerModal.open"
+<div class="modal-backdrop" aria-label="Context layer"
+     x-dialog="$store.memory.layerModal.open"
+         x-show="$store.memory.layerModal.open"
      x-cloak
      x-transition.opacity.duration.150ms
      @click.self="$store.memory.closeLayer()"
-     @keydown.escape.window="$store.memory.layerModal.open && $store.memory.closeLayer()">
+     @dialog-close="$store.memory.layerModal.open && $store.memory.closeLayer()">
     <div class="modal modal-lg memory-layer-modal">
         <div class="modal-head">
             <div class="memory-layer-heading">
@@ -52,3 +54,5 @@
         </div>
     </div>
 </div>
+
+</template>

@@ -6,8 +6,8 @@ from rich.errors import MarkupError
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.panel import Panel
+from rich.text import Text
 
-from utils.helpers import safe_markup
 
 console = Console()
 
@@ -88,35 +88,35 @@ def render_response(text):
                 flags=re.MULTILINE,
             )
 
-        if title:
-            console.print(f"[bold cyan]### {safe_markup(title)}[/bold cyan]")
-        console.print(
-            f" [bold cyan]┌── {lang} ─────────────────────────────────[/bold cyan]"
-        )
         syntax = Syntax(
             content,
             lang,
             theme="monokai",
             background_color=None,
-            word_wrap=False,
+            word_wrap=True,
             padding=0,
         )
-        console.print(syntax)
         console.print(
-            " [bold cyan]└────────────────────────────────────────────[/bold cyan]"
+            Panel(
+                syntax,
+                title=Text(title or lang),
+                title_align="left",
+                border_style="dim cyan",
+                padding=(0, 1),
+            )
         )
 
     for part in parts:
         if not part.strip():
             continue
 
-        if part.startswith("``````"):
+        if part.startswith("```"):
             lines = part.split("\n")
             lang = lines[0].strip("`").strip() or "text"
             content = "\n".join(lines[1:-1])
             print_code_panel(content, lang)
 
-        elif part.startswith("<file_"):
+        elif part.startswith(("<file_", "<new_file")):
             tag_match = re.match(
                 r"<(file_change|file_content|new_file)\s+path='([^']+)'>([\s\S]*?)</\1>",
                 part,

@@ -59,12 +59,13 @@
         const viewportHeight = Math.max(1, viewport ? viewport.height : document.documentElement.clientHeight);
         const viewportRight = viewportLeft + viewportWidth;
         const viewportBottom = viewportTop + viewportHeight;
-        const widthLimit = Math.max(120, viewportWidth - MARGIN * 2);
+        const widthLimit = Math.max(1, viewportWidth - MARGIN * 2);
         const desiredWidth = settings.align === 'stretch'
             ? Math.max(anchorRect.width, layer.scrollWidth)
             : Math.max(measured.width, layer.scrollWidth, settings.min);
         const width = clamp(desiredWidth, Math.min(settings.min, widthLimit), Math.min(settings.max, widthLimit));
-        const naturalHeight = Math.max(measured.height, layer.scrollHeight);
+        layer.style.width = `${Math.round(width)}px`;
+        const naturalHeight = layer.scrollHeight;
         const above = Math.max(0, anchorRect.top - viewportTop - MARGIN - GAP);
         const below = Math.max(0, viewportBottom - anchorRect.bottom - MARGIN - GAP);
         const placeAbove = above > below;
@@ -96,7 +97,13 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         schedule();
-        new MutationObserver(schedule).observe(document.body, {
+        new MutationObserver(records => {
+            // Streaming text changes throughout the page. Only menu content
+            // or menu insertion/removal needs a fresh geometry pass.
+            if (records.some(record => record.target.closest?.(SELECTOR) ||
+                [...record.addedNodes, ...record.removedNodes].some(node =>
+                    node.nodeType === 1 && (node.matches(SELECTOR) || node.querySelector(SELECTOR))))) schedule();
+        }).observe(document.body, {
             subtree: true,
             childList: true,
         });

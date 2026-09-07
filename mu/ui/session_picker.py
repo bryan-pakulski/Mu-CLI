@@ -104,6 +104,7 @@ def run_interactive_picker(
         ("quit", None)        — Ctrl-C / q
     """
     from prompt_toolkit.application import Application
+    from prompt_toolkit.data_structures import Point
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import Layout
@@ -125,6 +126,11 @@ def run_interactive_picker(
                 label = str(item)
                 style = "class:current bold" if is_current else ""
             lines.append((style, f"{cursor_marker}{label}\n"))
+
+        return FormattedText(lines)
+
+    def _footer() -> FormattedText:
+        lines: list = []
 
         if state.pending_delete:
             lines.append(("", "\n"))
@@ -227,8 +233,13 @@ def run_interactive_picker(
         event.app.exit(result=("quit", None))
 
     body = Window(
-        FormattedTextControl(_render, focusable=True, show_cursor=False),
+        FormattedTextControl(
+            _render, focusable=True, show_cursor=False,
+            get_cursor_position=lambda: Point(x=0, y=state.cursor),
+        ),
         always_hide_cursor=True,
+        wrap_lines=False,
+        allow_scroll_beyond_bottom=False,
     )
     title = Window(
         FormattedTextControl(
@@ -238,7 +249,8 @@ def run_interactive_picker(
         ),
         height=1,
     )
-    layout = Layout(HSplit([title, body]))
+    footer = Window(FormattedTextControl(_footer), height=3, wrap_lines=True)
+    layout = Layout(HSplit([title, body, footer]), focused_element=body)
 
     from prompt_toolkit.styles import Style
 

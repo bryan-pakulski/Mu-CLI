@@ -80,8 +80,8 @@ def _init_windows():
 def set_os_thread_name(name: str) -> bool:
     """Set the OS-level name of the current thread.
 
-    On Linux the name is truncated to 15 characters (the kernel limit).
-    On macOS the limit is ~63 characters.  On Windows there is no
+    On Linux the name is truncated to 15 UTF-8 bytes (the kernel limit).
+    On macOS the limit is 63 UTF-8 bytes.  On Windows there is no
     practical limit.
 
     Returns True if the call succeeded (or was a no-op), False if it
@@ -100,8 +100,9 @@ def set_os_thread_name(name: str) -> bool:
         pthread_self.restype = ctypes.c_ulong
         pthread_self.argtypes = []
         tid = pthread_self()
-        # 15-char limit including NUL → 15 usable chars
-        truncated = name[:15].encode("utf-8", errors="replace")
+        # Leave room for the NUL byte and avoid splitting a UTF-8 character.
+        truncated = name.encode("utf-8", errors="replace")[:15]
+        truncated = truncated.decode("utf-8", errors="ignore").encode("utf-8")
         try:
             rc = _PTHREAD_SETNAME_NP(tid, truncated)
             if rc != 0:
@@ -117,7 +118,8 @@ def set_os_thread_name(name: str) -> bool:
         if not _PTHREAD_LIB or not _PTHREAD_SETNAME_NP:
             return False
         # macOS: pthread_setname_np(const char*) — sets name of current thread
-        truncated = name[:63].encode("utf-8", errors="replace")
+        truncated = name.encode("utf-8", errors="replace")[:63]
+        truncated = truncated.decode("utf-8", errors="ignore").encode("utf-8")
         try:
             rc = _PTHREAD_SETNAME_NP(truncated)
             if rc != 0:

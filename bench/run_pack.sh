@@ -170,6 +170,7 @@ mkdir -p bench/results
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="bench/results/run-$STAMP"
 mkdir -p "$OUT"
+SOURCE_ARCHIVE="$OUT/mucli-source.tar.gz"
 
 PROVENANCE_ARGS=()
 if [ -n "$PREPARED_MANIFEST" ]; then
@@ -185,8 +186,11 @@ python3 bench/write_tb_provenance.py \
   --setup-allowance-seconds "$SETUP_TIMEOUT_SEC" \
   --outer-cleanup-margin-seconds "$OUTER_CLEANUP_MARGIN_SEC" \
   --run-label "$RUN_LABEL" \
+  --source-archive "$SOURCE_ARCHIVE" \
   "${PROVENANCE_ARGS[@]}" \
   "${TASKS[@]}"
+SOURCE_ARCHIVE="$(realpath "$SOURCE_ARCHIVE")"
+SOURCE_ARCHIVE_SHA256="$(sha256sum "$SOURCE_ARCHIVE" | awk '{print $1}')"
 
 echo "== MuCLI benchmark pack -> $OUT =="
 echo "   attempts per task: $ATTEMPTS; execution timing excludes agent setup"
@@ -226,7 +230,9 @@ PY
     --global-agent-timeout-sec "$outer_timeout" \
     --agent-kwarg "execution_timeout_sec=$execution_timeout" \
     --agent-kwarg "setup_timeout_sec=$SETUP_TIMEOUT_SEC" \
-    --agent-kwarg "benchmark_prompt=verify-v1" \
+    --agent-kwarg "benchmark_prompt=verify-v4" \
+    --agent-kwarg "source_archive_path=$SOURCE_ARCHIVE" \
+    --agent-kwarg "source_archive_sha256=$SOURCE_ARCHIVE_SHA256" \
     "${BUILD_ARGS[@]}" \
     "${EXTRA[@]}"; then
     echo "   (harness failed for $task — see $OUT/$task)" >&2

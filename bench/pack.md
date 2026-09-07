@@ -35,6 +35,34 @@ failures are valid benchmark outcomes and remain in the score.
 
 ## C. Running Terminal-Bench
 
+The supported entry point is one script. With no arguments it runs the full
+10-task MuCLI pack with three attempts per task—the minimum comparison run we
+treat as credible—and automatically builds or reuses immutable task images:
+
+```bash
+./benchmark.sh
+```
+
+Common variants are:
+
+```bash
+./benchmark.sh --smoke
+./benchmark.sh --task git-multibranch --attempts 3 --run-label subprocess-v2
+./benchmark.sh --harness opencode --attempts 3
+./benchmark.sh --harness all --attempts 3 --run-label glm-baseline
+./benchmark.sh --dry-run
+```
+
+`--harness all` runs MuCLI, OpenCode, Claude Code, and Pi sequentially with the
+same task selection, attempt count, prepared image set, and model. Preparation
+and harness setup remain outside the measured execution interval. Use
+`--bootstrap` on a new machine to install Terminal-Bench 0.2.18, download the
+pinned dataset, and build a missing MuCLI wheelhouse; Docker and `uv` must
+already be installed. The checksum-pinned external CLI artifacts must be
+staged under `bench/artifacts/agents/` for external comparisons.
+
+The lower-level commands below remain available for debugging the adapters.
+
 One-time setup from the repository root:
 
 ```bash
@@ -72,6 +100,25 @@ MODEL=ollama/glm-5.3-flash bash bench/run_pack.sh --task fix-git
 MODEL=openai/gpt-5 bash bench/run_pack.sh --attempts 3 --run-label mucli-gpt5
 ```
 
+Run the same prepared pack through the pinned external CLI adapters with:
+
+```bash
+OLLAMA_API_KEY=... bash bench/run_cli_pack.sh --harness opencode --smoke
+OLLAMA_API_KEY=... bash bench/run_cli_pack.sh --harness opencode --attempts 3
+OLLAMA_API_KEY=... bash bench/run_cli_pack.sh --harness claude-code --attempts 3
+OLLAMA_API_KEY=... bash bench/run_cli_pack.sh --harness pi --attempts 3
+```
+
+The external runner uses checksum-pinned OpenCode, Claude Code, Pi, and Node
+artifacts staged under `bench/artifacts/agents/`. It maps the LiteLLM name
+`ollama/glm-5.3-flash` to the native Ollama launcher ID
+`glm-5.3-flash:cloud`, then configures each CLI to use Ollama Cloud directly.
+Artifact verification, copying/extraction, configuration, and CLI preflight
+are measured as setup. The execution clock starts only when the first
+model-backed CLI command is sent. Each trial writes a native JSONL transcript
+and `<harness>-execution.json`; the run-level `provenance.json` records artifact
+and adapter hashes without recording the API key.
+
 `--attempts N` asks Terminal-Bench for repeated trials of every selected task.
 Use the same prepared task-image manifest, task list, model settings, prompt,
 and attempt count for each harness being compared. A single attempt is useful
@@ -82,6 +129,10 @@ The runner uses the cached pinned dataset at
 `TB_DATASET_PATH=/path/to/tasks`. If it is missing, download the pinned dataset
 with `~/.venvs/tb/bin/tb datasets download --dataset terminal-bench-core==0.1.1`.
 Results land under `bench/results/`.
+Raw runs are generated evidence and are ignored by Git. Keep only runs cited by
+an evaluation report or needed for an active regression investigation; smoke,
+partial, and superseded runs can be deleted. Adapter teardown makes files under
+the container-backed `/logs` mount host-readable and removable.
 
 For direct TB use, pass both timing controls explicitly (360 is `hello-world`'s
 native budget, while 570 adds the 180-second setup cap and a 30-second outer
@@ -95,7 +146,7 @@ cleanup margin):
   --global-agent-timeout-sec 570 \
   --agent-kwarg execution_timeout_sec=360 \
   --agent-kwarg setup_timeout_sec=180 \
-  --agent-kwarg benchmark_prompt=verify-v1 \
+  --agent-kwarg benchmark_prompt=verify-v4 \
   --model openai/gpt-5
 ```
 
@@ -111,10 +162,13 @@ TB 0.2.18 starts its timer before invoking the installed-agent adapter.
 
 The adapter runs MuCLI with the explicit `terminal-bench` tool profile, which
 keeps direct workspace, shell, task, result, and context tools while omitting
-unrelated schemas. It appends the versioned `verify-v1` instruction: verify all
-requirements directly, exercise service changes end to end, preserve exact
-bytes when restoring version-control content, and stop once acceptance checks
-pass. Both choices are recorded in each run's `provenance.json` alongside the
+unrelated schemas. It appends the versioned `verify-v4` instruction: verify all
+requirements directly, prefer externally validated existing services over
+parallel replacements, keep unattended checks bounded, leave future-facing
+client state empty after removing disposable verification fixtures, preserve
+the requested infrastructure, preserve exact bytes when restoring
+version-control content, and stop once acceptance
+checks pass. Both choices are recorded in each run's `provenance.json` alongside the
 tracked-worktree fingerprint, model, Terminal-Bench version, wheelhouse hash,
 attempt count, timing policy, and prepared Docker image IDs.
 

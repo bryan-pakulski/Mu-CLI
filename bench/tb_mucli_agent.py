@@ -12,8 +12,8 @@ Usage (TB 0.2.x):
         --task-id hello-world --model <provider/model>
 
 Provider keys are forwarded verbatim (OPENAI_API_KEY / GEMINI_API_KEY /
-OLLAMA_HOST / OLLAMA_API_KEY). The current tracked worktree is snapshotted into
-each task and fingerprinted in ``/logs/mucli/source.json``.
+OLLAMA_HOST / OLLAMA_API_KEY). Pack runs freeze one complete runtime snapshot
+for every trial; direct adapter invocations safely snapshot the live worktree.
 """
 
 from __future__ import annotations
@@ -31,7 +31,14 @@ from terminal_bench.agents.installed_agents.abstract_installed_agent import (
 )
 from terminal_bench.terminal.models import TerminalCommand
 
-from bench.tb_support import build_source_tarball, read_trace_usage, stop_mucli_process
+from bench.tb_prompts import BENCHMARK_PROMPTS, DEFAULT_BENCHMARK_PROMPT
+from bench.tb_support import (
+    build_source_tarball,
+    file_sha256,
+    make_container_logs_host_cleanable,
+    read_trace_usage,
+    stop_mucli_process,
+)
 
 # Where mucli's own repo lives on the host (bench/ sits inside it).
 _MUCLI_REPO_HOST = Path(__file__).resolve().parent.parent
@@ -47,20 +54,6 @@ _FORWARD_KEYS = (
     "MUCLI_BENCH_MODEL",
 )
 
-_BENCHMARK_PROMPTS = {
-    "none": "",
-    "verify-v1": (
-        "Before finishing, verify the final state against every requirement "
-        "with direct checks. For services and configuration, exercise the "
-        "changed behavior end to end rather than relying only on a syntax "
-        "check. When restoring existing files or commits, use version-control "
-        "operations instead of reconstructing content so exact bytes are "
-        "preserved. Prefer the smallest direct solution, stop exploration once "
-        "the acceptance criteria pass, and do not report success while any "
-        "check fails."
-    ),
-}
-
 
 class MucliAgent(AbstractInstalledAgent):
     """Run mucli headlessly inside the TB task container."""
@@ -74,7 +67,9 @@ class MucliAgent(AbstractInstalledAgent):
         model_name: str | None = None,
         execution_timeout_sec: float | str | None = None,
         setup_timeout_sec: float | str | None = 180,
-        benchmark_prompt: str = "verify-v1",
+        benchmark_prompt: str = DEFAULT_BENCHMARK_PROMPT,
+        source_archive_path: str | None = None,
+        source_archive_sha256: str | None = None,
         *args,
         **kwargs,
     ):
@@ -83,8 +78,23 @@ class MucliAgent(AbstractInstalledAgent):
         self._version = kwargs.get("version", "bench-2")
         self._execution_timeout_sec = self._positive_timeout(execution_timeout_sec)
         self._setup_timeout_sec = self._positive_timeout(setup_timeout_sec) or 180.0
-        if benchmark_prompt not in _BENCHMARK_PROMPTS:
-            choices = ", ".join(sorted(_BENCHMARK_PROMPTS))
+        self._source_archive_path = (
+            Path(source_archive_path).resolve() if source_archive_path else None
+        )
+        self._source_archive_sha256 = (source_archive_sha256 or "").strip().lower()
+        if self._source_archive_path is not None and not self._source_archive_sha256:
+            raise ValueError(
+                "source_archive_sha256 is required with source_archive_path"
+            )
+        if self._source_archive_sha256 and (
+            len(self._source_archive_sha256) != 64
+            or any(
+                char not in "0123456789abcdef" for char in self._source_archive_sha256
+            )
+        ):
+            raise ValueError("source_archive_sha256 must be a hexadecimal SHA-256")
+        if benchmark_prompt not in BENCHMARK_PROMPTS:
+            choices = ", ".join(sorted(BENCHMARK_PROMPTS))
             raise ValueError(f"benchmark_prompt must be one of: {choices}")
         self._benchmark_prompt = benchmark_prompt
 
@@ -141,17 +151,21 @@ class MucliAgent(AbstractInstalledAgent):
 
     # -- repo delivery ----------------------------------------------------
 
-    def _build_repo_tarball(self) -> Path:
-        """Snapshot the current tracked worktree, including local edits."""
-        return build_source_tarball(_MUCLI_REPO_HOST)
+    def _repo_tarball(self) -> tuple[Path, bool]:
+        """Return the frozen pack archive, or a disposable direct-run snapshot."""
 
-    @staticmethod
-    def _make_logs_readable(session) -> None:
-        # The directory may not exist when startup failed; artifact recovery is
-        # best-effort and must never mask the benchmark outcome.
-        session.container.exec_run(
-            ["sh", "-c", "chmod -R a+rwX /logs/mucli 2>/dev/null || true"]
-        )
+        if self._source_archive_path is None:
+            return build_source_tarball(_MUCLI_REPO_HOST), True
+        if not self._source_archive_path.is_file():
+            raise FileNotFoundError(
+                f"frozen MuCLI source archive not found: {self._source_archive_path}"
+            )
+        actual = file_sha256(self._source_archive_path)
+        if actual != self._source_archive_sha256:
+            raise ValueError(
+                "frozen MuCLI source archive changed after provenance was recorded"
+            )
+        return self._source_archive_path, False
 
     @staticmethod
     def _stop_running_agent(session) -> None:
@@ -197,7 +211,7 @@ class MucliAgent(AbstractInstalledAgent):
         benchmark command is allowed to run.
         """
         setup_started = time.monotonic()
-        tarball = self._build_repo_tarball()
+        tarball, disposable_tarball = self._repo_tarball()
         try:
             session.copy_to_container(
                 paths=tarball,
@@ -205,7 +219,8 @@ class MucliAgent(AbstractInstalledAgent):
                 container_filename="mucli-src.tar.gz",
             )
         finally:
-            tarball.unlink(missing_ok=True)
+            if disposable_tarball:
+                tarball.unlink(missing_ok=True)
         # Offline wheelhouse (pre-baked manylinux wheels): eliminates
         # pip's registry round-trip — the 200s+ install cost that starved the
         # 360s per-task gates. Falls back to network if payload is missing.
@@ -227,6 +242,7 @@ class MucliAgent(AbstractInstalledAgent):
             ]
         )
         if extraction.exit_code != 0:
+            make_container_logs_host_cleanable(session)
             return self._setup_failure(
                 logging_dir, setup_started, "SourceExtractionError"
             )
@@ -280,27 +296,25 @@ class MucliAgent(AbstractInstalledAgent):
             )
         except TimeoutError as exc:
             self._stop_running_agent(session)
-            self._make_logs_readable(session)
-            return self._setup_failure(
-                logging_dir, setup_started, type(exc).__name__
-            )
+            make_container_logs_host_cleanable(session)
+            return self._setup_failure(logging_dir, setup_started, type(exc).__name__)
 
         installation_status = session.container.exec_run(
             ["sh", "-c", 'test "$(cat /tmp/mucli-install-status)" = 0']
         )
         if installation_status.exit_code != 0:
-            return self._setup_failure(
-                logging_dir, setup_started, "InstallScriptError"
-            )
+            make_container_logs_host_cleanable(session)
+            return self._setup_failure(logging_dir, setup_started, "InstallScriptError")
 
         preflight = session.container.exec_run(
             ["sh", "-c", "cd /opt/mucli && python3 -c 'import mucli'"]
         )
         if preflight.exit_code != 0:
+            make_container_logs_host_cleanable(session)
             return self._setup_failure(logging_dir, setup_started, "PreflightError")
 
         rendered_instruction = self._render_instruction(instruction)
-        prompt_suffix = _BENCHMARK_PROMPTS[self._benchmark_prompt]
+        prompt_suffix = BENCHMARK_PROMPTS[self._benchmark_prompt]
         if prompt_suffix:
             rendered_instruction = f"{rendered_instruction.rstrip()}\n\n{prompt_suffix}"
         setup_seconds = time.monotonic() - setup_started
@@ -314,7 +328,7 @@ class MucliAgent(AbstractInstalledAgent):
         except TimeoutError as exc:
             error_type = type(exc).__name__
             self._stop_running_agent(session)
-            self._make_logs_readable(session)
+            make_container_logs_host_cleanable(session)
             input_tokens, output_tokens = read_trace_usage(logging_dir)
             return AgentResult(
                 total_input_tokens=input_tokens,
@@ -334,11 +348,11 @@ class MucliAgent(AbstractInstalledAgent):
                 error_type=error_type,
                 error_phase="execution" if error_type else None,
             )
+            make_container_logs_host_cleanable(session)
 
         # Files written through the bind mount are created by the container
         # user. Make the captured artifacts readable/removable by the host
         # benchmark user before parsing them.
-        self._make_logs_readable(session)
         input_tokens, output_tokens = read_trace_usage(logging_dir)
         return AgentResult(
             total_input_tokens=input_tokens,

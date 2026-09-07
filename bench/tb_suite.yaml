@@ -1,5 +1,5 @@
 # mucli harness benchmark — Terminal-Bench task selection
-# Run: bash bench/run_pack.sh [--smoke]
+# Run: ./benchmark.sh [--smoke]
 # Time gates come from each task's max_agent_timeout_sec (TB enforces natively).
 
 name: terminal-bench-core

@@ -17,7 +17,8 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bench.tb_support import source_snapshot_metadata
+from bench.tb_prompts import DEFAULT_BENCHMARK_PROMPT
+from bench.tb_support import build_source_tarball, source_archive_metadata
 
 
 def _sha256(path: Path) -> str:
@@ -82,11 +83,14 @@ def _prepared_images(path: Path | None, tasks: list[str]) -> dict[str, Any] | No
 
 def _harness_file_hashes(repo: Path) -> dict[str, str]:
     relative_paths = (
+        "benchmark.sh",
         "bench/run_pack.sh",
         "bench/tb_mucli_agent.py",
+        "bench/tb_prompts.py",
         "bench/tb_support.py",
         "bench/mucli-setup.sh.j2",
         "bench/prepare_tb.py",
+        "bench/summarize_tb.py",
         "bench/write_tb_provenance.py",
     )
     hashes = {}
@@ -110,7 +114,9 @@ def write_provenance(
     outer_cleanup_margin_seconds: float,
     prepared_manifest: Path | None,
     run_label: str,
+    source_archive: Path,
 ) -> dict[str, Any]:
+    build_source_tarball(repo, source_archive)
     payload = {
         "schema": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -119,9 +125,9 @@ def write_provenance(
             "name": "mucli",
             "adapter_version": "bench-2",
             "tool_profile": "terminal-bench",
-            "benchmark_prompt": "verify-v1",
+            "benchmark_prompt": DEFAULT_BENCHMARK_PROMPT,
             "model": model,
-            "source": source_snapshot_metadata(repo),
+            "source": source_archive_metadata(source_archive),
             "files_sha256": _harness_file_hashes(repo),
         },
         "terminal_bench": {
@@ -166,6 +172,7 @@ def main() -> int:
     parser.add_argument("--outer-cleanup-margin-seconds", type=float, required=True)
     parser.add_argument("--prepared-manifest", type=Path)
     parser.add_argument("--run-label", default="")
+    parser.add_argument("--source-archive", type=Path, required=True)
     parser.add_argument("tasks", nargs="+")
     args = parser.parse_args()
     if args.attempts <= 0:
@@ -182,6 +189,7 @@ def main() -> int:
         outer_cleanup_margin_seconds=args.outer_cleanup_margin_seconds,
         prepared_manifest=args.prepared_manifest,
         run_label=args.run_label,
+        source_archive=args.source_archive,
     )
     return 0
 

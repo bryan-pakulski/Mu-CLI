@@ -24,6 +24,27 @@ _SOURCE_EXCLUDES = (
     "bench/results/",
 )
 
+# A benchmark of an in-progress worktree must include new runtime modules, not
+# only files that have already been staged in Git.  Limit untracked inclusion
+# to project runtime roots so local notes, credentials, and unrelated scratch
+# files can never be copied into an arbitrary Terminal-Bench container.
+_UNTRACKED_RUNTIME_ROOTS = (
+    "config/",
+    "mu/",
+    "providers/",
+    "utils/",
+)
+_UNTRACKED_SECRET_NAMES = {
+    ".env",
+    ".netrc",
+    "credentials.json",
+    "id_ed25519",
+    "id_rsa",
+    "secrets.json",
+    "service-account.json",
+}
+_UNTRACKED_SECRET_SUFFIXES = (".key", ".p12", ".pfx", ".pem")
+
 _TASK_TIMEOUT_RE = re.compile(
     r"^max_agent_timeout_sec:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:#.*)?$",
     re.MULTILINE,
@@ -40,16 +61,44 @@ def _git(repo: Path, *args: str, text: bool = True) -> subprocess.CompletedProce
     )
 
 
-def _tracked_paths(repo: Path) -> list[Path]:
-    """Return existing tracked files, excluding generated benchmark payloads.
+def _safe_untracked_runtime_path(rel_text: str) -> bool:
+    """Whether an untracked, non-ignored file is safe runtime source."""
 
-    Only tracked files are eligible.  This includes edits to tracked files but
-    deliberately excludes untracked files, which could contain local secrets.
-    """
+    posix = PurePosixPath(rel_text)
+    if not any(rel_text.startswith(prefix) for prefix in _UNTRACKED_RUNTIME_ROOTS):
+        return False
+    if any(
+        part in {"__pycache__", ".pytest_cache", ".mypy_cache"} for part in posix.parts
+    ):
+        return False
+    name = posix.name.lower()
+    if name in _UNTRACKED_SECRET_NAMES or name.startswith(".env."):
+        return False
+    return not name.endswith(_UNTRACKED_SECRET_SUFFIXES)
 
-    raw = _git(repo, "ls-files", "--cached", "-z", text=False).stdout
+
+def _source_paths(repo: Path) -> tuple[list[Path], list[Path]]:
+    """Return tracked files plus narrowly scoped untracked runtime source."""
+
+    tracked_raw = _git(repo, "ls-files", "--cached", "-z", text=False).stdout
+    untracked_raw = _git(
+        repo,
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        text=False,
+    ).stdout
     paths: list[Path] = []
-    for item in raw.split(b"\0"):
+    untracked: list[Path] = []
+    tracked_items = {item for item in tracked_raw.split(b"\0") if item}
+    items = [(item, False) for item in tracked_items]
+    items.extend(
+        (item, True)
+        for item in untracked_raw.split(b"\0")
+        if item and item not in tracked_items
+    )
+    for item, is_untracked in items:
         if not item:
             continue
         rel_text = os.fsdecode(item)
@@ -58,15 +107,24 @@ def _tracked_paths(repo: Path) -> list[Path]:
             raise ValueError(f"unsafe tracked path: {rel_text!r}")
         if any(rel_text.startswith(prefix) for prefix in _SOURCE_EXCLUDES):
             continue
+        if is_untracked and not _safe_untracked_runtime_path(rel_text):
+            continue
         rel = Path(*posix.parts)
         target = repo / rel
         # Deleted tracked files should be absent from the worktree snapshot.
         if target.is_file() or target.is_symlink():
             paths.append(rel)
-    return sorted(paths, key=lambda path: path.as_posix())
+            if is_untracked:
+                untracked.append(rel)
+    key = lambda path: path.as_posix()
+    return sorted(paths, key=key), sorted(untracked, key=key)
 
 
-def _snapshot_metadata(repo: Path, paths: list[Path]) -> dict[str, Any]:
+def _snapshot_metadata(
+    repo: Path,
+    paths: list[Path],
+    untracked_paths: list[Path],
+) -> dict[str, Any]:
     digest = hashlib.sha256()
     for rel in paths:
         target = repo / rel
@@ -92,38 +150,77 @@ def _snapshot_metadata(repo: Path, paths: list[Path]) -> dict[str, Any]:
         "schema": 1,
         "git_commit": commit,
         "tracked_worktree_dirty": dirty,
+        "included_untracked_files": [path.as_posix() for path in untracked_paths],
+        "included_untracked_count": len(untracked_paths),
         "source_sha256": digest.hexdigest(),
         "file_count": len(paths),
     }
 
 
 def source_snapshot_metadata(repo: Path) -> dict[str, Any]:
-    """Describe the exact tracked worktree used by a benchmark run."""
+    """Describe the tracked and safe-untracked runtime worktree snapshot."""
 
     repo = Path(repo).resolve()
-    return _snapshot_metadata(repo, _tracked_paths(repo))
+    paths, untracked = _source_paths(repo)
+    return _snapshot_metadata(repo, paths, untracked)
 
 
-def build_source_tarball(repo: Path) -> Path:
-    """Create a safe snapshot of the current tracked worktree.
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_archive_metadata(path: Path) -> dict[str, Any]:
+    """Read source metadata and bind it to the exact archive bytes."""
+
+    path = Path(path)
+    with tarfile.open(path, "r:gz") as archive:
+        raw = archive.extractfile(".mucli-benchmark-source.json")
+        if raw is None:
+            raise ValueError("source archive has no benchmark metadata")
+        metadata = json.load(raw)
+    if not isinstance(metadata, dict):
+        raise ValueError("source archive benchmark metadata is invalid")
+    return {
+        **metadata,
+        "archive_sha256": file_sha256(path),
+        "archive_path": str(path.resolve()),
+    }
+
+
+def build_source_tarball(repo: Path, output: Path | None = None) -> Path:
+    """Create a safe snapshot of the current runtime worktree.
 
     ``git archive HEAD`` silently omitted in-progress fixes.  This snapshot
-    reads tracked files from the worktree, so modified files are benchmarked,
-    while ignored and untracked files (including likely credentials) are never
-    copied into task containers.
+    reads tracked files from the worktree and safe untracked files from runtime
+    roots, so modified and newly added modules are benchmarked. Ignored files,
+    arbitrary untracked files, and likely credentials remain excluded.
     """
 
     repo = repo.resolve()
-    paths = _tracked_paths(repo)
-    metadata = _snapshot_metadata(repo, paths)
+    paths, untracked = _source_paths(repo)
+    metadata = _snapshot_metadata(repo, paths, untracked)
 
-    handle = tempfile.NamedTemporaryFile(
-        prefix="mucli-bench-", suffix=".tar.gz", delete=False
-    )
-    handle.close()
-    output = Path(handle.name)
+    if output is None:
+        handle = tempfile.NamedTemporaryFile(
+            prefix="mucli-bench-", suffix=".tar.gz", delete=False
+        )
+        handle.close()
+        output = Path(handle.name)
+        temporary = output
+    else:
+        output = Path(output).resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            prefix=f".{output.name}.", suffix=".tmp", dir=output.parent, delete=False
+        )
+        handle.close()
+        temporary = Path(handle.name)
     try:
-        with tarfile.open(output, mode="w:gz") as archive:
+        with tarfile.open(temporary, mode="w:gz") as archive:
             for rel in paths:
                 archive.add(
                     repo / rel,
@@ -135,8 +232,15 @@ def build_source_tarball(repo: Path) -> Path:
             info.size = len(payload)
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(payload))
+        # Refuse to freeze a mixed snapshot if source changed while the archive
+        # was being assembled. A subsequent worktree edit is harmless because
+        # every trial consumes the immutable archive, not live source.
+        if source_snapshot_metadata(repo) != metadata:
+            raise RuntimeError("MuCLI source changed while freezing benchmark archive")
+        if temporary != output:
+            temporary.replace(output)
     except Exception:
-        output.unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
         raise
     return output
 
@@ -230,6 +334,162 @@ def read_task_execution_timeout(task_yaml: Path) -> float:
     return timeout
 
 
+def normalize_ollama_cloud_model(model_name: str) -> str:
+    """Return the model ID expected by Ollama's native CLI integrations.
+
+    LiteLLM identifies Ollama Cloud models as ``ollama/<name>`` while
+    ``ollama launch`` exposes the same hosted model as ``<name>:cloud``.
+    Keeping this conversion in one place prevents comparator runners from
+    silently selecting a different model.
+    """
+
+    value = (model_name or "").strip()
+    if value.startswith("ollama/"):
+        value = value.split("/", 1)[1]
+    if not value:
+        raise ValueError("an Ollama model name is required")
+    return value if value.endswith(":cloud") else f"{value}:cloud"
+
+
+def external_harness_environment(
+    harness: str,
+    model_name: str,
+    api_key: str,
+) -> dict[str, str]:
+    """Build the direct-cloud equivalent of ``ollama launch`` configuration.
+
+    The local Ollama relay normally emits these settings. Benchmark containers
+    connect to Ollama Cloud directly so their networking does not depend on a
+    host-only loopback listener. Secrets are returned only as environment
+    values and are never included in provenance.
+    """
+
+    model = normalize_ollama_cloud_model(model_name)
+    if not api_key:
+        raise ValueError("OLLAMA_API_KEY is required")
+    if harness == "opencode":
+        config = {
+            "$schema": "https://opencode.ai/config.json",
+            "model": f"ollama/{model}",
+            "provider": {
+                "ollama": {
+                    "models": {
+                        model: {
+                            "name": model,
+                            "reasoning": True,
+                            "modalities": {
+                                "input": ["text", "image"],
+                                "output": ["text"],
+                            },
+                            "limit": {"context": 1048576, "output": 1048576},
+                            "variants": {
+                                "high": {"disabled": True},
+                                "low": {"disabled": True},
+                                "medium": {"disabled": True},
+                                "none": {"reasoningEffort": "none"},
+                            },
+                        }
+                    },
+                    "name": "Ollama",
+                    "npm": "@ai-sdk/openai-compatible",
+                    "options": {
+                        "baseURL": "https://ollama.com/v1",
+                        "apiKey": api_key,
+                    },
+                }
+            },
+        }
+        return {"OPENCODE_CONFIG_CONTENT": json.dumps(config, separators=(",", ":"))}
+    if harness == "claude-code":
+        return {
+            "ANTHROPIC_AUTH_TOKEN": api_key,
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_BASE_URL": "https://ollama.com",
+        }
+    if harness == "pi":
+        return {
+            "OLLAMA_API_KEY": api_key,
+            "PI_CODING_AGENT_DIR": "/logs/pi",
+        }
+    raise ValueError(f"unsupported external harness: {harness}")
+
+
+def pi_ollama_models_config(model_name: str) -> dict[str, Any]:
+    """Return Pi's secret-free Ollama Cloud model configuration."""
+
+    model = normalize_ollama_cloud_model(model_name)
+    return {
+        "providers": {
+            "ollama": {
+                "api": "openai-completions",
+                "apiKey": "$OLLAMA_API_KEY",
+                "baseUrl": "https://ollama.com/v1",
+                "models": [
+                    {
+                        "_launch": True,
+                        "contextWindow": 1048576,
+                        "id": model,
+                        "input": ["text", "image"],
+                        "reasoning": True,
+                    }
+                ],
+            }
+        }
+    }
+
+
+def read_external_cli_usage(harness: str, output: str) -> tuple[int, int]:
+    """Extract cumulative request tokens from a controlled CLI JSONL stream."""
+
+    input_tokens = 0
+    output_tokens = 0
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        usage: Any = None
+        if harness == "opencode" and event.get("type") == "step_finish":
+            part = event.get("part")
+            if isinstance(part, dict):
+                usage = part.get("tokens")
+        elif harness == "claude-code" and event.get("type") == "result":
+            usage = event.get("usage")
+        elif harness == "pi" and event.get("type") == "message_end":
+            message = event.get("message")
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                usage = message.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        try:
+            input_tokens += int(usage.get("input_tokens", usage.get("input", 0)) or 0)
+            output_tokens += int(
+                usage.get("output_tokens", usage.get("output", 0)) or 0
+            )
+        except (TypeError, ValueError):
+            continue
+    return input_tokens, output_tokens
+
+
+def make_container_logs_host_cleanable(session) -> None:
+    """Make bind-mounted benchmark logs readable and removable by the host.
+
+    Terminal-Bench task containers can create files as a container-only user,
+    including mode-0600 CLI state.  Normalizing the complete log mount during
+    teardown keeps generated result trees disposable.  Cleanup is best-effort
+    and must never change a benchmark outcome.
+    """
+
+    try:
+        session.container.exec_run(
+            ["sh", "-c", "chmod -R a+rwX /logs 2>/dev/null || true"]
+        )
+    except Exception:
+        pass
+
+
 def stop_mucli_process(
     session,
     *,
@@ -267,8 +527,15 @@ def stop_mucli_process(
 
 __all__ = [
     "build_source_tarball",
+    "file_sha256",
+    "external_harness_environment",
+    "make_container_logs_host_cleanable",
+    "normalize_ollama_cloud_model",
+    "pi_ollama_models_config",
+    "read_external_cli_usage",
     "read_task_execution_timeout",
     "read_trace_usage",
+    "source_archive_metadata",
     "source_snapshot_metadata",
     "stop_mucli_process",
 ]

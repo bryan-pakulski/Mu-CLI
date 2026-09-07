@@ -173,5 +173,21 @@ Agent modes (one doc per mode):
 make test
 ```
 
+## Benchmarking
+
+![MuCLI harness performance comparison](documentation/assets/mucli-harness-performance.png)
+
+Run the credible Terminal-Bench profile (10 pinned tasks, three attempts each)
+with one command:
+
+```bash
+./benchmark.sh
+```
+
+Use `./benchmark.sh --smoke` for a cheap end-to-end check or
+`./benchmark.sh --harness all --attempts 3` for the timing-controlled MuCLI,
+OpenCode, Claude Code, and Pi comparison. See [bench/pack.md](bench/pack.md) for
+prerequisites, timing boundaries, and provenance details.
+
 ## ROADMAP
 - Authentication for hosting

@@ -8,11 +8,19 @@ from types import SimpleNamespace
 
 from bench.prepare_tb import check_prepared, stage_task, task_source_sha256
 from bench.summarize_tb import summarize
+from bench.tb_prompts import BENCHMARK_PROMPTS, DEFAULT_BENCHMARK_PROMPT
 from bench.write_tb_provenance import _prepared_images
 from bench.tb_support import (
     build_source_tarball,
+    external_harness_environment,
+    file_sha256,
+    make_container_logs_host_cleanable,
+    normalize_ollama_cloud_model,
+    pi_ollama_models_config,
+    read_external_cli_usage,
     read_task_execution_timeout,
     read_trace_usage,
+    source_archive_metadata,
     stop_mucli_process,
 )
 from mucli import apply_tool_profile
@@ -22,7 +30,20 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
-def test_source_snapshot_uses_tracked_worktree_without_untracked_files(tmp_path):
+def test_default_benchmark_prompt_restores_disposable_verification_state():
+    prompt = BENCHMARK_PROMPTS[DEFAULT_BENCHMARK_PROMPT]
+
+    assert DEFAULT_BENCHMARK_PROMPT == "verify-v4"
+    assert "unavailable evidence, not evidence" in prompt
+    assert "reuse the distribution service" in prompt
+    assert "Do not clear the harness's" in prompt
+    assert "ready for fresh evaluator input" in prompt
+    assert "leave the corresponding client state empty" in prompt
+    assert "disposable verification fixture, not seed state" in prompt
+    assert "Keep requested infrastructure" in prompt
+
+
+def test_source_snapshot_includes_safe_untracked_runtime_files_only(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -50,21 +71,61 @@ def test_source_snapshot_uses_tracked_worktree_without_untracked_files(tmp_path)
     # must never be copied into an arbitrary task container.
     (repo / "app.py").write_text("working tree\n", encoding="utf-8")
     (repo / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+    (repo / "notes.txt").write_text("not runtime\n", encoding="utf-8")
+    (repo / "mu").mkdir()
+    (repo / "mu" / "new_module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "mu" / "service.pem").write_text("secret\n", encoding="utf-8")
 
     archive_path = build_source_tarball(repo)
     try:
         with tarfile.open(archive_path, "r:gz") as archive:
             names = set(archive.getnames())
             assert archive.extractfile("app.py").read() == b"working tree\n"
+            assert archive.extractfile("mu/new_module.py").read() == b"VALUE = 1\n"
             metadata = json.load(archive.extractfile(".mucli-benchmark-source.json"))
     finally:
         archive_path.unlink(missing_ok=True)
 
     assert ".env" not in names
+    assert "notes.txt" not in names
+    assert "mu/service.pem" not in names
     assert "bench/results/old.json" not in names
     assert metadata["tracked_worktree_dirty"] is True
-    assert metadata["file_count"] == 1
+    assert metadata["included_untracked_files"] == ["mu/new_module.py"]
+    assert metadata["file_count"] == 2
     assert len(metadata["source_sha256"]) == 64
+
+
+def test_source_snapshot_can_be_frozen_and_bound_to_archive_hash(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "mu").mkdir()
+    (repo / "mu" / "app.py").write_text("version = 1\n", encoding="utf-8")
+    _git(repo, "add", "mu/app.py")
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=MuCLI tests",
+            "-c",
+            "user.email=tests@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    output = tmp_path / "frozen" / "source.tar.gz"
+
+    assert build_source_tarball(repo, output) == output.resolve()
+    metadata = source_archive_metadata(output)
+
+    assert metadata["archive_sha256"] == file_sha256(output)
+    assert metadata["archive_path"] == str(output.resolve())
+    assert metadata["file_count"] == 1
 
 
 def test_trace_usage_prefers_run_end_and_skips_incomplete_newer_trace(tmp_path):
@@ -134,6 +195,27 @@ def test_timed_out_mucli_is_stopped_before_verification():
     shell_commands = [call[2] for call in container.calls if call[:2] == ["sh", "-c"]]
     assert any("pkill -TERM" in command for command in shell_commands)
     assert any("pkill -KILL" in command for command in shell_commands)
+
+
+def test_container_logs_are_left_host_cleanable():
+    class Container:
+        def __init__(self):
+            self.calls = []
+
+        def exec_run(self, command):
+            self.calls.append(command)
+
+    container = Container()
+    make_container_logs_host_cleanable(SimpleNamespace(container=container))
+
+    assert container.calls == [["sh", "-c", "chmod -R a+rwX /logs 2>/dev/null || true"]]
+
+    class BrokenContainer:
+        def exec_run(self, _command):
+            raise RuntimeError("container already stopped")
+
+    # Teardown cleanup is best-effort and must not replace the benchmark result.
+    make_container_logs_host_cleanable(SimpleNamespace(container=BrokenContainer()))
 
 
 def test_prepared_task_uses_content_addressed_image_and_detects_drift(tmp_path):
@@ -297,6 +379,24 @@ def test_summary_labels_terminal_bench_fallback_as_setup_inclusive(tmp_path):
     assert any("2.5s TB-agent (setup included)" in line for line in lines)
 
 
+def test_summary_does_not_label_zero_resolved_repeats_as_pass(tmp_path):
+    run_dir = tmp_path / "failing-task" / "run-1"
+    run_dir.mkdir(parents=True)
+    results = [
+        {"task_id": "failing-task", "is_resolved": False},
+        {"task_id": "failing-task", "is_resolved": False},
+    ]
+    (run_dir / "results.json").write_text(
+        json.dumps({"results": results}), encoding="utf-8"
+    )
+
+    lines, healthy = summarize(tmp_path, ["failing-task"])
+
+    assert healthy is True
+    assert any("0/2 RESOLVED" in line for line in lines)
+    assert all("0/2 PASS" not in line for line in lines)
+
+
 def test_task_execution_timeout_uses_native_task_budget(tmp_path):
     config = tmp_path / "task.yaml"
     config.write_text(
@@ -305,6 +405,109 @@ def test_task_execution_timeout_uses_native_task_budget(tmp_path):
     )
 
     assert read_task_execution_timeout(config) == 480.5
+
+
+def test_external_harnesses_use_same_native_ollama_cloud_model():
+    assert normalize_ollama_cloud_model("ollama/glm-5.3-flash") == (
+        "glm-5.3-flash:cloud"
+    )
+    assert normalize_ollama_cloud_model("glm-5.3-flash:cloud") == (
+        "glm-5.3-flash:cloud"
+    )
+
+    opencode = external_harness_environment(
+        "opencode", "ollama/glm-5.3-flash", "secret-value"
+    )
+    config = json.loads(opencode["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "ollama/glm-5.3-flash:cloud"
+    assert config["provider"]["ollama"]["options"]["baseURL"] == (
+        "https://ollama.com/v1"
+    )
+    assert config["provider"]["ollama"]["options"]["apiKey"] == "secret-value"
+
+    claude = external_harness_environment(
+        "claude-code", "ollama/glm-5.3-flash", "secret-value"
+    )
+    assert claude == {
+        "ANTHROPIC_AUTH_TOKEN": "secret-value",
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_BASE_URL": "https://ollama.com",
+    }
+
+    pi = pi_ollama_models_config("ollama/glm-5.3-flash")
+    assert pi["providers"]["ollama"]["apiKey"] == "$OLLAMA_API_KEY"
+    assert pi["providers"]["ollama"]["models"][0]["id"] == ("glm-5.3-flash:cloud")
+
+
+def test_summary_accepts_controlled_external_harness_timing(tmp_path):
+    run_dir = tmp_path / "hello-world" / "run-1"
+    trial_dir = run_dir / "hello-world" / "trial-1"
+    trial_dir.mkdir(parents=True)
+    (run_dir / "results.json").write_text(
+        json.dumps({"results": [{"task_id": "hello-world", "is_resolved": True}]}),
+        encoding="utf-8",
+    )
+    agent_logs = trial_dir / "agent-logs"
+    agent_logs.mkdir()
+    (agent_logs / "opencode-execution.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "harness": "opencode",
+                "execution_seconds": 4.0,
+                "setup_seconds": 12.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    lines, healthy = summarize(tmp_path, ["hello-world"])
+
+    assert healthy is True
+    assert any("4.0s execution (+12.0s setup excluded)" in line for line in lines)
+
+
+def test_external_cli_usage_parses_each_native_jsonl_shape():
+    opencode = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {"tokens": {"input": 100, "output": 7}},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {"tokens": {"input": 140, "output": 9}},
+                }
+            ),
+        ]
+    )
+    claude = json.dumps(
+        {
+            "type": "result",
+            "usage": {"input_tokens": 900, "output_tokens": 33},
+        }
+    )
+    pi = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "usage": {"input": 300, "output": 12},
+                    },
+                }
+            ),
+            json.dumps({"type": "turn_end", "message": {"usage": {"input": 999}}}),
+        ]
+    )
+
+    assert read_external_cli_usage("opencode", opencode) == (240, 16)
+    assert read_external_cli_usage("claude-code", claude) == (900, 33)
+    assert read_external_cli_usage("pi", pi) == (300, 12)
 
 
 def test_tb_suite_uses_terminal_bench_dataset_config_schema():
@@ -326,3 +529,41 @@ def test_pack_requires_python_314_and_supports_repeated_prebuilt_runs():
     assert '--n-attempts "$ATTEMPTS"' in runner
     assert "--no-rebuild --no-cleanup" in runner
     assert "write_tb_provenance.py" in runner
+    assert "source_archive_path=$SOURCE_ARCHIVE" in runner
+    assert "source_archive_sha256=$SOURCE_ARCHIVE_SHA256" in runner
+
+
+def _benchmark_dry_run(*args: str) -> str:
+    result = subprocess.run(
+        ["bash", "benchmark.sh", "--dry-run", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def test_one_command_benchmark_uses_credible_defaults_and_excluded_setup():
+    output = _benchmark_dry_run()
+
+    assert "harness: mucli" in output
+    assert "model: ollama/glm-5.3-flash" in output
+    assert "tasks: 10; attempts per task: 3" in output
+    assert "outside timed execution" in output
+    assert "bench/prepare_tb.py" in output
+    assert "bench/run_pack.sh --attempts 3" in output
+
+
+def test_one_command_smoke_and_all_harness_modes_are_forwarded():
+    smoke = _benchmark_dry_run("--smoke")
+    assert "tasks: 1; attempts per task: 1" in smoke
+    assert "bench/run_pack.sh --smoke --attempts 1" in smoke
+
+    comparison = _benchmark_dry_run(
+        "--harness", "all", "--task", "fix-git", "--run-label", "baseline"
+    )
+    assert "harness: mucli opencode claude-code pi" in comparison
+    assert comparison.count("--task fix-git --attempts 3 --run-label baseline") == 4
+    assert "bench/run_cli_pack.sh --harness opencode" in comparison
+    assert "bench/run_cli_pack.sh --harness claude-code" in comparison
+    assert "bench/run_cli_pack.sh --harness pi" in comparison

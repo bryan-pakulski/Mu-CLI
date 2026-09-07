@@ -52,10 +52,10 @@ def load_task_results(task_dir: Path) -> list[dict[str, Any]]:
 
 
 def load_execution_metrics(task_dir: Path, limit: int) -> list[dict[str, Any]]:
-    """Load command-only timing emitted by the MuCLI adapter."""
+    """Load command-only timing emitted by a controlled benchmark adapter."""
 
     candidates: list[tuple[int, dict[str, Any]]] = []
-    for path in task_dir.glob("**/agent-logs/mucli-execution.json"):
+    for path in task_dir.glob("**/agent-logs/*-execution.json"):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, ValueError):
@@ -117,7 +117,7 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
         if len(results) == 1:
             status = "PASS" if passed else "FAIL"
         else:
-            status = f"{passed}/{len(results)} PASS"
+            status = f"{passed}/{len(results)} RESOLVED"
         modes = sorted(
             {
                 str(result.get("failure_mode"))
@@ -126,12 +126,15 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
             }
         )
         mode_text = f" [{', '.join(modes)}]" if modes else ""
-        input_tokens = sum(int(result.get("total_input_tokens") or 0) for result in results)
-        output_tokens = sum(int(result.get("total_output_tokens") or 0) for result in results)
+        input_tokens = sum(
+            int(result.get("total_input_tokens") or 0) for result in results
+        )
+        output_tokens = sum(
+            int(result.get("total_output_tokens") or 0) for result in results
+        )
         token_text = f"; {input_tokens:,} in/{output_tokens:,} out tokens"
         lines.append(
-            f"  {task_name:<28} {status:<10} "
-            f"{duration_text}{mode_text}{token_text}"
+            f"  {task_name:<28} {status:<10} " f"{duration_text}{mode_text}{token_text}"
         )
 
     lines.append(f"pack score: {resolved_trials}/{total_trials}")

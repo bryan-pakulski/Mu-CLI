@@ -1,2 +1,3 @@
+# Rebuildable/downloaded benchmark inputs; keep only this policy file in Git.
 *
 !.gitignore

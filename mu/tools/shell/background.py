@@ -37,6 +37,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from utils.threads import NamedThread
+from mu.tools.shell.process import noninteractive_environment
 from typing import Deque, Dict, List, Optional
 
 
@@ -48,8 +49,12 @@ class BackgroundTask:
     cwd: str
     started_at: float
     process: subprocess.Popen
-    stdout_buf: Deque[str] = field(default_factory=lambda: collections.deque(maxlen=2000))
-    stderr_buf: Deque[str] = field(default_factory=lambda: collections.deque(maxlen=2000))
+    stdout_buf: Deque[str] = field(
+        default_factory=lambda: collections.deque(maxlen=2000)
+    )
+    stderr_buf: Deque[str] = field(
+        default_factory=lambda: collections.deque(maxlen=2000)
+    )
     exit_code: Optional[int] = None
     ended_at: Optional[float] = None
     # Set by the harness when the user kills the task explicitly.
@@ -97,10 +102,12 @@ class BackgroundTaskRegistry:
         proc = subprocess.Popen(
             ["/bin/bash", "-lc", command],
             cwd=resolved_cwd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=1,
             text=True,
+            env=noninteractive_environment(),
             # New session so we can SIGTERM the whole tree on kill.
             start_new_session=True,
         )
@@ -144,7 +151,9 @@ class BackgroundTaskRegistry:
         with self._lock:
             return list(self._tasks.values())
 
-    def kill(self, task_id: str, *, grace_seconds: float = 3.0) -> Optional[BackgroundTask]:
+    def kill(
+        self, task_id: str, *, grace_seconds: float = 3.0
+    ) -> Optional[BackgroundTask]:
         task = self.get(task_id)
         if task is None:
             return None

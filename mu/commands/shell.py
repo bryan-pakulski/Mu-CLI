@@ -9,9 +9,9 @@ Working directory: the first attached workspace folder, or the
 process's cwd if none is attached. Bounded by `_BASH_TIMEOUT` so a
 runaway command can't lock the REPL.
 
-Not for interactive commands — there's no TTY plumbing, so `/bash vim`
-will block until timeout. Use Ctrl+Z to suspend mucli and run those
-in the real shell.
+Not for interactive commands — stdin is closed and no controlling TTY is
+provided, so tools such as `/bash vim` cannot prompt. Use Ctrl+Z to suspend
+mucli and run those in the real shell.
 """
 
 from __future__ import annotations
@@ -20,8 +20,9 @@ import os
 import subprocess
 from typing import Any
 
-from . import CommandResult, command
+from mu.tools.shell.process import run_noninteractive_shell
 
+from . import CommandResult, command
 
 _BASH_TIMEOUT = 60.0
 
@@ -65,8 +66,9 @@ def _print(session: Any, message: str, *, style: str | None = None) -> None:
     "/!",
     help=(
         "Run a shell command in your workspace folder. Usage: `/bash <cmd>`. "
-        f"Bounded by a {_BASH_TIMEOUT:.0f}s timeout — not for interactive "
-        "tools (vim, less). User-facing convenience, distinct from the "
+        f"Bounded by a {_BASH_TIMEOUT:.0f}s timeout with closed stdin and no "
+        "controlling TTY — not for interactive tools (vim, less). "
+        "User-facing convenience, distinct from the "
         "agent's `bash` tool."
     ),
 )
@@ -93,11 +95,9 @@ def bash_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             _print(session, f"  (cwd: {cwd})", style="dim")
 
     try:
-        proc = subprocess.run(
-            ["/bin/bash", "-lc", command_str],
+        proc = run_noninteractive_shell(
+            command_str,
             cwd=cwd,
-            capture_output=True,
-            text=True,
             timeout=_BASH_TIMEOUT,
         )
         stdout = proc.stdout or ""
@@ -105,8 +105,12 @@ def bash_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
         exit_code = proc.returncode
         timed_out = False
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        stdout = (
+            exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        )
+        stderr = (
+            exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        )
         exit_code = -1
         timed_out = True
     except FileNotFoundError:

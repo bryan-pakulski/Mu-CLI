@@ -1,0 +1,2 @@
+# Raw runs are generated evidence, never source fixtures.
+/results/

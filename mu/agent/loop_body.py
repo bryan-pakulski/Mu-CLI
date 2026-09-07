@@ -59,6 +59,7 @@ from mu.tools.descriptors import (
     COLLATED_TOOLS,
     TOOLS,
     filter_tools_by_phase,
+    filter_tools_for_mode,
     resolve_active_tool_phases,
 )
 from providers.base import FileReference, ImageData, Message, MessagePart
@@ -95,12 +96,138 @@ from mu.agent.context_guard import (  # noqa: F401
     _calibrate_drift_from_response,
     _aggressive_compact_for_overflow,
     _generate_with_overflow_recovery,
+    _maybe_nudge_context_pressure,
 )
 from mu.agent.teacher_watcher import (
     _render_learner_profile_block,
     _run_teacher_watcher_assistant,
     _run_teacher_watcher_user,
 )
+
+def _empty_flush_message(session) -> str:
+    """Self-diagnosing empty-flush message (increment 12).
+
+    An empty flush used to return bare "No data in collation buffer to
+    flush.", which models read as silent data loss — children (collation
+    disabled, inline delivery) and single-tool-call batches then re-derived
+    evidence they already held (observed: 10 redundant reads, ~8 wasted
+    iterations in subagent run_db7ad867a85b). The message now states which
+    delivery state the session is in, so the model acts on results it
+    already has instead of re-gathering.
+    """
+    if not session.variables.get("collation_enabled", True):
+        return (
+            "Collation is disabled in this session — "
+            "read-only results are delivered inline as "
+            "they execute. Nothing was dropped; act on "
+            "the results already in the conversation. "
+            "No `flush` calls are needed here."
+        )
+    return (
+        "No data in collation buffer to flush. "
+        "Read-only results deliver inline unless a "
+        "tool result explicitly said \"Stored ... in "
+        "collation buffer\" with an artifact_id — "
+        "only those are pending here. Nothing was "
+        "dropped."
+    )
+
+
+def _filter_state_capsule_duplicates(payload: str, state_capsule: str) -> str:
+    """Drop payload lines already duplicated by the L2 state capsule.
+
+    The deterministic state capsule (LAYER 2) projects task-memory decisions
+    and scratchpad todos into "Durable decisions and findings" / "Open work
+    ledger". The LAYER 3 working-memory / scratchpad snapshots re-render the
+    same stores, so long sessions carried every decision and todo twice per
+    prompt. Frame prefixes ("- #id", "- [kind] (src):") are the layer's own
+    rendering, not substance - the normalized core is what the capsule
+    would duplicate.
+
+    Two containment orders are checked per line core:
+    1. full containment - the core appears anywhere in the capsule
+       (short entries render whole in both layers);
+    2. truncated-capsule prefix - capsule entries are char-capped and end
+       with "...", so a long payload core can never be a substring of the
+       truncated capsule text; when the capsule entry (minus its ellipsis,
+       >=32 normalized chars) is a PREFIX of the payload core, the line is
+       the same store entry and is dropped. Live evidence: increment-11/12
+       memory entries (~700 chars) rendered fully in L3 while the capsule
+       carried their ~220-char prefixes - full containment silently no-op'd.
+
+    >=24-char cores only, so framing noise ("ok", "- #1 [active]") never
+    matches. Capsule lines are frame-stripped identically before both checks.
+    """
+    if not payload or not state_capsule:
+        return payload
+
+    def _norm(text: str) -> str:
+        return " ".join(text.split()).lower()
+
+    frame_re = r"^\-\s*(#\d+\s*)?(\[[^\]]+\]\s*)*(\([^)]*\)\s*:\s*)?"
+
+    # Capsule side: per-line normalized cores for both containment orders.
+    cap_full = " ".join(state_capsule.split()).lower()
+    cap_prefixes: list[str] = []
+    for cap_line in state_capsule.splitlines():
+        cap_core = re.sub(frame_re, "", _norm(cap_line)).strip()
+        if cap_core.endswith("..."):
+            cap_core = cap_core[:-3].strip()
+        if len(cap_core) >= 32:
+            cap_prefixes.append(cap_core)
+
+    kept: list[str] = []
+    for line in payload.splitlines():
+        norm = _norm(line)
+        core = re.sub(frame_re, "", norm).strip()
+        if len(core) >= 24 and core in cap_full:
+            continue
+        if len(core) >= 32 and any(core.startswith(p) for p in cap_prefixes):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def _filter_goal_echo_entries(summary: str, goal_texts: list[str]) -> str:
+    """Drop memory-snapshot entries that restate an already-rendered goal.
+
+    The LAYER 3 active-goal block renders ``session_goal`` / ``loop_goal``
+    verbatim every prompt (goal-persistence policy keeps them pinned in L3),
+    so working-memory entries that only restate the same sentence are pure
+    duplication in long sessions. Entry-level (not line-level) matching is
+    robust to multi-line entry content. Two drop rules, both requiring the
+    goal text to be present inside the entry:
+
+    * dominance: the whitespace-normalized goal makes up >=50% of the
+      entry (floor 24 chars so short goals never nuke whole entries);
+    * persistence framing: entries written by the goal-persistence hatch
+      ("Locked session goal:" / "Locked loop goal:" prefix) carry no other
+      substance.
+
+    Returns the summary unchanged when no goals are set or nothing matches.
+    """
+    goal_norms = [" ".join(str(g or "").split()) for g in goal_texts]
+    goal_norms = [g for g in goal_norms if g]
+    if not goal_norms or not summary:
+        return summary
+    kept: list[str] = []
+    # Snapshot entries render one "- #id ..." block each; entry-level
+    # matching survives multi-line entry content.
+    for entry in re.split(r"(?=\n- #)", summary):
+        norm = " ".join(entry.split())
+        low = norm.lower()
+        dominated = any(
+            g in norm and len(g) >= max(24, 0.5 * len(norm))
+            for g in goal_norms
+        )
+        framed = ("locked session goal:" in low or "locked loop goal:" in low) and any(
+            g in norm for g in goal_norms
+        )
+        if dominated or framed:
+            continue
+        kept.append(entry)
+    return "\n".join(kept)
+
 
 def run_turn(session, text, *, origin="user"):
     logger.info(f"Sending message: {text[:100]}...")
@@ -299,9 +426,10 @@ def run_turn(session, text, *, origin="user"):
         if session.agentic:
             active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
             active_tools = filter_tools_for_session_type(active_tools, session_type)
+            active_tools = filter_tools_for_mode(active_tools, active_mode)
             # Spec #9: phased exposure — when lazy_tools_enabled, exclude
-            # specialist-phase tools not in the active phase set (+ any the
-            # model loaded via load_tools). Default off → no filtering.
+            # optional non-mode phases not in the active phase set. Mode-owned
+            # phases are filtered unconditionally above.
             if session.variables.get("lazy_tools_enabled", False):
                 active_tools = filter_tools_by_phase(active_tools, active_tool_phases)
 
@@ -342,8 +470,9 @@ def run_turn(session, text, *, origin="user"):
                     "strategy-mode registries are activated automatically."
                     if session.variables.get("lazy_tools_enabled", False)
                     else (
-                        f"all registered phases. Provider schema exposes "
-                        f"{len(active_tools)} tools because lazy tool exposure is disabled."
+                        f"core/non-mode phases plus the current mode. Provider schema "
+                        f"exposes {len(active_tools)} tools; inactive mode registries "
+                        "remain hidden even though optional lazy exposure is disabled."
                     )
                 )
             )
@@ -366,7 +495,7 @@ def run_turn(session, text, *, origin="user"):
             "Step through one task at a time until completion; never work multiple tasks simultaneously. "
             "Use get_execution_state to choose the next actionable phase/task, use block_task if external input is required, and resume_task when user unblock context arrives. "
             "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
-            "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
+            "gather read-only context first, use save_scratchpad for temporary phase notes, call flush only after a tool result reported \"Stored ... in collation buffer\", and call raise_blocker when blocked on user input. In subagent sessions read-only results always deliver inline — never call flush there. "
             "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
             "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows. "
             "Do not stall on status-only updates: unless blocked or awaiting explicit approval/decision, continue implementation autonomously until all phases and tasks are completed."
@@ -680,6 +809,7 @@ def run_turn(session, text, *, origin="user"):
     iteration = 0
     active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
     active_tools = filter_tools_for_session_type(active_tools, session_type)
+    active_tools = filter_tools_for_mode(active_tools, active_mode)
     provider_tools = active_tools if expose_tools else None
     # Spec #9: phased exposure (see the earlier filter site for details).
     if session.variables.get("lazy_tools_enabled", False):
@@ -901,6 +1031,24 @@ def run_turn(session, text, *, origin="user"):
             # can update feature_state / the scratchpad between iterations.
             # L1B is reused from the per-turn cache (no disk reads).
             # The memory + scratchpad snapshots are appended below as before.
+            # L2 state capsule is the authoritative structured projection;
+            # the L3 snapshots below are deduped against it so stores don't
+            # render twice per prompt.
+            try:
+                from mu.session.state_capsule import build_state_capsule
+
+                state_capsule_text = build_state_capsule(
+                    session,
+                    max_chars=int(
+                        session.variables.get(
+                            "conversation_summary_char_limit", 24000
+                        )
+                        * 0.7
+                    ),
+                    include_goal=False,
+                )
+            except Exception:
+                state_capsule_text = ""
             dynamic_system_prompt = session._inject_hierarchical_context(
                 base_persona_prompt,
                 cached_skills=session._turn_skills_block,
@@ -934,6 +1082,17 @@ def run_turn(session, text, *, origin="user"):
                     query=effective_text,
                 )
                 if memory_summary:
+                    memory_summary = _filter_goal_echo_entries(
+                        memory_summary,
+                        [
+                            str(session.variables.get(k, "") or "")
+                            for k in ("session_goal", "loop_goal")
+                        ],
+                    )
+                    memory_summary = _filter_state_capsule_duplicates(
+                        memory_summary, state_capsule_text
+                    )
+                if memory_summary:
                     dynamic_system_prompt += (
                         "\n\nLAYER 3 — Persisted working memory snapshot:\n"
                         f"{memory_summary}"
@@ -950,6 +1109,20 @@ def run_turn(session, text, *, origin="user"):
                     )
             if session.variables.get("scratchpad_enabled", True):
                 scratchpad_summary = session.turn_scratchpad.render_summary(limit=8)
+                if scratchpad_summary:
+                    # Same goal-echo dedup as the memory snapshot: loop-mode
+                    # notes that only restate the pinned goal duplicate the
+                    # L3 active-goal block.
+                    scratchpad_summary = _filter_goal_echo_entries(
+                        scratchpad_summary,
+                        [
+                            str(session.variables.get(k, "") or "")
+                            for k in ("session_goal", "loop_goal")
+                        ],
+                    )
+                    scratchpad_summary = _filter_state_capsule_duplicates(
+                        scratchpad_summary, state_capsule_text
+                    )
                 if scratchpad_summary:
                     dynamic_system_prompt += (
                         "\n\nLAYER 3 — Turn scratchpad snapshot:\n"
@@ -1184,6 +1357,28 @@ def run_turn(session, text, *, origin="user"):
             # effective_drift_ratio. Factored into _calibrate_drift_from_response
             # so the warm-vs-cold gate is unit-testable.
             _calibrate_drift_from_response(session, response)
+
+            # Model-directed context-pressure nudge (increment 11): default
+            # mode has no proactive compaction, so nothing told the model WHEN
+            # to run the `compact` tool. When the assembled request crosses
+            # `context_pressure_nudge_pct` (default 80%) of the effective
+            # limit, inject ONE synthetic compact nudge per threshold
+            # crossing — hysteresis via the summary anchor. Turn-final
+            # responses only (no tool-call parts — an in-flight tool batch
+            # continues and gets the nudge after it settles). Zero cost
+            # under the threshold: reads the manifest the preflight guard
+            # already stashed this iteration. Parts-based gate is
+            # scope-safe — `tool_calls` may not be bound at this seam in
+            # the streaming path.
+            if not any(
+                getattr(p, "type", None) == "tool_call"
+                for p in (getattr(response, "parts", None) or [])
+            ):
+                _maybe_nudge_context_pressure(
+                    session,
+                    limit=int(getattr(session, "_last_effective_limit", 0) or 0),
+                    manifest=getattr(session, "_request_estimate_manifest", None),
+                )
 
             total_in += response.input_tokens
             total_out += response.output_tokens
@@ -1778,10 +1973,13 @@ def run_turn(session, text, *, origin="user"):
                                 logger.debug("Suppressed exception", exc_info=True)
                         return (
                             f"[dedup: {part.tool_name} — file unchanged; this "
-                            f"range was already read this session "
-                            f"(cache_key={ck}). Call recall({ck}) or "
-                            f"result_range/result_search if you need the content "
-                            f"again; otherwise continue with what you have.]"
+                            f"exact range was already read earlier in this "
+                            f"conversation and its full content is in the "
+                            f"message history above — use what you already "
+                            f"have instead of re-reading. If a verbatim "
+                            f"re-fetch is truly required, call "
+                            f"recall({ck}) or result_range/result_search "
+                            f"(when available in this session).]"
                         )
                 hit = None
                 try:
@@ -1989,7 +2187,11 @@ def run_turn(session, text, *, origin="user"):
                     collated_pairs = session.collation_buffer.flush_selected(requested_ids)
                     collated_data = [body for _, body in collated_pairs]
                     if not collated_data:
-                        raw_result = "No data in collation buffer to flush."
+                        # Sub-increment 12a: self-diagnosing message so the
+                        # model doesn't read "No data" as data loss (see
+                        # _empty_flush_message — collation-disabled children
+                        # and single-call batches were re-deriving evidence).
+                        raw_result = _empty_flush_message(session)
                     else:
                         raw_result = "--- Flushed Context ---\n" + "\n\n".join(
                             collated_data
@@ -2245,6 +2447,21 @@ def run_turn(session, text, *, origin="user"):
                     "thought_signature": part.thought_signature,
                     "cache_key": cache_key,
                 }
+                # Artifacts such as browser_snapshot PNGs stay durable in the
+                # artifact registry, while capable models receive the original
+                # bytes natively on the next iteration. Text-only models keep
+                # the ordinary tool result/artifact path.
+                try:
+                    from mu.session.media import tool_media_references
+
+                    media_inputs = tool_media_references(session, source_result)
+                    if media_inputs:
+                        tool_result_part["media_inputs"] = media_inputs
+                except Exception:
+                    logger.debug(
+                        "native tool media capture failed",
+                        exc_info=True,
+                    )
                 # Keep a compact, first-class visualization descriptor beside
                 # the tool result. Structured observation transforms and older
                 # transports may reshape the result body; history replay should

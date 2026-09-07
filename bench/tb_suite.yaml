@@ -1,0 +1,17 @@
+# mucli harness benchmark — Terminal-Bench task selection
+# Run: ./benchmark.sh [--smoke]
+# Time gates come from each task's max_agent_timeout_sec (TB enforces natively).
+
+name: terminal-bench-core
+version: 0.1.1
+task_ids:
+  - hello-world            # baseline loop, 360s gate
+  - processing-pipeline    # bash deps + multi-step diagnosis
+  - fix-git                # git state recovery
+  - git-multibranch        # long-turn planning, ssh/nginx/git
+  - nginx-request-logging  # service configuration
+  - cron-broken-network    # scheduler/network diagnosis
+  - sqlite-db-truncate     # data recovery, careful shell
+  - train-fasttext         # long-horizon tool chaining
+  - fix-permissions        # shell fluency, no code edit
+  - build-tcc-qemu         # multi-step build/debug

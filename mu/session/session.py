@@ -182,7 +182,7 @@ class Session:
                 )
 
     def stage_attachment_ids(self, attachment_ids, *, replace=True):
-        """Validate registry IDs and stage descriptor-only history parts."""
+        """Stage durable descriptors plus capability-gated native references."""
         registry = getattr(self, "attachment_registry", None)
         if registry is None:
             raise ValueError("attachment registry is unavailable for this session")
@@ -209,6 +209,30 @@ class Session:
                 "attachment": descriptor,
             }
         self.staged_attachments = [part for key, part in by_id.items() if key]
+
+        from mu.session.media import native_media_reference
+
+        current_native = [] if replace else list(getattr(self, "staged_files", []) or [])
+        native_by_id = {}
+        passthrough = []
+        for part in current_native:
+            if not isinstance(part, dict) or part.get("type") != "media_input":
+                passthrough.append(part)
+                continue
+            media = part.get("media") or {}
+            item_id = str(media.get("attachment_id") or "")
+            if item_id:
+                native_by_id[item_id] = part
+        for descriptor in staged:
+            reference = native_media_reference(
+                self, descriptor, registry_kind="attachment"
+            )
+            if reference is not None:
+                native_by_id[descriptor["attachment_id"]] = {
+                    "type": "media_input",
+                    "media": reference,
+                }
+        self.staged_files = passthrough + list(native_by_id.values())
         return staged
 
     def add_file(self, file_path):
@@ -223,8 +247,8 @@ class Session:
         safe_mime = get_safe_mime_type(file_path)
 
         # The durable attachment registry is the canonical path for user inputs.
-        # Keep the old provider-native staging below as a compatibility fallback
-        # for sessions created before runtime-state initialization.
+        # Ephemeral sessions created without runtime-state initialization keep
+        # a bounded inline compatibility path below.
         registry = getattr(self, "attachment_registry", None)
         if registry is not None:
             try:
@@ -236,66 +260,61 @@ class Session:
                     self.ui.show_info(
                         f"Attached {descriptor['name']} ({descriptor['attachment_id'][:8]})"
                     )
-                # Fall through to the provider-native staging below so
-                # staged_files mirrors the legacy contract: images become
-                # image_input dicts with the full source path, other files
-                # keep flowing through provider.upload_file.
+                # stage_attachment_ids has also queued a safe registry
+                # reference when the active model declares this MIME type.
+                return descriptor
             except Exception as e:
                 if self.ui:
                     self.ui.show_error(f"Attachment failed: {e}")
                 return None
 
-        # Images route through the vision path (image_input + raw bytes), not
-        # the file-ref path — provider.upload_file for OpenAI/Ollama returns a
-        # local path that becomes a plain "[File: ...]" text stub, which
-        # vision-capable models can't actually look at.
-        if safe_mime.startswith("image/"):
+        # Compatibility path for ephemeral sessions without a durable
+        # attachment registry. Normal CLI/GUI/mobile sessions use registry IDs
+        # above so base64 does not inflate session.json.
+        try:
+            native_supported = bool(
+                self.provider.supports_input_mime(
+                    safe_mime, os.path.basename(file_path)
+                )
+            )
+        except Exception:
+            native_supported = False
+        if native_supported:
             try:
                 with open(file_path, "rb") as fh:
                     raw = fh.read()
             except OSError as e:
                 if self.ui:
-                    self.ui.show_error(f"Could not read image: {e}")
+                    self.ui.show_error(f"Could not read media: {e}")
                 return
             import base64 as _b64
             self.staged_files.append(
                 {
-                    "type": "image_input",
-                    "image": {
+                    "type": "media_input",
+                    "media": {
                         "data_b64": _b64.b64encode(raw).decode("ascii"),
                         "mime_type": safe_mime,
                         "source": file_path,
+                        "display_name": os.path.basename(file_path),
                     },
                 }
             )
             if self.ui:
                 size_kb = max(1, len(raw) // 1024)
                 self.ui.show_info(
-                    f"Staged image: {os.path.basename(file_path)} ({safe_mime}, {size_kb} KB)"
+                    f"Staged native media: {os.path.basename(file_path)} ({safe_mime}, {size_kb} KB)"
                 )
             return
 
+        # Fail closed if runtime-state initialization could not provide the
+        # durable registry and the model does not explicitly support this MIME.
+        # In particular, do not turn an unsupported upload into an optimistic
+        # provider file reference.
         if self.ui:
-            self.ui.show_info(f"Uploading {file_path} as {safe_mime}...")
-
-        try:
-            file_ref = self.provider.upload_file(file_path, safe_mime)
-            if file_ref:
-                self.staged_files.append(
-                    {
-                        "type": "file",
-                        "file_ref": {
-                            "uri": file_ref.uri,
-                            "mime_type": file_ref.mime_type,
-                            "display_name": file_ref.display_name,
-                        },
-                    }
-                )
-                if self.ui:
-                    self.ui.show_info("Upload complete.")
-        except Exception as e:
-            if self.ui:
-                self.ui.show_error(f"Upload failed: {e}")
+            self.ui.show_info(
+                f"{os.path.basename(file_path)} was not sent natively: "
+                f"{self.provider.model_name or 'the active model'} does not advertise {safe_mime} input."
+            )
 
     def clear_files(self):
         self.staged_files = []
@@ -524,11 +543,13 @@ class Session:
     ) -> list[Message]:
         from mu.session.messages import build_messages_from_history
         from mu.session.budgets import resolve_tool_result_floor
+        from mu.session.media import media_resolver_for_session
 
         floor = resolve_tool_result_floor(self)
         return build_messages_from_history(
             recent_history_dicts, new_user_message_dict,
             tool_result_floor=floor,
+            media_resolver=media_resolver_for_session(self),
         )
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:
@@ -638,9 +659,6 @@ class Session:
             if next_task_text:
                 sections.append(f"- next_task: {next_task_text}")
 
-        scratch = self.turn_scratchpad.render_summary(limit=8).strip()
-        if scratch:
-            sections.append("\nScratchpad snapshot:\n" + scratch)
         return "\n".join(sections).strip()
 
     def _ensure_session_goal_persistence(self) -> None:
@@ -918,8 +936,19 @@ class Session:
             except Exception:
                 logger.debug("skill auto-expand banner failed", exc_info=True)
 
+        # Auto-expanded bodies get a fractional slice of the L1B budget by
+        # default: a multi-KB skill body inlined on trigger-match crowds the
+        # name+description index out and ships content the model can pull
+        # on demand via `invoke_skill`. 0.4 caps a body at 40% of L1B —
+        # enough head + front-matter to act on, tail dropped deliberately
+        # (context-optimisation lever). Set 1.0 to restore legacy inline-all.
+        body_budget_scale = 0.4
         return render_skills_block(
-            skills, budget=budget, user_text=user_text, mode=mode
+            skills,
+            budget=budget,
+            user_text=user_text,
+            mode=mode,
+            budget_scale=body_budget_scale,
         )
 
     def _announce_auto_expanded_skills(self, skills, user_text, announce_skill) -> None:
@@ -1125,7 +1154,7 @@ class Session:
             "As each criterion is satisfied, call update_task_status with cumulative verified_exit_criteria so progress is visible in the task UI. "
             "In review mode, use review_all_completed_tasks first, then review_completed_tasks with categorized issues (bug/risk/enhancement), propose_task_diff for proposed fixes, decide_task_diff for user approvals/denials, and archive_task once tasks become archive-ready. "
             "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
-            "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
+            "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush only after a tool result reported \"Stored ... in collation buffer\" (subagent sessions deliver read-only results inline — never call flush there). "
             "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
             "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
             "Do not pause after progress reports. Unless blocked or waiting on explicit approval/decision, immediately continue to the next actionable implementation step in the same run without asking the user to 'continue'. "

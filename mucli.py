@@ -38,6 +38,68 @@ from mu.tools.capabilities import normalize_session_type
 console = Console()
 
 
+# Terminal-Bench tasks only need direct workspace and shell execution. Keeping
+# this profile explicit avoids sending schemas for GUI, research, teaching,
+# memory-ledger, security, and multi-agent features on every benchmark turn.
+# The normal CLI remains on the complete tool set by default.
+_TERMINAL_BENCH_TOOLS = frozenset(
+    {
+        "todo_write",
+        "todo_set_status",
+        "todo_list",
+        "todo_delete",
+        "todo_clear",
+        "result_range",
+        "result_head",
+        "result_tail",
+        "result_search",
+        "result_diagnostics",
+        "result_json_path",
+        "compare_results",
+        "get_workspace_details",
+        "read_file",
+        "get_chunk",
+        "search_for_string",
+        "search_references",
+        "retrieve_relevant_context",
+        "list_dir",
+        "write_file",
+        "apply_diff",
+        "search_and_replace_file",
+        "bash",
+        "bash_background",
+        "bash_status",
+        "bash_logs",
+        "bash_kill",
+        "bash_list",
+        "batch_job",
+        "flush",
+        "discard_deferred_context",
+        "set_session_goal",
+        "context_status",
+        "compact",
+        "checkpoint_progress",
+    }
+)
+
+
+def apply_tool_profile(session, profile="full", tools=None):
+    """Apply a named initial tool allow-list without changing saved config."""
+
+    if profile == "full":
+        return
+    if profile != "terminal-bench":
+        raise ValueError(f"unknown tool profile: {profile}")
+    if tools is None:
+        from mu.tools.descriptors import TOOLS
+
+        tools = TOOLS
+    available = {tool.name for tool in tools}
+    disabled = set(getattr(session, "disabled_tools", ()))
+    disabled.update(available - _TERMINAL_BENCH_TOOLS)
+    session.disabled_tools = sorted(disabled)
+
+
 def refresh_memory_hud(session, ui, *, force=False):
     if force and ui and hasattr(ui, "show_memory_monitor"):
         ui.show_memory_monitor(session)
@@ -649,6 +711,8 @@ def build_session(args, ui, allow_prompt=True):
         session.variables["yolo"] = True
         session.session_manager.save_history(session.folder_context)
 
+    apply_tool_profile(session, getattr(args, "tool_profile", "full"))
+
     # Auto-load hooks.json from `.mu/`. Failures log a warning and continue.
     try:
         from mu.agent.hooks_config import load_hooks_from_config
@@ -879,6 +943,26 @@ def main():
         ),
     )
     parser.add_argument(
+        "--headless-prompt",
+        type=str,
+        default=None,
+        metavar="TEXT",
+        help=(
+            "Run ONE agent turn with TEXT as the user prompt, save, and exit "
+            "without the TUI (benchmark/CI mode). Requires --provider and "
+            "--model (or a saved --session with a provider)."
+        ),
+    )
+    parser.add_argument(
+        "--tool-profile",
+        choices=["full", "terminal-bench"],
+        default="full",
+        help=(
+            "Initial tool schema profile. 'terminal-bench' keeps only direct "
+            "workspace, shell, result, task, and context tools."
+        ),
+    )
+    parser.add_argument(
         "--mode-prompt",
         type=str,
         action="append",
@@ -934,6 +1018,39 @@ def main():
         return
 
     ui = RichUI()
+
+    # Headless one-shot mode (benchmark/CI): run a single agent turn and exit.
+    if getattr(args, "headless_prompt", None):
+        from mu.session.ui_headless import HeadlessUI
+
+        # Bench runs operate on the TB task dir (/app). Default the workspace
+        # to the CWD so write/bash tools are exposed without --workspace.
+        if not args.workspace:
+            args.workspace = [os.getcwd()]
+        try:
+            headless_ui = HeadlessUI()
+            session = build_session(args, headless_ui, allow_prompt=False)
+        except Exception as exc:
+            console.print(
+                f"[red]Headless init failed: {safe_markup(str(exc))}[/red]"
+            )
+            sys.exit(1)
+        exit_code = 0
+        try:
+            result = session.send_message(args.headless_prompt)
+            status = (result or {}).get("status", "complete")
+            if status not in ("complete", "completed", "paused"):
+                exit_code = 1
+            console.print(f"[dim]headless turn status: {status}[/dim]")
+        except Exception as exc:
+            console.print(f"[red]Headless turn failed: {safe_markup(str(exc))}[/red]")
+            exit_code = 1
+        finally:
+            try:
+                session.shutdown()
+            except Exception:
+                pass
+        sys.exit(exit_code)
 
     try:
         session = build_session(args, ui, allow_prompt=True)

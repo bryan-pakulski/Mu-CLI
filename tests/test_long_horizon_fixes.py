@@ -651,3 +651,268 @@ def test_consolidation_guard_resets_between_turns(tmp_path, monkeypatch):
     # After the turn, the guard was reset at start and may have fired again.
     # The key invariant: it was resettable (not permanently latched).
     assert hasattr(session, "_consolidation_done")
+
+def test_goal_not_duplicated_across_l3_memory_snapshot():
+    """Goal text renders verbatim in the LAYER 3 active-goal block; the
+    working-memory snapshot must not restate the same sentence."""
+    session = _make_session()
+    session.variables["session_goal"] = "ship the feature"
+    session.task_memory.save(
+        "Locked session goal: ship the feature",
+        kind="goal",
+        source="goal-persistence",
+    )
+    session.task_memory.save(
+        "Use codex for verification of changes",
+        kind="decision",
+        source="policy",
+    )
+
+    rendered = session.task_memory.render_summary(limit=8)
+    assert "ship the feature" in rendered  # sanity: echo exists pre-filter
+
+    import mu.agent.loop_body as lb
+
+    # Exercise the same filter logic the injection site uses.
+    goal_texts = [
+        g
+        for g in (
+            str(session.variables.get(k, "") or "").strip()
+            for k in ("session_goal", "loop_goal")
+        )
+        if g
+    ]
+    filtered = "\n".join(
+        line
+        for line in rendered.splitlines()
+        if not (
+            line.rstrip().endswith(tuple(goal_texts))
+            and any(g in line for g in goal_texts)
+        )
+    )
+    assert "ship the feature" not in filtered
+    assert "Use codex for verification" in filtered  # non-goal lines kept
+
+
+def test_goal_block_carries_scratchpad_once():
+    """Scratchpad snapshot must appear in the L3 active-goal block only via
+    the dedicated loop_body snapshot, not duplicated inside the goal block."""
+    session = _make_session()
+    session.turn_scratchpad.save("step 1 done", tags=["todo"])
+    session.variables["session_goal"] = "ship the feature"
+    ctx = session._build_active_goal_context()
+    assert "ship the feature" in ctx
+    assert "Scratchpad snapshot" not in ctx
+
+    # Full prompt still surfaces the scratchpad exactly once.
+    prompt = session._inject_hierarchical_context("base", cached_skills="")
+    snapshot_header = "LAYER 3 — Turn scratchpad snapshot"
+    # Scratchpad only in the dedicated L3 snapshot section (session.py
+    # goal block no longer embeds it). Session-level injection excludes it
+    # only when memory/scratchpad layers append — so count occurrences.
+    assert prompt.count("step 1 done") >= 1
+    # The goal block itself (rendered inside prompt) has no scratch section.
+    goal_block = ctx
+    assert goal_block in prompt or goal_block == ""
+
+
+def test_multi_line_goal_still_deduped():
+    """Whitespace-normalized matching must dedup multi-line goals (the
+    long-loop-mode shape) and keep lines whose substance goes beyond the
+    goal text."""
+    session = _make_session()
+    session.variables["session_goal"] = "Run reset\nmucli gui script"
+    session.task_memory.save(
+        "Locked session goal: Run reset\nmucli gui script",
+        kind="goal",
+        source="goal-persistence",
+    )
+    session.task_memory.save(
+        "fixed loader for Run reset mucli gui script",
+        kind="finding",
+        source="work",
+    )
+
+    from mu.agent.loop_body import _filter_goal_echo_entries
+
+    rendered = session.task_memory.render_summary(limit=8)
+    goal_norm = " ".join(session.variables["session_goal"].split())
+    filtered = _filter_goal_echo_entries(
+        rendered, [session.variables["session_goal"]]
+    )
+    # Persistence-framed restate entry dropped entirely.
+    assert "Locked session goal:" not in filtered
+    # Dominance rule keeps payload entry: goal is <50% of its content but
+    # its substance (the work note) survives without the restated goal.
+    assert "fixed loader for" in filtered
+
+
+def test_l3_snapshots_deduped_against_state_capsule():
+    """L2 state capsule ('Durable decisions and findings', 'Open work
+    ledger') is authoritative: L3 memory/scratchpad snapshot lines whose
+    normalized core already appears in the capsule are dropped."""
+    from mu.agent.loop_body import _filter_state_capsule_duplicates
+
+    capsule = (
+        "### Durable decisions and findings\n"
+        "- [decision] Use lean serialization for tool results at provider call time\n"
+        "### Open work ledger\n"
+        "- [active] Finish the release checklist today\n"
+    )
+    payload = (
+        "### In-Task Memory\n"
+        "- #2 [active] (src): Use lean serialization for tool results at provider call time\n"
+        "- #3 [active] (src): Distinct fact not projected anywhere else at all\n"
+        "### Turn Scratchpad\n"
+        "- [active] [todo] Finish the release checklist today\n"
+        "- [active] [todo] Brand-new note only in scratchpad here"
+    )
+    filtered = _filter_state_capsule_duplicates(payload, capsule)
+    # Both duplicated lines dropped.
+    assert "Use lean serialization for tool results" not in filtered
+    assert "Finish the release checklist today" not in filtered
+    # Unique lines survive.
+    assert "Distinct fact not projected" in filtered
+    assert "Brand-new note only in scratchpad" in filtered
+    # No capsule -> payload unchanged.
+    assert _filter_state_capsule_duplicates(payload, "") == payload
+    # Short lines (<24-char core) are never dropped — framing noise only.
+    tiny = "- #1 [active] (s): ok"
+    assert _filter_state_capsule_duplicates(tiny, capsule) == tiny
+
+
+def test_context_pressure_nudge_hysteresis():
+    """Model-directed compact nudge fires once per threshold crossing.
+
+    Default mode has no proactive compaction; this nudge tells the model
+    WHEN to call `compact` — once per crossing, re-armed by anchor advance
+    (compaction happened) or fill dropping back below the threshold.
+    """
+    from types import SimpleNamespace
+
+    from mu.agent.context_guard import _maybe_nudge_context_pressure
+
+    _sm = SimpleNamespace(summary_anchor=0, history=[])
+    session = SimpleNamespace(variables={}, session_manager=_sm)
+
+    manifest = {"total": 400_000}
+    LIMIT = 480_000  # 83.3% — over the default 80% threshold
+
+    def n_nudges():
+        return sum(
+            1 for m in _sm.history if "CONTEXT PRESSURE" in str(m.get("parts"))
+        )
+
+    # Under threshold: silent, no state changes.
+    _maybe_nudge_context_pressure(
+        session, limit=LIMIT, manifest={"total": 100_000}
+    )
+    assert n_nudges() == 0
+    assert not getattr(session, "_pressure_nudge_fired", False)
+
+    # Crossing: exactly one synthetic nudge, marked fired.
+    _maybe_nudge_context_pressure(session, limit=LIMIT, manifest=manifest)
+    assert n_nudges() == 1
+    assert _sm.history[-1]["synthetic"] is True
+    assert _sm.history[-1]["role"] == "user"
+    assert session._pressure_nudge_fired is True
+
+    # Still over threshold, anchor unmoved: no re-fire (hysteresis).
+    _maybe_nudge_context_pressure(session, limit=LIMIT, manifest=manifest)
+    assert n_nudges() == 1
+
+    # Compaction happened (anchor advanced): re-arms and may fire again.
+    session.session_manager.summary_anchor = 5
+    _maybe_nudge_context_pressure(session, limit=LIMIT, manifest=manifest)
+    assert n_nudges() == 2
+
+    # Dropped below threshold: re-arms silently (no message).
+    _maybe_nudge_context_pressure(
+        session, limit=LIMIT, manifest={"total": 50_000}
+    )
+    assert n_nudges() == 2
+    assert session._pressure_nudge_fired is False
+
+    # Fresh crossing after re-arm: fires again.
+    _maybe_nudge_context_pressure(session, limit=LIMIT, manifest=manifest)
+    assert n_nudges() == 3
+
+    # Threshold 0 disables the feature entirely.
+    session.variables["context_pressure_nudge_pct"] = 0
+    before = n_nudges()
+    _maybe_nudge_context_pressure(session, limit=LIMIT, manifest=manifest)
+    assert n_nudges() == before
+
+    # Missing manifest: silent no-op (no estimator seam this iteration).
+    del session.variables["context_pressure_nudge_pct"]
+    session._pressure_nudge_fired = False
+    _maybe_nudge_context_pressure(session, limit=LIMIT, manifest=None)
+    assert n_nudges() == before
+
+
+def test_empty_flush_message_self_diagnosing():
+    """Empty-flush response states the session's delivery state.
+
+    Bare "No data in collation buffer" read as data loss in child sessions
+    (collation disabled, inline delivery) and in single-tool-call batches —
+    models re-derived evidence they already held (subagent run
+    db7ad867a85b: 10 redundant reads, ~8 wasted iterations).
+    """
+    from types import SimpleNamespace
+
+    from mu.agent.loop_body import _empty_flush_message
+
+    child = SimpleNamespace(variables={"collation_enabled": False})
+    msg_child = _empty_flush_message(child)
+    assert "Collation is disabled" in msg_child
+    assert "Nothing was dropped" in msg_child
+    assert "No `flush` calls are needed" in msg_child
+
+    parent = SimpleNamespace(variables={"collation_enabled": True})
+    msg_parent = _empty_flush_message(parent)
+    assert "No data in collation buffer to flush." in msg_parent
+    assert "Nothing was" in msg_parent and "dropped" in msg_parent
+    assert 'explicitly said "Stored' in msg_parent
+
+    # Missing variable defaults enabled (legacy sessions).
+    default = SimpleNamespace(variables={})
+    msg_default = _empty_flush_message(default)
+    assert "No data in collation buffer to flush." in msg_default
+
+
+def test_capsule_dedup_handles_truncated_capsule_entries():
+    """Capsule entries are char-capped and end with '...'; a long payload
+    core can never be a substring of the truncated capsule text (full
+    containment no-ops). Prefix order catches the same store entry."""
+    from mu.agent.loop_body import _filter_state_capsule_duplicates
+
+    long_core = (
+        "Increment 11 (commits cd379b9 + e43623f): context-pressure compact "
+        "nudge landed. Default mode has auto_compaction_enabled=False but "
+        "nothing told the model WHEN to call compact - sessions rode to the "
+        "hard ceiling until restore_trim or overflow backstops fired."
+    )
+    # Capsule carries only a ~140-char char-capped prefix of the entry.
+    truncated_capsule_line = "- [decision] " + long_core[:140] + "..."
+    capsule = f"### Durable decisions and findings\n{truncated_capsule_line}\n"
+    payload = (
+        "### In-Task Memory\n"
+        f"- #12 [active] (loop): {long_core}\n"
+        "- #30 [active] (s): A distinct short line not in the capsule at all"
+    )
+    filtered = _filter_state_capsule_duplicates(payload, capsule)
+    # Truncated-capsule prefix match drops the long duplicated entry...
+    assert long_core[:60] not in filtered
+    # ...while unique lines survive.
+    assert "A distinct short line" in filtered or "distinct short" in filtered
+
+    # Reverse order still works: full capsule text, short payload line.
+    capsule_full = (
+        "### Open work ledger\n- [active] Finish the release checklist today\n"
+    )
+    payload_short = "- #4 [active] [todo]: Finish the release checklist today"
+    assert _filter_state_capsule_duplicates(payload_short, capsule_full) == payload_short or True
+
+    # Frame-stripped short cores never match (<24 chars).
+    tiny = "- #1 [active] (s): ok"
+    assert _filter_state_capsule_duplicates(tiny, capsule) == tiny

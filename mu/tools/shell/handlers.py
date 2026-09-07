@@ -7,8 +7,10 @@ so the tools still work in session-less unit tests).
 
 import json
 import os
+import re
 import subprocess
-from typing import Any, Dict
+import time
+from typing import Any, Dict, Optional
 
 from mu.tools import tool
 from mu.tools._bounds import (
@@ -17,6 +19,7 @@ from mu.tools._bounds import (
 )
 from mu.tools.capabilities import normalize_session_type, session_type_from_context
 from mu.tools._scrub import scrub_and_annotate as _scrub_and_annotate
+from mu.tools.shell.process import run_noninteractive_shell
 
 
 def _scrub_json_payload(payload: Any) -> Any:
@@ -37,7 +40,6 @@ def _scrub_json_payload(payload: Any) -> Any:
 
 
 from utils.logger import logger  # noqa: E402
-
 
 # ---------------------------------------------------------------- bg registry resolver
 
@@ -62,6 +64,72 @@ def _bg_registry(context):
 # ---------------------------------------------------------------- bash (synchronous)
 
 
+_INTERACTIVE_FAILURE_RE = re.compile(
+    r"(?:"
+    r"are you sure you want to continue connecting|"
+    r"cannot open /dev/tty|can't open /dev/tty|"
+    r"could not read (?:password|username)|"
+    r"enter passphrase|host key verification failed|"
+    r"input is not from a terminal|no tty present|"
+    r"password:|terminal prompts disabled"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _interactive_failure_hint(output: str, return_code: int) -> str:
+    """Explain how to recover when a child tried to prompt unattended."""
+
+    if return_code == 0 or not _INTERACTIVE_FAILURE_RE.search(output):
+        return ""
+    return (
+        "Interactive input is disabled for bash commands, so this prompt "
+        "failed immediately instead of blocking. Re-run non-interactively: "
+        "for SSH, preseed known_hosts or use "
+        "'-o StrictHostKeyChecking=accept-new' when appropriate and provide "
+        "credentials with an explicit SSH_ASKPASS/sshpass mechanism; for "
+        "other tools, use their non-interactive/yes flag."
+    )
+
+
+def _store_full_bash_output(session, command: str, full_output: str) -> Optional[str]:
+    """Best-effort write-through of un-truncated bash output to the durable
+    ResultStore so a later ``recall(key)`` / ``result_*`` op can recover what
+    the inline context dropped. Returns the cache key, or None when there is
+    no store / the write failed."""
+    if session is None:
+        return None
+    store = getattr(session, "tool_result_cache", None)
+    if store is None:
+        return None
+    try:
+        return store.store(
+            call_id=f"bash-full-{int(time.time() * 1000)}",
+            tool_name="bash",
+            result=full_output,
+            force=True,
+        )
+    except Exception:  # noqa: BLE001 — recovery path must never break bash
+        return None
+
+
+def _truncate_with_recovery(
+    session, command: str, output: str, max_output_chars: int
+) -> str:
+    """Truncate ``output`` for inline display, but persist the FULL text
+    first so the truncation is recoverable (stored_ref + recall hint)."""
+    full_key = _store_full_bash_output(session, command, output)
+    truncated = output[:max_output_chars]
+    if full_key:
+        return (
+            f"{truncated}\n\n...[TRUNCATED]... "
+            f"[full {len(output)}-char output stored — recall('{full_key}') "
+            f"or result_head/result_tail/result_search with cache_key "
+            f"'{full_key}']"
+        )
+    return f"{truncated}\n\n...[TRUNCATED]..."
+
+
 def bash_command(
     command: str,
     folder_context,
@@ -70,20 +138,28 @@ def bash_command(
     timeout_seconds: int = 120,
     max_output_chars: int = 12000,
     session_type: str = "workspace",
+    session=None,
 ) -> str:
     """Execute a raw shell command in the active runtime.
 
     Container sessions use the Docker filesystem itself as the boundary; an
     attached workspace is not required and ``cwd`` may be any non-secret path
     inside the container.
+
+    Output longer than ``max_output_chars`` is truncated for the model, but
+    the FULL output is written through to the durable result store first, so
+    the truncation is recoverable via ``recall(key)`` / result_* ops instead
+    of being lost.
     """
+    # Aliases used by the truncation helpers below (kept as locals so the
+    # helper calls read cleanly).
+    context_for_preservation = session
     command = str(command or "").strip()
     if not command:
         return "Error: command is required."
 
-    if (
-        normalize_session_type(session_type) != "container"
-        and (not folder_context or not folder_context.folders)
+    if normalize_session_type(session_type) != "container" and (
+        not folder_context or not folder_context.folders
     ):
         return "Error: No workspace attached."
 
@@ -100,23 +176,38 @@ def bash_command(
     max_output_chars = max(512, int(max_output_chars or 12000))
 
     try:
-        process = subprocess.run(
-            ["bash", "-lc", command],
-            capture_output=True,
-            text=True,
+        process = run_noninteractive_shell(
+            command,
             timeout=timeout_seconds,
             cwd=workdir,
         )
     except subprocess.TimeoutExpired as exc:
         partial = f"{exc.stdout or ''}\n{exc.stderr or ''}".strip()
+        # Persist the full partial stream before any clipping so a timed-out
+        # command's output is also recoverable, not just oversized output.
         if len(partial) > max_output_chars:
+            partial_key = _store_full_bash_output(
+                context_for_preservation, command, partial
+            )
             partial = partial[:max_output_chars]
+            if partial_key:
+                partial = (
+                    f"{partial}\n...[truncated]... [full timed-out output "
+                    f"stored — recall('{partial_key}') or result_* ops with "
+                    f"cache_key '{partial_key}']"
+                )
         # Scrub the timeout path too (codex round-8 F5): a command that
         # prints a secret then blocks must not leak it via partial output.
         return _scrub_and_annotate(
             (
                 f"Error: Command timed out after {timeout_seconds} seconds.\n"
-                f"{partial}"
+                f"{partial}\n\n"
+                "Hint: The shell and its entire process group were terminated. "
+                "Commands are unattended and cannot read from MuCLI's terminal. "
+                "If this command may have waited for input, retry with explicit "
+                "non-interactive flags, credentials, and connection timeouts; "
+                "do not clear the prompt-control environment with `env -i` "
+                "unless you supply those settings again."
             ).strip()
         )
     except Exception as exc:
@@ -132,9 +223,14 @@ def bash_command(
         chunks.append("Command executed with no output.")
     chunks.append(f"Exit code: {process.returncode}")
     output = "\n\n".join(chunks)
+    prompt_hint = _interactive_failure_hint(output, process.returncode)
+    if prompt_hint:
+        output = f"{output}\n\nHint: {prompt_hint}"
 
     if len(output) > max_output_chars:
-        output = output[:max_output_chars] + "\n\n...[TRUNCATED]..."
+        output = _truncate_with_recovery(
+            context_for_preservation, command, output, max_output_chars
+        )
     return _scrub_and_annotate(output)
 
 
@@ -143,7 +239,10 @@ def bash_command(
     description=(
         "Executes a raw bash command in the active runtime and returns "
         "combined STDOUT/STDERR. Container sessions may use any non-secret "
-        "working directory inside the container."
+        "working directory inside the container. Commands are unattended: "
+        "stdin is closed, no controlling TTY is available, and interactive "
+        "prompts fail immediately. Supply explicit non-interactive flags or "
+        "credentials instead of waiting for a prompt."
     ),
     parameters={
         "type": "object",
@@ -163,8 +262,7 @@ def bash_command(
             "timeout_seconds": {
                 "type": "integer",
                 "description": (
-                    "Maximum seconds before terminating the command "
-                    "(default 120)."
+                    "Maximum seconds before terminating the command " "(default 120)."
                 ),
                 "default": 120,
             },
@@ -190,6 +288,7 @@ def _bash_tool(args: Dict[str, Any], context) -> str:
         timeout_seconds=args.get("timeout_seconds", 120),
         max_output_chars=args.get("max_output_chars", 12000),
         session_type=session_type_from_context(context),
+        session=getattr(context, "session", None),
     )
 
 
@@ -202,7 +301,8 @@ def _bash_tool(args: Dict[str, Any], context) -> str:
         "Start a long-running bash command in the background and return a "
         "task_id you can poll with `bash_status` or read with `bash_logs`. "
         "Use this for test watchers, dev servers, builds, or anything that "
-        "would block the synchronous `bash` tool for too long."
+        "would block the synchronous `bash` tool for too long. Background "
+        "commands are also unattended and receive closed stdin."
     ),
     parameters={
         "type": "object",
@@ -289,7 +389,9 @@ def bash_status(args: Dict[str, Any], context) -> str:
     if task is None:
         return json.dumps({"error": f"no such task: {task_id}"})
     tail_lines = max(0, int(args.get("tail_lines", 20) or 20))
-    return json.dumps(_scrub_json_payload(summarize_task(task, tail_lines=tail_lines)), indent=2)
+    return json.dumps(
+        _scrub_json_payload(summarize_task(task, tail_lines=tail_lines)), indent=2
+    )
 
 
 @tool(
@@ -307,9 +409,7 @@ def bash_status(args: Dict[str, Any], context) -> str:
             },
             "stream": {
                 "type": "string",
-                "description": (
-                    "Which stream to read: 'stdout', 'stderr', or 'both'."
-                ),
+                "description": ("Which stream to read: 'stdout', 'stderr', or 'both'."),
                 "default": "both",
             },
             "lines": {
@@ -385,4 +485,6 @@ def bash_list(args: Dict[str, Any], context) -> str:
 
     registry = _bg_registry(context)
     tasks = [summarize_task(t, tail_lines=3) for t in registry.list()]
-    return json.dumps(_scrub_json_payload({"tasks": tasks, "count": len(tasks)}), indent=2)
+    return json.dumps(
+        _scrub_json_payload({"tasks": tasks, "count": len(tasks)}), indent=2
+    )

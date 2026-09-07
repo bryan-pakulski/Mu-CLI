@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Optional
 _logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -71,11 +72,13 @@ STATIC_DIR = GUI_ROOT / "static"
 __all__ = ["create_app", "require_session"]
 
 
-class _NoCacheStaticFiles(StaticFiles):
+class _RevalidatedStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
+        # Keep local assets in the browser cache, but validate their ETag on
+        # every use. Updates remain immediate; unchanged vendor bundles get
+        # a body-free 304 instead of downloading megabytes on each reload.
+        response.headers["Cache-Control"] = "no-cache"
         return response
 
 
@@ -151,7 +154,11 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.auto_reload = True
     app.state.templates = templates
-    app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
+    # Compress assets only: SSE and live tool streams must never be buffered.
+    app.mount("/static", GZipMiddleware(
+        _RevalidatedStaticFiles(directory=str(STATIC_DIR)),
+        minimum_size=1024, compresslevel=5,
+    ), name="static")
 
     app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
     app.include_router(artifacts_router.router, prefix="/api/sessions", tags=["artifacts"])

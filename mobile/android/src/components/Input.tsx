@@ -53,6 +53,7 @@ export function Input({
           paddingHorizontal: spacing.base,
           paddingVertical: spacing.sm,
           minHeight: 44,
+          textAlignVertical: multiline ? 'top' : 'center',
         },
         style,
       ]}

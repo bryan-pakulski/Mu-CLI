@@ -58,6 +58,8 @@ def _ssrf_check_hostname(hostname: str) -> str | None:
         infos = socket.getaddrinfo(hostname, None)
     except OSError as exc:
         return f"cannot resolve hostname {hostname}: {exc}"
+    if not infos:
+        return f"cannot resolve hostname {hostname}: no addresses returned"
     seen: set[str] = set()
     for info in infos:
         addr = _ip.ip_address(info[4][0])

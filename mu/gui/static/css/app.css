@@ -203,6 +203,7 @@ input::placeholder, textarea::placeholder { color: var(--text-dimmer); }
         "header  header"
         "sidebar main";
     height: 100vh;
+    height: 100dvh;
     transition: grid-template-columns 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .app.sidebar-hidden {
@@ -2458,6 +2459,7 @@ html[data-theme="light"] {
 .file-browser {
     width: min(520px, 90vw);
     max-height: 70vh;
+    max-height: min(70dvh, calc(100dvh - 24px));
     background: var(--bg);
     border: 1px solid var(--border-strong);
     border-radius: 12px;
@@ -2599,7 +2601,8 @@ html[data-theme="light"] {
 .modal-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 150;
+    padding: 12px;
+    z-index: 1500;
     background: var(--backdrop);
     display: flex;
     align-items: center;
@@ -2608,6 +2611,8 @@ html[data-theme="light"] {
 .modal {
     width: min(480px, 92vw);
     max-height: 80vh;
+    max-height: min(80dvh, calc(100dvh - 24px));
+    min-height: 0;
     background: var(--bg);
     border: 1px solid var(--border-strong);
     border-radius: 12px;
@@ -3618,7 +3623,7 @@ html[data-theme="light"] {
 
 .confirm-pop {
     position: fixed;
-    z-index: 200;
+    z-index: 2600;
     background: var(--bg-lift);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
@@ -3817,7 +3822,7 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 .inspector-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 50;
+    z-index: 1200;
     display: grid;
     place-items: center;
     padding: var(--space-5);
@@ -3827,7 +3832,8 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 .inspector {
     width: min(900px, calc(100vw - var(--space-8)));
     height: min(85vh, calc(100vh - var(--space-8)));
-    min-height: 360px;
+    height: min(85dvh, calc(100dvh - var(--space-8)));
+    min-height: 0;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: calc(var(--radius) * 2);
@@ -6427,4 +6433,29 @@ html[data-theme="light"] .context-composition button:hover { filter: saturate(.9
 .wizard-hardware-warning { color:var(--text-dim); font-size:11px; line-height:1.45; margin:9px 0 0; }
 @media (max-width:700px) {
   .wizard-hardware-grid,.wizard-device-add { grid-template-columns:1fr; }
+}
+
+/* Shared input, dialog and motion behavior across every web route. */
+html { color-scheme: dark; }
+html[data-theme="light"] { color-scheme: light; }
+html.has-dialog, html.has-dialog body { overflow: hidden; }
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+:where(button, input, select, textarea) { font: inherit; }
+.modal-head, .modal-actions, .fb-head, .fb-actions { flex-shrink: 0; }
+.modal-body, .fb-list { min-height: 0; overscroll-behavior: contain; }
+.modal-head, .modal-actions { gap: 12px; }
+.modal-title, .fb-current { min-width: 0; overflow-wrap: anywhere; }
+.modal-head .icon-btn, .fb-head .icon-btn { flex-shrink: 0; }
+.modal-actions { flex-wrap: wrap; }
+.confirm-pop { max-width: calc(100vw - 20px); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

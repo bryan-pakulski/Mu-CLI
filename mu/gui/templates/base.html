@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <title>{% block title %}μcli{% endblock %}</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>μ</text></svg>">
     <!-- Set theme BEFORE first paint to avoid the dark→light flash on
@@ -47,10 +47,11 @@
         startup: { typeset: false }
     };
     </script>
-    <script src="/static/vendor/mathjax-tex-svg.js"></script>
-    <script src="/static/vendor/marked.min.js"></script>
-    <script src="/static/vendor/highlight.min.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/vendor/mathjax-tex-svg.js" defer></script>
+    <script src="/static/vendor/marked.min.js" defer></script>
+    <script src="/static/vendor/highlight.min.js" defer></script>
+    <script src="/static/js/app.js" defer></script>
+    <script src="/static/js/dialogs.js" defer></script>
     <script src="/static/js/floating_popouts.js" defer></script>
     <script src="/static/vendor/htmx.min.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
@@ -60,11 +61,13 @@
     <!-- Confirm popover (anchored near click) -->
     <div class="confirm-pop"
          x-data
+         x-dialog="$store.confirm.open"
+         x-cloak
          x-show="$store.confirm.open"
          x-transition.opacity.duration.120ms
          :style="`left:${$store.confirm.x}px; top:${$store.confirm.y}px;`"
          @click.outside="$store.confirm.cancel()"
-         @keydown.escape.window="$store.confirm.cancel()"
+         @dialog-close="$store.confirm.cancel()"
          @keydown.enter.window="$store.confirm.open && $store.confirm.confirm()"
          role="dialog">
         <div class="confirm-message" x-text="$store.confirm.message"></div>
@@ -78,9 +81,11 @@
     <!-- Loop: add backlog item modal -->
     <div class="modal-backdrop"
          x-data
+         x-dialog="$store.loop.showAddItem"
+         x-cloak
          x-show="$store.loop.showAddItem"
          x-transition.opacity.duration.150ms
-         @keydown.escape.window="$store.loop.showAddItem && $store.loop.closeAddItem()">
+         @dialog-close="$store.loop.showAddItem && $store.loop.closeAddItem()">
         <div class="modal" @click.stop>
             <div class="modal-head">
                 <span class="modal-title">add backlog item</span>
@@ -113,9 +118,11 @@
     <!-- Feature: create feature modal -->
     <div class="modal-backdrop"
          x-data
+         x-dialog="$store.feature.showCreateModal"
+         x-cloak
          x-show="$store.feature.showCreateModal"
          x-transition.opacity.duration.150ms
-         @keydown.escape.window="$store.feature.showCreateModal && $store.feature.closeCreateModal()">
+         @dialog-close="$store.feature.showCreateModal && $store.feature.closeCreateModal()">
         <div class="modal modal-lg" @click.stop>
             <div class="modal-head">
                 <span class="modal-title">new feature</span>
@@ -220,9 +227,11 @@
     <!-- Skills modal -->
     <div class="modal-backdrop"
          x-data
+         x-dialog="$store.skills.modalOpen"
+         x-cloak
          x-show="$store.skills.modalOpen"
          x-transition.opacity.duration.150ms
-         @keydown.escape.window="$store.skills.modalOpen && $store.skills.view === 'list' && $store.skills.closeModal()">
+         @dialog-close="$store.skills.modalOpen && $store.skills.view === 'list' && $store.skills.closeModal()">
         <div class="modal modal-lg" @click.stop style="max-height:85vh;">
             <template x-if="$store.skills.view === 'list'">
                 <div style="display:flex;flex-direction:column;max-height:85vh;">
@@ -338,9 +347,11 @@
     <!-- Tool result cache popup -->
     <div class="modal-backdrop"
          x-data
+         x-dialog="$store.chat.cachePopup.open"
+         x-cloak
          x-show="$store.chat.cachePopup.open"
          x-transition.opacity.duration.150ms
-         @keydown.escape.window="$store.chat.cachePopup.open && $store.chat.closeCachePopup()"
+         @dialog-close="$store.chat.cachePopup.open && $store.chat.closeCachePopup()"
          @click="$store.chat.closeCachePopup()">
         <div class="modal" @click.stop style="max-width: 800px;">
             <div class="modal-head">

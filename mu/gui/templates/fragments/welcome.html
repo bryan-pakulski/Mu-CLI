@@ -41,10 +41,11 @@
     </footer>
 
     <!-- Sessions -->
-    <div class="welcome-modal-backdrop" x-show="modal === 'sessions'" x-cloak
+    <div class="welcome-modal-backdrop" x-dialog="modal === 'sessions'"
+         x-show="modal === 'sessions'" x-cloak
          x-transition:enter="welcome-fade-enter" x-transition:enter-start="welcome-fade-start"
          x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
-         @keydown.escape.window="modal === 'sessions' && closeModal()">
+         @dialog-close="modal === 'sessions' && closeModal()">
         <section class="welcome-modal welcome-modal-medium" @click.stop
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head">
@@ -85,10 +86,11 @@
     </div>
 
     <!-- Guided creation -->
-    <div class="welcome-modal-backdrop" x-show="modal === 'create'" x-cloak
+    <div class="welcome-modal-backdrop" x-dialog="modal === 'create'"
+         x-show="modal === 'create'" x-cloak
          x-transition:enter="welcome-fade-enter" x-transition:enter-start="welcome-fade-start"
          x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
-         @keydown.escape.window="modal === 'create' && !creating && closeModal()">
+         @dialog-close="modal === 'create' && !creating && closeModal()">
         <section class="welcome-modal welcome-wizard" @click.stop
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head wizard-head">
@@ -276,7 +278,8 @@
     </div>
 
     <!-- Editors -->
-    <div class="container-editor-backdrop" x-show="editorModal" x-cloak @keydown.escape.window="editorModal && (editorModal = null)">
+    <div class="container-editor-backdrop" x-dialog="editorModal"
+         x-show="editorModal" x-cloak @dialog-close="editorModal && (editorModal = null)">
         <section class="container-editor-modal" @click.stop>
             <header class="container-editor-header"><div><strong x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button class="icon-btn" @click="editorModal = null">×</button></header>
             <div class="container-editor-body" :class="{'container-network-editor': editorModal === 'network'}">

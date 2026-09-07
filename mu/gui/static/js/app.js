@@ -3072,6 +3072,9 @@ ${problem.text}`, "error", 16000);
                 if (saved.sidebarWidth > 0) this.sidebarWidth = saved.sidebarWidth;
                 if (saved.panelWidth > 0) this.panelWidth = saved.panelWidth;
             } catch (e) {}
+            // Opening the mobile app should reveal the conversation first.
+            // Drawer visibility on a phone must not overwrite desktop prefs.
+            if (window.matchMedia('(max-width: 760px)').matches) this.sidebarOpen = false;
         },
         _persist() {
             try {
@@ -3085,7 +3088,10 @@ ${problem.text}`, "error", 16000);
         },
         toggleSidebar() {
             this.sidebarOpen = !this.sidebarOpen;
-            this._persist();
+            if (!window.matchMedia('(max-width: 760px)').matches) this._persist();
+        },
+        closeMobileSidebar() {
+            if (window.matchMedia('(max-width: 760px)').matches) this.sidebarOpen = false;
         },
         togglePanel() {
             this.panelOpen = !this.panelOpen;
@@ -6239,11 +6245,11 @@ function typesetMath(elements) {
     // typesets on the same node (MathJax chokes if a node is mid-typeset
     // when another typeset starts on it).
     _mathjaxBusy = _mathjaxBusy.then(() => {
-        try {
-            return mj.typesetPromise(elements);
-        } catch (e) {
-            console.warn("typesetMath", e);
-        }
+        const connected = elements.filter(element => element.isConnected);
+        if (connected.length) return mj.typesetPromise(connected);
+    }).catch(e => {
+        // A rejected typeset must not poison the queue for every later turn.
+        console.warn("typesetMath", e);
     });
     return _mathjaxBusy;
 }
@@ -7094,14 +7100,27 @@ document.addEventListener("DOMContentLoaded", () => {
     Alpine.store("skills").load();
     Alpine.store("cmdComplete").load();
     Alpine.store("inspector").loadProviders();
-    setInterval(() => Alpine.store("sessions").load(), 5000);
-    setInterval(() => Alpine.store("threads").load(), 3000);
-    setInterval(() => Alpine.store("loop").load(), 5000);
+    function pollVisible(storeName, interval) {
+        let pending = false;
+        const refresh = async () => {
+            if (document.hidden || pending) return;
+            pending = true;
+            try { await Alpine.store(storeName).load(); }
+            finally { pending = false; }
+        };
+        const poll = () => { void refresh().catch(() => {}); };
+        setInterval(poll, interval);
+        document.addEventListener('visibilitychange', poll);
+    }
+    pollVisible('sessions', 5000);
+    pollVisible('threads', 3000);
+    pollVisible('loop', 5000);
     // Live clock: bump while ANY session's turn is in flight so the
     // running trace header re-renders its elapsed time. (One global tick
     // is enough — we re-render every slot's clock; backgrounded ones
     // aren't visible but the cost is negligible.)
     setInterval(() => {
+        if (document.hidden) return;
         const chat = Alpine.store("chat");
         let anyBusy = false;
         for (const key of Object.keys(chat.chats)) {

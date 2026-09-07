@@ -12,7 +12,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import Markdown, { RenderRules } from 'react-native-markdown-display';
+import MarkdownRenderer, { RenderRules } from 'react-native-markdown-display';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
@@ -32,6 +32,10 @@ import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCo
 import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
 import { ConflictBanner } from '../components/ConflictBanner';
 import { spacing } from '../theme/tokens';
+
+// Completed messages keep their parsed Markdown while new tokens arrive in
+// another row. Streaming messages still use the lightweight Text path.
+const Markdown = React.memo(MarkdownRenderer);
 
 export function ChatScreen() {
   const { colors } = useTheme();

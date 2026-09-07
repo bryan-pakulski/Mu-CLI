@@ -1,8 +1,11 @@
+<template x-teleport="body">
 <div class="inspector-backdrop"
-     x-show="$store.inspector.open"
+     x-dialog="$store.inspector.open"
+         x-cloak
+         x-show="$store.inspector.open"
      x-transition.opacity.duration.180ms
      @click.self="$store.inspector.close()"
-     @keydown.escape.window="$store.inspector.close()">
+     @dialog-close="$store.inspector.close()">
     <div class="inspector"
          role="dialog"
          aria-modal="true"
@@ -244,3 +247,5 @@
     </div>
     </div>
 </div>
+
+</template>

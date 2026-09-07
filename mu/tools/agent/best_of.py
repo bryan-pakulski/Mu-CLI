@@ -306,9 +306,6 @@ def best_of_codex(args: Dict[str, Any], context) -> Dict[str, Any]:
         except (TypeError, ValueError):
             timeout_seconds = 0
 
-    if not _codex_available():
-        return _envelope(False, "codex_unavailable", "codex CLI not found on PATH.")
-
     repo_abs = resolve_repo(repo)
     if repo_abs is None:
         return _envelope(False, "bad_repo", f"repo path not found: {repo}")
@@ -318,6 +315,10 @@ def best_of_codex(args: Dict[str, Any], context) -> Dict[str, Any]:
     allowed, reason = check_repo_gate(repo_abs, context)
     if not allowed:
         return _envelope(False, "bad_repo", reason)
+
+    # Report invalid inputs consistently, including when Codex is not installed.
+    if not _codex_available():
+        return _envelope(False, "codex_unavailable", "codex CLI not found on PATH.")
 
     with tempfile.TemporaryDirectory(prefix="mucli-best-of-") as tmp:
         out_paths = {

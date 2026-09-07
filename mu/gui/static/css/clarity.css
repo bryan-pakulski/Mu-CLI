@@ -88,7 +88,7 @@ html[data-theme="light"] {
     content: "";
     position: fixed;
     inset: -10%;
-    z-index: 0;
+    z-index: -1;
     pointer-events: none;
     background:
         radial-gradient(ellipse 46% 38% at 72% 5%, var(--sunrise-pink), transparent 72%),
@@ -100,8 +100,6 @@ html[data-theme="light"] {
     filter: blur(38px) saturate(.94);
     transform: scale(1.05);
 }
-.product-app > *,
-.welcome-shell > * { position: relative; z-index: 1; }
 
 /* Frosted functional panes. */
 .product-header,

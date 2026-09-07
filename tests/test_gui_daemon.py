@@ -11,10 +11,97 @@ import socket
 import subprocess
 import sys
 import time
+from io import StringIO, BytesIO
+from unittest.mock import patch
 
 import pytest
 
 from mu.gui import daemon
+
+
+@pytest.fixture
+def ancestor_procfs(monkeypatch):
+    """Two sibling namespaces reuse PID 8; only one belongs to this caller."""
+    links = {
+        "/proc/self": "100",
+        "/proc/self/ns/pid": "pid:[1]",
+        "/proc/100/ns/pid": "pid:[1]",
+        "/proc/200/ns/pid": "pid:[2]",
+        "/proc/300/ns/pid": "pid:[1]",
+        "/proc/100/fd/3": "socket:[42]",
+        "/proc/200/fd/3": "socket:[42]",
+        "/proc/300/fd/3": "socket:[42]",
+    }
+    files = {
+        "/proc/100/status": "NSpid:\t100\t7\n",
+        "/proc/200/status": "NSpid:\t200\t8\n",
+        "/proc/300/status": "NSpid:\t300\t8\n",
+        "/proc/300/cmdline": b"python\0mucli.py\0--gui-foreground\0",
+    }
+
+    def readlink(path):
+        if path not in links:
+            raise FileNotFoundError(path)
+        return links[path]
+
+    def read_file(path, mode="r"):
+        if path not in files:
+            raise FileNotFoundError(path)
+        return BytesIO(files[path]) if "b" in mode else StringIO(files[path])
+
+    def listdir(path):
+        if path == "/proc":
+            return ["self", "100", "200", "300"]
+        if path in {"/proc/100/fd", "/proc/200/fd", "/proc/300/fd"}:
+            return ["3"]
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(daemon.os, "getpid", lambda: 7)
+    monkeypatch.setattr(daemon.os, "readlink", readlink)
+    monkeypatch.setattr(daemon.os, "listdir", listdir)
+    # Patch only the daemon module's open, leaving pytest's own I/O intact.
+    monkeypatch.setattr(daemon, "open", read_file, raising=False)
+    return links, files
+
+
+def test_procfs_pid_maps_only_the_callers_namespace(ancestor_procfs):
+    assert daemon._procfs_pid(8) == 300
+    assert daemon._procfs_pid(9) is None
+    assert daemon._procfs_pid(0) is None
+
+
+def test_pid_for_port_maps_pids_and_ignores_self_and_siblings(ancestor_procfs, monkeypatch):
+    monkeypatch.setattr(daemon, "_listener_inodes", lambda port: {"42"})
+    assert daemon.pid_for_port(30311) == 8
+
+
+def test_cmdline_guard_reads_the_mapped_process(ancestor_procfs):
+    _, files = ancestor_procfs
+    assert daemon._cmdline_is_mucli(8) is True
+    files["/proc/300/cmdline"] = b"python\0unrelated.py\0"
+    assert daemon._cmdline_is_mucli(8) is False
+    assert daemon._cmdline_is_mucli(9) is None
+
+
+@pytest.mark.parametrize("status", ["", "NSpid:\n", "NSpid: bad\n", "NSpid: 400 8\n", "NSpid: 300 0\n"])
+def test_procfs_mapping_fails_closed_for_invalid_metadata(ancestor_procfs, status):
+    _, files = ancestor_procfs
+    files["/proc/300/status"] = status
+    assert daemon._procfs_pid(8) is None
+
+
+def test_procfs_mapping_fails_closed_for_unreadable_namespace(ancestor_procfs):
+    links, _ = ancestor_procfs
+    del links["/proc/300/ns/pid"]
+    assert daemon._procfs_pid(8) is None
+
+
+def test_procfs_pid_uses_direct_path_when_namespaces_match(monkeypatch):
+    monkeypatch.setattr(daemon.os, "getpid", lambda: 7)
+    monkeypatch.setattr(daemon.os, "readlink", lambda path: "7")
+    with patch.object(daemon.os, "listdir") as scan:
+        assert daemon._procfs_pid(8) == 8
+    scan.assert_not_called()
 
 
 def _free_port() -> int:

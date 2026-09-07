@@ -444,3 +444,77 @@
     .settings-pane .var-bool { justify-content: flex-start; }
     .composer-toolbar { margin-bottom: 12px; }
 }
+
+/* Compact navigation stays reachable without competing with the session title. */
+/* Blur creates a containing block for fixed menus. These already tinted
+ * surfaces sit over a soft background and do not need another blur pass. */
+.chat-column, .composer, .composer form {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+.main, .chat-column, .chat-history { min-height: 0; }
+/* The composer participates in layout, so growing input and attachments can
+ * never cover the last response or an approval waiting for a decision. */
+.composer { position: relative; flex-shrink: 0; }
+.chat-history { padding-bottom: 24px; scroll-padding-bottom: 24px; }
+.conversation-stage-rail { bottom: calc(var(--composer-height, 142px) + 8px); }
+.sidebar-scrim, .header-mobile-menu { display: none; }
+.header-mobile-menu summary { list-style: none; cursor: pointer; }
+.header-mobile-menu summary::-webkit-details-marker { display: none; }
+.header-mobile-menu nav {
+    position: absolute; top: calc(100% + 8px); right: 0;
+    display: grid; width: 220px; max-width: calc(100vw - 24px);
+    padding: 6px; border: 1px solid var(--hairline); border-radius: 10px;
+    background: var(--glass-strong); box-shadow: var(--shadow-modal);
+}
+.header-mobile-menu nav :is(a, button) {
+    display: flex; align-items: center; min-height: 44px; padding: 8px 12px;
+    text-align: left; color: var(--text-soft); text-decoration: none;
+    background: transparent; border: 0;
+}
+@media (max-width: 760px) {
+    .app, .app.sidebar-hidden { grid-template-columns: 0 minmax(0, 1fr); grid-template-rows: 58px minmax(0, 1fr); }
+    .product-header { padding-inline: 12px; gap: 8px; z-index: 70; }
+    .header-primary { flex: 1; min-width: 0; gap: 8px; }
+    .session-identity, .session-title-wrap { min-width: 0; }
+    .session-title { max-width: 100%; }
+    .header-actions { flex: 0 0 auto; gap: 2px; }
+    .header-actions .product-secondary-action { display: none; }
+    .header-mobile-menu { display: block; position: relative; }
+    .header-mobile-menu summary, .product-icon-button, .product-sidebar-toggle {
+        min-width: 44px; min-height: 44px;
+    }
+    .product-sidebar { position: fixed; inset: 58px auto 0 0; transition: transform .2s ease; }
+    .sidebar-scrim {
+        display: block; position: fixed; inset: 0; z-index: 55;
+        padding: 0; border: 0; border-radius: 0;
+        background: var(--backdrop);
+    }
+    .panel-select-nav { gap: 8px; padding: 0 12px; }
+    .panel-selectors { flex: 1; gap: 12px; }
+    .panel-selector { flex: 1; }
+    .panel-select-nav .panel-view-select { width: 100%; min-width: 0; max-width: 100%; }
+    .composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    .composer textarea { font-size: 16px; max-height: min(200px, 32dvh); }
+    .inspector-backdrop { padding: 10px; }
+    .inspector {
+        width: 100% !important; height: calc(100dvh - 20px);
+        grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr);
+    }
+    .inspector-head {
+        min-height: 0; grid-column: 1; grid-row: 1;
+        padding: 8px !important; border-right: 0 !important;
+        border-bottom: 1px solid var(--hairline) !important;
+        flex-direction: row; align-items: center !important; gap: 6px;
+    }
+    .inspector-tabs {
+        flex: 1; min-width: 0; flex-direction: row !important;
+        overflow-x: auto; padding: 4px; gap: 4px;
+    }
+    .inspector-tabs button { width: auto; min-height: 44px; flex-shrink: 0; white-space: nowrap; }
+    .inspector-head > .icon-btn { margin-top: 0; align-self: center; flex-shrink: 0; min-width: 44px; min-height: 44px; }
+    .inspector-body { grid-column: 1; grid-row: 2; padding: 22px 16px !important; }
+    .settings-pane-head { flex-wrap: wrap; gap: 12px; }
+    .welcome-modal-backdrop { padding: 10px; }
+    .welcome-wizard { height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); }
+}

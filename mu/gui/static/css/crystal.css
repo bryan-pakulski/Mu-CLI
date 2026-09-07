@@ -96,13 +96,14 @@ body { color: var(--text); }
     position: fixed;
     inset: 0;
     pointer-events: none;
-    z-index: 0;
+    z-index: -1;
     background:
         radial-gradient(ellipse 70% 46% at 78% -14%, var(--mist-a), transparent 67%),
         radial-gradient(ellipse 54% 42% at 6% 112%, var(--mist-b), transparent 70%);
 }
-.product-app > *,
-.welcome-shell > * { position: relative; z-index: 1; }
+/* Keep decoration behind content without resetting each child's positioning
+ * and overlay stack (in particular fixed drawers on narrow screens). */
+.product-app, .welcome-shell { isolation: isolate; }
 
 /* Functional material only. */
 .product-header,

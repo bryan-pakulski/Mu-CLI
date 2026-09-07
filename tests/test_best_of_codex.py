@@ -34,6 +34,15 @@ def test_handler_rejects_bad_repo(tmp_path):
     assert result["error_code"] == "bad_repo"
 
 
+def test_handler_validates_repo_before_checking_codex(tmp_path):
+    with patch.object(best_of, "_codex_available") as available:
+        result = best_of.best_of_codex(
+            {"task": "x", "repo": str(tmp_path / "missing")}, context=None
+        )
+    assert result["error_code"] == "bad_repo"
+    available.assert_not_called()
+
+
 def test_handler_reports_codex_unavailable():
     with patch.object(best_of, "_codex_available", return_value=False):
         result = best_of.best_of_codex({"task": "x"}, context=None)

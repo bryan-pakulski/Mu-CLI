@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { useMotionPreference } from '../hooks/useMotionPreference';
 
 export type GeneratingIndicatorProps = {
   label?: string;
@@ -9,12 +10,17 @@ export type GeneratingIndicatorProps = {
 
 export function GeneratingIndicator({ label = 'Thinking' }: GeneratingIndicatorProps) {
   const { colors } = useTheme();
+  const { animate } = useMotionPreference();
   const dots = useMemo(
     () => [new Animated.Value(0.25), new Animated.Value(0.25), new Animated.Value(0.25)],
     [],
   );
 
   useEffect(() => {
+    if (!animate) {
+      dots.forEach(dot => dot.setValue(0.6));
+      return;
+    }
     const animations = dots.map((dot, index) => Animated.loop(
       Animated.sequence([
         Animated.delay(index * 140),
@@ -23,19 +29,21 @@ export function GeneratingIndicator({ label = 'Thinking' }: GeneratingIndicatorP
           duration: 300,
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
+          isInteraction: false,
         }),
         Animated.timing(dot, {
           toValue: 0.25,
           duration: 420,
           easing: Easing.inOut(Easing.quad),
           useNativeDriver: true,
+          isInteraction: false,
         }),
         Animated.delay((2 - index) * 140),
       ]),
     ));
     animations.forEach(animation => animation.start());
     return () => animations.forEach(animation => animation.stop());
-  }, [dots]);
+  }, [animate, dots]);
 
   return (
     <View style={styles.root} accessibilityLiveRegion="polite">
@@ -47,7 +55,7 @@ export function GeneratingIndicator({ label = 'Thinking' }: GeneratingIndicatorP
           />
         ))}
       </View>
-      <Text variant="sm" style={{ color: colors.textDim }}>{label}</Text>
+      <Text variant="sm" style={{ color: colors.textDim, flexShrink: 1 }}>{label}</Text>
     </View>
   );
 }

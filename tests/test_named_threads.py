@@ -2,19 +2,15 @@
 
 Tests cover:
 1. NamedThread sets Python-level name correctly
-2. NamedThread sets OS-level name on Linux (reads /proc/self/task/<tid>/comm from within the thread)
+2. NamedThread sets OS-level name on Linux (reads /proc/thread-self/comm)
 3. set_os_thread_name() works on the main thread (Linux)
-4. Names are truncated to 15 chars on Linux
+4. Names are truncated to 15 UTF-8 bytes on Linux
 5. NamedThread is a subclass of threading.Thread
 6. set_os_thread_name returns False for empty strings
 7. Falls back gracefully on mocked failures
 """
-import ctypes
-import ctypes.util
-import os
 import platform
 import threading
-import time
 
 import pytest
 
@@ -23,14 +19,11 @@ from utils.threads import NamedThread, set_os_thread_name
 IS_LINUX = platform.system() == "Linux"
 
 
-def _get_os_tid():
-    """Get the current thread's OS TID using syscall."""
-    libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
-    gettid = libc.syscall
-    gettid.argtypes = [ctypes.c_long]
-    gettid.restype = ctypes.c_long
-    SYS_gettid = 186  # x86_64
-    return gettid(SYS_gettid)
+def _os_thread_name():
+    # Let procfs resolve the current thread. Hard-coded x86 syscall numbers
+    # and process-local TIDs do not work on ARM or ancestor-mounted procfs.
+    with open("/proc/thread-self/comm") as f:
+        return f.read().strip()
 
 
 class TestNamedThreadBasic:
@@ -82,12 +75,7 @@ class TestOSLevelNamesLinux:
         result = [None]
 
         def worker():
-            tid = _get_os_tid()
-            try:
-                with open(f"/proc/self/task/{tid}/comm") as f:
-                    result[0] = f.read().strip()
-            except FileNotFoundError:
-                result[0] = f"NOT_FOUND_{tid}"
+            result[0] = _os_thread_name()
 
         t = NamedThread(target=worker, name="os-name-test")
         t.start()
@@ -100,12 +88,7 @@ class TestOSLevelNamesLinux:
         result = [None]
 
         def worker():
-            tid = _get_os_tid()
-            try:
-                with open(f"/proc/self/task/{tid}/comm") as f:
-                    result[0] = f.read().strip()
-            except FileNotFoundError:
-                result[0] = f"NOT_FOUND_{tid}"
+            result[0] = _os_thread_name()
 
         t = NamedThread(target=worker, name=long_name)
         t.start()
@@ -116,14 +99,12 @@ class TestOSLevelNamesLinux:
         """set_os_thread_name should work on the main thread."""
         original_name = None
         try:
-            with open(f"/proc/self/task/{os.getpid()}/comm") as f:
-                original_name = f.read().strip()
+            original_name = _os_thread_name()
 
             result = set_os_thread_name("test-main-thrd")
             assert result is True
 
-            with open(f"/proc/self/task/{os.getpid()}/comm") as f:
-                new_name = f.read().strip()
+            new_name = _os_thread_name()
             assert new_name == "test-main-thrd"
         finally:
             if original_name:
@@ -134,17 +115,28 @@ class TestOSLevelNamesLinux:
         result = [None]
 
         def worker():
-            tid = _get_os_tid()
-            try:
-                with open(f"/proc/self/task/{tid}/comm") as f:
-                    result[0] = f.read().strip()
-            except FileNotFoundError:
-                result[0] = None
+            result[0] = _os_thread_name()
 
         t = NamedThread(target=worker, name="subagent-watchdog")
         t.start()
         t.join(timeout=5)
         assert result[0] == "subagent-watchdog"[:15]
+
+    @pytest.mark.parametrize("name,expected", [
+        ("分析任务处理线程", "分析任务处"),
+        ("mu-😀😀😀😀", "mu-😀😀😀"),
+    ])
+    def test_named_thread_truncates_utf8_without_splitting_characters(self, name, expected):
+        result = [None]
+
+        def worker():
+            result[0] = _os_thread_name()
+
+        t = NamedThread(target=worker, name=name)
+        t.start()
+        t.join(timeout=5)
+        assert result[0] == expected
+        assert len(result[0].encode("utf-8")) <= 15
 
 
 class TestGracefulFallback:

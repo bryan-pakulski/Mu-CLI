@@ -63,14 +63,14 @@ export function Button({
   return (
     <TouchableOpacity
       accessibilityRole="button"
-      accessibilityState={accessibilityState ?? (disabled || loading ? { disabled: true } : undefined)}
+      accessibilityState={{ ...accessibilityState, disabled: !!(disabled || loading), busy: !!loading }}
       onPress={onPress}
       disabled={disabled || loading}
       style={[baseStyle, variantStyles[variant], style]}
       activeOpacity={0.72}
     >
       {loading && <ActivityIndicator size="small" color={textColor} style={{ marginRight: 8 }} />}
-      <RNText style={[{ color: textColor, fontSize: fontSpec.fontSize, fontWeight: '600' }, textStyle]}>
+      <RNText style={[{ color: textColor, fontSize: fontSpec.fontSize, lineHeight: fontSpec.lineHeight, fontWeight: '600', flexShrink: 1, textAlign: 'center' }, textStyle]}>
         {title}
       </RNText>
     </TouchableOpacity>

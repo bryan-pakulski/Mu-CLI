@@ -46,6 +46,36 @@ Loop Mode is designed for long-horizon autonomous tasks where the assistant shou
 
 ## Long-horizon context freshness
 
+Automatic cleanup now runs throughout a turn, rather than stopping after
+its first compaction. The default L5 working-history threshold is 64,000
+estimated tokens, independent of a model's much larger context window;
+the provider-aware budget can lower this threshold further. Crossing it
+rolls older activity into L2 toward half the threshold, leaving room for
+new batches. Four new history entries re-arm cleanup after an attempt,
+so unchanged retries or an uncompactable recent tail do not repeatedly
+invoke the summarizer.
+
+The active user request and recent tool results remain protected. This
+soft cleanup advances the summary anchor without deleting or degrading
+the durable transcript: older receipts can still be found with
+`search_history` and cached payloads recalled by reference. If protected
+content prevents reaching the soft target, it stays intact; the existing
+provider-limit recovery remains the final backstop. The first provider
+request after compaction includes the new summary and updated token
+estimates, with no agent restart.
+
+For repetitive work, maintain a short progress checkpoint containing the
+goal, filters, resume cursor, completed counts, confirmed writes,
+unresolved exceptions, and next action. Summaries should aggregate completed
+batches instead of listing every processed item. This applies to ordinary
+long turns as well as `loop` and `feature` modes.
+
+New sessions enable this automatically. Existing sessions retain saved
+settings, including the old `auto_compaction_enabled=false` default. Enable
+it once in such a session with `/set auto_compaction_enabled true`.
+Use `/set auto_compaction_token_limit 64000` to change the working threshold;
+`/set auto_compaction_enabled false` opts out of proactive cleanup.
+
 A long task that stays under the compaction token budget used to leave L2
 (the conversation summary) frozen at its turn-start value while the model
 racked up real progress in L5 — so it kept re-reading files it had already

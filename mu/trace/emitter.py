@@ -51,11 +51,7 @@ _FLUSH_EVERY_RECORDS = 64
 _REQUEST_PART_CACHE: Dict[Any, Dict[str, Any]] = {}
 _REQUEST_PART_CACHE_LOCK = threading.Lock()
 _REQUEST_PART_CACHE_CAP = 4096
-# Round-48 F10: per-part content digest memoized by object id — the
-# identity itself must not re-hash MB-scale tool results every call.
-_PART_ID_HASH: Dict[int, str] = {}
-_PART_ID_HASH_CAP = 16384
-_TOOL_HASH_CACHE: Dict[tuple, Dict[str, Any]] = {}
+_TOOL_HASH_CACHE: Dict[str, Dict[str, Any]] = {}
 _TOOL_HASH_CACHE_LOCK = threading.Lock()
 _TOOL_HASH_CACHE_CAP = 8
 
@@ -605,36 +601,26 @@ def build_request_record(
     # Round-47 F6: per-message part detail is memoized by content identity.
     # The dominant per-iteration cost was re-TOKENIZING (tiktoken) every old
     # message's parts on every provider call — quadratic over a turn.
-    # Round-48 F10: the r47 identity itself rebuilt role + FULL text chunks
-    # and hashed MB-scale bytes for every OLD message on every call — the
-    # quadratic walk survived as the cache key. Identity is now (role,
-    # id(part) per part) with a content hash computed ONLY for parts we
-    # haven't seen before; hash results are memoized by object id. Message
-    # objects are immutable once appended to history, so id() is stable.
-    _part_digest: Dict[int, str] = {}
+    # Provider parts are rebuilt each iteration, and Python reuses freed
+    # object IDs. Key by content and metadata so a new or mutated result
+    # cannot inherit another result's token count. Tokenization remains
+    # cached across identical payloads without retaining the payload itself.
 
     def _part_identity(part: Any) -> str:
-        pid = id(part)
-        with _REQUEST_PART_CACHE_LOCK:
-            known = _PART_ID_HASH.get(pid)
-        if known is not None:
-            return known
         if _get(part, "text") is not None:
             body = "t:" + str(_get(part, "text"))
         elif _get(part, "tool_result") is not None:
             body = "r:" + str(_get(part, "tool_result"))
         elif _get(part, "tool_args") is not None:
-            body = "a:" + json.dumps(_get(part, "tool_args"), sort_keys=True, default=str)
+            body = "a:" + json.dumps(_get(part, "tool_args"))
         elif _get(part, "inline_data") is not None:
             body = "i:" + _serialized(_get(part, "inline_data"))
         else:
             body = "e:"
-        h = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest()
-        with _REQUEST_PART_CACHE_LOCK:
-            if len(_PART_ID_HASH) >= _PART_ID_HASH_CAP and pid not in _PART_ID_HASH:
-                _PART_ID_HASH.pop(next(iter(_PART_ID_HASH)), None)
-            _PART_ID_HASH[pid] = h
-        return h
+        identity = json.dumps([
+            _get(part, "type", ""), _get(part, "tool_name", ""), body,
+        ], ensure_ascii=False, default=str)
+        return hashlib.sha256(identity.encode("utf-8", errors="replace")).hexdigest()
 
     def _message_identity(msg: Any) -> tuple:
         return (
@@ -726,20 +712,13 @@ def build_request_record(
         "parameters": getattr(tool, "parameters", {}) or {},
     } for tool in (tools or [])]
     tool_names = [tool["name"] for tool in tool_payload]
-    # Round-47 F7 + Round-48 F11: schema hash + bytes memoized by tool-set
-    # identity. The r48 review caught the identity itself re-serializing the
-    # full schema (json.dumps of the whole payload) on EVERY call — the
-    # exact cost the cache claims to avoid. Identity is now (names tuple,
-    # tuple of tool object ids); tool objects are stable for the process
-    # lifetime, and the payload is serialized only on a cache miss.
-    identity = (
-        tuple(tool_names),
-        tuple(id(t) for t in (tools or [])),
-    )
+    # Tool definitions can also be replaced or edited while keeping the
+    # same names. Their contents, not reusable object IDs, define the key.
+    tool_json = json.dumps(tool_payload, sort_keys=True, default=str, ensure_ascii=False)
+    identity = hashlib.sha256(tool_json.encode("utf-8")).hexdigest()
     with _TOOL_HASH_CACHE_LOCK:
         meta = _TOOL_HASH_CACHE.get(identity)
     if meta is None:
-        tool_json = json.dumps(tool_payload, sort_keys=True, default=str, ensure_ascii=False)
         meta = {
             "hash": _hash(tool_payload),
             "bytes": len(tool_json.encode("utf-8")) if tool_payload else 0,

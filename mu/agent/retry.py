@@ -270,6 +270,7 @@ def provider_generate_with_retry(
     anchor_before_hooks = getattr(
         session.session_manager, "summary_anchor", 0
     )
+    summary_before_hooks = getattr(session.session_manager, "conversation_summary", "")
 
     while True:
         try:
@@ -281,7 +282,7 @@ def provider_generate_with_retry(
                 system_prompt=system_prompt,
                 tools=tools,
             )
-            _, _, abort = default_registry.fire_with_signals(
+            hook_results, _, abort = default_registry.fire_with_signals(
                 "pre_provider_call", pre_ctx
             )
             if abort is not None:
@@ -293,6 +294,8 @@ def provider_generate_with_retry(
                 or getattr(
                     session.session_manager, "summary_anchor", 0
                 ) != anchor_before_hooks
+                or getattr(session.session_manager, "conversation_summary", "") != summary_before_hooks
+                or any(result.data.get("compaction") for result in hook_results)
             ):
                 # History changed under us (hook compaction or append) —
                 # rebuild the wire messages from live history. Mirrors the
@@ -311,6 +314,23 @@ def provider_generate_with_retry(
                     )[:-1]
                 except AttributeError:
                     pass
+                # The SAME request that drops archived messages must carry
+                # their refreshed summary. Rebuild L2 without losing the
+                # loop's appended recall/scratchpad context, then recheck the
+                # actual wire budget and refresh telemetry/drift estimates.
+                from mu.agent.context_guard import (
+                    _preflight_context_check, _reinject_refreshed_summary,
+                )
+
+                system_prompt = _reinject_refreshed_summary(session, system_prompt)
+                system_prompt, messages = _preflight_context_check(
+                    session, system_prompt, messages,
+                    turn_start_index=getattr(session, "_current_turn_start_index", None),
+                    tools=tools,
+                )
+                hist_len_before_hooks = len(session.session_manager.history)
+                anchor_before_hooks = getattr(session.session_manager, "summary_anchor", 0)
+                summary_before_hooks = getattr(session.session_manager, "conversation_summary", "")
 
             renderer = build_default_renderer(session.ui)
             events = session.provider.stream(

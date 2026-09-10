@@ -33,23 +33,26 @@ def _reinject_refreshed_summary(session, prompt: str) -> str:
     GROWS the prompt it is trying to shrink, and repeated rounds duplicate
     layer content while history was already compacted.
 
-    The first successful layered injection stashes the ORIGINAL
-    pre-injection base on ``session._system_prompt_base`` (loop_body sets
-    the same attribute every turn start, so it is always current for the
-    active turn). Rebuilding from that base produces ONE fresh set of
-    L1-L3 layers over the persona, with the per-turn caches intact.
+    loop_body stashes the ORIGINAL pre-injection base on
+    ``session._system_prompt_base`` every turn. Rebuilding from that base
+    produces one fresh set of L1-L3 layers over the persona, with the
+    per-turn caches intact.
 
-    Callers that append turn-scoped blocks AFTER the injection (durable
-    recall, scratchpad snapshot/evictions, L3B subagent context) must
-    preserve those themselves: pass the already-injected prompt as
-    ``injected_prompt`` and this helper re-attaches exactly the tail that
-    followed the injected base, so those blocks appear exactly once.
+    The injector records the exact old prefix. Turn-scoped blocks appended
+    AFTER it (durable recall, scratchpad snapshot/evictions, L3B subagent
+    context) are re-attached once after the rebuilt layers.
     Returns ``prompt`` unchanged when the base is unknown or the rebuild
     fails — callers treat this as best-effort and never crash the loop.
     """
     base = getattr(session, "_system_prompt_base", None)
     if not base:
         return prompt
+    previous = getattr(session, "_last_injected_context_prompt", None)
+    tail = (
+        prompt[len(previous):]
+        if isinstance(previous, str) and previous and prompt.startswith(previous)
+        else None
+    )
     try:
         rebuilt = session._inject_hierarchical_context(
             base,
@@ -62,6 +65,8 @@ def _reinject_refreshed_summary(session, prompt: str) -> str:
             exc_info=True,
         )
         return prompt
+    if tail is not None:
+        return rebuilt + tail
     if prompt.startswith(rebuilt):
         tail = prompt[len(rebuilt):]
     else:
@@ -562,12 +567,9 @@ def _maybe_nudge_context_pressure(
 ) -> None:
     """Model-directed compaction prompt when the assembled request runs hot.
 
-    Default mode has no proactive compaction (`auto_compaction_enabled`
-    defaults False — history cleanup is deliberately model-directed via the
-    `compact` tool). But nothing told the model WHEN to call it: sessions
-    without a vigilant model rode to the hard ceiling (observed 438k peak on
-    a 480k window), paying fat per-request costs until restore_trim or a
-    wire-level overflow backstop fired.
+    Automatic working-history cleanup normally runs before this point.
+    This nudge also helps opted-out sessions and runs where protected
+    results or fixed prompt layers keep the assembled request large.
 
     This nudge fires ONE synthetic user message per threshold crossing
     (hysteresis: re-arms when the summary anchor advances past the armed

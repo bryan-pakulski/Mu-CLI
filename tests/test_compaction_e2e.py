@@ -220,11 +220,9 @@ def test_compaction_no_op_when_history_already_fits():
 
 
 def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
-    """The auto-compaction hook must pass `compaction_token_budget()` as the
-    budget — NOT `compaction_token_budget() * threshold`. The latter
-    double-applied `context_trim_threshold` (already applied inside
-    `compaction_token_budget`), collapsing the target from 85% to ~72% of
-    the residual window and firing compaction far too often.
+    """The provider-aware trigger already includes the trim threshold.
+
+    The lower cleanup target is separate hysteresis, not an earlier trigger.
     """
     from mu.agent.compactor import _compact_history
     from mu.agent.hooks import HookContext
@@ -232,13 +230,12 @@ def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
     session = _make_session()
     sm = session.session_manager
     session.variables["auto_compaction_enabled"] = True
+    session.variables["auto_compaction_token_limit"] = 0
     _stuff_history_over_budget(sm, n_turns=10, size=1500)
     session.variables["context_token_limit"] = 256_000
     session._compaction_watermark = 0  # arm the watermark gate
-    session._compacted_this_turn = False  # arm the once-per-turn gate
 
     captured: dict = {}
-    real = sm.roll_history_summary_to_token_budget
 
     def _spy(budget, *args, **kwargs):
         captured.setdefault("budgets", []).append(budget)
@@ -249,29 +246,23 @@ def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
     monkeypatch.setattr(sm, "roll_history_summary_to_token_budget", _spy)
 
     ctx = HookContext(point="pre_provider_call", session=session)
-    _compact_history(ctx)
-
-    assert captured.get("budgets"), "hook did not invoke the roller"
     expected = int(session._compaction_token_budget())
-    for budget in captured["budgets"]:
-        # Must equal compaction_token_budget() exactly — not that × threshold.
-        assert budget == expected, (
-            f"hook budget {budget} != compaction_token_budget() {expected}; "
-            f"threshold was double-applied (target collapsed to ~72%)"
-        )
-        # And it must be strictly larger than the buggy double-applied value.
-        assert budget > int(expected * 0.85), (
-            "hook budget is at or below the old double-applied value — "
-            "the fix regressed"
-        )
+    monkeypatch.setattr(sm, "estimate_runtime_history_tokens", lambda: expected)
+    assert _compact_history(ctx) is None
+    assert not captured, "compaction fired before crossing the provider-aware trigger"
+    monkeypatch.setattr(sm, "estimate_runtime_history_tokens", lambda: expected + 1)
+    _compact_history(ctx)
+    assert captured["budgets"] == [expected // 2]
 
 
-def test_auto_compact_hook_is_disabled_by_default(monkeypatch):
-    """Normal cleanup is model-directed; automatic trimming is opt-in."""
+def test_auto_compact_hook_respects_an_explicit_opt_out(monkeypatch):
+    """Saved/user opt-outs disable soft cleanup, even above its watermark."""
     from mu.agent.compactor import _compact_history
     from mu.agent.hooks import HookContext
 
     session = _make_session()
+    session.variables["auto_compaction_enabled"] = False
+    _stuff_history_over_budget(session.session_manager)
     called = False
 
     def _unexpected(*args, **kwargs):
@@ -286,18 +277,12 @@ def test_auto_compact_hook_is_disabled_by_default(monkeypatch):
     assert called is False
 
 
-def test_auto_compact_hook_fires_at_most_once_per_turn(monkeypatch):
-    """The per-iteration auto-compaction hook must fire at most once per turn
-    (Claude Code fires autocompact once per turn at the boundary). Once
-    `_compacted_this_turn` is set — by the turn-start roll or by the hook's
-    own first compaction — subsequent `pre_provider_call` invocations skip.
-    """
+def test_auto_compact_hook_rearms_after_new_work_in_the_same_turn(monkeypatch):
+    """Repeated calls without growth skip; fresh work can compact again."""
     from mu.agent.compactor import _compact_history
     from mu.agent.hooks import HookContext
 
     session = _make_session()
-    # Round-9 F3: the hook is gated on the same auto_compaction_enabled
-    # opt-in as the turn-start roll — opt this session in.
     session.variables["auto_compaction_enabled"] = True
     sm = session.session_manager
     _stuff_history_over_budget(sm, n_turns=10, size=1500)
@@ -318,8 +303,11 @@ def test_auto_compact_hook_fires_at_most_once_per_turn(monkeypatch):
     assert res1 is not None, "first invocation should compact"
     assert session._compacted_this_turn is True, "hook did not set the flag"
 
-    # Simulate history growing (another tool result landed) past the
-    # watermark — the old behavior would re-fire here.
+    assert _compact_history(ctx) is None
+    assert call_count["n"] == 1
+
+    # A small increment stays in the cooldown even if protected history
+    # prevented the previous roll from reaching its soft target.
     sm.history.append(
         {"role": "user", "parts": [{"type": "text", "text": "more" * 1500}]}
     )
@@ -328,14 +316,16 @@ def test_auto_compact_hook_fires_at_most_once_per_turn(monkeypatch):
     )
     assert len(sm.history) > session._compaction_watermark
 
-    # Second + third invocations this turn: must skip (flag is set).
     assert _compact_history(ctx) is None
     assert _compact_history(ctx) is None
-    assert call_count["n"] == 1, (
-        f"hook compacted {call_count['n']} times this turn, expected once"
-    )
+    assert call_count["n"] == 1
 
-    # After the turn ends (`_collect_turn_response`), the flag resets and the
-    # next turn can fire again.
-    session._compacted_this_turn = False
+    sm.history.extend([
+        {"role": "user", "parts": [{"type": "text", "text": "next" * 1500}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "next" * 1500}]},
+    ])
+    # No turn-end reset or agent restart is needed.
+    assert session._compacted_this_turn is True
     assert _compact_history(ctx) is not None
+    assert call_count["n"] == 2
+    assert _compact_history(ctx) is None

@@ -1,15 +1,9 @@
-"""Auto-compaction: fire at `pre_provider_call` when history approaches
-the context window.
+"""Keep a bounded working history throughout long-running agent turns.
 
-This wraps the existing `SessionManager.roll_history_summary_to_token_budget`
-algorithm — the algorithm is correct and tested, the only thing missing
-is a hook-based trigger so the loop fires it automatically when the
-estimated history size crosses a threshold.
-
-Threshold is configurable via `session.variables["context_trim_threshold"]`
-(default 0.85). When the estimated history token count exceeds
-`context_token_limit * threshold`, the compactor invokes the existing
-roll path with `keep_recent=4`.
+The provider window is a safety ceiling, not a working-set target. Roll
+older activity into the summary at the smaller of the provider-aware L5
+budget and the configured working-history limit, then aim for half that
+budget so another small tool result does not immediately trigger a roll.
 """
 
 from __future__ import annotations
@@ -25,11 +19,7 @@ logger = logging.getLogger("mucli")
 from utils.config import _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
-def _compact_history(ctx: HookContext) -> Optional[HookResult]:
-    # `run_turn` calls `roll_history_summary_to_token_budget()` once
-    # before entering its iteration loop. Within a single turn we
-    # therefore want exactly one auto-compaction pass — suppress
-    # this hook when the session already rolled this turn.
+def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[HookResult]:
     session = ctx.session
     if session is None:
         return None
@@ -39,34 +29,16 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         session_manager, "roll_history_summary_to_token_budget"
     ):
         return None
-    # Opt-in gate (codex round-9 F3): proactive auto-compaction is an
-    # explicit deployment opt-in — `auto_compaction_enabled` gates the
-    # turn-start roll in loop_body, so it must gate this hook too, or a
-    # session with the flag off would still compact mid-turn once history
-    # crossed the watermark. Emergency preflight and reactive-overflow
-    # recovery do NOT go through this hook and stay unconditional.
-    if not variables.get("auto_compaction_enabled", False):
+    # Respect saved opt-outs; emergency provider-window recovery remains on.
+    if not variables.get("auto_compaction_enabled", True):
         return None
 
-    # Once-per-turn proactive-compaction gate (Claude Code fires autocompact
-    # once per turn at the boundary; mid-turn overshoot is handled by the
-    # emergency preflight + reactive-overflow backstops, not by re-firing the
-    # proactive pass after every tool call). The turn-start roll sets this
-    # flag when it actually compacts; this hook sets it on its own first
-    # compaction. Either way: at most one proactive compaction per turn —
-    # reset to False in `_collect_turn_response`. Without this the hook fired
-    # on every `pre_provider_call`, and a turn with N tool calls compacted up
-    # to N times.
-    if getattr(session, "_compacted_this_turn", False):
-        return None
-
-    # Re-compaction gate: allow when history has grown since the last
-    # compaction pass.  The previous boolean flag suppressed ALL
-    # re-compaction within a turn, which meant long turns with many tool
-    # calls grew history unbounded until emergency compaction fired.
+    # Retry/no-progress cooldown, including when protected recent results
+    # alone exceed the soft budget. New work re-arms this within the SAME
+    # turn; _compacted_this_turn is telemetry, never a lifetime lockout.
     watermark = getattr(session, "_compaction_watermark", 0)
     history_len = len(getattr(session_manager, "history", []))
-    if history_len <= watermark:
+    if watermark and history_len >= watermark and history_len - watermark < 4:
         return None
 
     try:
@@ -87,8 +59,7 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         # Zero capacity (non-L5 layers + reserve >= window) means compaction
         # cannot help — the fixed prompt itself must shrink. Return None so
         # the caller reports the condition instead of looping.
-        raw_budget = int(session._compaction_token_budget())
-        budget = raw_budget if raw_budget > 0 else None
+        budget = int(session._compaction_token_budget())
     else:
         try:
             context_limit = max(
@@ -107,6 +78,17 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     try:
         from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
 
+        if budget <= 0:
+            return None
+        working_limit = int(variables.get("auto_compaction_token_limit", 64_000))
+        if working_limit > 0:
+            budget = min(budget, working_limit)
+        if session_manager.estimate_runtime_history_tokens() <= budget:
+            return None
+        target = max(1, budget // 2)
+        # Mark attempts as well as successful rolls: an uncompactable tail
+        # must not cause repeated summarization calls on provider retries.
+        session._compaction_watermark = history_len
         session_manager._tool_result_floor = resolve_tool_result_floor(session)
         # Bridge the optional compact_focus variable (Claude Code
         # `/compact <focus>` style) so the LLM summarizer emphasizes it.
@@ -115,30 +97,29 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         ).get("compact_focus") or ""
         # Tag this compaction for the run tracer (drained into the trace at the
         # post-response seam). `iter` comes from the loop's current-iter marker.
-        session_manager._pending_compaction_kind = "auto_hook"
+        session_manager._pending_compaction_kind = kind
         session_manager._pending_compaction_iter = int(
             getattr(session, "_trace_current_iter", 0) or 0
         )
         rolled = session_manager.roll_history_summary_to_token_budget(
-            budget,
+            target,
             keep_recent=resolve_keep_recent(session),
             provider=getattr(session, "provider", None),
+            allow_degrade=False,
         )
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("Auto-compaction raised %s; continuing without compacting", exc)
         return None
     if rolled:
-        # Mark this turn's proactive compaction as done so the hook (and the
-        # turn-start roll next turn) don't fire again, and re-baseline the
-        # watermark to the post-compaction history length.
+        # Keep accounting and retry suppression in sync with the new tail.
         session._compacted_this_turn = True
         session._compaction_watermark = len(session_manager.history)
         logger.info(
-            "Auto-compaction triggered (budget=%d tokens, threshold=%.2f).",
+            "Auto-compaction triggered (high watermark=%d, target=%d tokens).",
             budget,
-            threshold,
+            target,
         )
-        return HookResult(action="continue", data={"compaction": True, "budget": budget})
+        return HookResult(action="continue", data={"compaction": True, "budget": target})
     return None
 
 
@@ -147,16 +128,15 @@ def manual_compact(session: any, *, focus: str = "") -> dict:
     slash command and the agent `compact` tool.
 
     Unlike the auto-hook, this is an *explicit* user/agent action: it fires
-    regardless of the once-per-turn gate, and (mirroring Claude Code's manual
-    `/compact`, which always summarizes) it rolls at least one bounded
+    regardless of the automatic growth cooldown, and it rolls at least one bounded
     segment even when history is under the budget — so an explicit request
     always makes progress when there's anything left to summarize. Recent
     tool results are still protected by `resolve_tool_result_floor` /
     `resolve_keep_recent`, so a mid-turn agent invocation can't eat the
     active turn's own results.
 
-    Marks the turn compacted so the auto-hook does not immediately re-fire
-    after this explicit pass; the flag resets at turn end.
+    Re-baselines the growth watermark so automatic cleanup waits for fresh
+    work after this explicit pass, then can resume within the same turn.
     """
     session_manager = getattr(session, "session_manager", None)
     if session_manager is None or not hasattr(
@@ -214,8 +194,7 @@ def manual_compact(session: any, *, focus: str = "") -> dict:
     after_len = len(session_manager.history)
     after_anchor = int(getattr(session_manager, "summary_anchor", 0) or 0)
 
-    # An explicit pass satisfies the turn's proactive compaction so the
-    # auto-hook doesn't immediately re-fire; re-baseline the watermark.
+    # An explicit pass restarts the automatic cleanup growth cooldown.
     session._compacted_this_turn = True
     session._compaction_watermark = after_len
 

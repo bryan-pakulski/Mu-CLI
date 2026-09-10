@@ -23,6 +23,12 @@ else:
 
 _IMAGE_PLACEHOLDER = "${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}"
 _SAFE_TASK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_BUILD_ADJUSTMENTS = {
+    # This task's base image lists matching Debian snapshots but leaves them
+    # commented out. Use a fixed snapshot because the oldoldstable live mirror
+    # can expire or rotate packages; signature and checksum checks remain on.
+    "qemu-alpine-ssh": "apt-snapshot-https-20260824-v1",
+}
 
 
 def task_source_sha256(task_dir: Path) -> str:
@@ -60,7 +66,13 @@ def cached_image_name(task: str, source_sha256: str) -> str:
     )
 
 
-def stage_task(source_task: Path, target_task: Path, image_name: str) -> None:
+def stage_task(
+    source_task: Path,
+    target_task: Path,
+    image_name: str,
+    *,
+    build_adjustment: str | None = None,
+) -> None:
     """Copy one task and bind its compose file to a content-addressed image."""
 
     source_task = Path(source_task)
@@ -87,6 +99,66 @@ def stage_task(source_task: Path, target_task: Path, image_name: str) -> None:
         compose_path.write_text(
             compose.replace(_IMAGE_PLACEHOLDER, image_name), encoding="utf-8"
         )
+        if build_adjustment == "apt-snapshot-https-20260824-v1":
+            dockerfile_path = staging / "Dockerfile"
+            try:
+                dockerfile = dockerfile_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ValueError(
+                    f"cannot read task Dockerfile: {dockerfile_path}"
+                ) from exc
+            base_image = "FROM debian:bullseye-slim"
+            occurrences = dockerfile.count(base_image)
+            if occurrences != 1:
+                raise ValueError(
+                    f"expected one {base_image!r} line in {dockerfile_path}; "
+                    f"found {occurrences}"
+                )
+            snapshot_bootstrap = (
+                "RUN printf '%s\\n' \\\n"
+                "    'deb [check-valid-until=no] "
+                "http://snapshot.debian.org/archive/debian/20260824T000000Z "
+                "bullseye main' \\\n"
+                "    > /etc/apt/sources.list\n"
+                "RUN apt-get -o Acquire::Retries=10 update \\\n"
+                "    && apt-get -o Acquire::Retries=10 install -y ca-certificates \\\n"
+                "    && rm -rf /var/lib/apt/lists/*"
+            )
+            snapshot_sources = (
+                "RUN printf '%s\\n' \\\n"
+                "    'deb [check-valid-until=no] "
+                "https://snapshot.debian.org/archive/debian/20260824T000000Z "
+                "bullseye main' \\\n"
+                "    'deb [check-valid-until=no] "
+                "https://snapshot.debian.org/archive/debian-security/"
+                "20260824T000000Z bullseye-security main' \\\n"
+                "    'deb [check-valid-until=no] "
+                "https://snapshot.debian.org/archive/debian/20260824T000000Z "
+                "bullseye-updates main' \\\n"
+                "    > /etc/apt/sources.list"
+            )
+            dockerfile = dockerfile.replace(
+                base_image,
+                f"{base_image}\n\n{snapshot_bootstrap}\n{snapshot_sources}",
+                1,
+            )
+            replacements = {
+                "apt-get update": "apt-get -o Acquire::Retries=10 update",
+                "apt-get install -y": "apt-get -o Acquire::Retries=10 install -y",
+                "apt update -y": "apt -o Acquire::Retries=10 update -y",
+                "apt install -y": "apt -o Acquire::Retries=10 install -y",
+            }
+            for original, adjusted in replacements.items():
+                occurrences = dockerfile.count(original)
+                if occurrences != 1:
+                    raise ValueError(
+                        f"expected one {original!r} command in {dockerfile_path}; "
+                        f"found {occurrences}"
+                    )
+                dockerfile = dockerfile.replace(original, adjusted)
+            dockerfile_path.write_text(dockerfile, encoding="utf-8")
+        elif build_adjustment is not None:
+            raise ValueError(f"unknown build adjustment: {build_adjustment}")
         if target_task.exists():
             shutil.rmtree(target_task)
         staging.replace(target_task)
@@ -171,9 +243,19 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
             raise ValueError(f"invalid task id: {task!r}")
         source_task = source / task
         source_sha = task_source_sha256(source_task)
-        image_name = cached_image_name(task, source_sha)
+        build_adjustment = _BUILD_ADJUSTMENTS.get(task)
+        image_input_sha = source_sha
+        if build_adjustment is not None:
+            image_input_sha = hashlib.sha256(
+                f"{source_sha}\0{build_adjustment}".encode("utf-8")
+            ).hexdigest()
+        image_name = cached_image_name(task, image_input_sha)
         existing = entries.get(task)
-        if isinstance(existing, dict) and existing.get("source_sha256") == source_sha:
+        if (
+            isinstance(existing, dict)
+            and existing.get("source_sha256") == source_sha
+            and existing.get("build_adjustment") == build_adjustment
+        ):
             try:
                 compose = (output / task / "docker-compose.yaml").read_text(
                     encoding="utf-8"
@@ -189,7 +271,12 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
                     print(f"-- reusing {task} -> {image_name}", flush=True)
                     continue
         print(f"-- preparing {task} -> {image_name}", flush=True)
-        stage_task(source_task, output / task, image_name)
+        stage_task(
+            source_task,
+            output / task,
+            image_name,
+            build_adjustment=build_adjustment,
+        )
         with tempfile.TemporaryDirectory(prefix=f"mucli-tb-prepare-{task}-") as raw:
             scratch = Path(raw)
             env = _docker_env(image_name, task, scratch)
@@ -210,6 +297,7 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
         image = _inspect_image(image_name)
         entries[task] = {
             "source_sha256": source_sha,
+            "build_adjustment": build_adjustment,
             "image_name": image_name,
             "image_id": image.get("Id"),
             "repo_digests": sorted(image.get("RepoDigests") or []),
@@ -250,6 +338,9 @@ def check_prepared(
             continue
         if entry.get("source_sha256") != source_sha:
             errors.append(f"{task}: source task changed since image preparation")
+            continue
+        if entry.get("build_adjustment") != _BUILD_ADJUSTMENTS.get(task):
+            errors.append(f"{task}: build adjustment changed since image preparation")
             continue
         compose_path = output / task / "docker-compose.yaml"
         try:

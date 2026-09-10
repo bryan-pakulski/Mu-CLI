@@ -277,6 +277,52 @@ def test_prepared_task_uses_content_addressed_image_and_detects_drift(tmp_path):
     assert errors == ["hello-world: source task changed since image preparation"]
 
 
+def test_stage_task_can_pin_apt_sources_for_pinned_task(tmp_path):
+    source = tmp_path / "source"
+    task = source / "qemu-alpine-ssh"
+    task.mkdir(parents=True)
+    (task / "Dockerfile").write_text(
+        "FROM debian:bullseye-slim\n"
+        "RUN apt-get update && apt-get install -y qemu-system-x86\n"
+        "RUN apt update -y\n"
+        "RUN apt install -y telnet\n",
+        encoding="utf-8",
+    )
+    (task / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  client:\n"
+        "    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}\n",
+        encoding="utf-8",
+    )
+
+    prepared = tmp_path / "prepared" / "qemu-alpine-ssh"
+    stage_task(
+        task,
+        prepared,
+        "mucli-test/qemu:adjusted",
+        build_adjustment="apt-snapshot-https-20260824-v1",
+    )
+
+    dockerfile = (prepared / "Dockerfile").read_text(encoding="utf-8")
+    assert dockerfile.count("FROM debian:bullseye-slim") == 1
+    assert (
+        "deb [check-valid-until=no] "
+        "https://snapshot.debian.org/archive/debian/20260824T000000Z "
+        "bullseye main"
+    ) in dockerfile
+    assert (
+        "deb [check-valid-until=no] "
+        "https://snapshot.debian.org/archive/debian-security/20260824T000000Z "
+        "bullseye-security main"
+    ) in dockerfile
+    assert "apt-get -o Acquire::Retries=10 update" in dockerfile
+    assert "apt-get -o Acquire::Retries=10 install -y" in dockerfile
+    assert "apt -o Acquire::Retries=10 update -y" in dockerfile
+    assert "apt -o Acquire::Retries=10 install -y" in dockerfile
+    assert "apt-get -o Acquire::Retries=10 install -y qemu-system-x86" in dockerfile
+    assert "apt -o Acquire::Retries=10 install -y telnet" in dockerfile
+
+
 def test_provenance_includes_selected_prepared_image_ids(tmp_path):
     manifest = tmp_path / "prepare-manifest.json"
     manifest.write_text(

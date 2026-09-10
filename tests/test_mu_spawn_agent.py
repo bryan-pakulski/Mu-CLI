@@ -58,9 +58,9 @@ class _ScriptedProvider(LLMProvider):
         return None
 
 
-def _build_parent(tmp_path, provider, monkeypatch):
+def _build_parent(tmp_path, provider, monkeypatch, session_name=None):
     monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
-    sm = SessionManager()
+    sm = SessionManager(session_name=session_name)
     parent = Session(provider, False, "system", sm)
     fc = FolderContext()
     fc.add_folder(str(tmp_path))
@@ -513,3 +513,113 @@ def test_spawn_agent_returns_running_within_one_second(tmp_path, monkeypatch):
     assert snap["status"] == "done"
     assert "finished after two tools" in snap["summary"]
     assert snap["tool_calls"] >= 2
+
+def test_parallel_children_enter_real_session_turns_without_identity_collisions(tmp_path, monkeypatch):
+    """Exercise the real execution lease before the mocked model loop.
+
+    Mocking Session.send_message hides the shared '__subagent__' identity bug:
+    one child starts while its siblings fail before reaching the provider.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    parent = _build_parent(tmp_path, _ScriptedProvider([]), monkeypatch, session_name="concurrent-parent")
+    entered = threading.Condition()
+    running = []
+    release = threading.Event()
+
+    def hold_turn(child, text):
+        with entered:
+            running.append(child)
+            entered.notify_all()
+        assert release.wait(10), "test did not release child turns"
+        return {"status": "completed", "assistant_text": "Finished " + text}
+
+    monkeypatch.setattr("mu.agent.loop_body.run_turn", hold_turn)
+    registry = parent._subagent_registry
+    try:
+        dispatched = [execute("spawn_agent", {"task": "Brief clients", "specialist": "general"}, _ctx_for(parent))]
+        with entered:
+            assert entered.wait_for(lambda: len(running) == 1, timeout=5)
+        # Keep the first child running while additional tools dispatch together.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            dispatched.extend(pool.map(
+                lambda title: execute("spawn_agent", {"task": title, "specialist": "general"}, _ctx_for(parent)),
+                ["Brief vendors", "Brief partners"],
+            ))
+        assert all(item["ok"] for item in dispatched), dispatched
+        with entered:
+            assert entered.wait_for(lambda: len(running) == 3, timeout=5), registry.snapshot_all()
+        assert len({child.session_manager.current_session_name for child in running}) == 3
+        assert len({child.thread_meta.thread_id for child in running}) == 3
+        assert len({child.artifact_registry.session_dir for child in running}) == 3
+        assert all(child._thread_coordination_required and child.thread_coordinator for child in running)
+        assert all(child.thread_meta.group_id == parent.thread_meta.group_id for child in running)
+        assert all(child.thread_meta.parent_thread_id == parent.thread_meta.thread_id for child in running)
+        # A second runtime for one actual child must still be rejected.
+        first, second = running[:2]
+        assert not first.thread_coordinator.heartbeat(first.thread_meta.thread_id, "competing-runtime")
+        # Sibling writes still share the family journal and cannot steal paths.
+        path = str(tmp_path / "shared-result.json")
+        assert first.thread_coordinator.claim_paths(first.thread_meta.thread_id, [path], turn_id=first._thread_turn_id)["ok"]
+        conflict = second.thread_coordinator.claim_paths(second.thread_meta.thread_id, [path], turn_id=second._thread_turn_id)
+        assert not conflict["ok"]
+        assert conflict["conflicts"][0]["owner_thread_id"] == first.thread_meta.thread_id
+        assert second.thread_coordinator.claim_paths(second.thread_meta.thread_id, [str(tmp_path / "second-result.json")], turn_id=second._thread_turn_id)["ok"]
+    finally:
+        release.set()
+        for record in registry.list():
+            assert record.done_event.wait(5)
+        registry.shutdown()
+    assert all(record.status == "done" for record in registry.list()), registry.snapshot_all()
+
+
+def test_reused_specialist_retains_its_private_session_and_history(tmp_path, monkeypatch):
+    provider = _ScriptedProvider([
+        ProviderResponse(text="First delegation complete", parts=[MessagePart(type="text", text="First delegation complete")]),
+        ProviderResponse(text="Second delegation complete", parts=[MessagePart(type="text", text="Second delegation complete")]),
+    ])
+    parent = _build_parent(tmp_path, provider, monkeypatch, session_name="reuse-parent")
+    first = execute("spawn_agent", {"task": "First delegation", "specialist": "mail"}, _ctx_for(parent))
+    registry = parent._subagent_registry
+    try:
+        first_id = first["data"]["task_id"]
+        assert registry.wait(first_id, timeout=5)["status"] == "done"
+        child = registry.get(first_id).child
+        name, meta = child.session_manager.current_session_name, child.thread_meta
+        history = list(child.session_manager.history)
+        second = execute("spawn_agent", {"task": "Second delegation", "specialist": "mail"}, _ctx_for(parent))
+        second_id = second["data"]["task_id"]
+        assert second["data"]["reused_specialist"] is True
+        assert second["data"]["worker_id"] == first["data"]["worker_id"]
+        assert registry.wait(second_id, timeout=5)["status"] == "done"
+        assert registry.get(second_id).child is child
+        assert child.session_manager.current_session_name == name
+        assert child.thread_meta == meta
+        assert child.session_manager.history[:len(history)] == history
+        assert "Second delegation complete" in registry.snapshot(second_id)["summary"]
+    finally:
+        registry.shutdown()
+
+
+def test_new_specialist_does_not_load_the_old_shared_subagent_session(tmp_path, monkeypatch):
+    provider = _ScriptedProvider([ProviderResponse(text="Done", parts=[MessagePart(type="text", text="Done")])])
+    parent = _build_parent(tmp_path, provider, monkeypatch, session_name="fresh-parent")
+    legacy = SessionManager(session_name="__subagent__")
+    legacy.conversation_summary = "Legacy shared specialist context must stay isolated."
+    legacy.save_history()
+    old_path = legacy._get_filepath(legacy.current_session_name)
+    from pathlib import Path
+    before = Path(old_path).read_bytes()
+    result = execute("spawn_agent", {"task": "A fresh delegation"}, _ctx_for(parent))
+    registry = parent._subagent_registry
+    try:
+        task_id = result["data"]["task_id"]
+        assert registry.wait(task_id, timeout=5)["status"] == "done"
+        child = registry.get(task_id).child
+        assert child.session_manager.current_session_name != "__subagent__"
+        assert child.session_manager.conversation_summary != legacy.conversation_summary
+        assert legacy.conversation_summary not in provider._captures["system_prompt"]
+        assert Path(old_path).read_bytes() == before
+    finally:
+        registry.shutdown()

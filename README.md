@@ -74,7 +74,7 @@ mucli --trace-analyze ~/.mucli/trace/X.jsonl  # headless trace summary
 - Plan mode (`/plan`) — read-only tool enforcement.
 - Hooks (`.mu/hooks.json`) — shell-cmd hooks at five lifecycle points; plus built-in Python hooks for plan-mode enforcement, secret-path guarding, auto-compaction, and usage tracking. See [documentation/hooks.md](documentation/hooks.md).
 - TodoWrite-style task tracking (`todo_write`, `todo_set_status`, `todo_list` tools).
-- Sub-agent spawning (`spawn_agent`) — isolated child sessions for focused side quests, depth-capped, plan-mode-aware.
+- Sub-agent spawning (`spawn_agent`) — isolated child sessions for focused side quests, depth-capped, plan-mode-aware. Each persistent specialist owns a unique session and execution lease, while siblings share the parent’s file-ownership journal. Reused specialists keep their private context.
 - Skills (`mu/skills/`, `~/.mu/skills/`, `<ws>/.mu/skills/`) — declarative agent extensions with regex triggers; compact index injected by default, bodies auto-load on trigger match or via `invoke_skill`. See [documentation/skills.md](documentation/skills.md).
 - Runtime stats with token + cache + reasoning + cost accounting.
 - Run tracing + Trace Analyzer dashboard — a per-run JSONL trace of every iteration (context layers, real vs estimated tokens, compactions, nudges, tools, subagents, memory) visualized at `/trace` (or `mucli --trace`) with context-growth curves, tokenizer drift, compaction/nudge/tool timelines, redundant-read heatmaps, and more. The data for harness-performance decisions. See [documentation/tracing.md](documentation/tracing.md).

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from typing import Any, Dict
 
 from mu.memory.stores import ACTIVE
@@ -194,6 +195,7 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
 
     from mu.agent.lifecycle import SubagentLifecycleManager
     from mu.session.session import Session, SessionManager
+    from mu.threads.model import new_child_thread_meta
     from mu.ui.subagent import SubagentUI
 
     parent.variables["session_role"] = "parent"
@@ -255,7 +257,14 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     if worker is None:
         child_provider = parent.provider.clone_for_child()
         child_provider.model_name = resolved_model
-        child_sm = SessionManager(session_name="__subagent__")
+        # Session names also key execution leases and artifact storage. A
+        # shared '__subagent__' name makes independent workers compete for
+        # one turn lease before they can reach the provider. Allocate once
+        # per specialist; the reuse path retains this identity and context.
+        child_sm = SessionManager(session_name=f"__subagent__{uuid.uuid4().hex}")
+        # Keep siblings in their parent's journal so distinct identities do
+        # not bypass workspace path ownership or thread coordination.
+        child_sm.thread_meta = new_child_thread_meta(parent.thread_meta, title=title)
         child_sm.save_history = lambda *a, **kw: None
         child = Session(provider=child_provider, thinking=parent.thinking, system_instruction=_build_system_prompt(specialist=specialist_key, depth=child_depth), session_manager=child_sm, ui=child_ui, debug=getattr(parent, "debug", False))
         _seed_handoff(child_sm, handoff)

@@ -6,6 +6,9 @@ import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from bench.list_tb_tasks import load_task_ids
 from bench.prepare_tb import check_prepared, stage_task, task_source_sha256
 from bench.summarize_tb import summarize
 from bench.tb_prompts import BENCHMARK_PROMPTS, DEFAULT_BENCHMARK_PROMPT
@@ -514,9 +517,53 @@ def test_tb_suite_uses_terminal_bench_dataset_config_schema():
     config = Path("bench/tb_suite.yaml").read_text(encoding="utf-8")
     assert "name: terminal-bench-core" in config
     assert "version: 0.1.1" in config
-    assert "task_ids:\n  - hello-world" in config
+    assert "\ntask_ids:\n" in config
+    assert load_task_ids()[0] == "hello-world"
     assert "\ndataset:" not in config
     assert "\nagent:" not in config
+
+
+def test_tb_suite_has_50_unique_tasks_across_domains_and_sources():
+    config = Path("bench/tb_suite.yaml").read_text(encoding="utf-8")
+    tasks = load_task_ids()
+
+    assert len(tasks) == 50
+    assert len(set(tasks)) == 50
+    assert {
+        # Representatives for data, debugging, systems, coding, ML, science,
+        # security, forensics, and interactive reasoning.
+        "csv-to-parquet",
+        "swe-bench-fsspec",
+        "qemu-alpine-ssh",
+        "polyglot-c-py",
+        "cartpole-rl-training",
+        "raman-fitting",
+        "openssl-selfsigned-cert",
+        "password-recovery",
+        "chess-best-move",
+    } <= set(tasks)
+    for source in ("terminal-bench", "swe-bench", "mteb", "gymnasium"):
+        assert f"- id: {source}" in config
+
+
+def test_tb_suite_loader_rejects_duplicate_tasks(tmp_path):
+    suite = tmp_path / "suite.yaml"
+    suite.write_text(
+        "name: terminal-bench-core\n"
+        "task_ids:\n"
+        "  - hello-world\n"
+        "  - hello-world\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate task IDs"):
+        load_task_ids(suite)
+
+
+def test_all_benchmark_runners_read_the_shared_suite():
+    for runner_name in ("benchmark.sh", "bench/run_pack.sh", "bench/run_cli_pack.sh"):
+        runner = Path(runner_name).read_text(encoding="utf-8")
+        assert "python3 bench/list_tb_tasks.py" in runner
 
 
 def test_pack_requires_python_314_and_supports_repeated_prebuilt_runs():
@@ -548,7 +595,7 @@ def test_one_command_benchmark_uses_credible_defaults_and_excluded_setup():
 
     assert "harness: mucli" in output
     assert "model: ollama/glm-5.3-flash" in output
-    assert "tasks: 10; attempts per task: 3" in output
+    assert "tasks: 50; attempts per task: 3" in output
     assert "outside timed execution" in output
     assert "bench/prepare_tb.py" in output
     assert "bench/run_pack.sh --attempts 3" in output

@@ -41,10 +41,11 @@ case "$MODEL" in
 esac
 
 case "$SELECTION" in
-  full) TASKS=(hello-world processing-pipeline fix-git git-multibranch nginx-request-logging cron-broken-network sqlite-db-truncate train-fasttext fix-permissions build-tcc-qemu) ;;
+  full) mapfile -t TASKS < <(python3 bench/list_tb_tasks.py) ;;
   smoke) TASKS=(hello-world) ;;
   task) TASKS=("$SINGLE_TASK") ;;
 esac
+[ "${#TASKS[@]}" -gt 0 ] || { echo "no tasks found in bench/tb_suite.yaml" >&2; exit 2; }
 
 MANIFEST="$DATASET_PATH/prepare-manifest.json"
 python3 bench/prepare_tb.py --check-only \

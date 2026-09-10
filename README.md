@@ -177,7 +177,7 @@ make test
 
 ![MuCLI harness performance comparison](documentation/assets/mucli-harness-performance.png)
 
-Run the credible Terminal-Bench profile (10 pinned tasks, three attempts each)
+Run the credible Terminal-Bench profile (50 pinned tasks, three attempts each)
 with one command:
 
 ```bash

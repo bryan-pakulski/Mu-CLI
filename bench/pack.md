@@ -1,10 +1,16 @@
 # MuCLI Harness Benchmark Pack
 
-Small, time-gated task list to measure **harness + model effectiveness**.
-The runnable pack currently contains ten pinned Terminal-Bench core tasks.
-SWE-bench and MuCLI-native tasks below remain design candidates rather than
-implemented runners. Terminal-Bench supplies verifier outcomes and time gates;
-the MuCLI adapter adds exact source fingerprints and token-bearing JSONL traces.
+Time-gated task pack to measure **harness + model effectiveness**. The runnable
+profile contains 50 pinned Terminal-Bench Core tasks spanning nine upstream
+task categories and several practical skill strata. Terminal-Bench supplies
+the common isolated environment, verifier contract, reference solutions, and
+time gates; the MuCLI adapter adds
+exact source fingerprints and token-bearing JSONL traces.
+
+The profile also includes four real-issue repair tasks derived from SWE-bench,
+an MTEB embedding evaluation, and a Gymnasium CartPole task. Their upstream
+projects are attributed in `bench/tb_suite.yaml`; all are run through the
+pinned Terminal-Bench packaging so scores remain comparable.
 
 ---
 
@@ -19,15 +25,15 @@ the MuCLI adapter adds exact source fingerprints and token-bearing JSONL traces.
 | SWE-Lancer (OpenAI) | Real Upwork tasks, $-graded | ~23 GB docker | Runner-set | Too heavy for routine runs |
 | InterCode | Old terminal bash tasks | Docker | No | Dormant since 2023 — skip |
 
-## B. Current Terminal-Bench pack (10 tasks, all time-gated)
+## B. Current Terminal-Bench pack (50 tasks, all time-gated)
 
-The task IDs and native timeout gates are pinned in `bench/tb_suite.yaml` and
-`bench/run_pack.sh`. The selection covers file operations, shell repair, Git,
-service configuration, data recovery, model training, and a QEMU build task.
-
-`hello-world`, `processing-pipeline`, `fix-git`, `git-multibranch`,
-`nginx-request-logging`, `cron-broken-network`, `sqlite-db-truncate`,
-`train-fasttext`, `fix-permissions`, and `build-tcc-qemu`.
+The task IDs are pinned in `bench/tb_suite.yaml`; each task's native
+`max_agent_timeout_sec` remains its time gate. The selection covers file and
+data transformation; debugging and real-repository repair; Git, services, and
+system administration; software engineering and programming languages; model
+training and scientific computing; security and forensics; games and
+interactive problem solving. All runners read the same YAML list through
+`bench/list_tb_tasks.py`.
 
 The score printed by the runner is resolved trials / total trials. Harness
 failures and missing result files make the runner exit non-zero; ordinary task
@@ -36,8 +42,8 @@ failures are valid benchmark outcomes and remain in the score.
 ## C. Running Terminal-Bench
 
 The supported entry point is one script. With no arguments it runs the full
-10-task MuCLI pack with three attempts per task—the minimum comparison run we
-treat as credible—and automatically builds or reuses immutable task images:
+50-task MuCLI pack with three attempts per task and automatically builds or
+reuses immutable task images:
 
 ```bash
 ./benchmark.sh

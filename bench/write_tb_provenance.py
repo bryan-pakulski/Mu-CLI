@@ -84,6 +84,8 @@ def _prepared_images(path: Path | None, tasks: list[str]) -> dict[str, Any] | No
 def _harness_file_hashes(repo: Path) -> dict[str, str]:
     relative_paths = (
         "benchmark.sh",
+        "bench/tb_suite.yaml",
+        "bench/list_tb_tasks.py",
         "bench/run_pack.sh",
         "bench/tb_mucli_agent.py",
         "bench/tb_prompts.py",

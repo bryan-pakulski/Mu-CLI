@@ -206,6 +206,11 @@ class HistoryMixin:
         "and does NOT need to be re-summarized.\n"
         "- Do NOT add commentary outside the sections you choose.\n"
         "- Be concise but complete. Target 200-600 words.\n"
+        "- For repetitive batch work, summarize completed batches and totals "
+        "instead of enumerating every item. Preserve the exact resume cursor, "
+        "selection/filter rules, unresolved exceptions, and next action. "
+        "Distinguish confirmed writes from attempted or uncertain writes so "
+        "the agent does not repeat side effects after compaction.\n"
     )
 
     def _generate_llm_summary(
@@ -616,6 +621,28 @@ class HistoryMixin:
             if end <= self.summary_anchor:
                 return False
 
+        # Keep the assistant call with its tool-result bundle in the live
+        # tail. The result floor or a segment boundary can otherwise leave
+        # an orphaned result immediately after the new summary anchor.
+        def starts_with_result(index: int) -> bool:
+            return index < len(self.history) and any(
+                part.get("type") == "tool_result"
+                for part in self.history[index].get("parts", [])
+            )
+
+        boundary = end
+        while boundary > self.summary_anchor and starts_with_result(boundary):
+            boundary -= 1
+        if boundary > self.summary_anchor:
+            end = boundary
+        else:
+            # A single large tool bundle may exceed the segment hint. Roll
+            # it whole only when all of its results are outside the floor.
+            while end < target_anchor and starts_with_result(end):
+                end += 1
+            if starts_with_result(end):
+                return False
+
         # Exclude protected messages from summarization — they stay
         # verbatim in L5 even after the anchor advances past them.
         # This preserves important context (initial user request, key
@@ -684,6 +711,7 @@ class HistoryMixin:
         max_passes: int = 8,
         provider: Optional[LLMProvider] = None,
         max_segment_chars: Optional[int] = _COMPACTION_SEGMENT_CHARS,
+        allow_degrade: bool = True,
     ) -> bool:
         token_budget = max(1, int(token_budget or 1))
         # Run-tracer instrumentation: record one compaction event per call so
@@ -708,7 +736,7 @@ class HistoryMixin:
             ):
                 changed = True
                 continue
-            if self._degrade_oldest_runtime_payload(provider=provider):
+            if allow_degrade and self._degrade_oldest_runtime_payload(provider=provider):
                 changed = True
                 continue
             break

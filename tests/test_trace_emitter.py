@@ -244,6 +244,52 @@ def test_request_manifest_attributes_context_components():
     assert record["messages"][2]["part_details"][0]["tokens"] > 500
 
 
+def test_request_manifest_cache_handles_reused_ids_and_mutated_parts(monkeypatch):
+    import mu.trace.emitter as emitter
+    from providers.base import Message
+
+    # Deterministically model Python recycling an earlier part's address.
+    monkeypatch.setattr(emitter, "id", lambda obj: 1, raising=False)
+
+    def record(part):
+        return emitter.build_request_record(
+            iteration=1, system_prompt="sys",
+            messages=[Message(role="tool", parts=[part])],
+            tools=[], token_estimate=0,
+        )
+
+    first = MessagePart(type="tool_result", tool_name="first", tool_result="short")
+    record(first)
+    second = MessagePart(type="tool_result", tool_name="second", tool_result="x" * 8000)
+    large = record(second)
+    assert large["component_tokens"]["tool_results"] > 500
+    second.tool_result = "small again"
+    small = record(second)
+    assert small["component_tokens"]["tool_results"] < 20
+    second.tool_name = "renamed"
+    renamed = record(second)
+    assert renamed["messages"][0]["part_details"][0]["tool_name"] == "renamed"
+
+
+def test_request_manifest_cache_tracks_changed_tool_schemas(monkeypatch):
+    import mu.trace.emitter as emitter
+    from providers.base import ToolDefinition
+
+    monkeypatch.setattr(emitter, "id", lambda obj: 1, raising=False)
+    tool = ToolDefinition(name="work", description="short", parameters={})
+
+    def record():
+        return emitter.build_request_record(
+            iteration=1, system_prompt="sys", messages=[],
+            tools=[tool], token_estimate=0,
+        )
+
+    before = record()
+    tool.description = "longer description " * 100
+    after = record()
+    assert after["tool_schema_bytes"] > before["tool_schema_bytes"]
+
+
 def test_run_start_emits_effective_limit_and_divergence(session, tmp_path, caplog):
     """Round-51 T1: run_start carries the drift-corrected effective_limit the
     preflight guard enforces alongside the configured context_token_limit, and

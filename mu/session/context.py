@@ -158,6 +158,9 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
     last = layered.rfind(_LAYER_SENTINEL)
     if first != last:
         layered = layered[:first] + _LAYER_SENTINEL + layered[last + len(_LAYER_SENTINEL):]
+    # A compaction rebuild must remove exactly this old prefix while
+    # preserving turn-scoped recall/scratchpad blocks appended by the loop.
+    session._last_injected_context_prompt = layered
     return layered
 
 

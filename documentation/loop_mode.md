@@ -46,14 +46,15 @@ Loop Mode is designed for long-horizon autonomous tasks where the assistant shou
 
 ## Long-horizon context freshness
 
-Automatic cleanup now runs throughout a turn, rather than stopping after
-its first compaction. The default L5 working-history threshold is 64,000
-estimated tokens, independent of a model's much larger context window;
-the provider-aware budget can lower this threshold further. Crossing it
-rolls older activity into L2 toward half the threshold, leaving room for
-new batches. Four new history entries re-arm cleanup after an attempt,
-so unchanged retries or an uncompactable recent tail do not repeatedly
-invoke the summarizer.
+The model chooses useful completion boundaries and relevant evidence.
+`context_status` reports projected request size, available context, and a
+bounded list of result identifiers. Large relevant context remains available:
+the default `auto_compaction_token_limit=0` uses the provider-aware budget.
+Automatic cleanup remains a fallback near that budget, clearing eligible old
+results without summarizer calls before rolling history into L2. Four new
+history entries re-arm cleanup after an attempt, so unchanged retries do not
+repeatedly invoke the summarizer. Fixed layers, tools and output reserve also
+consume the effective context window.
 
 The active user request and recent tool results remain protected. This
 soft cleanup advances the summary anchor without deleting or degrading
@@ -73,8 +74,60 @@ long turns as well as `loop` and `feature` modes.
 New sessions enable this automatically. Existing sessions retain saved
 settings, including the old `auto_compaction_enabled=false` default. Enable
 it once in such a session with `/set auto_compaction_enabled true`.
-Use `/set auto_compaction_token_limit 64000` to change the working threshold;
+Use `/set auto_compaction_token_limit 0` to remove a saved 64k working threshold;
 `/set auto_compaction_enabled false` opts out of proactive cleanup.
+
+### Selective tool-result clearing
+
+The model can call `clear_tool_results` with result identifiers from
+`context_status.working_context.candidates`. Only selected results change.
+Candidates are paginated oldest first: pass `candidate_offset` from
+`next_candidate_offset` to inspect another page (`candidate_limit`: 1–100).
+`action="keep"` pins evidence and its call bundle against summarization;
+`action="clear"` replaces eligible payloads with recall references;
+`action="restore"` releases a previous retention decision. Neither clearing
+nor restoring executes the original tool or calls a summarizer.
+
+```json
+{
+  "result_ids": ["identifier-from-context-status"],
+  "action": "clear",
+  "checkpoint": {
+    "progress": "20 batches confirmed complete",
+    "resume": "exact cursor returned by the tool",
+    "exceptions": "Two uncertain writes need verification",
+    "constraints": "Never send replies",
+    "next_action": "Read the next batch"
+  }
+}
+```
+
+The checkpoint is a bounded field update within L2, outside the rolling
+summary. It accepts `progress`, `decisions`, `resume`, `exceptions`,
+`next_action`, and `constraints`, up to 6,000 JSON characters in total. Invalid
+or oversized checkpoints are rejected before edits. Original user requirements
+and approval rules remain authoritative. Record confirmed outcomes separately
+from attempts; never infer success just because a result was archived.
+
+Clearing refuses recent result bundles, pinned/protected evidence, failures,
+pending outcomes and provider-signed content. It verifies durable storage before
+changing the projection. Complete signed bundles can still be archived during
+compaction; their signatures are never edited individually. Raw history is
+never rewritten by selective clearing, and retention/checkpoint
+state survives session reload, and `recall` can recover cleared receipts from
+saved history after per-run cache eviction. A missing/failed durable store is a
+reported skip. Unselected results remain active.
+
+When clearing is insufficient, `compact` accepts the same checkpoint plus
+`preserve_result_ids`, `clear_result_ids`, and `through_index` (the last saved
+history message eligible for summarization). It keeps later work and protected
+call/result bundles intact. Summaries process bounded, newly archived segments;
+cleared results contribute small action records, not their raw payloads again.
+`context_status` and iteration traces expose clearing savings, latency and
+rolling-history summary-call/input/output counters. Traces label the edit `last_context_edit`
+with its iteration; summary counters are cumulative within the process.
+Fixed-token status uses the last provider
+request; the actual pre-provider guard remeasures the assembled request.
 
 A long task that stays under the compaction token budget used to leave L2
 (the conversation summary) frozen at its turn-start value while the model
@@ -85,11 +138,12 @@ explored and progress halts. Four fixes keep the model oriented on long runs:
   goal (L3) are reassembled from in-memory state *every iteration*, not
   frozen at turn start. L1 (workspace files) and L1B (skills) are cached per
   turn (disk reads once) and reused, so the freshness is cheap.
-- **Periodic L2 progress checkpoints** — every `progress_checkpoint_every`
-  iterations (loop/feature default `12`, `default`/`chat` `0` = off), recent
+- **Optional periodic L2 progress checkpoints** — every `progress_checkpoint_every`
+  iterations (`0` = off in every mode; set a positive cadence to opt in), recent
   history is folded into the structured summary (Progress / Key decisions /
   Current state / Open items) **without compacting** — the anchor doesn't
-  advance and entries stay verbatim in L5, only L2 is enriched.
+  advance and entries stay verbatim in L5, only L2 is enriched. By default the
+  model maintains its structured checkpoint without an extra summary request.
 - **Auto-recall of cached reads** — a repeat `read_file` / `get_chunk` /
   `list_dir` / `search_*` on an *unchanged* file short-circuits to the
   tool-result sidecar cache instead of re-reading from disk and re-burning

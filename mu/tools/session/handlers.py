@@ -149,9 +149,15 @@ def search_history(args: Dict[str, Any], context) -> str:
         "(those entries have decayed out of the active set and are noise); "
         "call `todo_clear('completed')` when `stale_todos` > 0; and curate "
         "memory before `memory_pressure_pct` forces a silent eviction. "
+        "working_context lists selectable tool result IDs, oldest first; use "
+        "candidate_offset / next_candidate_offset to page through older work, "
+        "then clear_tool_results to clear or keep individual results cheaply. "
         "Read-only — call freely before big gathers or when a turn feels long."
     ),
-    parameters={"type": "object", "properties": {}},
+    parameters={"type": "object", "properties": {
+        "candidate_offset": {"type": "integer", "minimum": 0, "default": 0},
+        "candidate_limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 30},
+    }},
     requires_approval=False,
     execution_kind="read",
     preview_policy="none",
@@ -165,9 +171,14 @@ def context_status(args: Dict[str, Any], context) -> str:
         return json.dumps({"error": "No session available."})
 
     from utils.runtime_metrics import collect_context_layers
+    from mu.session.context_maintenance import context_status as working_context_status
 
     try:
         layers = collect_context_layers(session)
+        working_context = working_context_status(
+            session, candidate_offset=args.get("candidate_offset", 0),
+            candidate_limit=args.get("candidate_limit", 30),
+        )
     except Exception as exc:
         return json.dumps({"error": f"context layer collection failed: {exc}"})
 
@@ -230,6 +241,7 @@ def context_status(args: Dict[str, Any], context) -> str:
 
     return json.dumps({
         "layers": layer_rows,
+        "working_context": working_context,
         "total_tokens": total,
         "context_limit": context_limit,
         "fill_pct": round(100.0 * total / context_limit, 1) if context_limit > 0 else 0.0,
@@ -254,7 +266,7 @@ def context_status(args: Dict[str, Any], context) -> str:
 @tool(
     name="compact",
     description=(
-        "Manually compact the conversation history: summarize older turns into "
+        "At a completed task/batch boundary, compact selected older history into "
         "the L2 conversation summary to free context, advancing the summary "
         "anchor. Recent tool results (the active turn's) are protected and "
         "[cache:KEY] tags are preserved so full results stay recallable. Call "
@@ -263,7 +275,10 @@ def context_status(args: Dict[str, Any], context) -> str:
         "checkpoint_progress, this ADVANCES the anchor — compacted entries "
         "are replaced by their summary. Optional `focus` steers what the "
         "summary preserves (a task, file, or decision to keep front-of-mind). "
-        "Returns before/after token estimates and the new summary anchor."
+        "Use clear_tool_results first for completed payloads (no summarizer cost). "
+        "Pass a structured checkpoint and preserve_result_ids for evidence that "
+        "must remain verbatim. through_index is the last history message eligible "
+        "for summarization; later work stays active. Returns token estimates and anchor."
     ),
     parameters={
         "type": "object",
@@ -274,7 +289,15 @@ def context_status(args: Dict[str, Any], context) -> str:
                     "Optional short text steering what the summary preserves "
                     "(e.g. 'the auth refactor and open decisions')."
                 ),
-            }
+            },
+            "through_index": {"type": "integer", "minimum": 0},
+            "preserve_result_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+            "clear_result_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+            "checkpoint": {
+                "type": "object", "additionalProperties": False,
+                "properties": {field: {"type": "string"} for field in
+                               ("progress", "decisions", "resume", "exceptions", "next_action", "constraints")},
+            },
         },
     },
     requires_approval=False,
@@ -292,8 +315,46 @@ def compact(args: Dict[str, Any], context) -> str:
     from mu.agent.compactor import manual_compact
 
     focus = str(args.get("focus", "") or "").strip()
-    result = manual_compact(session, focus=focus)
+    result = manual_compact(session, focus=focus, checkpoint=args.get("checkpoint"),
+                            preserve_result_ids=args.get("preserve_result_ids"),
+                            clear_result_ids=args.get("clear_result_ids"),
+                            through_index=args.get("through_index"))
     return json.dumps(result, default=str, indent=2)
+
+
+@tool(
+    name="clear_tool_results",
+    description=(
+        "Selectively remove completed tool payloads from the active context with ZERO "
+        "summarizer calls. Obtain result_ids from context_status. Original history and "
+        "verified durable recall remain intact; calls and their result placeholders stay "
+        "paired. Only named results change. action=keep pins relevant evidence verbatim; "
+        "action=restore releases a prior keep/clear decision. Recent results, failures "
+        "and provider-signed content cannot be cleared. Optionally update a structured "
+        "checkpoint with progress, resume cursor, confirmed actions and exceptions. "
+        "Use this before compact; never repeat a write to recover an archived receipt."
+    ),
+    parameters={"type": "object", "properties": {
+        "result_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+        "action": {"type": "string", "enum": ["clear", "keep", "restore"], "default": "clear"},
+        "checkpoint": {"type": "object", "additionalProperties": False,
+                       "properties": {field: {"type": "string"} for field in
+                                      ("progress", "decisions", "resume", "exceptions", "next_action", "constraints")}},
+    }, "required": ["result_ids"]},
+    requires_approval=False, execution_kind="mutate", preview_policy="none",
+    server_policy="session_only", result_mode="raw",
+)
+def clear_tool_results(args: Dict[str, Any], context) -> str:
+    from mu.session.context_maintenance import edit_tool_results
+    session = getattr(context, "session", None)
+    if session is None or not hasattr(session, "session_manager"):
+        return json.dumps({"ok": False, "error": "No session available."})
+    try:
+        result = edit_tool_results(session, args.get("result_ids"),
+                                   action=args.get("action", "clear"), checkpoint=args.get("checkpoint"))
+    except ValueError as exc:
+        result = {"ok": False, "error": str(exc)}
+    return json.dumps(result, default=str)
 
 
 # ============================================================ checkpoint_progress

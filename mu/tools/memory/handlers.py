@@ -1102,11 +1102,15 @@ def recall(args: Dict[str, Any], context) -> str:
     if not key:
         return "Error: cache_key argument is required."
     result = session.tool_result_cache.recall(key)
+    if result is None and hasattr(session, "session_manager"):
+        from mu.session.context_maintenance import recall_cleared_result
+        result = recall_cleared_result(session.session_manager, key)
     if result is None:
         return (
             f"Cache key '{key}' not found or evicted. "
             "The result may have been dropped due to LRU eviction. "
-            "Re-run the original tool call if needed."
+            "Use search_history to locate the original receipt. Verify the prior "
+            "outcome before considering another write."
         )
     return _json.dumps(result, default=str, indent=2)
 

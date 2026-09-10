@@ -135,6 +135,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         # sessions without one), incremented on every successful save.
         self.revision = 0
         self.conversation_summary = ""
+        self.context_retention = {}
+        self.context_checkpoint = {}
         self.provider_config = {}
         self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
@@ -249,6 +251,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.current_session_name = name
         self.history = []
         self.conversation_summary = ""
+        self.context_retention = {}
+        self.context_checkpoint = {}
         self.summary_anchor = 0
         # Phase 1 (G2): reset revision alongside the rest of the loadable
         # state; hydrated from session.json below (0 if absent/legacy).
@@ -295,6 +299,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                         data.get("conversation_summary", "") or ""
                     )
                     self.summary_anchor = data.get("summary_anchor", 0)
+                    self.context_retention = data.get("context_retention", {}) or {}
+                    self.context_checkpoint = data.get("context_checkpoint", {}) or {}
                     try:
                         self.revision = int(data.get("revision", 0) or 0)
                     except (TypeError, ValueError):
@@ -1002,6 +1008,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 "container_config": self.container_config,
                 "thread_meta": self.thread_meta.to_dict(),
                 "conversation_summary": self.conversation_summary,
+                "context_retention": self.context_retention,
+                "context_checkpoint": self.context_checkpoint,
                 "summary_anchor": self.summary_anchor,
                 "protected_indices": sorted(self.protected_indices),
                 "provider_config": self.provider_config,

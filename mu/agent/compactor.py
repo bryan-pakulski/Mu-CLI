@@ -1,9 +1,9 @@
 """Keep a bounded working history throughout long-running agent turns.
 
-The provider window is a safety ceiling, not a working-set target. Roll
-older activity into the summary at the smaller of the provider-aware L5
-budget and the configured working-history limit, then aim for half that
-budget so another small tool result does not immediately trigger a roll.
+The model clears selected completed results and checkpoints before requesting
+summaries. Automatic cleanup is a provider-aware fallback: measure projected
+history, clear eligible payloads cheaply, then summarize if pressure remains.
+An explicit smaller working-history limit is still respected.
 """
 
 from __future__ import annotations
@@ -17,6 +17,14 @@ from .hooks import HookContext, HookRegistry, HookResult, HookSpec, default_regi
 logger = logging.getLogger("mucli")
 
 from utils.config import _DEFAULT_CONTEXT_TOKEN_LIMIT
+
+
+def checkpoint_progress_if_due(session, iteration: int) -> bool:
+    """Periodic summaries are opt-in; zero consistently disables them."""
+    every = int(session.variables.get("progress_checkpoint_every", 0) or 0)
+    if every > 0 and iteration > 1 and iteration % every == 0:
+        return session.session_manager.force_progress_checkpoint(session.provider)
+    return False
 
 
 def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[HookResult]:
@@ -80,15 +88,35 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
 
         if budget <= 0:
             return None
-        working_limit = int(variables.get("auto_compaction_token_limit", 64_000))
+        from mu.session.context_maintenance import candidates, edit_tool_results, projected_tokens
+        from .context_guard import _estimate_request_tokens
+        from mu.session.budgets import drift_corrected_context_limit, resolve_response_reserve
+        working_limit = int(variables.get("auto_compaction_token_limit", 0))
+        if ctx.system_prompt is not None:
+            fixed = _estimate_request_tokens(ctx.system_prompt, [], ctx.tools)
+            available = drift_corrected_context_limit(session) - resolve_response_reserve(session)
+            budget = min(budget, int(available * threshold) - fixed["total"])
         if working_limit > 0:
             budget = min(budget, working_limit)
-        if session_manager.estimate_runtime_history_tokens() <= budget:
+        if budget <= 0:
             return None
-        target = max(1, budget // 2)
+        estimate = (lambda: projected_tokens(session)) if hasattr(session, "_build_messages_from_history") else session_manager.estimate_runtime_history_tokens
+        if estimate() <= budget:
+            return None
+        target = max(1, budget // 2 if working_limit > 0 else int(budget * 0.8))
         # Mark attempts as well as successful rolls: an uncompactable tail
         # must not cause repeated summarization calls on provider retries.
         session._compaction_watermark = history_len
+        # Reclaim completed cached results without a provider call before
+        # falling back to lossy summarization near the effective window.
+        cleared = None
+        if hasattr(session, "_build_messages_from_history"):
+            selected = [item["result_id"] for item in candidates(session)
+                        if not item["blocked_reason"] and item["state"] != "clear"][:100]
+            if selected:
+                cleared = edit_tool_results(session, selected)
+            if estimate() <= budget:
+                return HookResult(action="continue", data={"compaction": True, "clearing": cleared})
         session_manager._tool_result_floor = resolve_tool_result_floor(session)
         # Bridge the optional compact_focus variable (Claude Code
         # `/compact <focus>` style) so the LLM summarizer emphasizes it.
@@ -106,6 +134,7 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
             keep_recent=resolve_keep_recent(session),
             provider=getattr(session, "provider", None),
             allow_degrade=False,
+            estimate_tokens=estimate,
         )
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("Auto-compaction raised %s; continuing without compacting", exc)
@@ -120,10 +149,13 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
             target,
         )
         return HookResult(action="continue", data={"compaction": True, "budget": target})
+    if cleared and cleared.get("saved_tokens", 0) > 0:
+        return HookResult(action="continue", data={"compaction": True, "clearing": cleared})
     return None
 
 
-def manual_compact(session: any, *, focus: str = "") -> dict:
+def manual_compact(session: any, *, focus: str = "", checkpoint=None,
+                   preserve_result_ids=None, clear_result_ids=None, through_index=None) -> dict:
     """Run a compaction pass on demand — the back end for the `/compact`
     slash command and the agent `compact` tool.
 
@@ -147,6 +179,30 @@ def manual_compact(session: any, *, focus: str = "") -> dict:
         return {"ok": False, "error": "session has no _compaction_token_budget"}
 
     from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
+    from mu.session.context_maintenance import candidates, edit_tool_results, projected_tokens, validate_checkpoint
+
+    try:
+        checkpoint = validate_checkpoint(checkpoint)
+        if through_index is not None and (
+            isinstance(through_index, bool) or not isinstance(through_index, int)
+            or through_index < 0 or through_index >= len(session_manager.history)
+        ):
+            raise ValueError("through_index must identify a saved history message")
+        for ids in (preserve_result_ids, clear_result_ids):
+            if ids is not None and (not isinstance(ids, list) or len(ids) > 100
+                                   or any(not isinstance(key, str) or not key or len(key) > 128 for key in ids)):
+                raise ValueError("result identifiers must be a list of at most 100 identifiers")
+        validate_checkpoint({**getattr(session_manager, "context_checkpoint", {}), **checkpoint})
+        known = {item["result_id"] for item in candidates(session)} if preserve_result_ids else set()
+        if set(preserve_result_ids or []) - known:
+            raise ValueError("cannot preserve unknown result identifiers; inspect context_status first")
+        if set(preserve_result_ids or []) & set(clear_result_ids or []):
+            raise ValueError("the same result cannot be preserved and cleared")
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if preserve_result_ids:
+        edit_tool_results(session, preserve_result_ids, action="keep")
+    clearing = edit_tool_results(session, clear_result_ids or [], checkpoint=checkpoint)
 
     keep_recent = resolve_keep_recent(session)
     provider = getattr(session, "provider", None)
@@ -173,6 +229,9 @@ def manual_compact(session: any, *, focus: str = "") -> dict:
             budget,
             keep_recent=keep_recent,
             provider=provider,
+            allow_degrade=False,
+            estimate_tokens=lambda: projected_tokens(session),
+            through_index=through_index,
         )
         if not rolled:
             # Honor the explicit manual request: roll one bounded segment
@@ -182,6 +241,8 @@ def manual_compact(session: any, *, focus: str = "") -> dict:
             rolled = session_manager.roll_history_summary(
                 keep_recent=keep_recent,
                 provider=provider,
+                max_segment_chars=24_000,
+                through_index=through_index,
             )
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("Manual compaction raised %s", exc)
@@ -204,6 +265,9 @@ def manual_compact(session: any, *, focus: str = "") -> dict:
         "budget_tokens": budget,
         "keep_recent": keep_recent,
         "focus": focus_val,
+        "clearing": clearing,
+        "projected_tokens": projected_tokens(session),
+        "checkpoint": getattr(session_manager, "context_checkpoint", {}),
         "before": {
             "history_len": before_len,
             "summary_anchor": before_anchor,

@@ -968,6 +968,8 @@ def build_iter_record(
     return {
         "iter": iteration,
         "max_iter": max_iter,
+        "last_context_edit": getattr(getattr(session, "session_manager", None), "_last_context_edit", None),
+        "summary_usage": getattr(getattr(session, "session_manager", None), "_summary_usage", None),
         "wall_ms": wall_ms,
         "context": {
             "l0": layers["l0"],

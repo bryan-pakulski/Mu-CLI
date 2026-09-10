@@ -544,12 +544,15 @@ class Session:
         from mu.session.messages import build_messages_from_history
         from mu.session.budgets import resolve_tool_result_floor
         from mu.session.media import media_resolver_for_session
+        from mu.session.context_maintenance import retention_for_parts
 
         floor = resolve_tool_result_floor(self)
         return build_messages_from_history(
             recent_history_dicts, new_user_message_dict,
             tool_result_floor=floor,
             media_resolver=media_resolver_for_session(self),
+            retention=retention_for_parts(self.session_manager),
+            auto_clear=False,
         )
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:

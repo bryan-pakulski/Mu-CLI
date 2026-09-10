@@ -887,34 +887,16 @@ def run_turn(session, text, *, origin="user"):
         # iterations, fold recent history into the structured L2 summary
         # WITHOUT compacting (anchor doesn't advance) so the next iteration's
         # system prompt reflects current Progress/State/Open-items. Cadence:
-        # `progress_checkpoint_every` (0 disables); when unset, loop/feature
-        # modes default to 12, default/chat to 0. Fires before the per-
+        # `progress_checkpoint_every` (0 disables in every mode). Fires before the per-
         # iteration system-prompt rebuild so the refreshed L2 is used this
         # iteration.
         try:
-            _ckpt_every = int(
-                session.variables.get("progress_checkpoint_every", 0) or 0
-            )
-            if _ckpt_every <= 0:
-                # Mode-aware default: only long-horizon modes auto-enable.
-                _ckpt_mode = str(
-                    session.variables.get("agent_mode", "default") or "default"
-                ).lower()
-                if _ckpt_mode in ("loop", "feature"):
-                    _ckpt_every = 12
-            if (
-                _ckpt_every > 0
-                and iteration > 1
-                and (iteration % _ckpt_every) == 0
-            ):
-                _ckpt_ok = session.session_manager.force_progress_checkpoint(
-                    session.provider
+            from .compactor import checkpoint_progress_if_due
+            if checkpoint_progress_if_due(session, iteration):
+                logger.debug(
+                    f"L2 progress checkpoint refreshed at iteration "
+                    f"{iteration}/{max_iterations}"
                 )
-                if _ckpt_ok:
-                    logger.debug(
-                        f"L2 progress checkpoint refreshed at iteration "
-                        f"{iteration}/{max_iterations}"
-                    )
         except Exception as _ckpt_exc:
             logger.debug(f"progress checkpoint skipped: {_ckpt_exc}")
         # Subagent wrap-up reminder. Two strategies:

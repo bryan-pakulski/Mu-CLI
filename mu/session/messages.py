@@ -112,6 +112,8 @@ def build_messages_from_history(
     *,
     tool_result_floor: int = 0,
     media_resolver: Optional[Callable[[dict[str, Any]], Optional[MediaData]]] = None,
+    retention: Optional[dict] = None,
+    auto_clear: bool = True,
 ) -> List[Message]:
     """Rehydrate dict-shaped history records into provider-typed
     `Message` objects. Pass-through for text; decodes base64 image
@@ -222,8 +224,14 @@ def build_messages_from_history(
                 )
             elif p_type == "tool_result":
                 cache_key = p.get("cache_key")
+                decision = retention.get(id(p), {}) if retention else {}
+                cache_key = decision.get("cache_key") or cache_key
+                use_reference = (cache_key and not is_within_floor
+                                 and not p.get("thought_signature")
+                                 and decision.get("action") != "keep"
+                                 and (auto_clear or decision.get("action") == "clear"))
                 media_inputs: List[MediaData] = []
-                if media_resolver is not None and (not cache_key or is_within_floor):
+                if media_resolver is not None and not use_reference:
                     for reference in p.get("media_inputs") or []:
                         media = media_resolver(reference)
                         if media is not None:
@@ -234,12 +242,12 @@ def build_messages_from_history(
                 # the full content on demand. Within the floor: keep verbatim
                 # so the model has recent results without an extra round-trip.
                 # No cache_key: keep verbatim (no ref to recall).
-                if cache_key and not is_within_floor:
+                if use_reference:
                     parts.append(
                         MessagePart(
                             type="tool_result",
                             tool_name=p.get("tool_name", "tool"),
-                            tool_result=_compact_tool_result_ref(p),
+                            tool_result=_compact_tool_result_ref({**p, "cache_key": cache_key}),
                             thought_signature=p.get("thought_signature"),
                             media_inputs=media_inputs,
                         )
@@ -503,13 +511,19 @@ def prepare_runtime_history(
     if session_manager.summary_anchor > len(session_manager.history):
         session_manager.summary_anchor = 0
     token_budget = session._compaction_token_budget()
+    # Budget the same selective projection that will be serialized. Counting
+    # archived raw payloads here silently evicted otherwise-small requests.
+    from .context_maintenance import protected_indices
+    from mu.agent.context_guard import _estimate_messages_tokens
+    projection_start = session_manager.summary_anchor
+    projected = session._build_messages_from_history(
+        session_manager.history[projection_start:], {"role": "system", "parts": []}
+    )[:-1]
     start_index = len(session_manager.history)
     running_tokens = 0
     while start_index > session_manager.summary_anchor:
         next_index = start_index - 1
-        next_tokens = session_manager._estimate_message_tokens(
-            session_manager.history[next_index]
-        )
+        next_tokens = _estimate_messages_tokens([projected[next_index - projection_start]])
         if (
             running_tokens + next_tokens > token_budget
             and next_index < len(session_manager.history) - 1
@@ -523,6 +537,7 @@ def prepare_runtime_history(
     # per absolute history index on the session so repeated calls within
     # a turn (the loop calls this every iteration) don't re-summarize.
     raw_slice = session_manager.history[start_index:]
+    protected = protected_indices(session_manager)
     cache = getattr(session, "_oversized_message_summaries", None)
     if cache is None:
         cache = {}
@@ -530,7 +545,9 @@ def prepare_runtime_history(
     runtime_slice = [
         _maybe_summarize_oversized(
             session, start_index + i, msg, token_budget, provider, cache
-        )
+        ) if (start_index + i not in protected and
+              not any(part.get("thought_signature") for part in msg.get("parts", [])) and
+              _estimate_messages_tokens([projected[start_index + i - projection_start]]) > token_budget) else msg
         for i, msg in enumerate(raw_slice)
     ]
     # Inject protected messages that are below the summary anchor back
@@ -538,7 +555,6 @@ def prepare_runtime_history(
     # summarisation in roll_history_summary() and must appear verbatim
     # in L5 so the model retains the original user request and key
     # decisions even after compaction has advanced the anchor past them.
-    protected = getattr(session_manager, "protected_indices", set())
     if protected:
         protected_below_anchor = [
             session_manager.history[idx]

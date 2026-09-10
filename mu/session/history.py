@@ -261,12 +261,22 @@ class HistoryMixin:
                 ),
             ]
 
-            response = provider.generate(
-                messages=messages,
-                system_prompt=self._LLM_SUMMARY_SYSTEM_PROMPT,
-                thinking=False,
-                tools=None,
-            )
+            import time
+            summary_started = time.monotonic()
+            usage = getattr(self, "_summary_usage", {"calls": 0, "input_tokens": 0, "output_tokens": 0, "elapsed_ms": 0})
+            usage["calls"] += 1
+            self._summary_usage = usage
+            try:
+                response = provider.generate(
+                    messages=messages,
+                    system_prompt=self._LLM_SUMMARY_SYSTEM_PROMPT,
+                    thinking=False,
+                    tools=None,
+                )
+            finally:
+                usage["elapsed_ms"] += round((time.monotonic() - summary_started) * 1000, 2)
+            usage["input_tokens"] += int(getattr(response, "input_tokens", 0) or 0)
+            usage["output_tokens"] += int(getattr(response, "output_tokens", 0) or 0)
 
             summary_text = str(response.text or "").strip()
             if not summary_text:
@@ -303,6 +313,8 @@ class HistoryMixin:
         in ``mu/session/tool_cache.py``), so the summarizer can mark a
         compacted result as recallable instead of losing it to truncation.
         """
+        from .context_maintenance import retention_for_parts
+        retention = retention_for_parts(self)
         lines: List[str] = []
         for entry in entries:
             role = str(entry.get("role", "message"))
@@ -319,6 +331,11 @@ class HistoryMixin:
                         f"args={_shorten_tool_args(part.get('tool_args', {}))}"
                     )
                 elif part_type == "tool_result":
+                    decision = retention.get(id(part), {})
+                    if decision.get("action") == "clear":
+                        from .action_record import render_action_record
+                        parts_text.append(render_action_record({**part, "cache_key": decision["cache_key"]}))
+                        continue
                     # Action record (spec #4/#5): when the part carries a
                     # cache_key or a structured envelope, render a compact
                     # one-line record preserving the decision, outcome,
@@ -560,6 +577,7 @@ class HistoryMixin:
         provider: Optional[LLMProvider] = None,
         *,
         max_segment_chars: Optional[int] = None,
+        through_index: Optional[int] = None,
     ) -> bool:
         keep_recent = max(1, int(keep_recent or 1))
         if self.summary_anchor > len(self.history):
@@ -592,6 +610,11 @@ class HistoryMixin:
 
         if target_anchor <= self.summary_anchor:
             return False
+
+        if through_index is not None:
+            target_anchor = min(target_anchor, through_index + 1)
+            if target_anchor <= self.summary_anchor:
+                return False
 
         # Portion-based compaction (Claude Code "context collapse" style):
         # when ``max_segment_chars`` is set, summarize only the OLDEST
@@ -647,7 +670,8 @@ class HistoryMixin:
         # verbatim in L5 even after the anchor advances past them.
         # This preserves important context (initial user request, key
         # decisions) through compaction without losing recent history.
-        protected = getattr(self, "protected_indices", set())
+        from .context_maintenance import protected_indices
+        protected = protected_indices(self)
         entries_to_summarize = [
             msg
             for idx, msg in enumerate(self.history[self.summary_anchor : end])
@@ -712,6 +736,8 @@ class HistoryMixin:
         provider: Optional[LLMProvider] = None,
         max_segment_chars: Optional[int] = _COMPACTION_SEGMENT_CHARS,
         allow_degrade: bool = True,
+        estimate_tokens=None,
+        through_index: Optional[int] = None,
     ) -> bool:
         token_budget = max(1, int(token_budget or 1))
         # Run-tracer instrumentation: record one compaction event per call so
@@ -721,18 +747,20 @@ class HistoryMixin:
         # is drained by the trace emitter at the post-response seam.
         _before_len = len(self.history)
         _before_anchor = self.summary_anchor
+        estimate = estimate_tokens or self.estimate_runtime_history_tokens
         try:
-            _before_tokens = self.estimate_runtime_history_tokens()
+            _before_tokens = estimate()
         except Exception:  # noqa: BLE001
             _before_tokens = 0
         changed = False
         for _ in range(max(1, int(max_passes or 1))):
-            if self.estimate_runtime_history_tokens() <= token_budget:
+            if estimate() <= token_budget:
                 break
             if self.roll_history_summary(
                 keep_recent=keep_recent,
                 provider=provider,
                 max_segment_chars=max_segment_chars,
+                through_index=through_index,
             ):
                 changed = True
                 continue
@@ -743,7 +771,7 @@ class HistoryMixin:
         if changed:
             try:
                 try:
-                    _after_tokens = self.estimate_runtime_history_tokens()
+                    _after_tokens = estimate()
                 except Exception:  # noqa: BLE001
                     _after_tokens = 0
                 log = getattr(self, "_compaction_log", None)
@@ -753,6 +781,7 @@ class HistoryMixin:
                 log.append(
                     {
                         "kind": getattr(self, "_pending_compaction_kind", "auto"),
+                        "tokens_basis": "projected" if estimate_tokens is not None else "stored",
                         "iter": getattr(self, "_pending_compaction_iter", 0),
                         "tokens_before": int(_before_tokens),
                         "tokens_after": int(_after_tokens),
@@ -799,11 +828,18 @@ class HistoryMixin:
             if floor > 0
             else set()
         )
+        from .context_maintenance import protected_indices, retention_for_parts
+        protected = protected_indices(self, include_signatures=True)
+        retention = retention_for_parts(self)
         for msg_idx, message in enumerate(self.history[self.summary_anchor :], start=self.summary_anchor):
-            if msg_idx in floor_indices:
+            if msg_idx in floor_indices or msg_idx in protected:
                 continue
             parts = message.get("parts", []) or []
             for part in parts:
+                # Cleared receipts already cost only a reference on the wire.
+                # Preserve the original for recall after durable-cache GC.
+                if retention.get(id(part), {}).get("action") == "clear":
+                    continue
                 p_type = part.get("type")
                 if p_type == "text":
                     value = str(part.get("text", "") or "")

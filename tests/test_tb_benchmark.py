@@ -566,6 +566,17 @@ def test_all_benchmark_runners_read_the_shared_suite():
         assert "python3 bench/list_tb_tasks.py" in runner
 
 
+def test_prepare_runner_can_be_executed_as_a_script():
+    result = subprocess.run(
+        ["python3", "bench/prepare_tb.py", "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Build immutable, reusable Terminal-Bench task images" in result.stdout
+
+
 def test_pack_requires_python_314_and_supports_repeated_prebuilt_runs():
     wheelhouse = Path("bench/build_wheelhouse.sh").read_text(encoding="utf-8")
     setup = Path("bench/mucli-setup.sh.j2").read_text(encoding="utf-8")

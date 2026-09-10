@@ -16,7 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from bench.list_tb_tasks import load_task_ids
+if __package__:
+    from bench.list_tb_tasks import load_task_ids
+else:
+    from list_tb_tasks import load_task_ids
 
 _IMAGE_PLACEHOLDER = "${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}"
 _SAFE_TASK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")

@@ -263,6 +263,15 @@ document.addEventListener("alpine:init", () => {
         _ensureTrace(slot) {
             let trace = this._activeTrace(slot);
             if (trace) return trace;
+            // Reload reconstructs the current tool/thinking block as history.
+            // Resume that block instead of adding a second "thinking" row.
+            const previous = this._lastTurn(slot);
+            if (previous?.role === "trace" && Number.isInteger(previous.historyIndex)) {
+                previous.running = true;
+                previous.startedAt = Date.now();
+                previous.elapsed = null;
+                return previous;
+            }
             trace = {
                 id: this._id("tr"),
                 role: "trace",
@@ -1429,11 +1438,14 @@ document.addEventListener("alpine:init", () => {
                     await new Promise(resolve => setTimeout(resolve, 0));
                 }
                 historyChunkIndex += 1;
-                let traceForTurn = null;
                 let partIndex = 0;
                 const ensureHistoryTrace = () => {
-                    if (traceForTurn) return traceForTurn;
-                    traceForTurn = {
+                    // Provider messages are storage boundaries, not visual
+                    // boundaries. Consecutive calls/results/thinking belong
+                    // to one trace, just as they do during live streaming.
+                    const previous = rebuiltTurns[rebuiltTurns.length - 1];
+                    if (previous?.role === "trace") return previous;
+                    const trace = {
                         id: `h-tr-${turn.index}-${partIndex}`,
                         role: "trace",
                         events: [],
@@ -1443,8 +1455,8 @@ document.addEventListener("alpine:init", () => {
                         elapsed: null,
                         historyIndex: turn.index,
                     };
-                    rebuiltTurns.push(traceForTurn);
-                    return traceForTurn;
+                    rebuiltTurns.push(trace);
+                    return trace;
                 };
 
                 for (const part of turn.parts || []) {
@@ -1453,7 +1465,6 @@ document.addEventListener("alpine:init", () => {
                         part.type === "text"
                         && (turn.role === "user" || turn.role === "assistant")
                     ) {
-                        traceForTurn = null;
                         rebuiltTurns.push({
                             id: `h-${turn.index}-${stablePartIndex}`,
                             role: turn.role,
@@ -1503,7 +1514,6 @@ document.addEventListener("alpine:init", () => {
                             at: 0,
                         });
                     } else if (part.type === "visualization") {
-                        traceForTurn = null;
                         const visualization = this._visualizationTurn(part.artifact, sessionKey);
                         if (visualization && !rebuiltTurns.some(item =>
                             item.role === "visualization"
@@ -1528,7 +1538,6 @@ document.addEventListener("alpine:init", () => {
                             rebuiltTurns.push({ ...visualization, historyIndex: turn.index });
                         }
                     } else if (part.type === "subagent_panel") {
-                        traceForTurn = null;
                         const panel = this._historySubagentPanel(part);
                         if (panel && !rebuiltTurns.some(item =>
                             item.role === "subagent_panel" && item.batch_id === panel.batch_id

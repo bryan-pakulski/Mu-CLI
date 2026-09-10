@@ -8,6 +8,7 @@ from mu.agent.compactor import _compact_history, manual_compact
 from mu.agent.context_guard import _estimate_request_tokens, _reinject_refreshed_summary
 from mu.agent.hooks import HookContext
 from mu.session.budgets import resolve_tool_result_floor
+from mu.session.context_maintenance import projected_tokens
 from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse, StreamEvent
 
@@ -75,7 +76,10 @@ def add_batch(session, index, size=800):
 def test_long_task_compacts_repeatedly_without_restart_or_losing_receipts(session, mode):
     session.variables["agent_mode"] = mode
     assert session.variables["auto_compaction_enabled"] is True
-    assert session.variables["auto_compaction_token_limit"] == 64_000
+    assert session.variables["auto_compaction_token_limit"] == 0
+    # Explicit small working sets remain available; the universal default
+    # now follows the effective provider window (tested in selective_context).
+    session.variables["auto_compaction_token_limit"] = 64_000
     sm = session.session_manager
     ctx = HookContext(point="pre_provider_call", session=session)
     peaks, lows, anchors = [], [], []
@@ -83,13 +87,13 @@ def test_long_task_compacts_repeatedly_without_restart_or_losing_receipts(sessio
     for index in range(180):
         add_batch(session, index)
         original.extend(deepcopy(sm.history[-2:]))
-        before = sm.estimate_runtime_history_tokens()
+        before = projected_tokens(session)
         floor = resolve_tool_result_floor(session)
         protected = deepcopy(sm.history[-floor * 2:])
         result = _compact_history(ctx)
         if result:
             peaks.append(before)
-            lows.append(sm.estimate_runtime_history_tokens())
+            lows.append(projected_tokens(session))
             anchors.append(sm.summary_anchor)
             assert sm.history[-floor * 2:] == protected
             runtime = session._prepare_runtime_history(turn_start_index=0)
@@ -130,6 +134,7 @@ def test_protected_tail_can_exceed_soft_limit_without_degradation_or_retry_storm
 
 
 def test_manual_compaction_allows_later_automatic_cleanup_in_same_turn(session):
+    session.variables["auto_compaction_token_limit"] = 64_000
     for index in range(24):
         add_batch(session, index)
     result = manual_compact(session)

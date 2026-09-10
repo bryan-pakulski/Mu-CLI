@@ -247,12 +247,12 @@ def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
 
     ctx = HookContext(point="pre_provider_call", session=session)
     expected = int(session._compaction_token_budget())
-    monkeypatch.setattr(sm, "estimate_runtime_history_tokens", lambda: expected)
+    monkeypatch.setattr("mu.session.context_maintenance.projected_tokens", lambda session: expected)
     assert _compact_history(ctx) is None
     assert not captured, "compaction fired before crossing the provider-aware trigger"
-    monkeypatch.setattr(sm, "estimate_runtime_history_tokens", lambda: expected + 1)
+    monkeypatch.setattr("mu.session.context_maintenance.projected_tokens", lambda session: expected + 1)
     _compact_history(ctx)
-    assert captured["budgets"] == [expected // 2]
+    assert captured["budgets"] == [int(expected * 0.8)]
 
 
 def test_auto_compact_hook_respects_an_explicit_opt_out(monkeypatch):

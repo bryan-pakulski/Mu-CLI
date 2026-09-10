@@ -150,17 +150,16 @@ VARIABLE_SCHEMA = {
     # a run; later request trace records are bounded summaries (<2KB).
     "auto_compaction_enabled": {
         "type": bool,
-        # Keep long turns bounded without waiting for the model to call
-        # compact. Saved false values remain explicit opt-outs.
+        # Provider-aware fallback if model-led clearing/compaction is late.
+        # Saved false values remain explicit opt-outs.
         "default": True,
     },
     "auto_compaction_token_limit": {
         "type": int,
-        # Soft ceiling for L5 working history, independent of the provider
-        # window. Cross it to roll toward half this size; recent protected
-        # results survive even if they prevent reaching the target.
-        # 0 uses only the provider-aware compaction budget.
-        "default": 64_000,
+        # Optional smaller threshold for projected L5, after selective result
+        # clearing. 0 leaves the full provider-aware budget available. Saved
+        # nonzero values remain deliberate working-set limits.
+        "default": 0,
     },
     "yolo": {"type": bool, "default": False},  # YOLO mode (no approvals)
     "verbose": {
@@ -270,9 +269,9 @@ VARIABLE_SCHEMA = {
         # anchor doesn't advance, entries stay in L5). This keeps L2 fresh
         # on long turns that never hit the compaction budget, so the model
         # stops re-deriving context it already gathered (the long-horizon
-        # stall). 0 disables. When unset, loop/feature modes default to 12
-        # (long-horizon work benefits); default/chat modes default to 0
-        # (short turns don't need it). See HistoryMixin.force_progress_checkpoint.
+        # stall). 0 disables in every mode; model-maintained checkpoints
+        # avoid extra periodic summary calls by default.
+        # See HistoryMixin.force_progress_checkpoint.
         "type": int,
         "default": 0,
     },
@@ -675,7 +674,7 @@ TOOL SURFACE:
 - Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
 - Memory: `save_memory` / `search_memory` / `list_memory` manage working memory and the scoped cross-session Memory Ledger; `manage_durable_memory` pins, archives, restores or marks durable knowledge for review without an approval round-trip; `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` are per-turn.
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
-- Context self-management: `context_status` (live fill before/after broad investigation), `checkpoint_progress` (refresh L2 while retaining verbatim history), `compact(focus?)` (summarize completed/irrelevant history), `retire_thread(topic, reason)` (drop abandoned thread state). The harness automatically rolls older history when its working budget fills. Use `compact` earlier at completed task/batch boundaries when useful; preserve what must survive first.
+- Context self-management: `context_status` reports projected request usage, result_ids and clearing restrictions. Use `clear_tool_results(result_ids, action='keep')` for evidence that must remain verbatim, and action='clear' to remove selected completed payloads with zero summarizer calls. Originals stay recallable. action='restore' releases a prior decision. Save a structured checkpoint (progress, decisions, resume, exceptions, next_action, constraints) as part of clearing or `compact`. Only use `compact(focus, through_index, preserve_result_ids, checkpoint)` when completed history itself needs summarizing; through_index bounds eligible history and later work stays active. The harness is a provider-window fallback, not a substitute for your task-aware decisions.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
 - Visual output: `publish_visualization(name, html|file_path, title?, height?)` publishes a persistent interactive HTML view into web/mobile chat and a browser link in TUI. Use it proactively when a visual explains data or structure better than prose; do not wait for the user to nudge a tool call.
@@ -708,7 +707,7 @@ GENERAL RULES:
 5. Multiple tool calls in a single turn execute concurrently. Issue them together when the calls are independent reads (e.g. read 3 files at once). Use `batch_job` only when you need an atomic bundle with shared approval.
 6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, etc.) results are stored in a collation buffer.
    You receive a status update when you call them; call `flush` when the gathered results answer the next decision. Do not repeatedly ask for information already in active context.
-7. YOU OWN YOUR CONTEXT. Keep a resumable working state. Before/after a broad gather, call `context_status`; preserve active evidence and `checkpoint_progress` when L2 needs a fresh progress view. At completed task or batch boundaries, record the goal, filters, exact resume cursor, completed counts, confirmed side effects, unresolved exceptions, and next action in working memory/scratchpad. Then use `compact(focus)` when older detail is no longer needed. The harness also compacts automatically as the working-history budget fills, including repeatedly within a long turn, while protecting the current request and recent results. Retrieve archived details when needed; do not repeat writes just because their old tool output is no longer in context.
+7. YOU OWN YOUR CONTEXT. At completed task or batch boundaries, use `context_status` to inspect projected usage and result_ids. Keep relevant evidence with `clear_tool_results(action='keep')`; clear only selected completed results with action='clear' before paying for a summary. Preserve goal/filter rules, exact resume cursor, confirmed counts and side effects, unresolved exceptions, constraints and next action in its checkpoint. `compact` accepts that checkpoint, preserve_result_ids and a through_index boundary when older conversation also needs summarizing. Large relevant context may remain active. The harness clears eligible old results and then summarizes only as a fallback near the effective provider budget. Retrieve archived results; never repeat writes merely because their old output is out of context.
 
 SELF-MANAGEMENT:
 - **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.

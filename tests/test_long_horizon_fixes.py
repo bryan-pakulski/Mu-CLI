@@ -280,17 +280,18 @@ def test_checkpoint_mechanical_fallback_without_provider():
 
 
 def test_checkpoint_loop_mode_default_cadence():
-    """loop mode should default to an enabled checkpoint cadence even when
-    the user hasn't set progress_checkpoint_every (long-horizon work)."""
-    # Mirror the loop's cadence resolution.
+    """Loop mode honors zero; an explicit cadence still checkpoints."""
+    from unittest.mock import Mock
+    from mu.agent.compactor import checkpoint_progress_if_due
     session = _make_session()
     session.variables["agent_mode"] = "loop"
-    every = int(session.variables.get("progress_checkpoint_every", 0) or 0)
-    if every <= 0:
-        mode = str(session.variables.get("agent_mode", "default") or "default").lower()
-        if mode in ("loop", "feature"):
-            every = 12
-    assert every == 12
+    session.session_manager.force_progress_checkpoint = Mock(return_value=True)
+    assert checkpoint_progress_if_due(session, 12) is False
+    session.session_manager.force_progress_checkpoint.assert_not_called()
+    session.variables["progress_checkpoint_every"] = 12
+    assert checkpoint_progress_if_due(session, 11) is False
+    assert checkpoint_progress_if_due(session, 12) is True
+    session.session_manager.force_progress_checkpoint.assert_called_once_with(session.provider)
 
 
 def test_checkpoint_default_mode_disabled_by_default():

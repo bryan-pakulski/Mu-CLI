@@ -100,6 +100,14 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
         state_capsule = state_capsule[:state_budget] if state_budget else ""
     except Exception:
         state_capsule = ""
+    # Model-authored checkpoint is bounded within L2, outside lossy rolling
+    # summaries. Refresh fields explicitly instead of repeatedly summarizing
+    # the same batch receipts. Requirements in the original prompt stay intact.
+    checkpoint = getattr(session.session_manager, "context_checkpoint", {})
+    if checkpoint:
+        import json
+        checkpoint_text = "Working checkpoint (model-maintained):\n" + json.dumps(checkpoint, ensure_ascii=False)
+        state_capsule = (checkpoint_text + "\n\n" + state_capsule)[:state_budget]
     residue_budget = max(0, summary_limit - len(state_capsule))
     if residue_budget:
         semantic_residue = semantic_residue[-residue_budget:].lstrip()

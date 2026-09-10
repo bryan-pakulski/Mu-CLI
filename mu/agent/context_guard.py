@@ -313,6 +313,7 @@ def _preflight_context_check(
                 keep_recent=max(2, base_keep_recent - round_idx * 2),
                 max_passes=6,
                 provider=session.provider,
+                estimate_tokens=_projected_history_estimator(session),
             )
             session._compaction_watermark = len(session.session_manager.history)
             _after_anchor = int(getattr(session.session_manager, "summary_anchor", 0) or 0)
@@ -552,6 +553,7 @@ def _aggressive_compact_for_overflow(
         session.session_manager.roll_history_summary_to_token_budget(
             budget, keep_recent=keep_recent, max_passes=12,
             provider=session.provider,
+            estimate_tokens=_projected_history_estimator(session),
         )
 
         session._compaction_watermark = len(session.session_manager.history)
@@ -560,6 +562,13 @@ def _aggressive_compact_for_overflow(
     finally:
         # Restore the floor so later in-turn compaction keeps FM-8 protection.
         session.session_manager._tool_result_floor = floor_value
+
+
+def _projected_history_estimator(session):
+    from mu.session.context_maintenance import projected_tokens
+    if hasattr(session, "_build_messages_from_history"):
+        return lambda: projected_tokens(session)
+    return session.session_manager.estimate_runtime_history_tokens
 
 
 def _maybe_nudge_context_pressure(
@@ -627,9 +636,11 @@ def _maybe_nudge_context_pressure(
                 "text": (
                     "CONTEXT PRESSURE: assembled request is at "
                     f"{fill:.0f}% of the context limit "
-                    f"({total:,} / {limit:,} tokens). Call the `compact` "
-                    "tool now to fold older history into the rolling "
-                    "summary before iteration results overflow the window. "
+                    f"({total:,} / {limit:,} tokens). Inspect `context_status`, "
+                    "preserve active evidence, and use `clear_tool_results` to "
+                    "archive selected completed payloads without a summarizer call. "
+                    "If more space is needed, use `compact` with a resumable "
+                    "checkpoint and a completed-history boundary. "
                     "This fires once per threshold crossing; after "
                     "compaction it re-arms automatically."
                 ),

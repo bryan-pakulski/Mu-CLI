@@ -24,10 +24,11 @@ else:
 _IMAGE_PLACEHOLDER = "${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}"
 _SAFE_TASK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _BUILD_ADJUSTMENTS = {
-    # This task's base image lists matching Debian snapshots but leaves them
+    # These tasks' base image lists matching Debian snapshots but leaves them
     # commented out. Use a fixed snapshot because the oldoldstable live mirror
     # can expire or rotate packages; signature and checksum checks remain on.
     "qemu-alpine-ssh": "apt-snapshot-https-20260824-v1",
+    "qemu-startup": "apt-snapshot-https-20260824-v1",
 }
 
 

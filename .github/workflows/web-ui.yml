@@ -1,0 +1,36 @@
+name: Web UI regressions
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  web-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/android/package-lock.json
+
+      - name: Install test dependencies
+        working-directory: mobile/android
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # Name the reload regression file explicitly so deleting it cannot
+      # silently turn this check green by reducing the wildcard test set.
+      - name: Check dialog and restored trace rendering
+        env:
+          NODE_PATH: ${{ github.workspace }}/mobile/android/node_modules
+        run: node --test tests/frontend/dialogs.test.cjs tests/frontend/history-traces.test.cjs

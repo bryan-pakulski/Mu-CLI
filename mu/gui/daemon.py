@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -106,8 +107,33 @@ def _cmdline_is_mucli(pid: int) -> bool | None:
             raw = fh.read()
     except (OSError, ValueError):
         return None
-    argv = raw.split(b"\0")
-    return any(b"mucli" in arg for arg in argv)
+    argv = raw.rstrip(b"\0").split(b"\0")
+    entrypoints = {b"mucli", b"mucli.py"}
+    executable = os.path.basename(argv[0])
+    if executable in entrypoints:
+        return True
+    if not re.fullmatch(rb"(?:python|pypy)(?:\d+(?:\.\d+)*)?", executable):
+        return False
+    # Inspect Python's entrypoint, never an environment directory, command
+    # string, or application argument that merely mentions MuCLI.
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == b"-m":
+            return index + 1 < len(argv) and argv[index + 1] == b"mucli"
+        if arg in {b"-c", b"-"} or arg.startswith(b"-c"):
+            return False
+        if arg in {b"-W", b"-X"}:
+            index += 2
+            continue
+        if arg == b"--":
+            return index + 1 < len(argv) and os.path.basename(argv[index + 1]) in entrypoints
+        if not arg.startswith(b"-"):
+            return os.path.basename(arg) in entrypoints
+        if not (re.fullmatch(rb"-[bBdEhiIOPqRsSuvVx]+", arg) or arg.startswith((b"-W", b"-X"))):
+            return False
+        index += 1
+    return False
 
 
 def is_running() -> int | None:

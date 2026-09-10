@@ -83,6 +83,28 @@ def test_cmdline_guard_reads_the_mapped_process(ancestor_procfs):
     assert daemon._cmdline_is_mucli(9) is None
 
 
+@pytest.mark.parametrize("argv, expected", [
+    ([b"/opt/mucli-venv/bin/python", b"-c", b"import time; time.sleep(30)"], False),
+    ([b"python", b"-c", b"import mucli", b"mucli.py"], False),
+    ([b"python", b"-uc", b"mucli.py"], False),
+    ([b"python", b"/work/mucli/unrelated.py"], False),
+    ([b"python", b"unrelated.py", b"--workspace", b"/work/mucli"], False),
+    ([b"python", b"-m", b"http.server", b"--directory", b"/work/mucli"], False),
+    ([b"unrelated", b"mucli.py"], False),
+    ([b"python"], False),
+    ([b"/usr/bin/python3.12", b"/work/mucli.py", b"--gui-foreground"], True),
+    ([b"python", b"-u", b"-X", b"dev", b"-W", b"ignore", b"mucli.py"], True),
+    ([b"python", b"--", b"mucli.py"], True),
+    ([b"python", b"-m", b"mucli", b"--gui-foreground"], True),
+    ([b"/opt/venv/bin/python", b"/opt/venv/bin/mucli", b"--gui"], True),
+    ([b"/opt/venv/bin/mucli", b"--gui-foreground"], True),
+])
+def test_cmdline_guard_checks_the_entrypoint(ancestor_procfs, argv, expected):
+    _, files = ancestor_procfs
+    files["/proc/300/cmdline"] = b"\0".join(argv) + b"\0"
+    assert daemon._cmdline_is_mucli(8) is expected
+
+
 @pytest.mark.parametrize("status", ["", "NSpid:\n", "NSpid: bad\n", "NSpid: 400 8\n", "NSpid: 300 0\n"])
 def test_procfs_mapping_fails_closed_for_invalid_metadata(ancestor_procfs, status):
     _, files = ancestor_procfs
@@ -180,7 +202,7 @@ def test_stop_falls_back_to_port_when_pid_file_missing(monkeypatch, tmp_path):
     # companion test asserts a foreign process is NOT signaled.
     sleeper = subprocess.Popen(
         [
-            "mucli-sleeper",
+            "mucli",
             "-c",
             "import time; print('ready', flush=True); time.sleep(30)",
         ],

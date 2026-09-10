@@ -1523,8 +1523,8 @@ class Session:
     ) -> dict:
         # Reset the compaction watermark so a future turn starts fresh.
         self._compaction_watermark = 0
-        # Reset the once-per-turn proactive-compaction flag so the next turn's
-        # turn-start roll + auto-compaction hook can fire again.
+        # Reset per-turn compaction accounting; growth re-arms cleanup even
+        # before the turn finishes.
         self._compacted_this_turn = False
         # Reset the reactive-overflow-recovery counter for the next turn.
         self._overflow_recoveries_this_turn = 0

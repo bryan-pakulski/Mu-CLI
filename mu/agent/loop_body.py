@@ -45,6 +45,7 @@ from collections import deque
 from typing import Any
 
 from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
+from mu.agent.hooks import HookContext
 from mu.agent.retry import is_context_overflow_error, parse_overflow_token_counts
 from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
 from mu.tools._dispatcher import execute_tool
@@ -678,29 +679,16 @@ def run_turn(session, text, *, origin="user"):
     session.session_manager._compact_focus = (
         session.variables.get("compact_focus") or ""
     )
-    # Normal history cleanup is model-directed via the `compact` tool. Keep
-    # proactive automatic compaction as an explicit deployment opt-in; the
-    # preflight/overflow paths below still enforce the provider's hard ceiling.
-    _turn_start_rolled = False
-    if session.variables.get("auto_compaction_enabled", False):
-        _turn_start_rolled = session.session_manager.roll_history_summary_to_token_budget(
-            session._compaction_token_budget(),
-            keep_recent=resolve_keep_recent(session),
-            provider=session.provider,
-        )
-    # This is the turn's proactive compaction pass. If it actually compacted,
-    # mark the turn so the per-iteration auto-compaction hook does not fire
-    # again this turn (Claude Code fires autocompact once per turn; mid-turn
-    # overshoot is handled by the emergency preflight + reactive overflow
-    # backstops). Reset in `_collect_turn_response` at turn end.
-    session._compacted_this_turn = bool(_turn_start_rolled)
-    # Record history length as the compaction watermark.  The
-    # auto-compaction hook will allow another compaction pass only when
-    # history has grown beyond this point, preventing redundant
-    # re-compaction while still permitting re-compaction when long
-    # turns with many tool calls push history past the threshold.
-    # Reset to 0 in `_collect_turn_response` when the turn finishes.
-    session._compaction_watermark = len(session.session_manager.history)
+    # Use the same bounded working-history policy at turn start and on
+    # subsequent provider calls. New work can trigger another roll without
+    # waiting for this (potentially thousand-iteration) turn to finish.
+    from mu.agent.compactor import _compact_history
+
+    session._compacted_this_turn = False
+    session._compaction_watermark = 0
+    _compact_history(
+        HookContext(point="pre_provider_call", session=session), kind="turn_start"
+    )
     session._pending_user_text = effective_text or text or ""
     # Cross-session recall runs once per user turn, not once per provider
     # iteration. The resulting block and receipt are reused by retries and
@@ -1249,6 +1237,13 @@ def run_turn(session, text, *, origin="user"):
                     tools=active_tools if expose_tools else None,
                     turn_start_index=turn_start_index,
                 )
+
+            # A pre-provider hook or overflow recovery can compact after
+            # the initial estimate. Use its refreshed wire estimate for the
+            # context-growth chart, before archiving the new response.
+            _wire_estimate = getattr(session, "_request_estimate_manifest", None)
+            if _wire_estimate:
+                request_token_estimate = _wire_estimate["total"]
 
             logger.debug(
                 f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}"

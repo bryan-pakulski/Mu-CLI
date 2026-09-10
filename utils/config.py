@@ -150,10 +150,17 @@ VARIABLE_SCHEMA = {
     # a run; later request trace records are bounded summaries (<2KB).
     "auto_compaction_enabled": {
         "type": bool,
-        # Model-directed `compact` is the normal cleanup path. This opt-in
-        # fallback exists for unattended deployments; preflight overflow
-        # recovery remains enabled regardless so provider limits are safe.
-        "default": False,
+        # Keep long turns bounded without waiting for the model to call
+        # compact. Saved false values remain explicit opt-outs.
+        "default": True,
+    },
+    "auto_compaction_token_limit": {
+        "type": int,
+        # Soft ceiling for L5 working history, independent of the provider
+        # window. Cross it to roll toward half this size; recent protected
+        # results survive even if they prevent reaching the target.
+        # 0 uses only the provider-aware compaction budget.
+        "default": 64_000,
     },
     "yolo": {"type": bool, "default": False},  # YOLO mode (no approvals)
     "verbose": {
@@ -668,7 +675,7 @@ TOOL SURFACE:
 - Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
 - Memory: `save_memory` / `search_memory` / `list_memory` manage working memory and the scoped cross-session Memory Ledger; `manage_durable_memory` pins, archives, restores or marks durable knowledge for review without an approval round-trip; `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` are per-turn.
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
-- Context self-management: `context_status` (live fill before/after broad investigation), `checkpoint_progress` (refresh L2 while retaining verbatim history), `compact(focus?)` (summarize completed/irrelevant history), `retire_thread(topic, reason)` (drop abandoned thread state). You decide when to clean up; call `compact` proactively before the hard provider ceiling forces recovery.
+- Context self-management: `context_status` (live fill before/after broad investigation), `checkpoint_progress` (refresh L2 while retaining verbatim history), `compact(focus?)` (summarize completed/irrelevant history), `retire_thread(topic, reason)` (drop abandoned thread state). The harness automatically rolls older history when its working budget fills. Use `compact` earlier at completed task/batch boundaries when useful; preserve what must survive first.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
 - Visual output: `publish_visualization(name, html|file_path, title?, height?)` publishes a persistent interactive HTML view into web/mobile chat and a browser link in TUI. Use it proactively when a visual explains data or structure better than prose; do not wait for the user to nudge a tool call.
@@ -701,7 +708,7 @@ GENERAL RULES:
 5. Multiple tool calls in a single turn execute concurrently. Issue them together when the calls are independent reads (e.g. read 3 files at once). Use `batch_job` only when you need an atomic bundle with shared approval.
 6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, etc.) results are stored in a collation buffer.
    You receive a status update when you call them; call `flush` when the gathered results answer the next decision. Do not repeatedly ask for information already in active context.
-7. YOU OWN YOUR CONTEXT. No arbitrary tool-result window prunes an active investigation. Before/after a broad gather, call `context_status`; preserve active evidence, `checkpoint_progress` when L2 needs a fresh progress view, and `compact(focus)` only after recording what must survive. The harness enforces only hard provider/iteration limits as a safety backstop — do not wait for forced recovery.
+7. YOU OWN YOUR CONTEXT. Keep a resumable working state. Before/after a broad gather, call `context_status`; preserve active evidence and `checkpoint_progress` when L2 needs a fresh progress view. At completed task or batch boundaries, record the goal, filters, exact resume cursor, completed counts, confirmed side effects, unresolved exceptions, and next action in working memory/scratchpad. Then use `compact(focus)` when older detail is no longer needed. The harness also compacts automatically as the working-history budget fills, including repeatedly within a long turn, while protecting the current request and recent results. Retrieve archived details when needed; do not repeat writes just because their old tool output is no longer in context.
 
 SELF-MANAGEMENT:
 - **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.

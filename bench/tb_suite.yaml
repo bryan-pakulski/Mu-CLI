@@ -1,17 +1,87 @@
-# mucli harness benchmark — Terminal-Bench task selection
+# MuCLI harness benchmark — curated Terminal-Bench Core task selection.
 # Run: ./benchmark.sh [--smoke]
 # Time gates come from each task's max_agent_timeout_sec (TB enforces natively).
+# Keep this at 50 unique task IDs. The labels are coverage strata; each task's
+# task.yaml remains authoritative for its category, difficulty, and time gate.
 
 name: terminal-bench-core
 version: 0.1.1
+sources:
+  - id: terminal-bench
+    url: https://github.com/laude-institute/terminal-bench
+    role: isolated environments, oracle solutions, and task verifiers
+  - id: swe-bench
+    url: https://www.swebench.com/
+    task_ids:
+      - swe-bench-astropy-1
+      - swe-bench-astropy-2
+      - swe-bench-fsspec
+      - swe-bench-langcodes
+  - id: mteb
+    url: https://github.com/embeddings-benchmark/mteb
+    task_ids: [eval-mteb]
+  - id: gymnasium
+    url: https://gymnasium.farama.org/environments/classic_control/cart_pole/
+    task_ids: [cartpole-rl-training]
 task_ids:
-  - hello-world            # baseline loop, 360s gate
-  - processing-pipeline    # bash deps + multi-step diagnosis
-  - fix-git                # git state recovery
-  - git-multibranch        # long-turn planning, ssh/nginx/git
-  - nginx-request-logging  # service configuration
-  - cron-broken-network    # scheduler/network diagnosis
-  - sqlite-db-truncate     # data recovery, careful shell
-  - train-fasttext         # long-horizon tool chaining
-  - fix-permissions        # shell fluency, no code edit
-  - build-tcc-qemu         # multi-step build/debug
+  # File operations and data transformation
+  - hello-world
+  - heterogeneous-dates
+  - organization-json-generator
+  - decommissioning-service-with-sensitive-data
+  - csv-to-parquet
+  - reshard-c4-data
+  - simple-web-scraper
+  - hf-model-inference
+  - eval-mteb
+
+  # Debugging and real-repository repair
+  - processing-pipeline
+  - fix-pandas-version
+  - incompatible-python-fasttext
+  - sqlite-db-truncate
+  - swe-bench-astropy-1
+  - swe-bench-astropy-2
+  - swe-bench-fsspec
+  - swe-bench-langcodes
+  - tmux-advanced-workflow
+
+  # Version control, services, and system administration
+  - fix-git
+  - git-multibranch
+  - configure-git-webserver
+  - nginx-request-logging
+  - cron-broken-network
+  - fix-permissions
+  - build-tcc-qemu
+  - build-initramfs-qemu
+  - build-linux-kernel-qemu
+  - qemu-alpine-ssh
+  - qemu-startup
+  - sqlite-with-gcov
+
+  # Software engineering and programming languages
+  - fibonacci-server
+  - grid-pattern-transform
+  - modernize-fortran-build
+  - path-tracing
+  - polyglot-c-py
+  - prove-plus-comm
+  - vim-terminal-task
+  - write-compressor
+
+  # Model training and scientific computing
+  - train-fasttext
+  - cartpole-rl-training
+  - count-dataset-tokens
+  - pytorch-model-cli
+  - raman-fitting
+
+  # Security, forensics, and interactive problem solving
+  - extract-safely
+  - new-encrypt-command
+  - openssl-selfsigned-cert
+  - password-recovery
+  - sanitize-git-repo
+  - blind-maze-explorer-5x5
+  - chess-best-move

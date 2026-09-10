@@ -60,6 +60,8 @@ def main() -> int:
     }[args.harness]
     harness_files = [
         repo / "benchmark.sh",
+        repo / "bench" / "tb_suite.yaml",
+        repo / "bench" / "list_tb_tasks.py",
         repo / "bench" / "run_cli_pack.sh",
         repo / "bench" / "tb_cli_agent.py",
         repo / "bench" / "tb_support.py",

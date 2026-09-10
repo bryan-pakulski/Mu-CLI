@@ -26,7 +26,7 @@ usage() {
   cat <<'EOF'
 Usage: ./benchmark.sh [OPTIONS]
 
-With no options, run the credible MuCLI baseline: all 10 pinned tasks, three
+With no options, run the credible MuCLI baseline: all 50 pinned tasks, three
 attempts each, using ollama/glm-5.3-flash and reusable prebuilt task images.
 
 Options:
@@ -130,7 +130,7 @@ esac
 
 case "$SELECTION" in
   full)
-    mapfile -t TASKS < <(awk '/^  - / { print $2 }' bench/tb_suite.yaml)
+    mapfile -t TASKS < <(python3 bench/list_tb_tasks.py)
     ;;
   smoke)
     TASKS=(hello-world)

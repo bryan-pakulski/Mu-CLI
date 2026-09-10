@@ -16,18 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-PACK_TASKS = (
-    "hello-world",
-    "processing-pipeline",
-    "fix-git",
-    "git-multibranch",
-    "nginx-request-logging",
-    "cron-broken-network",
-    "sqlite-db-truncate",
-    "train-fasttext",
-    "fix-permissions",
-    "build-tcc-qemu",
-)
+from bench.list_tb_tasks import load_task_ids
 
 _IMAGE_PLACEHOLDER = "${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}"
 _SAFE_TASK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -293,8 +282,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.smoke and args.tasks:
         _parser().error("--smoke cannot be combined with explicit task IDs")
-    tasks = ["hello-world"] if args.smoke else list(args.tasks or PACK_TASKS)
     try:
+        tasks = ["hello-world"] if args.smoke else list(args.tasks or load_task_ids())
         if args.check_only:
             healthy, errors = check_prepared(args.source, args.output, tasks)
             if not healthy:

@@ -6,8 +6,10 @@ cd "$(dirname "$0")/.."
 TB_PY="${TB_PY:-$HOME/.venvs/tb/bin/tb}"
 DATASET_PATH="${TB_PREPARED_DATASET_PATH:-bench/artifacts/tb-prepared/terminal-bench-core/0.1.1}"
 MODEL="${MODEL:-ollama/glm-5.3-flash}"
-ATTEMPTS="${TB_ATTEMPTS:-1}"
-SETUP_TIMEOUT_SEC="${TB_SETUP_TIMEOUT_SEC:-180}"
+ATTEMPTS="${TB_ATTEMPTS:-3}"
+SETUP_TIMEOUT_SEC="${TB_SETUP_TIMEOUT_SEC:-300}"
+EXECUTION_TIMEOUT_FLOOR_SEC="${TB_EXECUTION_TIMEOUT_FLOOR_SEC:-1800}"
+TEST_TIMEOUT_SEC="${TB_TEST_TIMEOUT_SEC:-900}"
 OUTER_CLEANUP_MARGIN_SEC="${TB_OUTER_CLEANUP_MARGIN_SEC:-30}"
 HARNESS=""
 SELECTION="full"
@@ -86,27 +88,30 @@ python3 bench/write_cli_provenance.py \
   --attempts "$ATTEMPTS" --tb "$TB_PY" \
   --run-label "$RUN_LABEL" \
   --setup-allowance-seconds "$SETUP_TIMEOUT_SEC" \
+  --execution-timeout-floor-seconds "$EXECUTION_TIMEOUT_FLOOR_SEC" \
+  --test-timeout-seconds "$TEST_TIMEOUT_SEC" \
   --outer-cleanup-margin-seconds "$OUTER_CLEANUP_MARGIN_SEC" "${TASKS[@]}"
 
 echo "== $HARNESS controlled baseline -> $OUT =="
 echo "   model: $MODEL (direct Ollama Cloud)"
-echo "   attempts per task: $ATTEMPTS; setup excluded from execution timing"
+echo "   correctness: best of $ATTEMPTS; execution/setup/token totals reported separately"
 harness_failed=0
 for task in "${TASKS[@]}"; do
-  execution_timeout=$(python3 - "$DATASET_PATH/$task/task.yaml" <<'PY'
+  execution_timeout=$(python3 - "$DATASET_PATH/$task/task.yaml" "$EXECUTION_TIMEOUT_FLOOR_SEC" <<'PY'
 import sys
 from pathlib import Path
 from bench.tb_support import read_task_execution_timeout
-print(read_task_execution_timeout(Path(sys.argv[1])))
+print(read_task_execution_timeout(Path(sys.argv[1]), minimum_seconds=float(sys.argv[2])))
 PY
   )
   outer_timeout=$(awk -v execution="$execution_timeout" -v setup="$SETUP_TIMEOUT_SEC" -v cleanup="$OUTER_CLEANUP_MARGIN_SEC" 'BEGIN { print execution + setup + cleanup }')
-  echo "-- $task (${execution_timeout}s execution; ${SETUP_TIMEOUT_SEC}s setup allowance)"
+  echo "-- $task (${execution_timeout}s execution safety ceiling; ${TEST_TIMEOUT_SEC}s verifier ceiling)"
   if ! "$TB_PY" run --dataset-path "$DATASET_PATH" \
     --agent-import-path bench.tb_cli_agent:ControlledCliAgent \
     --model "$MODEL" --task-id "$task" --output-path "$OUT/$task" \
     --n-concurrent 1 --n-attempts "$ATTEMPTS" --no-rebuild --no-cleanup \
     --global-agent-timeout-sec "$outer_timeout" \
+    --global-test-timeout-sec "$TEST_TIMEOUT_SEC" \
     --agent-kwarg "harness=$HARNESS" \
     --agent-kwarg "execution_timeout_sec=$execution_timeout" \
     --agent-kwarg "setup_timeout_sec=$SETUP_TIMEOUT_SEC"; then

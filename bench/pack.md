@@ -1,11 +1,11 @@
 # MuCLI Harness Benchmark Pack
 
-Time-gated task pack to measure **harness + model effectiveness**. The runnable
-profile contains 50 pinned Terminal-Bench Core tasks spanning nine upstream
-task categories and several practical skill strata. Terminal-Bench supplies
-the common isolated environment, verifier contract, reference solutions, and
-time gates; the MuCLI adapter adds
-exact source fingerprints and token-bearing JSONL traces.
+Correctness-first task pack to measure **harness + model effectiveness**. The
+runnable profile contains 50 pinned Terminal-Bench Core tasks spanning nine
+upstream task categories and several practical skill strata. Terminal-Bench
+supplies the common isolated environment, verifier contract, reference
+solutions, and reference time limits; the MuCLI adapter adds exact source
+fingerprints and token-bearing JSONL traces.
 
 The profile also includes four real-issue repair tasks derived from SWE-bench,
 an MTEB embedding evaluation, and a Gymnasium CartPole task. Their upstream
@@ -16,28 +16,33 @@ pinned Terminal-Bench packaging so scores remain comparable.
 
 ## A. Why these suites
 
-| Suite | What it measures | Infra | Time-gating | Verdict |
+| Suite | What it measures | Infra | Runtime policy | Verdict |
 |---|---|---|---|---|
-| **Terminal-Bench** (laude-institute/terminal-bench) | Full terminal-agent loop w/ verifier scripts | Docker, free, MIT | ✅ per-task `timeout_s` | **Core** — same shape as mucli |
+| **Terminal-Bench** (laude-institute/terminal-bench) | Full terminal-agent loop w/ verifier scripts | Docker, free, MIT | Generous safety ceilings | **Core** — same shape as mucli |
 | **SWE-bench Lite/Verified** | Real-issue repo patches graded by FAIL_TO_PASS tests | Docker + HF dataset, free | Harness-level | **Core** (4 instances) |
 | Aider polyglot | Single-file edit format, 225 Exercism | No docker, free | Whole-run only | Cross-check only — not agent-shaped |
 | LiveCodeBench | Competitive programming | No docker, free | Judge limits only | Measures model, not harness — skip |
 | SWE-Lancer (OpenAI) | Real Upwork tasks, $-graded | ~23 GB docker | Runner-set | Too heavy for routine runs |
 | InterCode | Old terminal bash tasks | Docker | No | Dormant since 2023 — skip |
 
-## B. Current Terminal-Bench pack (50 tasks, all time-gated)
+## B. Current Terminal-Bench pack (50 tasks, correctness-first)
 
-The task IDs are pinned in `bench/tb_suite.yaml`; each task's native
-`max_agent_timeout_sec` remains its time gate. The selection covers file and
+The task IDs are pinned in `bench/tb_suite.yaml`. The runner gives every task
+at least 30 minutes for agent execution and 15 minutes for verification; a
+larger native task limit remains authoritative. These are runaway-process
+safety ceilings, not the performance score. The selection covers file and
 data transformation; debugging and real-repository repair; Git, services, and
 system administration; software engineering and programming languages; model
 training and scientific computing; security and forensics; games and
 interactive problem solving. All runners read the same YAML list through
 `bench/list_tb_tasks.py`.
 
-The score printed by the runner is resolved trials / total trials. Harness
-failures and missing result files make the runner exit non-zero; ordinary task
-failures are valid benchmark outcomes and remain in the score.
+Correctness is scored best-of-three per task: a task counts as solved when at
+least one of its three trials passes. The summary also preserves raw trial
+outcomes and sums execution time, setup time, input tokens, and output tokens
+across all trials. Harness failures and missing result files make the runner
+exit non-zero; ordinary task failures are valid outcomes and remain in the
+score.
 
 ## C. Running Terminal-Bench
 
@@ -64,8 +69,11 @@ same task selection, attempt count, prepared image set, and model. Preparation
 and harness setup remain outside the measured execution interval. Use
 `--bootstrap` on a new machine to install Terminal-Bench 0.2.18, download the
 pinned dataset, and build a missing MuCLI wheelhouse; Docker and `uv` must
-already be installed. The checksum-pinned external CLI artifacts must be
-staged under `bench/artifacts/agents/` for external comparisons.
+already be installed. Before the first scored trial, preparation builds every
+selected client image with its grader interpreter, grader dependencies, fixed
+test datasets, and a private Python 3.10 runtime for MuCLI when the task's own
+Python is older. The checksum-pinned external CLI artifacts must be staged
+under `bench/artifacts/agents/` for external comparisons.
 
 The lower-level commands below remain available for debugging the adapters.
 
@@ -83,10 +91,11 @@ wheelhouses and a task container whose Python minor is absent from the payload.
 Rebuild it whenever `requirements.txt` changes.
 
 For stable comparison runs, prebuild the selected task images once. The
-prepared dataset rewrites only the Compose image reference to a
-content-addressed local tag and records the task-input hash plus Docker image ID
-in `prepare-manifest.json`. Later runs validate both before using
-`--no-rebuild --no-cleanup`:
+prepared dataset rewrites the verifier bootstrap to use image-baked,
+offline dependencies, adds the isolated runtimes above, binds the Compose image
+reference to a content-addressed local tag, and records the source hash,
+environment revision, and Docker image ID in `prepare-manifest.json`. Later
+runs validate all of them before using `--no-rebuild --no-cleanup`:
 
 ```bash
 MODEL=ollama/glm-5.3-flash bash bench/run_pack.sh --smoke --prepare
@@ -125,7 +134,8 @@ model-backed CLI command is sent. Each trial writes a native JSONL transcript
 and `<harness>-execution.json`; the run-level `provenance.json` records artifact
 and adapter hashes without recording the API key.
 
-`--attempts N` asks Terminal-Bench for repeated trials of every selected task.
+`--attempts N` asks Terminal-Bench for repeated trials of every selected task;
+the default is three and correctness uses the best verdict for each task.
 Use the same prepared task-image manifest, task list, model settings, prompt,
 and attempt count for each harness being compared. A single attempt is useful
 for smoke testing but is not a reliable harness comparison.
@@ -140,18 +150,19 @@ an evaluation report or needed for an active regression investigation; smoke,
 partial, and superseded runs can be deleted. Adapter teardown makes files under
 the container-backed `/logs` mount host-readable and removable.
 
-For direct TB use, pass both timing controls explicitly (360 is `hello-world`'s
-native budget, while 570 adds the 180-second setup cap and a 30-second outer
-cleanup margin):
+For direct TB use, pass both timing controls explicitly. This example uses the
+pack defaults: a 30-minute execution safety ceiling, 5-minute setup allowance,
+15-minute verifier ceiling, and 30-second outer cleanup margin:
 
 ```bash
 ~/.venvs/tb/bin/tb run \
   --dataset-path ~/.cache/terminal-bench/terminal-bench-core/0.1.1 \
   --agent-import-path bench.tb_mucli_agent:MucliAgent \
   --task-id hello-world \
-  --global-agent-timeout-sec 570 \
-  --agent-kwarg execution_timeout_sec=360 \
-  --agent-kwarg setup_timeout_sec=180 \
+  --global-agent-timeout-sec 2130 \
+  --global-test-timeout-sec 900 \
+  --agent-kwarg execution_timeout_sec=1800 \
+  --agent-kwarg setup_timeout_sec=300 \
   --agent-kwarg benchmark_prompt=verify-v4 \
   --model openai/gpt-5
 ```
@@ -178,7 +189,7 @@ checks pass. Both choices are recorded in each run's `provenance.json` alongside
 tracked-worktree fingerprint, model, Terminal-Bench version, wheelhouse hash,
 attempt count, timing policy, and prepared Docker image IDs.
 
-If the native execution limit expires, the adapter interrupts MuCLI and uses
+If the execution safety ceiling expires, the adapter interrupts MuCLI and uses
 narrowly scoped TERM/KILL fallbacks before the verifier starts. Completed
 iteration tokens from the partial trace are retained in the result instead of
 being reported as zero.

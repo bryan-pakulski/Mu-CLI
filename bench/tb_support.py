@@ -318,8 +318,10 @@ def read_trace_usage(logging_dir: Path | None) -> tuple[int, int]:
     return incomplete_fallback or (0, 0)
 
 
-def read_task_execution_timeout(task_yaml: Path) -> float:
-    """Read the task's native agent budget without adding a YAML dependency."""
+def read_task_execution_timeout(
+    task_yaml: Path, *, minimum_seconds: float | None = None
+) -> float:
+    """Read a task budget and optionally apply a correctness-run floor."""
 
     try:
         text = Path(task_yaml).read_text(encoding="utf-8")
@@ -331,6 +333,11 @@ def read_task_execution_timeout(task_yaml: Path) -> float:
     timeout = float(match.group(1))
     if timeout <= 0:
         raise ValueError(f"invalid max_agent_timeout_sec in {task_yaml}")
+    if minimum_seconds is not None:
+        minimum = float(minimum_seconds)
+        if minimum <= 0:
+            raise ValueError("minimum execution timeout must be positive")
+        timeout = max(timeout, minimum)
     return timeout
 
 

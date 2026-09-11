@@ -229,11 +229,17 @@ class ControlledCliAgent(BaseAgent):
         exports = "\n".join(
             f"export {key}={shlex.quote(value)}" for key, value in env.items()
         )
+        exports += "\nexport PATH=/opt/mucli-task-bin:$PATH"
         result = session.container.exec_run(
             [
                 "sh",
                 "-c",
-                "mkdir -p /installed-agent && "
+                "mkdir -p /installed-agent /opt/mucli-task-bin && "
+                "if command -v tmux >/dev/null 2>&1; then "
+                "tmux_real=$(command -v tmux); "
+                "printf '#!/bin/sh\\nexec %s -L mucli-task \"$@\"\\n' "
+                '"$tmux_real" > /opt/mucli-task-bin/tmux; '
+                "chmod 755 /opt/mucli-task-bin/tmux; fi && "
                 "printf '%s\\n' \"$TB_AGENT_ENV\" > /installed-agent/setup-env.sh && "
                 "chmod 600 /installed-agent/setup-env.sh",
             ],
@@ -265,29 +271,43 @@ class ControlledCliAgent(BaseAgent):
         if result.exit_code != 0:
             raise RuntimeError(f"{self._harness} preflight failed")
 
-    def _command(self, instruction: str) -> TerminalCommand:
-        prompt = shlex.quote(self._render_instruction(instruction))
+    @staticmethod
+    def _write_prompt(session, prompt: str) -> None:
+        result = session.container.exec_run(
+            [
+                "sh",
+                "-c",
+                "umask 077 && printf '%s' \"$TB_AGENT_PROMPT\" "
+                "> /tmp/controlled-agent-prompt.txt",
+            ],
+            environment={"TB_AGENT_PROMPT": prompt},
+        )
+        if result.exit_code != 0:
+            raise RuntimeError("failed to stage external harness prompt")
+
+    def _command(self) -> TerminalCommand:
         if self._harness == "opencode":
             agent_command = (
                 "opencode run --format json --model "
-                f"ollama/{shlex.quote(self._ollama_model)} --auto {prompt}"
+                f"ollama/{shlex.quote(self._ollama_model)} --auto"
             )
         elif self._harness == "claude-code":
             allowed = "Bash Edit Write Read Glob Grep LS WebFetch NotebookEdit NotebookRead TodoRead TodoWrite Agent"
             agent_command = (
                 "claude --verbose --output-format stream-json "
-                f"--model {shlex.quote(self._ollama_model)} -p {prompt} "
+                f"--model {shlex.quote(self._ollama_model)} -p "
                 f"--allowedTools {allowed} --no-session-persistence"
             )
         else:
             agent_command = (
                 "pi --provider ollama "
                 f"--model {shlex.quote(self._ollama_model)} --mode json "
-                f"--print --no-session --approve -- {prompt}"
+                "--print --no-session --approve"
             )
         command = (
             "cd /app && ( "
-            f"{agent_command} > /logs/controlled-agent-output.jsonl 2>&1; "
+            f"{agent_command} < /tmp/controlled-agent-prompt.txt "
+            "> /logs/controlled-agent-output.jsonl 2>&1; "
             "agent_status=$?; printf '%s' \"$agent_status\" "
             '> /tmp/controlled-agent-status; exit "$agent_status" )'
         )
@@ -361,6 +381,7 @@ class ControlledCliAgent(BaseAgent):
             self._copy_and_install(session, setup_started)
             self._write_environment(session)
             self._preflight(session)
+            self._write_prompt(session, self._render_instruction(instruction))
             self._check_setup_budget(setup_started)
         except Exception as exc:
             make_container_logs_host_cleanable(session)
@@ -373,7 +394,7 @@ class ControlledCliAgent(BaseAgent):
         failure_mode = FailureMode.NONE
         execution_seconds = 0.0
         try:
-            session.send_command(self._command(instruction))
+            session.send_command(self._command())
             exit_status = self._agent_exit_status(session)
             completed = exit_status == 0
             if not completed:

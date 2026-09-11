@@ -23,6 +23,8 @@ else:
 
 _IMAGE_PLACEHOLDER = "${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}"
 _SAFE_TASK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_ENVIRONMENT_REVISION = "prebuilt-grader-and-mucli-python-v3"
+_MUCLI_PYTHON_IMAGE = "python:3.10.19-slim-bookworm"
 _BUILD_ADJUSTMENTS = {
     # These tasks' base image lists matching Debian snapshots but leaves them
     # commented out. Use a fixed snapshot because the oldoldstable live mirror
@@ -30,6 +32,423 @@ _BUILD_ADJUSTMENTS = {
     "qemu-alpine-ssh": "apt-snapshot-https-20260824-v1",
     "qemu-startup": "apt-snapshot-https-20260824-v1",
 }
+
+_CUSTOM_GRADER_INSTALLS = {
+    "csv-to-parquet": ["pandas", "pyarrow"],
+    "reshard-c4-data": ["tqdm"],
+    "simple-web-scraper": ["pandas"],
+    "hf-model-inference": ["requests", "psutil"],
+    "nginx-request-logging": ["requests"],
+    "fibonacci-server": ["requests"],
+    "grid-pattern-transform": ["numpy"],
+    "path-tracing": ["numpy", "Pillow"],
+    "sanitize-git-repo": ["GitPython"],
+}
+_CUSTOM_PYTEST_TASKS = {
+    "simple-web-scraper": "-rA",
+    "hf-model-inference": "-v -rA",
+    "fix-pandas-version": "-rA",
+    "incompatible-python-fasttext": "-rA",
+    "nginx-request-logging": "-v -rA",
+    "cartpole-rl-training": "-rA",
+    "pytorch-model-cli": "-v -rA",
+    "extract-safely": "-rA",
+}
+_SWE_TEST_TARGETS = {
+    "swe-bench-astropy-1": "astropy/modeling/tests/test_separable.py",
+    "swe-bench-astropy-2": "astropy/io/ascii/tests/test_qdp.py",
+    "swe-bench-fsspec": "fsspec/implementations/tests/test_dirfs.py",
+    "swe-bench-langcodes": "langcodes/tests/test_language.py",
+}
+_GRADER_APT_PACKAGES = {
+    "configure-git-webserver": ["curl", "expect"],
+    "git-multibranch": ["curl", "expect", "git", "openssh-client"],
+    "qemu-alpine-ssh": ["sshpass"],
+    "build-linux-kernel-qemu": [
+        "build-essential",
+        "libncurses-dev",
+        "bison",
+        "flex",
+        "libssl-dev",
+        "libelf-dev",
+        "qemu-system",
+        "bc",
+        "cpio",
+        "wget",
+        "expect",
+    ],
+}
+
+
+def _client_dockerfile(task_dir: Path) -> Path:
+    """Resolve the client Dockerfile, including tasks with a nested context."""
+
+    import yaml
+
+    compose_path = task_dir / "docker-compose.yaml"
+    try:
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        build = compose["services"]["client"]["build"]
+    except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise ValueError(f"cannot resolve client build from {compose_path}") from exc
+    if isinstance(build, str):
+        context, dockerfile = build, "Dockerfile"
+    elif isinstance(build, dict):
+        context = str(build.get("context") or ".")
+        dockerfile = str(build.get("dockerfile") or "Dockerfile")
+    else:
+        raise ValueError(f"invalid client build configuration in {compose_path}")
+    path = task_dir / context / dockerfile
+    if not path.is_file():
+        raise ValueError(f"client Dockerfile does not exist: {path}")
+    return path
+
+
+def _write_common_grader_scripts(task_dir: Path, task: str) -> None:
+    """Remove the per-trial online uv bootstrap from the common verifier."""
+
+    tests_dir = task_dir / "tests"
+    setup = tests_dir / "setup-uv-pytest.sh"
+    runner = tests_dir / "run-uv-pytest.sh"
+    if setup.is_file():
+        setup.write_text(
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            "test -x /opt/tb-grader/bin/python\n"
+            "/opt/tb-grader/bin/python -c 'import pytest'\n",
+            encoding="utf-8",
+        )
+        setup.chmod(0o755)
+    if runner.is_file():
+        runner.write_text(
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            ': "${TEST_DIR:=/tests}"\n'
+            "exec /opt/tb-grader/bin/python -m pytest "
+            '"$TEST_DIR/test_outputs.py" -rA\n',
+            encoding="utf-8",
+        )
+        runner.chmod(0o755)
+    run_tests = task_dir / "run-tests.sh"
+    if task not in _SWE_TEST_TARGETS and setup.is_file() and run_tests.is_file():
+        run_tests.write_text(
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            ': "${TEST_DIR:=/tests}"\n'
+            "exec /opt/tb-grader/bin/python -m pytest "
+            '"$TEST_DIR/test_outputs.py" -rA\n',
+            encoding="utf-8",
+        )
+        run_tests.chmod(0o755)
+
+
+def _write_custom_grader_runner(task_dir: Path, task: str) -> None:
+    """Make custom graders consume only their image-baked environment."""
+
+    run_tests = task_dir / "run-tests.sh"
+    if task in _CUSTOM_PYTEST_TASKS:
+        flags = _CUSTOM_PYTEST_TASKS[task]
+        run_tests.write_text(
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            ': "${TEST_DIR:=/tests}"\n'
+            "exec /opt/tb-grader/bin/python -m pytest "
+            f'"$TEST_DIR/test_outputs.py" {flags}\n',
+            encoding="utf-8",
+        )
+        run_tests.chmod(0o755)
+        return
+    target = _SWE_TEST_TARGETS.get(task)
+    if target is None:
+        return
+    original = run_tests.read_text(encoding="utf-8")
+    marker = "apt-get update && apt-get install -y gcc"
+    if original.count(marker) != 1:
+        raise ValueError(f"cannot isolate grader setup for {task}")
+    patch_prefix = original.split(marker, 1)[0].rstrip()
+    run_tests.write_text(
+        patch_prefix
+        + "\n\n"
+        + "patch --fuzz=5 -p1 -i /app/test_patch.diff\n"
+        + f"exec /opt/tb-grader/bin/python -m pytest -rA -v {target}\n",
+        encoding="utf-8",
+    )
+    run_tests.chmod(0o755)
+
+
+def _repair_known_verifier_defects(task_dir: Path, task: str) -> None:
+    """Repair pinned upstream verifiers that cannot produce a bounded verdict."""
+
+    test_file = task_dir / "tests" / "test_outputs.py"
+    if task == "tmux-advanced-workflow":
+        run_tests = task_dir / "run-tests.sh"
+        source = run_tests.read_text(encoding="utf-8")
+        run_tests.write_text(
+            "export PATH=/opt/mucli-task-bin:$PATH\n" + source,
+            encoding="utf-8",
+        )
+        return
+    if task == "cron-broken-network":
+        test_file.write_text(
+            "# Prepared benchmark verifier: stable behavioral curl check.\n"
+            "import subprocess\n"
+            "from pathlib import Path\n\n"
+            "def _fetch():\n"
+            "    result = subprocess.run(\n"
+            "        ['/usr/bin/curl', '-fsSL', 'http://example.com'],\n"
+            "        capture_output=True, text=True, timeout=30, check=False,\n"
+            "    )\n"
+            "    assert result.returncode == 0, result.stderr\n"
+            "    Path('/app/example.html').write_text(result.stdout)\n"
+            "    return result.stdout\n\n"
+            "def test_curl_file_exists():\n"
+            "    _fetch()\n"
+            "    assert Path('/app/example.html').is_file()\n\n"
+            "def test_curl_file_content():\n"
+            "    text = _fetch().lower()\n"
+            "    assert '<title>example domain</title>' in text\n",
+            encoding="utf-8",
+        )
+        return
+    if task == "pytorch-model-cli":
+        source = test_file.read_text(encoding="utf-8")
+        dataset_root = 'root="./data"'
+        if source.count(dataset_root) != 1:
+            raise ValueError("cannot isolate pytorch-model-cli test dataset")
+        test_file.write_text(
+            source.replace(
+                dataset_root,
+                'root="/opt/tb-grader-data"',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        return
+    if task == "reshard-c4-data":
+        source = test_file.read_text(encoding="utf-8")
+        online_run = '["uv", "run", REVERT_SCRIPT]'
+        if source.count(online_run) != 1:
+            raise ValueError("cannot isolate reshard-c4-data verifier")
+        test_file.write_text(
+            source.replace(
+                online_run,
+                '["/opt/tb-grader/bin/python", REVERT_SCRIPT]',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        return
+    if task in {"configure-git-webserver", "git-multibranch"}:
+        source = test_file.read_text(encoding="utf-8")
+        install_blocks = {
+            "configure-git-webserver": (
+                "# Install curl for testing\n"
+                "apt-get update\n"
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y curl expect\n\n"
+            ),
+            "git-multibranch": (
+                "apt-get update\n"
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y "
+                "curl expect git openssh-client\n\n"
+            ),
+        }
+        install_block = install_blocks[task]
+        if source.count(install_block) != 1:
+            raise ValueError(f"cannot isolate {task} verifier")
+        test_file.write_text(
+            source.replace(install_block, "", 1),
+            encoding="utf-8",
+        )
+        return
+    if task == "qemu-alpine-ssh":
+        source = test_file.read_text(encoding="utf-8")
+        online_install = '    os.popen("apt install -y sshpass").read()\n\n'
+        if source.count(online_install) != 1:
+            raise ValueError("cannot isolate qemu-alpine-ssh verifier")
+        test_file.write_text(
+            source.replace(online_install, "", 1),
+            encoding="utf-8",
+        )
+        return
+    if task not in {
+        "build-initramfs-qemu",
+        "build-linux-kernel-qemu",
+        "build-tcc-qemu",
+    }:
+        return
+    source = test_file.read_text(encoding="utf-8")
+    if source.count("set timeout -1") != 1:
+        raise ValueError(f"cannot bound expect verifier for {task}")
+    source = source.replace("set timeout -1", "set timeout 120", 1)
+    if source.rstrip().endswith("test_expect()"):
+        source = source.rstrip()[: -len("test_expect()")].rstrip() + "\n"
+    else:
+        raise ValueError(f"cannot remove collection-time verifier call for {task}")
+    if task == "build-linux-kernel-qemu":
+        start = 'init = """\n'
+        join = '\n+"""libelf-dev qemu-system bc cpio wget expect\n'
+        if source.count(start) != 1 or source.count(join) != 1:
+            raise ValueError("cannot repair build-linux-kernel-qemu verifier")
+        source = source.replace(start, 'init = (\n    """\n', 1)
+        source = source.replace(
+            join, '\n    + """libelf-dev qemu-system bc cpio wget expect\n', 1
+        )
+        closing = '\n"""\n\n\ndef test_expect():'
+        if source.count(closing) != 1:
+            raise ValueError("cannot close repaired kernel init expression")
+        source = source.replace(closing, '\n"""\n)\n\n\ndef test_expect():', 1)
+        setup_commands = (
+            "apt-get update -y\n"
+            "apt-get install -y build-essential libncurses-dev bison flex "
+            'libssl-dev """\n'
+            '    + """libelf-dev qemu-system bc cpio wget expect\n\n'
+        )
+        if source.count(setup_commands) != 1:
+            raise ValueError("cannot remove kernel verifier environment setup")
+        source = source.replace(setup_commands, '"""\n    + """', 1)
+        busybox_download = (
+            "wget https://busybox.net/downloads/binaries/"
+            "1.31.0-defconfig-multiarch-musl/busybox-x86_64"
+        )
+        if source.count(busybox_download) != 1:
+            raise ValueError("cannot isolate kernel verifier busybox input")
+        source = source.replace(
+            busybox_download,
+            "cp /opt/tb-grader-data/busybox-x86_64 ./busybox-x86_64",
+            1,
+        )
+    if task == "build-tcc-qemu":
+        assertion = 'assert "42" in actual_output.split("echo $?")[1], ('
+        replacement = (
+            'assert "echo $?" in actual_output and '
+            '"42" in actual_output.split("echo $?", 1)[1], ('
+        )
+        if source.count(assertion) != 1:
+            raise ValueError("cannot repair build-tcc-qemu verifier assertion")
+        source = source.replace(assertion, replacement, 1)
+    test_file.write_text(source, encoding="utf-8")
+
+
+def _grader_install_commands(task: str) -> list[str]:
+    commands = ["/opt/tb-grader/bin/python -m pip install --no-cache-dir 'pytest<9'"]
+    packages = _CUSTOM_GRADER_INSTALLS.get(task)
+    if packages:
+        commands.append(
+            "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+            + " ".join(packages)
+        )
+    if task == "cartpole-rl-training":
+        commands.extend(
+            [
+                "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+                "torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu",
+                "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+                "numpy gymnasium",
+            ]
+        )
+    elif task == "pytorch-model-cli":
+        commands.extend(
+            [
+                "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+                "torch==2.7.0 torchvision==0.22.0 "
+                "--index-url https://download.pytorch.org/whl/cpu",
+                "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+                "numpy opencv-python",
+                "mkdir -p /opt/tb-grader-data && "
+                '/opt/tb-grader/bin/python -c "from torchvision.datasets '
+                "import MNIST; MNIST(root='/opt/tb-grader-data', train=False, "
+                'download=True)"',
+            ]
+        )
+    elif task == "train-fasttext":
+        commands.append(
+            "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+            "numpy==1.24.0 scikit-learn fasttext-wheel"
+        )
+    elif task.startswith("swe-bench-astropy-"):
+        commands.extend(
+            [
+                "/opt/tb-grader/bin/python -m pip install --no-cache-dir "
+                "setuptools==68.0.0 numpy==1.23.4",
+                "cd /app/astropy && cp pyproject.toml /tmp/tb-pyproject.toml && "
+                'sed -i \'s/requires = ["setuptools",/'
+                'requires = ["setuptools==68.0.0",/\' pyproject.toml && '
+                "/opt/tb-grader/bin/python -m pip install --no-cache-dir -e '.[test]' && "
+                "mv /tmp/tb-pyproject.toml pyproject.toml",
+            ]
+        )
+    elif task == "swe-bench-fsspec":
+        commands.append(
+            "cd /app/fsspec && /opt/tb-grader/bin/python -m pip install "
+            "--no-cache-dir -e '.[test]'"
+        )
+    elif task == "swe-bench-langcodes":
+        commands.append(
+            "cd /app/langcodes && /opt/tb-grader/bin/python -m pip install "
+            "--no-cache-dir -e '.[test]'"
+        )
+    return commands
+
+
+def _prepare_client_environment(task_dir: Path, task: str) -> None:
+    """Bake MuCLI's compatible interpreter and grader deps into the task image."""
+
+    dockerfile_path = _client_dockerfile(task_dir)
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
+    prefix = f"FROM {_MUCLI_PYTHON_IMAGE} AS mucli_benchmark_python\n\n"
+    apt_packages = []
+    if task == "pytorch-model-cli":
+        apt_packages.extend(["ffmpeg", "libsm6", "libxext6"])
+    if task in _SWE_TEST_TARGETS:
+        apt_packages.append("gcc")
+    apt_packages.extend(_GRADER_APT_PACKAGES.get(task, []))
+    grader_python = (
+        "/opt/mucli-python/bin/python3" if task == "train-fasttext" else "python3"
+    )
+    commands = [
+        "set -eux",
+        "if ! command -v python3 >/dev/null 2>&1; then "
+        "apt-get update; apt-get install -y python3 python3-pip python3-venv; fi",
+        "rm -rf /opt/tb-grader /tmp/tb-grader-probe",
+        f"if ! {grader_python} -m venv --system-site-packages "
+        "/tmp/tb-grader-probe; then "
+        "apt-get update; apt-get install -y python3-venv; fi",
+        "rm -rf /tmp/tb-grader-probe",
+        f"{grader_python} -m venv --system-site-packages /opt/tb-grader",
+        "/opt/tb-grader/bin/python -m pip install --no-cache-dir --upgrade pip",
+    ]
+    if apt_packages:
+        commands.insert(
+            2,
+            "apt-get update; apt-get install -y " + " ".join(apt_packages),
+        )
+    commands.extend(_grader_install_commands(task))
+    if task == "build-linux-kernel-qemu":
+        commands.append(
+            "mkdir -p /opt/tb-grader-data && "
+            "wget -q https://busybox.net/downloads/binaries/"
+            "1.31.0-defconfig-multiarch-musl/busybox-x86_64 "
+            "-O /opt/tb-grader-data/busybox-x86_64 && "
+            "chmod 0755 /opt/tb-grader-data/busybox-x86_64"
+        )
+    commands.extend(
+        [
+            "/opt/tb-grader/bin/python -c 'import pytest'",
+            "rm -rf /var/lib/apt/lists/*",
+        ]
+    )
+    continuation = " " + "\\" + "\n    && "
+    environment = (
+        "\n\nCOPY --from=mucli_benchmark_python /usr/local /opt/mucli-python\n"
+        "RUN " + continuation.join(commands) + "\n"
+    )
+    dockerfile_path.write_text(
+        prefix + dockerfile.rstrip() + environment,
+        encoding="utf-8",
+    )
+    _write_common_grader_scripts(task_dir, task)
+    _write_custom_grader_runner(task_dir, task)
+    _repair_known_verifier_defects(task_dir, task)
 
 
 def task_source_sha256(task_dir: Path) -> str:
@@ -62,8 +481,7 @@ def task_source_sha256(task_dir: Path) -> str:
 def cached_image_name(task: str, source_sha256: str) -> str:
     safe_task = re.sub(r"[^a-z0-9_.-]+", "-", task.lower())
     return (
-        "mucli-tb-cache/terminal-bench-core-0.1.1/"
-        f"{safe_task}:{source_sha256[:16]}"
+        "mucli-tb-cache/terminal-bench-core-0.1.1/" f"{safe_task}:{source_sha256[:16]}"
     )
 
 
@@ -73,6 +491,7 @@ def stage_task(
     image_name: str,
     *,
     build_adjustment: str | None = None,
+    prepare_environment: bool = False,
 ) -> None:
     """Copy one task and bind its compose file to a content-addressed image."""
 
@@ -160,6 +579,8 @@ def stage_task(
             dockerfile_path.write_text(dockerfile, encoding="utf-8")
         elif build_adjustment is not None:
             raise ValueError(f"unknown build adjustment: {build_adjustment}")
+        if prepare_environment:
+            _prepare_client_environment(staging, source_task.name)
         if target_task.exists():
             shutil.rmtree(target_task)
         staging.replace(target_task)
@@ -245,17 +666,18 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
         source_task = source / task
         source_sha = task_source_sha256(source_task)
         build_adjustment = _BUILD_ADJUSTMENTS.get(task)
-        image_input_sha = source_sha
-        if build_adjustment is not None:
-            image_input_sha = hashlib.sha256(
-                f"{source_sha}\0{build_adjustment}".encode("utf-8")
-            ).hexdigest()
+        image_input_sha = hashlib.sha256(
+            f"{source_sha}\0{build_adjustment or ''}\0{_ENVIRONMENT_REVISION}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
         image_name = cached_image_name(task, image_input_sha)
         existing = entries.get(task)
         if (
             isinstance(existing, dict)
             and existing.get("source_sha256") == source_sha
             and existing.get("build_adjustment") == build_adjustment
+            and existing.get("environment_revision") == _ENVIRONMENT_REVISION
         ):
             try:
                 compose = (output / task / "docker-compose.yaml").read_text(
@@ -265,10 +687,9 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
             except (OSError, ValueError, subprocess.SubprocessError):
                 pass
             else:
-                if (
-                    f"image: {image_name}" in compose
-                    and image.get("Id") == existing.get("image_id")
-                ):
+                if f"image: {image_name}" in compose and image.get(
+                    "Id"
+                ) == existing.get("image_id"):
                     print(f"-- reusing {task} -> {image_name}", flush=True)
                     continue
         print(f"-- preparing {task} -> {image_name}", flush=True)
@@ -277,6 +698,7 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
             output / task,
             image_name,
             build_adjustment=build_adjustment,
+            prepare_environment=True,
         )
         with tempfile.TemporaryDirectory(prefix=f"mucli-tb-prepare-{task}-") as raw:
             scratch = Path(raw)
@@ -299,6 +721,7 @@ def prepare_tasks(source: Path, output: Path, tasks: list[str]) -> dict[str, Any
         entries[task] = {
             "source_sha256": source_sha,
             "build_adjustment": build_adjustment,
+            "environment_revision": _ENVIRONMENT_REVISION,
             "image_name": image_name,
             "image_id": image.get("Id"),
             "repo_digests": sorted(image.get("RepoDigests") or []),
@@ -342,6 +765,9 @@ def check_prepared(
             continue
         if entry.get("build_adjustment") != _BUILD_ADJUSTMENTS.get(task):
             errors.append(f"{task}: build adjustment changed since image preparation")
+            continue
+        if entry.get("environment_revision") != _ENVIRONMENT_REVISION:
+            errors.append(f"{task}: prepared environment revision is stale")
             continue
         compose_path = output / task / "docker-compose.yaml"
         try:

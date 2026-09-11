@@ -17,9 +17,11 @@ SOURCE_DATASET_PATH="${TB_DATASET_PATH:-$HOME/.cache/terminal-bench/terminal-ben
 PREPARED_DATASET_PATH="${TB_PREPARED_DATASET_PATH:-bench/artifacts/tb-prepared/terminal-bench-core/0.1.1}"
 AGENT_PATH="bench.tb_mucli_agent:MucliAgent"
 MODEL="${MODEL:-}"
-SETUP_TIMEOUT_SEC="${TB_SETUP_TIMEOUT_SEC:-180}"
+SETUP_TIMEOUT_SEC="${TB_SETUP_TIMEOUT_SEC:-300}"
+EXECUTION_TIMEOUT_FLOOR_SEC="${TB_EXECUTION_TIMEOUT_FLOOR_SEC:-1800}"
+TEST_TIMEOUT_SEC="${TB_TEST_TIMEOUT_SEC:-900}"
 OUTER_CLEANUP_MARGIN_SEC="${TB_OUTER_CLEANUP_MARGIN_SEC:-30}"
-ATTEMPTS="${TB_ATTEMPTS:-1}"
+ATTEMPTS="${TB_ATTEMPTS:-3}"
 RUN_LABEL="${TB_RUN_LABEL:-}"
 SELECTION="full"
 SINGLE_TASK=""
@@ -31,8 +33,8 @@ usage: $0 [--smoke | --task TASK] [--attempts N] [--prepare] [--run-label LABEL]
 
   --smoke          run hello-world only
   --task TASK      run one task from the pinned dataset
-  --attempts N     repeated trials per task (default: ${TB_ATTEMPTS:-1})
-  --prepare        build/reuse immutable task images before starting the run
+  --attempts N     repeated trials per task (default: ${TB_ATTEMPTS:-3})
+  --prepare        build/reuse fully provisioned task images before the run
   --run-label TEXT record a comparison label in provenance.json
 EOF
 }
@@ -115,7 +117,7 @@ except (OSError, KeyError, TypeError, json.JSONDecodeError, tarfile.TarError):
     raise SystemExit(1)
 
 versions = str(manifest.get("python_versions", "")).split()
-if manifest.get("format") != 2 or not {"3.12", "3.13", "3.14"}.issubset(versions):
+if manifest.get("format") != 2 or not {"3.10", "3.12", "3.13", "3.14"}.issubset(versions):
     raise SystemExit(1)
 
 excluded = ("kokoro", "faster-whisper", "soundfile", "playwright", "pytest", "black")
@@ -142,22 +144,18 @@ if [ "$PREPARE" -eq 1 ]; then
     "${TASKS[@]}"
 fi
 
-PREPARED_MANIFEST=""
-if python3 bench/prepare_tb.py \
+if ! python3 bench/prepare_tb.py \
     --check-only \
     --source "$SOURCE_DATASET_PATH" \
     --output "$PREPARED_DATASET_PATH" \
-    "${TASKS[@]}" >/dev/null 2>&1; then
-  DATASET_PATH="$PREPARED_DATASET_PATH"
-  BUILD_ARGS=(--no-rebuild --no-cleanup)
-  PREPARED_MANIFEST="$PREPARED_DATASET_PATH/prepare-manifest.json"
-  echo "using immutable prebuilt task images: $DATASET_PATH"
-else
-  DATASET_PATH="$SOURCE_DATASET_PATH"
-  BUILD_ARGS=(--rebuild --no-cleanup)
-  echo "using cached source dataset: $DATASET_PATH"
-  echo "task images are not fully prepared; add --prepare for reproducible fast startup" >&2
+    "${TASKS[@]}" >/dev/null; then
+  echo "task environments are not fully prepared; rerun with --prepare" >&2
+  exit 2
 fi
+DATASET_PATH="$PREPARED_DATASET_PATH"
+BUILD_ARGS=(--no-rebuild --no-cleanup)
+PREPARED_MANIFEST="$PREPARED_DATASET_PATH/prepare-manifest.json"
+echo "using fully provisioned immutable task images: $DATASET_PATH"
 DATASET_ARGS=(--dataset-path "$DATASET_PATH")
 
 EXTRA=()
@@ -183,6 +181,8 @@ python3 bench/write_tb_provenance.py \
   --attempts "$ATTEMPTS" \
   --tb "$TB_PY" \
   --setup-allowance-seconds "$SETUP_TIMEOUT_SEC" \
+  --execution-timeout-floor-seconds "$EXECUTION_TIMEOUT_FLOOR_SEC" \
+  --test-timeout-seconds "$TEST_TIMEOUT_SEC" \
   --outer-cleanup-margin-seconds "$OUTER_CLEANUP_MARGIN_SEC" \
   --run-label "$RUN_LABEL" \
   --source-archive "$SOURCE_ARCHIVE" \
@@ -192,19 +192,19 @@ SOURCE_ARCHIVE="$(realpath "$SOURCE_ARCHIVE")"
 SOURCE_ARCHIVE_SHA256="$(sha256sum "$SOURCE_ARCHIVE" | awk '{print $1}')"
 
 echo "== MuCLI benchmark pack -> $OUT =="
-echo "   attempts per task: $ATTEMPTS; execution timing excludes agent setup"
+echo "   correctness: best of $ATTEMPTS; execution/setup/token totals reported separately"
 harness_failed=0
 for task in "${TASKS[@]}"; do
   echo "-- $task"
   task_config="$DATASET_PATH/$task/task.yaml"
-  if ! execution_timeout=$(python3 - "$task_config" <<'PY'
+  if ! execution_timeout=$(python3 - "$task_config" "$EXECUTION_TIMEOUT_FLOOR_SEC" <<'PY'
 import sys
 from pathlib import Path
 
 from bench.tb_support import read_task_execution_timeout
 
 try:
-    print(read_task_execution_timeout(Path(sys.argv[1])))
+    print(read_task_execution_timeout(Path(sys.argv[1]), minimum_seconds=float(sys.argv[2])))
 except ValueError as exc:
     print(exc, file=sys.stderr)
     raise SystemExit(2)
@@ -218,7 +218,7 @@ PY
     -v setup="$SETUP_TIMEOUT_SEC" \
     -v cleanup="$OUTER_CLEANUP_MARGIN_SEC" \
     'BEGIN { print execution + setup + cleanup }')
-  echo "   execution budget: ${execution_timeout}s; setup allowance: ${SETUP_TIMEOUT_SEC}s"
+  echo "   execution safety ceiling: ${execution_timeout}s; verifier ceiling: ${TEST_TIMEOUT_SEC}s"
   if ! "$TB_PY" run \
     "${DATASET_ARGS[@]}" \
     --agent-import-path "$AGENT_PATH" \
@@ -227,6 +227,7 @@ PY
     --n-concurrent 1 \
     --n-attempts "$ATTEMPTS" \
     --global-agent-timeout-sec "$outer_timeout" \
+    --global-test-timeout-sec "$TEST_TIMEOUT_SEC" \
     --agent-kwarg "execution_timeout_sec=$execution_timeout" \
     --agent-kwarg "setup_timeout_sec=$SETUP_TIMEOUT_SEC" \
     --agent-kwarg "benchmark_prompt=verify-v4" \

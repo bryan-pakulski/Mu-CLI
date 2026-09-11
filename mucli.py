@@ -38,6 +38,15 @@ from mu.tools.capabilities import normalize_session_type
 console = Console()
 
 
+def read_headless_prompt_file(path):
+    """Read a one-shot prompt without placing its contents in process argv."""
+
+    if path == "-":
+        return sys.stdin.read()
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
 # Terminal-Bench tasks only need direct workspace and shell execution. Keeping
 # this profile explicit avoids sending schemas for GUI, research, teaching,
 # memory-ledger, security, and multi-agent features on every benchmark turn.
@@ -954,6 +963,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--headless-prompt-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Run one headless agent turn using the prompt in PATH. Use '-' "
+            "for stdin. The prompt text stays out of process arguments."
+        ),
+    )
+    parser.add_argument(
         "--tool-profile",
         choices=["full", "terminal-bench"],
         default="full",
@@ -977,6 +996,16 @@ def main():
         ),
     )
     args = parser.parse_args()
+
+    if args.headless_prompt is not None and args.headless_prompt_file is not None:
+        parser.error(
+            "--headless-prompt and --headless-prompt-file are mutually exclusive"
+        )
+    if args.headless_prompt_file is not None:
+        try:
+            args.headless_prompt = read_headless_prompt_file(args.headless_prompt_file)
+        except OSError as exc:
+            parser.error(f"cannot read --headless-prompt-file: {exc}")
 
     if getattr(args, "trace_analyze", None):
         sys.exit(_trace_analyze_cli(args.trace_analyze))
@@ -1020,7 +1049,7 @@ def main():
     ui = RichUI()
 
     # Headless one-shot mode (benchmark/CI): run a single agent turn and exit.
-    if getattr(args, "headless_prompt", None):
+    if getattr(args, "headless_prompt", None) is not None:
         from mu.session.ui_headless import HeadlessUI
 
         # Bench runs operate on the TB task dir (/app). Default the workspace

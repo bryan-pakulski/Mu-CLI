@@ -113,6 +113,8 @@ def write_provenance(
     tasks: list[str],
     tb_executable: Path,
     setup_allowance_seconds: float,
+    execution_timeout_floor_seconds: float,
+    test_timeout_seconds: float,
     outer_cleanup_margin_seconds: float,
     prepared_manifest: Path | None,
     run_label: str,
@@ -125,7 +127,7 @@ def write_provenance(
         "run_label": run_label,
         "harness": {
             "name": "mucli",
-            "adapter_version": "bench-2",
+            "adapter_version": "bench-3",
             "tool_profile": "terminal-bench",
             "benchmark_prompt": DEFAULT_BENCHMARK_PROMPT,
             "model": model,
@@ -140,8 +142,11 @@ def write_provenance(
             "attempts_per_task": attempts,
             "n_concurrent": 1,
             "setup_allowance_seconds": setup_allowance_seconds,
+            "execution_timeout_floor_seconds": execution_timeout_floor_seconds,
+            "test_timeout_seconds": test_timeout_seconds,
             "outer_cleanup_margin_seconds": outer_cleanup_margin_seconds,
             "execution_time_excludes_agent_setup": True,
+            "correctness_aggregation": "best_of_attempts_per_task",
         },
         "task_images": _prepared_images(prepared_manifest, tasks),
         "wheelhouse": _wheelhouse_metadata(
@@ -171,6 +176,8 @@ def main() -> int:
     parser.add_argument("--attempts", type=int, required=True)
     parser.add_argument("--tb", type=Path, required=True)
     parser.add_argument("--setup-allowance-seconds", type=float, required=True)
+    parser.add_argument("--execution-timeout-floor-seconds", type=float, required=True)
+    parser.add_argument("--test-timeout-seconds", type=float, required=True)
     parser.add_argument("--outer-cleanup-margin-seconds", type=float, required=True)
     parser.add_argument("--prepared-manifest", type=Path)
     parser.add_argument("--run-label", default="")
@@ -188,6 +195,8 @@ def main() -> int:
         tasks=args.tasks,
         tb_executable=args.tb,
         setup_allowance_seconds=args.setup_allowance_seconds,
+        execution_timeout_floor_seconds=args.execution_timeout_floor_seconds,
+        test_timeout_seconds=args.test_timeout_seconds,
         outer_cleanup_margin_seconds=args.outer_cleanup_margin_seconds,
         prepared_manifest=args.prepared_manifest,
         run_label=args.run_label,

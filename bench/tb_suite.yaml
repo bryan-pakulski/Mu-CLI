@@ -1,8 +1,9 @@
 # MuCLI harness benchmark — curated Terminal-Bench Core task selection.
 # Run: ./benchmark.sh [--smoke]
-# Time gates come from each task's max_agent_timeout_sec (TB enforces natively).
+# Native limits are floored by generous runner safety ceilings. Correctness is
+# best-of-three per task; time and token use are separate aggregate metrics.
 # Keep this at 50 unique task IDs. The labels are coverage strata; each task's
-# task.yaml remains authoritative for its category, difficulty, and time gate.
+# task.yaml remains authoritative for its category and difficulty.
 
 name: terminal-bench-core
 version: 0.1.1

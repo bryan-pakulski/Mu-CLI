@@ -75,7 +75,7 @@ class MucliAgent(AbstractInstalledAgent):
     ):
         super().__init__(*args, **kwargs)
         self._model_name = model_name or os.environ.get("MUCLI_BENCH_MODEL", "")
-        self._version = kwargs.get("version", "bench-2")
+        self._version = kwargs.get("version", "bench-3")
         self._execution_timeout_sec = self._positive_timeout(execution_timeout_sec)
         self._setup_timeout_sec = self._positive_timeout(setup_timeout_sec) or 180.0
         self._source_archive_path = (
@@ -306,9 +306,7 @@ class MucliAgent(AbstractInstalledAgent):
             make_container_logs_host_cleanable(session)
             return self._setup_failure(logging_dir, setup_started, "InstallScriptError")
 
-        preflight = session.container.exec_run(
-            ["sh", "-c", "cd /opt/mucli && python3 -c 'import mucli'"]
-        )
+        preflight = session.container.exec_run(["/usr/local/bin/mucli", "--help"])
         if preflight.exit_code != 0:
             make_container_logs_host_cleanable(session)
             return self._setup_failure(logging_dir, setup_started, "PreflightError")
@@ -317,14 +315,23 @@ class MucliAgent(AbstractInstalledAgent):
         prompt_suffix = BENCHMARK_PROMPTS[self._benchmark_prompt]
         if prompt_suffix:
             rendered_instruction = f"{rendered_instruction.rstrip()}\n\n{prompt_suffix}"
+        try:
+            self._write_prompt(session, rendered_instruction)
+        except Exception as exc:
+            make_container_logs_host_cleanable(session)
+            return self._setup_failure(logging_dir, setup_started, type(exc).__name__)
         setup_seconds = time.monotonic() - setup_started
         execution_started = time.monotonic()
         completed = False
         error_type = None
+        failure_mode = FailureMode.NONE
         try:
-            for command in self._run_agent_commands(rendered_instruction):
+            for command in self._run_agent_commands():
                 session.send_command(command)
-            completed = True
+            completed = self._agent_exit_status(session) == 0
+            if not completed:
+                error_type = "CliExitError"
+                failure_mode = FailureMode.UNKNOWN_AGENT_ERROR
         except TimeoutError as exc:
             error_type = type(exc).__name__
             self._stop_running_agent(session)
@@ -357,6 +364,7 @@ class MucliAgent(AbstractInstalledAgent):
         return AgentResult(
             total_input_tokens=input_tokens,
             total_output_tokens=output_tokens,
+            failure_mode=failure_mode,
         )
 
     # -- AbstractInstalledAgent contract ---------------------------------
@@ -376,9 +384,38 @@ class MucliAgent(AbstractInstalledAgent):
 
     def _create_env_setup_file(self) -> str:
         """Render shell-safe exports, including values containing quotes."""
-        return "\n".join(
+        exports = "\n".join(
             f"export {key}={shlex.quote(value)}" for key, value in self._env.items()
         )
+        return f"{exports}\nexport PATH=/opt/mucli-task-bin:$PATH"
+
+    @staticmethod
+    def _write_prompt(session, prompt: str) -> None:
+        """Keep task text out of MuCLI's argv and process-match surface."""
+
+        result = session.container.exec_run(
+            [
+                "sh",
+                "-c",
+                "umask 077 && printf '%s' \"$MUCLI_BENCH_PROMPT\" "
+                "> /tmp/mucli-benchmark-prompt.txt",
+            ],
+            environment={"MUCLI_BENCH_PROMPT": prompt},
+        )
+        if result.exit_code != 0:
+            raise RuntimeError("failed to stage MuCLI benchmark prompt")
+
+    @staticmethod
+    def _agent_exit_status(session) -> int | None:
+        result = session.container.exec_run(
+            ["sh", "-c", "cat /tmp/mucli-agent-status 2>/dev/null"]
+        )
+        if result.exit_code != 0:
+            return None
+        try:
+            return int(result.output.decode().strip())
+        except (AttributeError, TypeError, ValueError):
+            return None
 
     @property
     def _install_agent_script_path(self) -> os.PathLike:
@@ -389,8 +426,7 @@ class MucliAgent(AbstractInstalledAgent):
             )
         return self._get_templated_script_path("mucli-setup.sh.j2")
 
-    def _run_agent_commands(self, instruction: str) -> list[TerminalCommand]:
-        escaped = shlex.quote(instruction)
+    def _run_agent_commands(self) -> list[TerminalCommand]:
         provider_part = ""
         if self._model_name and "/" in self._model_name:
             provider, model = self._model_name.split("/", 1)
@@ -405,8 +441,11 @@ class MucliAgent(AbstractInstalledAgent):
         return [
             TerminalCommand(
                 command=(
-                    "cd /app && mucli --headless-prompt "
-                    f"{escaped}{provider_part} --tool-profile terminal-bench --yolo"
+                    "cd /app && ( mucli --headless-prompt-file "
+                    f"/tmp/mucli-benchmark-prompt.txt{provider_part} "
+                    "--tool-profile terminal-bench --yolo; "
+                    "agent_status=$?; printf '%s' \"$agent_status\" "
+                    '> /tmp/mucli-agent-status; exit "$agent_status" )'
                 ),
                 min_timeout_sec=0.0,
                 max_timeout_sec=self._execution_timeout_sec or float("inf"),

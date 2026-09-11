@@ -9,7 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from bench.list_tb_tasks import load_task_ids
-from bench.prepare_tb import check_prepared, stage_task, task_source_sha256
+from bench.prepare_tb import (
+    _ENVIRONMENT_REVISION,
+    _MUCLI_PYTHON_IMAGE,
+    check_prepared,
+    stage_task,
+    task_source_sha256,
+)
 from bench.summarize_tb import summarize
 from bench.tb_prompts import BENCHMARK_PROMPTS, DEFAULT_BENCHMARK_PROMPT
 from bench.write_tb_provenance import _prepared_images
@@ -26,7 +32,7 @@ from bench.tb_support import (
     source_archive_metadata,
     stop_mucli_process,
 )
-from mucli import apply_tool_profile
+from mucli import apply_tool_profile, read_headless_prompt_file
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -244,6 +250,7 @@ def test_prepared_task_uses_content_addressed_image_and_detects_drift(tmp_path):
                 "tasks": {
                     "hello-world": {
                         "source_sha256": source_sha,
+                        "environment_revision": _ENVIRONMENT_REVISION,
                         "image_name": image_name,
                         "image_id": "sha256:image-one",
                     }
@@ -321,6 +328,104 @@ def test_stage_task_can_pin_apt_sources_for_pinned_task(tmp_path):
     assert "apt -o Acquire::Retries=10 install -y" in dockerfile
     assert "apt-get -o Acquire::Retries=10 install -y qemu-system-x86" in dockerfile
     assert "apt -o Acquire::Retries=10 install -y telnet" in dockerfile
+
+
+def test_stage_task_bakes_isolated_runtime_and_offline_grader(tmp_path):
+    source = tmp_path / "source" / "hello-world"
+    tests_dir = source / "tests"
+    tests_dir.mkdir(parents=True)
+    (source / "Dockerfile").write_text("FROM python:3.9-slim-bookworm\n")
+    (source / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  client:\n"
+        "    build:\n"
+        "      context: .\n"
+        "      dockerfile: Dockerfile\n"
+        "    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}\n"
+    )
+    (source / "run-tests.sh").write_text(
+        "source $TEST_DIR/setup-uv-pytest.sh\n"
+        "uv add pandas\n"
+        "bash $TEST_DIR/run-uv-pytest.sh\n"
+    )
+    (tests_dir / "setup-uv-pytest.sh").write_text(
+        "curl https://astral.sh/uv/install.sh | sh\n"
+    )
+    (tests_dir / "run-uv-pytest.sh").write_text("uv run pytest\n")
+    (tests_dir / "test_outputs.py").write_text("def test_ok(): assert True\n")
+
+    prepared = tmp_path / "prepared" / "hello-world"
+    stage_task(
+        source,
+        prepared,
+        "mucli-test/hello:prepared",
+        prepare_environment=True,
+    )
+
+    dockerfile = (prepared / "Dockerfile").read_text()
+    setup = (prepared / "tests" / "setup-uv-pytest.sh").read_text()
+    runner = (prepared / "tests" / "run-uv-pytest.sh").read_text()
+    run_tests = (prepared / "run-tests.sh").read_text()
+    assert dockerfile.startswith(
+        f"FROM {_MUCLI_PYTHON_IMAGE} AS mucli_benchmark_python"
+    )
+    assert (
+        "COPY --from=mucli_benchmark_python /usr/local /opt/mucli-python" in dockerfile
+    )
+    assert "python3 -m venv --system-site-packages /opt/tb-grader" in dockerfile
+    assert "\n+    &&" not in dockerfile
+    assert "astral.sh" not in setup
+    assert "/opt/tb-grader/bin/python -m pytest" in runner
+    assert "uv" not in run_tests
+    assert "/opt/tb-grader/bin/python -m pytest" in run_tests
+
+
+def test_stage_task_preloads_pytorch_grader_dataset(tmp_path):
+    source = tmp_path / "source" / "pytorch-model-cli"
+    tests_dir = source / "tests"
+    tests_dir.mkdir(parents=True)
+    (source / "Dockerfile").write_text("FROM python:3.12-slim-bookworm\n")
+    (source / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  client:\n"
+        "    build: .\n"
+        "    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}\n"
+    )
+    (source / "run-tests.sh").write_text("uv run pytest\n")
+    (tests_dir / "test_outputs.py").write_text(
+        'DATASET = MNIST(root="./data", train=False, download=True)\n'
+    )
+
+    prepared = tmp_path / "prepared" / "pytorch-model-cli"
+    stage_task(
+        source,
+        prepared,
+        "mucli-test/pytorch:prepared",
+        prepare_environment=True,
+    )
+
+    dockerfile = (prepared / "Dockerfile").read_text()
+    test_file = (prepared / "tests" / "test_outputs.py").read_text()
+    assert "MNIST(root='/opt/tb-grader-data'" in dockerfile
+    assert 'root="/opt/tb-grader-data"' in test_file
+    assert "download=True" in test_file
+
+
+def test_headless_prompt_file_keeps_prompt_source_outside_argv(tmp_path):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("qemu-system-x86_64 should remain prompt text\n")
+
+    assert read_headless_prompt_file(prompt) == prompt.read_text()
+
+
+def test_benchmark_commands_feed_prompts_by_file_or_stdin():
+    mucli = Path("bench/tb_mucli_agent.py").read_text()
+    external = Path("bench/tb_cli_agent.py").read_text()
+
+    assert "--headless-prompt-file " in mucli
+    assert "/tmp/mucli-benchmark-prompt.txt" in mucli
+    assert "< /tmp/controlled-agent-prompt.txt" in external
+    assert "prompt = shlex.quote" not in external
 
 
 def test_provenance_includes_selected_prepared_image_ids(tmp_path):
@@ -405,7 +510,10 @@ def test_summary_reports_execution_time_separately_from_setup(tmp_path):
         for line in lines
     )
     assert any("missing-task" in line and "NO-RESULT" in line for line in lines)
-    assert lines[-1] == "pack score: 1/1"
+    assert "task score: 1/1 tasks" in lines
+    assert "trial outcomes: 1/1 resolved" in lines
+    assert "execution total: 1.2s; setup total (excluded): 9.8s" in lines
+    assert lines[-1] == "tokens total: 0 input; 0 output"
 
 
 def test_summary_labels_terminal_bench_fallback_as_setup_inclusive(tmp_path):
@@ -442,8 +550,44 @@ def test_summary_does_not_label_zero_resolved_repeats_as_pass(tmp_path):
     lines, healthy = summarize(tmp_path, ["failing-task"])
 
     assert healthy is True
-    assert any("0/2 RESOLVED" in line for line in lines)
-    assert all("0/2 PASS" not in line for line in lines)
+    assert any("BEST-2 FAIL (0/2)" in line for line in lines)
+    assert "best-of-2 score: 0/1 tasks" in lines
+
+
+def test_summary_scores_best_of_three_and_sums_trial_tokens(tmp_path):
+    run_dir = tmp_path / "variable-task" / "run-1"
+    run_dir.mkdir(parents=True)
+    results = [
+        {
+            "task_id": "variable-task",
+            "is_resolved": False,
+            "total_input_tokens": 100,
+            "total_output_tokens": 10,
+        },
+        {
+            "task_id": "variable-task",
+            "is_resolved": True,
+            "total_input_tokens": 200,
+            "total_output_tokens": 20,
+        },
+        {
+            "task_id": "variable-task",
+            "is_resolved": False,
+            "total_input_tokens": 300,
+            "total_output_tokens": 30,
+        },
+    ]
+    (run_dir / "results.json").write_text(
+        json.dumps({"results": results}), encoding="utf-8"
+    )
+
+    lines, healthy = summarize(tmp_path, ["variable-task"])
+
+    assert healthy is True
+    assert any("BEST-3 PASS (1/3)" in line for line in lines)
+    assert "best-of-3 score: 1/1 tasks" in lines
+    assert "trial outcomes: 1/3 resolved" in lines
+    assert lines[-1] == "tokens total: 600 input; 60 output"
 
 
 def test_task_execution_timeout_uses_native_task_budget(tmp_path):
@@ -454,6 +598,7 @@ def test_task_execution_timeout_uses_native_task_budget(tmp_path):
     )
 
     assert read_task_execution_timeout(config) == 480.5
+    assert read_task_execution_timeout(config, minimum_seconds=1800) == 1800
 
 
 def test_external_harnesses_use_same_native_ollama_cloud_model():
@@ -631,6 +776,12 @@ def test_pack_requires_python_314_and_supports_repeated_prebuilt_runs():
     assert "3.10 3.11 3.12 3.13 3.14" in wheelhouse
     assert "MUCLI_WHEELHOUSE_PYTHON_UNSUPPORTED" in setup
     assert '--n-attempts "$ATTEMPTS"' in runner
+    assert (
+        'EXECUTION_TIMEOUT_FLOOR_SEC="${TB_EXECUTION_TIMEOUT_FLOOR_SEC:-1800}"'
+        in runner
+    )
+    assert 'TEST_TIMEOUT_SEC="${TB_TEST_TIMEOUT_SEC:-900}"' in runner
+    assert "--global-test-timeout-sec" in runner
     assert "--no-rebuild --no-cleanup" in runner
     assert "write_tb_provenance.py" in runner
     assert "source_archive_path=$SOURCE_ARCHIVE" in runner
@@ -653,6 +804,8 @@ def test_one_command_benchmark_uses_credible_defaults_and_excluded_setup():
     assert "harness: mucli" in output
     assert "model: ollama/glm-5.3-flash" in output
     assert "tasks: 50; attempts per task: 3" in output
+    assert "correctness: best of 3 per task" in output
+    assert "execution, setup, and tokens are accumulated separately" in output
     assert "outside timed execution" in output
     assert "bench/prepare_tb.py" in output
     assert "bench/run_pack.sh --attempts 3" in output

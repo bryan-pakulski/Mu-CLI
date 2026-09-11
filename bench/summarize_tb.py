@@ -77,6 +77,16 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
     healthy = True
     resolved_trials = 0
     total_trials = 0
+    resolved_tasks = 0
+    scored_tasks = 0
+    attempt_counts: list[int] = []
+    total_execution_seconds = 0.0
+    total_setup_seconds = 0.0
+    total_fallback_seconds = 0.0
+    timed_tasks = 0
+    fallback_tasks = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
 
     for task_name in task_names:
         results = load_task_results(root / task_name)
@@ -86,12 +96,18 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
             continue
 
         total_trials += len(results)
+        scored_tasks += 1
+        attempt_counts.append(len(results))
         passed = sum(result.get("is_resolved") is True for result in results)
         resolved_trials += passed
+        resolved_tasks += int(passed > 0)
         timing = load_execution_metrics(root / task_name, len(results))
         if timing:
             execution_seconds = sum(float(item["execution_seconds"]) for item in timing)
             setup_seconds = sum(float(item["setup_seconds"]) for item in timing)
+            total_execution_seconds += execution_seconds
+            total_setup_seconds += setup_seconds
+            timed_tasks += 1
             if len(timing) == 1:
                 duration_text = (
                     f"{execution_seconds:.1f}s execution "
@@ -109,6 +125,8 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
                 for result in results
                 if (duration := _duration_seconds(result)) is not None
             ]
+            total_fallback_seconds += sum(durations)
+            fallback_tasks += int(bool(durations))
             duration_text = (
                 f"{sum(durations):.1f}s TB-agent (setup included)"
                 if durations
@@ -117,7 +135,8 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
         if len(results) == 1:
             status = "PASS" if passed else "FAIL"
         else:
-            status = f"{passed}/{len(results)} RESOLVED"
+            verdict = "PASS" if passed else "FAIL"
+            status = f"BEST-{len(results)} {verdict} ({passed}/{len(results)})"
         modes = sorted(
             {
                 str(result.get("failure_mode"))
@@ -132,12 +151,30 @@ def summarize(root: Path, task_names: list[str]) -> tuple[list[str], bool]:
         output_tokens = sum(
             int(result.get("total_output_tokens") or 0) for result in results
         )
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
         token_text = f"; {input_tokens:,} in/{output_tokens:,} out tokens"
         lines.append(
-            f"  {task_name:<28} {status:<10} " f"{duration_text}{mode_text}{token_text}"
+            f"  {task_name:<28} {status:<19} " f"{duration_text}{mode_text}{token_text}"
         )
 
-    lines.append(f"pack score: {resolved_trials}/{total_trials}")
+    attempts = max(attempt_counts, default=0)
+    score_label = f"best-of-{attempts}" if attempts > 1 else "task"
+    lines.append(f"{score_label} score: {resolved_tasks}/{scored_tasks} tasks")
+    lines.append(f"trial outcomes: {resolved_trials}/{total_trials} resolved")
+    if timed_tasks:
+        lines.append(
+            f"execution total: {total_execution_seconds:.1f}s; "
+            f"setup total (excluded): {total_setup_seconds:.1f}s"
+        )
+    if fallback_tasks:
+        lines.append(
+            f"TB-agent fallback time (setup included): {total_fallback_seconds:.1f}s"
+        )
+    lines.append(
+        f"tokens total: {total_input_tokens:,} input; "
+        f"{total_output_tokens:,} output"
+    )
     return lines, healthy
 
 

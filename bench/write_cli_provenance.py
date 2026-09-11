@@ -44,6 +44,8 @@ def main() -> int:
     parser.add_argument("--run-label", default="")
     parser.add_argument("--tb", type=Path, required=True)
     parser.add_argument("--setup-allowance-seconds", type=float, required=True)
+    parser.add_argument("--execution-timeout-floor-seconds", type=float, required=True)
+    parser.add_argument("--test-timeout-seconds", type=float, required=True)
     parser.add_argument("--outer-cleanup-margin-seconds", type=float, required=True)
     parser.add_argument("tasks", nargs="+")
     args = parser.parse_args()
@@ -75,7 +77,7 @@ def main() -> int:
         "harness": {
             "name": args.harness,
             "version": _VERSIONS[args.harness],
-            "adapter_version": "controlled-cli-1",
+            "adapter_version": "controlled-cli-2",
             "model_requested": args.model,
             "model_native": normalize_ollama_cloud_model(args.model),
             "provider": "ollama-cloud",
@@ -96,8 +98,11 @@ def main() -> int:
             "attempts_per_task": args.attempts,
             "n_concurrent": 1,
             "setup_allowance_seconds": args.setup_allowance_seconds,
+            "execution_timeout_floor_seconds": args.execution_timeout_floor_seconds,
+            "test_timeout_seconds": args.test_timeout_seconds,
             "outer_cleanup_margin_seconds": args.outer_cleanup_margin_seconds,
             "execution_time_excludes_agent_setup": True,
+            "correctness_aggregation": "best_of_attempts_per_task",
         },
         "task_images": _prepared_images(args.prepared_manifest, args.tasks),
         "host": {

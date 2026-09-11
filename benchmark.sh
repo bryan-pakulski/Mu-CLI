@@ -196,6 +196,22 @@ bootstrap_tb() {
   TB_EXECUTABLE="$tb_venv/bin/tb"
 }
 
+verify_external_artifact() {
+  local expected="$1"
+  local path="$2"
+  local actual
+  [ -f "$path" ] || {
+    echo "controlled harness artifact is missing: $path" >&2
+    return 1
+  }
+  actual="$(sha256sum "$path")"
+  actual="${actual%% *}"
+  [ "$actual" = "$expected" ] || {
+    echo "controlled harness artifact checksum mismatch: $path" >&2
+    return 1
+  }
+}
+
 if [ "$DRY_RUN" -eq 0 ]; then
   if [ ! -x "$TB_EXECUTABLE" ]; then
     if [ "$BOOTSTRAP" -eq 1 ]; then
@@ -254,6 +270,28 @@ if [ "$DRY_RUN" -eq 0 ]; then
     echo "OLLAMA_API_KEY is required by the controlled external harnesses" >&2
     exit 2
   fi
+  for selected_harness in "${HARNESSES[@]}"; do
+    case "$selected_harness" in
+      opencode)
+        verify_external_artifact \
+          6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5 \
+          bench/artifacts/agents/opencode/1.18.4/opencode || exit 2
+        ;;
+      claude-code)
+        verify_external_artifact \
+          8272c8a474ac9ea1bc35f19b9f7c7e7dc4dc4eb6d5ad3e484b19335ac72446b2 \
+          bench/artifacts/agents/claude-code/2.1.211/claude || exit 2
+        ;;
+      pi)
+        verify_external_artifact \
+          ffa2a8214ef6f96fe6a5cdb1ddfb4165396dbcc352e92e42bf4d988986757bc6 \
+          bench/artifacts/agents/pi/pi-0.85.1.tar.gz || exit 2
+        verify_external_artifact \
+          b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a \
+          bench/artifacts/agents/node/22.23.2/node-v22.23.2-linux-x64.tar.gz || exit 2
+        ;;
+    esac
+  done
   command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 2; }
   docker info >/dev/null 2>&1 || {
     echo "the Docker daemon is unavailable" >&2
@@ -265,7 +303,8 @@ echo "== Terminal-Bench evaluation =="
 echo "   harness: ${HARNESSES[*]}"
 echo "   model: $MODEL_NAME"
 echo "   tasks: ${#TASKS[@]}; attempts per task: $ATTEMPTS"
-echo "   timing: task execution only; harness setup is reported separately"
+echo "   correctness: best of $ATTEMPTS per task"
+echo "   metrics: execution, setup, and tokens are accumulated separately"
 
 if [ "$PREPARE" -eq 1 ]; then
   echo "-- preparing/reusing immutable task images (outside timed execution)"

@@ -4,9 +4,9 @@ set -euo pipefail
 # mucli TB agent install {{ version }}: dependencies + source into /opt/mucli.
 mkdir -p /opt/mucli
 
-# Several TB images already contain a newer Python under /usr/local. Avoid an
-# unnecessary apt transaction (and avoid replacing the intended interpreter)
-# unless Python or pip is genuinely absent.
+# Prepared images carry a private Python 3.10 runtime for MuCLI. Prefer it so
+# installing the harness cannot mutate the task's own interpreter or package
+# set; direct adapter runs may fall back to a compatible task interpreter.
 if ! command -v python3 >/dev/null 2>&1 || \
    ! python3 -m pip --version >/dev/null 2>&1; then
     if ! command -v apt-get >/dev/null 2>&1; then
@@ -18,12 +18,32 @@ if ! command -v python3 >/dev/null 2>&1 || \
         --no-install-recommends python3 python3-pip
 fi
 
+python_supported() {
+    "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' \
+        >/dev/null 2>&1
+}
+
+if [ -x /opt/mucli-python/bin/python3 ]; then
+    MUCLI_PYTHON=/opt/mucli-python/bin/python3
+else
+    MUCLI_PYTHON="$(command -v python3)"
+    if ! python_supported "$MUCLI_PYTHON"; then
+        echo "MUCLI_PYTHON_UNSUPPORTED: $(python3 --version 2>&1); " \
+             "prepare the benchmark task image first" >&2
+        exit 1
+    fi
+fi
+if ! "$MUCLI_PYTHON" -m pip --version >/dev/null 2>&1; then
+    echo "MUCLI_PIP_MISSING: $MUCLI_PYTHON has no pip" >&2
+    exit 1
+fi
+
 export PIP_BREAK_SYSTEM_PACKAGES=1
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 pip_install() {
     local attempt
     for attempt in 1 2; do
-        if python3 -m pip install --retries 3 --quiet --no-input "$@"; then
+        if "$MUCLI_PYTHON" -m pip install --retries 3 --quiet --no-input "$@"; then
             return 0
         fi
         echo "pip install attempt ${attempt}/2 failed" >&2
@@ -46,7 +66,7 @@ if [ -f /tmp/mucli-wheelhouse.tar.gz ]; then
         echo "MUCLI_WHEELHOUSE_INCOMPATIBLE: rebuild with bench/build_wheelhouse.sh" >&2
         exit 1
     fi
-    python3 - /mucli-wheelhouse/wheelhouse/manifest.json <<'PY'
+    "$MUCLI_PYTHON" - /mucli-wheelhouse/wheelhouse/manifest.json <<'PY'
 import json
 import sys
 
@@ -65,7 +85,7 @@ PY
     # Task images may contain apt-owned Python packages without pip RECORD
     # files. Overlay the isolated benchmark dependencies under /usr/local
     # instead of trying to uninstall distro-managed files.
-    python3 -m pip install --quiet --no-input --ignore-installed --no-index \
+    "$MUCLI_PYTHON" -m pip install --quiet --no-input --ignore-installed --no-index \
         --find-links /mucli-wheelhouse/wheelhouse \
         -r /mucli-wheelhouse/wheelhouse/requirements-bench.txt \
         pathspec python-dotenv psutil
@@ -85,11 +105,19 @@ cp -r /mucli-src/. /opt/mucli/
 cd /opt/mucli
 # The launcher executes the copied source directly. An editable install is
 # unnecessary and could trigger build-isolation network access.
-cat > /usr/local/bin/mucli <<'EOF'
-#!/bin/sh
-exec python3 /opt/mucli/mucli.py "$@"
-EOF
+printf '#!/bin/sh\nexec %s /opt/mucli/mucli.py "$@"\n' \
+    "$MUCLI_PYTHON" > /usr/local/bin/mucli
 chmod +x /usr/local/bin/mucli
+
+# Terminal-Bench controls its own pane through the container's default tmux
+# socket. Agent tasks that exercise tmux get a distinct socket so commands such
+# as `tmux kill-server` cannot kill the benchmark controller.
+if TMUX_REAL="$(command -v tmux 2>/dev/null)"; then
+    mkdir -p /opt/mucli-task-bin
+    printf '#!/bin/sh\nexec %s -L mucli-task "$@"\n' \
+        "$TMUX_REAL" > /opt/mucli-task-bin/tmux
+    chmod +x /opt/mucli-task-bin/tmux
+fi
 
 mkdir -p "${MUCLI_HOME:-/logs/mucli}"
 cp /opt/mucli/.mucli-benchmark-source.json \
@@ -99,7 +127,7 @@ if [ -f /mucli-wheelhouse/wheelhouse/manifest.json ]; then
         "${MUCLI_HOME:-/logs/mucli}/wheelhouse.json"
 fi
 
-python3 -c '
+"$MUCLI_PYTHON" -c '
 import importlib
 import sys
 
@@ -127,4 +155,4 @@ if failed:
 '
 
 mucli --help >/dev/null 2>&1 || exit 1
-echo "mucli install OK ($(python3 --version 2>&1))"
+echo "mucli install OK ($("$MUCLI_PYTHON" --version 2>&1))"

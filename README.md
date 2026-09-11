@@ -185,9 +185,11 @@ with one command:
 ```
 
 Use `./benchmark.sh --smoke` for a cheap end-to-end check or
-`./benchmark.sh --harness all --attempts 3` for the timing-controlled MuCLI,
-OpenCode, Claude Code, and Pi comparison. See [bench/pack.md](bench/pack.md) for
-prerequisites, timing boundaries, and provenance details.
+`./benchmark.sh --harness all --attempts 3` for a correctness-first MuCLI,
+OpenCode, Claude Code, and Pi comparison. The score is best-of-three per task;
+elapsed time and token use are reported separately. See
+[bench/pack.md](bench/pack.md) for prerequisites, safety ceilings, and
+provenance details.
 
 ## ROADMAP
 - Authentication for hosting

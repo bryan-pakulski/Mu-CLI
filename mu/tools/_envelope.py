@@ -144,6 +144,35 @@ def _build_tool_envelope(
 
 # ---------------------------------------------------------------- normalizer
 
+# Keys that belong to the envelope itself. Anything else a handler returns
+# at top level is *payload* (e.g. ask_user_choice's `selected`, feature
+# tools' `task` / `state`) and must survive normalisation.
+_ENVELOPE_KEYS = frozenset(
+    {
+        "ok",
+        "error_code",
+        "message",
+        "data",
+        "artifacts",
+        "hint",
+        "retryable",
+        "telemetry",
+        "error",
+    }
+)
+
+
+def _payload_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Top-level handler fields that are not envelope bookkeeping."""
+    return {k: v for k, v in payload.items() if k not in _ENVELOPE_KEYS}
+
+
+def _render_payload_message(payload: Dict[str, Any]) -> str:
+    try:
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001
+        return str(payload)
+
 
 def _envelope_from_handler_result(
     tool_name: str, handler_result: Any
@@ -163,15 +192,26 @@ def _envelope_from_handler_result(
                 if out.get("ok")
                 else infer_tool_error_code(tool_name, out)
             )
+        # Handlers commonly return `{"ok": true, <payload...>}` with the
+        # result fields at top level and no `message` / `data`. The model
+        # only ever sees `message` (or `data`) after unwrapping, so a bare
+        # "ok" here silently discarded e.g. ask_user_choice's `selected`
+        # list. Preserve the payload: lift it into `data` and render it as
+        # the message. Top-level keys are kept too for existing consumers.
+        extra = _payload_keys(out)
         if "message" not in out:
-            if isinstance(out.get("error"), str):
+            if isinstance(out.get("error"), str) and out.get("error"):
                 out["message"] = out.get("error", "")
+            elif extra:
+                out["message"] = _render_payload_message(extra)
             elif out.get("ok"):
                 out["message"] = "ok"
             else:
                 out["message"] = str(out.get("error") or "")
-        if "data" not in out:
-            out["data"] = {}
+        if "data" not in out or (
+            isinstance(out.get("data"), dict) and not out["data"] and extra
+        ):
+            out["data"] = extra if extra else {}
         if "artifacts" not in out:
             out["artifacts"] = []
         # Backfill hint + retryable from the registry when missing. Handlers

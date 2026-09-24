@@ -1172,6 +1172,19 @@ class Session:
             return None, raw_result
         message = parsed.get("message", "")
         data = parsed.get("data")
+        # tool_result_payload_unwrap: a bare acknowledgement ("ok" /
+        # "success") carries no information when structured data exists —
+        # older persisted envelopes and third-party handlers backfilled
+        # message="ok" and left the real payload in `data` (or top-level).
+        # Hand the model the payload instead of the two-character ack.
+        if isinstance(message, str) and message.strip().lower() in {"ok", "success"}:
+            if isinstance(data, (dict, list)) and data:
+                return parsed, json.dumps(data, ensure_ascii=False, sort_keys=True)
+            from mu.tools._envelope import _payload_keys
+
+            payload = _payload_keys(parsed)
+            if payload:
+                return parsed, json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if isinstance(message, str) and message.strip():
             return parsed, message
         if isinstance(data, str):

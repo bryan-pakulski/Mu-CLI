@@ -576,4 +576,19 @@
     state.poll = window.setInterval(() => {
         refreshBoard({ quiet: true, refreshSelected: true });
     }, 5000);
+
+    // Push path: the controller emits `job_attention` on the shared SSE bus
+    // when a job enters/leaves a human-attention state. Refresh immediately
+    // instead of waiting for the next poll tick. Polling stays as fallback.
+    try {
+        const source = new EventSource('/api/events');
+        source.onmessage = event => {
+            let data;
+            try { data = JSON.parse(event.data); } catch { return; }
+            if (data && data.kind === 'job_attention') {
+                refreshBoard({ quiet: true, refreshSelected: true });
+            }
+        };
+        window.addEventListener('beforeunload', () => source.close());
+    } catch { /* EventSource unavailable: polling covers it */ }
 })();

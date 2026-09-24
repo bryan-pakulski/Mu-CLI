@@ -93,6 +93,10 @@ class JobService:
         never materializes the full archived-id set per render."""
         return self.store.list_unarchived_jobs(limit=limit)
 
+    def attention_summary(self) -> Dict[str, Any]:
+        """Jobs currently waiting on a human (NEEDS_HUMAN / CONFLICTED)."""
+        return self.store.attention_summary()
+
     def events(self, job_id: str, *, after_id: int = 0, limit: int = 500) -> List[JobEvent]:
         self.get(job_id)
         return self.store.list_events(job_id, after_id=after_id, limit=limit)
@@ -124,6 +128,11 @@ class JobService:
             attention = attention_reason if isinstance(attention_reason, AttentionReason) else AttentionReason(str(attention_reason or ""))
             if attention == AttentionReason.NONE:
                 raise JobStateError("needs_human requires an attention_reason")
+        elif target_status == JobStatus.CONFLICTED:
+            # Base drift / merge conflict is a human-attention state too:
+            # keep the reason so boards and the attention push explain WHY.
+            attention_reason = AttentionReason.MERGE_CONFLICT
+            attention_detail = str(attention_detail or "The job branch no longer merges cleanly onto its base branch.")
         else:
             attention_reason = AttentionReason.NONE
             attention_detail = ""
@@ -165,9 +174,22 @@ class JobService:
         if current.status != JobStatus.NEEDS_HUMAN:
             raise JobStateError("only a needs_human job can be resumed")
         self.store.append_event(job_id, "human_response", payload={"detail": str(detail or "")})
+        self._clear_retry_backoff(job_id)
         return self.transition(job_id, JobStatus.QUEUED, reason="human response received; requeued")
 
+    def _clear_retry_backoff(self, job_id: str) -> None:
+        """Drop a pending automatic-retry ``next_run_at`` so an explicit
+        human retry/resume runs immediately."""
+        try:
+            job = self.get(job_id)
+            metadata = dict(job.metadata or {})
+            if metadata.pop("next_run_at", None) is not None:
+                self.store.update_runtime_fields(job_id, metadata_json=metadata)
+        except Exception:  # noqa: BLE001
+            logger.debug("clear_retry_backoff failed", exc_info=True)
+
     def retry(self, job_id: str, *, reason: str = "retry requested") -> Job:
+        self._clear_retry_backoff(job_id)
         current = self.get(job_id)
         if current.status not in {
             JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED,

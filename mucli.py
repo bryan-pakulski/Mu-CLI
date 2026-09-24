@@ -1093,6 +1093,16 @@ def main():
 
     print_splash(session)
     refresh_memory_hud(session, ui)
+    # Jobs waiting on a human are surfaced at startup so an unattended
+    # overnight run is understood without opening the work board.
+    try:
+        from mu.commands.job import attention_banner
+
+        _jobs_banner = attention_banner()
+        if _jobs_banner:
+            ui.show_info(_jobs_banner)
+    except Exception:
+        logger.debug("job attention banner skipped", exc_info=True)
 
     # Cross-surface continuity phases 2+3 (G1+G4): inbound session watcher +
     # presence beacon. The watcher polls session.json only while another

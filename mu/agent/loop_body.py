@@ -249,6 +249,10 @@ def run_turn(session, text, *, origin="user"):
     # compact-and-retry budget (circuit breaker is per-turn, capped at
     # _MAX_OVERFLOW_RECOVERIES_PER_TURN recoveries).
     session._overflow_recoveries_this_turn = 0
+    # Unattended provider-error policy: per-turn auto-retry budget.
+    session._provider_auto_retries_used = 0
+    session._provider_auto_rollback_done = False
+    session._last_provider_error_transient = None
     session.sync_runtime_state()
     # Round-51 T7: trim oversized restored history BEFORE the first request.
     # The traced 517-iter run resumed with L5 at 300k (another at 795k,
@@ -1749,17 +1753,27 @@ def run_turn(session, text, *, origin="user"):
                         session.ui.show_info(
                             "[dim]Compacting turn history (removing tool metadata)...[/dim]"
                         )
-                    session.session_manager.compact_completed_turn()
+                    _sm_ = session.session_manager
+                    _sm_._pending_compaction_iter = iteration
+                    _snap = _sm_._shrink_snapshot()
+                    _sm_.compact_completed_turn()
+                    _sm_._record_shrink_since(_snap, kind="turn_collapse")
                     # Fold whatever the just-finished turn displaced into the
                     # rolling summary so compacted-away content survives in
                     # L2 — otherwise the summary never learns about turns
                     # that were dropped from history without a budget-driven
                     # compaction pass.
                     try:
-                        session.session_manager.roll_history_summary(
+                        _snap = _sm_._shrink_snapshot()
+                        if _sm_.roll_history_summary(
                             keep_recent=resolve_keep_recent(session),
                             provider=session.provider,
-                        )
+                        ):
+                            _sm_._record_shrink_since(
+                                _snap,
+                                kind="post_turn_roll",
+                                summarizer=getattr(_sm_, "_last_summary_mode", "unknown"),
+                            )
                     except Exception as exc:
                         logger.debug("Post-turn summary roll skipped: %s", exc)
                     logger.debug("History compacted.")
@@ -1952,23 +1966,36 @@ def run_turn(session, text, *, origin="user"):
                     if rr is not None:
                         ck = str(rr.get("cache_key", "") or "")
                         rng = rr.get("range")
+                        covered_by = rr.get("covered_by") or rng
+                        exact = bool(rr.get("exact", True))
                         _auto_recall_hits[part_idx] = ck
                         if session.ui:
                             try:
                                 session.ui.show_info(
                                     f"  [Dedup: {part.tool_name} range {rng} "
-                                    f"already supplied — cache_key={ck}]"
+                                    + ("already supplied" if exact else
+                                       f"inside earlier read {covered_by}")
+                                    + f" — cache_key={ck}]"
                                 )
                             except Exception:
                                 # Defensive: best-effort path must not break the caller.
                                 logger.debug("Suppressed exception", exc_info=True)
+                        _cov_s, _cov_e = (covered_by or (None, None))[:2]
+                        _cov_txt = (
+                            "this exact range was already read"
+                            if exact
+                            else (
+                                f"lines {rng[0]}-{rng[1]} sit inside an earlier read of "
+                                + ("the whole file" if _cov_e is None
+                                   else f"lines {_cov_s}-{_cov_e}")
+                            )
+                        )
                         return (
-                            f"[dedup: {part.tool_name} — file unchanged; this "
-                            f"exact range was already read earlier in this "
-                            f"conversation and its full content is in the "
-                            f"message history above — use what you already "
-                            f"have instead of re-reading. If a verbatim "
-                            f"re-fetch is truly required, call "
+                            f"[dedup: {part.tool_name} — file unchanged; "
+                            f"{_cov_txt} earlier in this conversation and its "
+                            f"content is in the message history above — use "
+                            f"what you already have instead of re-reading. If a "
+                            f"verbatim re-fetch is truly required, call "
                             f"recall({ck}) or result_range/result_search "
                             f"(when available in this session).]"
                         )
@@ -2950,10 +2977,14 @@ def run_turn(session, text, *, origin="user"):
                 # record orphans an irreversible action and retrying the
                 # request can duplicate it — surface the error instead.
                 provider_bad_request_retried = True
+                _snap = session.session_manager._shrink_snapshot()
                 session.session_manager.history = session.session_manager.history[:initial_history_len]
                 session.session_manager.summary_anchor = min(
                     session.session_manager.summary_anchor,
                     len(session.session_manager.history),
+                )
+                session.session_manager._record_shrink_since(
+                    _snap, kind="provider_error_rollback", http_status=status_code
                 )
                 session.session_manager.history.append(new_user_message)
                 session.session_manager.save_history_turn(session.folder_context)
@@ -2968,12 +2999,17 @@ def run_turn(session, text, *, origin="user"):
                     )
                 continue
 
+            session._last_provider_error = str(e)
             choice = session._provider_error_recovery_choice()
             if choice == "rollback_retry":
+                _snap = session.session_manager._shrink_snapshot()
                 session.session_manager.history = session.session_manager.history[: turn_start_index + 1]
                 session.session_manager.summary_anchor = min(
                     session.session_manager.summary_anchor,
                     len(session.session_manager.history),
+                )
+                session.session_manager._record_shrink_since(
+                    _snap, kind="user_rollback_retry"
                 )
                 session.session_manager.save_history_turn(session.folder_context)
                 messages = session._build_messages_from_history(

@@ -232,3 +232,58 @@ def test_search_and_replace_does_not_get_deduped_after_read(tmp_path):
     assert rr is None, (
         "search_and_replace_file was short-circuited by range memo — P0 dedup bug!"
     )
+
+
+# ---------------------------------------------------------------------------
+# Range overlap (governance tier-3): a get_chunk subset of an earlier read of
+# the same unchanged file is as redundant as an exact repeat.
+# ---------------------------------------------------------------------------
+
+def test_range_memo_subset_of_whole_file_read_dedups(tmp_path):
+    cache = ToolResultCache()
+    f = tmp_path / "x.py"
+    _write(f, "line\n" * 100)
+    key = cache.store_with_locator("c1", "read_file", {"filename": str(f)}, "body")
+    cache.record_read_range("read_file", {"filename": str(f)}, key)
+    rr = cache.lookup_read_range("get_chunk", {"file": str(f), "start_line": 10, "end_line": 20})
+    assert rr is not None
+    assert rr["cache_key"] == key
+    assert rr["exact"] is False
+    assert rr["covered_by"] == (1, None)
+    assert cache.dup_bytes_avoided == 1
+    assert cache.locator_hits == 1
+
+
+def test_range_memo_subset_of_wider_chunk_dedups_and_prefers_tightest(tmp_path):
+    cache = ToolResultCache()
+    f = tmp_path / "x.py"
+    _write(f, "line\n" * 100)
+    wide = cache.store_with_locator("c1", "get_chunk", {"file": str(f), "start_line": 1, "end_line": 90}, "w")
+    cache.record_read_range("get_chunk", {"file": str(f), "start_line": 1, "end_line": 90}, wide)
+    tight = cache.store_with_locator("c2", "get_chunk", {"file": str(f), "start_line": 10, "end_line": 40}, "t")
+    cache.record_read_range("get_chunk", {"file": str(f), "start_line": 10, "end_line": 40}, tight)
+    rr = cache.lookup_read_range("get_chunk", {"file": str(f), "start_line": 12, "end_line": 30})
+    assert rr is not None and rr["cache_key"] == tight and rr["covered_by"] == (10, 40)
+
+
+def test_range_memo_partial_overlap_is_a_miss(tmp_path):
+    cache = ToolResultCache()
+    f = tmp_path / "x.py"
+    _write(f, "line\n" * 100)
+    key = cache.store_with_locator("c1", "get_chunk", {"file": str(f), "start_line": 10, "end_line": 20}, "b")
+    cache.record_read_range("get_chunk", {"file": str(f), "start_line": 10, "end_line": 20}, key)
+    # Straddles the recorded range on both sides -> not covered.
+    assert cache.lookup_read_range("get_chunk", {"file": str(f), "start_line": 5, "end_line": 25}) is None
+    assert cache.lookup_read_range("get_chunk", {"file": str(f), "start_line": 15, "end_line": 25}) is None
+    # Whole-file request is never covered by a bounded chunk.
+    assert cache.lookup_read_range("read_file", {"filename": str(f)}) is None
+
+
+def test_range_memo_overlap_respects_file_change(tmp_path):
+    cache = ToolResultCache()
+    f = tmp_path / "x.py"
+    _write(f, "line\n" * 100)
+    key = cache.store_with_locator("c1", "read_file", {"filename": str(f)}, "body")
+    cache.record_read_range("read_file", {"filename": str(f)}, key)
+    _write(f, "LINE\n" * 100)  # same size, different content
+    assert cache.lookup_read_range("get_chunk", {"file": str(f), "start_line": 1, "end_line": 5}) is None

@@ -121,6 +121,33 @@ def _materialize_for_review(service, job_id: str, feedback: dict) -> tuple[bool,
         return False, payload
 
 
+def _maybe_acceptance_review(service, job, feedback: dict) -> Optional[int]:
+    """Run the reviewer when enabled. Returns an exit code when the job was
+    parked on a human (verdict fail), else None to continue to READY."""
+    from .acceptance import AcceptanceReviewer, acceptance_review_enabled
+
+    if not acceptance_review_enabled(job):
+        return None
+    try:
+        review = AcceptanceReviewer(service).review(
+            job.id, head_sha=str(feedback.get("verified_head_sha") or "")
+        )
+    except Exception as exc:  # noqa: BLE001 — reviewer failure never blocks READY
+        service.store.append_event(job.id, "acceptance_review_failed", reason=str(exc)[:400])
+        return None
+    if review.verdict != "fail":
+        return None
+    unmet = [c.criterion for c in review.criteria if c.verdict == "fail"]
+    service.require_human(
+        job.id,
+        AttentionReason.VERIFICATION_REQUIRED,
+        "Validation commands passed, but the independent acceptance review judged "
+        f"{review.unmet} of {review.total} criteria unmet: " + "; ".join(unmet)[:600],
+        payload={**feedback, "acceptance_review": review.to_dict()},
+    )
+    return 24
+
+
 def apply_verification_result(service, job_id: str, run: VerificationRun) -> int:
     """Apply deterministic readiness policy to persisted verification evidence."""
     feedback = verification_feedback(run)
@@ -147,12 +174,31 @@ def apply_verification_result(service, job_id: str, run: VerificationRun) -> int
         if not materialized:
             _refresh_receipt(service, job_id)
             return 23
+        # Milestone 3 (optional): independent acceptance-criteria review.
+        # A 'fail' verdict gates READY behind a human — "ready" must not hide
+        # a criterion the reviewer believes is unmet. 'unknown' proceeds but
+        # is recorded as evidence.
+        acceptance_gate = _maybe_acceptance_review(service, current, review_feedback)
+        if acceptance_gate is not None:
+            _refresh_receipt(service, job_id)
+            return acceptance_gate
         service.transition(
             job_id,
             JobStatus.READY_FOR_REVIEW,
             reason="deterministic verification passed; review branch materialized",
             payload=review_feedback,
         )
+        # Milestone 5: READY must also mean "still merges". Assess base drift
+        # right away so a base that moved during the run is caught here, not
+        # by the reviewer.
+        try:
+            from .base_drift import apply_base_drift
+
+            apply_base_drift(service, job_id, source="verification")
+        except Exception as exc:  # noqa: BLE001 — drift check must not undo READY
+            service.store.append_event(
+                job_id, "base_drift_check_failed", reason=str(exc)[:400]
+            )
         _refresh_receipt(service, job_id)
         return 0
 

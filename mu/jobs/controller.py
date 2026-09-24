@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Callable, Dict, Optional
+from typing import IO, Any, Callable, Dict, Optional
 
 from utils.config import HISTORY_DIR
 
@@ -39,6 +39,15 @@ class WorkerHandle:
     terminate_started: Optional[float] = None
 
 
+def _retry_due(job, now: float) -> bool:
+    """True when the job has no pending backoff or the backoff has elapsed."""
+    try:
+        next_run_at = float((job.metadata or {}).get("next_run_at") or 0.0)
+    except (TypeError, ValueError):
+        return True
+    return next_run_at <= float(now)
+
+
 class JobController:
     """Lease jobs and launch isolated implementation/verification processes."""
 
@@ -58,8 +67,27 @@ class JobController:
         python_executable: Optional[str] = None,
         project_root: Optional[str] = None,
         process_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
+        notify: Optional[Callable[[Dict[str, Any]], None]] = None,
+        retention_days: Optional[float] = None,
+        retention_interval_seconds: float = 3600.0,
+        drift_check_interval_seconds: float = 300.0,
     ):
         self.service = service
+        # Attention push: called (from the controller thread) with a
+        # session-agnostic event dict whenever a job enters or leaves a
+        # human-attention state. The GUI wires this to the SSE bus.
+        self.notify = notify
+        # Retention sweeper: purge evidence/logs/worktrees of ARCHIVED
+        # historic jobs older than `retention_days` (None/0 disables).
+        self.retention_days = retention_days
+        self.retention_interval_seconds = max(60.0, float(retention_interval_seconds or 3600.0))
+        self._last_retention_sweep = 0.0
+        # Base-drift watch: re-assess READY_FOR_REVIEW jobs periodically so
+        # a base branch that moves while the job waits for review flips it
+        # to CONFLICTED (and pushes attention) instead of staying "ready".
+        self.drift_check_interval_seconds = max(0.0, float(drift_check_interval_seconds or 0.0))
+        self._last_drift_check = 0.0
+        self._last_status_fp: Optional[Dict[str, tuple]] = None
         self.max_workers = max(1, int(max_workers))
         self.poll_interval = max(0.1, float(poll_interval))
         self.lease_ttl_seconds = max(15, int(lease_ttl_seconds))
@@ -160,6 +188,9 @@ class JobController:
         self._terminate_cancelled()
         self._enforce_runtime_deadlines()
         self.service.recover_expired_leases()
+        self._maybe_check_base_drift()
+        self._watch_attention()
+        self._maybe_sweep_retention()
         with self._lock:
             capacity = self.max_workers - len(self._active)
         if capacity <= 0:
@@ -170,16 +201,133 @@ class JobController:
             limit=max(capacity * 5, 25),
         )
         started = 0
+        now = float(self.service.store._clock())
         for job in reversed(candidates):
             if started >= capacity:
                 break
             with self._lock:
                 if job.id in self._active:
                     continue
+            # Backoff gate: a transient-failure requeue stamps next_run_at;
+            # leave the job QUEUED until that time has passed.
+            if job.status == JobStatus.QUEUED and not _retry_due(job, now):
+                continue
             phase = self._phase_for_status(job.status)
             if self._spawn(job.id, phase):
                 started += 1
         return started
+
+    # ------------------------------------------------------------ attention push
+
+    _ATTENTION_STATUSES = frozenset({JobStatus.NEEDS_HUMAN.value, JobStatus.CONFLICTED.value})
+
+    def _watch_attention(self) -> None:
+        """Detect jobs entering/leaving a human-attention state between
+        ticks and push one `job_attention` event per change plus the
+        aggregate count. Workers run out-of-process, so the controller's
+        SQLite poll is the only place that sees every transition."""
+        if self.notify is None:
+            return
+        try:
+            current = self.service.store.status_fingerprints()
+        except Exception:
+            logger.debug("attention watcher: fingerprint read failed", exc_info=True)
+            return
+        previous = self._last_status_fp
+        self._last_status_fp = current
+        if previous is None:
+            # First tick after start: announce the standing backlog once so
+            # a restarted daemon still surfaces jobs already waiting.
+            waiting = [jid for jid, (st, _v) in current.items() if st in self._ATTENTION_STATUSES]
+            if waiting:
+                self._emit_attention(entered=waiting, left=[])
+            return
+        entered, left = [], []
+        for job_id, (status, _version) in current.items():
+            was = previous.get(job_id, ("", 0))[0]
+            now_attn = status in self._ATTENTION_STATUSES
+            was_attn = was in self._ATTENTION_STATUSES
+            if now_attn and not was_attn:
+                entered.append(job_id)
+            elif was_attn and not now_attn:
+                left.append(job_id)
+        for job_id, (status, _v) in previous.items():
+            if job_id not in current and status in self._ATTENTION_STATUSES:
+                left.append(job_id)  # deleted while waiting
+        if entered or left:
+            self._emit_attention(entered=entered, left=left)
+
+    def _emit_attention(self, *, entered: list, left: list) -> None:
+        try:
+            summary = self.service.attention_summary()
+        except Exception:
+            logger.debug("attention watcher: summary failed", exc_info=True)
+            return
+        by_id = {j["id"]: j for j in summary.get("jobs", [])}
+        event = {
+            "kind": "job_attention",
+            "count": int(summary.get("count", 0)),
+            "entered": [by_id[j] for j in entered if j in by_id],
+            "left": list(left),
+            "jobs": summary.get("jobs", []),
+            "ts": float(self.service.store._clock()),
+        }
+        try:
+            self.notify(event)
+        except Exception:
+            logger.debug("attention notify failed", exc_info=True)
+
+    # ------------------------------------------------------------ base drift
+
+    def _maybe_check_base_drift(self) -> None:
+        if self.drift_check_interval_seconds <= 0:
+            return
+        now = time.monotonic()
+        if self._last_drift_check and now - self._last_drift_check < self.drift_check_interval_seconds:
+            return
+        self._last_drift_check = now
+        try:
+            ready = self.service.list(statuses=[JobStatus.READY_FOR_REVIEW], limit=100)
+        except Exception:
+            logger.debug("drift watch: list failed", exc_info=True)
+            return
+        if not ready:
+            return
+        from .base_drift import apply_base_drift
+
+        for job in ready:
+            try:
+                report = apply_base_drift(self.service, job.id, source="controller")
+                if report.mergeable is False:
+                    logger.warning(
+                        "Job %s: base %s drifted (%d commits); branch no longer merges -> CONFLICTED",
+                        job.id[:10], report.base_ref, report.commits_behind,
+                    )
+            except Exception:
+                logger.debug("drift watch: job %s assessment failed", job.id, exc_info=True)
+
+    # ------------------------------------------------------------ retention
+
+    def _maybe_sweep_retention(self) -> None:
+        if not self.retention_days or float(self.retention_days) <= 0:
+            return
+        now = time.monotonic()
+        if now - self._last_retention_sweep < self.retention_interval_seconds:
+            return
+        self._last_retention_sweep = now
+        try:
+            from .management import JobManagementService
+
+            result = JobManagementService(self.service).sweep_retention(
+                older_than_days=float(self.retention_days)
+            )
+            if result.get("deleted"):
+                logger.info(
+                    "Job retention sweep: purged %d archived job(s) older than %.1f days",
+                    len(result["deleted"]), float(self.retention_days),
+                )
+        except Exception:
+            logger.exception("job retention sweep failed")
 
     def _worker_id(self, job_id: str, phase: str) -> str:
         return f"{self.controller_id}:{phase}:{job_id[:10]}:{uuid.uuid4().hex[:6]}"

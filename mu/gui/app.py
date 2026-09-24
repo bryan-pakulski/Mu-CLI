@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -141,9 +142,25 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.state.job_service = get_default_job_service()
     # Milestone 2: each worker is a separate Python process with a managed Git
     # worktree, so five jobs can execute without sharing Session CWD/runtime.
+    def _job_attention_notify(event: dict) -> None:
+        # Session-agnostic bus event: every connected surface (web, mobile,
+        # TUI daemon client) learns a job entered/left a human-attention
+        # state without polling. Called from the controller thread.
+        bus.publish_threadsafe(dict(event, kind="job_attention"))
+
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, "") or default)
+        except (TypeError, ValueError):
+            return default
+
     app.state.job_controller = JobController(
         app.state.job_service,
         max_workers=5,
+        notify=_job_attention_notify,
+        # Retention: purge artifacts of ARCHIVED historic jobs older than N
+        # days (0 disables). Env-tunable so the daemon needs no session var.
+        retention_days=_env_float("MUCLI_JOBS_RETENTION_DAYS", 30.0),
     )
 
     app.state.session_by_name = lambda name=None: session_by_name(app, name)

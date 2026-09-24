@@ -7,6 +7,8 @@ parallel without sharing Session process-global state.
 
 from __future__ import annotations
 
+import logging
+
 import argparse
 import os
 import threading
@@ -205,7 +207,56 @@ def _apply_outcome(
         return 0
 
     checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-failed")
-    target = JobStatus.ENVIRONMENT_ERROR if outcome.status == "environment_error" else JobStatus.FAILED
+    if outcome.status == "environment_error":
+        target = JobStatus.ENVIRONMENT_ERROR
+    else:
+        target = JobStatus.FAILED
+
+    # Unattended retry: a transient provider/network failure is requeued
+    # with exponential backoff while the attempt count is within
+    # max_retries (same budget the verifier uses). Non-transient failures
+    # and exhausted budgets stay terminal FAILED so a human sees the truth.
+    retry_budget = int(getattr(current, "max_retries", 0) or 0)
+    retryable = (
+        target == JobStatus.FAILED
+        and bool(getattr(outcome, "transient", False))
+        and int(attempt_number) <= retry_budget
+    )
+    if retryable:
+        delay = _retry_backoff_seconds(int(attempt_number))
+        next_run_at = float(service.store._clock()) + delay
+        owned = service.store.finish_attempt_owned(
+            attempt_id,
+            worker_id=worker_id,
+            status="failed",
+            error=outcome.error,
+            cost_usd=outcome.cost_usd,
+            cost_add=outcome.cost_usd,
+            metadata={
+                **common_metadata,
+                "checkpoint": checkpoint,
+                "transient": True,
+                "retry_scheduled": True,
+                "next_run_at": next_run_at,
+            },
+            target_status=JobStatus.QUEUED,
+            transition_reason="transient provider failure; requeued with backoff",
+            transition_payload={
+                "error": outcome.error,
+                "agent_status": outcome.status,
+                "checkpoint": checkpoint,
+                "attempt": int(attempt_number),
+                "max_retries": retry_budget,
+                "backoff_seconds": delay,
+                "next_run_at": next_run_at,
+            },
+        )
+        if not owned:
+            return 5
+        _schedule_next_run(service, job_id, next_run_at)
+        _refresh_receipt(service, job_id)
+        return 10
+
     owned = service.store.finish_attempt_owned(
         attempt_id,
         worker_id=worker_id,
@@ -213,19 +264,54 @@ def _apply_outcome(
         error=outcome.error,
         cost_usd=outcome.cost_usd,
         cost_add=outcome.cost_usd,
-        metadata={**common_metadata, "checkpoint": checkpoint},
+        metadata={
+            **common_metadata,
+            "checkpoint": checkpoint,
+            "transient": bool(getattr(outcome, "transient", False)),
+            "retry_budget_exhausted": bool(getattr(outcome, "transient", False)),
+        },
         target_status=target,
-        transition_reason="job attempt failed",
+        transition_reason=(
+            "transient failure; automatic retry budget exhausted"
+            if getattr(outcome, "transient", False) and target == JobStatus.FAILED
+            else "job attempt failed"
+        ),
         transition_payload={
             "error": outcome.error,
             "agent_status": outcome.status,
             "checkpoint": checkpoint,
+            "attempt": int(attempt_number),
+            "max_retries": retry_budget,
         },
     )
     if not owned:
         return 5
     _refresh_receipt(service, job_id)
     return 1
+
+
+# Backoff schedule for automatic transient-failure requeues: 30s, 60s,
+# 120s, ... capped at 10 minutes. Attempt numbers start at 1.
+RETRY_BACKOFF_BASE_SECONDS = 30.0
+RETRY_BACKOFF_MAX_SECONDS = 600.0
+
+
+def _retry_backoff_seconds(attempt_number: int) -> float:
+    exponent = max(0, int(attempt_number) - 1)
+    return float(min(RETRY_BACKOFF_MAX_SECONDS, RETRY_BACKOFF_BASE_SECONDS * (2 ** exponent)))
+
+
+def _schedule_next_run(service, job_id: str, next_run_at: float) -> None:
+    """Persist the earliest time the controller may lease this job again.
+    Stored in job metadata (no schema migration); the controller's tick
+    skips QUEUED jobs whose ``next_run_at`` is still in the future."""
+    try:
+        job = service.get(job_id)
+        metadata = dict(job.metadata or {})
+        metadata["next_run_at"] = float(next_run_at)
+        service.store.update_runtime_fields(job_id, metadata_json=metadata)
+    except Exception:  # noqa: BLE001 — scheduling hint is best-effort
+        logging.getLogger("mucli").debug("next_run_at update failed", exc_info=True)
 
 
 def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
@@ -253,6 +339,9 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
         heartbeat_thread.start()
 
         if job.status == JobStatus.QUEUED:
+            # Consume any automatic-retry backoff hint: this attempt IS the
+            # scheduled retry, so a stale next_run_at must not linger.
+            service._clear_retry_backoff(job_id)
             job = service.transition(job_id, JobStatus.PREPARING, reason="worker preparing isolated workspace")
         elif job.status != JobStatus.RECOVERING:
             return 0

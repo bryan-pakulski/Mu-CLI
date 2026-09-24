@@ -27,6 +27,10 @@ class JobRunOutcome:
     attention_detail: str = ""
     attention_payload: Dict[str, Any] = field(default_factory=dict)
     result: Dict[str, Any] = field(default_factory=dict)
+    # True when a failed outcome was caused by a transient provider/network
+    # error (rate limit, 5xx, timeout): the worker may requeue with backoff
+    # under the job's retry budget instead of failing terminally.
+    transient: bool = False
 
 
 _TOKEN_KEYS = ("input", "output", "total", "cached", "reasoning")
@@ -45,6 +49,18 @@ class SessionJobRunner:
     @staticmethod
     def workspace_path(job: Job) -> str:
         return str(job.worktree or job.repository or "")
+
+    @staticmethod
+    def _is_transient_error(session, error: str) -> bool:
+        flagged = getattr(session, "_last_provider_error_transient", None) if session is not None else None
+        if isinstance(flagged, bool):
+            return flagged
+        try:
+            from mu.agent.retry import is_transient_provider_error
+
+            return is_transient_provider_error(RuntimeError(str(error or "")))
+        except Exception:  # noqa: BLE001
+            return False
 
     @staticmethod
     def _token_snapshot(session) -> Dict[str, float]:
@@ -248,6 +264,10 @@ class SessionJobRunner:
             session.variables["agent_mode"] = str(execution.get("agent_mode") or "default")
             session.variables["session_type"] = session_type
             session.variables["yolo"] = bool(execution.get("auto_approve_writes", False))
+            # Unattended: provider failures must never become a human
+            # question. The loop retries transient errors with backoff and
+            # aborts otherwise; the worker then decides requeue vs FAILED.
+            session.variables["provider_recovery_policy"] = "auto"
             session.variables["durable_job_id"] = job.id
             session.variables["durable_job_attempt"] = attempt.number
             session.variables["durable_job_branch"] = job.branch
@@ -288,13 +308,16 @@ class SessionJobRunner:
                 return JobRunOutcome(
                     kind="completed", status=status, cost_usd=cost, result=result
                 )
-            return JobRunOutcome(
+            outcome = JobRunOutcome(
                 kind="failed",
                 status=status,
                 error=error or f"Agent stopped with status {status}",
                 cost_usd=cost,
                 result=result,
             )
+            if status == "error":
+                outcome.transient = self._is_transient_error(session, error)
+            return outcome
 
         except InteractionRequired as gate:
             cost = 0.0
@@ -321,7 +344,8 @@ class SessionJobRunner:
             if session is not None:
                 cost, result = self._usage_result(job, session, initial_usage)
             return JobRunOutcome(
-                kind="failed", status="error", error=str(exc), cost_usd=cost, result=result
+                kind="failed", status="error", error=str(exc), cost_usd=cost, result=result,
+                transient=self._is_transient_error(session, str(exc)),
             )
         finally:
             if session is not None:

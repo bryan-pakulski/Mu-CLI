@@ -230,6 +230,8 @@ class JobReviewService:
             return self.respond(job_id, detail=text or "Continue with the current task.")
         if job.status == JobStatus.READY_FOR_REVIEW:
             return self.request_changes(job_id, text or "Continue working on this ticket before merge.")
+        if job.status == JobStatus.CONFLICTED:
+            return self.resolve_conflict(job_id, text)
         if job.status in {
             JobStatus.FAILED,
             JobStatus.TIMED_OUT,
@@ -244,6 +246,33 @@ class JobReviewService:
                 )
             return self.service.retry(job_id, reason=text or "continue requested by reviewer")
         raise JobReviewError(f"Job cannot be continued from {job.status.value}.")
+
+    def resolve_conflict(self, job_id: str, detail: str = ""):
+        """Requeue a CONFLICTED job so the agent rebases/merges the current
+        base into the job branch and re-runs verification. The drift report
+        is handed to the next attempt as review feedback."""
+        job = self.service.get(job_id)
+        if job.status != JobStatus.CONFLICTED:
+            raise JobReviewError("Only a conflicted job can be resolved this way.")
+        drift = dict((job.metadata or {}).get("base_drift") or {})
+        files = ", ".join(drift.get("conflicted_files") or []) or "unknown files"
+        text = str(detail or "").strip() or (
+            f"The base branch {drift.get('base_ref') or job.base_branch} moved and the job branch no "
+            f"longer merges cleanly (conflicts: {files}). Merge or rebase onto the current base tip "
+            f"{str(drift.get('current_base_sha') or '')[:12]}, resolve conflicts, keep the ticket's "
+            "behaviour, and re-run the validation commands."
+        )
+        self.service.store.append_event(
+            job_id, "human_response", payload={"detail": text, "source": "conflict_resolution"},
+        )
+        # CONFLICTED -> RUNNING is not a worker-owned path; route through
+        # QUEUED so the controller leases a fresh implementation attempt.
+        # (CONFLICTED -> QUEUED is allowed for exactly this loop.)
+        return self.service.transition(
+            job_id, JobStatus.QUEUED,
+            reason="conflict resolution requested; requeued",
+            payload={"feedback": text, "branch": job.branch, "base_drift": drift},
+        )
 
     def discard(self, job_id: str, reason: str = ""):
         job = self.service.get(job_id)

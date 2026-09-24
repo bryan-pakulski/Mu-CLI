@@ -41,9 +41,34 @@ def _format_job(job) -> str:
     return f"{job.id[:10]}  {job.status.value:<17}  {budget:<13}  {job.title}{attention}"
 
 
+def attention_banner(*, limit: int = 5) -> str:
+    """One-glance "N jobs need you" text for TUI startup and `/jobs`.
+    Empty string when nothing is waiting or the job store is unavailable
+    (never raises — startup must not depend on the jobs plane)."""
+    try:
+        summary = get_default_job_service().attention_summary()
+    except Exception:
+        return ""
+    count = int(summary.get("count", 0) or 0)
+    if count <= 0:
+        return ""
+    lines = [f"\u26a0 {count} engineering job{'s' if count != 1 else ''} need you \u2014 /job show <id> \u00b7 /job respond <id> ..."]
+    for item in summary.get("jobs", [])[:limit]:
+        why = str(item.get("attention_reason") or item.get("status") or "").replace("_", " ")
+        detail = str(item.get("attention_detail") or "").strip().splitlines()[0:1]
+        detail_text = f" \u2014 {detail[0][:80]}" if detail else ""
+        lines.append(f"  {str(item.get('id', ''))[:10]}  {why:<20} {str(item.get('title', ''))[:48]}{detail_text}")
+    if count > limit:
+        lines.append(f"  \u2026 {count - limit} more")
+    return "\n".join(lines)
+
+
 def _board_jobs(session: Any, allow_prompt: bool) -> CommandResult:
     board = build_job_board(get_default_job_service())
     lines = ["Engineering work", ""]
+    banner = attention_banner()
+    if banner:
+        lines.extend([banner, ""])
     for section in BOARD_ORDER:
         jobs = getattr(board, section)
         if not jobs:
@@ -74,6 +99,89 @@ def _list_jobs(session: Any, status: str, allow_prompt: bool) -> CommandResult:
     body = "\n".join(lines)
     _emit(session, body, allow_prompt)
     return CommandResult(ok=True, message=f"{len(jobs)} job(s).", data={"jobs": [job.to_dict() for job in jobs]})
+
+
+def _summary_row(service, job) -> list[str]:
+    """Five-line digest: what happened, what it cost, what it needs."""
+    receipt = JobReceiptBuilder(service).build(job.id)
+    outcome = receipt.get("outcome") or {}
+    git = receipt.get("git") or {}
+    verification = receipt.get("verification") or {}
+    drift = receipt.get("base_drift") or {}
+    acceptance = receipt.get("acceptance_review") or {}
+    checks = verification.get("checks") or []
+    passed = sum(1 for c in checks if c.get("passed"))
+    if job.status.value == "ready_for_review":
+        headline = "READY TO REVIEW"
+    elif job.needs_attention:
+        headline = f"NEEDS YOU · {job.attention_reason.value.replace('_', ' ')}"
+    else:
+        headline = job.status.value.replace("_", " ").upper()
+    verify_text = (
+        f"{verification.get('status')} ({passed}/{len(checks)} checks)"
+        if verification else "not run"
+    )
+    if acceptance:
+        verify_text += f" · acceptance {acceptance.get('verdict', '?')} {acceptance.get('met', 0)}/{acceptance.get('total', 0)}"
+    merge_text = ""
+    if drift:
+        if drift.get("mergeable") is False:
+            merge_text = f" · CONFLICTS with {drift.get('base_ref')}"
+        elif drift.get("drifted"):
+            merge_text = f" · {drift.get('commits_behind', 0)} behind {drift.get('base_ref')}, merges"
+    lines = [
+        f"{job.id[:10]}  {headline}  ·  {job.title}",
+        f"    {_fmt_elapsed(outcome.get('elapsed_seconds', 0))} · ${float(job.cost_usd or 0):.2f} · "
+        f"{outcome.get('attempts', 0)} attempt(s) · {len(git.get('changed_files') or [])} files "
+        f"+{git.get('additions', 0)}/-{git.get('deletions', 0)}",
+        f"    verify: {verify_text}{merge_text}",
+        f"    branch: {job.branch or '—'} @ {str(git.get('head_sha') or '—')[:12]}",
+    ]
+    if job.needs_attention and job.attention_detail:
+        lines.append(f"    → {job.attention_detail.strip().splitlines()[0][:110]}")
+    elif job.status.value == "ready_for_review":
+        lines.append(f"    → /job diff {job.id[:10]} · /job changes {job.id[:10]} <feedback>")
+    else:
+        last_error = ""
+        for attempt in reversed(receipt.get("attempts") or []):
+            if attempt.get("error"):
+                last_error = str(attempt["error"]).splitlines()[0][:110]
+                break
+        lines.append(f"    → {last_error or 'no action needed'}")
+    return lines
+
+
+def _summary(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
+    """`/job summary [N|all]` — the <2-minute view: every non-archived job
+    as a five-line block, attention first, then ready, then the rest."""
+    service = get_default_job_service()
+    token = str(raw or "").strip().lower()
+    limit = 10
+    if token == "all":
+        limit = 200
+    elif token.isdigit():
+        limit = max(1, min(int(token), 200))
+    jobs = service.list_unarchived(limit=200)
+    order = {"needs_human": 0, "conflicted": 0, "ready_for_review": 1, "running": 2, "verifying": 2,
+             "preparing": 2, "recovering": 2, "queued": 3}
+    jobs.sort(key=lambda j: (order.get(j.status.value, 4), -(j.updated_at or 0)))
+    jobs = jobs[:limit]
+    if not jobs:
+        _emit(session, "No jobs.", allow_prompt)
+        return CommandResult(ok=True, message="0 job(s).", data={"jobs": []})
+    attention = sum(1 for j in jobs if j.status.value in {"needs_human", "conflicted"})
+    ready = sum(1 for j in jobs if j.status.value == "ready_for_review")
+    cost = sum(float(j.cost_usd or 0) for j in jobs)
+    lines = [f"Engineering work summary · {len(jobs)} job(s) · {attention} need you · {ready} ready · ${cost:.2f} total", ""]
+    for job in jobs:
+        lines.extend(_summary_row(service, job))
+        lines.append("")
+    _emit(session, "\n".join(lines).rstrip(), allow_prompt)
+    return CommandResult(
+        ok=True,
+        message=f"{len(jobs)} job(s) · {attention} need you · {ready} ready",
+        data={"jobs": [j.to_dict() for j in jobs], "attention": attention, "ready": ready, "cost_usd": cost},
+    )
 
 
 def _resolve_job(service, token: str):
@@ -124,6 +232,19 @@ def _show_job(session: Any, token: str, allow_prompt: bool) -> CommandResult:
         f"Changes: {len(git.get('changed_files') or [])} files · +{git.get('additions', 0)} / -{git.get('deletions', 0)}",
         f"Verification: {verification.get('status') or 'not run'}",
     ]
+    drift = receipt.get("base_drift") or {}
+    if drift:
+        merge_state = {True: "merges cleanly", False: "CONFLICTS", None: "unknown"}[drift.get("mergeable")]
+        lines.append(
+            f"Base drift: {'yes' if drift.get('drifted') else 'no'} "
+            f"({drift.get('commits_behind', 0)} behind {drift.get('base_ref') or job.base_branch}) · {merge_state}"
+        )
+    acceptance = receipt.get("acceptance_review") or {}
+    if acceptance:
+        lines.append(
+            f"Acceptance review: {acceptance.get('verdict') or 'unknown'} "
+            f"({acceptance.get('met', 0)}/{acceptance.get('total', 0)} criteria met)"
+        )
     if job.description:
         lines.extend(["", job.description])
     if job.attention_reason.value:
@@ -375,7 +496,7 @@ def _review_action(session: Any, action: str, raw: str, allow_prompt: bool) -> C
     "/job",
     "/jobs",
     help=(
-        "Engineering jobs: board, list [status], show|receipt|diff <id>, "
+        "Engineering jobs: board, summary [N|all], list [status], show|receipt|diff <id>, "
         "create <title> [--repo PATH --provider NAME --model NAME --accept TEXT --check CMD], "
         "respond <id> <answer>, changes <id> <feedback>, continue|discard <id> [detail]."
     ),
@@ -389,6 +510,8 @@ def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
     rest = rest.strip()
     if sub == "board":
         return _board_jobs(session, allow_prompt)
+    if sub in {"summary", "digest"}:
+        return _summary(session, rest, allow_prompt)
     if sub == "list":
         return _list_jobs(session, rest, allow_prompt)
     if sub == "show":

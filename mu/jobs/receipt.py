@@ -172,6 +172,10 @@ class JobReceiptBuilder:
                 "dirty": verification.dirty if verification else None,
             },
             "verification": verification.to_dict() if verification else None,
+            # Milestone 5: freshness of the review artifact vs the moving base.
+            "base_drift": metadata.get("base_drift") or None,
+            # Milestone 3: optional independent verifier-agent verdict.
+            "acceptance_review": metadata.get("acceptance_review") or None,
             "attempts": [attempt.to_dict() for attempt in attempts],
             "usage": {
                 "cost_usd": float(job.cost_usd or 0.0),

@@ -238,12 +238,20 @@ def manual_compact(session: any, *, focus: str = "", checkpoint=None,
             # even when the budget gate said we're under budget (matches
             # Claude Code's manual `/compact`). No-op if the anchor is
             # already at the keep-recent boundary — nothing left to summarize.
+            _snap = session_manager._shrink_snapshot()
             rolled = session_manager.roll_history_summary(
                 keep_recent=keep_recent,
                 provider=provider,
                 max_segment_chars=24_000,
                 through_index=through_index,
             )
+            if rolled:
+                session_manager._record_shrink_since(
+                    _snap,
+                    kind="manual",
+                    summarizer=getattr(session_manager, "_last_summary_mode", "unknown"),
+                    keep_recent=keep_recent,
+                )
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("Manual compaction raised %s", exc)
         return {"ok": False, "error": str(exc)}

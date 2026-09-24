@@ -117,6 +117,12 @@ async def create_job(request: Request, payload: Dict[str, Any]):
     return {"job": job.to_dict()}
 
 
+@router.get("/attention")
+async def get_job_attention(request: Request):
+    """Aggregate "needs you" count + rows (NEEDS_HUMAN / CONFLICTED)."""
+    return _service(request).attention_summary()
+
+
 @router.get("/board")
 async def get_job_board(request: Request):
     return build_job_board(_service(request)).to_dict()
@@ -397,6 +403,22 @@ async def get_job_verification(job_id: str, verification_id: str, request: Reque
     if value.job_id != job_id:
         raise HTTPException(status_code=404, detail=f"Verification '{verification_id}' not found for job")
     return {"verification": value.to_dict()}
+
+
+@router.get("/{job_id}/drift")
+async def get_job_base_drift(job_id: str, request: Request, apply: bool = Query(default=False)):
+    """Base-drift + mergeability of the review branch. ``apply=true`` also
+    records the assessment and flips READY_FOR_REVIEW -> CONFLICTED when the
+    branch no longer merges."""
+    from mu.jobs.base_drift import BaseDriftError, apply_base_drift, assess_base_drift
+
+    service = _service(request)
+    _job_or_404(service, job_id)
+    try:
+        report = apply_base_drift(service, job_id, source="api") if apply else assess_base_drift(service, job_id)
+    except BaseDriftError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"drift": report.to_dict(), "job": service.get(job_id).to_dict()}
 
 
 @router.post("/{job_id}/respond")

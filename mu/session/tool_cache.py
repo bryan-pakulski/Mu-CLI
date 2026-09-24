@@ -457,12 +457,68 @@ class ToolResultCache:
                     self.invalidations += 1
                     return None
             key = memo["ranges"].get((start, end))
-            if key is None:
+            if key is not None:
+                self.dup_bytes_avoided += 1
+                return {
+                    "cache_key": key,
+                    "range": (start, end),
+                    "covered_by": (start, end),
+                    "exact": True,
+                }
+            # Overlap match: a `get_chunk` whose [start, end] sits inside an
+            # earlier read of the same unchanged file (whole-file read_file or
+            # a wider get_chunk) is just as redundant as an exact repeat — the
+            # lines are already in history / recallable from the covering key.
+            covering = self._covering_range(memo["ranges"], start, end)
+            if covering is None:
                 return None
             self.dup_bytes_avoided += 1
-            return {"cache_key": key, "range": (start, end)}
+            self.locator_hits += 1
+            return {
+                "cache_key": memo["ranges"][covering],
+                "range": (start, end),
+                "covered_by": covering,
+                "exact": False,
+            }
         except Exception:  # noqa: BLE001
             return None
+
+    @staticmethod
+    def _covering_range(ranges: dict, start: Any, end: Any) -> Optional[tuple]:
+        """Smallest recorded (s, e) range that fully contains [start, end].
+
+        ``None`` end means "to EOF" (whole-file read). Non-integer bounds
+        never match. Returns None when nothing covers the request.
+        """
+        try:
+            req_s = int(start if start is not None else 1)
+        except (TypeError, ValueError):
+            return None
+        req_e: Optional[int]
+        if end is None:
+            req_e = None
+        else:
+            try:
+                req_e = int(end)
+            except (TypeError, ValueError):
+                return None
+        best: Optional[tuple] = None
+        best_span: Optional[float] = None
+        for rec in ranges:
+            try:
+                rs = int(rec[0] if rec[0] is not None else 1)
+                re_ = rec[1]
+                re_ = None if re_ is None else int(re_)
+            except (TypeError, ValueError, IndexError):
+                continue
+            if rs > req_s:
+                continue
+            if re_ is not None and (req_e is None or re_ < req_e):
+                continue
+            span = float("inf") if re_ is None else float(re_ - rs)
+            if best_span is None or span < best_span:
+                best, best_span = rec, span
+        return best
 
     def invalidate_path(self, path: str) -> None:
         """Drop any range memo / locator entries pointing at ``path`` (call

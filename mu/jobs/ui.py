@@ -33,7 +33,12 @@ class JobUI(BaseUI):
         )
 
     def _load_pending_responses(self):
-        events = self.service.events(self.job_id)
+        # Filter by type in SQL: the generic events() call is capped at 500
+        # rows oldest-first, so on a chatty job a late interaction_response
+        # was silently invisible and the job stayed wedged in NEEDS_HUMAN.
+        events = self.service.store.list_events_by_type(
+            self.job_id, ("interaction_response", "interaction_response_consumed")
+        )
         consumed = {
             int(event.payload.get("response_event_id"))
             for event in events

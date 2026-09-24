@@ -1208,3 +1208,23 @@ code {
     .composer-mode-pill { max-width: 108px; overflow: hidden; }
     .welcome-hero h1 { font-size: 29px; }
 }
+
+
+/* Jobs waiting on a human — count badge on the Engineering-work button. */
+.product-work-button { position: relative; }
+.product-attention-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--danger, #e0564f);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+    pointer-events: none;
+}

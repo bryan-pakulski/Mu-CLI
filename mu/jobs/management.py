@@ -406,7 +406,7 @@ class JobManagementService:
             )
         if job.worker_id:
             raise JobManagementError("A job with an active worker lease cannot be archived.")
-        now = time.time()
+        now = float(self.store._clock())
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -552,6 +552,53 @@ class JobManagementService:
             "warnings": warnings,
             "branch_preserved": job.branch,
         }
+
+    def retention_candidates(self, *, older_than_days: float, limit: int = 100) -> List[str]:
+        """Archived historic jobs whose last update is older than the cutoff
+        and which hold no worker lease. Bounded, oldest first."""
+        cutoff = float(self.store._clock()) - max(0.0, float(older_than_days)) * 86400.0
+        statuses = tuple(sorted(status.value for status in HISTORIC_STATUSES))
+        placeholders = ",".join("?" for _ in statuses)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT j.id FROM jobs j
+                JOIN job_management m ON m.job_id = j.id
+                WHERE m.archived_at IS NOT NULL
+                  AND j.status IN ({placeholders})
+                  AND (j.worker_id IS NULL OR j.worker_id = '')
+                  AND j.updated_at < ?
+                  AND m.archived_at < ?
+                ORDER BY j.updated_at ASC
+                LIMIT ?
+                """,
+                (*statuses, cutoff, cutoff, max(1, min(int(limit), 1000))),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row["id"]) for row in rows]
+
+    def sweep_retention(self, *, older_than_days: float, limit: int = 100) -> Dict[str, Any]:
+        """Purge artifacts (evidence, worker logs, worktree) and rows of
+        archived historic jobs older than ``older_than_days``.
+
+        Only ARCHIVED jobs are eligible: archiving is the human's explicit
+        "I am done with this" signal, so the sweeper never removes a job a
+        reviewer may still want to inspect. The review branch is preserved
+        (``delete`` never touches Git branches).
+        """
+        deleted: List[str] = []
+        skipped: List[Dict[str, str]] = []
+        for job_id in self.retention_candidates(older_than_days=older_than_days, limit=limit):
+            try:
+                self.delete(job_id, purge_artifacts=True)
+                deleted.append(job_id)
+            except (JobManagementError, KeyError) as exc:
+                skipped.append({"job_id": job_id, "reason": str(exc)})
+            except Exception as exc:  # noqa: BLE001 — one bad job must not stop the sweep
+                skipped.append({"job_id": job_id, "reason": f"{type(exc).__name__}: {exc}"})
+        return {"deleted": deleted, "skipped": skipped, "older_than_days": float(older_than_days)}
 
     def bulk(self, action: str, job_ids: Sequence[str], *, reason: str = "") -> Dict[str, Any]:
         operation = str(action or "").strip().lower()

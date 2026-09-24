@@ -251,6 +251,15 @@ def edit_tool_results(session, result_ids, *, action="clear", checkpoint=None) -
     sm._last_context_edit = {name: value for name, value in result.items() if name not in {"changed", "skipped"}}
     sm._last_context_edit.update(changed_count=len(changed), skipped_count=len(skipped),
                                  iteration=getattr(session, "_trace_current_iter", None))
+    if action == "clear" and changed and after < before and hasattr(sm, "record_history_shrink"):
+        # Projected-context shrink with no summarizer: still a history-size
+        # change the trace must be able to explain.
+        sm._pending_compaction_iter = int(getattr(session, "_trace_current_iter", 0) or 0)
+        sm.record_history_shrink(
+            kind="result_clear", tokens_before=before, tokens_after=after,
+            msgs_before=len(sm.history), anchor_before=int(getattr(sm, "summary_anchor", 0) or 0),
+            tokens_basis="projected", cleared=len(changed),
+        )
     return result
 
 

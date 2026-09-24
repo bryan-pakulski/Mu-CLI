@@ -524,7 +524,12 @@ class DeterministicVerifier:
             "checks_failed": sum(1 for check in checks if not check.passed),
             "acceptance_criteria": list(job.acceptance_criteria),
             "acceptance_criteria_count": len(job.acceptance_criteria),
-            "acceptance_criteria_machine_verified": False,
+            # Set truthfully by the optional independent acceptance review
+            # (mu/jobs/acceptance.py); deterministic checks alone never
+            # claim to have verified acceptance criteria.
+            "acceptance_criteria_machine_verified": bool(
+                ((job.metadata or {}).get("acceptance_review") or {}).get("verdict") == "pass"
+            ),
             "changed_files": len(changed_files),
             "additions": additions,
             "deletions": deletions,

@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Sequence, Any, Dict, Iterable, Iterator, List, Optional
 
 from utils.config import HISTORY_DIR
 
@@ -138,6 +138,8 @@ class JobStore:
                     );
                     CREATE INDEX IF NOT EXISTS job_events_job_idx
                         ON job_events(job_id, id);
+                    CREATE INDEX IF NOT EXISTS job_events_job_type_idx
+                        ON job_events(job_id, event_type, id);
 
                     CREATE TABLE IF NOT EXISTS job_attempts (
                         id TEXT PRIMARY KEY,
@@ -255,6 +257,44 @@ class JobStore:
         finally:
             conn.close()
         return [self._job_from_row(row) for row in rows]
+
+    def attention_summary(self) -> Dict[str, Any]:
+        """Aggregate "needs you" view: count + compact rows for jobs parked in
+        NEEDS_HUMAN / CONFLICTED. One indexed SQL pass (jobs_status_idx)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, title, status, attention_reason, attention_detail, updated_at "
+                "FROM jobs WHERE status IN (?, ?) ORDER BY updated_at DESC LIMIT 200",
+                (JobStatus.NEEDS_HUMAN.value, JobStatus.CONFLICTED.value),
+            ).fetchall()
+        finally:
+            conn.close()
+        jobs = [
+            {
+                "id": str(row["id"]),
+                "title": str(row["title"] or ""),
+                "status": str(row["status"]),
+                "attention_reason": str(row["attention_reason"] or ""),
+                "attention_detail": str(row["attention_detail"] or ""),
+                "updated_at": float(row["updated_at"] or 0.0),
+            }
+            for row in rows
+        ]
+        return {"count": len(jobs), "jobs": jobs}
+
+    def status_fingerprints(self, *, limit: int = 1000) -> Dict[str, tuple]:
+        """job_id -> (status, version) for every non-terminal-archived job.
+        Cheap change detection for the controller's attention watcher."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, status, version FROM jobs ORDER BY updated_at DESC LIMIT ?",
+                (max(1, min(int(limit), 5000)),),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {str(r["id"]): (str(r["status"]), int(r["version"] or 0)) for r in rows}
 
     def list_unarchived_jobs(
         self,
@@ -474,6 +514,36 @@ class JobStore:
             rows = conn.execute(
                 "SELECT * FROM job_events WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
                 (job_id, max(0, int(after_id)), max(1, min(int(limit), 5000))),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._event_from_row(row) for row in rows]
+
+    def list_events_by_type(
+        self,
+        job_id: str,
+        event_types: Sequence[str],
+        *,
+        after_id: int = 0,
+        limit: int = 5000,
+    ) -> List[JobEvent]:
+        """Events of the given types only, oldest first.
+
+        Used by the interaction-response loader: filtering in SQL means a
+        chatty job (thousands of tool_call_ui/runtime_status events) cannot
+        push a late human answer past a row cap the way the generic
+        ``list_events`` LIMIT did.
+        """
+        types = [str(t) for t in event_types if str(t)]
+        if not types:
+            return []
+        placeholders = ",".join("?" for _ in types)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"SELECT * FROM job_events WHERE job_id = ? AND id > ? "
+                f"AND event_type IN ({placeholders}) ORDER BY id ASC LIMIT ?",
+                (job_id, max(0, int(after_id)), *types, max(1, min(int(limit), 50000))),
             ).fetchall()
         finally:
             conn.close()

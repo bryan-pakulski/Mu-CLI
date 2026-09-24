@@ -53,10 +53,13 @@ ALLOWED_TRANSITIONS = {
         JobStatus.ENVIRONMENT_ERROR, JobStatus.FAILED, JobStatus.CANCELLED,
         JobStatus.TIMED_OUT,
     },
+    # RUNNING -> QUEUED is the unattended retry path: a transient provider
+    # failure (rate limit / 5xx / timeout) requeues the implementation with
+    # backoff under max_retries instead of parking the job on a human.
     JobStatus.RUNNING: {
         JobStatus.NEEDS_HUMAN, JobStatus.VERIFYING, JobStatus.RECOVERING,
         JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED,
-        JobStatus.ENVIRONMENT_ERROR, JobStatus.CANCELLED,
+        JobStatus.ENVIRONMENT_ERROR, JobStatus.CANCELLED, JobStatus.QUEUED,
     },
     JobStatus.NEEDS_HUMAN: {
         JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
@@ -79,7 +82,8 @@ ALLOWED_TRANSITIONS = {
         JobStatus.TIMED_OUT,
     },
     JobStatus.CONFLICTED: {
-        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED, JobStatus.CANCELLED,
+        JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED,
+        JobStatus.CANCELLED,
     },
     JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.CANCELLED},
     JobStatus.TIMED_OUT: {JobStatus.QUEUED, JobStatus.CANCELLED},

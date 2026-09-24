@@ -106,12 +106,12 @@ and client restarts.
 - [x] Core regression tests written.
 
 ### Left
-- [ ] Background controller/scheduler that leases queued jobs.
-- [ ] Existing MuCLI agent-runtime adapter for one job attempt.
-- [ ] Durable provider/model/execution policy captured on the job.
-- [ ] Human-gate bridge from an executing job back into durable NEEDS_HUMAN state.
-- [ ] Controller lifecycle independent of browser/mobile connection.
-- [ ] Run the new regression tests in CI/local checkout.
+- [x] Background controller/scheduler that leases queued jobs (`mu/jobs/controller.py`).
+- [x] Existing MuCLI agent-runtime adapter for one job attempt (`mu/jobs/runner.py`).
+- [x] Durable provider/model/execution policy captured on the job (`execution_json`).
+- [x] Human-gate bridge from an executing job back into durable NEEDS_HUMAN state (`JobUI` + `InteractionRequired`).
+- [x] Controller lifecycle independent of browser/mobile connection (detached daemon, `mu/jobs/host.py`).
+- [x] Run the new regression tests in CI/local checkout (`tests/test_job_*.py`).
 
 **Completion gate:** submit a job, close the browser, and observe the job continue
 to an execution terminal/gate state from TUI/mobile later.
@@ -138,7 +138,12 @@ execution worktrees alive.
 - [x] Validation command plan.
 - [x] Deterministic verifier runner.
 - [x] Structured verification evidence.
-- [ ] Optional independent verifier-agent pass.
+- [x] Optional independent verifier-agent pass (`mu/jobs/acceptance.py`): opt-in via
+      `execution.acceptance_review=true` or `MUCLI_JOBS_ACCEPTANCE_REVIEW=1`; read-only
+      reviewer session grades each acceptance criterion pass/fail/unknown from the
+      verified diff; `fail` gates READY behind a human; verdict stored as evidence
+      (`acceptance-review.json`, receipt `acceptance_review`,
+      `acceptance_criteria_machine_verified` is now truthful).
 - [x] Work receipt/result manifest.
 
 **Completion gate:** `READY_FOR_REVIEW` always has evidence and never means merely
@@ -157,29 +162,47 @@ been handed off to its normal Git review branch.
 
 **Completion gate:** understand five jobs without opening five chat transcripts.
 
+TUI: `/job summary [N|all]` renders one five-line block per job (headline, time/cost/
+attempts/changes, verify + drift + acceptance verdict, branch@head, next action),
+attention first.
+
 ## Milestone 5 — Git / PR Completion
 
 - [x] Verified implementation materialized as a normal review branch.
 - [x] Execution worktree retired before `READY_FOR_REVIEW`.
 - [ ] Final commit policy / commit cleanup.
 - [ ] PR creation.
-- [ ] Base-drift detection.
-- [ ] Merge-conflict state.
+- [x] Base-drift detection (`mu/jobs/base_drift.py`, `git merge-tree --write-tree`):
+      assessed after verification, on a 5-minute controller sweep of READY jobs, and via
+      `GET /api/jobs/{id}/drift[?apply=true]`; receipt `base_drift`.
+- [x] Merge-conflict state: READY_FOR_REVIEW + not mergeable -> CONFLICTED
+      (attention `merge_conflict`, pushed to surfaces); `continue` requeues with a
+      rebase instruction (CONFLICTED -> QUEUED).
 - [ ] CI/check state.
-- [ ] Mergeability state.
+- [x] Mergeability state (`base_drift.mergeable`, surfaced in receipt/`/job show`/`/job summary`).
 - [ ] Merge action.
 
 **Completion gate:** ticket -> autonomous implementation -> branch review -> merge.
 
 ## Milestone 6 — Unattended Reliability
 
-- [ ] Process/worker crash recovery.
-- [ ] Provider retry policy.
-- [ ] Stuck/loop watchdogs.
-- [ ] Runtime/cost/iteration/subagent budgets.
-- [ ] Durable human gates across controller restart.
-- [ ] State-driven notifications.
-- [ ] Failure injection suite.
+- [x] Process/worker crash recovery (lease CAS + idempotent replay).
+- [x] Provider retry policy: headless sessions run `provider_recovery_policy=auto`
+      (transient errors retry in-loop with backoff, never a human question);
+      a transient implementation failure requeues with 30s→10min backoff
+      (`next_run_at`) while attempts ≤ `max_retries`, then terminal FAILED.
+- [x] Stuck/loop watchdogs (agent-loop watchdog + job runtime deadline).
+- [x] Runtime/cost/iteration/subagent budgets (enforced by controller tick).
+- [x] Artifact retention: `MUCLI_JOBS_RETENTION_DAYS` (default 30, 0 = off)
+      purges evidence/logs/worktrees of ARCHIVED historic jobs on an hourly
+      controller sweep; review branches are preserved.
+- [x] Durable human gates across controller restart (event-backed responses; loader filters by type).
+- [x] State-driven notifications: controller pushes `job_attention` (SSE) on
+      enter/leave of NEEDS_HUMAN/CONFLICTED; `GET /api/jobs/attention`; web
+      badge + toast; TUI startup banner and `/jobs` header.
+- [x] Failure injection suite: `tests/test_job_failure_injection.py` (disconnect, worker
+      kill, controller restart, transient/hard provider failure, base movement, late
+      human answer on a chatty job, runtime deadline, five-ticket invariant sweep).
 - [ ] Friday Five benchmark.
 
 **Completion gate:** five jobs can be trusted overnight through deliberate failure

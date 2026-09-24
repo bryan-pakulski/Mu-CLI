@@ -87,6 +87,18 @@ document.addEventListener("alpine:init", () => {
         currentName: null,
         // Connection status (SSE) is a global concern, not per-session.
         connected: null,
+        // Durable jobs waiting on a human (NEEDS_HUMAN / CONFLICTED). Fed
+        // by the controller's `job_attention` SSE push + a cold-start fetch;
+        // drives the badge on the Engineering-work button.
+        jobAttentionCount: 0,
+        async loadJobAttention() {
+            try {
+                const r = await fetch("/api/jobs/attention", { cache: "no-store" });
+                if (!r.ok) return;
+                const data = await r.json();
+                this.jobAttentionCount = Number(data.count || 0);
+            } catch { /* daemon may not host jobs; badge stays 0 */ }
+        },
         lastOpenAt: 0,
         _renderRaf: 0,
         _scrollRaf: 0,
@@ -6441,6 +6453,22 @@ function routeEvent(ev) {
             const mode = Alpine.store("mode");
             if (isFocused && mode && mode.active === "memory") {
                 Alpine.store("memory").applySnapshot(ev);
+            }
+            break;
+        }
+        case "job_attention": {
+            // Session-agnostic push from the job controller: a job entered
+            // or left a human-attention state. Update the badge and toast
+            // newly-blocked jobs so the user learns without opening /work.
+            const chat = Alpine.store("chat");
+            chat.jobAttentionCount = Number(data.count || 0);
+            const entered = Array.isArray(data.entered) ? data.entered : [];
+            for (const job of entered.slice(0, 3)) {
+                const why = job.attention_reason ? ` (${String(job.attention_reason).replace(/_/g, " ")})` : "";
+                Alpine.store("toast").show(`Job needs you${why}: ${job.title || job.id}`, "info", 8000);
+            }
+            if (entered.length > 3) {
+                Alpine.store("toast").show(`${entered.length - 3} more job(s) need you`, "info", 8000);
             }
             break;
         }

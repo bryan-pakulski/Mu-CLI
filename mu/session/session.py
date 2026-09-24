@@ -1308,6 +1308,12 @@ class Session:
         return True
 
     def _provider_error_recovery_choice(self) -> str:
+        # Unattended policy (durable jobs, headless workers): never turn a
+        # provider failure into a human question. Transient errors retry
+        # with bounded exponential backoff; anything else aborts the turn so
+        # the outer controller can decide (requeue / fail / escalate).
+        if str(self.variables.get("provider_recovery_policy", "") or "").lower() == "auto":
+            return self._auto_provider_error_recovery()
         if self.ui and hasattr(self.ui, "prompt_choices"):
             return self._prompt_tool_choice(
                 "Provider call failed. Choose recovery strategy:",
@@ -1325,6 +1331,53 @@ class Session:
             if not self._is_transient_provider_error(RuntimeError(error_msg)):
                 return "abort"
             return "retry"
+        return "abort"
+
+    def _auto_provider_error_recovery(self) -> str:
+        """Headless provider-error policy. Returns 'retry' (after sleeping a
+        capped exponential backoff) while the error is transient and the
+        per-turn budget `provider_error_max_auto_retries` (default 4) is
+        not exhausted; 'rollback_retry' once for a non-429 4xx; otherwise
+        'abort'. Records the classification on the session so the job
+        runner can mark the outcome transient."""
+        import time as _time
+
+        error_msg = str(getattr(self, "_last_provider_error", "") or "")
+        exc = RuntimeError(error_msg)
+        transient = self._is_transient_provider_error(exc)
+        self._last_provider_error_transient = bool(transient)
+        status = self._extract_http_status_code(error_msg.lower())
+        try:
+            budget = int(self.variables.get("provider_error_max_auto_retries", 4) or 0)
+        except (TypeError, ValueError):
+            budget = 4
+        used = int(getattr(self, "_provider_auto_retries_used", 0) or 0)
+        if transient and used < budget:
+            self._provider_auto_retries_used = used + 1
+            try:
+                base = float(self.variables.get("provider_error_backoff_base", 2.0) or 2.0)
+                cap = float(self.variables.get("provider_error_backoff_max", 60.0) or 60.0)
+            except (TypeError, ValueError):
+                base, cap = 2.0, 60.0
+            delay = min(cap, base * (2 ** used))
+            if self.ui and hasattr(self.ui, "show_info"):
+                try:
+                    self.ui.show_info(
+                        f"Transient provider error; auto-retry {used + 1}/{budget} "
+                        f"in {delay:.0f}s."
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            _time.sleep(max(0.0, delay))
+            return "retry"
+        if (
+            status is not None
+            and 400 <= status < 500
+            and status != 429
+            and not getattr(self, "_provider_auto_rollback_done", False)
+        ):
+            self._provider_auto_rollback_done = True
+            return "rollback_retry"
         return "abort"
 
     def _announce_retryable_failure(self, tool_name: str, raw_result) -> int:
@@ -1811,6 +1864,18 @@ class Session:
                 _em = get_emitter(self)
                 if _em is not None and not _em._closed:
                     _summary = getattr(self, "_trace_turn_summary", {}) or {}
+                    # Shrink-ledger flush: history reductions that happen
+                    # AFTER the last iteration record (post-turn collapse,
+                    # provider-error rollback) have no later iteration seam
+                    # to drain them. Emit them here so no history shrink
+                    # leaves the run untraced.
+                    try:
+                        from mu.trace.emitter import drain_compactions
+
+                        for _comp in drain_compactions(self):
+                            _em.compaction(_comp)
+                    except Exception:  # noqa: BLE001
+                        pass
                     # Efficiency metrics (spec #12): compression, cache rates,
                     # retrieval rate, tool-output share. Folded into turn_end.
                     _eff = {}

@@ -770,35 +770,100 @@ class HistoryMixin:
             break
         if changed:
             try:
-                try:
-                    _after_tokens = estimate()
-                except Exception:  # noqa: BLE001
-                    _after_tokens = 0
-                log = getattr(self, "_compaction_log", None)
-                if log is None:
-                    log = []
-                    self._compaction_log = log
-                log.append(
-                    {
-                        "kind": getattr(self, "_pending_compaction_kind", "auto"),
-                        "tokens_basis": "projected" if estimate_tokens is not None else "stored",
-                        "iter": getattr(self, "_pending_compaction_iter", 0),
-                        "tokens_before": int(_before_tokens),
-                        "tokens_after": int(_after_tokens),
-                        "tokens_saved": int(_before_tokens - _after_tokens),
-                        "msgs_before": _before_len,
-                        "msgs_after": len(self.history),
-                        "anchor_before": _before_anchor,
-                        "anchor_after": self.summary_anchor,
-                        "anchor_delta": self.summary_anchor - _before_anchor,
-                        "summarizer": getattr(self, "_last_summary_mode", "unknown"),
-                        "keep_recent": keep_recent,
-                        "budget": token_budget,
-                    }
-                )
-            except Exception:  # noqa: BLE001 — tracer must never break compaction
-                pass
+                _after_tokens = estimate()
+            except Exception:  # noqa: BLE001
+                _after_tokens = 0
+            self.record_history_shrink(
+                kind=getattr(self, "_pending_compaction_kind", "auto"),
+                tokens_before=_before_tokens,
+                tokens_after=_after_tokens,
+                msgs_before=_before_len,
+                anchor_before=_before_anchor,
+                tokens_basis="projected" if estimate_tokens is not None else "stored",
+                summarizer=getattr(self, "_last_summary_mode", "unknown"),
+                keep_recent=keep_recent,
+                budget=token_budget,
+            )
         return changed
+
+    # ------------------------------------------------------ shrink ledger
+
+    def record_history_shrink(
+        self,
+        *,
+        kind: str,
+        tokens_before: int,
+        tokens_after: int,
+        msgs_before: int,
+        anchor_before: int,
+        **extra: Any,
+    ) -> None:
+        """Append one entry to the compaction ledger (``_compaction_log``).
+
+        Governance invariant (Round-51 T3 follow-up): EVERY path that makes
+        live history smaller — budget-driven summary rolls, the post-turn
+        tool-traffic collapse, manual `/compact`, selective result clearing,
+        provider-error rollbacks — must leave a record here. The trace
+        emitter drains the ledger at the post-response seam and writes one
+        ``compaction`` line per entry, so a token drop between iterations
+        is always explained by a record instead of tripping the
+        ``context_collapse`` detector as an unexplained nuke. Best-effort:
+        never raises.
+        """
+        try:
+            log = getattr(self, "_compaction_log", None)
+            if log is None:
+                log = []
+                self._compaction_log = log
+            entry: Dict[str, Any] = {
+                "kind": str(kind or "auto"),
+                "tokens_basis": "stored",
+                "iter": int(getattr(self, "_pending_compaction_iter", 0) or 0),
+                "tokens_before": int(tokens_before or 0),
+                "tokens_after": int(tokens_after or 0),
+                "tokens_saved": int((tokens_before or 0) - (tokens_after or 0)),
+                "msgs_before": int(msgs_before),
+                "msgs_after": len(self.history),
+                "anchor_before": int(anchor_before),
+                "anchor_after": int(self.summary_anchor),
+                "anchor_delta": int(self.summary_anchor) - int(anchor_before),
+                "summarizer": "none",
+            }
+            entry.update({k: v for k, v in extra.items() if v is not None})
+            log.append(entry)
+        except Exception:  # noqa: BLE001 — ledger must never break the caller
+            pass
+
+    def _shrink_snapshot(self) -> Dict[str, int]:
+        """(tokens, msgs, anchor) before a shrinking operation."""
+        try:
+            tokens = int(self.estimate_runtime_history_tokens())
+        except Exception:  # noqa: BLE001
+            tokens = 0
+        return {
+            "tokens_before": tokens,
+            "msgs_before": len(self.history),
+            "anchor_before": int(self.summary_anchor),
+        }
+
+    def _record_shrink_since(self, snapshot: Dict[str, int], *, kind: str, **extra: Any) -> None:
+        """Record a shrink relative to ``snapshot`` if anything changed."""
+        try:
+            tokens_after = int(self.estimate_runtime_history_tokens())
+        except Exception:  # noqa: BLE001
+            tokens_after = 0
+        if (
+            tokens_after == snapshot["tokens_before"]
+            and len(self.history) == snapshot["msgs_before"]
+            and int(self.summary_anchor) == snapshot["anchor_before"]
+        ):
+            return
+        self.record_history_shrink(
+            kind=kind,
+            tokens_after=tokens_after,
+            **snapshot,
+            **extra,
+        )
 
     def _degrade_oldest_runtime_payload(
         self,

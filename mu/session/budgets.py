@@ -118,21 +118,24 @@ def resolve_tool_cache_bounds(session: Any) -> tuple[int, int]:
     return entries, nbytes
 
 
+def _user_context_limit(session: Any) -> int:
+    """The user-set ``context_token_limit`` (floored at 1024)."""
+    try:
+        raw = session.variables.get(
+            "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+        )
+        return max(1024, int(raw or _DEFAULT_CONTEXT_TOKEN_LIMIT))
+    except (TypeError, ValueError):
+        return _DEFAULT_CONTEXT_TOKEN_LIMIT
+
+
 def resolve_context_limit(session: Any) -> int:
     """Pick the smaller of (user-set `context_token_limit`, real
     provider window). Ollama models often have 4k–32k real windows
     while the user-set default is 256k, so without this the compactor
     never fires before the provider 400s with "prompt too long".
     """
-    user_limit = max(
-        1024,
-        int(
-            session.variables.get(
-                "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
-            )
-            or _DEFAULT_CONTEXT_TOKEN_LIMIT
-        ),
-    )
+    user_limit = _user_context_limit(session)
     try:
         provider_window = session.provider.effective_context_window(
             session.provider.model_name
@@ -217,11 +220,21 @@ def drift_corrected_context_limit(session: Any) -> int:
       factor, so ``limit * static / eff == limit`` (no change; stays
       conservative until a reliable reading lands).
 
-    For providers with no safety factor (OpenAI/Gemini) this is a no-op.
+    Providers with no static safety factor (OpenAI/Gemini/Anthropic, factor
+    1.0) are corrected too: their seed is 1.0 (trust cl100k), so until a
+    drift observation lands this returns ``resolve_context_limit``; once
+    ``update_observed_drift`` records e.g. 1.67x (Anthropic's tokenizer vs
+    cl100k on tool-heavy prompts) the ceiling becomes ``window / 1.67`` so
+    every cl100k-based gate fires at the real 80/85/100% marks instead of
+    ~1.67x too late. Previously this short-circuited for factor<=1.0 and the
+    learned ratio was silently ignored for every non-Ollama provider.
+
+    The corrected ceiling never exceeds the raw provider window. For
+    factor-1.0 providers the base is ``resolve_context_limit`` (min of the
+    user cap and the window), so ``context_token_limit`` keeps governing and
+    learned drift can only tighten it.
     """
     static = _static_safety_factor(session)
-    if static <= 1.0:
-        return resolve_context_limit(session)
     # Derive the base from the RAW window, not the user-set token limit:
     # the whole point of drift correction is to retire the static safety
     # factor when measurement says the tokenizer tracks real tokens, so the
@@ -231,9 +244,17 @@ def drift_corrected_context_limit(session: Any) -> int:
         raw_window = int(session.provider.effective_context_window())
     except Exception:
         raw_window = None
+    # Floor: 1024 tokens, unless the physical window itself is smaller (a
+    # tiny test window must not be inflated past what the provider accepts).
+    floor = 1024
     if raw_window and raw_window > 0:
-        base = max(1024, int(raw_window / static))
+        floor = min(1024, raw_window)
+    if static > 1.0 and raw_window and raw_window > 0:
+        base = max(floor, int(raw_window / static))
     else:
+        # No static factor to retire: the base is the resolved limit
+        # (min of user cap and window), so the user's context_token_limit
+        # keeps governing and only the learned drift tightens it.
         base = resolve_context_limit(session)
     eff = effective_drift_ratio(session)
     if eff <= 0:
@@ -241,7 +262,88 @@ def drift_corrected_context_limit(session: Any) -> int:
     corrected = int(base * static / eff)
     if raw_window and raw_window > 0:
         corrected = min(corrected, raw_window)
-    return max(1024, corrected)
+    return max(floor, corrected)
+
+
+def real_prompt_estimate(session: Any, cl100k_total: int) -> int:
+    """Project a cl100k token count onto the provider's real tokenizer using
+    the learned/seeded drift ratio. Shared by every pressure gate (preflight,
+    nudge, compactor, context_status) so they all reason about the same
+    number the provider will actually bill/limit on."""
+    try:
+        total = int(cl100k_total or 0)
+    except (TypeError, ValueError):
+        return 0
+    if total <= 0:
+        return 0
+    return int(total * effective_drift_ratio(session))
+
+
+def effective_fill(
+    session: Any, cl100k_total: int, *, limit: int | None = None
+) -> dict:
+    """One fill% for every pressure gate, expressed in REAL provider tokens.
+
+    Two equivalent frames exist and mixing them double-corrects:
+
+    * cl100k frame — raw cl100k total vs ``drift_corrected_context_limit``
+      (what preflight/compactor compare internally).
+    * real frame — ``cl100k * drift`` vs the physical window (what the
+      provider bills and limits on; what humans/models understand).
+
+    This helper reports the real frame. ``real_tokens`` prefers the
+    provider's own full-prompt count for the CURRENT iteration
+    (``session._last_prompt_tokens_real`` stashed by the response
+    calibration) over the projected ``cl100k * drift`` when it is fresher or
+    larger — ground truth beats an estimate. ``fill_pct`` is identical in
+    both frames, so gates may keep comparing in the cl100k frame and still
+    agree with this number.
+    """
+    try:
+        cl100k = int(cl100k_total or 0)
+    except (TypeError, ValueError):
+        cl100k = 0
+    eff = effective_drift_ratio(session)
+    corrected_limit = int(limit) if limit else drift_corrected_context_limit(session)
+    try:
+        raw_window = int(session.provider.effective_context_window()) or 0
+    except Exception:
+        raw_window = 0
+    # Undo the corrected limit's drift division to recover the real-frame
+    # ceiling. Round to the nearest token (int() truncation on the way down
+    # would otherwise leave 479,999 for a 480,000 window) and cap at the
+    # physical window.
+    real_limit = int(round(corrected_limit * eff))
+    if raw_window > 0:
+        real_limit = min(real_limit, raw_window)
+    real_limit = max(1, real_limit)
+
+    projected = int(cl100k * eff)
+    source = "cl100k_drift"
+    ground = int(getattr(session, "_last_prompt_tokens_real", 0) or 0)
+    ground_iter = getattr(session, "_last_prompt_tokens_real_iter", None)
+    current_iter = getattr(session, "_trace_current_iter", None)
+    fresh = (
+        ground > 0
+        and ground_iter is not None
+        and current_iter is not None
+        and int(ground_iter) == int(current_iter)
+    )
+    real_tokens = projected
+    if fresh and ground >= projected // 2:
+        # Same-iteration provider count: authoritative for this request.
+        real_tokens = ground
+        source = "provider_usage"
+    fill_pct = real_tokens / float(real_limit) * 100.0
+    return {
+        "real_tokens": int(real_tokens),
+        "real_limit": int(real_limit),
+        "fill_pct": round(fill_pct, 2),
+        "drift_ratio": round(float(eff), 3),
+        "source": source,
+        "cl100k_tokens": cl100k,
+        "corrected_limit": int(corrected_limit),
+    }
 
 
 def update_observed_drift(session: Any, observed: float) -> None:
@@ -344,6 +446,8 @@ __all__ = [
     "resolve_context_limit",
     "drift_corrected_context_limit",
     "effective_drift_ratio",
+    "real_prompt_estimate",
+    "effective_fill",
     "update_observed_drift",
     "resolve_response_reserve",
     "compaction_token_budget",

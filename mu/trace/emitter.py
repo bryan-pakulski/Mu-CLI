@@ -206,6 +206,11 @@ class TraceEmitter:
         self._fh: Optional[Any] = None
         self._closed = False
         self.iter_count = 0
+        # context_packaging_v2 P4-T10: running prompt-cache aggregates so
+        # turn_end / run_end can report cache_hit_ratio + uncached input.
+        self.cache_hit_iters = 0
+        self.cached_input_tokens = 0
+        self.uncached_input_tokens = 0
         # Round-47 F9: monotonic per-run sequence allocated under the lock in
         # emit(); consumers and the parser key ordering on it.
         self._seq = 0
@@ -256,6 +261,14 @@ class TraceEmitter:
                     # Round-47 F9: counter incremented under the lock — was
                     # outside, losing increments under concurrent emission.
                     self.iter_count += 1
+                    try:
+                        _tk = record.get("tokens") or {}
+                        if _tk.get("cache_hit"):
+                            self.cache_hit_iters += 1
+                        self.cached_input_tokens += int(_tk.get("cached", 0) or 0)
+                        self.uncached_input_tokens += int(_tk.get("uncached_in", 0) or 0)
+                    except Exception:  # noqa: BLE001
+                        pass
                 # Round-47 F9: seq rides INSIDE the record (flat JSONL schema
                 # preserved — the parser and trace consumers see the same
                 # shape; the copy-on-write avoids mutating the caller's dict).
@@ -338,8 +351,19 @@ class TraceEmitter:
         out.update(rec)
         self.emit(out)
 
+    def cache_stats(self) -> Dict[str, Any]:
+        """Prompt-cache aggregates for this run so far (P4-T10)."""
+        iters = int(self.iter_count)
+        return {
+            "cache_hit_iters": int(self.cache_hit_iters),
+            "cache_hit_ratio": round(self.cache_hit_iters / float(iters), 3) if iters else 0.0,
+            "cached_input_tokens": int(self.cached_input_tokens),
+            "uncached_input_tokens": int(self.uncached_input_tokens),
+        }
+
     def turn_end(self, rec: Dict[str, Any]) -> None:
         out = {"type": "turn_end", "run_id": self.run_id}
+        out.update(self.cache_stats())
         out.update(rec)
         self.emit(out)
         self.flush()
@@ -367,6 +391,7 @@ class TraceEmitter:
             _RUN_END_REGISTRY.add(self.run_id)
         self._run_end_emitted = True
         out = {"type": "run_end", "run_id": self.run_id}
+        out.update(self.cache_stats())
         out.update(rec)
         self.emit(out)
         self.flush()
@@ -736,10 +761,34 @@ def build_request_record(
         component_tokens["tool_schemas"] = _et(json.dumps(
             tool_payload, sort_keys=True, default=str, ensure_ascii=False
         )) if tool_payload else 0
+    # context_packaging_v2 P4: size of the trailing request-only
+    # runtime-state message (volatile memory/scratchpad/clock blocks that
+    # used to live in the system prompt). Lets the trace prove the system
+    # prompt hash is stable while volatile context still ships.
+    volatile_block_tokens = 0
+    try:
+        from mu.session.runtime_state import is_runtime_state_message
+
+        if messages and is_runtime_state_message(list(messages)[-1]):
+            _details = message_parts[-1].get("part_details") or []
+            if _details:
+                volatile_block_tokens = int(_details[-1].get("tokens", 0) or 0)
+            else:
+                from utils.token_estimator import estimate_tokens as _et_rs
+                from mu.session.runtime_state import runtime_state_text
+
+                volatile_block_tokens = int(_et_rs(runtime_state_text(list(messages)[-1])))
+    except Exception:  # noqa: BLE001
+        volatile_block_tokens = 0
+    component_tokens["volatile_block"] = volatile_block_tokens
+    if volatile_block_tokens:
+        # Reattribute: the block was counted as `user` by the part walk.
+        component_tokens["user"] = max(0, int(component_tokens.get("user", 0)) - volatile_block_tokens)
     return {
         "iter": iteration,
         "system_prompt_bytes": len(system_prompt.encode("utf-8", errors="replace")),
         "system_prompt_hash": _hash(system_prompt),
+        "volatile_block_tokens": volatile_block_tokens,
         "messages": (
             # Round-51 T6: bounded summary — per-message totals only, no
             # part_details, and older messages beyond the most recent 50
@@ -941,13 +990,45 @@ def build_iter_record(
     except Exception:  # noqa: BLE001
         eff_drift = 1.0
     real_est = int(total_est * eff_drift)
+    # Real-frame fill% of the window (the number every gate now reasons
+    # about). Prefer the provider's full prompt count for this iteration.
+    fill_pct_real = 0.0
+    try:
+        from mu.session.budgets import effective_fill
 
+        _limit = int(getattr(session, "_last_effective_limit", 0) or 0) or None
+        _fill = effective_fill(session, total_est, limit=_limit)
+        fill_pct_real = float(_fill["fill_pct"])
+        if _fill["source"] == "provider_usage":
+            real_est = int(_fill["real_tokens"])
+    except Exception:  # noqa: BLE001
+        fill_pct_real = 0.0
+
+    _in_tok = int(getattr(response, "input_tokens", 0) or 0)
+    _cached_tok = int(getattr(response, "cached_tokens", 0) or 0)
+    # Prompt-cache efficiency (context_packaging_v2 P4-T10). `cached_pct` is
+    # the cached share of the full prompt (cache_read / total prompt); a
+    # `cache_hit` is any iteration that read from the cache at all.
+    try:
+        from providers.base import prompt_tokens_total
+
+        _full_prompt = prompt_tokens_total(
+            _in_tok,
+            int(getattr(response, "cache_read_tokens", 0) or 0),
+            int(getattr(response, "cache_creation_tokens", 0) or 0),
+        )
+    except Exception:  # noqa: BLE001
+        _full_prompt = _in_tok
+    _full_prompt = max(_full_prompt, _cached_tok, 0)
     tokens = {
-        "in": int(getattr(response, "input_tokens", 0) or 0),
+        "in": _in_tok,
         "out": int(getattr(response, "output_tokens", 0) or 0),
-        "cached": int(getattr(response, "cached_tokens", 0) or 0),
+        "cached": _cached_tok,
         "reasoning": int(getattr(response, "reasoning_tokens", 0) or 0),
         "cost_delta": round(float(cost_delta or 0.0), 6),
+        "cache_hit": bool(_cached_tok > 0),
+        "cached_pct": round(_cached_tok / float(_full_prompt) * 100.0, 2) if _full_prompt > 0 else 0.0,
+        "uncached_in": max(0, _full_prompt - _cached_tok),
     }
 
     # Assistant text preview (first text part, truncated).
@@ -986,6 +1067,7 @@ def build_iter_record(
             ),
             "prompt_tokens_actual": actual,
             "prompt_tokens_real_est": real_est,
+            "fill_pct_real": round(fill_pct_real, 2),
             "drift_ratio": round(eff_drift, 3),
             "drift_pct": drift_pct,
             "drift_pct_reliable": drift_pct_reliable,

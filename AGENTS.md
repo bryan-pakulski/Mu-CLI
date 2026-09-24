@@ -74,6 +74,19 @@ python3 -m pytest tests/ -q
 - L2 is the conversation summary; L3 carries active goals and memory.
 - L4/L4B carry recent tool activity and retrieved context; L5 is live history.
 - Non-L5 layers consume the global context cap before the L5 budget is derived.
+- Context packaging (`mu/session/budgets.py`, `context_maintenance.py`,
+  `runtime_state.py`, `mu/agent/compactor.py`): every pressure gate compares
+  the cl100k estimate against `drift_corrected_context_limit` (learned real/cl100k
+  drift applies to all providers); `budgets.effective_fill` is the real-frame view —
+  never scale both sides. At turn end `loop_body._fold_turn_context` folds the
+  finished turn's tool results into the durable result store, then rolls the turn
+  into L2 when it exceeds `turn_keep_budget_tokens`. Answered tool-call args above
+  `tool_call_arg_stub_threshold_chars` are stubbed in the projected request only;
+  `session.history` is never rewritten. `compactor._pressure_clear` runs even with
+  `auto_compaction_enabled=False`. With `prompt_prefix_stable` the system prompt is
+  byte-stable per turn; volatile blocks ride in the trailing RUNTIME STATE message
+  (never persisted). Every history shrink records a ledger kind (`turn_fold`,
+  `turn_roll`, `pressure_clear`, `pressure_forced`, ...).
 - Do not bypass approval gates for mutations. Write-side tools require approval
   unless the user explicitly enables YOLO mode; plan mode remains read-only.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.
@@ -84,7 +97,6 @@ python3 -m pytest tests/ -q
 
 ## Commits and pull requests
 
-- Work and commit on the `mucli-codex` branch.
 - Run the full test suite successfully before committing.
 - Describe user-visible behavior changes and the verification performed.
 - Preserve approval, security, persistence, and context-budget invariants.

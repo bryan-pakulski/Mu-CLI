@@ -284,6 +284,73 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 4,
     },
+    "turn_fold_enabled": {
+        # context_packaging_v2 P2: when a turn FINISHES, move its completed
+        # tool results into the durable result store (retention action
+        # 'clear', recoverable via recall()) so a finished turn no longer
+        # rides verbatim into the next one. Zero summarizer cost. Skipped
+        # when the result store is unavailable; protected / failed /
+        # provider-signed results are never folded. Records a 'turn_fold'
+        # entry in the history-shrink ledger.
+        "type": bool,
+        "default": True,
+    },
+    "turn_fold_keep_recent_results": {
+        # How many of the finished turn's trailing tool results stay
+        # verbatim after the fold (the model may still be reasoning about
+        # them in the next turn's opening). 0 folds everything clearable.
+        "type": int,
+        "default": 2,
+    },
+    "prompt_prefix_stable": {
+        # context_packaging_v2 P4: keep the system prompt byte-stable across
+        # the iterations of a turn. Volatile per-iteration blocks (memory /
+        # scratchpad snapshots, eviction notices, delegated work, peer
+        # coordination, wall-clock) render into ONE trailing request-only
+        # user message instead of the system prompt, so a saved memory or
+        # the clock ticking no longer invalidates the provider prefix cache
+        # for system+tools+history. False restores in-prompt rendering.
+        "type": bool,
+        "default": True,
+    },
+    "context_pressure_escalate_after": {
+        # context_packaging_v2 P3: how many further turn-final iterations
+        # at/over context_pressure_nudge_pct (without the summary anchor
+        # moving) climb the pressure ladder one rung: L1 nudge -> L2
+        # stronger nudge -> L3 harness-forced compaction (at most once per
+        # episode). 0 disables escalation (single nudge, legacy behaviour).
+        "type": int,
+        "default": 3,
+    },
+    "turn_roll_enabled": {
+        # context_packaging_v2 P2: after the turn-boundary fold, if the
+        # FINISHED turn still projects to more than turn_keep_budget_tokens
+        # (e.g. a 40-iteration turn of assistant/tool traffic), roll it
+        # into the L2 conversation summary (summary_anchor advances past
+        # the turn; keep_recent=1 keeps the final assistant answer live).
+        # Uses the provider summarizer when available, the mechanical
+        # summarizer otherwise. Ledger kind 'turn_roll'. Never touches the
+        # active turn (only runs at the turn's end).
+        "type": bool,
+        "default": True,
+    },
+    "turn_keep_budget_tokens": {
+        # Projected-token budget a finished turn may keep verbatim in L5
+        # before turn_roll folds it into L2.
+        "type": int,
+        "default": 6000,
+    },
+    "tool_call_arg_stub_threshold_chars": {
+        # context_packaging_v2 P2: once a tool_call has been answered by a
+        # tool_result, string arguments longer than this many chars
+        # (write_file content, apply_diff patches, bash heredocs) are
+        # replaced in the PROJECTED request by a {__stubbed__, bytes,
+        # sha256, preview} stub. The tool already ran; the payload is on
+        # disk / in the result store and was ~83k tokens per iteration at
+        # peak. session.history keeps the original. 0 disables.
+        "type": int,
+        "default": 2000,
+    },
     "tool_result_cache_entries": {
         # Max entries in the tool-result sidecar cache (recall() + auto-
         # recall by locator, Fix #10). Mode-aware: loop/feature modes raise

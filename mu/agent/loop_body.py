@@ -232,6 +232,54 @@ def _filter_goal_echo_entries(summary: str, goal_texts: list[str]) -> str:
     return "\n".join(kept)
 
 
+def _fold_turn_context(session, turn_start_index, iteration) -> dict | None:
+    """Turn-boundary fold seam (context_packaging_v2 P2).
+
+    Called once when a turn finishes with a text-only response. Moves the
+    finished turn's completed tool results into the durable result store
+    (retention ``clear``; recoverable via ``recall``) so the next turn's
+    prompt carries stubs instead of payloads. Zero summarizer cost. Ledger
+    kind ``turn_fold`` is recorded by ``edit_tool_results``. Best-effort:
+    any failure is logged and swallowed — a fold must never break a turn.
+    """
+    try:
+        from mu.session.context_maintenance import fold_completed_turn
+
+        _sm = session.session_manager
+        try:
+            _sm._pending_compaction_iter = int(iteration)
+        except Exception:  # noqa: BLE001
+            pass
+        result = fold_completed_turn(session, turn_start_index=turn_start_index)
+        if result.get("changed"):
+            logger.info(
+                "Turn fold: archived %d completed tool result(s) to the durable "
+                "store (saved ~%d projected tokens, %d eligible).",
+                len(result["changed"]), int(result.get("saved_tokens", 0) or 0),
+                int(result.get("eligible", 0) or 0),
+            )
+        # Roll the finished turn into L2 when it still exceeds the per-turn
+        # keep budget (T6). Anchor advance re-arms the pressure nudge.
+        try:
+            from mu.session.context_maintenance import roll_completed_turn
+
+            roll = roll_completed_turn(session, turn_start_index=turn_start_index)
+            if roll.get("rolled"):
+                logger.info(
+                    "Turn roll: finished turn (%d projected tokens > %d budget) "
+                    "summarized into L2; anchor %d -> %d.",
+                    int(roll.get("turn_tokens", 0)), int(roll.get("budget", 0)),
+                    int(roll.get("anchor_before", 0)), int(roll.get("anchor_after", 0)),
+                )
+            result["roll"] = roll
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Turn roll skipped: %s", exc)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Turn fold skipped: %s", exc)
+        return None
+
+
 def run_turn(session, text, *, origin="user"):
     logger.info(f"Sending message: {text[:100]}...")
     session.paused_execution_text = None
@@ -1035,14 +1083,45 @@ def run_turn(session, text, *, origin="user"):
                 )
             except Exception:
                 state_capsule_text = ""
+            _prefix_stable = bool(session.variables.get("prompt_prefix_stable", True))
             dynamic_system_prompt = session._inject_hierarchical_context(
                 base_persona_prompt,
                 cached_skills=session._turn_skills_block,
+                volatile_handoff=_prefix_stable,
             )
+            # context_packaging_v2 P4: volatile per-iteration blocks (memory /
+            # scratchpad snapshots, eviction notices, delegated work, peer
+            # coordination, wall-clock) go to a trailing request-only
+            # message instead of the system prompt so the system+tools
+            # prefix stays byte-stable across the turn (provider prefix
+            # cache). `prompt_prefix_stable=False` restores the legacy
+            # in-prompt rendering.
+            _volatile_blocks: list[str] = []
+
+            def _add_volatile(block: str) -> None:
+                nonlocal dynamic_system_prompt
+                if _prefix_stable:
+                    _volatile_blocks.append(block.strip())
+                else:
+                    dynamic_system_prompt += "\n\n" + block.strip()
+
+            if _prefix_stable:
+                try:
+                    from utils.runtime_metrics import _current_time_prelude
+
+                    _add_volatile(_current_time_prelude())
+                except Exception:  # noqa: BLE001
+                    pass
+                # L2 state capsule / checkpoint + L3 goal, handed over by
+                # inject_hierarchical_context (they mutate mid-turn).
+                for _blk in list(getattr(session, "_volatile_layer_blocks", None) or []):
+                    _add_volatile(str(_blk))
             _durable_recall = str(
                 getattr(session, "_turn_durable_recall_block", "") or ""
             ).strip()
             if _durable_recall:
+                # Turn-constant (computed once at turn start): safe in the
+                # stable prompt.
                 dynamic_system_prompt += (
                     "\n\nLAYER 2M — Durable cross-session recall:\n"
                     f"{_durable_recall}"
@@ -1079,8 +1158,8 @@ def run_turn(session, text, *, origin="user"):
                         memory_summary, state_capsule_text
                     )
                 if memory_summary:
-                    dynamic_system_prompt += (
-                        "\n\nLAYER 3 — Persisted working memory snapshot:\n"
+                    _add_volatile(
+                        "LAYER 3 — Persisted working memory snapshot:\n"
                         f"{memory_summary}"
                     )
                 # Surface eviction notices to the model (R12, FM-11) so it
@@ -1088,8 +1167,8 @@ def run_turn(session, text, *, origin="user"):
                 # re-deriving it. Drained once per turn.
                 _mem_evictions = session.task_memory.drain_eviction_log()
                 if _mem_evictions:
-                    dynamic_system_prompt += (
-                        "\n\nLAYER 3 — Memory eviction notices (these entries "
+                    _add_volatile(
+                        "LAYER 3 — Memory eviction notices (these entries "
                         "were removed to make room; do not assume they still "
                         "exist):\n- " + "\n- ".join(_mem_evictions)
                     )
@@ -1110,14 +1189,14 @@ def run_turn(session, text, *, origin="user"):
                         scratchpad_summary, state_capsule_text
                     )
                 if scratchpad_summary:
-                    dynamic_system_prompt += (
-                        "\n\nLAYER 3 — Turn scratchpad snapshot:\n"
+                    _add_volatile(
+                        "LAYER 3 — Turn scratchpad snapshot:\n"
                         f"{scratchpad_summary}"
                     )
                 _scratch_evictions = session.turn_scratchpad.drain_eviction_log()
                 if _scratch_evictions:
-                    dynamic_system_prompt += (
-                        "\n\nLAYER 3 — Scratchpad eviction notices:\n- "
+                    _add_volatile(
+                        "LAYER 3 — Scratchpad eviction notices:\n- "
                         + "\n- ".join(_scratch_evictions)
                     )
 
@@ -1128,8 +1207,8 @@ def run_turn(session, text, *, origin="user"):
             except Exception:
                 _subagent_context = ""
             if _subagent_context:
-                dynamic_system_prompt += (
-                    "\n\nLAYER 3B — Authoritative delegated work:\n"
+                _add_volatile(
+                    "LAYER 3B — Authoritative delegated work:\n"
                     + _subagent_context
                 )
 
@@ -1153,10 +1232,24 @@ def run_turn(session, text, *, origin="user"):
                 _thread_context = ""
                 logger.debug("peer thread context refresh failed", exc_info=True)
             if _thread_context:
-                dynamic_system_prompt += (
-                    "\n\nLAYER 3C — Peer thread coordination:\n"
+                _add_volatile(
+                    "LAYER 3C — Peer thread coordination:\n"
                     + _thread_context
                 )
+
+            # Materialise the trailing runtime-state message for THIS
+            # request only (never persisted to history). Stashed on the
+            # session so post-hook/overflow rebuilds of the wire messages
+            # can re-append it.
+            try:
+                from mu.session.runtime_state import append_runtime_state, render_runtime_state
+
+                session._runtime_state_block = (
+                    render_runtime_state(_volatile_blocks) if _prefix_stable else ""
+                )
+                messages = append_runtime_state(session, messages)
+            except Exception:  # noqa: BLE001
+                logger.debug("runtime-state message skipped", exc_info=True)
 
             dynamic_system_prompt, messages = _preflight_context_check(
                 session, dynamic_system_prompt, messages,
@@ -1744,6 +1837,14 @@ def run_turn(session, text, *, origin="user"):
                     and session.session_manager.get_feature_state()
                 ):
                     session._set_feature_state()
+
+                # context_packaging_v2 P2: turn-boundary fold. The turn is
+                # over, so its completed tool results are no longer live
+                # evidence — move them into the durable result store
+                # (recallable) so they do not ride verbatim into the next
+                # turn. Independent of compact_history (which rewrites
+                # history); this only edits retention. Never raises.
+                _fold_turn_context(session, turn_start_index, iteration)
 
                 if session.variables.get("compact_history", False):
                     # Compaction must run regardless of UI presence —

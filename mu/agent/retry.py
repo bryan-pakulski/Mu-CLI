@@ -312,6 +312,9 @@ def provider_generate_with_retry(
                         _live_recent,
                         {"role": "system", "parts": []},
                     )[:-1]
+                    from mu.agent.context_guard import _reattach_runtime_state
+
+                    messages = _reattach_runtime_state(session, messages)
                 except AttributeError:
                     pass
                 # The SAME request that drops archived messages must carry

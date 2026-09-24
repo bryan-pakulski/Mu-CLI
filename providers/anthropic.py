@@ -869,6 +869,8 @@ class AnthropicProvider(LLMProvider):
             total_tokens=total_input + output_tokens,
             cached_tokens=cache_read,
             reasoning_tokens=thinking_tokens,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_create,
         )
         yield StreamEvent(kind="done")
 

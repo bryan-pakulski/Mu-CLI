@@ -856,3 +856,105 @@ def test_restore_trim_fires_on_oversized_history(session, tmp_path, caplog):
         r for r in caplog.records if "Restore trim" in str(r.msg)
     ]
     assert restore_trims, "expected restore-trim warning for oversized restore"
+
+
+# --------------------------------------------------------------------------
+# context_packaging_v2 / P4-T10: prompt-cache efficiency in the trace
+# --------------------------------------------------------------------------
+
+
+class _CacheProvider(LLMProvider):
+    """iter1 cold (no cache), iter2 warm (cache_read), iter3 final warm."""
+
+    def __init__(self, model_name="dummy"):
+        self.calls = 0
+        self.model_name = model_name
+
+    def get_available_models(self):
+        return ["dummy"]
+
+    def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ProviderResponse(
+                text="", parts=[MessagePart(type="tool_call", tool_name="todo_list", tool_args={}, tool_call_id="c1")],
+                input_tokens=1000, output_tokens=2, total_tokens=1002, cached_tokens=0,
+                cache_read_tokens=0, cache_creation_tokens=900,
+            )
+        if self.calls == 2:
+            return ProviderResponse(
+                text="", parts=[MessagePart(type="tool_call", tool_name="todo_list", tool_args={}, tool_call_id="c2")],
+                input_tokens=1200, output_tokens=2, total_tokens=1202, cached_tokens=900,
+                cache_read_tokens=900, cache_creation_tokens=200,
+            )
+        return ProviderResponse(
+            text="done", parts=[MessagePart(type="text", text="done")],
+            input_tokens=1400, output_tokens=1, total_tokens=1401, cached_tokens=1100,
+            cache_read_tokens=1100, cache_creation_tokens=200,
+        )
+
+    def upload_file(self, *a, **kw):
+        return None
+
+
+def test_iter_records_carry_cache_hit_and_cached_pct(tmp_path, monkeypatch):
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
+    from mu.session.session import Session, SessionManager
+
+    sm = SessionManager()
+    session = Session(_CacheProvider(), False, "system", sm)
+    session.variables["agent_mode"] = "default"
+    session.send_message("go")
+
+    recs = _read_trace(_trace_files(tmp_path)[0])
+    iters = [r for r in recs if r["type"] == "iter"]
+    assert len(iters) == 3
+    tk = [r["tokens"] for r in iters]
+    assert [t["cache_hit"] for t in tk] == [False, True, True]
+    assert tk[0]["cached_pct"] == 0.0
+    assert tk[1]["cached_pct"] == 75.0   # 900 / 1200
+    assert round(tk[2]["cached_pct"], 1) == 78.6  # 1100 / 1400
+    assert [t["uncached_in"] for t in tk] == [1000, 300, 300]
+
+
+def test_turn_end_and_run_end_carry_cache_hit_ratio(tmp_path, monkeypatch):
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
+    from mu.session.session import Session, SessionManager
+
+    sm = SessionManager()
+    session = Session(_CacheProvider(), False, "system", sm)
+    session.variables["agent_mode"] = "default"
+    session.send_message("go")
+
+    recs = _read_trace(_trace_files(tmp_path)[0])
+    turn_end = next(r for r in recs if r["type"] == "turn_end")
+    run_end = next(r for r in recs if r["type"] == "run_end")
+    for rec in (turn_end, run_end):
+        assert rec["cache_hit_iters"] == 2
+        assert rec["cache_hit_ratio"] == round(2 / 3, 3)
+        assert rec["uncached_input_tokens"] == 1000 + 300 + 300
+        assert rec["cached_input_tokens"] == 900 + 1100
+
+
+def test_trace_summary_exposes_cache_hit_ratio(tmp_path, monkeypatch):
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
+    from mu.session.session import Session, SessionManager
+    from mu.trace import parse_trace, build_series, build_summary
+
+    sm = SessionManager()
+    session = Session(_CacheProvider(), False, "system", sm)
+    session.variables["agent_mode"] = "default"
+    session.send_message("go")
+
+    run = parse_trace(_trace_files(tmp_path)[0])
+    summary = build_summary(run, build_series(run))
+    assert summary["cache_hit_ratio"] == round(2 / 3, 3)
+    assert summary["cache_hit_iters"] == 2
+    assert summary["uncached_input_tokens"] == 1600
+
+    # Legacy trace without the aggregates: derived from the per-iter series.
+    run.run_end = None
+    run.turn_end = None
+    legacy = build_summary(run, build_series(run))
+    assert legacy["cache_hit_ratio"] == round(2 / 3, 3)
+    assert legacy["cache_hit_iters"] == 2

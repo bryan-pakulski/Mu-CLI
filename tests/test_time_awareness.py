@@ -61,12 +61,28 @@ def test_compose_base_system_prompt_accounts_time_prelude(session):
     assert "Current date/time" not in first_line
 
 
-def test_inject_hierarchical_context_places_time_in_layer5(session):
-    """`_inject_hierarchical_context` builds the actual prompt sent to the
-    provider — pin that the time prelude lands there, AFTER the static base
-    (prefix-cache stability) and inside the per-iteration LAYER 5 block."""
+def test_inject_hierarchical_context_places_time_in_layer5_when_prefix_unstable(session):
+    """Legacy placement (`prompt_prefix_stable=False`): the time prelude
+    lands in the system prompt AFTER the static base and inside the
+    per-iteration LAYER 5 block."""
+    session.variables["prompt_prefix_stable"] = False
     out = session._inject_hierarchical_context("the base prompt")
     assert "Current date/time" in out
     assert out.index("the base prompt") < out.index("Current date/time")
     assert out.index("LAYER 5") < out.index("Current date/time")
     assert not out.startswith("Current date/time")
+
+
+def test_inject_hierarchical_context_keeps_clock_out_of_stable_prompt(session):
+    """Default (`prompt_prefix_stable=True`, context_packaging_v2 P4): the
+    wall-clock changes every minute, so it must NOT be in the system prompt
+    at all — it ships in the trailing runtime-state message instead, and
+    the system prompt is byte-identical across iterations."""
+    session.variables["prompt_prefix_stable"] = True
+    out = session._inject_hierarchical_context("the base prompt", volatile_handoff=True)
+    assert "Current date/time" not in out
+    assert "LAYER 5" in out
+    # Direct callers without the handoff (memory map, subagent bootstrap,
+    # tests) still get the complete legacy prompt.
+    legacy = session._inject_hierarchical_context("the base prompt")
+    assert "Current date/time" in legacy

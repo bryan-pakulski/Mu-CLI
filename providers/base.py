@@ -132,6 +132,29 @@ class StreamEvent:
     total_tokens: int = 0
     cached_tokens: int = 0
     reasoning_tokens: int = 0
+    # Prompt-cache breakdown (Anthropic: cache_read_input_tokens /
+    # cache_creation_input_tokens). 0 when the provider has no such split.
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+
+def prompt_tokens_total(
+    input_tokens: int, cache_read_tokens: int = 0, cache_creation_tokens: int = 0
+) -> int:
+    """The FULL prompt size the provider actually processed this call.
+
+    Providers disagree on what ``input_tokens`` means: OpenAI's
+    ``prompt_tokens`` and our Anthropic adapter already include the cached
+    subset, while a raw Anthropic usage block (and Ollama's
+    ``prompt_eval_count``) report only the uncached delta. If the reported
+    input already covers the cache counters it is the total; otherwise the
+    cache counters are additive.
+    """
+    inp = max(0, int(input_tokens or 0))
+    cache = max(0, int(cache_read_tokens or 0)) + max(0, int(cache_creation_tokens or 0))
+    if cache <= 0:
+        return inp
+    return inp if inp >= cache else inp + cache
 
 
 @dataclass
@@ -143,6 +166,16 @@ class ProviderResponse:
     total_tokens: int = 0
     cached_tokens: int = 0
     reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+    @property
+    def prompt_tokens_total(self) -> int:
+        """Full prompt tokens processed (cached + uncached); see
+        :func:`prompt_tokens_total`."""
+        return prompt_tokens_total(
+            self.input_tokens, self.cache_read_tokens, self.cache_creation_tokens
+        )
 
 
 class LLMProvider(ABC):
@@ -293,6 +326,8 @@ class LLMProvider(ABC):
             total_tokens=response.total_tokens,
             cached_tokens=response.cached_tokens,
             reasoning_tokens=response.reasoning_tokens,
+            cache_read_tokens=getattr(response, "cache_read_tokens", 0) or 0,
+            cache_creation_tokens=getattr(response, "cache_creation_tokens", 0) or 0,
         )
         yield StreamEvent(kind="done")
 
@@ -316,6 +351,7 @@ class LLMProvider(ABC):
         ordered_call_ids: List[str] = []
         partial_calls: Dict[str, Dict[str, Any]] = {}
         in_tok = out_tok = tot_tok = cached_tok = reasoning_tok = 0
+        cache_read_tok = cache_create_tok = 0
 
         for ev in events:
             if ev.kind == "text_delta" and ev.text:
@@ -375,6 +411,10 @@ class LLMProvider(ABC):
                 tot_tok = ev.total_tokens or tot_tok
                 cached_tok = ev.cached_tokens or cached_tok
                 reasoning_tok = ev.reasoning_tokens or reasoning_tok
+                cache_read_tok = (getattr(ev, "cache_read_tokens", 0) or 0) or cache_read_tok
+                cache_create_tok = (
+                    (getattr(ev, "cache_creation_tokens", 0) or 0) or cache_create_tok
+                )
             # 'error' and 'done' are signalling-only here. Callers wanting
             # to react to them should consume the stream directly.
 
@@ -411,6 +451,8 @@ class LLMProvider(ABC):
             total_tokens=tot_tok or (in_tok + out_tok),
             cached_tokens=cached_tok,
             reasoning_tokens=reasoning_tok,
+            cache_read_tokens=cache_read_tok,
+            cache_creation_tokens=cache_create_tok,
         )
 
     @abstractmethod

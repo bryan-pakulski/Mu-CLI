@@ -217,18 +217,68 @@ def test_drift_corrected_limit_shrinks_when_learned_worse():
     assert corrected == max(1024, int(static_limit * 2.5 / 5.0))
 
 
-def test_drift_corrected_limit_noop_without_static_factor():
-    """A provider with safety factor 1.0 (trust cl100k verbatim) never has
-    its limit drift-corrected — the static floor path is the only divisor."""
+def test_drift_corrected_limit_noop_without_static_factor_until_measured():
+    """A provider with safety factor 1.0 (trust cl100k verbatim) keeps the
+    plain resolved limit while nothing has been learned — the 1.0 seed is
+    a no-op divisor."""
     from mu.session.budgets import (
         drift_corrected_context_limit,
         resolve_context_limit,
-        update_observed_drift,
     )
 
     session = _make_session(_DriftProvider(factor=1.0))
-    update_observed_drift(session, 3.0)
+    assert not hasattr(session, "_observed_drift_ratio")
     assert drift_corrected_context_limit(session) == resolve_context_limit(session)
+
+
+def test_drift_corrected_limit_applies_learned_drift_without_static_factor():
+    """Regression for trace mucli_run_355d1b39c2a7: an Anthropic-style
+    provider (factor 1.0, 480k window) measured 1.67x real/cl100k drift, yet
+    the old short-circuit returned the raw 480k so every cl100k-based gate
+    (80% nudge, 85% compactor, preflight) fired ~1.67x too late. The learned
+    ratio must divide the window for every provider."""
+    from mu.session.budgets import (
+        drift_corrected_context_limit,
+        update_observed_drift,
+    )
+
+    session = _make_session(_DriftProvider(window=480_000, factor=1.0))
+    session.variables["context_token_limit"] = 480_000
+    update_observed_drift(session, 1.67)
+    corrected = drift_corrected_context_limit(session)
+    assert corrected == int(480_000 / 1.67)
+    assert corrected == 287_425
+
+
+def test_drift_corrected_limit_never_exceeds_window_without_static_factor():
+    """cl100k over-counting (drift < 1) floors at 1.0, so the corrected
+    ceiling for a factor-1.0 provider is exactly the raw window — never
+    more."""
+    from mu.session.budgets import (
+        drift_corrected_context_limit,
+        update_observed_drift,
+    )
+
+    session = _make_session(_DriftProvider(window=480_000, factor=1.0))
+    session.variables["context_token_limit"] = 480_000
+    update_observed_drift(session, 0.8)
+    assert drift_corrected_context_limit(session) == 480_000
+
+
+def test_real_prompt_estimate_projects_cl100k_by_effective_drift():
+    """Shared gate helper: cl100k total * learned drift; 0 for empty/invalid;
+    plain cl100k when nothing learned on a factor-1.0 provider."""
+    from mu.session.budgets import real_prompt_estimate, update_observed_drift
+    import mu.session.budgets as budgets
+
+    assert "real_prompt_estimate" in budgets.__all__
+
+    session = _make_session(_DriftProvider(window=480_000, factor=1.0))
+    assert real_prompt_estimate(session, 263_000) == 263_000
+    assert real_prompt_estimate(session, 0) == 0
+    assert real_prompt_estimate(session, None) == 0
+    update_observed_drift(session, 1.67)
+    assert real_prompt_estimate(session, 263_000) == int(263_000 * 1.67)
 
 
 # ----------------------------------------------------------- compaction_token_budget
@@ -386,3 +436,88 @@ def test_cold_cache_calibration_ignores_below_half_signal():
     # 4000 < 5000 (half) even though > 500 -> skipped.
     _calibrate_drift_from_response(session, _FakeResponse(input_tokens=4_000))
     assert not hasattr(session, "_observed_drift_ratio")
+
+# ----------------------------------------------------------- cache-aware calibration
+
+
+class _CachedResponse:
+    """Anthropic-style usage: uncached delta + cache_read + cache_creation."""
+
+    def __init__(self, input_tokens: int, cache_read: int = 0, cache_create: int = 0):
+        self.input_tokens = input_tokens
+        self.cache_read_tokens = cache_read
+        self.cache_creation_tokens = cache_create
+        self.cached_tokens = cache_read
+        self.output_tokens = 0
+        self.total_tokens = input_tokens + cache_read + cache_create
+
+
+def test_provider_response_exposes_cache_breakdown_defaults():
+    from providers.base import ProviderResponse
+
+    resp = ProviderResponse(text="", parts=[])
+    assert resp.cache_read_tokens == 0
+    assert resp.cache_creation_tokens == 0
+    assert resp.prompt_tokens_total == 0
+    resp = ProviderResponse(text="", parts=[], input_tokens=2_000,
+                            cache_read_tokens=430_000, cache_creation_tokens=3_000)
+    assert resp.prompt_tokens_total == 435_000
+
+
+def test_prompt_tokens_total_does_not_double_count_inclusive_input():
+    """Our Anthropic adapter already folds cache counters into input_tokens;
+    a raw usage block does not. Both shapes must yield the same total."""
+    from providers.base import prompt_tokens_total
+
+    assert prompt_tokens_total(435_000, 430_000, 3_000) == 435_000  # inclusive
+    assert prompt_tokens_total(2_000, 430_000, 3_000) == 435_000    # additive
+    assert prompt_tokens_total(26_000) == 26_000                    # Ollama shape
+
+
+def test_drain_stream_carries_cache_breakdown_onto_response():
+    from providers.base import StreamEvent
+
+    provider = _DriftProvider(factor=1.0)
+    events = [
+        StreamEvent(kind="text_delta", text="ok"),
+        StreamEvent(kind="usage", input_tokens=435_000, output_tokens=5,
+                    total_tokens=435_005, cached_tokens=430_000,
+                    cache_read_tokens=430_000, cache_creation_tokens=3_000),
+        StreamEvent(kind="done"),
+    ]
+    resp = provider.drain_stream(events)
+    assert resp.cache_read_tokens == 430_000
+    assert resp.cache_creation_tokens == 3_000
+    assert resp.prompt_tokens_total == 435_000
+
+
+def test_warm_cache_calibration_uses_cache_tokens_as_full_prompt():
+    """Regression for trace mucli_run_355d1b39c2a7: on a warm Anthropic
+    iteration input_tokens alone is the tiny uncached delta, which the
+    >= cl100k/2 gate rejects — so 160/274 iterations never calibrated.
+    The cache counters complete the picture: 2k + 430k + 3k = 435k real
+    against a 263k cl100k estimate -> drift 1.65."""
+    from mu.agent.loop_body import _calibrate_drift_from_response
+
+    session = _make_session(_DriftProvider(window=480_000, factor=1.0))
+    session._last_prompt_cl100k_est = 263_000
+    session._trace_current_iter = 47
+    _calibrate_drift_from_response(
+        session, _CachedResponse(input_tokens=2_000, cache_read=430_000, cache_create=3_000)
+    )
+    assert hasattr(session, "_observed_drift_ratio")
+    assert round(session._observed_drift_ratio, 2) == round(435_000 / 263_000, 2)
+    assert session._last_prompt_tokens_real == 435_000
+    assert session._last_prompt_tokens_real_iter == 47
+
+
+def test_calibration_stashes_real_prompt_even_when_signal_too_weak():
+    """The ground-truth prompt size is recorded for the gates regardless of
+    whether it qualifies as a drift observation."""
+    from mu.agent.loop_body import _calibrate_drift_from_response
+
+    session = _make_session(_DriftProvider(factor=2.5))
+    session._last_prompt_cl100k_est = 10_000
+    _calibrate_drift_from_response(session, _FakeResponse(input_tokens=200))
+    assert not hasattr(session, "_observed_drift_ratio")
+    assert session._last_prompt_tokens_real == 200

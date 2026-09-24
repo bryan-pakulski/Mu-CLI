@@ -1039,7 +1039,24 @@ def build_summary(run: TraceRun, series: Dict[str, Any]) -> Dict[str, Any]:
 
     subagent_iters = sum(1 for s in series["subagent_timeline"] if s["active"])
 
+    # Prompt-cache efficiency (context_packaging_v2 P4-T10): prefer the
+    # run_end/turn_end aggregates; derive from the per-iter token series for
+    # older traces that predate them.
+    _cache_src = run.run_end or run.turn_end or {}
+    if "cache_hit_ratio" in _cache_src:
+        cache_hit_ratio = float(_cache_src.get("cache_hit_ratio") or 0.0)
+        uncached_input = int(_num(_cache_src.get("uncached_input_tokens")))
+        cache_hit_iters = int(_num(_cache_src.get("cache_hit_iters")))
+    else:
+        _tok = series["tokens"]
+        cache_hit_iters = sum(1 for t in _tok if t.get("cached", 0) > 0)
+        cache_hit_ratio = round(cache_hit_iters / len(_tok), 3) if _tok else 0.0
+        uncached_input = int(sum(max(0.0, t["in"] - t.get("cached", 0)) for t in _tok))
+
     return {
+        "cache_hit_ratio": cache_hit_ratio,
+        "cache_hit_iters": cache_hit_iters,
+        "uncached_input_tokens": uncached_input,
         "run_id": run.run_id,
         "session": run.header.get("session", ""),
         "model": run.header.get("model", ""),

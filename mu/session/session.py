@@ -554,12 +554,19 @@ class Session:
         from mu.session.context_maintenance import retention_for_parts
 
         floor = resolve_tool_result_floor(self)
+        try:
+            stub_threshold = int(
+                self.variables.get("tool_call_arg_stub_threshold_chars", 2000) or 0
+            )
+        except (TypeError, ValueError):
+            stub_threshold = 2000
         return build_messages_from_history(
             recent_history_dicts, new_user_message_dict,
             tool_result_floor=floor,
             media_resolver=media_resolver_for_session(self),
             retention=retention_for_parts(self.session_manager),
             auto_clear=False,
+            arg_stub_threshold=max(0, stub_threshold),
         )
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:
@@ -620,12 +627,25 @@ class Session:
             f"{preamble}{summary}"
         )
 
-    def _build_active_goal_context(self) -> str:
+    def _build_active_goal_context(
+        self, *, include_goal: bool = True, include_feature_state: bool = True
+    ) -> str:
+        """L3 text. ``include_goal`` covers the pinned session/loop goal
+        (turn-constant); ``include_feature_state`` covers the feature
+        plan cursor (mutates mid-turn as tasks advance). The prefix-stable
+        prompt path renders them separately (context_packaging_v2 P4)."""
         sections = []
+        if not include_goal:
+            session_goal = ""
+            loop_goal = ""
+        else:
+            session_goal = None  # resolved below
+            loop_goal = None
         # session_goal is the mode-agnostic, top-level pinned ask. It
         # renders FIRST so it survives every compaction and reminds the
         # model what the user originally wanted across long runs.
-        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        if session_goal is None:
+            session_goal = str(self.variables.get("session_goal", "") or "").strip()
         if session_goal:
             # Single rendering of the pinned text: the L2 capsule and the
             # memory-snapshot goal-echo filter both defer to this line.
@@ -634,13 +654,14 @@ class Session:
                 "- session_goal_policy: every action should advance this goal; "
                 "re-anchor if drifting. /goal clear when the ask shifts."
             )
-        loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+        if loop_goal is None:
+            loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
         if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":
             sections.append(f"- loop_goal: {loop_goal}")
             sections.append(
                 "- loop_memory_policy: persist durable findings with save_memory and in-flight steps with save_scratchpad."
             )
-        feature_state = self.session_manager.get_feature_state()
+        feature_state = self.session_manager.get_feature_state() if include_feature_state else None
         if isinstance(feature_state, dict):
             feature_id = str(feature_state.get("feature_id", "") or "").strip()
             status = str(feature_state.get("status", "idle") or "idle")
@@ -1003,6 +1024,7 @@ class Session:
         *,
         cached_skills: str | None = None,
         cached_context_files: str | None = None,
+        volatile_handoff: bool = False,
     ) -> str:
         """Layered system-prompt assembly. Body moved to
         `mu/session/context.py:inject_hierarchical_context`.
@@ -1011,6 +1033,11 @@ class Session:
         loop can rebuild L2 / L3 fresh every iteration without re-reading
         the skills tree from disk each time. ``cached_context_files``
         forwards per-turn-cached L1A context-files text for the same reason.
+        ``volatile_handoff`` (agent loop only, context_packaging_v2 P4)
+        keeps mid-turn-mutable blocks (L2 state capsule / checkpoint, L3
+        feature cursor, clock) OUT of the returned prompt and stashes them
+        on ``self._volatile_layer_blocks`` for the trailing runtime-state
+        message, so the returned system prompt is byte-stable for the turn.
         """
         from mu.session.context import inject_hierarchical_context
 
@@ -1019,6 +1046,7 @@ class Session:
             system_prompt,
             cached_skills=cached_skills,
             cached_context_files=cached_context_files,
+            volatile_handoff=volatile_handoff,
         )
 
     def queue_resumption_briefing(self, briefing: str) -> None:

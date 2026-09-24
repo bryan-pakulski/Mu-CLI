@@ -76,18 +76,30 @@ def build_attachment_context(session: Any) -> str:
     return "\n".join(lines)[:6000]
 
 
-def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skills: Optional[str] = None, cached_context_files: Optional[str] = None) -> str:
+def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skills: Optional[str] = None, cached_context_files: Optional[str] = None, volatile_handoff: bool = False) -> str:
     # Prefix stability: the wall-clock line changes every minute, so it must
     # NOT lead the prompt — a volatile head defeats provider prefix caching
     # of the static L0 base + tool schema on every iteration. It renders in
     # the LAYER 5 block instead, which is rebuilt per iteration anyway.
+    # context_packaging_v2 P4: with `prompt_prefix_stable` (default) the
+    # clock moves to the trailing request-only runtime-state message
+    # (mu/session/runtime_state.py) so the SYSTEM prompt is byte-stable for
+    # the whole turn; the legacy in-prompt L5 placement remains when the
+    # variable is off.
+    # `volatile_handoff` is only requested by the agent loop, which owns the
+    # trailing runtime-state message; direct callers (tests, /memory map,
+    # subagent bootstrap) get the complete legacy prompt.
+    prefix_stable = bool(volatile_handoff) and bool(
+        session.variables.get("prompt_prefix_stable", True)
+    )
     time_prelude = ""
-    try:
-        from utils.runtime_metrics import _current_time_prelude
-        time_prelude = _current_time_prelude()
-    except Exception:
-        # Defensive: best-effort path must not break the caller.
-        logger.debug("Suppressed exception", exc_info=True)
+    if not prefix_stable:
+        try:
+            from utils.runtime_metrics import _current_time_prelude
+            time_prelude = _current_time_prelude()
+        except Exception:
+            # Defensive: best-effort path must not break the caller.
+            logger.debug("Suppressed exception", exc_info=True)
     system_prompt = str(system_prompt or "").strip()
 
     summary_limit = max(0, int(session.variables.get("conversation_summary_char_limit", 24000) or 12000))
@@ -120,7 +132,12 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
     else:
         semantic_residue = ""
 
-    goal_context = session._build_active_goal_context()
+    if prefix_stable:
+        goal_context = session._build_active_goal_context(include_feature_state=False)
+        feature_context = session._build_active_goal_context(include_goal=False)
+    else:
+        goal_context = session._build_active_goal_context()
+        feature_context = ""
     layers: list[str] = []
 
     session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
@@ -144,16 +161,44 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
         limit = max(0, int(session.variables.get("skills_max_chars", 6144) or 6144))
         layers.append(f"LAYER 1B \u2014 Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n[budget: {limit} chars | eviction: drop-tail after auto-expand]\n{skills_block}")
 
-    if state_capsule or semantic_residue:
-        parts = [f"[budget: {summary_limit} chars | eviction: keep newest]"]
+    # Prefix stability (context_packaging_v2 P4): the deterministic state
+    # capsule (tool envelopes / stores / task state), the model-maintained
+    # checkpoint and the active goal / feature plan all change MID-TURN as
+    # the model calls tools. With `prompt_prefix_stable` they are handed to
+    # the loop for the trailing runtime-state message and only the
+    # semantic residue (which changes solely on compaction — a legitimate
+    # prefix change) stays in the system prompt's L2.
+    volatile_layers: list[str] = []
+    if prefix_stable:
         if state_capsule:
-            parts.append(state_capsule)
+            volatile_layers.append(
+                f"LAYER 2 \u2014 Structured state capsule:\n[budget: {state_budget} chars]\n{state_capsule}"
+            )
         if semantic_residue:
-            parts.append("Semantic residue from compacted older conversation (non-authoritative where structured state disagrees):\n" + semantic_residue)
-        layers.append("LAYER 2 \u2014 Conversation summary:\n" + "\n\n".join(parts))
+            layers.append(
+                "LAYER 2 \u2014 Conversation summary:\n"
+                f"[budget: {summary_limit} chars | eviction: keep newest]\n\n"
+                "Semantic residue from compacted older conversation (non-authoritative where structured state disagrees):\n"
+                + semantic_residue
+            )
+        # The pinned goal is turn-constant: it stays in the stable prompt.
+        if goal_context:
+            layers.append("LAYER 3 \u2014 Active task plan / current goal:\n" + goal_context)
+        # The feature plan cursor advances mid-turn: trailing message.
+        if feature_context:
+            volatile_layers.append("LAYER 3 \u2014 Feature plan cursor:\n" + feature_context)
+    else:
+        if state_capsule or semantic_residue:
+            parts = [f"[budget: {summary_limit} chars | eviction: keep newest]"]
+            if state_capsule:
+                parts.append(state_capsule)
+            if semantic_residue:
+                parts.append("Semantic residue from compacted older conversation (non-authoritative where structured state disagrees):\n" + semantic_residue)
+            layers.append("LAYER 2 \u2014 Conversation summary:\n" + "\n\n".join(parts))
 
-    if goal_context:
-        layers.append("LAYER 3 \u2014 Active task plan / current goal:\n" + goal_context)
+        if goal_context:
+            layers.append("LAYER 3 \u2014 Active task plan / current goal:\n" + goal_context)
+    session._volatile_layer_blocks = volatile_layers
 
     session_role = str(session.variables.get("session_role", "") or "").strip()
     if session_role:
@@ -179,6 +224,7 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
     # A compaction rebuild must remove exactly this old prefix while
     # preserving turn-scoped recall/scratchpad blocks appended by the loop.
     session._last_injected_context_prompt = layered
+    session._last_injected_volatile_handoff = bool(prefix_stable)
     return layered
 
 

@@ -58,6 +58,9 @@ def _reinject_refreshed_summary(session, prompt: str) -> str:
             base,
             cached_skills=getattr(session, "_turn_skills_block", None),
             cached_context_files=getattr(session, "_turn_context_files_block", None),
+            # Same assembly mode the loop used for this request (P4): a
+            # prefix-stable prompt must not regain the volatile layers here.
+            volatile_handoff=bool(getattr(session, "_last_injected_volatile_handoff", False)),
         )
     except Exception:
         logger.warning(
@@ -76,6 +79,17 @@ def _reinject_refreshed_summary(session, prompt: str) -> str:
             "incoming prompt; post-injection tail dropped.",
         )
     return rebuilt + tail
+
+
+def _reattach_runtime_state(session, messages):
+    """Rebuilt wire messages come from history, which never holds the
+    request-only runtime-state message — re-append it (P4)."""
+    try:
+        from mu.session.runtime_state import append_runtime_state
+
+        return append_runtime_state(session, messages)
+    except Exception:  # noqa: BLE001
+        return messages
 
 
 def _estimate_messages_tokens(messages) -> int:
@@ -255,6 +269,11 @@ def _preflight_context_check(
     except Exception:
         pass
     response_reserve = resolve_response_reserve(session)
+    # FRAME CONTRACT: `context_limit` is already drift-corrected (window /
+    # learned real-per-cl100k ratio), so the comparison below is in the
+    # cl100k frame: raw cl100k `total` vs corrected limit. Do NOT also scale
+    # `total` by the drift ratio — that would double-correct. The real-frame
+    # view of the same decision is `budgets.effective_fill`.
     max_prompt = context_limit - response_reserve
 
     # Round-46 F2: ONE tokenization pass for this request. The manifest is
@@ -337,6 +356,7 @@ def _preflight_context_check(
             recent_history,
             {"role": "system", "parts": []},
         )[:-1]
+        messages = _reattach_runtime_state(session, messages)
 
         new_msg_tokens = _estimate_messages_tokens(messages)
         new_total = prompt_tokens + new_msg_tokens + tool_tokens
@@ -448,10 +468,30 @@ def _calibrate_drift_from_response(session, response) -> None:
     it. The guard rejects the warm-cache near-zero delta: only calibrate when
     the reported count is >= half the stashed cl100k estimate AND > 500
     tokens AND that estimate is itself substantial (> 1000). Never raises.
+
+    For prompt-caching providers (Anthropic) the streamed ``input_tokens``
+    may be only the uncached delta while ``cache_read_tokens`` /
+    ``cache_creation_tokens`` carry the rest; ``prompt_tokens_total`` folds
+    them into the full prompt size so warm iterations calibrate too (trace
+    mucli_run_355d1b39c2a7: 160/274 iterations were cache hits and never
+    updated drift under the input-only rule). The full figure is stashed as
+    ``session._last_prompt_tokens_real`` (with the iteration it belongs to)
+    so the pressure gates can prefer ground truth over ``cl100k * drift``.
     """
     try:
+        from providers.base import prompt_tokens_total
+
         cl100k_est = int(getattr(session, "_last_prompt_cl100k_est", 0) or 0)
-        reported_in = int(getattr(response, "input_tokens", 0) or 0)
+        reported_in = prompt_tokens_total(
+            int(getattr(response, "input_tokens", 0) or 0),
+            int(getattr(response, "cache_read_tokens", 0) or 0),
+            int(getattr(response, "cache_creation_tokens", 0) or 0),
+        )
+        if reported_in > 0:
+            session._last_prompt_tokens_real = int(reported_in)
+            session._last_prompt_tokens_real_iter = int(
+                getattr(session, "_trace_current_iter", 0) or 0
+            )
         if cl100k_est > 1000 and reported_in > 500 and reported_in >= cl100k_est // 2:
             from mu.session.budgets import update_observed_drift
 
@@ -612,51 +652,127 @@ def _maybe_nudge_context_pressure(
     if anchor > seen:
         session._pressure_nudge_armed_at = anchor
         session._pressure_nudge_fired = False
+        session._pressure_nudge_iters_over = 0
+        session._pressure_nudge_level = 0
+        session._pressure_forced_this_episode = False
 
     total = int((manifest or {}).get("total", 0) or 0)
     if not total or not limit or limit <= 0:
         return
-    fill = total / float(limit) * 100.0
+    # Real-frame fill: `limit` is the drift-corrected ceiling the preflight
+    # guard stashed; `effective_fill` projects the cl100k total by the
+    # learned drift (or uses this iteration's provider-reported prompt size)
+    # so the model is told the number the provider actually enforces.
+    from mu.session.budgets import effective_fill
+
+    fill_info = effective_fill(session, total, limit=int(limit))
+    fill = float(fill_info["fill_pct"])
+    real_total = int(fill_info["real_tokens"])
+    real_limit = int(fill_info["real_limit"])
     if fill < threshold:
         # Dropped back below the threshold without compacting — re-arm.
         if getattr(session, "_pressure_nudge_fired", False):
             session._pressure_nudge_fired = False
+        session._pressure_nudge_iters_over = 0
+        session._pressure_nudge_level = 0
+        session._pressure_forced_this_episode = False
         return
-    if getattr(session, "_pressure_nudge_fired", False):
+
+    # Escalation ladder (context_packaging_v2 P3-T8). Each turn-final
+    # iteration that stays at/over the threshold without the anchor moving
+    # counts. Level 1 fires on the first crossing; every
+    # `context_pressure_escalate_after` further iterations climb one rung:
+    #   L1 nudge -> L2 stronger nudge -> L3 forced compaction (once per
+    #   episode; a manual_compact pass that advances the anchor resets the
+    #   ladder through the hysteresis block above).
+    try:
+        escalate_after = int(session.variables.get("context_pressure_escalate_after", 3) or 0)
+    except Exception:
+        escalate_after = 3
+    iters_over = int(getattr(session, "_pressure_nudge_iters_over", 0) or 0) + 1
+    session._pressure_nudge_iters_over = iters_over
+    level = int(getattr(session, "_pressure_nudge_level", 0) or 0)
+
+    if not getattr(session, "_pressure_nudge_fired", False):
+        session._pressure_nudge_fired = True
+        new_level = 1
+    elif escalate_after > 0 and iters_over - 1 >= escalate_after * level and level < 3:
+        new_level = level + 1
+    else:
         return
-    session._pressure_nudge_fired = True
+    session._pressure_nudge_level = new_level
 
     from mu.trace.emitter import emit_nudge
 
+    iteration = int(getattr(session, "_trace_current_iter", 0) or 0)
+    fill_line = (
+        f"{fill:.0f}% of the context limit "
+        f"(~{real_total:,} / {real_limit:,} provider tokens)"
+    )
+
+    if new_level == 3 and not getattr(session, "_pressure_forced_this_episode", False):
+        session._pressure_forced_this_episode = True
+        forced = None
+        try:
+            from .compactor import manual_compact
+
+            forced = manual_compact(session, kind="pressure_forced")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Forced pressure compaction failed: %s", exc)
+        ok = bool(forced and forced.get("ok"))
+        compacted = bool(forced and forced.get("compacted"))
+        text = (
+            f"CONTEXT PRESSURE (forced): the request stayed at {fill_line} for "
+            f"{iters_over} iterations after two nudges, so the harness ran "
+            f"`compact` itself ({'history summarized' if compacted else 'nothing summarizable' if ok else 'compaction failed'}). "
+            "Re-read `context_status` before continuing; recover archived evidence "
+            "with `recall(cache_key)` only when needed."
+        )
+        emit_nudge(session, "context_pressure_forced", iteration, fill_pct=round(fill, 2),
+                   iters_over=iters_over, compacted=compacted)
+        logger.warning(
+            "Context pressure L3: forced compaction after %d iterations at %.0f%% "
+            "(compacted=%s).", iters_over, fill, compacted,
+        )
+    elif new_level == 2:
+        text = (
+            f"CONTEXT PRESSURE (escalated): still at {fill_line} after "
+            f"{iters_over} iterations. Before ANY other tool call: run "
+            "`context_status`, then `clear_tool_results` on every completed "
+            "payload you no longer need, or `compact` with a checkpoint. "
+            "If pressure persists the harness will compact for you."
+        )
+        emit_nudge(session, "context_pressure_l2", iteration, fill_pct=round(fill, 2),
+                   iters_over=iters_over)
+        logger.warning(
+            "Context pressure L2: still %.0f%% after %d iterations — escalated nudge.",
+            fill, iters_over,
+        )
+    else:
+        text = (
+            f"CONTEXT PRESSURE: assembled request is at {fill_line}. "
+            "Inspect `context_status`, "
+            "preserve active evidence, and use `clear_tool_results` to "
+            "archive selected completed payloads without a summarizer call. "
+            "If more space is needed, use `compact` with a resumable "
+            "checkpoint and a completed-history boundary. "
+            "This fires once per threshold crossing; after "
+            "compaction it re-arms automatically."
+        )
+        emit_nudge(session, "context_pressure", iteration)
+        logger.warning(
+            "Context pressure nudge: request ~%d / %d real tokens (%.0f%%, "
+            "cl100k %d / corrected limit %d, source=%s) crossed the %.0f%% "
+            "threshold — compact nudge injected.",
+            real_total, real_limit, fill, total, limit, fill_info["source"], threshold,
+        )
+
     nudge_msg = {
         "role": "user",
-        "parts": [
-            {
-                "type": "text",
-                "text": (
-                    "CONTEXT PRESSURE: assembled request is at "
-                    f"{fill:.0f}% of the context limit "
-                    f"({total:,} / {limit:,} tokens). Inspect `context_status`, "
-                    "preserve active evidence, and use `clear_tool_results` to "
-                    "archive selected completed payloads without a summarizer call. "
-                    "If more space is needed, use `compact` with a resumable "
-                    "checkpoint and a completed-history boundary. "
-                    "This fires once per threshold crossing; after "
-                    "compaction it re-arms automatically."
-                ),
-            }
-        ],
+        "parts": [{"type": "text", "text": text}],
         "synthetic": True,
     }
     session.session_manager.history.append(nudge_msg)
-    emit_nudge(
-        session, "context_pressure", int(getattr(session, "_trace_current_iter", 0) or 0)
-    )
-    logger.warning(
-        "Context pressure nudge: request estimate %d / %d tokens (%.0f%%) "
-        "crossed the %.0f%% threshold — compact nudge injected.",
-        total, limit, fill, threshold,
-    )
 
 
 def _generate_with_overflow_recovery(

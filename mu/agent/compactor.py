@@ -27,6 +27,104 @@ def checkpoint_progress_if_due(session, iteration: int) -> bool:
     return False
 
 
+def _pressure_clear(ctx: HookContext, variables: dict) -> Optional[dict]:
+    """Summarizer-free working-set cap (context_packaging_v2 P3-T7).
+
+    Runs BEFORE the ``auto_compaction_enabled`` gate: even a session that
+    opted out of automatic summarization must not ride to the provider
+    ceiling with hundreds of completed tool payloads verbatim. When the
+    drift-corrected fill of the assembled request reaches
+    ``context_pressure_nudge_pct`` (the same threshold that wakes the
+    model), clear completed, non-recent, non-protected tool results into
+    the durable store — oldest first — until the projected fill drops
+    ~10 points below the threshold or nothing clearable remains. Ledger
+    kind ``pressure_clear``. Returns the ``edit_tool_results`` summary when
+    anything was cleared, else ``None``.
+    """
+    session = ctx.session
+    if session is None or ctx.system_prompt is None:
+        return None
+    if not hasattr(session, "_build_messages_from_history"):
+        return None
+    try:
+        threshold = float(variables.get("context_pressure_nudge_pct", 80.0))
+    except (TypeError, ValueError):
+        threshold = 80.0
+    if threshold <= 0:
+        return None
+    try:
+        from mu.session.budgets import drift_corrected_context_limit, effective_fill
+        from mu.session.context_maintenance import candidates, edit_tool_results, projected_tokens
+        from .context_guard import _estimate_request_tokens
+
+        sm = session.session_manager
+        store = getattr(getattr(sm, "tool_result_cache", None), "_store", None)
+        if store is None:
+            return None
+        limit = int(drift_corrected_context_limit(session))
+        fixed = int(_estimate_request_tokens(ctx.system_prompt, [], ctx.tools)["total"])
+
+        def fill_now() -> float:
+            return float(effective_fill(session, fixed + projected_tokens(session), limit=limit)["fill_pct"])
+
+        fill = fill_now()
+        if fill < threshold:
+            return None
+        target = max(0.0, threshold - 10.0)
+        selected = [
+            item["result_id"]
+            for item in sorted(candidates(session), key=lambda it: it["history_index"])
+            if not item["blocked_reason"] and item["state"] != "clear"
+        ]
+        if not selected:
+            return None
+        cleared_total: dict = {"ok": True, "action": "clear", "changed": [], "skipped": [],
+                               "before_tokens": 0, "after_tokens": 0, "saved_tokens": 0,
+                               "summarizer_calls": 0, "fill_before": round(fill, 2)}
+        # Clear in small batches, re-measuring between them so we stop as
+        # soon as the projection is comfortably under the threshold.
+        batch_size = 8
+        for offset in range(0, len(selected), batch_size):
+            batch = selected[offset:offset + batch_size]
+            try:
+                sm._pending_shrink_kind = "pressure_clear"
+                part = edit_tool_results(session, batch)
+            finally:
+                sm._pending_shrink_kind = None
+            if offset == 0:
+                cleared_total["before_tokens"] = part.get("before_tokens", 0)
+            cleared_total["after_tokens"] = part.get("after_tokens", 0)
+            cleared_total["changed"] += list(part.get("changed", []))
+            cleared_total["skipped"] += list(part.get("skipped", []))
+            fill = fill_now()
+            if fill <= target:
+                break
+        cleared_total["saved_tokens"] = max(
+            0, int(cleared_total["before_tokens"]) - int(cleared_total["after_tokens"])
+        )
+        cleared_total["fill_after"] = round(fill, 2)
+        if not cleared_total["changed"]:
+            return None
+        logger.info(
+            "Pressure clear: archived %d completed tool result(s) (fill %.0f%% -> %.0f%%, "
+            "threshold %.0f%%, saved ~%d projected tokens).",
+            len(cleared_total["changed"]), cleared_total["fill_before"], fill, threshold,
+            cleared_total["saved_tokens"],
+        )
+        return cleared_total
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("Pressure clear skipped: %s", exc)
+        return None
+
+
+def _pressure_only(pressure: Optional[dict]) -> Optional[HookResult]:
+    """Surface a pressure-clear as a compaction result so the retry loop
+    rebuilds the wire messages from live history; None when nothing cleared."""
+    if pressure:
+        return HookResult(action="continue", data={"compaction": True, "clearing": pressure})
+    return None
+
+
 def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[HookResult]:
     session = ctx.session
     if session is None:
@@ -37,8 +135,12 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
         session_manager, "roll_history_summary_to_token_budget"
     ):
         return None
+    # Summarizer-free working-set cap runs regardless of the opt-out below.
+    pressure = _pressure_clear(ctx, variables)
     # Respect saved opt-outs; emergency provider-window recovery remains on.
     if not variables.get("auto_compaction_enabled", True):
+        if pressure:
+            return HookResult(action="continue", data={"compaction": True, "clearing": pressure})
         return None
 
     # Retry/no-progress cooldown, including when protected recent results
@@ -47,12 +149,12 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
     watermark = getattr(session, "_compaction_watermark", 0)
     history_len = len(getattr(session_manager, "history", []))
     if watermark and history_len >= watermark and history_len - watermark < 4:
-        return None
+        return _pressure_only(pressure)
 
     try:
         threshold = float(variables.get("context_trim_threshold", 0.85) or 0.85)
     except (TypeError, ValueError):
-        return None
+        return _pressure_only(pressure)
     threshold = max(0.10, min(threshold, 1.0))
     # Use the provider-aware compaction budget when available — it
     # accounts for the actual model context window, not just the
@@ -80,14 +182,14 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
                 ),
             )
         except (TypeError, ValueError):
-            return None
+            return _pressure_only(pressure)
         budget = int(context_limit * threshold)
 
     try:
         from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
 
         if budget <= 0:
-            return None
+            return _pressure_only(pressure)
         from mu.session.context_maintenance import candidates, edit_tool_results, projected_tokens
         from .context_guard import _estimate_request_tokens
         from mu.session.budgets import drift_corrected_context_limit, resolve_response_reserve
@@ -99,10 +201,14 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
         if working_limit > 0:
             budget = min(budget, working_limit)
         if budget <= 0:
-            return None
+            return _pressure_only(pressure)
+        # cl100k frame throughout: `budget` derives from the drift-corrected
+        # limit, `estimate` is the raw cl100k projection. Scaling `estimate`
+        # by the drift ratio here would double-correct (see
+        # budgets.effective_fill for the real-frame equivalent).
         estimate = (lambda: projected_tokens(session)) if hasattr(session, "_build_messages_from_history") else session_manager.estimate_runtime_history_tokens
         if estimate() <= budget:
-            return None
+            return _pressure_only(pressure)
         target = max(1, budget // 2 if working_limit > 0 else int(budget * 0.8))
         # Mark attempts as well as successful rolls: an uncompactable tail
         # must not cause repeated summarization calls on provider retries.
@@ -138,7 +244,7 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
         )
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("Auto-compaction raised %s; continuing without compacting", exc)
-        return None
+        return _pressure_only(pressure)
     if rolled:
         # Keep accounting and retry suppression in sync with the new tail.
         session._compacted_this_turn = True
@@ -151,11 +257,12 @@ def _compact_history(ctx: HookContext, *, kind: str = "auto_hook") -> Optional[H
         return HookResult(action="continue", data={"compaction": True, "budget": target})
     if cleared and cleared.get("saved_tokens", 0) > 0:
         return HookResult(action="continue", data={"compaction": True, "clearing": cleared})
-    return None
+    return _pressure_only(pressure)
 
 
 def manual_compact(session: any, *, focus: str = "", checkpoint=None,
-                   preserve_result_ids=None, clear_result_ids=None, through_index=None) -> dict:
+                   preserve_result_ids=None, clear_result_ids=None, through_index=None,
+                   kind: str = "manual") -> dict:
     """Run a compaction pass on demand — the back end for the `/compact`
     slash command and the agent `compact` tool.
 
@@ -220,7 +327,7 @@ def manual_compact(session: any, *, focus: str = "", checkpoint=None,
     try:
         session_manager._tool_result_floor = resolve_tool_result_floor(session)
         session_manager._compact_focus = focus_val
-        session_manager._pending_compaction_kind = "manual"
+        session_manager._pending_compaction_kind = str(kind or "manual")
         session_manager._pending_compaction_iter = int(
             getattr(session, "_trace_current_iter", 0) or 0
         )
@@ -248,7 +355,7 @@ def manual_compact(session: any, *, focus: str = "", checkpoint=None,
             if rolled:
                 session_manager._record_shrink_since(
                     _snap,
-                    kind="manual",
+                    kind=str(kind or "manual"),
                     summarizer=getattr(session_manager, "_last_summary_mode", "unknown"),
                     keep_recent=keep_recent,
                 )

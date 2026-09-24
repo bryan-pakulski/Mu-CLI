@@ -32,6 +32,7 @@ rehydration), `tests/test_vision_e2e.py` (image_input round-trip),
 from __future__ import annotations
 
 import base64
+import hashlib
 from typing import Any, Callable, List, Optional
 
 from providers.base import (
@@ -106,6 +107,70 @@ def _lean_tool_result(tool_result: Any) -> Any:
     return lean
 
 
+ARG_STUB_MARKER = "__stubbed__"
+_ARG_STUB_PREVIEW_CHARS = 200
+
+
+def stub_oversized_arg_values(tool_args: Any, threshold: int) -> Any:
+    """Return a copy of ``tool_args`` with every top-level string value longer
+    than ``threshold`` chars replaced by a compact stub::
+
+        {"__stubbed__": true, "bytes": N, "sha256": "<16 hex>",
+         "preview": "<first 200 chars>"}
+
+    ``threshold <= 0`` disables. Non-dict args and short values pass through
+    untouched. Pure function — never mutates the input (session.history keeps
+    the original arguments; only the projected request is stubbed).
+    """
+    if threshold <= 0 or not isinstance(tool_args, dict):
+        return tool_args
+    out = None
+    for key, value in tool_args.items():
+        if isinstance(value, str) and len(value) > threshold:
+            if out is None:
+                out = dict(tool_args)
+            raw = value.encode("utf-8", "replace")
+            out[key] = {
+                ARG_STUB_MARKER: True,
+                "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest()[:16],
+                "preview": value[:_ARG_STUB_PREVIEW_CHARS],
+            }
+    return out if out is not None else tool_args
+
+
+def consumed_tool_call_indices(history_dicts: List[dict]) -> set[int]:
+    """Indices of history messages whose tool_call parts have already been
+    answered by a later tool_result (matched by ``tool_call_id`` when both
+    sides carry one; otherwise by order — a tool_result-bearing message
+    that follows the call). The trailing, still-pending batch (calls with
+    no result yet) is never included: the provider needs its full args to
+    pair the upcoming results."""
+    consumed: set[int] = set()
+    result_ids: set[str] = set()
+    last_result_index = -1
+    for index, msg in enumerate(history_dicts):
+        for part in msg.get("parts") or []:
+            if part.get("type") == "tool_result":
+                last_result_index = index
+                cid = part.get("tool_call_id")
+                if cid:
+                    result_ids.add(str(cid))
+    for index, msg in enumerate(history_dicts):
+        parts = msg.get("parts") or []
+        calls = [p for p in parts if p.get("type") == "tool_call"]
+        if not calls:
+            continue
+        ids = [str(p.get("tool_call_id")) for p in calls if p.get("tool_call_id")]
+        if ids and result_ids:
+            if all(cid in result_ids for cid in ids):
+                consumed.add(index)
+            continue
+        if last_result_index > index:
+            consumed.add(index)
+    return consumed
+
+
 def build_messages_from_history(
     recent_history_dicts: List[dict],
     new_user_message_dict: dict,
@@ -114,6 +179,7 @@ def build_messages_from_history(
     media_resolver: Optional[Callable[[dict[str, Any]], Optional[MediaData]]] = None,
     retention: Optional[dict] = None,
     auto_clear: bool = True,
+    arg_stub_threshold: int = 0,
 ) -> List[Message]:
     """Rehydrate dict-shaped history records into provider-typed
     `Message` objects. Pass-through for text; decodes base64 image
@@ -126,7 +192,18 @@ def build_messages_from_history(
     that have a ``cache_key`` are replaced by a compact ref string — the
     model can ``recall(KEY)`` or use chunk retrieval tools to fetch the
     full content on demand. Results without a cache_key stay verbatim
-    (no ref to recall)."""
+    (no ref to recall).
+
+    When ``arg_stub_threshold > 0``, oversized string arguments of tool_calls
+    that already have a matching tool_result (write_file bodies, apply_diff
+    patches, bash heredocs) are replaced by size+sha256+preview stubs — the
+    tool already ran, the result is in history, and the content is on disk
+    or in the result store; re-sending it every iteration was ~83k tokens at
+    peak in trace mucli_run_355d1b39c2a7. The pending batch is never stubbed
+    and the underlying history dicts are never mutated."""
+    consumed_calls: set[int] = (
+        consumed_tool_call_indices(recent_history_dicts) if arg_stub_threshold > 0 else set()
+    )
     # Build the set of message indices (in recent_history_dicts only —
     # the new user message is never compacted) that are within the floor.
     floor_indices: set[int] = set()
@@ -214,11 +291,14 @@ def build_messages_from_history(
                 if media is not None:
                     parts.append(MessagePart(type="media_input", media=media))
             elif p_type == "tool_call":
+                tool_args = p.get("tool_args", {})
+                if hist_idx in consumed_calls:
+                    tool_args = stub_oversized_arg_values(tool_args, arg_stub_threshold)
                 parts.append(
                     MessagePart(
                         type="tool_call",
                         tool_name=p["tool_name"],
-                        tool_args=p.get("tool_args", {}),
+                        tool_args=tool_args,
                         thought_signature=p.get("thought_signature"),
                     )
                 )

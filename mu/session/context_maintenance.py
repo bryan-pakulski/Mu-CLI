@@ -101,7 +101,7 @@ def projected_tokens(session) -> int:
 
 
 def context_status(session, *, candidate_offset=0, candidate_limit=30) -> dict:
-    from .budgets import drift_corrected_context_limit, resolve_response_reserve
+    from .budgets import drift_corrected_context_limit, effective_fill, resolve_response_reserve
     sm = session.session_manager
     # The current injected prefix is available during tool execution. Keep
     # the request's fixed/tool overhead from the last measured manifest.
@@ -115,6 +115,7 @@ def context_status(session, *, candidate_offset=0, candidate_limit=30) -> dict:
         raise ValueError("candidate_offset must be nonnegative and candidate_limit must be 1..100")
     all_candidates = candidates(session)
     end = candidate_offset + candidate_limit
+    fill = effective_fill(session, fixed + history_tokens, limit=limit)
     return {
         "projected_history_tokens": history_tokens,
         "stored_history_tokens": sm.estimate_runtime_history_tokens(),
@@ -123,6 +124,12 @@ def context_status(session, *, candidate_offset=0, candidate_limit=30) -> dict:
         "effective_context_limit": limit,
         "response_reserve": reserve,
         "available_tokens": max(0, limit - reserve - fixed - history_tokens),
+        # Real-frame view: what the provider will actually count.
+        "fill_pct_real": fill["fill_pct"],
+        "real_request_tokens": fill["real_tokens"],
+        "real_context_limit": fill["real_limit"],
+        "drift_ratio": fill["drift_ratio"],
+        "fill_source": fill["source"],
         "checkpoint": getattr(sm, "context_checkpoint", {}),
         "summary_usage": getattr(sm, "_summary_usage", {}),
         "fixed_tokens_source": "last_provider_request",
@@ -132,7 +139,15 @@ def context_status(session, *, candidate_offset=0, candidate_limit=30) -> dict:
     }
 
 
-def candidates(session) -> list[dict]:
+def candidates(session, *, floor_override: int | None = None) -> list[dict]:
+    """Every selectable tool result at/after the summary anchor with its
+    retention state and, when it cannot be cleared, the reason.
+
+    ``floor_override`` replaces the in-turn ``tool_result_floor`` (how many
+    trailing results count as ``recent``). The turn-boundary fold passes a
+    smaller value because the turn is over and its trailing results are no
+    longer evidence the model is mid-way through consuming.
+    """
     from .budgets import resolve_tool_result_floor
     sm = session.session_manager
     protected = protected_indices(sm, include_signatures=True)
@@ -142,7 +157,10 @@ def candidates(session) -> list[dict]:
     result_indexes = [i for i, m in enumerate(sm.history) if (i >= sm.summary_anchor or i in retained_indexes) and any(
         p.get("type") == "tool_result" for p in m.get("parts", [])
     )]
-    floor = resolve_tool_result_floor(session)
+    if floor_override is None:
+        floor = resolve_tool_result_floor(session)
+    else:
+        floor = max(0, int(floor_override))
     recent = set(result_indexes[-floor:]) if floor else set()
     if recent:
         for index in range(min(recent) - 1, -1, -1):
@@ -170,6 +188,154 @@ def candidates(session) -> list[dict]:
     return items
 
 
+def fold_completed_turn(session, *, turn_start_index: int | None = None) -> dict:
+    """Turn-boundary fold (context_packaging_v2 P2).
+
+    Move the FINISHED turn's completed tool results into the durable result
+    store via :func:`edit_tool_results` (retention action ``clear``), so the
+    next turn's prompt carries a one-line stub per result instead of the
+    payload, while ``recall(cache_key)`` still returns the exact text. No
+    summarizer call. Honors ``turn_fold_enabled`` /
+    ``turn_fold_keep_recent_results``; never touches protected, failed,
+    provider-signed or already-cleared results; a no-op when the durable
+    store is unavailable (``edit_tool_results`` refuses to clear without
+    verified durable recall).
+
+    ``turn_start_index`` bounds the fold to the turn that just ended;
+    defaults to ``session_manager._active_turn_start_index``. Returns the
+    ``edit_tool_results`` summary (``changed`` empty when nothing folded)
+    plus ``eligible`` (number of clearable candidates seen).
+    """
+    variables = getattr(session, "variables", None) or {}
+    empty = {"ok": True, "action": "clear", "changed": [], "skipped": [], "eligible": 0,
+             "before_tokens": 0, "after_tokens": 0, "saved_tokens": 0, "summarizer_calls": 0}
+    if not variables.get("turn_fold_enabled", True):
+        return {**empty, "reason": "disabled"}
+    sm = getattr(session, "session_manager", None)
+    if sm is None or not getattr(sm, "history", None):
+        return {**empty, "reason": "no_history"}
+    store = getattr(getattr(sm, "tool_result_cache", None), "_store", None)
+    if store is None:
+        return {**empty, "reason": "durable_store_unavailable"}
+    try:
+        keep = max(0, int(variables.get("turn_fold_keep_recent_results", 2)))
+    except (TypeError, ValueError):
+        keep = 2
+    if turn_start_index is None:
+        turn_start_index = getattr(sm, "_active_turn_start_index", None)
+    try:
+        start = int(turn_start_index) if turn_start_index is not None else 0
+    except (TypeError, ValueError):
+        start = 0
+    start = max(0, min(start, len(sm.history)))
+    selected = [
+        item["result_id"]
+        for item in candidates(session, floor_override=keep)
+        if item["history_index"] >= start
+        and not item["blocked_reason"]
+        and item["state"] != "clear"
+    ]
+    if not selected:
+        return {**empty, "reason": "nothing_clearable"}
+    result: dict = {**empty, "eligible": len(selected)}
+    # edit_tool_results caps at 100 ids per call; fold in batches.
+    for offset in range(0, len(selected), 100):
+        batch = selected[offset:offset + 100]
+        try:
+            sm._pending_shrink_kind = "turn_fold"
+            part = edit_tool_results(session, batch, floor_override=keep)
+        finally:
+            sm._pending_shrink_kind = None
+        result["changed"] = list(result["changed"]) + list(part.get("changed", []))
+        result["skipped"] = list(result["skipped"]) + list(part.get("skipped", []))
+        if offset == 0:
+            result["before_tokens"] = part.get("before_tokens", 0)
+        result["after_tokens"] = part.get("after_tokens", 0)
+    result["saved_tokens"] = max(0, int(result["before_tokens"]) - int(result["after_tokens"]))
+    result["reason"] = "folded" if result["changed"] else "nothing_changed"
+    return result
+
+
+def projected_turn_tokens(session, turn_start_index: int) -> int:
+    """Projected (post-retention, post-stub) tokens of history[turn_start:]."""
+    from mu.agent.context_guard import _estimate_request_tokens
+    sm = session.session_manager
+    start = max(0, min(int(turn_start_index or 0), len(sm.history)))
+    history = sm.history[start:]
+    if not history:
+        return 0
+    messages = session._build_messages_from_history(history, {"role": "system", "parts": []})[:-1]
+    return int(_estimate_request_tokens("", messages)["messages"])
+
+
+def roll_completed_turn(session, *, turn_start_index: int | None = None, provider=None) -> dict:
+    """Turn-boundary roll (context_packaging_v2 P2).
+
+    When the FINISHED turn still projects above ``turn_keep_budget_tokens``
+    after the fold and arg stubs, roll it into the L2 conversation summary
+    via ``roll_history_summary`` bounded by ``through_index`` (the turn's
+    last message) with ``keep_recent=1`` so the final assistant answer
+    stays live. The summary anchor advancing also re-arms the context
+    pressure nudge. Ledger kind ``turn_roll``. Returns a small report and
+    never raises.
+    """
+    variables = getattr(session, "variables", None) or {}
+    report = {"rolled": False, "reason": "", "turn_tokens": 0, "budget": 0,
+              "anchor_before": 0, "anchor_after": 0}
+    if not variables.get("turn_roll_enabled", True):
+        return {**report, "reason": "disabled"}
+    sm = getattr(session, "session_manager", None)
+    if sm is None or not getattr(sm, "history", None):
+        return {**report, "reason": "no_history"}
+    try:
+        budget = max(0, int(variables.get("turn_keep_budget_tokens", 6000)))
+    except (TypeError, ValueError):
+        budget = 6000
+    if turn_start_index is None:
+        turn_start_index = getattr(sm, "_active_turn_start_index", None)
+    try:
+        start = int(turn_start_index) if turn_start_index is not None else 0
+    except (TypeError, ValueError):
+        start = 0
+    start = max(0, min(start, len(sm.history)))
+    anchor_before = int(getattr(sm, "summary_anchor", 0) or 0)
+    report["anchor_before"] = anchor_before
+    report["budget"] = budget
+    try:
+        turn_tokens = projected_turn_tokens(session, start)
+    except Exception:  # noqa: BLE001
+        turn_tokens = 0
+    report["turn_tokens"] = turn_tokens
+    if turn_tokens <= budget:
+        return {**report, "reason": "under_budget", "anchor_after": anchor_before}
+    end_index = len(sm.history) - 1
+    if end_index <= anchor_before:
+        return {**report, "reason": "nothing_to_roll", "anchor_after": anchor_before}
+    provider = provider if provider is not None else getattr(session, "provider", None)
+    snap = sm._shrink_snapshot() if hasattr(sm, "_shrink_snapshot") else None
+    sm._compact_focus = variables.get("compact_focus") or ""
+    # The turn is over: its tool results are no longer floor-protected.
+    prev_floor = getattr(sm, "_tool_result_floor", 0)
+    sm._tool_result_floor = 0
+    sm._pending_compaction_kind = "turn_roll"
+    try:
+        rolled = bool(sm.roll_history_summary(
+            keep_recent=1, provider=provider, through_index=end_index,
+        ))
+    finally:
+        sm._tool_result_floor = prev_floor
+        sm._pending_compaction_kind = None
+    anchor_after = int(getattr(sm, "summary_anchor", 0) or 0)
+    if rolled and snap is not None and hasattr(sm, "_record_shrink_since"):
+        sm._record_shrink_since(
+            snap, kind="turn_roll",
+            summarizer=getattr(sm, "_last_summary_mode", "unknown"),
+            keep_recent=1, turn_tokens=turn_tokens, budget=budget,
+        )
+    return {**report, "rolled": rolled, "anchor_after": anchor_after,
+            "reason": "rolled" if rolled else "roll_declined"}
+
+
 def validate_checkpoint(checkpoint: Any) -> dict:
     if checkpoint is None:
         return {}
@@ -183,8 +349,14 @@ def validate_checkpoint(checkpoint: Any) -> dict:
     return dict(checkpoint)
 
 
-def edit_tool_results(session, result_ids, *, action="clear", checkpoint=None) -> dict:
-    """Clear only named, completed results after verifying durable recall."""
+def edit_tool_results(session, result_ids, *, action="clear", checkpoint=None,
+                      floor_override: int | None = None) -> dict:
+    """Clear only named, completed results after verifying durable recall.
+
+    ``floor_override`` is forwarded to :func:`candidates` so a caller that
+    legitimately operates with a different recency floor (the turn-boundary
+    fold) sees the same eligibility it selected against.
+    """
     started = time.monotonic()
     if action not in {"clear", "keep", "restore"}:
         raise ValueError("action must be clear, keep, or restore")
@@ -196,7 +368,7 @@ def edit_tool_results(session, result_ids, *, action="clear", checkpoint=None) -
     checkpoint = validate_checkpoint({**getattr(sm, "context_checkpoint", {}), **validate_checkpoint(checkpoint)})
     before = projected_tokens(session)
     retention = dict(getattr(sm, "context_retention", {}))
-    known = {item["result_id"]: item for item in candidates(session)}
+    known = {item["result_id"]: item for item in candidates(session, floor_override=floor_override)}
     changed, skipped = [], []
     for key in dict.fromkeys(result_ids):
         item = known.get(key)
@@ -256,7 +428,8 @@ def edit_tool_results(session, result_ids, *, action="clear", checkpoint=None) -
         # change the trace must be able to explain.
         sm._pending_compaction_iter = int(getattr(session, "_trace_current_iter", 0) or 0)
         sm.record_history_shrink(
-            kind="result_clear", tokens_before=before, tokens_after=after,
+            kind=str(getattr(sm, "_pending_shrink_kind", None) or "result_clear"),
+            tokens_before=before, tokens_after=after,
             msgs_before=len(sm.history), anchor_before=int(getattr(sm, "summary_anchor", 0) or 0),
             tokens_basis="projected", cleared=len(changed),
         )

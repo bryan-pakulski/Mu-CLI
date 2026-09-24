@@ -1617,6 +1617,11 @@ class Session:
         self._compacted_this_turn = False
         # Reset the reactive-overflow-recovery counter for the next turn.
         self._overflow_recoveries_this_turn = 0
+        # context_packaging_v2 P4: the request-only runtime-state block is
+        # rebuilt by the loop every iteration; drop it so no later,
+        # non-loop wire rebuild can attach a stale copy.
+        self._runtime_state_block = ""
+        self._volatile_layer_blocks = []
         # Reset per-turn retry counters so the next turn isn't penalised for
         # failures the previous turn already escalated on.
         if hasattr(self, "_retryable_failure_counts"):

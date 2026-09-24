@@ -16,87 +16,33 @@ from mu.tools import tool
 @tool(
     name="ask_user_choice",
     description=(
-        "Ask the user a multiple-choice question and BLOCK until they "
-        "pick (or cancel). Renders a live full-screen picker; the user "
-        "navigates with arrow keys and submits with Enter. When "
-        "multi_select=true the picker shows checkboxes and the user can "
-        "toggle any combination with Space (or `a` / `n` for all / none).\n"
-        "\n"
-        "Set allow_other=true when you're asking a CLARIFYING question "
-        "and the listed options might not cover every case. The picker "
-        "appends an extra 'Other (type your own)…' entry; picking it "
-        "opens a free-form text prompt. The returned `other_text` field "
-        "captures that prose answer.\n"
-        "\n"
-        "Use this WHENEVER:\n"
-        "  • Teacher mode quiz: 2–6 plausible answers, want the learner "
-        "to pick. Set multi_select=true for 'select all that apply'.\n"
-        "  • Disambiguation: the user said 'edit the auth code' and three "
-        "files plausibly qualify — ask them to pick which. Set "
-        "allow_other=true so they can name a different file if you "
-        "missed it.\n"
-        "  • Confirming a path-of-action: the user asked for a refactor "
-        "with multiple reasonable approaches — surface 2–4 named options "
-        "instead of free-form prose. allow_other=true gives them an "
-        "escape hatch.\n"
-        "\n"
-        "Do NOT use for pure free-form input — open-ended questions "
-        "belong in regular chat. Do NOT use for binary yes/no when a "
-        "simple clarifying sentence works.\n"
-        "\n"
-        "The result is `{\"selected\": [...labels], \"other_text\": str, "
-        "\"cancelled\": bool}`. When cancelled (Esc / Ctrl+C / blank), "
-        "both `selected` and `other_text` are empty — interpret that as "
-        "'the user wants to opt out of the picker; follow up in plain "
-        "chat'. When `other_text` is non-empty, treat it as the user's "
-        "authoritative answer alongside (or instead of) `selected`."
+        "Show the user a multiple-choice picker and block until they choose or cancel. Use for disambiguation, confirming an approach, or quizzes (2-8 options); not for free-form input or trivial yes/no. multi_select=true allows any subset; allow_other=true adds a free-form 'Other' entry returned in other_text. Result: {selected: [labels], other_text: str, cancelled: bool}; cancelled means follow up in plain chat."
     ),
     parameters={
         "type": "object",
         "properties": {
             "question": {
                 "type": "string",
-                "description": (
-                    "The headline question, shown bold at the top of the "
-                    "picker. Keep it under ~80 chars; expand context via "
-                    "`description`."
-                ),
+                "description": "Headline question (<~80 chars); put extra framing in `description`.",
             },
             "options": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": (
-                    "The choices, in display order. 2–8 is the sweet spot; "
-                    "more than ~10 and the user will skim past them."
-                ),
+                "description": "Choices in display order (2-8 ideal).",
             },
             "multi_select": {
                 "type": "boolean",
                 "default": False,
-                "description": (
-                    "When true, the picker is select-all-that-apply: the "
-                    "user toggles any subset with Space and submits with "
-                    "Enter. When false (default), the user picks exactly "
-                    "one option."
-                ),
+                "description": "Select-all-that-apply instead of exactly one.",
             },
             "allow_other": {
                 "type": "boolean",
                 "default": False,
-                "description": (
-                    "When true, append an 'Other (type your own)…' entry. "
-                    "Picking it opens a follow-up text prompt; the prose "
-                    "answer comes back in `other_text`. Strongly recommended "
-                    "for clarifying questions where you're not sure your "
-                    "options cover the full space of plausible answers."
-                ),
+                "description": "Append an 'Other (type your own)' entry; its prose answer returns in `other_text`.",
             },
             "description": {
                 "type": "string",
-                "description": (
-                    "Optional additional context shown under the question. "
-                    "Use for 'why I'm asking' framing — keep it brief."
-                ),
+                "description": "Optional brief context shown under the question.",
             },
         },
         "required": ["question", "options"],
@@ -205,53 +151,19 @@ def ask_user_choice_tool(args: dict[str, Any], context) -> str:
 @tool(
     name="set_session_goal",
     description=(
-        "Pin the user's top-level task into L3 of the system prompt for "
-        "the current turn. Keeps you oriented across many iterations "
-        "and the L2 conversation-summary compaction that happens "
-        "mid-turn — the pinned goal survives both, while the original "
-        "text in the user's first message may be summarized away.\n"
-        "\n"
-        "**LIFECYCLE**: the goal automatically clears at the END of the "
-        "turn. Each new user message starts fresh — re-pin at the top "
-        "if the next task is also multi-step. Don't carry over old "
-        "goals; an unrelated next request shouldn't be biased by what "
-        "was pinned before.\n"
-        "\n"
-        "Call this when:\n"
-        "  • The user just stated a multi-step task ('refactor the auth "
-        "layer', 'teach me Perl', 'audit this codebase for SQL "
-        "injection'). Pin it immediately at the start of the turn so "
-        "you don't drift across iterations.\n"
-        "  • The user's focus shifts mid-turn (call again with the new "
-        "text — replaces the previous goal). Rare — usually a new ask "
-        "is a new turn.\n"
-        "  • Pass `clear=true` to explicitly remove the pin before the "
-        "turn ends. Rarely needed since the auto-clear handles the "
-        "common case.\n"
-        "\n"
-        "The user can also set it manually with `/goal <text>` and "
-        "inspect with `/goal show`. This tool gives YOU the same lever "
-        "so a forgotten `/goal` isn't fatal. Goal text should be a "
-        "concise one-line summary of the request — full sentences are "
-        "fine but keep it ≤ ~200 chars for L3 budget."
+        "Pin the user's top-level task into L3 so it survives mid-turn compaction. Call at the start of any multi-step task (one concise line, <=~200 chars); call again to replace when focus shifts. Auto-clears at end of turn; pass clear=true to remove early."
     ),
     parameters={
         "type": "object",
         "properties": {
             "goal": {
                 "type": "string",
-                "description": (
-                    "The concise one-line summary of the user's top-level "
-                    "task. Required unless `clear=true`."
-                ),
+                "description": "One-line summary of the user's top-level task. Required unless clear=true.",
             },
             "clear": {
                 "type": "boolean",
                 "default": False,
-                "description": (
-                    "Set to true to clear the pinned goal instead of "
-                    "setting one. Ignores the `goal` field when true."
-                ),
+                "description": "Remove the pinned goal instead of setting one.",
             },
         },
     },

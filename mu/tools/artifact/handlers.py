@@ -220,14 +220,7 @@ def upload_artifact_tool(args: dict[str, Any], context) -> str:
 @tool(
     name="publish_visualization",
     description=(
-        "Publish an interactive visualization as a sandboxed HTML artifact. "
-        "Follow the built-in visualization-design skill (invoke it first if its "
-        "body is not already expanded) so chart choice, data integrity, glass "
-        "styling, accessibility, responsiveness, and light/dark behaviour match MuCLI. "
-        "Provide exactly one of html or file_path. Prefer a self-contained HTML "
-        "document; CDN scripts are allowed but the page cannot access the parent "
-        "chat. Web and mobile render it inline, while terminal clients receive a "
-        "clickable browser link."
+        "Publish an interactive HTML visualization artifact (inline on web/mobile, browser link in TUI). Follow the visualization-design skill (invoke if not expanded). Provide exactly one of html or file_path; self-contained HTML preferred, CDN scripts allowed, no access to parent chat."
     ),
     parameters={
         "type": "object",

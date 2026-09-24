@@ -84,17 +84,7 @@ def _clamp_timeout(value: Any) -> float:
 @tool(
     name="await_subagent",
     description=(
-        "Block until an async sub-agent (dispatched by `spawn_agent`) "
-        "finishes, or until `timeout` seconds elapse — whichever comes "
-        "first. This is the blocking counterpart to `poll_subagent`: use "
-        "it to wait without burning parent iterations on a poll loop "
-        "(which would trip loop detection). Returns the sub-agent's "
-        "snapshot (status, summary, tokens, etc.). On finish the status "
-        "is terminal (done|killed|error); on timeout the status is still "
-        "`running` with error_code=`timeout` — then decide whether to "
-        "re-await, kill, or continue other work. `timeout=0` is a "
-        "non-blocking probe. Prefer this over repeated `poll_subagent` "
-        "calls when you have nothing else to do but wait."
+        "Block until a spawn_agent delegation finishes or `timeout` seconds pass (clamped to 600; 0 = probe; omit = no timer). Returns the sub-agent snapshot; terminal status done|killed|error, or still running with error_code=timeout. Prefer over repeated poll_subagent when only waiting."
     ),
     parameters={
         "type": "object",

@@ -35,7 +35,6 @@ from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.runtime_metrics import build_live_status_line
 from utils.config import (
-    calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
     DEFAULT_VARIABLES,
@@ -81,6 +80,14 @@ class Session:
         self.system_instruction = system_instruction
         self.session_manager = session_manager
         self.ui = ui
+        # `/model` tab-completion discovers models from whichever provider is
+        # active at keystroke time (reads self.provider late, so /provider
+        # switches are honored). No static model list exists.
+        if ui is not None and hasattr(ui, "set_provider_source"):
+            try:
+                ui.set_provider_source(lambda: self.provider)
+            except Exception:
+                pass
         self.debug = debug
         self.variables = session_manager.variables
         self.agentic = True
@@ -620,14 +627,12 @@ class Session:
         # model what the user originally wanted across long runs.
         session_goal = str(self.variables.get("session_goal", "") or "").strip()
         if session_goal:
-            sections.append(f"- session_goal (pinned): {session_goal}")
+            # Single rendering of the pinned text: the L2 capsule and the
+            # memory-snapshot goal-echo filter both defer to this line.
+            sections.append(f"- Active Goal (session_goal, pinned): {session_goal}")
             sections.append(
-                f"- Active Goal: {session_goal}"
-            )
-            sections.append(
-                "- session_goal_policy: every meaningful action should advance "
-                "this goal. If a sub-task drifts off, pause and re-anchor. "
-                "Use /goal clear when the user signals the goal has shifted."
+                "- session_goal_policy: every action should advance this goal; "
+                "re-anchor if drifting. /goal clear when the ask shifts."
             )
         loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
         if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":

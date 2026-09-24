@@ -237,12 +237,7 @@ def bash_command(
 @tool(
     name="bash",
     description=(
-        "Executes a raw bash command in the active runtime and returns "
-        "combined STDOUT/STDERR. Container sessions may use any non-secret "
-        "working directory inside the container. Commands are unattended: "
-        "stdin is closed, no controlling TTY is available, and interactive "
-        "prompts fail immediately. Supply explicit non-interactive flags or "
-        "credentials instead of waiting for a prompt."
+        "Run a bash command in the active runtime; returns combined STDOUT/STDERR and exit code. Unattended: stdin closed, no TTY, interactive prompts fail immediately — pass non-interactive flags/credentials. Container sessions may use any non-secret cwd."
     ),
     parameters={
         "type": "object",
@@ -298,11 +293,7 @@ def _bash_tool(args: Dict[str, Any], context) -> str:
 @tool(
     name="bash_background",
     description=(
-        "Start a long-running bash command in the background and return a "
-        "task_id you can poll with `bash_status` or read with `bash_logs`. "
-        "Use this for test watchers, dev servers, builds, or anything that "
-        "would block the synchronous `bash` tool for too long. Background "
-        "commands are also unattended and receive closed stdin."
+        "Start a long-running bash command in the background (dev servers, watchers, builds); returns task_id for bash_status / bash_logs / bash_kill. Unattended, stdin closed."
     ),
     parameters={
         "type": "object",

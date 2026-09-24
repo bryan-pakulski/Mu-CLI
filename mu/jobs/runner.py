@@ -71,8 +71,8 @@ class SessionJobRunner:
     ) -> tuple[float, Dict[str, Any]]:
         """Return authoritative attempt API cost + persistence-ready result.
 
-        The inner ReAct loop historically priced only a small Gemini map. A
-        durable engineering job instead recomputes its attempt from actual
+        The inner ReAct loop prices each response from the same registry. A
+        durable engineering job additionally recomputes its attempt from actual
         provider token deltas and the versioned pricing registry. The pricing
         key/rates/version are persisted with the attempt so historical job
         economics remain explainable when list prices change later.

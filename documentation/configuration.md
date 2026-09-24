@@ -15,7 +15,7 @@ Invoke via `python mucli.py [flags]`.
 | Flag | Description |
 | --- | --- |
 | `--model <name>` | Default model name to start with. |
-| `--provider <gemini\|ollama\|openai>` | LLM provider. |
+| `--provider <anthropic\|gemini\|ollama\|openai>` | LLM provider. |
 | `--session <name>` | Load a saved session non-interactively. |
 | `--workspace <path>` | Attach a workspace folder. Repeatable. |
 | `--yolo` | Start in YOLO mode (auto-approve writes). |
@@ -30,6 +30,7 @@ Invoke via `python mucli.py [flags]`.
 | Variable | Used by | Description |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | OpenAI provider | API key for OpenAI models. |
+| `ANTHROPIC_API_KEY` | Anthropic provider | API key for Claude models. `ANTHROPIC_BASE_URL`, `ANTHROPIC_TIMEOUT_SECONDS`, `ANTHROPIC_MAX_TOKENS`, `ANTHROPIC_AUTO_CACHE=0` and `ANTHROPIC_EAGER_TOOL_STREAMING=1` tune the client. |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini provider | API key for Google Gemini. |
 | `OLLAMA_HOST` | Ollama provider | URL of the Ollama server (also settable via `/set ollama_host`). |
 | `MUCLI_HOME` | Filesystem layout | Base directory for sessions and logs. Defaults to `~/.mucli/`. |

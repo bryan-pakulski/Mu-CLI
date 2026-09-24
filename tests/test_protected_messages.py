@@ -264,11 +264,14 @@ def test_session_goal_not_overwritten_if_already_set():
     assert session.variables["session_goal"] == "Existing goal"
 
 
-def test_l2_preamble_includes_session_goal():
-    """L2 conversation_summary should be prefixed with goal if set."""
+def test_layered_prompt_renders_session_goal_exactly_once():
+    """The pinned goal renders once (L3 'Active Goal' line). The L2 capsule
+    and memory snapshot must not restate it — duplicate goal copies were
+    pure per-request token waste."""
     sm = SessionManager()
     session = Session(_DummyProvider("dummy"), False, "sys", sm)
     session.variables["session_goal"] = "Refactor auth to use JWT"
     session.session_manager.conversation_summary = "### Progress\nDid some work"
     full = session._inject_hierarchical_context("base prompt")
-    assert "Active Goal: Refactor auth to use JWT" in full
+    assert "Active Goal (session_goal, pinned): Refactor auth to use JWT" in full
+    assert full.count("Refactor auth to use JWT") == 1

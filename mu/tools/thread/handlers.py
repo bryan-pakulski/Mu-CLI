@@ -48,6 +48,7 @@ def _error(exc: Exception) -> dict[str, Any]:
 
 @tool(
     name="list_threads",
+    phase="thread",
     description=(
         "List all peer agent threads in this thread group, including live "
         "status, current goal, unread count, and claimed paths."
@@ -72,6 +73,7 @@ def list_threads(_args, context):
 
 @tool(
     name="get_thread_activity",
+    phase="thread",
     description=(
         "Read the durable, secret-scrubbed inter-thread audit timeline. Use "
         "after_id to incrementally inspect messages, claims, conflicts, and status."
@@ -103,6 +105,7 @@ def get_thread_activity(args, context):
 
 @tool(
     name="send_thread_message",
+    phase="thread",
     description=(
         "Send a durable message to a peer thread. Idle peers are automatically "
         "woken; busy peers receive it in live L3 coordination context."
@@ -144,6 +147,7 @@ def send_thread_message(args, context):
 
 @tool(
     name="acknowledge_thread_message",
+    phase="thread",
     description="Acknowledge and resolve an incoming peer message when no reply is needed.",
     parameters={
         "type": "object",
@@ -171,6 +175,7 @@ def acknowledge_thread_message(args, context):
 
 @tool(
     name="wait_for_thread_reply",
+    phase="thread",
     description=(
         "Wait for a direct reply to a previously sent peer message. Prefer "
         "continuing independent work when possible."
@@ -217,6 +222,7 @@ def wait_for_thread_reply(args, context):
 
 @tool(
     name="claim_thread_paths",
+    phase="thread",
     description=(
         "Explicitly reserve files or directories before a coordinated edit. "
         "Native file writes also acquire turn-scoped claims automatically."
@@ -260,6 +266,7 @@ def claim_thread_paths(args, context):
 
 @tool(
     name="release_thread_paths",
+    phase="thread",
     description="Release this thread's active path claims when a peer may proceed.",
     parameters={
         "type": "object",
@@ -284,6 +291,7 @@ def release_thread_paths(args, context):
 
 @tool(
     name="handoff_thread_paths",
+    phase="thread",
     description="Transfer this thread's active path claims to a peer after coordination.",
     parameters={
         "type": "object",
@@ -317,6 +325,7 @@ def handoff_thread_paths(args, context):
 
 @tool(
     name="request_thread_claim_override",
+    phase="thread",
     description=(
         "Ask the human to override an unresolved peer path claim. This is an "
         "emergency action: it always requires explicit human approval, even "

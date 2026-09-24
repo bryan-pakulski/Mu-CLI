@@ -1,4 +1,4 @@
-# Pricing DB, KNOWN_MODELS, constants
+# Constants
 import os
 
 # Try importing PIL for image handling
@@ -1181,79 +1181,3 @@ NUDGE_EMPTY_RESPONSE_CHILD = (
     "Return a concise summary of your findings to the parent orchestrator now — "
     "partial results are valuable. Do not wait for further input."
 )
-
-
-# --- Pricing & Models ---
-PRICING_DB = {
-    "gemini-3.1-pro-preview": {
-        "in": 2.00,
-        "out": 12.00,
-        "in_high": 4.00,
-        "out_high": 18.00,
-        "cutoff": 200000,
-    },
-    "gemini-3-pro-preview": {
-        "in": 2.00,
-        "out": 12.00,
-        "in_high": 4.00,
-        "out_high": 18.00,
-        "cutoff": 200000,
-    },
-    "gemini-3-flash-preview": {
-        "in": 0.50,
-        "out": 3.00,
-        "in_high": 0.50,
-        "out_high": 3.0,
-        "cutoff": 1000000,
-    },
-    "gemini-3-pro-image-preview": {
-        "in": 2.0,
-        "out": 12,
-        "in_high": 2.0,
-        "out_high": 120,
-        "cutoff": 128000,
-    },
-    "gemini-2.5-pro": {
-        "in": 1.25,
-        "out": 10.00,
-        "in_high": 2.50,
-        "out_high": 15.00,
-        "cutoff": 200000,
-    },
-    "gemini-2.5-flash": {
-        "in": 0.30,
-        "out": 2.50,
-        "in_high": 0.3,
-        "out_high": 2.50,
-        "cutoff": 128000,
-    },
-}
-
-# TODO: This should be done per provider, this should simply be a template config
-KNOWN_MODELS = [
-    "gemini-3.1-pro-preview",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-3-pro-image-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
-
-
-def calculate_cost(model_name, input_tokens, output_tokens):
-    """Calculates estimated cost based on model pricing tiers."""
-    pricing = None
-    for k, v in PRICING_DB.items():
-        if k in model_name:
-            pricing = v
-            break
-
-    if not pricing:
-        return None
-
-    is_high_tier = input_tokens > pricing.get("cutoff", 128000)
-    in_rate = pricing["in_high"] if is_high_tier else pricing["in"]
-    out_rate = pricing["out_high"] if is_high_tier else pricing["out"]
-
-    cost = (input_tokens / 1_000_000 * in_rate) + (output_tokens / 1_000_000 * out_rate)
-    return cost

@@ -2445,7 +2445,7 @@ ${problem.text}`, "error", 16000);
                                               dynamic: { "": "path_file" } },
                                 } },
             "/model":         { dynamic: { "": "models" } },
-            "/provider":      { subs: ["gemini", "ollama", "openai"] },
+            "/provider":      { subs: ["anthropic", "gemini", "ollama", "openai"] },
             "/ollama":        { subs: ["status", "models", "options", "pull"] },
             "/set":           { subs: ["layer"], dynamic: { "": "variables", layer: "layer_ids" } },
             "/get":           { dynamic: { "": "variables", layer: "layer_ids" },
@@ -7310,7 +7310,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="pricing-settings-head">
                 <div>
                     <h3 class="pricing-settings-title">Model pricing</h3>
-                    <p class="pricing-settings-copy">Edit the per-million token rates MuCLI uses for cost accounting. OpenAI, Gemini, and Ollama Cloud all use this registry. Local Ollama remains $0 attributable provider/API cost; host compute is intentionally separate.</p>
+                    <p class="pricing-settings-copy">Edit the per-million token rates MuCLI uses for cost accounting. OpenAI, Gemini, Anthropic, and Ollama Cloud all use this registry. Local Ollama remains $0 attributable provider/API cost; host compute is intentionally separate.</p>
                 </div>
                 <a class="pricing-settings-advanced" href="/static/model_costs.html">Advanced registry</a>
             </div>
@@ -7326,6 +7326,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <button type="button" :class="{ active: $store.pricingSettings.provider === 'all' }" @click="$store.pricingSettings.provider = 'all'">all</button>
                 <button type="button" :class="{ active: $store.pricingSettings.provider === 'openai' }" @click="$store.pricingSettings.provider = 'openai'">OpenAI <span x-text="$store.pricingSettings.providerCount('openai')"></span></button>
                 <button type="button" :class="{ active: $store.pricingSettings.provider === 'gemini' }" @click="$store.pricingSettings.provider = 'gemini'">Gemini <span x-text="$store.pricingSettings.providerCount('gemini')"></span></button>
+                <button type="button" :class="{ active: $store.pricingSettings.provider === 'anthropic' }" @click="$store.pricingSettings.provider = 'anthropic'">Anthropic <span x-text="$store.pricingSettings.providerCount('anthropic')"></span></button>
                 <button type="button" :class="{ active: $store.pricingSettings.provider === 'ollama' }" @click="$store.pricingSettings.provider = 'ollama'">Ollama <span x-text="$store.pricingSettings.providerCount('ollama')"></span></button>
                 <button type="button" @click="$store.pricingSettings.load(true)">refresh</button>
             </div>

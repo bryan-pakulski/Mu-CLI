@@ -6,6 +6,18 @@ import time
 from utils.config import HISTORY_DIR, _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
+def _session_cost_summary(session) -> dict:
+    """Registry-backed session cost; never raises (status surfaces must not
+    fail because pricing could not be resolved)."""
+    try:
+        from utils.model_pricing import session_cost_summary
+
+        return session_cost_summary(session)
+    except Exception:
+        counts = getattr(getattr(session, "session_manager", None), "token_counts", None) or {}
+        return {"cost_usd": float(counts.get("total_cost", 0.0) or 0.0), "source": "accumulated"}
+
+
 def collect_feature_progress(session):
     feature_state = None
     session_manager = getattr(session, "session_manager", None)
@@ -131,8 +143,10 @@ def collect_runtime_metrics(session):
             "reasoning": int(
                 session.session_manager.token_counts.get("reasoning", 0) or 0
             ),
+            # Per-request accumulated cost, with a bulk fallback for legacy
+            # sessions (see utils.model_pricing.session_cost_summary).
             "total_cost": float(
-                session.session_manager.token_counts.get("total_cost", 0.0) or 0.0
+                _session_cost_summary(session).get("cost_usd", 0.0) or 0.0
             ),
         },
         "mode": {"name": str(session.variables.get("agent_mode", "default"))},
@@ -187,7 +201,7 @@ def compose_base_system_prompt(session) -> str:
 
     Mirrors the composition in `Session.send_message`:
       * a one-line current-date/time prelude (so the model isn't
-        guessing at the wall clock)
+        guessing at the wall clock) — appended last, see below
       * `system_instruction` (user-set persona/role)
       * feature/loop mode prefixes when those modes are active
       * the agentic harness base + mode workflow text (when agentic
@@ -199,7 +213,7 @@ def compose_base_system_prompt(session) -> str:
     """
     if session is None:
         return ""
-    parts: list = [_current_time_prelude()]
+    parts: list = []
     base = str(getattr(session, "system_instruction", "") or "")
     if base:
         parts.append(base)
@@ -240,6 +254,10 @@ def compose_base_system_prompt(session) -> str:
         except Exception:
             pass
 
+    # The time prelude is accounted here (it IS sent every request) but
+    # appended last: the live prompt renders it inside LAYER 5 so the
+    # static head stays byte-stable for provider prefix caching.
+    parts.append(_current_time_prelude())
     return "\n\n".join(p for p in parts if p)
 
 

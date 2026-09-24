@@ -17,6 +17,7 @@ keywords = ["ai", "agent", "cli", "llm", "harness"]
 dependencies = [
     "google-genai",
     "openai>=1.40.0",
+    "anthropic>=1.8.0",
     "prompt-toolkit",
     "rich",
     "Pillow",

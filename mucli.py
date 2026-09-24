@@ -18,6 +18,7 @@ from rich import box
 
 # Import from our new modular structure
 from providers.gemini import GeminiProvider
+from providers.anthropic import AnthropicProvider
 from providers.ollama import OllamaProvider
 from utils.helpers import safe_markup
 from utils.logger import logger
@@ -213,6 +214,8 @@ def init_provider(
         provider = GeminiProvider(model_name=model_name)
     elif provider_name == "openai":
         provider = OpenAIProvider(model_name=model_name)
+    elif provider_name == "anthropic":
+        provider = AnthropicProvider(model_name=model_name)
     else:
         return None
     return provider
@@ -226,7 +229,7 @@ def select_provider_and_model(
     ollama_api_key=None,
     allow_prompt=True,
 ):
-    providers = ["gemini", "ollama", "openai"]
+    providers = ["anthropic", "gemini", "ollama", "openai"]
     provider_name = args_provider
 
     if provider_name not in providers:
@@ -238,6 +241,7 @@ def select_provider_and_model(
                 ("gemini", "Gemini", "Google Gemini models"),
                 ("ollama", "Ollama", "Local daemon or Ollama cloud"),
                 ("openai", "OpenAI", "OpenAI API models"),
+                ("anthropic", "Anthropic", "Anthropic Claude models"),
             ],
             default="gemini",
             subtitle="Use the arrow keys, then press Enter.",
@@ -855,7 +859,7 @@ def main():
     parser.add_argument(
         "--provider",
         default=None,
-        choices=["gemini", "ollama", "openai"],
+        choices=["anthropic", "gemini", "ollama", "openai"],
         help="LLM provider to use",
     )
     parser.add_argument(

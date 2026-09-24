@@ -24,13 +24,13 @@ def _emit(session: Any, text: str, allow_prompt: bool) -> None:
 @command(
     "/costs",
     "/pricing",
-    help="Show MuCLI's configurable model pricing registry. Optional: /costs openai|gemini|ollama",
+    help="Show MuCLI's configurable model pricing registry. Optional: /costs openai|gemini|anthropic|ollama",
 )
 def costs_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     catalog = pricing_catalog()
     wanted = str(args or "").strip().lower()
-    if wanted and wanted not in {"openai", "gemini", "ollama"}:
-        return CommandResult(ok=False, message="Usage: /costs [openai|gemini|ollama]")
+    if wanted and wanted not in {"openai", "gemini", "anthropic", "ollama"}:
+        return CommandResult(ok=False, message="Usage: /costs [openai|gemini|anthropic|ollama]")
 
     lines = [
         f"Model pricing registry · {catalog['version']}",
@@ -38,7 +38,7 @@ def costs_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         "Rates are USD / 1M tokens and are telemetry estimates, not invoices.",
         "",
     ]
-    for provider in ("openai", "gemini", "ollama"):
+    for provider in ("openai", "gemini", "anthropic", "ollama"):
         if wanted and wanted != provider:
             continue
         rows = [item for item in catalog["models"] if item["provider"] == provider]

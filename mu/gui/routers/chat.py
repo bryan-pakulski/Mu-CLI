@@ -177,10 +177,26 @@ async def completions_endpoint(request: Request, kind: str = ""):
         return {"items": names}
 
     if kind == "models":
-        try:
-            from utils.config import KNOWN_MODELS
+        # Live discovery from the active session's provider; there is no
+        # static model list. Discovery is a network call, so keep it off
+        # the event loop.
+        session = request.app.state.session_by_name()
+        provider = getattr(session, "provider", None) if session is not None else None
+        if provider is None:
+            return {"items": []}
 
-            return {"items": list(KNOWN_MODELS)}
+        def _discover() -> list:
+            try:
+                models = list(provider.get_available_models() or [])
+            except Exception:
+                models = []
+            current = str(getattr(provider, "model_name", "") or "")
+            if current and current not in models:
+                models.insert(0, current)
+            return models
+
+        try:
+            return {"items": await asyncio.to_thread(_discover)}
         except Exception:
             return {"items": []}
 

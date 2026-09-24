@@ -246,11 +246,18 @@ def _memory_lines(session: Any) -> List[str]:
     memory = getattr(getattr(session, "session_manager", None), "task_memory", None)
     if memory is None:
         return []
+    # Goal-persistence mirrors ("Locked session goal: ...", source
+    # session_goal/loop_goal) restate text L3 already renders verbatim
+    # every prompt — skip them here so the goal appears once.
     entries = [
         entry
         for entry in getattr(memory, "entries", []) or []
         if str(getattr(entry, "status", "")) in {"active", "done"}
         and str(getattr(entry, "kind", "")) in {"decision", "finding", "goal"}
+        and not (
+            str(getattr(entry, "kind", "")) == "goal"
+            and str(getattr(entry, "content", "")).lstrip().startswith("Locked ")
+        )
     ]
     priority = {"decision": 0, "goal": 1, "finding": 2}
     entries.sort(

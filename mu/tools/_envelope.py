@@ -24,10 +24,14 @@ pin this shape. Handlers can return any of:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, Optional, Tuple
 
 
 # ---------------------------------------------------------------- error-code heuristics
+
+
+_BASH_EXIT_RE = re.compile(r"^Exit code: (-?\d+)\s*$", re.MULTILINE)
 
 
 def infer_tool_error_code(tool_name: str, result: Any) -> Optional[str]:
@@ -41,6 +45,15 @@ def infer_tool_error_code(tool_name: str, result: Any) -> Optional[str]:
 
     if not raw_text:
         return None
+
+    # Shell output is user-program text: a successful `grep`/`sed`/`ls`
+    # that *prints* "no such file" or "does not exist" is not a tool
+    # failure. Trust the trailing exit-code line when the command
+    # completed (the timeout/error paths never emit one).
+    if tool_name == "bash" and not raw_text.startswith("Error"):
+        m = _BASH_EXIT_RE.search(raw_text)
+        if m and m.group(1) == "0":
+            return None
 
     if "disabled for this session" in lowered:
         return "access_denied"

@@ -26,7 +26,7 @@ const SUB_TREE: Record<string, SubTree> = {
                         file:   { subs: ['clear'], dynamic: { '': 'path_file' } },
                       } },
   '/model':         { dynamic: { '': 'models' } },
-  '/provider':      { subs: ['gemini', 'ollama', 'openai'] },
+  '/provider':      { subs: ['anthropic', 'gemini', 'ollama', 'openai'] },
   '/ollama':        { subs: ['status', 'models', 'options', 'pull'] },
   '/set':           { subs: ['layer'], dynamic: { '': 'variables', layer: 'layer_ids' } },
   '/get':           { dynamic: { '': 'variables', layer: 'layer_ids' }, subs: ['layer'] },

@@ -1,5 +1,6 @@
 # InputHandler (prompt_toolkit)
 import os
+import time
 import glob
 import re
 import json
@@ -20,7 +21,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.formatted_text import HTML
 
-from utils.config import HISTORY_DIR, KNOWN_MODELS, VARIABLE_SCHEMA
+from utils.config import HISTORY_DIR, VARIABLE_SCHEMA
 
 
 MODE_PROMPT_STYLES = {
@@ -168,6 +169,57 @@ class _DocsNameCompleter(Completer):
         yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
 
 
+class DynamicModelCompleter(Completer):
+    """`/model <Tab>` offers the ACTIVE provider's discovered models.
+
+    There is no static model list: each provider's `get_available_models()`
+    is the source of truth (OpenAI/Gemini/Anthropic list endpoints, Ollama's
+    `/api/tags`). Discovery hits the network, so results are cached per
+    provider object for a short TTL to keep keystroke latency flat.
+    """
+
+    CACHE_TTL_SECONDS = 120.0
+
+    def __init__(self, input_handler):
+        self.input_handler = input_handler
+        self._cache_key = None
+        self._cache_models: list = []
+        self._cache_at = 0.0
+
+    def _models(self) -> list:
+        source = getattr(self.input_handler, "provider_source", None)
+        provider = None
+        if callable(source):
+            try:
+                provider = source()
+            except Exception:
+                provider = None
+        if provider is None:
+            return []
+        key = (id(provider), getattr(provider, "name", ""), getattr(provider, "model_name", ""))
+        now = time.monotonic()
+        if key != self._cache_key or now - self._cache_at > self.CACHE_TTL_SECONDS:
+            try:
+                discovered = list(provider.get_available_models() or [])
+            except Exception:
+                discovered = []
+            current = str(getattr(provider, "model_name", "") or "")
+            if current and current not in discovered:
+                discovered.insert(0, current)
+            self._cache_key = key
+            self._cache_models = discovered
+            self._cache_at = now
+        return list(self._cache_models)
+
+    def get_completions(self, document, complete_event):
+        models = self._models()
+        if not models:
+            return
+        # Model ids contain '-', '.', ':' — treat the whole token as one word.
+        completer = FuzzyWordCompleter(models, WORD=True)
+        yield from completer.get_completions(document, complete_event)
+
+
 class DynamicToolCompleter(Completer):
     def get_completions(self, document, complete_event):
         try:
@@ -313,6 +365,7 @@ class InputHandler:
             self.history_root = os.path.expanduser("~/.mucli_history_sessions")
         os.makedirs(self.history_root, exist_ok=True)
         self.variables_dict = None  # Will be set via set_variables
+        self.provider_source = None  # callable -> active provider; see set_provider_source
         path_completer = PathCompleter(expanduser=True)
         directory_completer = PathCompleter(expanduser=True, only_directories=True)
         session_completer = DynamicSessionCompleter()
@@ -320,12 +373,10 @@ class InputHandler:
         feature_id_completer = DynamicFeatureIdCompleter()
         tool_name_completer = DynamicToolCompleter()
 
-        model_completer = NestedCompleter.from_nested_dict(
-            {m: None for m in KNOWN_MODELS}
-        )
+        model_completer = DynamicModelCompleter(self)
 
         provider_completer = NestedCompleter.from_nested_dict(
-            {"gemini": None, "ollama": None, "openai": None}
+            {"anthropic": None, "gemini": None, "ollama": None, "openai": None}
         )
 
         tool_command_completer = NestedCompleter.from_nested_dict(
@@ -650,6 +701,11 @@ class InputHandler:
     def set_variables(self, variables_dict):
         """Update the reference to the variables dictionary for completion."""
         self.variables_dict = variables_dict
+
+    def set_provider_source(self, source):
+        """Register a zero-arg callable returning the active provider so
+        `/model` completion can discover models live (survives /provider)."""
+        self.provider_source = source
 
     def is_yolo_enabled(self):
         if self.variables_dict is None:

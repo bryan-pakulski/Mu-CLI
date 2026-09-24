@@ -212,6 +212,47 @@ def resolve_active_tool_phases(
     return ["core", *sorted(phase for phase in phases if phase != "core")]
 
 
+# Optional (non-mode) lazy phases and when they matter. Rendered into the
+# "ACTIVE TOOL REGISTRIES" block so the model knows what `load_tools` can
+# surface without carrying every schema on every request.
+OPTIONAL_TOOL_PHASES: dict[str, str] = {
+    "attachment": "user-uploaded attachments (auto-on when attachments exist)",
+    "thread": "peer-thread coordination (auto-on when peer threads exist)",
+    "memory_curation": "durable-memory lifecycle: supersede/retire/archive/retire_thread",
+    "trace": "agent-run trace analysis: list_traces/trace_summary/trace_series/trace_iteration",
+    "browser": "headless-Chromium page snapshot + HTML self-review",
+    "codex": "best_of_codex parallel read-only proposals",
+}
+
+
+def infer_contextual_tool_phases(session) -> list[str]:
+    """Optional phases that should be active because live session state
+    makes them relevant: peer threads present -> ``thread``; uploaded
+    attachments present -> ``attachment``. Best-effort and read-only."""
+    phases: list[str] = []
+    if session is None:
+        return phases
+    try:
+        coordinator = getattr(session, "thread_coordinator", None)
+        meta = getattr(session, "thread_meta", None)
+        if coordinator is not None and meta is not None:
+            threads = coordinator.list_threads()
+            own = getattr(meta, "thread_id", None)
+            if any(t.get("thread_id") != own for t in threads):
+                phases.append("thread")
+    except Exception:  # noqa: BLE001 — never block prompt assembly
+        pass
+    try:
+        registry = getattr(session, "attachment_registry", None) or getattr(
+            getattr(session, "session_manager", None), "attachment_registry", None
+        )
+        if registry is not None and registry.list(limit=1):
+            phases.append("attachment")
+    except Exception:  # noqa: BLE001
+        pass
+    return phases
+
+
 _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
     "read_file",

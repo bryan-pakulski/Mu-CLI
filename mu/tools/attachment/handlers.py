@@ -29,6 +29,7 @@ def _registry(context):
 
 @tool(
     name="list_attachments",
+    phase="attachment",
     description=(
         "List files uploaded by the user to this session. Use this whenever the user "
         "mentions an attached/uploaded document or when an attachment ID is needed."
@@ -48,6 +49,7 @@ def list_attachments_tool(_args: dict[str, Any], context) -> str:
 
 @tool(
     name="read_attachment",
+    phase="attachment",
     description=(
         "Extract a bounded text chunk from a user-uploaded attachment by attachment_id. "
         "Supports text/code/log files, PDF, HTML, JSON, and DOCX. Use offset to continue."
@@ -88,6 +90,7 @@ def read_attachment_tool(args: dict[str, Any], context) -> str:
 
 @tool(
     name="download_attachment",
+    phase="attachment",
     description=(
         "Copy a user-uploaded attachment into the local workspace or container "
         "filesystem so it can be processed with normal file and shell tools. Use "
@@ -189,6 +192,7 @@ def download_attachment_tool(args: dict[str, Any], context) -> str:
 
 @tool(
     name="search_attachments",
+    phase="attachment",
     description=(
         "Search extracted text across user-uploaded attachments. Returns attachment IDs, "
         "names, match offsets, and surrounding snippets."

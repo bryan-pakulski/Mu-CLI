@@ -17,13 +17,7 @@ from mu.tools import tool
 @tool(
     name="search_history",
     description=(
-        "Search the full session conversation history — including messages "
-        "compacted behind the summary anchor — by keyword, role, tool name, "
-        "or time range. Returns ranked matching conversation snippets with "
-        "surrounding context, message index, anchor-awareness flag, and "
-        "cache key for ToolResultCache integration. Use this to recover "
-        "past decisions, tool call arguments, or context that is no longer "
-        "in the active context window."
+        "Search full session history (including compacted pre-anchor messages) by keyword, role or tool name. Returns ranked snippets with context, message index, anchor flag and cache key. Use to recover past decisions or tool arguments no longer in active context."
     ),
     parameters={
         "type": "object",
@@ -140,19 +134,7 @@ def search_history(args: Dict[str, Any], context) -> str:
 @tool(
     name="context_status",
     description=(
-        "Report the live token fill of every context layer (L0 system "
-        "prompt, L1 workspace, L1B skills, L2 conversation summary, L3 active "
-        "goal, L4B retrieved snippets, L5 history) plus the todo/scratchpad/"
-        "memory entry counts and STALENESS signals. Use this to self-manage "
-        "your context: call checkpoint_progress when L2 is stale relative to "
-        "L5 progress; RETIRE/ARCHIVE stale memory when `stale_memory_count` > 0 "
-        "(those entries have decayed out of the active set and are noise); "
-        "call `todo_clear('completed')` when `stale_todos` > 0; and curate "
-        "memory before `memory_pressure_pct` forces a silent eviction. "
-        "working_context lists selectable tool result IDs, oldest first; use "
-        "candidate_offset / next_candidate_offset to page through older work, "
-        "then clear_tool_results to clear or keep individual results cheaply. "
-        "Read-only — call freely before big gathers or when a turn feels long."
+        "Read-only report of per-layer token fill (L0-L5), todo/scratchpad/memory counts, staleness signals (l2_stale_vs_l5, stale_memory_count, stale_todos, memory_pressure_pct) and selectable tool result_ids (oldest first; page with candidate_offset). Use before big gathers and to decide checkpoint_progress / clear_tool_results / compact / memory curation."
     ),
     parameters={"type": "object", "properties": {
         "candidate_offset": {"type": "integer", "minimum": 0, "default": 0},
@@ -266,19 +248,7 @@ def context_status(args: Dict[str, Any], context) -> str:
 @tool(
     name="compact",
     description=(
-        "At a completed task/batch boundary, compact selected older history into "
-        "the L2 conversation summary to free context, advancing the summary "
-        "anchor. Recent tool results (the active turn's) are protected and "
-        "[cache:KEY] tags are preserved so full results stay recallable. Call "
-        "this when context_status shows L5 is high and you want to reclaim "
-        "space proactively rather than waiting for auto-compaction. Unlike "
-        "checkpoint_progress, this ADVANCES the anchor — compacted entries "
-        "are replaced by their summary. Optional `focus` steers what the "
-        "summary preserves (a task, file, or decision to keep front-of-mind). "
-        "Use clear_tool_results first for completed payloads (no summarizer cost). "
-        "Pass a structured checkpoint and preserve_result_ids for evidence that "
-        "must remain verbatim. through_index is the last history message eligible "
-        "for summarization; later work stays active. Returns token estimates and anchor."
+        "Summarize older completed history into L2 and advance the summary anchor (unlike checkpoint_progress). Recent/protected results and [cache:KEY] tags stay recallable. Prefer clear_tool_results first (no summarizer cost). Optional focus, through_index (last eligible history index), preserve_result_ids, clear_result_ids, and a structured checkpoint. Returns token estimates and the new anchor."
     ),
     parameters={
         "type": "object",
@@ -325,14 +295,7 @@ def compact(args: Dict[str, Any], context) -> str:
 @tool(
     name="clear_tool_results",
     description=(
-        "Selectively remove completed tool payloads from the active context with ZERO "
-        "summarizer calls. Obtain result_ids from context_status. Original history and "
-        "verified durable recall remain intact; calls and their result placeholders stay "
-        "paired. Only named results change. action=keep pins relevant evidence verbatim; "
-        "action=restore releases a prior keep/clear decision. Recent results, failures "
-        "and provider-signed content cannot be cleared. Optionally update a structured "
-        "checkpoint with progress, resume cursor, confirmed actions and exceptions. "
-        "Use this before compact; never repeat a write to recover an archived receipt."
+        "Remove (action=clear), pin (keep) or restore named completed tool payloads in active context with zero summarizer cost; result_ids come from context_status. Originals stay recallable; recent results, failures and provider-signed content cannot be cleared. Optional structured checkpoint. Use before compact; never redo a write to recover its old output."
     ),
     parameters={"type": "object", "properties": {
         "result_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
@@ -363,14 +326,7 @@ def clear_tool_results(args: Dict[str, Any], context) -> str:
 @tool(
     name="checkpoint_progress",
     description=(
-        "Fold recent conversation history into the L2 conversation summary "
-        "WITHOUT compacting — the summary anchor does not advance and "
-        "entries stay verbatim in L5. Call this when context_status shows "
-        "L2 is stale relative to your L5 progress (lots of uncheckpointed "
-        "entries) so the next iteration sees an up-to-date Progress / "
-        "Current-state picture instead of re-deriving it. Returns whether "
-        "L2 was updated and how many entries were folded. No-op if there "
-        "isn't enough new work yet (default >= 6 entries)."
+        "Fold recent history into the L2 summary WITHOUT advancing the anchor (entries stay verbatim in L5). Use when context_status shows L2 stale vs L5. No-op below min_new_entries (default 6)."
     ),
     parameters={
         "type": "object",

@@ -7,6 +7,7 @@ Terminal-first multi-provider coding assistant.
 - `patch` command available on your system
 - At least one provider key or local model setup:
   - `OPENAI_API_KEY` for OpenAI
+  - `ANTHROPIC_API_KEY` for Anthropic Claude (or an `ant auth login` profile)
   - `GEMINI_API_KEY` or `GOOGLE_API_KEY` for Gemini
   - `OLLAMA_API_KEY` for the hosted Ollama service (optional — self-hosted
     Ollama only needs `OLLAMA_HOST` and a running instance, below)
@@ -67,7 +68,7 @@ mucli --trace-analyze ~/.mucli/trace/X.jsonl  # headless trace summary
 ```
 
 ## Key features
-- Multi-provider model support (OpenAI, Gemini, Ollama) with real streaming, parallel tool execution, prompt caching, reasoning effort, and cached/reasoning token telemetry.
+- Multi-provider model support (OpenAI, Gemini, Anthropic, Ollama) with real streaming, parallel tool execution, prompt caching, reasoning effort, and cached/reasoning token telemetry.
 - Workspace context from attached folders and files.
 - Session save/load and multi-session workflows.
 - Feature mode with persistent plans stored in session metadata.
@@ -139,7 +140,7 @@ mu/
                   Analyzer dashboard data foundation)
   ui/             RichUI, stream renderer, input handler, subagent UI
   workspace/      FolderContext (sandbox + gitignore)
-providers/        Gemini, OpenAI, Ollama, base classes
+providers/        Gemini, OpenAI, Anthropic, Ollama, base classes
 utils/            Config, runtime metrics, token estimator, citation
                   manager, anti-detection, helpers, logger
 ```

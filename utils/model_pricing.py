@@ -207,12 +207,20 @@ def _default_registry() -> Dict[str, Any]:
 
 
 def _inherit_packaged_capabilities(value: Dict[str, Any]) -> Dict[str, Any]:
-    """Backfill new capability fields in pre-feature operator overrides.
+    """Merge an operator override with the packaged registry.
 
-    Pricing overrides intentionally replace packaged rates. Capability fields
-    were added later, so treating an absent field as an explicit text-only
-    choice would silently disable vision for every existing installation.
-    Explicit fields in the override always win.
+    Two rules, both in the operator's favour:
+
+    * Rows the override defines win outright - explicit rates are the point
+      of an override. Capability fields were added after overrides existed,
+      so an absent field is backfilled from the packaged row rather than
+      read as an explicit text-only choice (which would silently disable
+      vision for every existing installation).
+    * Packaged rows the override does not mention (by key or alias) are
+      appended. An override saved before a provider or model was added must
+      not hide it: with a pure replacement, every new packaged model would
+      be unpriced on every installation that ever saved the pricing page.
+      Appended rows are tagged so the GUI can show where they came from.
     """
     packaged = _read_json(DEFAULT_CONFIG_PATH).get("models") or []
     by_name: Dict[tuple[str, str], Dict[str, Any]] = {}
@@ -228,18 +236,38 @@ def _inherit_packaged_capabilities(value: Dict[str, Any]) -> Dict[str, Any]:
 
     merged = dict(value)
     merged_rows = []
+    override_names: set[tuple[str, str]] = set()
     for raw in value.get("models") or []:
         if not isinstance(raw, dict):
             continue
         row = dict(raw)
         provider = str(row.get("provider") or "").strip().lower()
         key = str(row.get("key") or "").strip().lower().replace("models/", "")
+        for name in [row.get("key"), *(row.get("aliases") or [])]:
+            normalized = str(name or "").strip().lower().replace("models/", "")
+            if provider and normalized:
+                override_names.add((provider, normalized))
         default = by_name.get((provider, key))
         if default:
             for field in ("input_modalities", "output_modalities", "capabilities"):
                 if field not in row and field in default:
                     row[field] = default[field]
         merged_rows.append(row)
+
+    for row in packaged:
+        if not isinstance(row, dict):
+            continue
+        provider = str(row.get("provider") or "").strip().lower()
+        names = {
+            str(name or "").strip().lower().replace("models/", "")
+            for name in [row.get("key"), *(row.get("aliases") or [])]
+        }
+        if any((provider, name) in override_names for name in names if name):
+            continue
+        appended = dict(row)
+        appended["source"] = f"{row.get('source') or 'packaged default'} (packaged; not in operator override)"
+        merged_rows.append(appended)
+
     merged["models"] = merged_rows
     return merged
 
@@ -352,6 +380,8 @@ def infer_provider(model_name: str) -> str:
         return "gemini"
     if name.startswith(("gpt-", "o1", "o3", "o4")):
         return "openai"
+    if name.startswith("claude-") or ".claude-" in name:
+        return "anthropic"
     return ""
 
 
@@ -737,6 +767,80 @@ def calculate_model_cost(**kwargs: Any) -> Optional[float]:
     return None if value is None else float(value)
 
 
+def estimate_session_cost(
+    session: Any,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cached_tokens: int = 0,
+    reasoning_tokens: int = 0,
+) -> Optional[float]:
+    """Price a token delta for the session's active provider/model using the
+    versioned pricing registry. Returns None when the model is unpriced
+    (unknown models are never silently $0), 0.0 for local Ollama.
+
+    Reads the provider name and model from ``session.provider`` and the
+    Ollama connection mode / host from ``session.variables`` so cloud vs
+    local Ollama is billed correctly.
+    """
+    provider = getattr(session, "provider", None)
+    if provider is None:
+        return None
+    variables = getattr(session, "variables", None) or {}
+    try:
+        return calculate_model_cost(
+            provider=str(getattr(provider, "name", "") or ""),
+            model_name=str(getattr(provider, "model_name", "") or ""),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
+            ollama_mode=str(variables.get("ollama_mode") or ""),
+            endpoint=str(getattr(provider, "host", "") or variables.get("ollama_host") or ""),
+        )
+    except Exception:
+        return None
+
+
+def session_cost_summary(session: Any) -> Dict[str, Any]:
+    """Authoritative session cost for status surfaces (CLI splash/status
+    line, GUI stats, mobile inspector).
+
+    The agent loop prices every provider response individually and
+    accumulates into ``token_counts["total_cost"]``. That per-request sum is
+    the figure to display: long-context tiers (rows with a
+    ``long_context_cutoff``) apply per request, so re-pricing a session's
+    aggregate token totals in bulk would push them into the high tier and
+    overstate cost. The bulk estimate is used only as a fallback for legacy
+    sessions whose tokens accumulated before per-request pricing covered
+    their provider (stored total is 0 while tokens are not); for providers
+    without tiers (Ollama Cloud) the two are identical.
+    """
+    manager = getattr(session, "session_manager", None)
+    counts = dict(getattr(manager, "token_counts", None) or {})
+    accumulated = float(counts.get("total_cost", 0.0) or 0.0)
+    input_tokens = int(counts.get("input", 0) or 0)
+    output_tokens = int(counts.get("output", 0) or 0)
+    summary: Dict[str, Any] = {
+        "cost_usd": accumulated,
+        "source": "accumulated",
+        "accumulated_cost_usd": accumulated,
+    }
+    if accumulated > 0.0 or input_tokens + output_tokens <= 0:
+        return summary
+    recomputed = estimate_session_cost(
+        session,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_tokens=int(counts.get("cached", 0) or 0),
+        reasoning_tokens=int(counts.get("reasoning", 0) or 0),
+    )
+    if recomputed:
+        summary["cost_usd"] = float(recomputed)
+        summary["source"] = "recomputed_from_totals"
+    return summary
+
+
 def pricing_catalog() -> Dict[str, Any]:
     registry, active_path, using_override = _registry()
     models = [_item(value).public_dict() for value in registry["models"]]
@@ -754,6 +858,7 @@ def pricing_catalog() -> Dict[str, Any]:
         "provider_notes": {
             "openai": "Configured token-rate estimate.",
             "gemini": "Configured token-rate estimate; output may include thinking tokens.",
+            "anthropic": "Configured token-rate estimate; output includes thinking tokens, cached input is billed at the cache-read rate.",
             "ollama_local": "$0 attributable provider/API cost; host compute is separate.",
             "ollama_cloud": "Uses separate configured input/output estimates when present; legacy blended overrides remain supported.",
         },
@@ -768,6 +873,8 @@ __all__ = [
     "PRICING",
     "PRICING_VERSION",
     "calculate_model_cost",
+    "estimate_session_cost",
+    "session_cost_summary",
     "estimate_model_cost",
     "infer_provider",
     "ollama_billing_mode",

@@ -117,12 +117,7 @@ def _int_arg(args: Dict[str, Any], key: str, default: int) -> int:
 @tool(
     name="save_memory",
     description=(
-        "Saves a concise, reusable fact to working memory and automatically "
-        "promotes eligible non-secret content into the scoped cross-session "
-        "Memory Ledger. This is model-controlled and never requires approval. "
-        "Choose repository scope for project facts and personal scope only "
-        "for genuine user-wide preferences. Use supersedes_id when replacing "
-        "an earlier durable memory instead of creating conflicting siblings."
+        "Save a concise reusable non-secret fact/decision/finding to working memory; eligible content auto-promotes to the scoped cross-session Memory Ledger. No approval needed. Use repository scope for project facts, personal only for user-wide preferences; pass supersedes_id when replacing an earlier durable memory."
     ),
     parameters={
         "type": "object",
@@ -295,13 +290,7 @@ def save_memory(args: Dict[str, Any], context) -> str:
 @tool(
     name="search_memory",
     description=(
-        "Searches the in-task memory store for previously saved facts. "
-        "By default returns ACTIVE + STALE entries — a search hit on a "
-        "STALE (decayed) entry reactivates it to ACTIVE, so retrieving "
-        "relevant-but-forgotten knowledge brings it back to the working "
-        "set automatically. Pass a status filter or include_all=True to "
-        "see done/superseded/archived entries. Use kind to filter by entry "
-        "classification (decision/finding/observation/goal)."
+        "Search in-task memory. Default returns ACTIVE+STALE entries (a hit reactivates a stale entry). Filter by status, kind, tags_exclude, or include_all for done/superseded/archived."
     ),
     parameters={
         "type": "object",
@@ -464,6 +453,7 @@ def list_memory(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="manage_durable_memory",
+    phase="memory_curation",
     description=(
         "Curates a visible cross-session Memory Ledger record without asking "
         "the user for approval. Use archive for knowledge that should stop "
@@ -521,6 +511,7 @@ def manage_durable_memory(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="update_memory_status",
+    phase="memory_curation",
     description=(
         "Update the lifecycle status of a memory entry. Valid statuses: "
         "active, done, superseded, archived, stale. Use 'done' when the "
@@ -604,6 +595,7 @@ def update_memory_status(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="supersede_memory",
+    phase="memory_curation",
     description=(
         "Mark an old memory entry as superseded by a newer one. Sets "
         "old.status='superseded', old.superseded_by=new_id, and "
@@ -691,6 +683,7 @@ def supersede_memory(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="retire_memory",
+    phase="memory_curation",
     description=(
         "Mark a memory entry as done — the work it describes is complete. "
         "Entry stays searchable but deprioritized in search and summary. "
@@ -732,6 +725,7 @@ def retire_memory(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="reactivate_memory",
+    phase="memory_curation",
     description=(
         "Set a memory entry's status back to 'active'. Clears "
         "superseded_by if set. Use when revisiting completed or "
@@ -779,6 +773,7 @@ def reactivate_memory(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="archive_memory",
+    phase="memory_curation",
     description=(
         "Archive a memory entry — removes it from search results (unless "
         "include_all=True) and from the system-prompt summary, but retains "
@@ -826,16 +821,9 @@ def archive_memory(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="retire_thread",
+    phase="memory_curation",
     description=(
-        "Explicitly drop an investigation or work thread you have abandoned — "
-        "the 'I'm done carrying this' lever for self-managed context. Archives "
-        "every ACTIVE task-memory entry whose content, tags, or source "
-        "matches the given topic (so they stop appearing in the default "
-        "active-only search and the system-prompt summary), optionally "
-        "removes matching scratchpad notes, and writes a single archived "
-        "audit entry recording the drop with your reason. Use when the "
-        "user's ask has shifted, a hypothesis was disproved and you're "
-        "moving on, or a sub-thread is simply no longer relevant."
+        "Drop an abandoned investigation: archive every ACTIVE task-memory entry matching `topic` (content/tags/source), optionally remove matching scratchpad notes, and write one archived audit entry with `reason`."
     ),
     parameters={
         "type": "object",

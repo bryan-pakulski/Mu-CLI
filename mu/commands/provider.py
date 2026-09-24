@@ -79,7 +79,7 @@ def model_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
 
 @command(
     "/provider",
-    help="Switch provider (openai|gemini|ollama). Interactive picker if no arg.",
+    help="Switch provider (openai|gemini|anthropic|ollama). Interactive picker if no arg.",
 )
 def provider_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     arg = (args or "").strip()

@@ -209,6 +209,9 @@ class RichUI:
         self._variables = variables_dict
         self.input_handler.set_variables(variables_dict)
 
+    def set_provider_source(self, source):
+        self.input_handler.set_provider_source(source)
+
     def confirm(self, message, default=True):
         return Confirm.ask(message, default=default)
 

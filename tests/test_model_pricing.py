@@ -119,7 +119,7 @@ def test_unknown_model_is_unpriced_not_free():
 def test_public_catalog_is_versioned_unified_and_exposes_config_paths():
     catalog = pricing_catalog()
     assert catalog["version"] == PRICING_VERSION
-    assert {item["provider"] for item in catalog["models"]} == {"openai", "gemini", "ollama"}
+    assert {item["provider"] for item in catalog["models"]} == {"openai", "gemini", "anthropic", "ollama"}
     assert catalog["ollama"]
     assert catalog["config_path"].endswith("model_pricing.json")
     assert catalog["active_config_path"]

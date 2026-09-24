@@ -428,12 +428,7 @@ def search_references(
 @tool(
     name="search_references",
     description=(
-        "Searches runtime files for references to a query string. Container "
-        "sessions may choose any non-secret search root. Returns matches with "
-        "filepath, line_number, "
-        "and a short context snippet (surrounding lines) for each match. "
-        "This complements search_for_string by providing surrounding "
-        "context lines."
+        "Search files for a query string and return matches with filepath, line_number and surrounding context lines (search_for_string plus context). Container sessions may use any non-secret root."
     ),
     parameters={
         "type": "object",

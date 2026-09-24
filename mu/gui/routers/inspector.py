@@ -23,7 +23,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from utils.config import (
     DEFAULT_VARIABLES,
     VARIABLE_SCHEMA,
-    calculate_cost,
     validate_and_cast,
 )
 
@@ -467,18 +466,14 @@ async def get_stats(request: Request) -> Dict[str, Any]:
     sm = session.session_manager
     tokens = dict(sm.token_counts)
     model = session.provider.model_name if session.provider else ""
-    cost = 0.0
-    if model:
-        try:
-            cost = calculate_cost(
-                model,
-                int(tokens.get("input", 0) or 0),
-                int(tokens.get("output", 0) or 0),
-            )
-        except Exception:
-            cost = 0.0
+    from utils.model_pricing import session_cost_summary
+
+    summary = session_cost_summary(session)
+    cost = float(summary["cost_usd"])
+    tokens["total_cost"] = cost
     return {
         "active": True,
+        "cost_source": summary["source"],
         "name": sm.current_session_name,
         "provider": session.provider.name if session.provider else "",
         "model": model,

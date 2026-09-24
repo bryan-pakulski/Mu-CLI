@@ -239,6 +239,7 @@ def _envelope(ok: bool, error_code: str | None, message: str, data: dict | None 
 
 @tool(
     name=TOOL_NAME,
+    phase="codex",
     description=(
         "Race N parallel read-only codex attempts on one task and return the "
         "best-ranked proposal. Use for high-stakes plans where a single "

@@ -87,7 +87,7 @@ _HELP_GROUPS = [
         "Model & provider",
         [
             ("/model [name]", "", "Show / change the model"),
-            ("/provider [name]", "", "Switch provider (gemini, ollama, openai)"),
+            ("/provider [name]", "", "Switch provider (anthropic, gemini, ollama, openai)"),
             ("/ollama [status|models|pull|options]", "", "Ollama-specific helpers"),
         ],
     ),

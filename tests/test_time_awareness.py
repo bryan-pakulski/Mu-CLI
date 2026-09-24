@@ -2,8 +2,9 @@
 
 The model has no built-in wall-clock. Without an injected date string
 it has to guess at "is this commit recent?" / "schedule X for next
-Tuesday" — which fails predictably. The prelude is a single line at
-the very top of the prompt so it's hard to miss.
+Tuesday" — which fails predictably. The prelude is a single line inside
+the per-iteration LAYER 5 block: present every request, but off the
+prompt head so the static base + tool schema stay a cacheable prefix.
 """
 
 import re
@@ -50,19 +51,22 @@ def test_time_prelude_includes_weekday():
     assert any(day in body for day in weekdays), body
 
 
-def test_compose_base_system_prompt_starts_with_time_prelude(session):
-    """L0 / the actual sent prompt MUST start with the time prelude
-    so the model can rely on it being there."""
+def test_compose_base_system_prompt_accounts_time_prelude(session):
+    """L0 accounting must include the time prelude (it is sent every
+    request) but keep it OFF the prompt head so the static base stays a
+    stable, cacheable prefix."""
     body = compose_base_system_prompt(session)
+    assert "Current date/time" in body
     first_line = body.split("\n", 1)[0]
-    assert "Current date/time" in first_line
+    assert "Current date/time" not in first_line
 
 
-def test_inject_hierarchical_context_prepends_time(session):
-    """`_inject_hierarchical_context` is what builds the actual prompt
-    sent to the provider — pin that the time prelude lands there too,
-    not only in the /memory L0 display."""
+def test_inject_hierarchical_context_places_time_in_layer5(session):
+    """`_inject_hierarchical_context` builds the actual prompt sent to the
+    provider — pin that the time prelude lands there, AFTER the static base
+    (prefix-cache stability) and inside the per-iteration LAYER 5 block."""
     out = session._inject_hierarchical_context("the base prompt")
     assert "Current date/time" in out
-    # And before "the base prompt" — i.e., truly prepended.
-    assert out.index("Current date/time") < out.index("the base prompt")
+    assert out.index("the base prompt") < out.index("Current date/time")
+    assert out.index("LAYER 5") < out.index("Current date/time")
+    assert not out.startswith("Current date/time")

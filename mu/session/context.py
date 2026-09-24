@@ -77,12 +77,18 @@ def build_attachment_context(session: Any) -> str:
 
 
 def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skills: Optional[str] = None, cached_context_files: Optional[str] = None) -> str:
+    # Prefix stability: the wall-clock line changes every minute, so it must
+    # NOT lead the prompt — a volatile head defeats provider prefix caching
+    # of the static L0 base + tool schema on every iteration. It renders in
+    # the LAYER 5 block instead, which is rebuilt per iteration anyway.
+    time_prelude = ""
     try:
         from utils.runtime_metrics import _current_time_prelude
-        system_prompt = f"{_current_time_prelude()}\n\n{system_prompt}".strip()
+        time_prelude = _current_time_prelude()
     except Exception:
         # Defensive: best-effort path must not break the caller.
         logger.debug("Suppressed exception", exc_info=True)
+    system_prompt = str(system_prompt or "").strip()
 
     summary_limit = max(0, int(session.variables.get("conversation_summary_char_limit", 24000) or 12000))
     semantic_residue = str(getattr(session.session_manager, "conversation_summary", "") or "").strip()
@@ -155,7 +161,11 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
         if role_block:
             layers.append("LAYER 3B \u2014 Agent role:\n" + role_block)
 
-    layers.append("LAYER 5 \u2014 Current turn:\nAlways prioritize the live user message and current-turn tool results. Structured L2 state is authoritative; older semantic residue is fallback context only.")
+    l5_lines = ["LAYER 5 \u2014 Current turn:"]
+    if time_prelude:
+        l5_lines.append(time_prelude)
+    l5_lines.append("Always prioritize the live user message and current-turn tool results. Structured L2 state is authoritative; older semantic residue is fallback context only.")
+    layers.append("\n".join(l5_lines))
     layered = f"{system_prompt}\n\nHierarchical runtime context (layered with independent budgets/eviction):\n" + "\n\n".join(layers)
     # Idempotency marker (codex round-9 F4): post-compaction rebuilds call
     # this function with an already-layered prompt. Strip any previous

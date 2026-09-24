@@ -15,7 +15,7 @@ from utils.model_pricing import (
 
 router = APIRouter()
 
-KNOWN_PROVIDERS: List[str] = ["openai", "gemini", "ollama"]
+KNOWN_PROVIDERS: List[str] = ["openai", "gemini", "anthropic", "ollama"]
 
 
 def _safe_init(
@@ -44,6 +44,10 @@ def _safe_init(
             from providers.openai import OpenAIProvider
 
             return OpenAIProvider(model_name=model_name)
+        if name == "anthropic":
+            from providers.anthropic import AnthropicProvider
+
+            return AnthropicProvider(model_name=model_name)
     except Exception:
         return None
     return None
@@ -87,6 +91,13 @@ async def list_providers() -> Dict[str, Any]:
                     os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
                 ),
                 "requires": "GEMINI_API_KEY",
+            },
+            {
+                "name": "anthropic",
+                "configured": bool(
+                    os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                ),
+                "requires": "ANTHROPIC_API_KEY",
             },
             {
                 "name": "ollama",

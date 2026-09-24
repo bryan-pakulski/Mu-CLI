@@ -120,8 +120,8 @@
             const provider = String(raw.provider || '').trim().toLowerCase();
             const key = String(raw.key || '').trim();
             const billing = String(raw.billing || 'token').trim().toLowerCase();
-            if (!['openai', 'gemini', 'ollama'].includes(provider)) {
-                throw new Error('Choose OpenAI, Gemini, or Ollama');
+            if (!['openai', 'gemini', 'anthropic', 'ollama'].includes(provider)) {
+                throw new Error('Choose OpenAI, Gemini, Anthropic, or Ollama');
             }
             if (!key) throw new Error('Model name is required');
             if (!['token', 'estimated_token', 'local', 'unknown'].includes(billing)) {
@@ -166,7 +166,7 @@
                 source: 'operator settings',
             };
             this.models = [...(this.models || []), row].sort((a, b) => {
-                const providerOrder = { openai: 0, gemini: 1, ollama: 2 };
+                const providerOrder = { openai: 0, gemini: 1, anthropic: 2, ollama: 3 };
                 const providerDelta = (providerOrder[a.provider] ?? 9) - (providerOrder[b.provider] ?? 9);
                 return providerDelta || String(a.key || '').localeCompare(String(b.key || ''));
             });
@@ -205,6 +205,7 @@
                     <select name="provider">
                         <option value="openai">OpenAI</option>
                         <option value="gemini">Gemini</option>
+                        <option value="anthropic">Anthropic</option>
                         <option value="ollama">Ollama</option>
                     </select>
                 </label>
@@ -288,7 +289,7 @@
 
         addButton.addEventListener('click', () => {
             const pricing = pricingStore();
-            const selectedProvider = pricing && ['openai', 'gemini', 'ollama'].includes(pricing.provider)
+            const selectedProvider = pricing && ['openai', 'gemini', 'anthropic', 'ollama'].includes(pricing.provider)
                 ? pricing.provider
                 : 'openai';
             providerInput.value = selectedProvider;

@@ -164,6 +164,7 @@ def _registry(context) -> Any | None:
 
 @tool(
     name=TOOL_NAME,
+    phase="browser",
     description=(
         "Render a URL or local HTML file in headless Chromium and return a "
         "full-page screenshot registered as a session artifact plus a text "

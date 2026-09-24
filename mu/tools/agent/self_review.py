@@ -78,6 +78,7 @@ def _run_codex_review(html_path: str, rendered_text: str, checklist: str, repo: 
 
 @tool(
     name=TOOL_NAME,
+    phase="browser",
     description=(
         "Self-review loop for HTML pages: render the page in headless "
         "Chromium (screenshot registered as a session artifact), extract "

@@ -60,6 +60,8 @@ from mu.tools.descriptors import (
     COLLATED_TOOLS,
     TOOLS,
     filter_tools_by_phase,
+    infer_contextual_tool_phases,
+    OPTIONAL_TOOL_PHASES,
     filter_tools_for_mode,
     resolve_active_tool_phases,
 )
@@ -68,8 +70,8 @@ from utils.config import (
     NUDGE_EMPTY_RESPONSE,
     NUDGE_EMPTY_RESPONSE_CHILD,
     SESSION_TYPE_PROMPTS,
-    calculate_cost,
 )
+from utils.model_pricing import estimate_session_cost
 from utils.helpers import display_image_in_terminal, get_safe_mime_type
 from utils.logger import logger
 from utils.runtime_metrics import build_live_status_line
@@ -312,7 +314,10 @@ def run_turn(session, text, *, origin="user"):
     active_mode = str(session.variables.get("agent_mode", "default")).lower()
     active_tool_phases = resolve_active_tool_phases(
         session.variables,
-        getattr(session, "_loaded_tool_phases", None),
+        [
+            *(getattr(session, "_loaded_tool_phases", None) or []),
+            *infer_contextual_tool_phases(session),
+        ],
     )
     # Runtime receipt for diagnostics/UI integrations. This is derived state,
     # not persisted configuration: mode-required registries remain active even
@@ -468,7 +473,14 @@ def run_turn(session, text, *, origin="user"):
                 + (
                     f"{', '.join(active_tool_phases)}. "
                     f"Provider schema exposes {len(active_tools)} tools; "
-                    "strategy-mode registries are activated automatically."
+                    "strategy-mode registries are activated automatically. "
+                    "Optional phases via `load_tools(phase)`: "
+                    + "; ".join(
+                        f"{name} — {why}"
+                        for name, why in OPTIONAL_TOOL_PHASES.items()
+                        if name not in active_tool_phases
+                    )
+                    + "."
                     if session.variables.get("lazy_tools_enabled", False)
                     else (
                         f"core/non-mode phases plus the current mode. Provider schema "
@@ -1360,10 +1372,12 @@ def run_turn(session, text, *, origin="user"):
             total_in += response.input_tokens
             total_out += response.output_tokens
 
-            est_cost = calculate_cost(
-                session.provider.model_name,
-                response.input_tokens,
-                response.output_tokens,
+            est_cost = estimate_session_cost(
+                session,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                cached_tokens=getattr(response, "cached_tokens", 0) or 0,
+                reasoning_tokens=getattr(response, "reasoning_tokens", 0) or 0,
             )
             cost_str = ""
             if est_cost is not None:

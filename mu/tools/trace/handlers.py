@@ -83,6 +83,7 @@ def _resolve(run_id: str):
 
 @tool(
     name="list_traces",
+    phase="trace",
     description=(
         "List recorded agent-run traces under $MUCLI_HOME/trace/ (newest "
         "first), each with run_id, session, model, provider, mode, iter "
@@ -122,6 +123,7 @@ def list_traces(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="trace_summary",
+    phase="trace",
     description=(
         "Get the at-a-glance overview of one run: iteration count, status, "
         "tokens in/out, cost, wall time (total/peak/mean), peak context, "
@@ -164,6 +166,7 @@ def trace_summary(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="trace_series",
+    phase="trace",
     description=(
         "Get a derived series for one run. With no `series` argument, returns "
         "the full series dict (all of them). With a `series` name, returns "
@@ -239,6 +242,7 @@ def trace_series(args: Dict[str, Any], context) -> str:
 
 @tool(
     name="trace_iteration",
+    phase="trace",
     description=(
         "Drill into one iteration of a run: the raw iteration record (context "
         "layers, total_est vs actual prompt tokens, drift, tokens in/out/"

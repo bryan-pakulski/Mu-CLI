@@ -3,7 +3,7 @@
 ## Project overview
 
 Mucli is a Python CLI harness for agentic AI workflows. It supports OpenAI,
-Gemini, and Ollama providers; assembles hierarchical context layers L0-L5;
+Gemini, Anthropic, and Ollama providers; assembles hierarchical context layers L0-L5;
 offers a FastAPI browser GUI, container-backed sessions, and an Android mobile
 client that connects to the GUI's SSE and REST interfaces.
 
@@ -17,7 +17,7 @@ client that connects to the GUI's SSE and REST interfaces.
 python3 -m pip install -r requirements.txt
 ```
 
-- Configure at least one provider: `OPENAI_API_KEY`, `GEMINI_API_KEY` or
+- Configure at least one provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` or
   `GOOGLE_API_KEY`, or a running Ollama instance via `OLLAMA_HOST`.
 
 ## Running Mucli
@@ -62,7 +62,7 @@ python3 -m pytest tests/ -q
 - `mu/ui/` — terminal input, rendering, selection, and streaming UI.
 - `mu/trace/` — JSONL trace emission, parsing, and snapshots.
 - `mu/jobs/` — job board, workers, review, verification, and receipts.
-- `providers/` — OpenAI, Gemini, Ollama, and provider base classes.
+- `providers/` — OpenAI, Gemini, Anthropic, Ollama, and provider base classes.
 - `utils/` — configuration, logging, metrics, token estimation, and helpers.
 - `tests/` — Python unit, integration, GUI, container, and regression tests.
 - `mobile/android/` — React Native Android client, assets, scripts, and tests.

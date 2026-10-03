@@ -68,13 +68,15 @@
 
     <main class="trace-main" x-show="!loading && summary" style="display:none;">
 
-        <!-- X pan window: charts cap at ~100 iters in view. Drag any chart
-             left/right, drag the scrollbar thumb, click the track, or
-             horizontal-scroll (trackpad / shift+wheel) to pan the shared
-             window (all charts move together); click a chart to jump the
-             conversation view to that iter. The run opens on the latest
-             iterations (RHS). Hidden when the whole run fits in the window. -->
-        <div class="trace-xscroll" x-show="totalIters() > xCount">
+        <!-- Shared X window (pan + zoom): every chart draws the same
+             [xStart, xStart+xCount) iter window through one scale, so they
+             stay aligned while navigating. Pan: drag any chart, drag the
+             scrollbar thumb, click the track, or horizontal-scroll (trackpad /
+             ⇧+wheel). Zoom: ⇧+drag a region on any chart, ctrl/⌘+scroll or
+             double-click at the cursor, or the −/+/all/latest buttons. Click a
+             chart to jump the conversation view to that iter. The run opens on
+             the latest ~100 iterations (RHS). -->
+        <div class="trace-xscroll" x-show="totalIters() > 1">
             <span class="trace-xscroll-label" x-text="xScrollLabel()"></span>
             <div class="trace-xscroll-track"
                  x-ref="xscrollTrack"
@@ -83,7 +85,14 @@
                      :style="thumbStyle()"
                      @mousedown.stop="onScrollThumbDown($event)"></div>
             </div>
-            <span class="trace-xscroll-hint">drag chart or bar · click to jump · ⇧+scroll</span>
+            <div class="trace-zoom" role="group" aria-label="Zoom">
+                <button type="button" class="trace-zoom-btn" @click="zoomOut()" :disabled="!canZoomOut()" title="Zoom out (ctrl+scroll)">−</button>
+                <span class="trace-zoom-level" x-text="zoomLabel()" title="zoom level"></span>
+                <button type="button" class="trace-zoom-btn" @click="zoomIn()" :disabled="!canZoomIn()" title="Zoom in (ctrl+scroll · double-click a chart)">+</button>
+                <button type="button" class="trace-zoom-btn trace-zoom-btn--word" @click="zoomAll()" :disabled="!canZoomOut()" title="Show the whole run">all</button>
+                <button type="button" class="trace-zoom-btn trace-zoom-btn--word" @click="zoomReset()" title="Latest iterations (default window)">latest</button>
+            </div>
+            <span class="trace-xscroll-hint">drag to pan · ⇧+drag to zoom a region · ctrl+scroll / dbl-click to zoom · click to jump</span>
         </div>
 
         <!-- 1. Overview cards -->

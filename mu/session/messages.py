@@ -94,10 +94,17 @@ def _lean_tool_result(tool_result: Any) -> Any:
         lean["raw"] = raw
     data = tool_result.get("data")
     if isinstance(data, dict):
-        data = {
-            k: v for k, v in data.items()
-            if k not in ("preview", "omitted", "stored_ref", "retrievable_via", "omission_note")
-        }
+        # Verbatim results (raw inline): the stored_ref / omission bookkeeping
+        # is pure duplication of content the model already has. Observed
+        # results (raw dropped, spec #1/#11): ``stored_ref`` + the omission
+        # note are the ONLY way the model learns the content was elided and
+        # how to recall it — stripping them silently broke "retrieve on
+        # demand" (the model saw an excerpt with no key and no hint).
+        observed = raw is None and bool(data.get("omitted"))
+        drop = {"preview", "omitted", "retrievable_via"}
+        if not observed:
+            drop |= {"stored_ref", "omission_note"}
+        data = {k: v for k, v in data.items() if k not in drop}
         if data:
             lean["data"] = data
     if tool_result.get("artifacts"):

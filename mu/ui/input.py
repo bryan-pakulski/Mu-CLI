@@ -401,6 +401,26 @@ class InputHandler:
             }
         )
 
+        _JOB_SUBCOMMAND_COMPLETER = NestedCompleter.from_nested_dict(
+            {
+                "board": None,
+                "summary": None,
+                "list": None,
+                "show": None,
+                "receipt": None,
+                "diff": None,
+                "create": None,
+                "respond": None,
+                "changes": None,
+                "continue": None,
+                "discard": None,
+                "cancel": None,
+                "resume": None,
+                "retry": None,
+                "delete": None,
+            }
+        )
+
         teach_completer = NestedCompleter.from_nested_dict(
             {
                 "list": None,
@@ -594,8 +614,8 @@ class InputHandler:
             "/jobdiag": None,
             "/job-diagnostics": None,
             "/job-analysis": None,
-            "/jobs": None,
-            "/job": None,
+            "/jobs": _JOB_SUBCOMMAND_COMPLETER,
+            "/job": _JOB_SUBCOMMAND_COMPLETER,
             # memory quick-write
             "/remember": None,
             # skills

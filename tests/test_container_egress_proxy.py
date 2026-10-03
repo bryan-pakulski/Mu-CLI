@@ -165,3 +165,40 @@ def test_proxy_readiness_failure_includes_proxy_logs():
         raise AssertionError("expected proxy readiness failure")
     assert "exited before becoming ready" in message
     assert "PermissionError: proxy startup failed" in message
+
+
+def test_internal_gateway_helpers_map_host_docker_internal():
+    from mu.container.network import (
+        host_internal_add_host,
+        internal_gateway_from_inspect,
+    )
+
+    inspect = {"IPAM": {"Config": [{"Subnet": "172.18.0.0/16", "Gateway": "172.18.0.1"}]}}
+    assert internal_gateway_from_inspect(inspect) == "172.18.0.1"
+    assert internal_gateway_from_inspect({}) == ""
+    assert internal_gateway_from_inspect({"IPAM": {"Config": []}}) == ""
+    # Known gateway → pin host.docker.internal to the internal bridge gateway.
+    assert host_internal_add_host("172.18.0.1") == "host.docker.internal:172.18.0.1"
+    # Unknown gateway → legacy docker keyword (docker0) as the only fallback.
+    assert host_internal_add_host("") == "host.docker.internal:host-gateway"
+
+
+def test_network_policy_captures_gateway_and_proxy_uses_it():
+    from mu.container.docker_cli import CommandRunner
+    from mu.container.network import DRY_RUN_GATEWAY, create_isolated_network
+
+    runner = CommandRunner(dry_run=True)
+    policy = create_isolated_network(
+        "mucli-gateway-net",
+        ["api.openai.com"],
+        proxy_image="mucli/proxy:test",
+        runner=runner,
+    )
+    assert policy.gateway == DRY_RUN_GATEWAY
+    assert policy.to_dict()["gateway"] == DRY_RUN_GATEWAY
+    create = next(
+        command for command in runner.commands if "io.mucli.role=egress-proxy" in command
+    )
+    add_host = create[create.index("--add-host") + 1]
+    assert add_host == f"host.docker.internal:{DRY_RUN_GATEWAY}"
+    assert "host.docker.internal:host-gateway" not in create

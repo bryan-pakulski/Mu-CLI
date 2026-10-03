@@ -402,8 +402,10 @@ VARIABLE_SCHEMA = {
     "tool_inline_budgets": {
         # Per-tool overrides for `tool_result_inline_budget`, keyed by tool
         # name. e.g. {"bash": 400}. Absent tools use the global default.
+        # Subagent reports and memory-search hits are model-facing prose the
+        # parent must act on, so they get a roomier default than raw logs.
         "type": dict,
-        "default": {},
+        "default": {"await_subagent": 2048, "search_memory": 1024},
     },
     "read_dedup_enabled": {
         # Spec #7: content-hash freshness + range memo so re-reading an

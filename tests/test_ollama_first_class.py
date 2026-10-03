@@ -291,6 +291,23 @@ def test_preflight_caches_success(monkeypatch):
     assert provider.is_model_installed("qwen3") is True
 
 
+def test_editor_can_disable_reasoning_without_changing_default_requests(monkeypatch):
+    payloads = []
+
+    def fake_urlopen(request, **kwargs):
+        payloads.append(json.loads(request.data))
+        return _mock_urlopen_factory(b'{"message":{"content":"code"},"done":true}\n')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    for think in (None, False):
+        provider = OllamaProvider("test", host="http://fake", think=think)
+        provider._preflight_done = True
+        provider._cached_models = ["test"]
+        list(provider.stream([Message("user", [MessagePart("text", text="complete")])]))
+    assert "think" not in payloads[0]
+    assert payloads[1]["think"] is False
+
+
 def test_preflight_actionable_message_on_connection_refused(monkeypatch):
     import urllib.error
 

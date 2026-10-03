@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
+
+from mu.session.manager import SessionUnreadableError
 from utils.logger import logger
 from utils.revision import js_safe_revision
 
@@ -276,6 +278,25 @@ def _resolve_attachments(session, raw_ids: Any) -> list[dict[str, Any]]:
     return values
 
 
+async def _publish_unreadable_session(bus, name: str, exc: Exception) -> None:
+    logger.error("session %s document unreadable after container turn: %s", name, exc)
+    try:
+        await bus.publish(
+            {
+                "kind": "error",
+                "session_name": name,
+                "text": (
+                    "Container turn completed but the host could not re-read "
+                    "the session document (file owner/permissions). The host "
+                    "mirror was not refreshed and will not be saved over the "
+                    f"worker's copy. Detail: {exc}"
+                ),
+            }
+        )
+    except Exception:
+        logger.debug("Suppressed exception", exc_info=True)
+
+
 @router.post("/send")
 async def send_message(request: Request, payload: Dict[str, Any]):
     session_name = (payload.get("session_name") or "").strip() or None
@@ -356,6 +377,12 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                 try:
                     session.session_manager._load_session(name)
                     session.sync_runtime_state()
+                except SessionUnreadableError as exc:
+                    # Worker (root) left session.json unreadable by the host.
+                    # The manager kept the in-memory container variables and
+                    # will refuse to save; tell the user instead of silently
+                    # demoting the session to a tool-less workspace session.
+                    await _publish_unreadable_session(bus, name, exc)
                 except Exception:
                     # Defensive: best-effort path must not break the caller.
                     logger.debug("Suppressed exception", exc_info=True)
@@ -393,6 +420,12 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                 try:
                     session.session_manager._load_session(name)
                     session.sync_runtime_state()
+                except SessionUnreadableError as exc:
+                    # Worker (root) left session.json unreadable by the host.
+                    # The manager kept the in-memory container variables and
+                    # will refuse to save; tell the user instead of silently
+                    # demoting the session to a tool-less workspace session.
+                    await _publish_unreadable_session(bus, name, exc)
                 except Exception:
                     # Defensive: best-effort path must not break the caller.
                     logger.debug("Suppressed exception", exc_info=True)

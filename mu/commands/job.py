@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from mu.jobs import JobSpec, JobStateError, get_default_job_service
 from mu.jobs.board import BOARD_ORDER, build_job_board
 from mu.jobs.host import ensure_controller_daemon
+from mu.jobs.management import JobManagementError, JobManagementService
 from mu.jobs.receipt import JobReceiptBuilder
 from mu.jobs.review import JobReviewError, JobReviewService, build_job_diff
 
@@ -492,13 +493,76 @@ def _review_action(session: Any, action: str, raw: str, allow_prompt: bool) -> C
     return CommandResult(ok=not host or host.running, message=message, data={"job": updated.to_dict()})
 
 
+def _delete_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
+    """`/job delete <id> [--yes]` — single-step cancel → archive → purge.
+
+    Destructive: removes the job record, telemetry, evidence and managed
+    worktree. The Git branch is preserved. Interactive sessions confirm via
+    ``ui.confirm``; non-interactive callers must pass ``--yes``/``-y``."""
+    tokens = [part for part in str(raw or "").split() if part]
+    assume_yes = any(part in {"--yes", "-y", "--force"} for part in tokens)
+    ids = [part for part in tokens if part not in {"--yes", "-y", "--force"}]
+    if not ids:
+        message = "Usage: /job delete <id> [--yes]"
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message)
+    token = ids[0]
+    service = get_default_job_service()
+    try:
+        job = _resolve_job(service, token)
+    except (KeyError, ValueError) as exc:
+        message = str(exc) if not isinstance(exc, KeyError) else f"Job not found: {token}"
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message)
+
+    if not assume_yes:
+        ui = getattr(session, "ui", None)
+        confirm = getattr(ui, "confirm", None) if allow_prompt else None
+        prompt = (
+            f"Delete job {job.id[:12]} \u00b7 {job.title!r} ({job.status.value})? "
+            "Running work is cancelled first; the record, telemetry, evidence and managed "
+            "worktree are removed. The Git branch is preserved."
+        )
+        if not callable(confirm):
+            message = (
+                f"Refusing to delete job {job.id[:12]} without confirmation. "
+                "Re-run as `/job delete <id> --yes`."
+            )
+            _emit(session, message, allow_prompt, error=True)
+            return CommandResult(ok=False, message=message, data={"job_id": job.id, "deleted": False})
+        if not confirm(prompt, default=False):
+            message = f"Kept job {job.id[:12]}."
+            _emit(session, message, allow_prompt)
+            return CommandResult(ok=True, message=message, data={"job_id": job.id, "deleted": False})
+
+    try:
+        result = JobManagementService(service).delete(job.id, force=True)
+    except (KeyError, JobManagementError, JobStateError, ValueError) as exc:
+        message = str(exc) if not isinstance(exc, KeyError) else f"Job not found: {token}"
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message, data={"job_id": job.id, "deleted": False})
+
+    parts = [f"Deleted job {job.id[:12]} \u00b7 {job.title}"]
+    if result.get("branch_preserved"):
+        parts.append(f"branch preserved: {result['branch_preserved']}")
+    if result.get("worktree_removed"):
+        parts.append("worktree removed")
+    warnings = list(result.get("warnings") or [])
+    message = " \u00b7 ".join(parts)
+    if warnings:
+        message += "\n" + "\n".join(f"WARNING: {item}" for item in warnings)
+    _emit(session, message, allow_prompt, error=bool(warnings))
+    return CommandResult(ok=True, message=message, data=result)
+
+
 @command(
     "/job",
     "/jobs",
     help=(
         "Engineering jobs: board, summary [N|all], list [status], show|receipt|diff <id>, "
         "create <title> [--repo PATH --provider NAME --model NAME --accept TEXT --check CMD], "
-        "respond <id> <answer>, changes <id> <feedback>, continue|discard <id> [detail]."
+        "respond <id> <answer>, changes <id> <feedback>, continue|discard <id> [detail], "
+        "delete <id> [--yes] (cancel \u2192 archive \u2192 purge; branch preserved)."
     ),
 )
 def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
@@ -526,4 +590,6 @@ def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
         return _respond_job(session, rest, allow_prompt)
     if sub in {"changes", "continue", "discard", "cancel", "resume", "retry"}:
         return _review_action(session, sub, rest, allow_prompt)
+    if sub in {"delete", "rm"}:
+        return _delete_job(session, rest, allow_prompt)
     return _show_job(session, raw, allow_prompt)

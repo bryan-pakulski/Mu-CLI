@@ -144,6 +144,31 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
     }
   };
 
+  const deleteJob = async () => {
+    if (!job || acting) return;
+    setActing(true);
+    setError('');
+    try {
+      await jobsApi.delete(job.id, true);
+      navigation.goBack();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setActing(false);
+    }
+  };
+
+  const confirmDelete = () => {
+    if (!job) return;
+    Alert.alert(
+      'Delete job?',
+      'Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.',
+      [
+        { text: 'Keep job', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => { void deleteJob(); } },
+      ],
+    );
+  };
+
   const confirmDiscard = () => {
     Alert.alert(
       job?.status === 'ready_for_review' ? 'Discard reviewed job?' : 'Cancel job?',
@@ -233,6 +258,13 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           onAction={run}
           onDiscard={confirmDiscard}
         />
+
+        <View style={[styles.section, styles.deleteSection]}>
+          <Text variant="sm" dim style={styles.deleteCopy}>
+            Delete this job permanently. Running work is cancelled first; the Git branch is preserved.
+          </Text>
+          <ActionButton label="Delete job" destructive disabled={acting} onPress={confirmDelete} />
+        </View>
 
         <DetailSection title="Work receipt">
           <ReceiptRow label="Repository" value={job.repository || '—'} />
@@ -483,6 +515,8 @@ const styles = StyleSheet.create({
   actionButton: { minHeight: 36, paddingHorizontal: 11, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   actionSpinner: { marginTop: 12, alignSelf: 'flex-start' },
   section: { paddingHorizontal: 18, paddingVertical: 19, borderBottomWidth: StyleSheet.hairlineWidth },
+  deleteSection: { borderBottomWidth: 0, gap: 12 },
+  deleteCopy: { lineHeight: 18 },
   sectionTitle: { fontWeight: '600', marginBottom: 11 },
   receiptRow: { minHeight: 39, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },
   receiptLabel: { width: 102 },

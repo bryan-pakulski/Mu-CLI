@@ -28,6 +28,8 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from mu.session.fileowner import match_owner
+
 logger = logging.getLogger(__name__)
 
 # A beacon is "live" if refreshed within this window. Writers touch every
@@ -99,6 +101,7 @@ def write_beacon(
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f)
+        match_owner(f.fileno(), path)
     os.replace(tmp, path)
     return path
 

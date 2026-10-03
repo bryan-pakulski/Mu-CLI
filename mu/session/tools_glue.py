@@ -297,6 +297,42 @@ def build_structured_tool_result(
     return structured
 
 
+def result_exceeds_inline_budget(session: Any, tool_name: str, raw_result: Any) -> bool:
+    """True when ``raw_result`` would be observed (spec #10 budget exceeded)
+    if it had a durable store key behind it.
+
+    The ToolResultCache allowlist only covers read tools, so bash /
+    bash_status / await_subagent / search_memory … — the bulk of raw tool
+    output — used to come back from ``store`` with ``None`` and the
+    observation transform kept their full raw inline (zero tokens saved).
+    loop_body calls this to decide whether to force-store such a result so
+    it gets a ``stored_ref`` and can be observed compactly + recalled on
+    demand. Retrieval tools (recall / result_* / flush) are never eligible.
+    Best-effort: any failure answers False (keep raw inline, the safe path).
+    """
+    try:
+        from mu.tools._observe import observation_eligible, resolve_inline_budget
+        from utils.token_estimator import estimate_tokens
+
+        if not observation_eligible(tool_name):
+            return False
+        envelope, unwrapped_raw = session._unwrap_tool_envelope(raw_result)
+        raw_text = str(unwrapped_raw)
+        if isinstance(envelope, dict):
+            is_error = envelope.get("error_code") is not None or not envelope.get(
+                "ok", True
+            )
+        else:
+            from mu.tools._envelope import infer_tool_error_code
+
+            is_error = infer_tool_error_code(tool_name, raw_text) is not None
+        variables = getattr(session, "variables", {}) or {}
+        budget = resolve_inline_budget(tool_name, is_error, variables)
+        return int(estimate_tokens(raw_text) or 0) > budget
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _apply_observation_transform(
     session: Any,
     structured: dict,
@@ -337,10 +373,22 @@ def _apply_observation_transform(
         structured["data"]["omission_note"] = note
         structured["raw"] = None  # full raw NOT in context (spec #1/#11)
         structured["telemetry"]["delivery_mode"] = "observed"
-        # Injected token estimate: the observation dict (no raw) + summary.
-        injected = int(estimate_tokens(str(structured["data"])) or 0) + int(
-            estimate_tokens(structured.get("summary") or "") or 0
-        )
+        # Injected token estimate: what the provider actually receives — the
+        # lean projection (``messages._lean_tool_result``) of this envelope,
+        # serialized the way the providers do it. Measuring ``str(data)`` +
+        # ``summary`` over-counted (summary/preview are stripped at
+        # serialization) and could even read as *negative* savings.
+        import json as _json
+
+        from mu.session.messages import _lean_tool_result
+
+        try:
+            projected = _json.dumps(
+                _lean_tool_result(structured), indent=2, sort_keys=True, default=str
+            )
+        except Exception:  # noqa: BLE001
+            projected = str(structured["data"])
+        injected = int(estimate_tokens(projected) or 0)
         structured["telemetry"]["injected_token_count"] = injected
         structured["telemetry"]["compression_ratio"] = round(
             (raw_tokens - injected) / max(1, raw_tokens), 3

@@ -1,0 +1,66 @@
+-- Run from repo root: nvim --headless -u NONE -i NONE -l integrations/nvim/tests/smoke.lua
+local function run()
+  vim.opt.rtp:append('integrations/nvim')
+  local repo = vim.fn.getcwd()
+  local root = vim.fn.tempname()
+  vim.fn.mkdir(root, 'p')
+  vim.env.PYTHONPATH = repo
+  local mucli = require('mucli')
+  mucli.setup({ workspace = root, command = { 'python3', repo .. '/integrations/nvim/tests/fake_service.py' },
+    analysis = { provider = { name = 'fake', model = 'fake' } } })
+  vim.cmd('edit ' .. vim.fn.fnameescape(root .. '/main.py'))
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'é = 1', '    ' })
+  vim.api.nvim_win_set_cursor(0, { 1, 2 })
+  local context = require('mucli.context')
+  local params, snapshot = context.snapshot(buf, mucli.config)
+  assert(params.col == 2, 'Neovim cursor column must remain bytes')
+  vim.api.nvim_buf_set_text(buf, 0, 2, 0, 2, { 'value' })
+  assert(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == 'évalue = 1')
+  assert(not context.valid(snapshot, false), 'Snapshot must invalidate after edits')
+
+  -- Exercise real fragmented stdio framing and Python provider dispatch.
+  local connection = require('mucli.client').get(root, mucli.config)
+  local response
+  connection.request('search', { query = 'évalue' }, function(message) if not message.event then response = message end end)
+  assert(vim.wait(5000, function() return response ~= nil end), 'Provider response timed out')
+  assert(response.result and response.result.sources, vim.inspect(response))
+
+  local ui = require('mucli.ui')
+  vim.cmd('MucliAsk explain this code')
+  assert(vim.wait(5000, function()
+    return ui.panel_buf and table.concat(vim.api.nvim_buf_get_lines(ui.panel_buf, 0, -1, false), '\n'):find('return 42', 1, true)
+  end), 'Investigation command must return model output')
+  vim.api.nvim_set_current_buf(buf)
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  vim.cmd('2MucliEdit return the answer')
+  assert(vim.wait(5000, function() return ui.proposal ~= nil end), 'Edit command must open a proposal')
+  assert(vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '    ', 'Edit command must not mutate source')
+  vim.cmd('MucliReject')
+  vim.api.nvim_set_current_buf(buf)
+  local _, fresh = context.snapshot(buf, mucli.config)
+  ui.review({ text = '    return 42' }, fresh, { start = 1, ['end'] = 2 })
+  assert(vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '    ', 'Preview must not mutate source')
+  ui.apply()
+  assert(vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '    return 42')
+  assert(vim.fn.filereadable(root .. '/main.py') == 0, 'Apply must not write disk')
+  vim.api.nvim_set_current_buf(buf)
+  _, fresh = context.snapshot(buf, mucli.config)
+  ui.review({ text = 'wrong' }, fresh, { start = 1, ['end'] = 2 })
+  vim.api.nvim_buf_set_lines(buf, 0, 1, false, { 'changed' })
+  ui.apply()
+  assert(vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '    return 42', 'Stale proposal must not apply')
+  ui.reject()
+  mucli.cancel()
+  require('mucli.client').stop()
+  vim.fn.delete(root, 'rf')
+  print('Mucli Neovim smoke tests passed')
+end
+
+local ok, err = xpcall(run, debug.traceback)
+if not ok then
+  io.stderr:write(err .. '\n')
+  vim.cmd('cquit 1')
+else
+  vim.cmd('qa!')
+end

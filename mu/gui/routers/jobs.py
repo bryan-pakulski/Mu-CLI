@@ -233,6 +233,7 @@ async def bulk_manage_jobs(request: Request, payload: Dict[str, Any]):
             str(payload.get("action") or ""),
             list(payload.get("job_ids") or []),
             reason=str(payload.get("reason") or ""),
+            force=bool(payload.get("force", False)),
         )
     except (ValueError, JobManagementError) as exc:
         raise _state_error(exc) from exc
@@ -293,11 +294,16 @@ async def delete_historic_job(
     job_id: str,
     request: Request,
     purge_artifacts: bool = Query(default=True),
+    force: bool = Query(
+        default=False,
+        description="Cancel an active job first, auto-archive, then purge (single-step delete).",
+    ),
 ):
     try:
         return JobManagementService(_service(request)).delete(
             job_id,
             purge_artifacts=purge_artifacts,
+            force=force,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc

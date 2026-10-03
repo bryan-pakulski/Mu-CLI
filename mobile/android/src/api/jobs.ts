@@ -221,6 +221,16 @@ export interface JobInteractionResponse extends Record<string, unknown> {
   selected?: unknown[];
 }
 
+export type JobDeleteResult = {
+  job_id: string;
+  deleted: boolean;
+  forced?: boolean;
+  worktree_removed: boolean;
+  artifacts_removed: string[];
+  warnings: string[];
+  branch_preserved: string;
+};
+
 export const jobsApi = {
   list: () => api.get<{ jobs: EngineeringJob[] }>('/api/jobs'),
   board: () => api.get<JobBoardResponse>('/api/jobs/board'),
@@ -239,4 +249,6 @@ export const jobsApi = {
   cancel: (jobId: string, reason?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { reason }),
   resume: (jobId: string, detail?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/resume`, { detail }),
   retry: (jobId: string, reason?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { reason }),
+  /** Single-step delete: cancels running work, archives, then purges record/telemetry/evidence. Git branch preserved. */
+  delete: (jobId: string, force = true) => api.delete<JobDeleteResult>(`/api/jobs/${encodeURIComponent(jobId)}?force=${force ? 1 : 0}`),
 };

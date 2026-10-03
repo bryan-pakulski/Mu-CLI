@@ -12,7 +12,12 @@ from urllib.parse import urlparse
 from utils.config import HISTORY_DIR
 
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback, run_with_output
-from .network import DEFAULT_EGRESS_ALLOW, create_isolated_network, teardown_network
+from .network import (
+    DEFAULT_EGRESS_ALLOW,
+    create_isolated_network,
+    host_internal_add_host,
+    teardown_network,
+)
 from .ref import (
     DEFAULT_WORKER_PORT,
     ContainerRef,
@@ -133,7 +138,7 @@ def build_create_command(
         "--pids-limit",
         "2048",
         "--add-host",
-        "host.docker.internal:host-gateway",
+        host_internal_add_host(ref.host_gateway),
         "--label",
         "io.mucli.managed=true",
         "--label",
@@ -349,6 +354,7 @@ def build_container(
         ref.proxy_port = policy.proxy_port
         ref.proxy_image = policy.proxy_image
         ref.egress_network_name = policy.egress_network_name
+        ref.host_gateway = policy.gateway
         _report(progress, "creating_container", "Creating the worker container…")
         create_cmd = build_create_command(ref, environment=provider_environment())
         create_cmd[0] = docker

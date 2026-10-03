@@ -2476,6 +2476,36 @@ def run_turn(session, text, *, origin="user"):
                     # Defensive: best-effort path must not break the caller.
                     logger.debug("Suppressed exception", exc_info=True)
 
+                # Spec #1/#11 hook-up: the cache allowlist only covers read
+                # tools, so bash / bash_status / await_subagent / search_memory
+                # … — the bulk of raw tool output — returned cache_key=None
+                # here and the observation transform kept their raw inline
+                # (measured on real traces: 1.8M raw bash tokens, 0 saved).
+                # Force-store any over-budget result so it carries a
+                # stored_ref and can be observed compactly + recalled on
+                # demand. Small results stay unstored + verbatim as before;
+                # retrieval tools (recall / result_* / flush) are exempt.
+                # Plain `store` (no locator) → never auto-recalled as fresh.
+                if cache_key is None and session.variables.get(
+                    "structured_tool_results", True
+                ):
+                    try:
+                        from mu.session.tools_glue import (
+                            result_exceeds_inline_budget,
+                        )
+
+                        if result_exceeds_inline_budget(
+                            session, part.tool_name, source_result
+                        ):
+                            cache_key = session.tool_result_cache.store(
+                                call_id=getattr(part, "tool_call_id", ""),
+                                tool_name=part.tool_name,
+                                result=source_result,
+                                force=True,
+                            )
+                    except Exception:
+                        logger.debug("Suppressed exception", exc_info=True)
+
                 # Range-memo bookkeeping (spec #7): record the supplied range
                 # so a later overlapping read of the unchanged file dedups.
                 # On writes, invalidate the memo for that path so the next

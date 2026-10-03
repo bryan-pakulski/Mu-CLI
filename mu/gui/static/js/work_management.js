@@ -150,7 +150,7 @@
                 ${job.archived
                     ? `<button type="button" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
                     : job.manageable ? `<button type="button" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
-                ${job.archived ? `<button type="button" class="delete" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}">Delete</button>` : ''}
+                <button type="button" class="delete" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
             </div>
         `;
     }
@@ -245,10 +245,10 @@
                 await api(`/api/jobs/${encodeURIComponent(jobId)}/restore`, { method: 'POST', body: {} });
                 toast('Job restored.');
             } else if (action === 'delete') {
-                if (!window.confirm('Permanently delete this archived job record, telemetry, evidence and clean managed worktree? The Git branch is preserved.')) return;
-                await api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+                if (!window.confirm('Delete this job? Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.')) return;
+                await api(`/api/jobs/${encodeURIComponent(jobId)}?force=1`, { method: 'DELETE' });
                 state.selected.delete(jobId);
-                toast('Archived job deleted.');
+                toast('Job deleted. Git branch preserved.');
             }
             document.getElementById('work-refresh')?.click();
             await load();
@@ -260,11 +260,11 @@
     async function bulk(action) {
         const ids = [...state.selected];
         if (!ids.length) return;
-        if (action === 'delete' && !window.confirm(`Permanently delete ${ids.length} selected archived jobs? Git branches are preserved.`)) return;
+        if (action === 'delete' && !window.confirm(`Delete ${ids.length} selected jobs? Running jobs are cancelled first; records, telemetry, evidence and managed worktrees are removed. Git branches are preserved.`)) return;
         try {
             const result = await api('/api/jobs/manage/bulk', {
                 method: 'POST',
-                body: { action, job_ids: ids },
+                body: { action, job_ids: ids, force: action === 'delete' },
             });
             const message = `${result.succeeded} ${action} succeeded${result.failed ? ` · ${result.failed} failed` : ''}`;
             toast(message, Boolean(result.failed));

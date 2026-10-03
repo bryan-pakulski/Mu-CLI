@@ -1,0 +1,61 @@
+*mucli.txt*  Mucli IDE integration for Neovim 0.10+
+
+SETUP                                                        *mucli-setup*
+
+See integrations/nvim/README.md for installation and all configuration options.
+Install Mucli in your Python environment and add integrations/nvim to runtimepath.
+Call require('mucli').setup() with an explicit analysis provider model.
+Run :checkhealth mucli to check prerequisites.
+
+COMMANDS                                                     *mucli-commands*
+
+:MucliExplain[!]       Explain in the RHS conversation; ! uses a cursor popup.
+:MucliAsk [question]   Investigate/follow up; prompts when arguments are omitted.
+:MucliChat             Open/close the right-hand conversation and request history.
+:MucliFocus            Focus the popup, or open/focus the conversation panel.
+:MucliScrollDown       Scroll the popup/panel down without leaving code.
+:MucliScrollUp         Scroll the popup/panel up without leaving code.
+:MucliClear            Clear investigation history.
+:MucliSearch {query}   Search code locally into quickfix, without a model call.
+:MucliReferences       LSP references, with lexical search fallback.
+:MucliSources          Open inspected sources in quickfix.
+:MucliEdit [request]   Preview selected-line changes; prompts if omitted.
+:MucliFix              Propose a fix using diagnostics for the selection.
+:MucliApply            Explicitly approve a proposed edit; does not save files.
+:MucliReject           Reject the current edit proposal.
+:MucliCancel           Cancel investigation requests.
+:MucliContext          Show actual context ranges and index coverage.
+:MucliStatus           Show the configured model and workspace.
+
+SCOPE                                                        *mucli-scope*
+
+Use .mucliignore exclusion globs to keep private paths out of all editor context.
+Investigation requests send selected context to your configured provider.
+Set share_open_buffers = false to stop synchronizing other buffers.
+
+Context is indexed in the background. Unsaved buffers override disk; answers
+use ranked definitions, cached LSP locations, and enclosing scopes.
+
+Explanations and investigations share the right-hand conversation. Explain! uses
+a popup and also records the reply in history. Context inspection is separate.
+Ask/Edit retain their source file while the input prompt is open. A fresh panel
+can use a recent eligible file from the same workspace, including hidden buffers.
+If none is open, open a named source file first. Closing the chosen file while
+answering the prompt cancels submission instead of switching to another file.
+Explain defaults to a short paragraph about the selected code or cursor block,
+using its actual definitions. Ask follow-ups for callers or a deeper investigation.
+Sources start collapsed: s expands them, gs opens quickfix, ? lists panel keys.
+Empty/tool-only responses get one automatic answer retry. A failed reply is shown
+as a failure, never a blank success; r retries its question from the panel.
+In the panel: j/k move by display line, Ctrl-d/u scroll half pages, Ctrl-f/b scroll
+full pages, gg/G jump to start/end, [q/]q jump between requests. Enter asks a
+follow-up, gd opens a source from that reply, gs lists its sources. Esc returns to
+code; q closes the panel. Popup focus enables normal scrolling; q/Esc closes it.
+Installed AstroNvim keys: Space mm toggles chat, Space mw focuses, Space mj/mk
+scroll down/up from code, Space me explains, Space mE opens a popup.
+History lasts for this Neovim session (up to 50 requests, about 256 KB of text per
+workspace); closing the panel preserves it. The model retains six exchanges within
+24,000 characters. MucliClear clears both display and backend conversation history.
+Edit previews focus on the replacement: a applies, q rejects, neither saves.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:

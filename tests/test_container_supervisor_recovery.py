@@ -206,3 +206,57 @@ def test_attach_session_rebuilds_invalid_proxy_topology(tmp_path, monkeypatch):
     assert recorded["supervisor_url"] == "http://host.docker.internal:30311"
     assert "recovering_container" in stages
     assert any("rebuilding the worker topology" in text for _stream, text in output)
+
+
+def test_worker_create_command_pins_host_docker_internal_to_internal_gateway():
+    from mu.container.builder import build_create_command
+
+    ref = make_ref()
+    ref.host_gateway = "172.31.0.1"
+    command = build_create_command(ref)
+    assert command[command.index("--add-host") + 1] == "host.docker.internal:172.31.0.1"
+    assert "host.docker.internal:host-gateway" not in command
+
+    legacy = make_ref()  # record predating host_gateway → docker keyword fallback
+    assert legacy.host_gateway == ""
+    legacy_command = build_create_command(legacy)
+    assert legacy_command[legacy_command.index("--add-host") + 1] == (
+        "host.docker.internal:host-gateway"
+    )
+
+
+def test_host_gateway_round_trips_through_registry_and_tolerates_missing_key(tmp_path):
+    registry = ContainerRegistry(str(tmp_path / "containers"))
+    ref = make_ref()
+    ref.host_gateway = "172.31.0.1"
+    registry.upsert(ref)
+    loaded = registry.get(ref.name)
+    assert loaded is not None and loaded.host_gateway == "172.31.0.1"
+
+    legacy = {k: v for k, v in ref.to_dict().items() if k != "host_gateway"}
+    assert ContainerRef.from_dict(legacy).host_gateway == ""
+
+
+def test_ensure_running_backfills_host_gateway_from_network_inspect(tmp_path, monkeypatch):
+    class GatewayRunner(FakeRunner):
+        def run(self, args, *, check=True, input_text=None, timeout=None):
+            command = [str(item) for item in args]
+            if command[1:3] == ["network", "inspect"]:
+                self.commands.append(command)
+                payload = '{"IPAM": {"Config": [{"Subnet": "172.31.0.0/24", "Gateway": "172.31.0.1"}]}}'
+                return CommandResult(command, 0, payload, "")
+            return super().run(args, check=check, input_text=input_text, timeout=timeout)
+
+    registry = ContainerRegistry(str(tmp_path / "containers"))
+    ref = make_ref()
+    ref.container_id = "live"
+    registry.upsert(ref)
+    runner = GatewayRunner(container_exists=True)
+    supervisor = ContainerSupervisor(registry=registry, runner=runner)
+    monkeypatch.setattr(supervisor, "wait_worker_ready", lambda ref: None)
+    monkeypatch.setattr(supervisor, "_ensure_proxy_running", lambda ref: None)
+
+    updated = supervisor.ensure_running(ref)
+    assert updated.host_gateway == "172.31.0.1"
+    assert registry.get(ref.name).host_gateway == "172.31.0.1"
+    assert any(cmd[1:4] == ["network", "inspect", ref.network_name] for cmd in runner.commands)

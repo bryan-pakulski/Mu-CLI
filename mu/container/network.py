@@ -111,6 +111,31 @@ def egress_network_name_for(network_name: str) -> str:
     return f"{str(network_name or '')}-egress"[:63]
 
 
+# Gateway used when the runner is in dry-run mode (no Docker inspect output).
+DRY_RUN_GATEWAY = "172.31.0.1"
+
+
+def internal_gateway_from_inspect(value: dict) -> str:
+    """Return IPAM Config[0].Gateway from ``docker network inspect`` JSON."""
+    try:
+        configs = (value or {}).get("IPAM", {}).get("Config", []) or []
+        return str((configs[0] if configs else {}).get("Gateway") or "").strip()
+    except (AttributeError, TypeError, IndexError):
+        return ""
+
+
+def host_internal_add_host(gateway: str) -> str:
+    """``--add-host`` value mapping host.docker.internal for a worker/proxy.
+
+    On a ``--internal`` bridge the host is only reachable at that bridge's own
+    gateway address; Docker's ``host-gateway`` keyword resolves to docker0,
+    which an internal network cannot route to.  Fall back to ``host-gateway``
+    only when the gateway is unknown.
+    """
+    target = str(gateway or "").strip() or "host-gateway"
+    return f"host.docker.internal:{target}"
+
+
 @dataclass
 class NetworkPolicy:
     name: str
@@ -127,6 +152,10 @@ class NetworkPolicy:
     proxy_port: int = DEFAULT_PROXY_PORT
     proxy_image: str = ""
     egress_network_name: str = ""
+    # IPv4 gateway of the --internal bridge. This is the only address at
+    # which the host is reachable from a worker: ``host-gateway`` resolves
+    # to docker0, which an internal network cannot route to.
+    gateway: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -144,6 +173,7 @@ class NetworkPolicy:
             "proxy_port": self.proxy_port,
             "proxy_image": self.proxy_image,
             "egress_network_name": self.egress_network_name,
+            "gateway": self.gateway,
         }
 
 
@@ -234,11 +264,13 @@ def create_isolated_network(
         )
         if runner.dry_run:
             network_id, subnet = f"dry-{network_name}", "172.31.0.0/24"
+            gateway = DRY_RUN_GATEWAY
         else:
             value = json.loads(inspect.stdout)
             network_id = str(value.get("Id") or "")
             configs = value.get("IPAM", {}).get("Config", []) or []
             subnet = str((configs[0] if configs else {}).get("Subnet") or "")
+            gateway = internal_gateway_from_inspect(value)
         if not subnet:
             raise ContainerRuntimeError(f"Docker network {network_name!r} has no subnet")
 
@@ -271,7 +303,7 @@ def create_isolated_network(
             "--workdir",
             "/tmp",
             "--add-host",
-            "host.docker.internal:host-gateway",
+            host_internal_add_host(gateway),
             "--label",
             "io.mucli.managed=true",
             "--label",
@@ -343,6 +375,7 @@ def create_isolated_network(
             proxy_ip=proxy_ip,
             proxy_port=DEFAULT_PROXY_PORT,
             proxy_image=image,
+            gateway=gateway,
             egress_network_name=egress_name,
         )
     except Exception:

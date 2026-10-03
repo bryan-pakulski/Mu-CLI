@@ -45,6 +45,7 @@ voice = [
 dev = [
     "pytest",
     "black",
+    "msgpack", # Neovim UI/RPC integration tests; not a runtime dependency.
 ]
 
 [project.scripts]

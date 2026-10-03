@@ -167,3 +167,98 @@ def test_report_exports_json_and_csv(tmp_path):
     assert b"Report row" in csv_bytes
     assert csv_type.startswith("text/csv")
     assert csv_name.endswith(".csv")
+
+
+def test_force_delete_cancels_active_job_then_archives_and_purges(tmp_path):
+    service = make_service(tmp_path)
+    management = JobManagementService(service)
+    job = service.create(JobSpec(title="Delete while running", repository="/repo"))
+    service.transition(job.id, JobStatus.PREPARING, reason="prepare")
+    service.transition(job.id, JobStatus.RUNNING, reason="run")
+
+    root = Path(service.store.path).parent
+    evidence = root / "evidence" / job.id
+    evidence.mkdir(parents=True)
+    (evidence / "work-receipt.json").write_text("{}", encoding="utf-8")
+
+    result = management.delete(job.id, force=True, lease_wait_seconds=0.5)
+
+    assert result["deleted"] is True
+    assert result["branch_preserved"] == job.branch
+    with pytest.raises(KeyError):
+        service.get(job.id)
+    assert not evidence.exists()
+
+
+def test_force_delete_refuses_while_worker_lease_persists(tmp_path):
+    service = make_service(tmp_path)
+    management = JobManagementService(service)
+    management.lease_poll_interval = 0.01
+    job = service.create(JobSpec(title="Leased job", repository="/repo"))
+    service.transition(job.id, JobStatus.PREPARING, reason="prepare")
+    assert service.store.acquire_lease(job.id, "worker-1", ttl_seconds=60)
+
+    with pytest.raises(JobManagementError, match="still cancelling"):
+        management.delete(job.id, force=True, lease_wait_seconds=0.05)
+
+    # Cancellation was requested but the record survives until the lease clears.
+    current = service.get(job.id)
+    assert current.status == JobStatus.CANCELLED
+    assert current.worker_id == "worker-1"
+
+
+def test_force_delete_waits_for_lease_release(tmp_path):
+    import threading
+
+    service = make_service(tmp_path)
+    management = JobManagementService(service)
+    management.lease_poll_interval = 0.01
+    job = service.create(JobSpec(title="Lease released late", repository="/repo"))
+    service.transition(job.id, JobStatus.PREPARING, reason="prepare")
+    assert service.store.acquire_lease(job.id, "worker-2", ttl_seconds=60)
+
+    def release_later():
+        import time as _time
+
+        _time.sleep(0.1)
+        service.store.release_lease(job.id, "worker-2", reason="worker exited")
+
+    thread = threading.Thread(target=release_later)
+    thread.start()
+    try:
+        result = management.delete(job.id, force=True, lease_wait_seconds=2.0)
+    finally:
+        thread.join()
+
+    assert result["deleted"] is True
+    with pytest.raises(KeyError):
+        service.get(job.id)
+
+
+def test_non_force_delete_still_requires_archive(tmp_path):
+    service = make_service(tmp_path)
+    management = JobManagementService(service)
+    active = service.create(JobSpec(title="Queued", repository="/repo"))
+    with pytest.raises(JobManagementError, match="cannot be deleted"):
+        management.delete(active.id)
+    historic = stopped_job(service, "Historic unarchived")
+    with pytest.raises(JobManagementError, match="Archive a historic job"):
+        management.delete(historic.id)
+    assert service.get(historic.id).id == historic.id
+
+
+def test_bulk_delete_forwards_force(tmp_path):
+    service = make_service(tmp_path)
+    management = JobManagementService(service)
+    running = service.create(JobSpec(title="Bulk running", repository="/repo"))
+    service.transition(running.id, JobSpec and JobStatus.PREPARING, reason="prepare")
+    historic = stopped_job(service, "Bulk historic")
+
+    refused = management.bulk("delete", [running.id, historic.id])
+    assert refused["succeeded"] == 0 and refused["failed"] == 2
+
+    forced = management.bulk("delete", [running.id, historic.id], force=True)
+    assert forced["succeeded"] == 2 and forced["failed"] == 0
+    for job_id in (running.id, historic.id):
+        with pytest.raises(KeyError):
+            service.get(job_id)

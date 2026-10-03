@@ -6,6 +6,18 @@
  * panel. Clicking an iter in any chart/table scrolls the conversation view to
  * that iteration and highlights it.
  *
+ * X axis contract: every chart shares ONE iter→pixel scale (`_xOf`), derived
+ * from the shared pan/zoom window [xStart, xStart+xCount) over `iters`. Each
+ * visible iter owns an equal-width slot; points/bars/cells sit at the slot
+ * centre. Sparse series (efficiency, per-tool latency, snapshot columns) are
+ * positioned by their iter number — never stretched to fill the width — so
+ * panning and zooming keep all charts in lockstep. Hover is a shared
+ * crosshair (`hoverIter`) drawn on every chart; the value chip appears on the
+ * hovered one.
+ *
+ * Navigation: drag to pan · ⇧+drag to zoom a region · ctrl/⌘+scroll or
+ * double-click to zoom at the cursor · +/−/all/latest buttons · scrollbar.
+ *
  * Each panel has a ⓘ info button (see trace.html) whose popout explains what the
  * panel shows, how to read it, and which harness decision it informs.
  */
@@ -77,15 +89,18 @@ function traceApp() {
         selectedTool: null,
         driftLog: false,        // signed-log y scale for the drift chart
         infoOpen: null,         // open info popout key
-        hoverRef: null, hoverIdx: null,
+        hoverRef: null,         // canvas ref under the cursor (chip owner)
         session: "",            // session scope (?session=) — traces are per-session
         runBounds: [],           // per-run global [start,end] for the combined view
         theme: "dark",          // current data-theme (for the toggle button glyph)
         expandedTools: {},      // toolKey -> true: that tool's result preview is expanded
         expandedCards: {},      // cardKey -> true: all tool previews in that turn expanded
-        VIEW_CAP: 100,          // max iters drawn across the plot width (X pan window)
-        xStart: 0,              // first iter index visible in the X pan window
-        xCount: 100,            // iters currently visible (≤ VIEW_CAP, or totalIters if fewer)
+        VIEW_CAP: 100,          // default iters in view (the "latest" window)
+        MIN_VIEW: 3,            // zoom-in floor (iters)
+        xStart: 0,              // first iter index visible in the X window
+        xCount: 100,            // iters currently visible (MIN_VIEW..totalIters)
+        hoverIter: null,        // shared crosshair iter (all charts)
+        brush: null,            // {a, b} iter positions of the ⇧+drag zoom selection
         readHover: null,        // {x, y, label} read-map hover tooltip state
 
         async init() {
@@ -124,7 +139,7 @@ function traceApp() {
             try {
                 const limit = this.allRuns ? 0 : 5;
                 const r = await fetch(
-                    "/api/traces/session/" + encodeURIComponent(this.session) + "?cols=256&limit=" + limit
+                    "/api/traces/session/" + encodeURIComponent(this.session) + "?cols=2048&limit=" + limit
                 );
                 if (!r.ok) { this.summary = null; return; }
                 const d = await r.json();
@@ -190,7 +205,7 @@ function traceApp() {
             this.selectedTool = null;
             this.runBounds = [];   // single-run view has no run boundaries
             try {
-                const r = await fetch("/api/traces/" + encodeURIComponent(this.runId) + "?cols=256");
+                const r = await fetch("/api/traces/" + encodeURIComponent(this.runId) + "?cols=2048");
                 const d = await r.json();
                 this.summary = d.summary;
                 this.series = d.series;
@@ -236,80 +251,197 @@ function traceApp() {
         toolHistSorted() { return [...(this.series.tool_histogram || [])].sort((a, b) => b.count - a.count); },
         maxToolCount() { return Math.max(1, ...this.toolHistSorted().map(h => h.count)); },
 
-        // ---- X pan window (cap ~VIEW_CAP iters visible; pan the rest) ------
-        // All per-iter series + the heat grid are indexed identically (one
-        // point per iter, aligned with `iters`), so a single [xStart, xStart+
-        // xCount) window pans every chart together. When total iters ≤
-        // VIEW_CAP the window covers everything and the scrollbar is hidden.
+        // ---- shared X window (pan + zoom) -----------------------------------
+        // All per-iter series + the heat grid + the read map are positioned by
+        // iter through ONE scale: the window [xStart, xStart+xCount) over
+        // `iters` maps to the plot width, one equal slot per visible iter.
         totalIters() { return (this.iters || []).length; },
         _winStart(total) {
             const cnt = Math.min(this.xCount, total);
             return Math.max(0, Math.min(this.xStart, Math.max(0, total - cnt)));
         },
-        _winCount(total) { return Math.min(this.xCount, total); },
-        // The shared [xStart, xStart+xCount) window is positional over `iters`.
-        // Full-length per-iter series (context, tokens, …) have one entry per
-        // iter, so a positional slice lands exactly on the visible window.
-        // But two series are NOT one-per-iter:
-        //   • efficiency — only iters that made tool calls (sparse), and
-        //   • the heat strip's snapshot.xs — downsampled to `cols` columns
-        //     server-side, so its length ≠ n on long runs.
-        // Slicing those positionally clamps to their own shorter length, so
-        // they stop panning (freeze) and desync from the other charts. Window
-        // them by ITER NUMBER instead: keep the entries whose `iter` falls in
-        // the current window's iter range, so they scroll in lockstep.
-        _iterBounds() {
-            const all = this.iters || [];
-            const n = all.length;
-            if (!n) return [-Infinity, Infinity];
-            const s = this._winStart(n), c = this._winCount(n);
-            const lo = all[s] != null ? all[s].iter : -Infinity;
-            const hi = all[Math.min(n - 1, s + c - 1)] != null
-                ? all[Math.min(n - 1, s + c - 1)].iter : Infinity;
-            return [lo, hi];
+        _winCount(total) { return Math.max(1, Math.min(this.xCount, total)); },
+        _win() {
+            const total = this.totalIters();
+            return { s: this._winStart(total), c: this._winCount(total), total };
         },
-        _view(arr) {
+        // iter number → position in `iters` (built once per load).
+        _posOf(iter) {
+            const m = this._iterIndex;
+            if (!m) return -1;
+            const p = m.get(iter);
+            return p == null ? -1 : p;
+        },
+        _slotW(pad, w) { return (w - pad.l - pad.r) / this._win().c; },
+        // pixel x of the slot centre for position `p` (may be off-plot).
+        _xAtPos(p, pad, w) { return pad.l + (p - this._win().s + 0.5) * this._slotW(pad, w); },
+        // pixel x of an iter; null when unknown, or when outside the window
+        // unless `outside` is set (lines use it for the clipped edge segments).
+        _xOf(iter, pad, w, outside) {
+            const p = this._posOf(iter);
+            if (p < 0) return null;
+            const { s, c } = this._win();
+            if (!outside && (p < s || p >= s + c)) return null;
+            return this._xAtPos(p, pad, w);
+        },
+        // iter under pixel x (slot hit-test); null outside the plot.
+        _iterAtX(x, pad, w) {
+            const { s, c } = this._win();
+            if (x < pad.l || x > w - pad.r) return null;
+            const local = Math.max(0, Math.min(c - 1, Math.floor((x - pad.l) / this._slotW(pad, w))));
+            const it = (this.iters || [])[s + local];
+            return it ? it.iter : null;
+        },
+        // Visible slice of a series. Full per-iter series slice positionally;
+        // sparse series (efficiency, tool latency) filter by iter number.
+        // `padOne` includes one neighbour on each side so lines run to the
+        // plot edge while panning (drawn under a clip rect).
+        _view(arr, padOne) {
             if (!arr || !arr.length) return [];
-            const n = (this.iters || []).length;
-            if (arr.length === n) {            // full per-iter series: positional == iter window
-                const s = this._winStart(n);
-                return arr.slice(s, s + this._winCount(n));
-            }
-            const [lo, hi] = this._iterBounds();   // sparse/downsampled: window by iter
-            return arr.filter(d => d.iter != null && d.iter >= lo && d.iter <= hi);
+            const { s, c, total } = this._win();
+            const ext = padOne ? 1 : 0;
+            const lo = Math.max(0, s - ext), hi = Math.min(total - 1, s + c - 1 + ext);
+            if (arr.length === total) return arr.slice(lo, hi + 1);
+            const all = this.iters || [];
+            const loIt = all[lo] ? all[lo].iter : -Infinity;
+            const hiIt = all[hi] ? all[hi].iter : Infinity;
+            return arr.filter(d => d.iter != null && d.iter >= loIt && d.iter <= hiIt);
         },
+        _clipPlot(ctx, w, h, pad) {
+            ctx.save(); ctx.beginPath();
+            ctx.rect(pad.l, pad.t, w - pad.l - pad.r, h - pad.t - pad.b); ctx.clip();
+        },
+        // Trace a path through `data` (any series with `iter`), y from yFn.
+        _pathOf(ctx, data, pad, w, yFn) {
+            let started = false;
+            for (const d of data) {
+                const x = this._xOf(d.iter, pad, w, true);
+                if (x == null) continue;
+                const y = yFn(d);
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            }
+            return started;
+        },
+        _hoverPoint(data) {
+            if (this.hoverIter == null) return null;
+            return data.find(d => d.iter === this.hoverIter) || null;
+        },
+        _notePad(ref, pad) { const c = this.$refs[ref]; if (c) c._pad = pad; },
+        _padOf(cv) { return cv._pad || { l: 56, r: 12, t: 14, b: 20 }; },
         _resetWindow() {
-            const total = (this.iters || []).length;
-            this.xCount = Math.min(this.VIEW_CAP, total);
+            const all = this.iters || [];
+            this._iterIndex = new Map(all.map((it, i) => [it.iter, i]));
+            const total = all.length;
+            this.xCount = Math.max(1, Math.min(this.VIEW_CAP, total));
             // Start at the latest iterations (RHS): the most recent work is the
             // default point of interest. When the whole run fits in the window
             // (total ≤ xCount) xStart is 0 and covers everything.
             this.xStart = Math.max(0, total - this.xCount);
+            this.brush = null;
             this._updatePanCursors();
         },
+        _afterWindowChange() { this._updatePanCursors(); this.renderAll(); },
         xScrollMax() { return Math.max(0, this.totalIters() - this.xCount); },
         // Pannable when the run exceeds the visible window. Dragging any chart
-        // shifts the shared [xStart, xStart+xCount) window (see _attachPan); all
-        // charts redraw together because they all slice through _view.
+        // shifts the shared window (see _attachPan); all charts redraw together.
         _pannable() { return this.totalIters() > this.xCount; },
         _updatePanCursors() {
-            const pannable = this._pannable();
-            const cur = pannable ? "grab" : "default";
+            const cur = this._pannable() ? "grab" : "crosshair";
             document.querySelectorAll(".trace-canvas").forEach(cv => { cv.style.cursor = cur; });
         },
+
+        // ---- zoom ------------------------------------------------------------
+        canZoomIn() { return this._win().c > this.MIN_VIEW; },
+        canZoomOut() { return this.xCount < this.totalIters(); },
+        zoomLabel() {
+            const { c, total } = this._win();
+            if (!total) return "";
+            return c >= total ? "all" : Math.round((total / c) * 10) / 10 + "×";
+        },
+        // Anchor for button zoom: the selected iter when visible, else centre.
+        _anchorPos() {
+            const { s, c } = this._win();
+            if (this.selectedIter !== null) {
+                const p = this._posOf(this.selectedIter);
+                if (p >= s && p < s + c) return p + 0.5;
+            }
+            return s + c / 2;
+        },
+        // Scale the window by `factor` keeping `anchorPos` (a fractional
+        // position in `iters`) at the same on-screen fraction.
+        zoomBy(factor, anchorPos) {
+            const { s, c, total } = this._win();
+            if (!total) return;
+            let cnt = Math.round(c * factor);
+            if (factor < 1 && cnt === c) cnt = c - 1;
+            if (factor > 1 && cnt === c) cnt = c + 1;
+            cnt = Math.max(Math.min(this.MIN_VIEW, total), Math.min(total, cnt));
+            if (cnt === c) return;
+            const anchor = anchorPos == null ? s + c / 2 : anchorPos;
+            const frac = (anchor - s) / c;
+            const ns = Math.round(anchor - frac * cnt);
+            this.xCount = cnt;
+            this.xStart = Math.max(0, Math.min(ns, total - cnt));
+            this._afterWindowChange();
+        },
+        // Zoom the window to the inclusive position range [a, b].
+        zoomToRange(a, b) {
+            const total = this.totalIters();
+            if (!total) return;
+            let lo = Math.max(0, Math.min(a, b)), hi = Math.min(total - 1, Math.max(a, b));
+            let cnt = hi - lo + 1;
+            const floor = Math.min(this.MIN_VIEW, total);
+            if (cnt < floor) { lo = Math.max(0, lo - Math.floor((floor - cnt) / 2)); cnt = floor; }
+            this.xCount = Math.min(total, cnt);
+            this.xStart = Math.max(0, Math.min(lo, total - this.xCount));
+            this._afterWindowChange();
+        },
+        zoomIn() { this.zoomBy(0.5, this._anchorPos()); },
+        zoomOut() { this.zoomBy(2, this._anchorPos()); },
+        zoomAll() {
+            const total = this.totalIters();
+            this.xCount = Math.max(1, total); this.xStart = 0;
+            this._afterWindowChange();
+        },
+        zoomReset() { this._resetWindow(); this.renderAll(); },
+
+        // ---- pan (drag) + brush zoom (⇧+drag) ---------------------------------
         _attachPan(cv) {
             if (cv._panAttached) return;
             cv._panAttached = true;
             cv.addEventListener("mousedown", (e) => this._onPanDown(e, cv));
         },
         _onPanDown(e, cv) {
+            if (e.button !== 0) return;
+            const rect = cv.getBoundingClientRect();
+            const pad = this._padOf(cv), w = cv.clientWidth || cv.width;
+            if (e.shiftKey) {
+                // Brush: select an iter range to zoom into on release.
+                const it = this._iterAtX(e.clientX - rect.left, pad, w);
+                if (it == null) return;
+                e.preventDefault();
+                const p = this._posOf(it);
+                this.brush = { a: p, b: p };
+                this._brushCV = cv;
+                this.hoverRef = null; this.hoverIter = null; this.readHover = null;
+                const move = (ev) => this._onBrushMove(ev);
+                const up = (ev) => {
+                    window.removeEventListener("mousemove", move);
+                    window.removeEventListener("mouseup", up);
+                    this._onBrushUp(ev);
+                };
+                window.addEventListener("mousemove", move);
+                window.addEventListener("mouseup", up);
+                this.renderAll();
+                return;
+            }
             if (!this._pannable()) return;        // nothing to pan — let click through
             e.preventDefault();
             this._dragCV = cv;
             this._dragStartClientX = e.clientX;
             this._dragStartXStart = this.xStart;
             this._dragMoved = false;
-            this.hoverRef = null; this.hoverIdx = null; this.readHover = null;  // drop hover chip while panning
+            this.hoverRef = null; this.hoverIter = null; this.readHover = null;  // drop hover chip while panning
             cv.style.cursor = "grabbing";
             // Track on the window so the drag continues even when the cursor
             // leaves the canvas; remove on mouseup to avoid leaks.
@@ -327,9 +459,8 @@ function traceApp() {
             const cv = this._dragCV;
             const dx = ev.clientX - this._dragStartClientX;
             if (Math.abs(dx) > 4) this._dragMoved = true;   // distinguish drag from click
-            // pixels per visible iter — uniform across charts (the window spans
-            // xCount iters over the canvas width).
-            const ppi = Math.max(1, (cv.clientWidth || 1) / Math.max(1, this.xCount));
+            // pixels per visible iter — the shared slot width for this canvas.
+            const ppi = Math.max(0.5, this._slotW(this._padOf(cv), cv.clientWidth || cv.width));
             const iters = Math.round(dx / ppi);             // drag right → show earlier iters
             const maxStart = this.xScrollMax();
             const ns = Math.max(0, Math.min(this._dragStartXStart - iters, maxStart));
@@ -338,6 +469,35 @@ function traceApp() {
         _onPanUp() {
             this._dragCV = null;
             this._updatePanCursors();
+        },
+        _onBrushMove(ev) {
+            const cv = this._brushCV; if (!cv || !this.brush) return;
+            const rect = cv.getBoundingClientRect();
+            const pad = this._padOf(cv), w = cv.clientWidth || cv.width;
+            const x = Math.max(pad.l, Math.min(w - pad.r, ev.clientX - rect.left));
+            const it = this._iterAtX(x, pad, w);
+            if (it == null) return;
+            const p = this._posOf(it);
+            if (p !== this.brush.b) { this.brush = { a: this.brush.a, b: p }; this.renderAll(); }
+        },
+        _onBrushUp() {
+            const b = this.brush; this.brush = null; this._brushCV = null;
+            this._dragMoved = true;   // swallow the trailing click
+            if (b && b.a !== b.b) this.zoomToRange(b.a, b.b); else this.renderAll();
+        },
+        _drawBrush(ctx, w, h, pad) {
+            const b = this.brush; if (!b) return;
+            const { s, c } = this._win();
+            const lo = Math.max(s, Math.min(b.a, b.b)), hi = Math.min(s + c - 1, Math.max(b.a, b.b));
+            if (hi < lo) return;
+            const sw = this._slotW(pad, w);
+            const x0 = this._xAtPos(lo, pad, w) - sw / 2, x1 = this._xAtPos(hi, pad, w) + sw / 2;
+            const t = this._theme();
+            ctx.fillStyle = "rgba(176,172,160,0.16)";
+            ctx.fillRect(x0, pad.t, x1 - x0, h - pad.t - pad.b);
+            ctx.strokeStyle = t.accent; ctx.lineWidth = 1; ctx.setLineDash([]);
+            ctx.beginPath(); ctx.moveTo(x0, pad.t); ctx.lineTo(x0, h - pad.b);
+            ctx.moveTo(x1, pad.t); ctx.lineTo(x1, h - pad.b); ctx.stroke();
         },
         // Label for the scrollbar: "iters A–B of N" in actual iter numbers.
         xScrollLabel() {
@@ -351,11 +511,11 @@ function traceApp() {
         },
         // Scrollbar thumb: width = window's share of the run, left = its
         // position within the scrollable range. Bound via :style so Alpine
-        // re-renders it reactively on every xStart change.
+        // re-renders it reactively on every xStart/xCount change.
         thumbStyle() {
             const total = this.totalIters();
             if (!total) return { display: "none" };
-            const wPct = (this.xCount / total) * 100;
+            const wPct = (Math.min(this.xCount, total) / total) * 100;
             const max = this.xScrollMax();
             const lPct = max > 0 ? (this.xStart / max) * (100 - wPct) : 0;
             return { width: wPct + "%", left: lPct + "%" };
@@ -395,12 +555,22 @@ function traceApp() {
             const ns = Math.max(0, Math.min(center - Math.floor(this.xCount / 2), max));
             if (ns !== this.xStart) { this.xStart = ns; this.renderAll(); }
         },
-        // Horizontal wheel / trackpad scroll over any chart pans the shared
-        // window too — trackpad horizontal swipe (deltaX) or shift+wheel.
+        // Wheel over any chart: horizontal (trackpad deltaX or ⇧+wheel) pans
+        // the shared window; ctrl/⌘+wheel zooms at the cursor's iter.
         _attachWheel(cv) {
             if (cv._wheelAttached) return;
             cv._wheelAttached = true;
             cv.addEventListener("wheel", (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    if (this.totalIters() <= 1) return;
+                    e.preventDefault();
+                    const rect = cv.getBoundingClientRect();
+                    const pad = this._padOf(cv), w = cv.clientWidth || cv.width;
+                    const it = this._iterAtX(e.clientX - rect.left, pad, w);
+                    const anchor = it != null ? this._posOf(it) + 0.5 : null;
+                    this.zoomBy(e.deltaY < 0 ? 0.8 : 1.25, anchor);
+                    return;
+                }
                 if (!this._pannable()) return;
                 const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
                 if (!dx) return;
@@ -436,10 +606,11 @@ function traceApp() {
             this.selectedIter = it;
             // Pan the X window to include the selected iter so chart clicks
             // on off-screen iters bring them into view.
-            const idx = (this.iters || []).findIndex(x => x.iter === it);
-            if (idx >= 0 && (idx < this._winStart(this.iters.length) || idx >= this._winStart(this.iters.length) + this.xCount)) {
+            const idx = this._posOf(it);
+            const { s, c } = this._win();
+            if (idx >= 0 && (idx < s || idx >= s + c)) {
                 const maxStart = this.xScrollMax();
-                this.xStart = Math.max(0, Math.min(idx - Math.floor(this.xCount / 2), maxStart));
+                this.xStart = Math.max(0, Math.min(idx - Math.floor(c / 2), maxStart));
             }
             this.$nextTick(() => {
                 // The conversation view groups iters into turn cards, so the
@@ -545,18 +716,15 @@ function traceApp() {
             this.expandedCards = { ...this.expandedCards };
         },
 
-        // Draw run-boundary dividers on a per-iter chart. `data` is the series
-        // (each point carries `iter`); we map each run's start_iter to its x.
-        _runMarks(ctx, w, h, pad, data) {
-            if (!this.runBounds || this.runBounds.length < 2 || !data.length) return;
+        // Draw run-boundary dividers on a per-iter chart: each run's
+        // start_iter (a global iter in the combined view) through the shared scale.
+        _runMarks(ctx, w, h, pad) {
+            if (!this.runBounds || this.runBounds.length < 2) return;
             const t = this._theme();
-            const n = data.length;
             ctx.font = "9px " + (getComputedStyle(document.body).fontFamily);
             for (let bi = 1; bi < this.runBounds.length; bi++) {
-                const startIter = this.runBounds[bi].start_iter;
-                const idx = data.findIndex(d => d.iter === startIter);
-                if (idx < 0) continue;
-                const x = this._iterX(idx, n, pad, w);
+                const x = this._xOf(this.runBounds[bi].start_iter, pad, w);
+                if (x == null) continue;
                 ctx.strokeStyle = "rgba(176,172,160,0.22)";
                 ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
                 ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
@@ -607,6 +775,7 @@ function traceApp() {
             c.height = h * dpr;
             const ctx = c.getContext("2d");
             ctx.scale(dpr, dpr);
+            c._ref = ref;
             return { ctx, w, h };
         },
 
@@ -630,27 +799,32 @@ function traceApp() {
                 ctx.fillText(unit, pad.l + 2, 2);
                 ctx.fillStyle = t.dim;
             }
-            // x labels — denser when there are many iters
-            const xs = opts.xs || [];
-            ctx.textAlign = "center"; ctx.textBaseline = "top";
-            if (xs.length) {
-                const plotW = w - pad.l - pad.r;
-                const want = xs.length > 60 ? 7 : (xs.length > 20 ? 5 : 3);
-                const labels = [];
-                for (let k = 0; k < want; k++) {
-                    const idx = Math.round((k / Math.max(1, want - 1)) * (xs.length - 1));
-                    if (!labels.includes(idx)) labels.push(idx);
-                }
-                for (const idx of labels) {
-                    const xx = pad.l + (xs.length === 1 ? plotW / 2 : (idx / (xs.length - 1)) * plotW);
-                    ctx.fillText("iter " + xs[idx], xx, h - pad.b + 4);
-                }
-            }
+            this._drawXLabels(ctx, w, h, pad, 4);
         },
 
-        _iterX(i, n, pad, w) {
-            if (n <= 1) return pad.l + (w - pad.l - pad.r) / 2;
-            return pad.l + (i / (n - 1)) * (w - pad.l - pad.r);
+        // X labels from the shared window: evenly spaced visible iters at
+        // their slot centres, density adapting to the plot width + zoom.
+        _drawXLabels(ctx, w, h, pad, yOff) {
+            const t = this._theme();
+            const { s, c } = this._win();
+            const all = this.iters || [];
+            if (!all.length) return;
+            const sw = this._slotW(pad, w);
+            ctx.fillStyle = t.dim; ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.textAlign = "center"; ctx.textBaseline = "top";
+            const want = Math.max(1, Math.min(c, Math.floor((w - pad.l - pad.r) / 64)));
+            const used = new Set();
+            for (let k = 0; k < want; k++) {
+                const local = want === 1 ? Math.floor((c - 1) / 2) : Math.round((k / (want - 1)) * (c - 1));
+                if (used.has(local)) continue;
+                used.add(local);
+                const it = all[s + local];
+                if (!it) continue;
+                // keep the (centred) label inside the canvas at both edges
+                const half = ctx.measureText("iter " + it.iter).width / 2 + 2;
+                const lx = Math.min(Math.max(pad.l + (local + 0.5) * sw, half), w - half);
+                ctx.fillText("iter " + it.iter, lx, h - pad.b + (yOff == null ? 4 : yOff));
+            }
         },
 
         _empty(ctx, w, h, msg) {
@@ -660,81 +834,87 @@ function traceApp() {
             ctx.fillText(msg, 8, 12);
         },
 
-        // ---- hover (line charts) --------------------------------------
+        // ---- hover (shared crosshair) ----------------------------------
+        // Every canvas reports the iter under the cursor into `hoverIter`;
+        // renderAll draws the crosshair on all charts and the value chip on
+        // the hovered one. Click jumps the conversation to that iter;
+        // double-click zooms in around it.
         attachHovers() {
             if (this._hoverAttached) return;
             this._hoverAttached = true;
-            const cfgs = [
-                { ref: "ctxCanvas", pad: { l: 56, r: 12 }, key: "context",
-                  label: it => `${this.fmtNum(it.actual)} actual · ${this.fmtNum(it.total_est)} est tok${it.drift_ratio ? " · drift ×" + it.drift_ratio : ""}` },
-                { ref: "attrCanvas", pad: { l: 56, r: 12 }, key: "context_attribution",
-                  label: it => `${this.fmtNum(it.total)} request · ${(it.delta >= 0 ? "+" : "") + this.fmtNum(it.delta)} · ${this.attributionLabel(it.growth_source)}` },
-                { ref: "driftCanvas", pad: { l: 56, r: 12 }, key: "drift",
-                  label: it => `${it.drift_pct}% drift` },
-                { ref: "tokCanvas", pad: { l: 56, r: 12 }, key: "tokens",
-                  label: it => `in ${this.fmtNum(it.in)} · out ${this.fmtNum(it.out)} tok` },
-                { ref: "latCanvas", pad: { l: 56, r: 12 }, key: "latency",
-                  label: it => `${this.fmtMs(it.wall_ms)} wall` },
-                { ref: "effCanvas", pad: { l: 56, r: 12 }, key: "efficiency",
-                  label: it => `${this.fmtNum(it.raw_tokens)} raw · ${this.fmtNum(it.injected_tokens)} inj · ${this.fmtNum((it.raw_tokens || 0) - (it.injected_tokens || 0))} saved tok` },
-            ];
-            for (const c of cfgs) {
-                const cv = this.$refs[c.ref]; if (!cv) continue;
-                cv._cfg = c;
+            document.querySelectorAll(".trace-canvas").forEach(cv => {
+                if (cv === this.$refs.readCanvas) return;   // 2D hover below
                 cv.addEventListener("mousemove", (e) => this._onHoverMove(e, cv));
                 cv.addEventListener("mouseleave", () => {
-                    if (this.hoverRef === c.ref) { this.hoverRef = null; this.hoverIdx = null; this.renderAll(); }
+                    if (this.hoverRef === cv._ref) { this.hoverRef = null; this.hoverIter = null; this.renderAll(); }
                 });
                 cv.addEventListener("click", (e) => {
-                    // A drag on the chart pans the shared window (see _onPanDown);
-                    // swallow the trailing click so a pan doesn't also jump the
-                    // conversation view to an arbitrary iter.
+                    // A drag pans / a ⇧+drag brushes; swallow the trailing click
+                    // so it doesn't also jump the conversation view.
                     if (this._dragMoved) { this._dragMoved = false; return; }
-                    const idx = this._hoverIdxAt(e, cv); if (idx == null) return;
-                    const s = this._view(this.series[c.key] || []); if (s[idx]) this.selectIter(s[idx].iter);
+                    const it = this._hoverIterAt(e, cv);
+                    if (it != null) this.selectIter(it);
                 });
-            }
+                cv.addEventListener("dblclick", (e) => {
+                    e.preventDefault();
+                    const it = this._hoverIterAt(e, cv);
+                    this.zoomBy(0.5, it != null ? this._posOf(it) + 0.5 : null);
+                });
+            });
             // Read-state map uses a 2D (row + col) hover instead of the x-only
-            // line-chart hover: the popup shows the path under the cursor and,
-            // when the cursor is on a cell, the iter + read/redundant state.
+            // crosshair: the popup shows the path under the cursor and, when
+            // the cursor is on a cell, the iter + read/redundant state.
             const rc = this.$refs.readCanvas;
             if (rc && !rc._readHoverAttached) {
                 rc._readHoverAttached = true;
                 rc.addEventListener("mousemove", (e) => this._onReadHover(e, rc));
                 rc.addEventListener("mouseleave", () => {
-                    if (this.hoverRef === "readCanvas") { this.hoverRef = null; this.readHover = null; this.renderAll(); }
+                    if (this.hoverRef === "readCanvas") { this.hoverRef = null; this.hoverIter = null; this.readHover = null; this.renderAll(); }
+                });
+                rc.addEventListener("click", (e) => {
+                    if (this._dragMoved) { this._dragMoved = false; return; }
+                    const it = this._hoverIterAt(e, rc);
+                    if (it != null) this.selectIter(it);
+                });
+                rc.addEventListener("dblclick", (e) => {
+                    e.preventDefault();
+                    const it = this._hoverIterAt(e, rc);
+                    this.zoomBy(0.5, it != null ? this._posOf(it) + 0.5 : null);
                 });
             }
-            // Drag-to-pan: every per-iter chart shares one [xStart, xStart+
-            // xCount) window, so a single drag handler per canvas pans them all
-            // together (each slices through _view, all redrawn by renderAll).
+            // Drag-to-pan / ⇧+drag-to-zoom / wheel on every canvas.
             document.querySelectorAll(".trace-canvas").forEach(cv => {
                 this._attachPan(cv);
                 this._attachWheel(cv);
             });
         },
-        _hoverIdxAt(e, cv) {
-            const c = cv._cfg; const rect = cv.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const s = this._view(this.series[c.key] || []); const n = s.length; if (!n) return null;
-            const w = cv.clientWidth || cv.width;
-            const plotL = c.pad.l, plotR = w - c.pad.r;
-            if (x < plotL || x > plotR) return null;
-            const frac = (x - plotL) / Math.max(1, plotR - plotL);
-            return Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+        _hoverIterAt(e, cv) {
+            const rect = cv.getBoundingClientRect();
+            return this._iterAtX(e.clientX - rect.left, this._padOf(cv), cv.clientWidth || cv.width);
         },
         _onHoverMove(e, cv) {
-            if (this._dragCV) return;                  // dragging pans; don't chase hover
-            const idx = this._hoverIdxAt(e, cv); if (idx == null) return;
-            this.hoverRef = cv._cfg.ref; this.hoverIdx = idx; this.renderAll();
+            if (this._dragCV || this.brush) return;    // dragging pans/brushes; don't chase hover
+            const it = this._hoverIterAt(e, cv);
+            if (it == null) {
+                if (this.hoverRef === cv._ref) { this.hoverRef = null; this.hoverIter = null; this.renderAll(); }
+                return;
+            }
+            if (it === this.hoverIter && this.hoverRef === cv._ref) return;
+            this.hoverRef = cv._ref; this.hoverIter = it; this.renderAll();
         },
-        _drawHover(ctx, w, h, pad, n, idx, label) {
-            if (this.hoverRef !== this._curRef) return;
+        // Crosshair at hoverIter on every chart; the chip only on the hovered
+        // one (`_curRef` is set by each renderer). `label` null → line only.
+        _drawHover(ctx, w, h, pad, label) {
+            if (this.hoverIter == null) return;
+            const x = this._xOf(this.hoverIter, pad, w);
+            if (x == null) return;
+            const mine = this.hoverRef === this._curRef;
             const t = this._theme();
-            const x = this._iterX(idx, n, pad, w);
             ctx.strokeStyle = t.accent; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+            ctx.globalAlpha = mine ? 1 : 0.4;
             ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.globalAlpha = 1; ctx.setLineDash([]);
+            if (!mine || !label) return;
             // chip
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             const tw = ctx.measureText(label).width + 10;
@@ -744,6 +924,12 @@ function traceApp() {
             ctx.strokeRect(cx, pad.t + 2, tw, 16);
             ctx.fillStyle = t.text; ctx.textAlign = "left"; ctx.textBaseline = "middle";
             ctx.fillText(label, cx + 5, pad.t + 10);
+        },
+        // Overlays every chart draws last: brush band + crosshair + selection.
+        _overlays(ctx, w, h, pad, label) {
+            this._drawBrush(ctx, w, h, pad);
+            this._drawHover(ctx, w, h, pad, label);
+            this._selectedMark(ctx, w, h, pad);
         },
 
         // ---- renderers -------------------------------------------------
@@ -768,17 +954,19 @@ function traceApp() {
             this._curRef = "attrCanvas";
             const dataAll = this.series.context_attribution || [];
             const data = this._view(dataAll);
+            const pad = { l: 56, r: 12, t: 38, b: 20 };
+            this._notePad("attrCanvas", pad);
             if (!data.length) { this._empty(ctx, w, h, "no request attribution data"); return; }
             const keys = ["system", "user", "assistant", "tool_calls", "tool_results", "files_images", "other", "tool_schemas"];
-            const pad = { l: 56, r: 12, t: 38, b: 20 };
-            const n = data.length;
             const max = Math.max(1, ...dataAll.map(d => d.total || keys.reduce((sum, key) => sum + (d[key] || 0), 0))) * 1.08;
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: data.map(d => d.iter), unit: "tokens" });
-            const slotW = (w - pad.l - pad.r) / Math.max(1, n);
-            const barW = Math.max(1, Math.min(18, slotW * 0.8));
-            data.forEach((point, i) => {
-                const x = this._iterX(i, n, pad, w) - barW / 2;
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "tokens" });
+            const slotW = this._slotW(pad, w);
+            const barW = Math.max(1, Math.min(28, slotW * 0.8));
+            data.forEach((point) => {
+                const cx = this._xOf(point.iter, pad, w);
+                if (cx == null) return;
+                const x = cx - barW / 2;
                 let yBottom = h - pad.b;
                 for (const key of keys) {
                     const value = point[key] || 0;
@@ -798,7 +986,7 @@ function traceApp() {
                     ctx.closePath(); ctx.fill();
                 }
             });
-            this._runMarks(ctx, w, h, pad, data);
+            this._runMarks(ctx, w, h, pad);
             ctx.font = "9px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             let lx = pad.l + 2, ly = 3;
@@ -810,22 +998,21 @@ function traceApp() {
                 ctx.fillStyle = t.dim; ctx.fillText(label, lx + 10, ly);
                 lx += width;
             }
-            if (this.hoverRef === "attrCanvas" && this.hoverIdx != null) {
-                const point = data[this.hoverIdx];
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
-                    this.fmtNum(point.total) + " request · " + (point.delta >= 0 ? "+" : "") + this.fmtNum(point.delta) + " · " + this.attributionLabel(point.growth_source));
-            }
-            this._selectedMark(ctx, w, h, pad, n, data);
+            const hp = this._hoverPoint(data);
+            this._overlays(ctx, w, h, pad, hp
+                ? this.fmtNum(hp.total) + " request · " + (hp.delta >= 0 ? "+" : "") + this.fmtNum(hp.delta) + " · " + this.attributionLabel(hp.growth_source)
+                : "iter " + this.hoverIter + " · no request");
         },
 
         renderContext() {
             const s = this._setupCanvas("ctxCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             const pad = { l: 56, r: 12, t: 14, b: 20 };
+            this._notePad("ctxCanvas", pad);
             ctx.clearRect(0, 0, w, h);
             this._curRef = "ctxCanvas";
             const ctxAll = this.series.context || [];
-            const ctxData = this._view(ctxAll);
+            const ctxData = this._view(ctxAll, true);
             if (!ctxData.length) { this._empty(ctx, w, h, "no context data"); return; }
             // The solid line is the provider's *reported* prompt size
             // (`actual`) — the ground truth, which can never exceed the model's
@@ -844,27 +1031,24 @@ function traceApp() {
             // y-scale is from the FULL series so it stays stable as you pan.
             const maxAll = ctxAll.flatMap(d => [d.actual, d.total_est]);
             const max = Math.max(1, ...maxAll) * 1.08;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: ctxData.map(d => d.iter), unit: "tokens" });
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "tokens" });
 
-            const n = ctxData.length;
             const plotH = h - pad.t - pad.b;
 
             // actual (solid, provider-reported) + total_est (dashed, cl100k)
+            this._clipPlot(ctx, w, h, pad);
             const line = (key, color, dash) => {
                 ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.setLineDash(dash || []);
                 ctx.beginPath();
-                for (let i = 0; i < n; i++) {
-                    const x = this._iterX(i, n, pad, w);
-                    const y = pad.t + plotH - ((ctxData[i][key] || 0) / max) * plotH;
-                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-                }
+                this._pathOf(ctx, ctxData, pad, w, d => pad.t + plotH - ((d[key] || 0) / max) * plotH);
                 ctx.stroke(); ctx.setLineDash([]);
             };
             line("actual", PALETTE.actual, []);
             line("total_est", PALETTE.est, [4, 3]);
+            ctx.restore();
 
-            this._compactionMarks(ctx, w, h, pad, n);
-            this._runMarks(ctx, w, h, pad, ctxData);
+            this._compactionMarks(ctx, w, h, pad);
+            this._runMarks(ctx, w, h, pad);
 
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
@@ -873,74 +1057,73 @@ function traceApp() {
             ctx.fillStyle = PALETTE.est; ctx.fillText("┄ cl100k est", w - pad.r - 80, 4);
 
             // hover + selected
-            if (this.hoverRef === "ctxCanvas" && this.hoverIdx != null) {
-                const it = ctxData[this.hoverIdx];
-                const dr = it.drift_ratio ? (" · drift ×" + it.drift_ratio) : "";
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
-                    this.fmtNum(it.actual) + " actual · " + this.fmtNum(it.total_est) + " est · "
-                    + this.fmtNum(it.real_est) + " real_est" + dr);
-            }
-            this._selectedMark(ctx, w, h, pad, n, ctxData);
+            const hp = this._hoverPoint(ctxData);
+            this._overlays(ctx, w, h, pad, hp
+                ? this.fmtNum(hp.actual) + " actual · " + this.fmtNum(hp.total_est) + " est · "
+                    + this.fmtNum(hp.real_est) + " real_est" + (hp.drift_ratio ? (" · drift ×" + hp.drift_ratio) : "")
+                : "iter " + this.hoverIter);
         },
 
         renderHeatStrip() {
             const s = this._setupCanvas("heatCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
+            this._curRef = "heatCanvas";
             const snap = this.snapshot || {};
             const meta = snap.meta || {};
             const layers = meta.layers || [];
             const labels = meta.labels || {};
             const xsAll = snap.xs || [];
-            // The snapshot is downsampled to `cols` columns server-side, so
-            // xsAll.length ≠ n on long runs. Window by iter number (not
-            // position) so the strip pans in lockstep with the other charts
-            // instead of clamping to its own shorter length and freezing.
-            const [lo, hi] = this._iterBounds();
-            const keep = [];
-            for (let ci = 0; ci < xsAll.length; ci++) {
-                const it = xsAll[ci];
-                if (it != null && it >= lo && it <= hi) keep.push(ci);
-            }
-            const xs = keep.map(ci => xsAll[ci]);
             const gridAll = snap.grid || [];
-            const grid = gridAll.map(row => keep.map(ci => (row || [])[ci] || 0));
-            const driftStrip = keep.map(ci => (snap.drift_strip || [])[ci] || 128);
-            const compCols = (snap.compaction_cols || []).map(ci => keep.indexOf(ci)).filter(ci => ci >= 0);
-            if (!grid.length || !layers.length || !xs.length) { this._empty(ctx, w, h, "no layer data"); return; }
+            const pad = { l: 96, r: 12, t: 6, b: 16 };
+            this._notePad("heatCanvas", pad);
+            if (!gridAll.length || !layers.length || !xsAll.length) { this._empty(ctx, w, h, "no layer data"); return; }
+            // The snapshot is downsampled to `cols` columns server-side (one
+            // per iter up to the 2048 requested, a stride of several iters
+            // beyond that). Each
+            // column spans from its own iter up to the next column's iter
+            // through the SHARED scale, so the strip lines up with the line
+            // charts at every zoom level instead of stretching its own
+            // columns across the width.
+            const { s: ws, c: wc } = this._win();
+            const sw = this._slotW(pad, w);
+            const spans = [];   // {ci, x0, x1} for columns overlapping the window
+            for (let ci = 0; ci < xsAll.length; ci++) {
+                const p0 = this._posOf(xsAll[ci]);
+                if (p0 < 0) continue;
+                const p1 = ci + 1 < xsAll.length ? this._posOf(xsAll[ci + 1]) : p0 + 1;
+                const pEnd = p1 > p0 ? p1 : p0 + 1;
+                if (pEnd <= ws || p0 >= ws + wc) continue;
+                const x0 = this._xAtPos(Math.max(p0, ws), pad, w) - sw / 2;
+                const x1 = this._xAtPos(Math.min(pEnd, ws + wc), pad, w) - sw / 2;
+                spans.push({ ci, x0, x1: Math.max(x1, x0 + 0.6) });
+            }
+            if (!spans.length) { this._empty(ctx, w, h, "no layer data in view"); return; }
 
             const driftH = 14, gap = 3;
-            const pad = { l: 96, r: 12, t: 6, b: 16 };
-            const cols = xs.length;
-            const cellW = (w - pad.l - pad.r) / Math.max(1, cols);
             const rowsH = h - pad.t - pad.b - driftH - gap;
             const rowH = rowsH / layers.length;
 
             // layer heat rows
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textBaseline = "middle";
+            this._clipPlot(ctx, w, h, pad);
             layers.forEach((key, ri) => {
                 const y = pad.t + ri * rowH;
-                ctx.fillStyle = t.dim; ctx.textAlign = "right";
-                ctx.fillText(labels[key] || key, pad.l - 6, y + rowH / 2);
-                const row = grid[ri] || [];
-                for (let ci = 0; ci < cols; ci++) {
-                    const v = row[ci] || 0;
-                    const x = pad.l + ci * cellW;
+                const row = gridAll[ri] || [];
+                for (const sp of spans) {
+                    const v = row[sp.ci] || 0;
                     if (v > 0) {
                         const a = 0.06 + (v / 255) * 0.9;
                         ctx.fillStyle = `rgba(${PALETTE.heat[0]},${PALETTE.heat[1]},${PALETTE.heat[2]},${a})`;
-                        ctx.fillRect(x, y + 0.5, Math.max(0.6, cellW - 0.4), rowH - 1);
+                        ctx.fillRect(sp.x0, y + 0.5, Math.max(0.6, sp.x1 - sp.x0 - 0.4), rowH - 1);
                     }
                 }
             });
             // drift strip
             const dy = pad.t + rowsH + gap;
-            ctx.fillStyle = t.dim; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-            ctx.fillText("drift", pad.l - 6, dy + driftH / 2);
-            for (let ci = 0; ci < cols; ci++) {
-                const v = driftStrip[ci] || 128;
-                const x = pad.l + ci * cellW;
+            for (const sp of spans) {
+                const v = (snap.drift_strip || [])[sp.ci] || 128;
                 let fill;
                 if (v >= 128) {
                     const a = (v - 128) / 128;
@@ -950,36 +1133,41 @@ function traceApp() {
                     fill = `rgba(${PALETTE.driftNeg[0]},${PALETTE.driftNeg[1]},${PALETTE.driftNeg[2]},${a * 0.9})`;
                 }
                 ctx.fillStyle = fill;
-                ctx.fillRect(x, dy, Math.max(0.6, cellW - 0.4), driftH);
+                ctx.fillRect(sp.x0, dy, Math.max(0.6, sp.x1 - sp.x0 - 0.4), driftH);
             }
             // compaction column markers
             ctx.fillStyle = PALETTE.compaction;
-            for (const ci of compCols) {
-                ctx.fillRect(pad.l + ci * cellW + cellW / 2 - 1, pad.t, 2, rowsH + gap + driftH);
+            for (const ci of (snap.compaction_cols || [])) {
+                const sp = spans.find(q => q.ci === ci);
+                if (!sp) continue;
+                ctx.fillRect((sp.x0 + sp.x1) / 2 - 1, pad.t, 2, rowsH + gap + driftH);
             }
+            ctx.restore();
+            // row labels
+            layers.forEach((key, ri) => {
+                ctx.fillStyle = t.dim; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+                ctx.fillText(labels[key] || key, pad.l - 6, pad.t + ri * rowH + rowH / 2);
+            });
+            ctx.fillStyle = t.dim; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+            ctx.fillText("drift", pad.l - 6, dy + driftH / 2);
             // selected-iter column highlight
             if (this.selectedIter !== null) {
-                const ci = xs.indexOf(this.selectedIter);
-                if (ci >= 0) {
+                const x = this._xOf(this.selectedIter, pad, w);
+                if (x != null) {
                     ctx.strokeStyle = t.accent; ctx.lineWidth = 1;
-                    ctx.strokeRect(pad.l + ci * cellW, pad.t - 1, cellW, rowsH + gap + driftH);
+                    ctx.strokeRect(x - sw / 2, pad.t - 1, sw, rowsH + gap + driftH);
                 }
             }
-            // x labels
-            ctx.fillStyle = t.dim; ctx.textAlign = "center"; ctx.textBaseline = "top";
-            const want = cols > 60 ? 7 : (cols > 20 ? 5 : 3);
-            for (let k = 0; k < want; k++) {
-                const ci = Math.round((k / Math.max(1, want - 1)) * (cols - 1));
-                ctx.fillText("iter " + xs[ci], pad.l + ci * cellW + cellW / 2, h - pad.b + 2);
-            }
+            this._drawXLabels(ctx, w, h, pad, 2);
+            this._drawBrush(ctx, w, h, pad);
+            this._drawHover(ctx, w, h, pad, this.hoverIter != null ? "iter " + this.hoverIter : null);
         },
 
-        _selectedMark(ctx, w, h, pad, n, data) {
+        _selectedMark(ctx, w, h, pad) {
             if (this.selectedIter === null) return;
-            const idx = data.findIndex(d => d.iter === this.selectedIter);
-            if (idx < 0) return;
+            const x = this._xOf(this.selectedIter, pad, w);
+            if (x == null) return;
             const t = this._theme();
-            const x = this._iterX(idx, n, pad, w);
             ctx.strokeStyle = t.accent; ctx.setLineDash([2, 2]); ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
             ctx.setLineDash([]);
@@ -989,12 +1177,12 @@ function traceApp() {
             const s = this._setupCanvas("driftCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             const pad = { l: 56, r: 12, t: 14, b: 20 };
+            this._notePad("driftCanvas", pad);
             ctx.clearRect(0, 0, w, h);
             this._curRef = "driftCanvas";
             const driftAll = this.series.drift || [];
-            const drift = this._view(driftAll);
+            const drift = this._view(driftAll, true);
             if (!drift.length) { this._empty(ctx, w, h, "no drift data"); return; }
-            const n = drift.length;
             const plotH = h - pad.t - pad.b;
 
             // raw values (window); clamp p99 from the FULL series so the
@@ -1041,28 +1229,22 @@ function traceApp() {
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             ctx.fillText(useLog ? "drift % (signed log)" : "drift %", pad.l + 2, 2);
             // x labels
-            ctx.textAlign = "center"; ctx.textBaseline = "top";
-            const want = n > 60 ? 7 : (n > 20 ? 5 : 3);
-            for (let k = 0; k < want; k++) {
-                const idx = Math.round((k / Math.max(1, want - 1)) * (n - 1));
-                ctx.fillText("iter " + drift[idx].iter, this._iterX(idx, n, pad, w), h - pad.b + 4);
-            }
+            this._drawXLabels(ctx, w, h, pad, 4);
 
             // drift line (with off-chart caps when linear & clamped)
+            this._clipPlot(ctx, w, h, pad);
             ctx.strokeStyle = PALETTE.drift; ctx.lineWidth = 1.8;
             ctx.beginPath();
-            for (let i = 0; i < n; i++) {
-                const x = this._iterX(i, n, pad, w);
-                const y = toY(raw[i]);
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            }
+            this._pathOf(ctx, drift, pad, w, d => toY(d.drift_pct));
             ctx.stroke();
+            ctx.restore();
             // cap triangles for clamped values
             if (!useLog) {
                 ctx.fillStyle = PALETTE.drift;
-                for (let i = 0; i < n; i++) {
+                for (let i = 0; i < drift.length; i++) {
                     if (Math.abs(raw[i]) > CLAMP) {
-                        const x = this._iterX(i, n, pad, w);
+                        const x = this._xOf(drift[i].iter, pad, w);
+                        if (x == null) continue;
                         const top = raw[i] > 0;
                         const yy = top ? pad.t + 3 : h - pad.b - 3;
                         ctx.beginPath();
@@ -1074,7 +1256,7 @@ function traceApp() {
                 }
             }
 
-            this._runMarks(ctx, w, h, pad, drift);
+            this._runMarks(ctx, w, h, pad);
 
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
@@ -1085,25 +1267,17 @@ function traceApp() {
             ctx.fillStyle = t.dim; ctx.fillText("±15% warn", pad.l + 12, h - pad.b - 16);
 
             // selected + hover
-            if (this.hoverRef === "driftCanvas" && this.hoverIdx != null) {
-                const it = drift[this.hoverIdx];
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx, it.drift_pct + "% drift");
-            }
-            this._selectedMark(ctx, w, h, pad, n, drift);
+            const hp = this._hoverPoint(drift);
+            this._overlays(ctx, w, h, pad, hp ? hp.drift_pct + "% drift" : "iter " + this.hoverIter);
         },
 
-        _compactionMarks(ctx, w, h, pad, n) {
+        _compactionMarks(ctx, w, h, pad) {
             const comps = this.series.compaction_timeline || [];
-            if (!comps.length || !n) return;
-            const all = this.series.context || [];
-            const start = this._winStart(all.length);
+            if (!comps.length) return;
             ctx.fillStyle = PALETTE.compaction;
             for (const c of comps) {
-                const idx = all.findIndex(d => d.iter === c.iter);
-                if (idx < 0) continue;
-                const local = idx - start;   // window-local index
-                if (local < 0 || local >= n) continue;
-                const x = this._iterX(local, n, pad, w);
+                const x = this._xOf(c.iter, pad, w);
+                if (x == null) continue;
                 ctx.fillRect(x - 1, pad.t, 2, h - pad.t - pad.b);
             }
         },
@@ -1112,10 +1286,12 @@ function traceApp() {
             const s = this._setupCanvas("readCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
+            this._curRef = "readCanvas";
             const itersAll = this.iters || [];
-            const start = this._winStart(itersAll.length);
             const iters = this._view(itersAll);
             const n = iters.length;
+            const pad = { l: 12, r: 12, t: 10, b: 18 };
+            this._notePad("readCanvas", pad);
             // Only genuine read tools, keyed by tool + path (a path can be read
             // by more than one tool). Writes carry paths too — exclude them.
             const tools = (this.tools || []).filter(t => READ_TOOLS.has(t.name) && t.path);
@@ -1129,9 +1305,8 @@ function traceApp() {
             // No Y-axis filename labels: the concern is *duplicate* reads (red
             // cells), which the grid makes visible without per-row text. The
             // full path + read/redundant state pops up on hover (see _onReadHover).
-            const pad = { l: 12, r: 12, t: 10, b: 18 };
             const plotH = h - pad.t - pad.b;
-            const cellW = (w - pad.l - pad.r) / Math.max(1, n);
+            const cellW = this._slotW(pad, w);
             // cap rows to what fits; floor rowH at 6px; note overflow
             let rowH = Math.min(16, plotH / Math.max(1, rows.length));
             rowH = Math.max(6, rowH);
@@ -1147,7 +1322,7 @@ function traceApp() {
             }
             // publish geometry for the hover handler (row/col hit testing)
             const cv = this.$refs.readCanvas;
-            if (cv) cv._geom = { pad, cellW, rowH, n, rows: shownRows, iters, byRow, redundant, w, h };
+            if (cv) cv._geom = { pad, rowH, rows: shownRows, byRow, redundant, w, h };
 
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textBaseline = "middle";
@@ -1158,7 +1333,9 @@ function traceApp() {
                 for (let i = 0; i < n; i++) {
                     const it = iters[i].iter;
                     if (cells[it] !== undefined) {
-                        const x = pad.l + i * cellW;
+                        const cx = this._xOf(it, pad, w);
+                        if (cx == null) continue;
+                        const x = cx - cellW / 2;
                         const isRed = redundant.has(it + "|" + r.path);
                         ctx.fillStyle = isRed ? PALETTE.redundant : PALETTE.read;
                         ctx.globalAlpha = isRed ? 0.85 : 0.6;
@@ -1172,13 +1349,12 @@ function traceApp() {
                 ctx.fillText("+" + overflow + " more paths (hover the grid to identify a row)", w - pad.r - 2, 2);
             }
             // x labels
-            ctx.fillStyle = t.dim; ctx.textAlign = "center"; ctx.textBaseline = "top";
-            const want = n > 60 ? 7 : (n > 20 ? 5 : 3);
-            for (let k = 0; k < want; k++) {
-                const idx = Math.round((k / Math.max(1, want - 1)) * (n - 1));
-                ctx.fillText("iter " + iters[idx].iter, pad.l + idx * cellW + cellW / 2, h - pad.b + 2);
-            }
-            this._runMarks(ctx, w, h, pad, iters);
+            this._drawXLabels(ctx, w, h, pad, 2);
+            this._runMarks(ctx, w, h, pad);
+            this._drawBrush(ctx, w, h, pad);
+            // crosshair from the other charts (the read map's own hover is 2D)
+            if (this.hoverRef !== "readCanvas") this._drawHover(ctx, w, h, pad, null);
+            this._selectedMark(ctx, w, h, pad);
             // legend
             ctx.textAlign = "left"; ctx.textBaseline = "middle";
             ctx.fillStyle = PALETTE.read; ctx.globalAlpha = 0.6; ctx.fillRect(8, 8, 9, 9); ctx.globalAlpha = 1;
@@ -1203,28 +1379,29 @@ function traceApp() {
         },
 
         _onReadHover(e, cv) {
-            if (this._dragCV) return;                  // dragging pans; don't chase hover
+            if (this._dragCV || this.brush) return;    // dragging pans/brushes; don't chase hover
             const g = cv._geom; if (!g) return;
             const rect = cv.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
             const plotR = g.w - g.pad.r, plotB = g.h - g.pad.b;
             if (y < g.pad.t || y > plotB || x < g.pad.l || x > plotR) {
-                if (this.hoverRef === "readCanvas") { this.readHover = null; this.hoverRef = null; this.renderAll(); }
+                if (this.hoverRef === "readCanvas") { this.readHover = null; this.hoverRef = null; this.hoverIter = null; this.renderAll(); }
                 return;
             }
-            const col = Math.max(0, Math.min(g.n - 1, Math.floor((x - g.pad.l) / Math.max(0.6, g.cellW))));
+            const it = this._iterAtX(x, g.pad, g.w);
             const row = Math.floor((y - g.pad.t) / g.rowH);
             if (row < 0 || row >= g.rows.length) {
-                if (this.hoverRef === "readCanvas") { this.readHover = null; this.hoverRef = null; this.renderAll(); }
+                // Below the rows: keep the shared crosshair, drop the path chip.
+                this.hoverRef = "readCanvas"; this.hoverIter = it; this.readHover = null; this.renderAll();
                 return;
             }
             const r = g.rows[row];
-            const it = g.iters[col] ? g.iters[col].iter : null;
             const isRed = it != null && g.redundant.has(it + "|" + r.path);
             const cell = it != null ? (g.byRow[r.name + "|" + r.path] || {})[it] : undefined;
             let label = r.name + " " + r.path;
             if (it != null) label += " · iter " + it + (isRed ? " · redundant re-read" : (cell ? " · read" : ""));
             this.hoverRef = "readCanvas";
+            this.hoverIter = it;
             this.readHover = { x, y, label };
             this.renderAll();
         },
@@ -1233,21 +1410,25 @@ function traceApp() {
             const s = this._setupCanvas("subCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
+            this._curRef = "subCanvas";
             const saAll = this.series.subagent_timeline || [];
             const sa = this._view(saAll);
             const n = sa.length;
+            const pad = { l: 56, r: 12, t: 14, b: 18 };
+            this._notePad("subCanvas", pad);
             const anyActive = saAll.some(d => d.active > 0 || d.stuck || d.stall);
             if (!n || !anyActive) { this._empty(ctx, w, h, "no subagents spawned this run"); return; }
-            const pad = { l: 56, r: 12, t: 14, b: 18 };
             const maxActive = Math.max(1, ...saAll.map(d => d.active));
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max: maxActive }, { xs: sa.map(d => d.iter), unit: "active" });
+            this._drawAxes(ctx, w, h, pad, { min: 0, max: maxActive }, { unit: "active" });
             ctx.fillStyle = PALETTE.subBar;
-            const barW = Math.max(2, (w - pad.l - pad.r) / n - 2);
+            const barW = Math.max(1.5, Math.min(28, this._slotW(pad, w) - 2));
             for (let i = 0; i < n; i++) {
                 const d = sa[i];
                 if (d.active <= 0) continue;
-                const x = this._iterX(i, n, pad, w) - barW / 2;
+                const cx = this._xOf(d.iter, pad, w);
+                if (cx == null) continue;
+                const x = cx - barW / 2;
                 const bh = (d.active / maxActive) * plotH;
                 ctx.fillStyle = PALETTE.subBar;
                 ctx.fillRect(x, pad.t + plotH - bh, barW, bh);
@@ -1261,24 +1442,30 @@ function traceApp() {
                     ctx.fillRect(x, pad.t + plotH - bh - (d.stuck ? 6 : 3), barW, 3);
                 }
             }
-            this._runMarks(ctx, w, h, pad, sa);
+            this._runMarks(ctx, w, h, pad);
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             ctx.fillStyle = PALETTE.subBar; ctx.fillText("● active", w - pad.r - 130, 2);
             ctx.fillStyle = PALETTE.stuck; ctx.fillText("■ stuck", w - pad.r - 70, 2);
             ctx.fillStyle = PALETTE.stall; ctx.fillText("■ stall", w - pad.r - 24, 2);
+            const hp = this._hoverPoint(sa);
+            this._overlays(ctx, w, h, pad, hp
+                ? hp.active + " active" + (hp.stuck ? " · " + hp.stuck + " stuck" : "") + (hp.stall ? " · " + hp.stall + " stall" : "")
+                : "iter " + this.hoverIter);
         },
 
         renderMem() {
             const s = this._setupCanvas("memCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
+            this._curRef = "memCanvas";
             const memAll = this.series.memory_series || [];
-            const mem = this._view(memAll);
+            const mem = this._view(memAll, true);
             const n = mem.length;
-            if (!n) { this._empty(ctx, w, h, "no memory data"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
+            this._notePad("memCanvas", pad);
+            if (!n) { this._empty(ctx, w, h, "no memory data"); return; }
             const counts = mem.map(d => Math.max(d.task_memory_count, d.scratchpad_count));
             // include by_status stack peaks in the y max so the stack doesn't overflow;
             // status keys from the FULL run so the legend lists every status seen.
@@ -1286,9 +1473,11 @@ function traceApp() {
             const stackPeaks = memAll.map(d => statusKeys.reduce((a, k) => a + ((d.by_status || {})[k] || 0), 0));
             const max = Math.max(1, ...counts, ...stackPeaks) * 1.1;
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: mem.map(d => d.iter), unit: "count" });
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "count" });
 
             // stacked by_status area (faint, behind the count lines)
+            this._clipPlot(ctx, w, h, pad);
+            const xs = mem.map(d => this._xOf(d.iter, pad, w, true));
             const stackTop = new Array(n).fill(0);
             for (const k of statusKeys) {
                 const vals = mem.map(d => (d.by_status || {})[k] || 0);
@@ -1296,14 +1485,12 @@ function traceApp() {
                 ctx.fillStyle = col; ctx.globalAlpha = 0.22;
                 ctx.beginPath();
                 for (let i = 0; i < n; i++) {
-                    const x = this._iterX(i, n, pad, w);
                     const y = pad.t + plotH - ((stackTop[i] + vals[i]) / max) * plotH;
-                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    if (i === 0) ctx.moveTo(xs[i], y); else ctx.lineTo(xs[i], y);
                 }
                 for (let i = n - 1; i >= 0; i--) {
-                    const x = this._iterX(i, n, pad, w);
                     const y = pad.t + plotH - (stackTop[i] / max) * plotH;
-                    ctx.lineTo(x, y);
+                    ctx.lineTo(xs[i], y);
                 }
                 ctx.closePath(); ctx.fill();
                 for (let i = 0; i < n; i++) stackTop[i] += vals[i];
@@ -1314,17 +1501,14 @@ function traceApp() {
             const line = (key, color, dash) => {
                 ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.setLineDash(dash || []);
                 ctx.beginPath();
-                for (let i = 0; i < n; i++) {
-                    const x = this._iterX(i, n, pad, w);
-                    const y = pad.t + plotH - (mem[i][key] / max) * plotH;
-                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-                }
+                this._pathOf(ctx, mem, pad, w, d => pad.t + plotH - ((d[key] || 0) / max) * plotH);
                 ctx.stroke(); ctx.setLineDash([]);
             };
             line("task_memory_count", PALETTE.taskMem, []);
             line("scratchpad_count", PALETTE.scratchpad, [4, 3]);
+            ctx.restore();
 
-            this._runMarks(ctx, w, h, pad, mem);
+            this._runMarks(ctx, w, h, pad);
 
             // legend (counts + status)
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
@@ -1340,6 +1524,10 @@ function traceApp() {
                 ctx.fillStyle = t.dim; ctx.fillText(k, sx + 11, sy - 1);
                 sx += 11 + ctx.measureText(k).width + 12;
             }
+            const hp = this._hoverPoint(mem);
+            this._overlays(ctx, w, h, pad, hp
+                ? hp.task_memory_count + " task_memory · " + hp.scratchpad_count + " scratchpad"
+                : "iter " + this.hoverIter);
         },
 
         _statusKeys(mem) {
@@ -1355,28 +1543,27 @@ function traceApp() {
             ctx.clearRect(0, 0, w, h);
             this._curRef = "tokCanvas";
             const tkAll = this.series.tokens || [];
-            const tk = this._view(tkAll);
+            const tk = this._view(tkAll, true);
             const n = tk.length;
-            if (!n) { this._empty(ctx, w, h, "no token data"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 20 };
+            this._notePad("tokCanvas", pad);
+            if (!n) { this._empty(ctx, w, h, "no token data"); return; }
             const max = Math.max(1, ...tkAll.map(d => Math.max(d.in, d.out, d.cached, d.reasoning))) * 1.1;
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: tk.map(d => d.iter), unit: "tokens" });
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "tokens" });
+            this._clipPlot(ctx, w, h, pad);
             const line = (key, color) => {
                 ctx.strokeStyle = color; ctx.lineWidth = 1.5;
                 ctx.beginPath();
-                for (let i = 0; i < n; i++) {
-                    const x = this._iterX(i, n, pad, w);
-                    const y = pad.t + plotH - ((tk[i][key] || 0) / max) * plotH;
-                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-                }
+                this._pathOf(ctx, tk, pad, w, d => pad.t + plotH - ((d[key] || 0) / max) * plotH);
                 ctx.stroke();
             };
             line("in", PALETTE.tokIn);
             line("out", PALETTE.tokOut);
             line("cached", PALETTE.tokCached);
             line("reasoning", PALETTE.tokReasoning);
-            this._runMarks(ctx, w, h, pad, tk);
+            ctx.restore();
+            this._runMarks(ctx, w, h, pad);
             // stacked vertical legend (4 entries × 32px collided)
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
@@ -1385,10 +1572,10 @@ function traceApp() {
                 const y = 2 + i * 12;
                 ctx.fillStyle = c; ctx.fillText("● " + k, w - pad.r - 70, y);
             });
-            if (this.hoverRef === "tokCanvas" && this.hoverIdx != null) {
-                const it = tk[this.hoverIdx];
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx, "in " + this.fmtNum(it.in) + " / out " + this.fmtNum(it.out));
-            }
+            const hp = this._hoverPoint(tk);
+            this._overlays(ctx, w, h, pad, hp
+                ? "in " + this.fmtNum(hp.in) + " · out " + this.fmtNum(hp.out) + " · cached " + this.fmtNum(hp.cached) + " · reasoning " + this.fmtNum(hp.reasoning)
+                : "iter " + this.hoverIter);
         },
 
         // Tool-output efficiency: raw tool tokens (amber) vs injected tokens
@@ -1420,42 +1607,66 @@ function traceApp() {
             ctx.clearRect(0, 0, w, h);
             this._curRef = "effCanvas";
             const effAll = this.series.efficiency || [];
-            const eff = this._view(effAll);
+            // Sparse: only iters that made tool calls. Positioned by iter
+            // through the shared scale (never stretched across the width).
+            const eff = this._view(effAll, true);
             const n = eff.length;
-            if (!n) { this._empty(ctx, w, h, "no tool-output efficiency data"); return; }
             const pad = { l: 56, r: 12, t: 16, b: 20 };
+            this._notePad("effCanvas", pad);
+            if (!n) { this._empty(ctx, w, h, "no tool-output efficiency data in view"); return; }
             const max = Math.max(1, ...effAll.map(d => Math.max(d.raw_tokens || 0, d.injected_tokens || 0))) * 1.1;
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: eff.map(d => d.iter), unit: "tokens" });
-            const x = i => this._iterX(i, n, pad, w);
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "tokens" });
             const y = v => pad.t + plotH - ((v || 0) / max) * plotH;
+            const xs = eff.map(d => this._xOf(d.iter, pad, w, true));
+            this._clipPlot(ctx, w, h, pad);
+            // saved band: between raw (top) and injected (bottom) — tokens kept
+            // out of context by storing raw externally + observing.
+            ctx.fillStyle = "rgba(224,160,64,0.18)";
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) ctx.lineTo(xs[i], y(eff[i].raw_tokens));
+            for (let i = n - 1; i >= 0; i--) ctx.lineTo(xs[i], y(eff[i].injected_tokens));
+            ctx.closePath(); ctx.fill();
             // injected tokens — filled area (what actually entered context)
             ctx.fillStyle = "rgba(126,201,107,0.32)";
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) ctx.lineTo(xs[i], y(eff[i].injected_tokens));
+            ctx.lineTo(xs[n - 1], pad.t + plotH); ctx.lineTo(xs[0], pad.t + plotH);
+            ctx.closePath(); ctx.fill();
             ctx.strokeStyle = PALETTE.tokOut; ctx.lineWidth = 1.5;
             ctx.beginPath();
-            for (let i = 0; i < n; i++) { ctx.lineTo(x(i), y(eff[i].injected_tokens)); }
-            ctx.lineTo(x(n - 1), pad.t + plotH); ctx.lineTo(x(0), pad.t + plotH);
-            ctx.closePath(); ctx.fill();
-            ctx.beginPath();
-            for (let i = 0; i < n; i++) { const px = x(i); const py = y(eff[i].injected_tokens); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+            this._pathOf(ctx, eff, pad, w, d => y(d.injected_tokens));
             ctx.stroke();
             // raw tokens — line above (what would have entered without observing)
             ctx.strokeStyle = PALETTE.actual; ctx.lineWidth = 1.6; ctx.setLineDash([5, 3]);
             ctx.beginPath();
-            for (let i = 0; i < n; i++) { const px = x(i); const py = y(eff[i].raw_tokens); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+            this._pathOf(ctx, eff, pad, w, d => y(d.raw_tokens));
             ctx.stroke(); ctx.setLineDash([]);
-            this._runMarks(ctx, w, h, pad, eff);
+            // point markers so isolated tool-call iters are visible when zoomed
+            const sw = this._slotW(pad, w);
+            if (sw >= 6) {
+                for (let i = 0; i < n; i++) {
+                    ctx.fillStyle = PALETTE.actual; ctx.beginPath(); ctx.arc(xs[i], y(eff[i].raw_tokens), 2.2, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = PALETTE.tokOut; ctx.beginPath(); ctx.arc(xs[i], y(eff[i].injected_tokens), 2.2, 0, Math.PI * 2); ctx.fill();
+                }
+            }
+            ctx.restore();
+            this._runMarks(ctx, w, h, pad);
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.actual; ctx.fillText("┄ raw (would-be)", w - pad.r - 150, 2);
-            ctx.fillStyle = PALETTE.tokOut; ctx.fillText("● injected (kept)", w - pad.r - 70, 2);
-            if (this.hoverRef === "effCanvas" && this.hoverIdx != null) {
-                const it = eff[this.hoverIdx];
-                const saved = (it.raw_tokens || 0) - (it.injected_tokens || 0);
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
-                    this.fmtNum(it.raw_tokens) + " raw · " + this.fmtNum(it.injected_tokens) + " inj · " + this.fmtNum(saved) + " saved");
-            }
+            // right-aligned legend, measured so the two entries never overlap
+            ctx.textAlign = "right";
+            ctx.fillStyle = PALETTE.tokOut; ctx.fillText("● injected (kept)", w - pad.r - 2, 2);
+            const injW = ctx.measureText("● injected (kept)").width;
+            ctx.fillStyle = PALETTE.actual; ctx.fillText("┄ raw (would-be)", w - pad.r - 2 - injW - 12, 2);
+            ctx.textAlign = "left";
+            const hp = this._hoverPoint(eff);
+            this._overlays(ctx, w, h, pad, hp
+                ? this.fmtNum(hp.raw_tokens) + " raw · " + this.fmtNum(hp.injected_tokens) + " inj · "
+                    + this.fmtNum((hp.raw_tokens || 0) - (hp.injected_tokens || 0)) + " saved · "
+                    + hp.tool_calls + " call" + (hp.tool_calls === 1 ? "" : "s") + (hp.omitted ? " · " + hp.omitted + " observed" : "")
+                : "iter " + this.hoverIter + " · no tool output");
         },
 
         renderLatency() {
@@ -1466,54 +1677,72 @@ function traceApp() {
             const latAll = this.series.latency || [];
             const lat = this._view(latAll);
             const n = lat.length;
-            if (!n) { this._empty(ctx, w, h, "no latency data"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
+            this._notePad("latCanvas", pad);
+            if (!n) { this._empty(ctx, w, h, "no latency data"); return; }
             const max = Math.max(1, ...latAll.map(d => d.wall_ms)) * 1.1;
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: lat.map(d => d.iter), unit: "wall ms" });
-            const barW = Math.max(2, (w - pad.l - pad.r) / n - 1);
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "wall ms" });
+            const barW = Math.max(1.5, Math.min(28, this._slotW(pad, w) - 1));
             for (let i = 0; i < n; i++) {
-                const x = this._iterX(i, n, pad, w) - barW / 2;
+                const cx = this._xOf(lat[i].iter, pad, w);
+                if (cx == null) continue;
+                const x = cx - barW / 2;
                 const bh = (lat[i].wall_ms / max) * plotH;
                 ctx.fillStyle = (this.selectedIter === lat[i].iter) ? PALETTE.actual : "rgba(176,172,160,0.6)";
                 ctx.fillRect(x, pad.t + plotH - bh, barW, bh);
             }
-            this._runMarks(ctx, w, h, pad, lat);
-            if (this.hoverRef === "latCanvas" && this.hoverIdx != null) {
-                const it = lat[this.hoverIdx];
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx, this.fmtMs(it.wall_ms) + " wall");
-            }
+            this._runMarks(ctx, w, h, pad);
+            const hp = this._hoverPoint(lat);
+            this._overlays(ctx, w, h, pad, hp ? this.fmtMs(hp.wall_ms) + " wall" : "iter " + this.hoverIter);
         },
 
         renderTool() {
             const s = this._setupCanvas("toolCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
+            this._curRef = "toolCanvas";
             const tsAll = this.selectedToolSeries();
+            // Sparse (only iters where this tool ran) and possibly several
+            // calls per iter: bars sit in their iter's slot, sub-divided when
+            // an iter has more than one call.
             const ts = this._view(tsAll);
-            if (!ts.length) { this._empty(ctx, w, h, this.selectedTool ? "no calls" : "select a tool"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
+            this._notePad("toolCanvas", pad);
+            if (!ts.length) { this._empty(ctx, w, h, this.selectedTool ? (tsAll.length ? "no calls in view" : "no calls") : "select a tool"); return; }
             const max = Math.max(1, ...tsAll.map(d => d.latency_ms)) * 1.1;
-            const n = ts.length;
             const plotH = h - pad.t - pad.b;
-            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: ts.map(d => d.iter), unit: "ms" });
-            const barW = Math.max(2, (w - pad.l - pad.r) / n - 2);
-            for (let i = 0; i < n; i++) {
-                const x = this._iterX(i, n, pad, w) - barW / 2;
-                const bh = (ts[i].latency_ms / max) * plotH;
-                ctx.fillStyle = ts[i].ok ? PALETTE.ok : PALETTE.err;
-                ctx.fillRect(x, pad.t + plotH - bh, barW, Math.max(1, bh));
-                if (ts[i].cache_hit) {
-                    ctx.fillStyle = PALETTE.cache;
-                    ctx.fillRect(x, pad.t + plotH - bh - 2, barW, 2);
-                }
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { unit: "ms" });
+            const slotW = Math.max(1.5, Math.min(28, this._slotW(pad, w) - 2));
+            const byIter = new Map();
+            for (const d of ts) { if (!byIter.has(d.iter)) byIter.set(d.iter, []); byIter.get(d.iter).push(d); }
+            for (const [iter, calls] of byIter) {
+                const cx = this._xOf(iter, pad, w);
+                if (cx == null) continue;
+                const m = calls.length;
+                const bw = Math.max(1, (slotW - (m - 1)) / m);
+                calls.forEach((d, k) => {
+                    const x = cx - slotW / 2 + k * (bw + 1);
+                    const bh = (d.latency_ms / max) * plotH;
+                    ctx.fillStyle = d.ok ? PALETTE.ok : PALETTE.err;
+                    ctx.fillRect(x, pad.t + plotH - bh, bw, Math.max(1, bh));
+                    if (d.cache_hit) {
+                        ctx.fillStyle = PALETTE.cache;
+                        ctx.fillRect(x, pad.t + plotH - bh - 2, bw, 2);
+                    }
+                });
             }
+            this._runMarks(ctx, w, h, pad);
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             ctx.fillStyle = PALETTE.ok; ctx.fillText("● ok", w - pad.r - 96, 2);
             ctx.fillStyle = PALETTE.err; ctx.fillText("● error", w - pad.r - 60, 2);
             ctx.fillStyle = PALETTE.cache; ctx.fillText("▬ cache hit", w - pad.r - 24, 2);
+            const calls = this.hoverIter != null ? ts.filter(d => d.iter === this.hoverIter) : [];
+            this._overlays(ctx, w, h, pad, calls.length
+                ? calls.map(d => this.fmtMs(d.latency_ms) + (d.ok ? "" : " ✗") + (d.cache_hit ? " (cache)" : "")).join(" · ")
+                : "iter " + this.hoverIter + " · no calls");
         },
     };
 }

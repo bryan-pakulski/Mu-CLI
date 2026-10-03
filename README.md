@@ -34,6 +34,13 @@ Run `mucli` to start. You'll get a session picker — choose `[+ New Session]` (
 explain how authentication works in this codebase
 ```
 
+## Neovim integration
+
+Mucli's [Neovim plugin](integrations/nvim/README.md) adds workspace-aware code
+investigation and chat, LSP/quickfix source navigation, and diagnostics-driven
+edits reviewed in a diff. Requires Neovim 0.10+, Python 3.10+, and ripgrep; no
+GUI server is needed.
+
 ## Mobile app
 
 Mucli has a mobile sister app to interact with the --gui sse session. Can be built under `mobile/android` using:

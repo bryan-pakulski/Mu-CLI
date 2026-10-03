@@ -93,6 +93,9 @@ class ContainerRef:
     proxy_port: int = 3128
     proxy_image: str = ""
     egress_network_name: str = ""
+    # IPv4 gateway of the --internal worker bridge; the address at which the
+    # host supervisor is reachable from inside the worker (see network.py).
+    host_gateway: str = ""
     session_volume: str = ""  # first attached session path (compatibility)
     container_volume: str = "/root/.mucli"
     worker_port: int = DEFAULT_WORKER_PORT

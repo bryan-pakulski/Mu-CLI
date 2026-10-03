@@ -29,6 +29,31 @@ from typing import Any, Dict, Optional, Tuple
 from mu.session.result_store import _DIAGNOSTIC_RE, _NOISE_RE
 
 
+# Tools whose output the model asked for *by reference* — recalling a stored
+# result, slicing it, or flushing the collation buffer. Observing these again
+# would hand the model another excerpt + another stored_ref for content it just
+# retrieved (a retrieval loop), so they are never force-stored for observation.
+NEVER_OBSERVE_TOOLS = frozenset(
+    {
+        "recall",
+        "result_range",
+        "result_head",
+        "result_tail",
+        "result_search",
+        "result_diagnostics",
+        "result_json_path",
+        "compare_results",
+        "flush",
+    }
+)
+
+
+def observation_eligible(tool_name: str) -> bool:
+    """True when an over-budget result from ``tool_name`` may be stored +
+    observed (spec #1/#11). Retrieval tools are exempt (see above)."""
+    return tool_name not in NEVER_OBSERVE_TOOLS
+
+
 def resolve_inline_budget(tool_name: str, is_error: bool, variables: Any) -> int:
     """Per-tool inline token budget (spec #10). Failures get a larger budget."""
     try:

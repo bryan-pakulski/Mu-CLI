@@ -36,6 +36,7 @@ import re
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
+from mu.session.fileowner import preserve_owner
 
 
 logger = logging.getLogger("mucli")
@@ -233,6 +234,9 @@ class TraceEmitter:
             with _prune_lock:
                 os.makedirs(os.path.dirname(self.path), exist_ok=True)
                 self._fh = open(self.path, "a", encoding="utf-8")
+                # Container workers run as root over a bind-mounted trace dir;
+                # hand the file back to the host user so it can be read/pruned.
+                preserve_owner(self.path)
                 _open_trace_paths.add(os.path.abspath(self.path))
 
     def emit(self, record: Dict[str, Any]) -> None:

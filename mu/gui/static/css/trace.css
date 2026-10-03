@@ -312,6 +312,34 @@ html[data-theme="light"] .trace-canvas--heat {
 }
 .trace-xscroll-thumb:hover { opacity: 1; }
 .trace-xscroll-thumb:active { cursor: grabbing; }
+.trace-zoom {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: 0 0 auto;
+}
+.trace-zoom-btn {
+    min-width: 20px;
+    height: 18px;
+    padding: 0 5px;
+    font: inherit;
+    font-size: 11px;
+    line-height: 16px;
+    color: var(--text-soft);
+    background: transparent;
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    cursor: pointer;
+}
+.trace-zoom-btn--word { font-size: 10px; letter-spacing: .02em; }
+.trace-zoom-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.trace-zoom-btn:disabled { opacity: .35; cursor: default; }
+.trace-zoom-level {
+    min-width: 30px;
+    text-align: center;
+    font-family: var(--mono);
+    color: var(--text-dim);
+}
 
 /* ---------------------------------------------------------------- data tables */
 .trace-scroll {

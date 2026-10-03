@@ -45,6 +45,10 @@ class JobManagementError(RuntimeError):
 class JobManagementService:
     """Query/archive/delete/report facade shared by control planes."""
 
+    # Poll cadence while waiting for the controller to release a cancelled
+    # job's worker lease during a forced delete (tests override this).
+    lease_poll_interval: float = 0.1
+
     def __init__(self, service: JobService):
         self.service = service
         self.store = service.store
@@ -464,8 +468,52 @@ class JobManagementService:
         root = os.path.dirname(self.store.path)
         return os.path.join(root, "evidence", job_id), os.path.join(root, "logs", f"{job_id}.log")
 
-    def delete(self, job_id: str, *, purge_artifacts: bool = True) -> Dict[str, Any]:
+    def _wait_for_lease_release(self, job_id: str, timeout_seconds: float) -> bool:
+        """Poll until the worker lease on ``job_id`` is released or ``timeout_seconds`` elapses.
+
+        Cancellation is asynchronous: ``service.cancel`` flips the status, then
+        the controller daemon terminates the worker and clears ``worker_id``.
+        Returns True when the lease is gone (or the row vanished)."""
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        while True:
+            try:
+                current = self.service.get(job_id)
+            except KeyError:
+                return True
+            if not current.worker_id:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(self.lease_poll_interval, max(0.0, deadline - time.monotonic())))
+
+    def delete(
+        self,
+        job_id: str,
+        *,
+        purge_artifacts: bool = True,
+        force: bool = False,
+        lease_wait_seconds: float = 5.0,
+    ) -> Dict[str, Any]:
+        """Permanently remove a job record, telemetry and artifacts (branch preserved).
+
+        Default (``force=False``): only archived, historic, lease-free jobs.
+        ``force=True`` runs the single-step "cancel → archive → purge" workflow:
+        an active job is cancelled first, we wait (bounded by
+        ``lease_wait_seconds``) for the controller to release the worker lease,
+        auto-archive if needed, then purge. A lease that outlives the wait
+        refuses the delete — the running worker's checkout is never destroyed.
+        """
         job = self.service.get(job_id)
+        if force:
+            if job.status not in HISTORIC_STATUSES:
+                self.service.cancel(job.id, reason="deleted by user")
+            if not self._wait_for_lease_release(job.id, lease_wait_seconds):
+                raise JobManagementError(
+                    f"Job {job.id} is still cancelling; its worker lease has not been released yet. Retry shortly."
+                )
+            job = self.service.get(job.id)
+            if not self.state(job.id)["archived"]:
+                self.archive(job.id, reason="deleted by user")
         state = self.state(job_id)
         if job.status not in HISTORIC_STATUSES:
             raise JobManagementError(
@@ -547,6 +595,7 @@ class JobManagementService:
         return {
             "job_id": job.id,
             "deleted": True,
+            "forced": bool(force),
             "worktree_removed": worktree_removed,
             "artifacts_removed": removed,
             "warnings": warnings,
@@ -600,7 +649,14 @@ class JobManagementService:
                 skipped.append({"job_id": job_id, "reason": f"{type(exc).__name__}: {exc}"})
         return {"deleted": deleted, "skipped": skipped, "older_than_days": float(older_than_days)}
 
-    def bulk(self, action: str, job_ids: Sequence[str], *, reason: str = "") -> Dict[str, Any]:
+    def bulk(
+        self,
+        action: str,
+        job_ids: Sequence[str],
+        *,
+        reason: str = "",
+        force: bool = False,
+    ) -> Dict[str, Any]:
         operation = str(action or "").strip().lower()
         if operation not in {"archive", "restore", "delete"}:
             raise ValueError("action must be archive, restore, or delete")
@@ -617,7 +673,7 @@ class JobManagementService:
                 elif operation == "restore":
                     value = self.restore(job_id)
                 else:
-                    value = self.delete(job_id, purge_artifacts=True)
+                    value = self.delete(job_id, purge_artifacts=True, force=force)
                 results.append({"job_id": job_id, "ok": True, "result": value})
             except Exception as exc:
                 results.append({"job_id": job_id, "ok": False, "error": str(exc)})

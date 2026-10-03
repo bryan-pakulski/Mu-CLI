@@ -32,6 +32,75 @@ _DELTAS_FLUSH_MS = 50.0
 _DELTAS_MAX_CHARS = 8192
 
 
+def _default_gateway(route_text: str) -> str:
+    """Return the IPv4 gateway for reaching the host from ``/proc/net/route``.
+
+    Prefer the default route's gateway.  A Docker ``--internal`` bridge has
+    *no* default route, only an on-link entry for its subnet; in that case the
+    host answers at the bridge gateway, which Docker assigns as the first
+    address of the subnet (network + 1).
+    """
+    def _ipv4(raw: str) -> bytes | None:
+        try:
+            packed = bytes.fromhex(raw)
+        except ValueError:
+            return None
+        return packed if len(packed) == 4 else None
+
+    def _dotted(packed: bytes) -> str:
+        # /proc/net/route stores addresses little-endian.
+        return ".".join(str(octet) for octet in reversed(packed))
+
+    on_link: str = ""
+    for line in str(route_text or "").splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 8:
+            continue
+        dest, gateway, mask = _ipv4(parts[1]), _ipv4(parts[2]), _ipv4(parts[7])
+        if dest is None or gateway is None:
+            continue
+        if parts[1] == "00000000" and parts[2] != "00000000":
+            return _dotted(gateway)
+        if not on_link and parts[2] == "00000000" and parts[1] != "00000000" and mask is not None:
+            network = int.from_bytes(bytes(reversed(dest)), "big") & int.from_bytes(bytes(reversed(mask)), "big")
+            on_link = ".".join(str((network + 1 >> shift) & 0xFF) for shift in (24, 16, 8, 0))
+    return on_link
+
+
+def _read_default_gateway(path: str = "/proc/net/route") -> str:
+    """Best-effort default gateway of this container; ``""`` when unknown."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return _default_gateway(handle.read())
+    except OSError:
+        return ""
+
+
+def supervisor_candidates(url: str, gateway: str) -> list[str]:
+    """Supervisor base URLs to try, configured first, then the default gateway.
+
+    Workers sit on a ``--internal`` bridge where ``host.docker.internal`` may
+    still point at docker0 (unroutable).  The bridge's own gateway is where the
+    host actually answers, so it is offered as a fallback with the same scheme
+    and port.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    base = str(url or "").rstrip("/")
+    candidates: list[str] = []
+    if base:
+        candidates.append(base)
+    gateway = str(gateway or "").strip()
+    if base and gateway:
+        parts = urlsplit(base)
+        if parts.hostname and parts.hostname != gateway:
+            netloc = gateway if parts.port is None else f"{gateway}:{parts.port}"
+            alt = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)).rstrip("/")
+            if alt not in candidates:
+                candidates.append(alt)
+    return candidates
+
+
 class _Status(AbstractContextManager):
     def __init__(self, ui: "WorkerBridgeUI", text: str):
         self.ui = ui
@@ -64,6 +133,15 @@ class WorkerBridgeUI(BaseUI):
         # internal bridge. It must never inherit HTTP(S)_PROXY/SOCKS settings
         # intended for provider egress.
         self._client = httpx.Client(timeout=10.0, trust_env=False)
+        # Candidate supervisor bases: the configured URL first, then the same
+        # URL re-pointed at this container's default-route gateway (the only
+        # address at which the host is reachable from a --internal bridge).
+        # Older workers were started with host.docker.internal → docker0,
+        # which an internal network cannot route to; failover keeps them live.
+        self._supervisor_candidates = supervisor_candidates(
+            self.supervisor_url, _read_default_gateway()
+        )
+        self._warned_unreachable = False
         # Dedup flag: when True, assistant text was already streamed via
         # assistant_delta events, so the post-stream render_message call
         # from loop_body must be suppressed to avoid a duplicate bubble.
@@ -72,6 +150,37 @@ class WorkerBridgeUI(BaseUI):
         self._assistant_buffer: list[str] = []
         self._thinking_buffer: list[str] = []
         self._last_delta_flush = 0.0
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Issue a supervisor request, failing over on connection errors.
+
+        Candidates are tried in order; the first base that accepts a TCP
+        connection is pinned for subsequent calls. Only ``httpx.ConnectError``
+        triggers failover — HTTP errors mean the host was reached and must
+        surface unchanged.
+        """
+        bases = [self.supervisor_url] + [
+            b for b in self._supervisor_candidates if b != self.supervisor_url
+        ]
+        last_exc: Exception | None = None
+        for base in bases:
+            if not base:
+                continue
+            try:
+                send = getattr(self._client, method.lower())
+                response = send(f"{base}{path}", **kwargs)
+            except httpx.ConnectError as exc:
+                last_exc = exc
+                continue
+            if base != self.supervisor_url:
+                logger.warning(
+                    "container supervisor reachable at %s (configured %s unreachable); pinning",
+                    base, self.supervisor_url,
+                )
+                self.supervisor_url = base
+            return response
+        assert last_exc is not None
+        raise last_exc
 
     def _publish_raw(self, event: dict[str, Any]) -> None:
         if not self.supervisor_url:
@@ -86,15 +195,27 @@ class WorkerBridgeUI(BaseUI):
         if active_mode:
             payload.setdefault("agent_mode", active_mode)
         try:
-            self._client.post(
-                f"{self.supervisor_url}/api/container-worker/events",
+            self._request(
+                "POST",
+                f"/api/container-worker/events",
                 json=payload,
                 headers={"X-MuCLI-Worker-Token": self.token},
             ).raise_for_status()
-        except Exception:
+        except Exception as exc:
             # A temporary GUI disconnect must not abort an agent turn.  Session
             # history remains authoritative and will be recovered on reconnect.
-            pass
+            # Log once per process so a dead control plane is diagnosable
+            # instead of silently dropping every event.
+            if not self._warned_unreachable:
+                self._warned_unreachable = True
+                logger.warning(
+                    "container supervisor event delivery failed (%s: %s); url=%s "
+                    "candidates=%s — further failures logged at DEBUG",
+                    type(exc).__name__, exc, self.supervisor_url,
+                    self._supervisor_candidates,
+                )
+            else:
+                logger.debug("supervisor event delivery failed: %s", exc)
 
     def _flush_deltas(self, *, force: bool = False) -> None:
         now = time.monotonic()
@@ -177,29 +298,39 @@ class WorkerBridgeUI(BaseUI):
         if timeline_part_index is not None and int(timeline_part_index) >= 0:
             params["timeline_part_index"] = str(int(timeline_part_index))
         headers = {"X-MuCLI-Worker-Token": self.token}
-        if source_path is not None:
-            with open(source_path, "rb") as handle:
-                chunks = iter(lambda: handle.read(1024 * 1024), b"")
-                response = self._client.post(
-                    f"{self.supervisor_url}/api/container-worker/artifacts",
+        try:
+            if source_path is not None:
+                with open(source_path, "rb") as handle:
+                    chunks = iter(lambda: handle.read(1024 * 1024), b"")
+                    response = self._request(
+                        "POST",
+                        f"/api/container-worker/artifacts",
+                        params=params,
+                        content=chunks,
+                        headers=headers,
+                        timeout=None,
+                    )
+            else:
+                payload = (
+                    content.encode("utf-8")
+                    if isinstance(content, str)
+                    else bytes(content or b"")
+                )
+                response = self._request(
+                    "POST",
+                    f"/api/container-worker/artifacts",
                     params=params,
-                    content=chunks,
+                    content=payload,
                     headers=headers,
                     timeout=None,
                 )
-        else:
-            payload = (
-                content.encode("utf-8")
-                if isinstance(content, str)
-                else bytes(content or b"")
-            )
-            response = self._client.post(
-                f"{self.supervisor_url}/api/container-worker/artifacts",
-                params=params,
-                content=payload,
-                headers=headers,
-                timeout=None,
-            )
+        except httpx.ConnectError as exc:
+            raise RuntimeError(
+                f"container supervisor unreachable at {self.supervisor_url} "
+                f"(tried {', '.join(self._supervisor_candidates) or 'no candidates'}): {exc}; "
+                "reload the container session so the worker is recreated with a "
+                "routable host.docker.internal mapping"
+            ) from exc
         response.raise_for_status()
         data = response.json()
         artifact = data.get("artifact") if isinstance(data, dict) else None
@@ -219,8 +350,9 @@ class WorkerBridgeUI(BaseUI):
     def list_artifacts(self) -> list[dict[str, Any]]:
         if not self.supervisor_url:
             return []
-        response = self._client.get(
-            f"{self.supervisor_url}/api/sessions/{self.session_name}/artifacts",
+        response = self._request(
+            "GET",
+            f"/api/sessions/{self.session_name}/artifacts",
             params={"_ts": __import__("time").time_ns()},
             timeout=30.0,
         )
@@ -328,8 +460,9 @@ class WorkerBridgeUI(BaseUI):
             "timeout": timeout,
         }
         try:
-            response = self._client.post(
-                f"{self.supervisor_url}/api/container-worker/prompt",
+            response = self._request(
+                "POST",
+                f"/api/container-worker/prompt",
                 json=payload,
                 headers={"X-MuCLI-Worker-Token": self.token},
                 timeout=timeout + 15.0,

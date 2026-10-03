@@ -274,6 +274,7 @@ class OllamaProvider(LLMProvider):
         api_key: Optional[str] = None,
         options: Optional[OllamaOptions] = None,
         request_timeout: float = 300.0,
+        think: Optional[bool] = None,
     ):
         super().__init__(model_name)
         self.name = "ollama"
@@ -284,6 +285,9 @@ class OllamaProvider(LLMProvider):
         self.api_key = api_key if api_key is not None else os.getenv("OLLAMA_API_KEY")
         self.options = options or OllamaOptions()
         self.request_timeout = float(request_timeout)
+        # None preserves the model/server default. Latency-sensitive editor
+        # callers can explicitly disable hidden reasoning before code output.
+        self.think = think
         # Cache the preflight result so we don't probe the daemon on every
         # request. Reset by `invalidate_preflight()`.
         self._preflight_done = False
@@ -530,6 +534,7 @@ class OllamaProvider(LLMProvider):
             tool_calls: List[Dict[str, Any]] = []
             images: List[str] = []
             returned_images: List[str] = []
+            tool_results: List[Dict[str, Any]] = []
             role = msg.role
 
             for part in msg.parts:
@@ -569,11 +574,16 @@ class OllamaProvider(LLMProvider):
                     )
                     role = "assistant"
                 elif part.type == "tool_result":
-                    role = "tool"
                     if isinstance(part.tool_result, (dict, list)):
-                        content = json.dumps(part.tool_result, indent=2, sort_keys=True)
+                        result_content = json.dumps(
+                            part.tool_result, indent=2, sort_keys=True
+                        )
                     else:
-                        content = str(part.tool_result)
+                        result_content = str(part.tool_result)
+                    result_message = {"role": "tool", "content": result_content}
+                    if part.tool_name:
+                        result_message["tool_name"] = part.tool_name
+                    tool_results.append(result_message)
                     for media in part.media_inputs or []:
                         if not self.supports_input_mime(
                             media.mime_type, media.display_name or ""
@@ -591,7 +601,15 @@ class OllamaProvider(LLMProvider):
                 message_dict["tool_calls"] = tool_calls
             if images:
                 message_dict["images"] = images
-            ollama_msgs.append(message_dict)
+            # Ollama expects one message for each result in a tool-call batch.
+            # Reusing `content` here used to overwrite every result but the last.
+            if tool_results and role == "tool" and content.strip() and not images:
+                tool_results[0]["content"] = (
+                    content.strip() + "\n" + tool_results[0]["content"]
+                )
+            elif content.strip() or tool_calls or images or not tool_results:
+                ollama_msgs.append(message_dict)
+            ollama_msgs.extend(tool_results)
             if returned_images:
                 ollama_msgs.append(
                     {
@@ -717,6 +735,8 @@ class OllamaProvider(LLMProvider):
         # keep_alive keeps the model warm across turns.
         keep_alive = cache_hint.keep_alive_seconds if cache_hint else 600
         payload["keep_alive"] = keep_alive
+        if self.think is not None:
+            payload["think"] = self.think
         if tools:
             payload["tools"] = [
                 {

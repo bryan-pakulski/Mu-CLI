@@ -25,6 +25,8 @@ import os
 import re
 import shutil
 import tempfile
+
+from mu.session.fileowner import match_owner
 import time
 from copy import deepcopy
 from typing import Any
@@ -104,6 +106,17 @@ def _normalize_tool_stats(value: Any) -> dict[str, Any]:
         if isinstance(value.get(key), dict):
             stats[key].update(value[key])
     return stats
+
+
+class SessionUnreadableError(OSError):
+    """session.json exists but this process cannot read it (permissions/owner).
+
+    Distinct from "missing": a missing document means a fresh session; an
+    unreadable one means another writer (e.g. a root container worker) owns
+    the file.  Loading must fail loudly and ``save_history`` must refuse to
+    overwrite it, otherwise the real document is silently clobbered with
+    defaults.
+    """
 
 
 class RevisionConflict(Exception):
@@ -248,6 +261,10 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
     def _load_session(self, name):
         filepath = self._get_filepath(name)
         legacy_filepath = os.path.join(_history_dir(), f"{name}.json")
+        # Snapshot routing-critical state so an unreadable document does not
+        # silently demote an in-memory container session to workspace.
+        _prev_variables = dict(self.variables)
+        _prev_container_config = dict(self.container_config or {})
         self.current_session_name = name
         self.history = []
         self.conversation_summary = ""
@@ -285,7 +302,18 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.thread_meta = ensure_thread_meta(name)
         self.variables.update(DEFAULT_VARIABLES)
 
-        data = self.read_session_data(name)
+        # Unreadable (not missing) document: leave in-memory defaults but
+        # mark the manager so save_history refuses to overwrite the real
+        # file with them. Re-raise so callers fail loud.
+        self._load_failed = False
+        try:
+            data = self.read_session_data(name)
+        except SessionUnreadableError:
+            self._load_failed = True
+            self.variables.clear()
+            self.variables.update(_prev_variables)
+            self.container_config = _prev_container_config
+            raise
         if data is not None:
             try:
                 if isinstance(data, list):
@@ -393,6 +421,13 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         try:
             with open(source_filepath, "r") as f:
                 return json.load(f)
+        except PermissionError as exc:
+            raise SessionUnreadableError(
+                exc.errno,
+                f"session document is not readable by this process "
+                f"(owner/permissions): {source_filepath}",
+                source_filepath,
+            ) from exc
         except (json.JSONDecodeError, OSError):
             return None
 
@@ -923,6 +958,14 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             return
         if expected_revision is not None and self.revision != expected_revision:
             raise RevisionConflict(expected_revision, self.revision)
+        if getattr(self, "_load_failed", False):
+            raise SessionUnreadableError(
+                None,
+                f"refusing to save session {self.current_session_name!r}: the "
+                "on-disk document could not be read at load time (owner/"
+                "permissions); saving would clobber it with defaults",
+                self._get_filepath(self.current_session_name),
+            )
         logger.debug(f"Saving history for session: {self.current_session_name}")
         filepath = self._get_filepath(self.current_session_name)
         # Round-13 F1: cross-process compare-and-swap. The in-memory check
@@ -1052,6 +1095,11 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                     json.dump(data, f, indent=2)
                     f.flush()
                     os.fsync(f.fileno())
+                    # Container workers run as root over a bind-mounted
+                    # host directory: a fresh mkstemp inode would be
+                    # root:root 0600 and lock the host out of its own
+                    # session.  Match the existing document's owner/mode.
+                    match_owner(f.fileno(), filepath, default_mode=0o600)
                 os.replace(tmp_path, filepath)
                 tmp_owned_path = False  # consumed by the replace
             finally:
@@ -1085,6 +1133,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                         }, mf)
                         mf.flush()
                         os.fsync(mf.fileno())
+                        match_owner(mf.fileno(), meta_path, default_mode=0o600)
                     os.replace(meta_tmp, meta_path)
                 finally:
                     if os.path.exists(meta_tmp):

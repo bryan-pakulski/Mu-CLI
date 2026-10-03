@@ -491,6 +491,7 @@ def _summarize(
     # in the new order on the next save, so the O(history) fallback decays
     # to zero instead of running on every poll.
     data = read_session_summary(path)
+    unreadable = not data and os.path.exists(path) and not os.access(path, os.R_OK)
     variables = data.get("variables") or {}
     container_config = data.get("container_config") or {}
     thread_meta = ensure_thread_meta(name, data.get("thread_meta"))
@@ -523,6 +524,7 @@ def _summarize(
         "modified_at": datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
         "modified_unix": mtime,
         "session_type": normalize_session_type(variables.get("session_type")),
+        "unreadable": unreadable,
         "container_name": container_config.get("container_name"),
         "thread_id": thread_meta.thread_id,
         "thread_group_id": thread_meta.group_id,
@@ -603,6 +605,18 @@ def _read_session_data(name: str) -> Dict[str, Any] | None:
     try:
         with open(path, "r") as fh:
             return json.load(fh)
+    except PermissionError as exc:
+        # Unreadable is NOT missing. Treating it as missing made the host
+        # recreate the session as a workspace one and clobber the real
+        # document (container-mode "functions: []" regression).
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Session {name!r} exists but its document is not readable by "
+                "this process (file owner/permissions). Fix ownership of "
+                f"{path} (for example `sudo chown $USER {path}`) and retry."
+            ),
+        ) from exc
     except (OSError, ValueError):
         return None
 

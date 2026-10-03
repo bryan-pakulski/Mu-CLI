@@ -375,6 +375,15 @@
                     } else if (action === 'discard') {
                         if (!window.confirm('Discard/cancel this job? Its worktree and evidence will remain available for inspection.')) return;
                         await api(`/api/jobs/${encodeURIComponent(job.id)}/discard`, { method: 'POST', body: { reason: detail || 'discarded from Engineering Work' } });
+                    } else if (action === 'delete') {
+                        if (!window.confirm('Delete this job? Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.')) return;
+                        await api(`/api/jobs/${encodeURIComponent(job.id)}?force=1`, { method: 'DELETE' });
+                        state.selectedId = null;
+                        state.selectedJob = null;
+                        detailEl.innerHTML = '<div class="work-empty-detail"><p>Job deleted. Select another job to inspect its evidence.</p></div>';
+                        toast('Job deleted. Git branch preserved.');
+                        await refreshBoard({ quiet: true });
+                        return;
                     }
                     toast('Job updated.');
                     await refreshBoard({ quiet: true });
@@ -452,6 +461,10 @@
                     </div>
                     <div class="work-detail-side">
                         ${actionPanel(job, events)}
+                        <aside class="work-action-panel work-delete-panel">
+                            <p>Delete this job permanently. Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.</p>
+                            <div class="work-action-row"><button class="work-danger" data-action="delete">Delete job</button></div>
+                        </aside>
                     </div>
                 </div>
             </article>

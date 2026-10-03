@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import subprocess
 import time
@@ -12,7 +13,7 @@ import utils.config as _config
 
 from .builder import build_container, container_slug
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback
-from .network import teardown_network
+from .network import internal_gateway_from_inspect, teardown_network
 from .hardware import detect_hardware, normalize_device_specs, normalize_gpu_request, validate_hardware  # MUCLI_CONTAINER_HARDWARE_V1
 from .ref import ContainerRef, DeviceSpec, DEFAULT_WORKER_PORT, WORKER_PROTOCOL_VERSION
 from .registry import ContainerRegistry
@@ -366,6 +367,29 @@ class ContainerSupervisor:
         except ValueError:
             return ""
 
+    def _network_gateway(self, network_name: str) -> str:
+        """Return the IPv4 gateway of a managed internal bridge, or ``""``."""
+        if not network_name:
+            return ""
+        docker = self.runner.require("docker")
+        result = self.runner.run(
+            [docker, "network", "inspect", network_name, "--format", "{{json .}}"],
+            check=False,
+        )
+        if result.returncode != 0:
+            return ""
+        try:
+            value = json.loads(str(result.stdout or "") or "{}")
+        except ValueError:
+            return ""
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        gateway = internal_gateway_from_inspect(value if isinstance(value, dict) else {})
+        try:
+            return str(ipaddress.ip_address(gateway)) if gateway else ""
+        except ValueError:
+            return ""
+
     def _discard_stale_registration(self, ref: ContainerRef) -> None:
         """Remove registry/network state before rebuilding a managed worker.
 
@@ -427,6 +451,11 @@ class ContainerSupervisor:
         self._ensure_proxy_running(ref)
         if not running:
             self.runner.run([self.runner.require("docker"), "start", ref.name])
+        if not ref.host_gateway:
+            # Backfill records created before host_gateway existed so rebuild
+            # and diagnostics know the address the worker must use for the
+            # supervisor. (The running container's /etc/hosts is unchanged.)
+            ref.host_gateway = self._network_gateway(ref.network_name)
         ref.status = "running"
         ref = self.registry.upsert(ref)
         self.wait_worker_ready(ref)

@@ -238,6 +238,10 @@ def _mark_findings(service, job, facts, args):
 
 
 def _push(service, job, facts, args):
+    from ..checks import push_check_reason
+    reason = push_check_reason(service, job)
+    if reason:
+        raise CommandRejected(reason)
     override = str(args.get("override_reason") or "").strip()
     if facts.verdict == "do_not_merge" and not override:
         raise CommandRejected("verdict is do_not_merge: push requires override_reason")

@@ -58,3 +58,8 @@ def test_real_plan_stage_reaches_scoped_relay_without_provider_keys(docker, tmp_
     assert result["kind"] == "completed", result
     assert "container relay works" in result["text"]
     assert calls
+    from mu.jobs.checks import Suite
+    from mu.jobs.sandbox.check_runner import run_suite_in_container
+    check = run_suite_in_container(service.get(job.id), service.get(job.id).worktree,
+                                   Suite("smoke", 'python3 -c "print(123)"'))
+    assert check["passed"] and "123" in check["stdout"]

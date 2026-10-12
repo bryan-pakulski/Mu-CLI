@@ -64,7 +64,7 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
             "--memory", policy.memory, "--user", f"{os.getuid()}:{os.getgid()}",
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
             "--workdir", "/workspace", "--label", "io.mucli.role=job-stage"]
-    for src, dst, readonly in ((workspace, "/workspace", stage != "implement"),
+    for src, dst, readonly in ((workspace, "/workspace", stage not in ("implement", "checks")),
                                 (inputs, "/artifacts", True), (output, "/output", False),
                                 (relay, "/relay", True)):
         src = str(Path(src).resolve(strict=True))

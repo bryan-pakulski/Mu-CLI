@@ -63,6 +63,7 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
             plan_version = plan_store(job).latest_version()
         except (OSError, ValueError):
             plan_version = 0
+    from ..checks import push_check_reason
     return JobFacts(
         core=core,
         archived=archived,
@@ -76,6 +77,7 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         live_stage=bool(job.worker_id) and core.state in (JobState.PLANNING, JobState.IMPLEMENTING,
                                                           JobState.REVIEWING),
         git_workspace=True,
+        push_check_reason=push_check_reason(service, job) if core.state == JobState.REVIEW_DONE else "push is available after review",
     )
 
 

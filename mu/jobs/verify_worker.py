@@ -148,8 +148,37 @@ def _maybe_acceptance_review(service, job, feedback: dict) -> Optional[int]:
     return 24
 
 
+def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
+    """Only new failures enter the bounded implementation repair loop."""
+    current = service.get(job_id)
+    if current.status != JobStatus.VERIFYING:
+        return 0
+    feedback = verification_feedback(run)
+    new_commands = {s["command"] for s in run.summary.get("suites", []) if s.get("new_failures")}
+    feedback["failed_checks"] = [c for c in feedback["failed_checks"] if c["command"] in new_commands]
+    if run.status == "missing_contract":
+        service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED,
+                              "Configure at least one check suite before review and push.", payload=feedback)
+        return 21
+    from .job_settings import load_settings
+    settings = load_settings().get("checks") or {}
+    maximum = max(0, int((current.execution.get("checks") or {}).get("max_fix_attempts", settings.get("max_fix_attempts", 2))))
+    core = service.store.core_state(job_id)
+    if run.summary.get("new_failures", 0) > 0 and core.fix_attempts < maximum:
+        service.store.set_fix_attempts(job_id, core.fix_attempts + 1)
+        service.store.append_event(job_id, "verification_failed", reason="new failures; fix attempt scheduled", payload=feedback)
+        service.transition(job_id, JobStatus.QUEUED, reason="checks require implementation fixes", payload=feedback)
+        return 10
+    # The reviewer needs the actual checked worktree. Do not retire it here.
+    service.transition(job_id, JobStatus.REVIEWING, reason="checks complete; review report next", payload=feedback)
+    _refresh_receipt(service, job_id)
+    return 0
+
+
 def apply_verification_result(service, job_id: str, run: VerificationRun) -> int:
     """Apply deterministic readiness policy to persisted verification evidence."""
+    if "new_failures" in run.summary:
+        return apply_checks_result(service, job_id, run)
     feedback = verification_feedback(run)
     current = service.get(job_id)
     if current.status == JobStatus.CANCELLED:
@@ -274,7 +303,8 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
         if job.status != JobStatus.VERIFYING:
             return 0
         heartbeat_thread.start()
-        run = DeterministicVerifier(service).verify(job)
+        from .checks import ChecksStage
+        run = ChecksStage(service).verify(job)
         if lease_lost.is_set():
             # Lease expired mid-verification: a retried verifier will take
             # over. Do not apply results this worker no longer owns.
@@ -307,6 +337,9 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
                 reason=str(exc),
                 payload={"process_id": os.getpid()},
             )
+            if service.store.assert_lease(job_id, worker_id) and service.get(job_id).status == JobStatus.VERIFYING:
+                service.transition(job_id, JobStatus.FAILED, reason="checks stage failed",
+                                   payload={"error": str(exc)[:1000]})
             _refresh_receipt(service, job_id)
         except Exception:
             pass

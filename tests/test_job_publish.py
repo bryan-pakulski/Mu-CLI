@@ -34,6 +34,15 @@ def _git_job(tmp_path, mode):
         "execution": {**EXE, "publish_mode": mode},
     })
     service.store.update_runtime_fields(job.id, branch="mucli/job-abc")
+    # Publishing now requires successful checks for the actual branch HEAD.
+    _git(repo, "branch", "mucli/job-abc")
+    from mu.jobs.verification import VerificationRun, VerificationStore
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                          capture_output=True, text=True).stdout.strip()
+    VerificationStore(service.store).save(VerificationRun(
+        id="passed-checks", job_id=job.id, status="passed", passed=True,
+        started_at=1, finished_at=2, duration_ms=1000, base_sha=head, head_sha=head,
+        branch="mucli/job-abc", worktree=str(repo)))
     for status in (JobStatus.PREPARING, JobStatus.RUNNING, JobStatus.VERIFYING,
                    JobStatus.REVIEWING, JobStatus.PUBLISHING):
         service.transition(job.id, status, reason="test")
@@ -78,7 +87,9 @@ def test_gh_mode_pushes_and_opens_draft_pr(tmp_path):
     assert publish_job(service, job.id, run=run, post=FakePost({}), env={}) == 0
     job = service.get(job.id)
     assert job.status == JobStatus.READY_FOR_REVIEW
-    assert ["git", "push", "origin", "refs/heads/mucli/job-abc:refs/heads/mucli/job-abc"] in run.calls
+    from mu.jobs.verification import VerificationStore
+    head = VerificationStore(service.store).latest(job.id).head_sha
+    assert ["git", "push", "origin", f"{head}:refs/heads/mucli/job-abc"] in run.calls
     gh = next(c for c in run.calls if c[:3] == ["gh", "pr", "create"])
     assert "--draft" in gh and gh[gh.index("--head") + 1] == "mucli/job-abc"
     assert job.metadata["pr"]["url"] == "https://github.com/o/r/pull/7"

@@ -336,6 +336,27 @@ Direct container networking remains disabled. `sandbox.cpu`, `memory`,
 is recorded in the job's `costs.jsonl`; a request already sent to a provider can
 still incur charges when its stream is interrupted at a budget limit.
 
+### Checks and the push gate
+
+After implementation, the host runs approved plan checks and configured required
+suites in containers without an agent. Configure suites in `.mucli/jobs.toml`
+under `[[checks.suites]]` (`name`, `command`, optional workspace-relative `junit`),
+or in job settings under `checks.suites`. Commands are validated again at
+execution and run without a shell. Pytest suites automatically produce JUnit
+evidence in the container output directory.
+
+Failed suites run again on the job's base commit in a disposable worktree.
+Matching test failures are reported as preexisting; only new failures enter the
+repair loop, capped by `checks.max_fix_attempts` (default 2). Checks retain the
+execution worktree for review and manual fixes. Summaries, JUnit and logs live
+under the job's `checks/run-<n>/` artifact directory.
+
+Push requires a successful check run for the current commit and a clean worktree.
+Preexisting failures do not trigger automatic fixes, but still prevent push until
+the checks pass. A review override cannot bypass this gate. The publisher pushes
+the verified commit SHA, so a branch moving after the gate cannot publish an
+unchecked commit.
+
 ### PR publish
 
 For git workspaces the default is `execution.publish_mode = "auto"`. For

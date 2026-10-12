@@ -83,7 +83,7 @@ def _pr_text(job: Job) -> Tuple[str, str]:
     return title, "\n".join(lines).strip()
 
 
-def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str]) -> Dict[str, Any]:
+def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str], verified_head: str) -> Dict[str, Any]:
     repo = str((job.metadata or {}).get("repository_root") or job.repository or "")
     branch, base = str(job.branch or ""), str(job.base_branch or "main")
     if not repo or not branch:
@@ -92,7 +92,7 @@ def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str]) ->
     if rc != 0:
         raise PublishError(f"no 'origin' remote: {err.strip()[:200]}")
     remote = parse_remote(out.strip())
-    rc, _, err = run(["git", "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"], repo)
+    rc, _, err = run(["git", "push", "origin", f"{verified_head}:refs/heads/{branch}"], repo)
     if rc != 0:
         raise PublishError(f"git push failed: {_redact(err.strip())[:400]}")
 
@@ -142,8 +142,14 @@ def publish_job(service, job_id: str, *, run: Optional[RunFn] = None,
         service.transition(job_id, JobStatus.READY_FOR_REVIEW, reason="publishing disabled; skipped")
         return 0
     try:
+        from .checks import push_check_reason
+        from .verification import VerificationStore
+        checked = VerificationStore(service.store).latest(job.id)
+        check_reason = push_check_reason(service, job, run=checked)
+        if check_reason:
+            raise PublishError(check_reason)
         pr = open_draft_pr(job, run=run or _default_run, post=post or _default_post,
-                           env=dict(os.environ if env is None else env))
+                           env=dict(os.environ if env is None else env), verified_head=checked.head_sha)
     except Exception as exc:  # noqa: BLE001 - any publish failure parks on a human
         service.require_human(job_id, AttentionReason.PUBLISH_FAILED,
                               f"Publishing failed: {_redact(str(exc))[:500]}",

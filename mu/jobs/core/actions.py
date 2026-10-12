@@ -51,6 +51,7 @@ class JobFacts:
     has_worktree: bool = False
     live_stage: bool = False  # a stage is attached and accepting messages
     git_workspace: bool = True
+    push_check_reason: str = "push requires a successful check run"
 
 
 @dataclass
@@ -115,6 +116,8 @@ def _rule(cmd: str, f: JobFacts) -> Optional[str]:
             return "push is available after review"
         if not f.git_workspace:
             return "workspace is not a git repository"
+        if f.push_check_reason:
+            return f.push_check_reason
         if f.verdict == "do_not_merge":
             # Still enabled with an explicit override + recorded reason (§4.4);
             # the UI asks for the reason, dispatch enforces it.

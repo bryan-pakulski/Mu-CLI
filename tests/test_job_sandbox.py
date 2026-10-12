@@ -48,7 +48,7 @@ def test_stage_has_no_credentials_host_network_or_gitdir(tmp_path, monkeypatch, 
     assert "--network none" in rendered and "--cap-drop ALL" in rendered
     assert "--user" in args and "--read-only" in args
     workspace = next(x for x in args if "dst=/workspace" in x and ".git" not in x)
-    assert workspace.endswith(",readonly") == (stage != "implement")
+    assert workspace.endswith(",readonly") == (stage not in ("implement", "checks"))
     assert f"dst=/workspace/.git,readonly" in rendered
     assert "dst=/artifacts,readonly" in rendered
     assert "docker.sock" not in rendered

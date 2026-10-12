@@ -85,19 +85,24 @@ def _review_service(service):
 def dispatch(service, cmd: Command | Dict[str, Any], *, bus: Optional[ChangeBus] = None) -> Result:
     if isinstance(cmd, dict):
         cmd = Command.from_payload(cmd)
+    with service.store.command_lock(cmd.job_id):
+        return _dispatch_locked(service, cmd, bus=bus)
+
+
+def _dispatch_locked(service, cmd: Command, *, bus=None) -> Result:
     from .vm import facts_for
 
     job = service.get(cmd.job_id)  # KeyError → 404
+    service.store.append_event(job.id, "command", reason=cmd.type,
+                               payload={"command": cmd.type, "args": _audit_args(cmd.args)})
+    handler = _HANDLERS.get(cmd.type)
+    if handler is None:
+        raise CommandError(f"unknown command {cmd.type!r}")
     facts = facts_for(service, job, archived=_archived(service, job.id))
     reason = check_allowed(facts, cmd.type)
     if reason:
         raise CommandRejected(reason)
-    handler = _HANDLERS.get(cmd.type)
-    if handler is None:
-        raise CommandError(f"unknown command {cmd.type!r}")
     parts, data = handler(service, job, facts, cmd.args)
-    service.store.append_event(job.id, "command", reason=cmd.type,
-                               payload={"command": cmd.type, "args": _audit_args(cmd.args)})
     bus = bus or default_bus()
     if cmd.type == "delete":
         bus.emit("home", "", ["state"])
@@ -149,17 +154,25 @@ def _save_plan_draft(service, job, facts, args):
 
     if "plan" not in args:
         raise CommandError("savePlanDraft requires plan")
+    if "version" in args:
+        try:
+            version = int(args["version"])
+        except (TypeError, ValueError) as exc:
+            raise CommandError("version must be an integer") from exc
+        if version != facts.plan_version:
+            raise CommandRejected("plan changed; reload before saving")
     data = save_plan_draft(service, job.id, args["plan"], autosave=bool(args.get("autosave")))
     return ["plan"], data
 
 
 def _message(service, job, facts, args):
+    from .states import effective_state
     text = str(args.get("text") or "").strip()
     if not text:
         raise CommandError("message requires text")
     # Delivered to the live stage by the stage runner (picked up from events).
     service.store.append_event(job.id, "stage_message", reason="human message",
-                               payload={"text": text[:8000], "stage": facts.core.state.value})
+                               payload={"text": text[:8000], "stage": effective_state(facts.core).value})
     return ["session"], {}
 
 
@@ -169,6 +182,10 @@ def _resume(service, job, facts, args):
         _merge_meta(service, job.id, resume_guidance=guidance)
     if job.status.value == "conflicted":
         _review_service(service).resolve_conflict(job.id, detail=guidance)
+    elif facts.core.paused_from in (JobState.PLANNING, JobState.CHECKING, JobState.REVIEWING, JobState.PUSHING):
+        target = {JobState.PLANNING: "planning", JobState.CHECKING: "verifying",
+                  JobState.REVIEWING: "reviewing", JobState.PUSHING: "publishing"}[facts.core.paused_from]
+        service.transition(job.id, target, reason="resumed stage", payload={"guidance": guidance})
     else:
         service.resume(job.id, detail=guidance or "resumed")
     return ["state", "pipeline", "session"], {}
@@ -184,14 +201,23 @@ def _restart_stage(service, job, facts, args):
 
 
 def _retry(service, job, facts, args):
-    service.retry(job.id, reason="retry requested")
+    origin = facts.core.failed_from
+    if origin in (JobState.PLANNING, JobState.CHECKING, JobState.REVIEWING, JobState.PUSHING):
+        target = {JobState.PLANNING: "planning", JobState.CHECKING: "verifying",
+                  JobState.REVIEWING: "reviewing", JobState.PUSHING: "publishing"}[origin]
+        service.transition(job.id, target, reason="retry failed stage")
+    else:
+        service.retry(job.id, reason="retry requested")
     return ["state", "pipeline"], {}
 
 
 def _recheck(service, job, facts, args):
     # Re-run Checks + Review on the current HEAD (no implement run).
-    _merge_meta(service, job.id, recheck_requested=True)
-    service.transition(job.id, "queued", reason="recheck requested")
+    if not job.worktree:
+        from ..worktree import JobWorktreeManager
+        JobWorktreeManager(service).prepare(job)
+    service.store.set_fix_attempts(job.id, 0)
+    service.transition(job.id, "verifying", reason="recheck requested")
     return ["state", "pipeline", "checks", "review"], {}
 
 
@@ -207,6 +233,8 @@ def _load_report(job):
 
 
 def _reprompt(service, job, facts, args):
+    if not isinstance(args.get("finding_ids"), list):
+        raise CommandError("finding_ids must be an array")
     ids = [str(i) for i in (args.get("finding_ids") or [])]
     if not ids:
         raise CommandError("reprompt requires finding_ids")
@@ -218,11 +246,14 @@ def _reprompt(service, job, facts, args):
         "findings": [f.to_dict() if hasattr(f, "to_dict") else dict(f.__dict__) for f in selected],
         "guidance": str(args.get("guidance") or "").strip(),
     })
-    service.transition(job.id, "running", reason="re-prompt with selected findings")
+    service.store.set_fix_attempts(job.id, 0)
+    service.transition(job.id, "queued", reason="re-prompt with selected findings")
     return ["state", "pipeline", "review"], {"findings": ids}
 
 
 def _mark_findings(service, job, facts, args):
+    if not isinstance(args.get("ids"), list):
+        raise CommandError("ids must be an array")
     ids = [str(i) for i in (args.get("ids") or [])]
     disposition = str(args.get("disposition") or "")
     if not ids:

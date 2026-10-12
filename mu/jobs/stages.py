@@ -1,22 +1,4 @@
-"""Durable job v2 staged pipeline: plan -> implement -> verify -> review.
-
-The implementation stage is still the existing worker/runner. This module
-adds the two model-driven stages around it:
-
-* **plan** runs before the first implementation attempt (status PLANNING)
-  with the ``plan`` stage model and stores ``metadata.plan``.
-* **review** runs after deterministic verification passed (status
-  REVIEWING) with the ``review`` stage model. ``approve`` advances to
-  PUBLISHING (git + publish enabled) or READY_FOR_REVIEW; ``request_changes``
-  requeues the implementation with the reviewer's feedback so the whole
-  RUNNING -> VERIFYING -> REVIEWING loop re-runs. More than
-  ``execution.max_review_rounds`` rejections park the job on a human with
-  ``AttentionReason.REVIEW_STALLED``.
-
-``generate_fn(job, prompt, workspace, model) -> (text, meta)`` is injectable
-so tests need no provider; :func:`default_generate` builds a read-only MuCLI
-session with the resolved stage provider/model.
-"""
+"""Artifact-based plan and report-only review stages, executed in sandboxes."""
 
 from __future__ import annotations
 
@@ -27,7 +9,6 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .models import (
-    DEFAULT_MAX_REVIEW_ROUNDS,
     AttentionReason,
     Job,
     JobStatus,
@@ -52,14 +33,6 @@ def publish_mode(job: Job) -> str:
     if not execution.get("git_enabled", True):
         return "none"
     return str(execution.get("publish_mode") or "none").strip().lower() or "none"
-
-
-def max_review_rounds(job: Job) -> int:
-    try:
-        value = int((job.execution or {}).get("max_review_rounds") or DEFAULT_MAX_REVIEW_ROUNDS)
-    except (TypeError, ValueError):
-        value = DEFAULT_MAX_REVIEW_ROUNDS
-    return max(1, value)
 
 
 def merge_metadata(service, job_id: str, **updates: Any) -> Job:
@@ -195,6 +168,11 @@ def run_plan_stage(service, job_id: str, *, generate_fn: GenerateFn) -> Job:
     job = service.get(job_id)
     model = resolve_stage_model(job.execution, "plan")
     text, meta = generate_fn(job, build_plan_prompt(job), job_workspace(job), model)
+    if job.worker_id and not service.store.assert_lease(job_id, job.worker_id):
+        return service.get(job_id)
+    cost = max(0, float((meta or {}).get("cost_usd") or 0))
+    if cost:
+        service.store.update_runtime_fields(job_id, cost_usd=float(service.get(job_id).cost_usd or 0) + cost)
     plan = parse_plan(text)
     plan["model"] = {"provider": model.get("provider", ""), "model": model.get("model", "")}
     plan["cost_usd"] = float((meta or {}).get("cost_usd", 0.0) or 0.0)
@@ -213,28 +191,27 @@ def run_plan_stage(service, job_id: str, *, generate_fn: GenerateFn) -> Job:
 # ----------------------------------------------------------------- review
 
 def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) -> str:
-    lines = [
-        "You are the REVIEW stage of an automated engineering pipeline.",
-        f"Review round {round_no}. Deterministic validation already passed.",
-        "Decide whether the change fully and correctly implements the ticket.",
-        "",
-        f"Title: {job.title}",
-    ]
-    if job.description:
-        lines.extend(["", "Description:", job.description])
-    if job.acceptance_criteria:
-        lines.extend(["", "Acceptance criteria:", *[f"- {c}" for c in job.acceptance_criteria]])
-    plan = dict((job.metadata or {}).get("plan") or {})
-    if plan.get("summary"):
-        lines.extend(["", "Agreed plan:", str(plan["summary"])])
-    lines.extend(["", "Diff stat:", stat or "(unavailable)", "", "Patch:", (patch or "(unavailable)")[:120_000]])
-    lines.extend([
-        "",
-        "Respond with JSON only:",
-        '{"verdict": "approve" | "request_changes", "summary": "...", '
-        '"feedback": ["concrete change the implementer must make"]}',
+    from .core.artifacts import artifacts_for
+    from .core.plan_ops import approved_plan_text
+    art = artifacts_for(job)
+    checks = art.read_json("checks/summary.json", {}) or {}
+    return "\n".join([
+        "You are the REVIEW stage. Produce a report; a human decides what happens next.",
+        "Inspect the workspace read-only. Check results below may include failures.",
+        f"Title: {job.title}", job.description or "",
+        "Approved plan:", approved_plan_text(job) or art.read_text("plan.md") or "",
+        "Acceptance criteria:", *job.acceptance_criteria,
+        "Checks:", json.dumps(checks), "Diff stat:", stat, "Patch:", patch[:120000],
+        "Respond with JSON only, with this schema:",
+        '{"summary":"overview and risks", "plan_coverage":[{"criterion_id":"AC-1",'
+        '"status":"met|partial|unmet|unverifiable","evidence":"file:line or test"}],'
+        '"findings":[{"id":"F-1","severity":"blocker|major|minor|nit",'
+        '"category":"correctness|security|regression|tests|perf|maintainability|scope",'
+        '"file":"path","line_start":1,"line_end":1,"title":"short",'
+        '"detail":"why it matters","suggestion":"fix","confidence":"high|medium|low"}],'
+        '"out_of_scope_changes":[]}',
+        "Do not choose a workflow action or mark findings dismissed/fixed. The host computes readiness.",
     ])
-    return "\n".join(lines)
 
 
 def parse_stage_review(text: str) -> Dict[str, Any]:
@@ -268,44 +245,34 @@ def _diff(service, job_id: str) -> Tuple[str, str, str]:
 
 
 def apply_review_verdict(service, job_id: str, review: Dict[str, Any]) -> int:
+    """Always stop at REVIEW_DONE, irrespective of the model's opinion."""
+    from .core.artifacts import artifacts_for
+    from .core.review_report import ReviewReport
     job = service.get(job_id)
     if job.status != JobStatus.REVIEWING:
         return 0
+    if job.worker_id and not service.store.assert_lease(job_id, job.worker_id):
+        return 6
+    art = artifacts_for(job).ensure()
+    report = ReviewReport.from_legacy(review, job_id=job.id)
+    report.job_id = job.id
+    checks = art.read_json("checks/summary.json", {}) or {}
+    report.checks_context = {"new_failures": int(checks.get("new_failures") or 0),
+                             "preexisting_failures": int(checks.get("preexisting_failures") or 0)}
+    for finding in report.findings:
+        finding.disposition = "open"
+    report.recompute()
     rounds = list((job.metadata or {}).get("review_rounds") or [])
-    review = {**review, "round": len(rounds) + 1}
-    rounds.append(review)
-    job = merge_metadata(service, job_id, review_rounds=rounds)
-    service.store.append_event(job_id, "review_completed", reason=review["verdict"], payload=review)
-
-    if review["verdict"] == VERDICT_APPROVE:
-        if publish_mode(job) != "none":
-            service.transition(job_id, JobStatus.PUBLISHING, reason="reviewer approved; publishing", payload=review)
-            return 0
-        service.transition(job_id, JobStatus.READY_FOR_REVIEW, reason="reviewer approved", payload=review)
-        try:
-            from .base_drift import apply_base_drift
-
-            apply_base_drift(service, job_id, source="review")
-        except Exception as exc:  # noqa: BLE001 — drift check must not undo READY
-            service.store.append_event(job_id, "base_drift_check_failed", reason=str(exc)[:400])
-        return 0
-
-    if len(rounds) >= max_review_rounds(job):
-        service.require_human(
-            job_id,
-            AttentionReason.REVIEW_STALLED,
-            f"Reviewer requested changes in {len(rounds)} consecutive rounds "
-            f"(max {max_review_rounds(job)}): " + "; ".join(review.get("feedback") or [])[:600],
-            payload=review,
-        )
-        return 25
-    service.store.append_event(
-        job_id, "review_changes_requested",
-        reason="reviewer requested changes; re-running implementation",
-        payload=review,
-    )
-    service.transition(job_id, JobStatus.QUEUED, reason="reviewer requested changes", payload=review)
-    return 10
+    payload = {**report.to_dict(), "round": len(rounds) + 1}
+    art.write_json("review.json", report.to_dict())
+    art.write_json(f"logs/review.round{len(rounds) + 1}.json", payload)
+    rounds.append(payload)
+    merge_metadata(service, job_id, review_rounds=rounds)
+    service.store.append_event(job_id, "review_completed", reason=report.verdict, payload=payload)
+    service.require_human(job_id, AttentionReason.REVIEW_DONE,
+                          report.summary or "Review report ready. Choose push, re-prompt, recheck, or discard.",
+                          payload={"verdict": report.verdict, "merge_readiness": report.merge_readiness})
+    return 0
 
 
 def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
@@ -317,13 +284,22 @@ def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
     round_no = len((job.metadata or {}).get("review_rounds") or []) + 1
     prompt = build_stage_review_prompt(job, patch, stat, round_no)
     text, meta = generate_fn(job, prompt, job_workspace(job), model)
-    review = parse_stage_review(text)
+    if job.worker_id and not service.store.assert_lease(job_id, job.worker_id):
+        return 6
+    cost = max(0, float((meta or {}).get("cost_usd") or 0))
+    if cost:
+        service.store.update_runtime_fields(job_id, cost_usd=float(service.get(job_id).cost_usd or 0) + cost)
+    raw = extract_json(text)
+    review = raw if "findings" in raw else parse_stage_review(text)
+    if not raw:
+        review = {"summary": "The reviewer did not return a valid report.", "findings": [
+            {"id": "F-1", "severity": "blocker", "title": "Invalid reviewer output", "detail": str(text)[:4000]}]}
     review.update({
         "head_sha": head,
+        "reviewed_head": head,
         "model": {"provider": model.get("provider", ""), "model": model.get("model", "")},
         "cost_usd": float((meta or {}).get("cost_usd", 0.0) or 0.0),
     })
-    _write_review_artifact(job, review, round_no)
     return apply_review_verdict(service, job_id, review)
 
 

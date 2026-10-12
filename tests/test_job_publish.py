@@ -145,7 +145,7 @@ def test_publish_mode_none_skips_to_ready(tmp_path):
     assert run.calls == []
 
 
-def test_git_job_defaults_to_auto_publish_and_approve_routes_to_publishing(tmp_path):
+def test_git_job_has_publish_configuration_but_review_waits_for_human(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-b", "main")
@@ -160,7 +160,8 @@ def test_git_job_defaults_to_auto_publish_and_approve_routes_to_publishing(tmp_p
     for status in (JobStatus.PREPARING, JobStatus.RUNNING, JobStatus.VERIFYING, JobStatus.REVIEWING):
         service.transition(job.id, status, reason="test")
     apply_review_verdict(service, job.id, {"verdict": "approve", "summary": "ok", "feedback": []})
-    assert service.get(job.id).status == JobStatus.PUBLISHING
+    assert service.get(job.id).attention_reason == AttentionReason.REVIEW_DONE
+    assert service.store.core_state(job.id).state.value == "review_done"
 
 
 def test_non_git_job_never_publishes(tmp_path):

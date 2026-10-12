@@ -203,7 +203,7 @@ class JobController:
             return 0
 
         candidates = self.service.list(
-            statuses=[JobStatus.QUEUED, JobStatus.RECOVERING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING],
+            statuses=[JobStatus.QUEUED, JobStatus.PLANNING, JobStatus.RECOVERING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING],
             limit=max(capacity * 5, 25),
         )
         started = 0

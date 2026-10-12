@@ -239,9 +239,8 @@ Jobs stored before v2 that have `repository` set still load unchanged.
 New jobs default to `execution.pipeline = "staged"`:
 
 ```
-QUEUED → PREPARING → PLANNING → RUNNING → VERIFYING → REVIEWING
-       → PUBLISHING (git + publish enabled) → READY_FOR_REVIEW
-REVIEWING --request_changes--> QUEUED (full re-implement + re-verify)
+PROVISIONING → PLANNING → PLAN_REVIEW → IMPLEMENTING → CHECKING → REVIEWING
+       → REVIEW_DONE (human decision) → PUSHING → PUSHED → DONE
 ```
 
 Each stage can use its own model. Lookup order is stage, then job execution,
@@ -255,22 +254,24 @@ then session:
     "implement": {"model": "haiku"},
     "review":    {"model": "opus"}
   },
-  "max_review_rounds": 3
+  "checks": {"max_fix_attempts": 2}
 }}
 ```
 
-- **Plan** runs once per job and stores `metadata.plan` (summary, steps,
-  acceptance criteria, validation commands). If the planner fails, the job goes
-  to `needs_human` with `provider_error`.
-- **Implement** is the existing worker. Its prompt includes the plan and the
-  latest reviewer feedback.
-- **Review** is a read-only model session over the diff. It returns
-  `approve` or `request_changes`. A response that can't be parsed counts as
-  `request_changes`. Each round is appended to `metadata.review_rounds`.
-  After `max_review_rounds` (default 3, range 1–20) the job goes to
-  `needs_human` with `review_stalled`.
+- **Plan** writes a versioned `plan.md` with acceptance criteria and checks.
+  Approval records a version; approving a stale version returns a conflict.
+- **Implement** receives the approved document verbatim and any findings that
+  a human explicitly selected for another implementation run.
+- **Review** writes `review.json`, with anchored findings and plan coverage.
+  The host computes readiness from open findings and the actual Checks evidence.
+  Every completed review stops at `REVIEW_DONE`. Invalid output is a blocking
+  report. The old automatic send-back loop and review-round limit are retired;
+  old `review_stalled` jobs remain readable as `REVIEW_DONE`.
 
-The human `READY_FOR_REVIEW` gate stays in place: the pipeline never merges.
+Humans can update finding dispositions, re-prompt with selected findings and
+guidance, recheck after manual edits, push, or discard. A blocking review needs
+an explicit, audited override reason to push; successful checks are still
+mandatory. The pipeline never automatically merges.
 
 ### Dynamic acceptance and validation
 
@@ -360,7 +361,7 @@ unchecked commit.
 ### PR publish
 
 For git workspaces the default is `execution.publish_mode = "auto"`. For
-non-git workspaces it is `"none"`. Once the reviewer approves, the job moves to
+non-git workspaces it is `"none"`. Once a human requests push, the job moves to
 `PUBLISHING`. That stage pushes the review branch to `origin` and opens a
 **draft** PR:
 

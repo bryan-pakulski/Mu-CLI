@@ -71,7 +71,11 @@ def run_stage_in_container(service, job, stage, prompt, *, runner=None, relay_fa
     name = f"mucli-job-{job.id[:12]}-{stage}-{uuid.uuid4().hex[:8]}"
     def alive():
         return not job.worker_id or service.store.assert_lease(job.id, job.worker_id)
-    relay = relay_factory(job, stage, model, policy, art, alive=alive)
+    stage_state = {"plan": "planning", "implement": "implementing", "review": "reviewing"}[stage]
+    def messages():
+        events = service.store.list_events_by_type(job.id, ("stage_message",))
+        return [str(e.payload.get("text") or "") for e in events if e.payload.get("stage") == stage_state][-20:]
+    relay = relay_factory(job, stage, model, policy, art, alive=alive, messages=messages)
     service.store.append_event(job.id, "sandbox_starting", payload={"stage": stage, "container": name, "image": policy.image})
     # Deliberately outside the job artifact folder: mounting that folder would
     # expose another stage's writable outputs and the durable worktree itself.

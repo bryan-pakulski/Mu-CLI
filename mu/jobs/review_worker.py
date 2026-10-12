@@ -1,11 +1,4 @@
-"""Isolated model-review worker for durable job v2 (status REVIEWING).
-
-Mirrors :mod:`mu.jobs.verify_worker`: owns the job lease, heartbeats while
-the reviewer model runs, and applies the verdict through
-:func:`mu.jobs.stages.run_review_stage` (approve -> PUBLISHING/READY,
-request_changes -> QUEUED for a full re-implement + re-verify round,
-round cap -> NEEDS_HUMAN/REVIEW_STALLED).
-"""
+"""Leased sandbox reviewer. Every completed review waits for a human decision."""
 
 from __future__ import annotations
 

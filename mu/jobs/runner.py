@@ -220,7 +220,7 @@ class SessionJobRunner:
         plan = dict((job.metadata or {}).get("plan") or {})
         if approved_text:
             version = (job.metadata or {}).get("plan_approved_version")
-            lines.extend(["", f"Approved plan (v{version}, follow it verbatim):", approved_text.strip()])
+            lines.extend(["", f"Approved plan (v{version}, follow it verbatim):", approved_text])
         elif plan.get("summary") or plan.get("steps"):
             lines.extend(["", "Agreed plan:"])
             if plan.get("summary"):
@@ -238,6 +238,15 @@ class SessionJobRunner:
                 if detail:
                     lines.extend(["", "Latest human response:", detail])
                 break
+
+        reprompt = (job.metadata or {}).get("reprompt") or {}
+        if reprompt:
+            lines.extend(["", "Human-selected review findings to address:"])
+            for finding in reprompt.get("findings") or []:
+                lines.append(f"- [{finding.get('id')}] {finding.get('file') or ''}:{finding.get('line_start') or ''} "
+                             f"{finding.get('title')}: {finding.get('detail')}")
+            if reprompt.get("guidance"):
+                lines.extend(["Human guidance:", reprompt["guidance"]])
 
         lines.extend([
             "",

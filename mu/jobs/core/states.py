@@ -152,7 +152,7 @@ _ACTIVE_LEGACY = {
 }
 _FAILED_LEGACY = {"failed", "timed_out", "budget_exceeded", "environment_error"}
 PLAN_REVIEW_REASONS = frozenset({"approval_required", "plan_review"})
-REVIEW_DONE_REASONS = frozenset({"review_stalled"})
+REVIEW_DONE_REASONS = frozenset({"review_stalled", "review_done"})
 
 
 def legacy_active_state(status: str) -> Optional[JobState]:

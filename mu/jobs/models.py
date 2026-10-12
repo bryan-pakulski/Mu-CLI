@@ -41,7 +41,8 @@ class AttentionReason(str, Enum):
     TEST_FAILURE = "test_failure"
     UNSAFE_ACTION = "unsafe_action"
     WORKER_LOST = "worker_lost"
-    REVIEW_STALLED = "review_stalled"
+    REVIEW_STALLED = "review_stalled"  # old saved jobs only
+    REVIEW_DONE = "review_done"
     NO_VALIDATION = "no_validation"
     PUBLISH_FAILED = "publish_failed"
     PROVIDER_ERROR = "provider_error"
@@ -71,7 +72,7 @@ ALLOWED_TRANSITIONS = {
         JobStatus.ENVIRONMENT_ERROR, JobStatus.CANCELLED, JobStatus.QUEUED,
     },
     JobStatus.NEEDS_HUMAN: {
-        JobStatus.PLANNING, JobStatus.REVIEWING,
+        JobStatus.PLANNING, JobStatus.REVIEWING, JobStatus.PUBLISHING, JobStatus.VERIFYING,
         JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.VERIFYING: {
@@ -85,7 +86,7 @@ ALLOWED_TRANSITIONS = {
     # Requeueing creates a fresh temporary worktree on that branch if more agent
     # work is required.
     JobStatus.READY_FOR_REVIEW: {
-        JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CONFLICTED,
+        JobStatus.VERIFYING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CONFLICTED,
         JobStatus.MERGED, JobStatus.CANCELLED,
     },
     JobStatus.RECOVERING: {
@@ -118,10 +119,10 @@ ALLOWED_TRANSITIONS = {
         JobStatus.READY_FOR_REVIEW, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
         JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
     },
-    JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.TIMED_OUT: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.BUDGET_EXCEEDED: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.ENVIRONMENT_ERROR: {JobStatus.QUEUED, JobStatus.CANCELLED},
+    JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.PLANNING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING, JobStatus.CANCELLED},
+    JobStatus.TIMED_OUT: {JobStatus.QUEUED, JobStatus.PLANNING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING, JobStatus.CANCELLED},
+    JobStatus.BUDGET_EXCEEDED: {JobStatus.QUEUED, JobStatus.PLANNING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING, JobStatus.CANCELLED},
+    JobStatus.ENVIRONMENT_ERROR: {JobStatus.QUEUED, JobStatus.PLANNING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING, JobStatus.CANCELLED},
     JobStatus.CANCELLED: set(),
     JobStatus.MERGED: set(),
 }
@@ -151,12 +152,11 @@ def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
         if key not in execution:
             execution[str(key)] = item
     execution["stages"] = normalize_stages(raw.get("stages"))
-    execution["max_review_rounds"] = normalize_max_review_rounds(raw.get("max_review_rounds"))
+    execution.pop("max_review_rounds", None)  # retired automatic review-loop setting
     return execution
 
 
 STAGES = ("plan", "implement", "review")
-DEFAULT_MAX_REVIEW_ROUNDS = 3
 
 
 def normalize_stages(value: Any) -> Dict[str, Dict[str, str]]:
@@ -185,15 +185,6 @@ def normalize_stages(value: Any) -> Dict[str, Dict[str, str]]:
         if entry["provider"] or entry["model"]:
             stages[key] = entry
     return stages
-
-
-def normalize_max_review_rounds(value: Any) -> int:
-    if value in (None, ""):
-        return DEFAULT_MAX_REVIEW_ROUNDS
-    rounds = int(value)
-    if rounds < 1 or rounds > 20:
-        raise ValueError("max_review_rounds must be between 1 and 20")
-    return rounds
 
 
 def resolve_stage_model(

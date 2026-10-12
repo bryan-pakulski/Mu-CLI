@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from mu.jobs.models import (
-    DEFAULT_MAX_REVIEW_ROUNDS,
     JobSpec,
     JobStatus,
     can_transition,
@@ -46,11 +45,10 @@ def test_new_statuses_can_be_cancelled():
         assert can_transition(status, JobStatus.CANCELLED)
 
 
-def test_max_review_rounds_default_and_bounds():
+def test_retired_review_loop_setting_is_not_carried_into_new_jobs():
     spec = JobSpec("t", execution={"provider": "p", "model": "m"}).normalized()
-    assert spec.execution["max_review_rounds"] == DEFAULT_MAX_REVIEW_ROUNDS == 3
-    with pytest.raises(ValueError, match="max_review_rounds"):
-        JobSpec("t", execution={"max_review_rounds": 0}).normalized()
+    assert "max_review_rounds" not in spec.execution
+    assert "max_review_rounds" not in JobSpec("t", execution={"max_review_rounds": 0}).normalized().execution
 
 
 def test_stage_model_falls_back_stage_then_job_then_session():

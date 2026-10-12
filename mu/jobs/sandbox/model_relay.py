@@ -53,7 +53,7 @@ class RelayDenied(RuntimeError):
 
 
 class ModelRelay:
-    def __init__(self, job, stage, model, policy, artifacts, *, provider_factory=None, alive=None):
+    def __init__(self, job, stage, model, policy, artifacts, *, provider_factory=None, alive=None, messages=None):
         self.job, self.stage, self.model = job, stage, dict(model)
         if getattr(job, "max_cost_usd", None) is not None:
             policy = dataclasses.replace(policy, max_cost_usd=min(policy.max_cost_usd,
@@ -65,6 +65,7 @@ class ModelRelay:
         self.cost = 0.0
         self.lock = threading.Lock()
         self.alive = alive or (lambda: True)
+        self.messages = messages or (lambda: [])
         if provider_factory is None:
             from mucli import init_provider
             provider_factory = init_provider
@@ -87,6 +88,7 @@ class ModelRelay:
             if self.tokens >= self.policy.max_tokens or self.cost >= self.policy.max_cost_usd:
                 raise RelayDenied("stage token/cost budget exhausted")
             messages = messages_from_wire(payload.get("messages", []))
+            messages.extend(Message("user", [MessagePart("text", text=text)]) for text in self.messages())
             from utils.token_estimator import estimate_tokens
             request_tokens = estimate_tokens(json.dumps(payload))
             if request_tokens + self.tokens >= self.policy.max_tokens:

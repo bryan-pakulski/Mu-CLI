@@ -50,7 +50,7 @@ PLAN = json.dumps({
 def test_new_jobs_default_to_staged_pipeline(tmp_path):
     _, job = _job(tmp_path)
     assert stages.is_staged(job)
-    assert job.execution["max_review_rounds"] == 3
+    assert "max_review_rounds" not in job.execution
 
 
 def test_plan_stage_uses_plan_model_and_stores_plan(tmp_path):
@@ -97,51 +97,60 @@ def _reviewing(tmp_path, **execution):
     return service, job
 
 
-def test_review_approve_non_git_goes_ready_and_records_round(tmp_path):
+def test_review_approve_stops_for_human_and_records_report(tmp_path):
     service, job = _reviewing(tmp_path, stages={"review": {"model": "big-reviewer"}})
     gen = FakeGen(json.dumps({"verdict": "approve", "summary": "looks good", "feedback": []}))
     assert stages.run_review_stage(service, job.id, generate_fn=gen) == 0
     current = service.get(job.id)
-    assert current.status == JobStatus.READY_FOR_REVIEW
+    assert current.status == JobStatus.NEEDS_HUMAN
+    assert current.attention_reason == AttentionReason.REVIEW_DONE
+    assert service.store.core_state(job.id).state.value == "review_done"
     assert gen.calls[0]["model"]["model"] == "big-reviewer"
     rounds = current.metadata["review_rounds"]
-    assert len(rounds) == 1 and rounds[0]["verdict"] == "approve" and rounds[0]["round"] == 1
+    assert len(rounds) == 1 and rounds[0]["verdict"] == "ready" and rounds[0]["round"] == 1
 
 
-def test_request_changes_requeues_with_feedback_in_implement_prompt(tmp_path):
+def test_request_changes_waits_until_human_reprompts_selected_findings(tmp_path):
     service, job = _reviewing(tmp_path)
     gen = FakeGen(json.dumps({
         "verdict": "request_changes", "summary": "missing test",
         "feedback": ["add a regression test for widget"],
     }))
-    assert stages.run_review_stage(service, job.id, generate_fn=gen) == 10
+    assert stages.run_review_stage(service, job.id, generate_fn=gen) == 0
     current = service.get(job.id)
-    # Back to QUEUED: the worker re-runs PREPARING -> RUNNING and the job
-    # goes through full verification again before the next review.
+    assert current.status == JobStatus.NEEDS_HUMAN
+    assert current.attention_reason == AttentionReason.REVIEW_DONE
+    assert not any(e.event_type == "review_changes_requested" for e in service.events(job.id))
+    from mu.jobs.core.commands import dispatch
+    dispatch(service, {"type": "reprompt", "job_id": job.id, "finding_ids": ["F-1"]})
+    current = service.get(job.id)
     assert current.status == JobStatus.QUEUED
-    assert any(e.event_type == "review_changes_requested" for e in service.events(job.id))
     runner = SessionJobRunner(service, build_session_fn=None, base_args=None)
     prompt = runner._prompt(current)
     assert "add a regression test for widget" in prompt
 
 
-def test_unparseable_review_is_treated_as_request_changes(tmp_path):
+def test_unparseable_review_is_a_blocking_report(tmp_path):
     service, job = _reviewing(tmp_path)
     gen = FakeGen("I am not JSON")
-    assert stages.run_review_stage(service, job.id, generate_fn=gen) == 10
-    assert service.get(job.id).status == JobStatus.QUEUED
+    assert stages.run_review_stage(service, job.id, generate_fn=gen) == 0
+    assert service.get(job.id).attention_reason == AttentionReason.REVIEW_DONE
+    from mu.jobs.core.artifacts import artifacts_for
+    assert artifacts_for(job).read_json("review.json")["verdict"] == "do_not_merge"
 
 
-def test_exceeding_max_review_rounds_parks_review_stalled(tmp_path):
+def test_old_review_round_limit_never_starts_an_automatic_loop(tmp_path):
     service, job = _reviewing(tmp_path, max_review_rounds=2)
     changes = json.dumps({"verdict": "request_changes", "feedback": ["again"]})
-    assert stages.run_review_stage(service, job.id, generate_fn=FakeGen(changes)) == 10
-    _to(service, job.id, JobStatus.PREPARING, JobStatus.RUNNING, JobStatus.VERIFYING, JobStatus.REVIEWING)
-    assert stages.run_review_stage(service, job.id, generate_fn=FakeGen(changes)) == 25
+    assert stages.run_review_stage(service, job.id, generate_fn=FakeGen(changes)) == 0
+    # Invoking a reviewer again at the human gate does no work.
+    gen = FakeGen(changes)
+    assert stages.run_review_stage(service, job.id, generate_fn=gen) == 0
+    assert not gen.calls
     current = service.get(job.id)
     assert current.status == JobStatus.NEEDS_HUMAN
-    assert current.attention_reason == AttentionReason.REVIEW_STALLED
-    assert len(current.metadata["review_rounds"]) == 2
+    assert current.attention_reason == AttentionReason.REVIEW_DONE
+    assert len(current.metadata["review_rounds"]) == 1
 
 
 def test_controller_dispatches_review_phase():

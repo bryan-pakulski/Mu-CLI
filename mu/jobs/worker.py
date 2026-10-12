@@ -359,7 +359,7 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             payload={"missing_stages": missing},
         )
         return 27
-    if not stages.is_staged(job) or (job.metadata or {}).get("plan"):
+    if not stages.is_staged(job) or ((job.metadata or {}).get("plan") and job.status != JobStatus.PLANNING):
         return None
     service.transition(job_id, JobStatus.PLANNING, reason="planning stage started")
     try:
@@ -396,6 +396,13 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             },
         )
         return 0
+    from .core.plan_ops import plan_store
+    from .stages import merge_metadata
+    version = plan_store(current).latest_version()
+    if version:
+        merge_metadata(service, job_id, plan_approved_version=version)
+        service.store.append_event(job_id, "plan_version_approved", reason="automatic approval configured",
+                                   payload={"version": version, "automatic": True})
     return None
 
 
@@ -428,7 +435,7 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
             # scheduled retry, so a stale next_run_at must not linger.
             service._clear_retry_backoff(job_id)
             job = service.transition(job_id, JobStatus.PREPARING, reason="worker preparing isolated workspace")
-        elif job.status != JobStatus.RECOVERING:
+        elif job.status not in (JobStatus.RECOVERING, JobStatus.PLANNING):
             return 0
 
         execution = dict(job.execution or {})
@@ -466,7 +473,7 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                 return 3
             job = service.get(job_id)
 
-        if job.status == JobStatus.PREPARING:
+        if job.status in (JobStatus.PREPARING, JobStatus.PLANNING):
             plan_rc = _maybe_run_plan_stage(service, job_id)
             if plan_rc is not None:
                 _refresh_receipt(service, job_id)

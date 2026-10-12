@@ -62,6 +62,21 @@ class JobStore:
         return conn
 
     @contextmanager
+    def command_lock(self, job_id: str):
+        """Serialize compound UI commands across GUI and TUI processes."""
+        import fcntl
+        from .verification import ensure_safe_job_id
+        ensure_safe_job_id(job_id)
+        directory = os.path.join(os.path.dirname(self.path), ".command-locks")
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, job_id + ".lock"), "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
         conn = self._connect()
         try:

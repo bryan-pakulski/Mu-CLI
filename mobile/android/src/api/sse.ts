@@ -16,6 +16,8 @@ export interface SSESubscription {
 
 export interface SSEOptions {
   sessionName?: string | null;
+  path?: string;
+  decode?: (value: unknown) => { kind: string; [key: string]: unknown } | null;
   reconnectDelayMs?: number;
 }
 
@@ -48,7 +50,7 @@ export function subscribeToEvents(
     // the user edits connection settings.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const connection = require('../store/connection').useConnectionStore.getState();
-    let url = `${connection.baseUrl}/api/events`;
+    let url = `${connection.baseUrl}${options.path || "/api/events"}`;
     if (sessionName) url += `?session_name=${encodeURIComponent(sessionName)}`;
     return url;
   };
@@ -114,6 +116,7 @@ export function subscribeToEvents(
         handlers.onError?.(new Error(`SSE: malformed JSON payload: ${String(event.data).slice(0, 120)}`));
         return;
       }
+      if (options.decode) parsed = options.decode(parsed);
       if (!parsed || typeof parsed !== 'object' || typeof (parsed as { kind?: unknown }).kind !== 'string') {
         handlers.onError?.(new Error('SSE: event missing string "kind" field'));
         return;

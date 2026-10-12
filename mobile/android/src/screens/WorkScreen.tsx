@@ -17,10 +17,9 @@ import {
   compactStageModels,
   JOB_STAGE_NAMES,
   type EngineeringJob,
-  type JobBoardSection,
-  type JobBoardResponse,
   type JobStageName,
 } from '../api/jobs';
+import { jobCoreApi, subscribeToJobChanges, type HomeVM, type JobSummary } from '../api/jobCore';
 import { ModernBottomSheet } from '../components/ModernBottomSheet';
 import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
 import { JiraSheet } from '../components/JiraSheet';
@@ -31,13 +30,10 @@ import { useTheme } from '../theme/ThemeContext';
 
 export type WorkScreenProps = NativeStackScreenProps<RootStackParamList, 'Work'>;
 
-const BOARD_ORDER: Array<{ key: JobBoardSection; label: string }> = [
+const BOARD_ORDER: Array<{ key: 'needs_you' | 'running' | 'jobs'; label: string }> = [
   { key: 'needs_you', label: 'Needs you' },
-  { key: 'running', label: 'Running' },
-  { key: 'queued', label: 'Queued' },
-  { key: 'ready', label: 'Ready for review' },
-  { key: 'failed', label: 'Failed' },
-  { key: 'done', label: 'Done' },
+  { key: 'running', label: 'Running now' },
+  { key: 'jobs', label: 'Jobs' },
 ];
 
 function statusLabel(value: string): string {
@@ -56,7 +52,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const activeProvider = useConnectionStore(state => state.activeProvider);
   const activeModel = useConnectionStore(state => state.activeModel);
-  const [board, setBoard] = useState<JobBoardResponse | null>(null);
+  const [board, setBoard] = useState<HomeVM | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -79,7 +75,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const next = await jobsApi.board();
+      const next = await jobCoreApi.home();
       setBoard(next);
       setError('');
     } catch (err) {
@@ -92,12 +88,12 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => { void load(true); }, 5000);
-    return () => clearInterval(timer);
+    const stream = subscribeToJobChanges(change => { if (change.scope === 'home') void load(true); }, () => { void load(true); });
+    return () => stream.close();
   }, [load]);
 
   const total = useMemo(
-    () => Object.values(board?.counts || {}).reduce((sum, count) => sum + Number(count || 0), 0),
+    () => board?.counts.total || 0,
     [board],
   );
 
@@ -188,7 +184,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
         ) : (
           <View style={styles.sections}>
             {BOARD_ORDER.map(section => {
-              const jobs = board?.sections?.[section.key] || [];
+              const jobs = board?.[section.key] || [];
               if (!jobs.length) return null;
               return (
                 <View key={section.key} style={styles.section}>
@@ -248,20 +244,9 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
   );
 }
 
-function JobRow({ job, onPress }: { job: EngineeringJob; onPress: () => void }) {
+function JobRow({ job, onPress }: { job: JobSummary; onPress: () => void }) {
   const { colors } = useTheme();
-  const statusColor = job.status === 'ready_for_review'
-    ? colors.success
-    : job.status === 'needs_human' || job.status === 'conflicted'
-      ? colors.warning
-      : ['failed', 'environment_error', 'timed_out', 'budget_exceeded'].includes(job.status)
-        ? colors.error
-        : ['running', 'preparing', 'verifying', 'recovering'].includes(job.status)
-          ? colors.accent
-          : colors.textDim;
-  const detail = job.needs_attention
-    ? (job.attention_detail || job.attention_reason)
-    : (job.branch || job.repository || 'Waiting for workspace');
+  const detail = job.attention_detail || job.verdict || job.repository;
 
   return (
     <TouchableOpacity
@@ -272,9 +257,11 @@ function JobRow({ job, onPress }: { job: EngineeringJob; onPress: () => void }) 
       <View style={styles.jobCopy}>
         <View style={styles.jobTitleRow}>
           <Text variant="sm" style={styles.jobTitle} numberOfLines={1}>{job.title}</Text>
-          <Text variant="xs" style={[styles.jobStatus, { color: statusColor }]}>{statusLabel(job.status)}</Text>
+          <Text variant="xs" style={[styles.jobStatus, { color: colors.textDim }]}>{statusLabel(job.state)}</Text>
         </View>
+        <Text variant="xs" dim>{job.mini}</Text>
         <Text variant="xs" dim numberOfLines={1}>{detail}</Text>
+        <Text variant="xs" style={{color:colors.accent}}>{job.actions.find(a => a.primary)?.label || "Open job"}</Text>
       </View>
       <View style={styles.jobTrailing}>
         <Text variant="xs" dim>${Number(job.cost_usd || 0).toFixed(2)}</Text>

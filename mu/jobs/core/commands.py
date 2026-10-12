@@ -83,10 +83,45 @@ def _review_service(service):
 
 
 def dispatch(service, cmd: Command | Dict[str, Any], *, bus: Optional[ChangeBus] = None) -> Result:
+    if isinstance(cmd, dict) and cmd.get("type") == "create":
+        args = cmd.get("args")
+        if not isinstance(args, dict):
+            raise CommandError("create requires job fields in args")
+        job = service.create_from_payload(args)
+        service.store.append_event(job.id, "command", reason="create", payload={"command": "create"})
+        (bus or default_bus()).emit_job(job.id, ["state", "pipeline"])
+        return Result(True, "create", job.id, ["state", "pipeline"], {"job": job.to_dict()})
     if isinstance(cmd, dict):
         cmd = Command.from_payload(cmd)
     with service.store.command_lock(cmd.job_id):
         return _dispatch_locked(service, cmd, bus=bus)
+
+
+def ensure_controller_daemon():
+    from ..host import ensure_controller_daemon as ensure
+    return ensure()
+
+
+def import_jira(service, *, keys, jql, defaults):
+    from mu.integrations.jira import JiraClient, import_issues
+    from mu.integrations.jira_settings import resolve_config
+    return import_issues(service, JiraClient(resolve_config()), keys=keys, jql=jql, defaults=defaults)
+
+
+def respond(service, job_id, answer):
+    """Compatibility parsing for terminal human responses; commands own writes."""
+    job = service.get(job_id)
+    core = service.store.core_state(job_id)
+    if core.state == JobState.PLAN_REVIEW:
+        decision, _, detail = answer.partition(" ")
+        if decision in {"approve", "yes"}:
+            from .plan_ops import plan_store
+            return dispatch(service, {"type": "approvePlan", "job_id": job_id,
+                                      "args": {"version": plan_store(job).latest_version(), "detail": detail}})
+        if decision in {"replan", "reject"}:
+            return dispatch(service, {"type": "rejectPlan", "job_id": job_id, "args": {"feedback": detail}})
+        raise CommandError("Use approve or replan <feedback> at the plan gate")
+    return dispatch(service, {"type": "resume", "job_id": job_id, "args": {"guidance": answer}})
 
 
 def _dispatch_locked(service, cmd: Command, *, bus=None) -> Result:
@@ -297,7 +332,7 @@ def _delete(service, job, facts, args):
     from ..management import JobManagementService
 
     data = JobManagementService(service).delete(job.id, force=True)
-    return ["state"], {"deleted": bool(data.get("deleted"))}
+    return ["state"], data
 
 
 _HANDLERS = {

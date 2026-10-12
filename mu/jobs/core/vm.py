@@ -17,6 +17,44 @@ from .states import CoreState, JobState, WAITING, from_legacy
 PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs")
 
 
+def get_default_job_service():
+    from ..service import get_default_job_service as get_service
+    return get_service()
+
+
+def resolve_job(service, token):
+    try:
+        return service.get(token)
+    except KeyError:
+        matches = [j for j in service.list(limit=1000) if j.id.startswith(token)] if token else []
+        if len(matches) > 1:
+            raise ValueError(f"job id prefix {token!r} is ambiguous")
+        if not matches:
+            raise KeyError(token)
+        return matches[0]
+
+
+def receipt_vm(service, job_id):
+    from ..receipt import JobReceiptBuilder
+    return JobReceiptBuilder(service).build(job_id)
+
+
+def diff_vm(service, job_id):
+    from ..review import build_job_diff
+    return build_job_diff(service, job_id).to_dict()
+
+
+def session_defaults(*, workspace, provider, model, variables):
+    from ..job_settings import missing_stages
+    stages = {s: {"provider": provider, "model": model} for s in missing_stages({})} if provider and model else {}
+    return {"workspace_root": workspace, "execution": {
+        **({"stages": stages} if stages else {}),
+        "agent_mode": variables.get("agent_mode", "default"),
+        "session_type": variables.get("session_type", "workspace"),
+        "auto_approve_writes": bool(variables.get("yolo", False)),
+    }}
+
+
 def _history(service, job_id: str) -> List[HistoryEntry]:
     """Core-state history derived from legacy ``status_changed`` events."""
     out: List[HistoryEntry] = []

@@ -233,3 +233,25 @@ def _job_imports(path: pathlib.Path):
 def test_jobs_v2_router_imports_only_core_ui_modules():
     bad = [m for m in _job_imports(ROOT / "mu/gui/routers/jobs_v2.py") if m not in ALLOWED_CORE]
     assert bad == [], f"jobs_v2 must only import core vm/commands/changes/actions, got {bad}"
+
+
+def test_tui_imports_only_core_ui_modules():
+    bad = [m for m in _job_imports(ROOT / "mu/commands/job.py") if m not in ALLOWED_CORE]
+    assert bad == [], bad
+
+
+def test_tui_show_and_approve_use_shared_actions(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from mu.commands import job as terminal
+    service = _service(tmp_path)
+    job = _at_plan_review(service, tmp_path)
+    monkeypatch.setattr(terminal, "get_default_job_service", lambda: service)
+    monkeypatch.setattr(terminal, "ensure_controller_daemon", lambda: None)
+    shown = terminal.job_cmd(SimpleNamespace(ui=None), f"show {job.id}", allow_prompt=False)
+    assert shown.data["state"] == "plan_review"
+    assert len(shown.data["pipeline"]) == 6
+    assert next(a for a in shown.data["actions"] if a["id"] == "approvePlan")["enabled"]
+    version = shown.data["plan"]["version"]
+    result = terminal.job_cmd(SimpleNamespace(ui=None), f"approve {job.id} {version}", allow_prompt=False)
+    assert result.ok
+    assert service.get(job.id).metadata["plan_approved_version"] == version

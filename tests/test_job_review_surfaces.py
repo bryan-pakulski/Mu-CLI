@@ -93,11 +93,15 @@ def test_durable_human_responses_are_consumed_once_by_workers():
     assert '"interaction_response"' in review
 
 
-def test_tui_covers_board_receipt_diff_attention_and_review_loop():
+def test_tui_covers_core_views_receipt_diff_and_human_actions():
     tui = TUI_JOB.read_text(encoding="utf-8")
 
-    assert "build_job_board" in tui
-    assert "BOARD_ORDER" in tui
+    assert "vm.home_vm" in tui
+    assert "vm.job_vm" in tui
+    assert "commands.dispatch" in tui
+    assert '("needs_you", "Needs you")' in tui
+    assert '("running", "Running now")' in tui
+    assert '("jobs", "Jobs")' in tui
     assert "_show_receipt" in tui
     assert "_show_diff" in tui
     assert "_respond_job" in tui
@@ -124,19 +128,18 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     assert 'name="briefcase-outline"' in header
     assert 'label="Engineering work"' in header
 
-    assert "jobsApi.board()" in work
+    assert "jobCoreApi.home()" in work
     assert "jobsApi.create(input)" in work
     assert "session_name" in work
     assert "BOARD_ORDER" in work
 
-    for action in ("jobsApi.receipt", "jobsApi.diff", "jobsApi.respond", "jobsApi.requestChanges", "jobsApi.continue", "jobsApi.discard"):
-        assert action in detail
-    assert "verification_required" in detail
-    assert "Ready for review" in detail
-
-    for method in ("board:", "receipt:", "diff:", "respond:", "requestChanges:", "continue:", "discard:"):
-        assert method in api
-    assert "verification_required" in api
+    assert "jobCoreApi.command" in detail
+    assert "job.actions" in detail
+    assert "subscribeToJobChanges" in detail
+    assert "pagingEnabled" in detail
+    assert "Plan Markdown" in detail
+    for tab in ("Plan", "Session", "Diff", "Review", "Checks"):
+        assert tab in detail
 
 
 def test_mobile_work_screens_only_use_published_theme_tokens():

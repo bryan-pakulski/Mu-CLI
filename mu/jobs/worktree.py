@@ -86,7 +86,7 @@ class JobWorktreeManager:
         check: bool = True,
         stage: str = "git",
     ) -> subprocess.CompletedProcess:
-        command = ["git", "-C", repo, *args]
+        command = ["git", "-c", "core.hooksPath=/dev/null", "-C", repo, *args]
         try:
             result = subprocess.run(
                 command,
@@ -528,7 +528,7 @@ class JobWorktreeManager:
         env.setdefault("GIT_COMMITTER_NAME", "MuCLI")
         env.setdefault("GIT_COMMITTER_EMAIL", "mucli@localhost")
         command = [
-            "git", "-C", worktree, "commit", "--no-gpg-sign",
+            "git", "-c", "core.hooksPath=/dev/null", "-C", worktree, "commit", "--no-gpg-sign",
             "-m", f"mu checkpoint: {label}",
         ]
         result = subprocess.run(

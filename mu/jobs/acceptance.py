@@ -203,68 +203,9 @@ class AcceptanceReviewer:
     # ------------------------------------------------------------ default generator
 
     def _agent_generate(self, job: Job, prompt: str, workspace: str) -> tuple[str, Dict[str, Any]]:
-        import copy
-        from types import SimpleNamespace
-
-        import mucli as mucli_entry
-
-        from .ui import JobUI
-        from .worker import _base_args
-
-        execution = dict(job.execution or {})
-        args = copy.copy(_base_args(job))
-        args.session = f"job-{job.id[:20]}-review"
-        args.workspace = [workspace] if workspace else []
-        args.yolo = False
-        args.system = (
-            "You are an independent acceptance reviewer for an engineering ticket. "
-            "Read-only. Never modify files. Answer with the requested JSON only."
-        )
-        ui = JobUI(self.service, job.id)
-        session = mucli_entry.build_session(args, ui, allow_prompt=False)
-        session.ui = ui
-        session.session_manager.ui = ui
-        session.variables["provider_recovery_policy"] = "auto"
-        session.variables["internal_session_kind"] = "durable_job"
-        session.variables["durable_job_id"] = job.id
-        session.variables["agent_mode"] = "default"
-        session.variables["yolo"] = False
-        session.variables["plan_mode"] = True  # belt: write-side tools blocked
-        session.variables["max_iterations"] = int(execution.get("acceptance_review_max_iterations", 12) or 12)
-        try:
-            from mu.tools.descriptors import TOOLS
-
-            session.disabled_tools = sorted(
-                {t.name for t in TOOLS} - REVIEWER_TOOL_ALLOWLIST
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        before = dict(getattr(session.session_manager, "token_counts", {}) or {})
-        try:
-            result = session.send_message(prompt) or {}
-        finally:
-            try:
-                session.shutdown()
-            except Exception:  # noqa: BLE001
-                pass
-        after = dict(getattr(session.session_manager, "token_counts", {}) or {})
-        text = ""
-        if isinstance(result, dict):
-            text = str(result.get("assistant_text") or result.get("text") or "")
-        if not text:
-            # Fall back to the last assistant text part in history.
-            for message in reversed(getattr(session.session_manager, "history", []) or []):
-                if message.get("role") == "assistant":
-                    parts = [p.get("text", "") for p in message.get("parts", []) if p.get("type") == "text"]
-                    if parts:
-                        text = "\n".join(parts)
-                        break
-        cost = float(after.get("total_cost", 0.0) or 0.0) - float(before.get("total_cost", 0.0) or 0.0)
-        return text, {
-            "provider": str(execution.get("provider") or ""),
-            "model": str(execution.get("model") or ""),
-            "cost_usd": max(0.0, cost),
-        }
+        from .models import resolve_stage_model
+        from .sandbox.runner import generate
+        return generate(self.service)(job, prompt, workspace, resolve_stage_model(job.execution, "review"))
 
     # ------------------------------------------------------------ public API
 

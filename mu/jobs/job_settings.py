@@ -48,7 +48,8 @@ def load_settings() -> Dict[str, Any]:
         cleaned = _clean_stage((data.get("stage_models") or {}).get(stage))
         if cleaned:
             stages[stage] = cleaned
-    return {"stage_models": stages, "plan_approval": bool(data.get("plan_approval", True))}
+    return {"stage_models": stages, "plan_approval": bool(data.get("plan_approval", True)),
+            "sandbox": dict(data.get("sandbox") or {}), "checks": dict(data.get("checks") or {})}
 
 
 def save_settings(update: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,6 +75,14 @@ def save_settings(update: Dict[str, Any]) -> Dict[str, Any]:
         current["stage_models"] = stages
     if "plan_approval" in update:
         current["plan_approval"] = bool(update.get("plan_approval"))
+    for key in ("sandbox", "checks"):
+        if key in update:
+            if not isinstance(update[key], dict):
+                raise ValueError(f"{key} must be an object")
+            current[key] = {**current.get(key, {}), **update[key]}
+    from .sandbox.policy import SandboxPolicy
+    for stage in (*STAGES, "checks"):
+        SandboxPolicy.for_stage(stage, current)
     path = settings_path()
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)

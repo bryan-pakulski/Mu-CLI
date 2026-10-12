@@ -15,6 +15,8 @@ import threading
 from types import SimpleNamespace
 from typing import Optional
 
+from mu.ui.exceptions import InteractionRequired
+
 from .models import AttentionReason, JobStatus
 from .receipt import JobReceiptBuilder
 from .runner import JobRunOutcome, SessionJobRunner
@@ -77,7 +79,17 @@ def _heartbeat(
 
 def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, label: str) -> str | None:
     try:
-        return manager.checkpoint(service.get(job_id), label=label)
+        current = service.get(job_id)
+        if current.worktree:
+            from .sandbox.runner import _guard
+            from .sandbox.policy import SandboxPolicy
+            _guard(current, SandboxPolicy.for_stage("implement"))
+        checkpoint = manager.checkpoint(current, label=label)
+        if checkpoint and current.base_sha:
+            from .core.artifacts import artifacts_for
+            patch = manager._run(current.worktree, "diff", "--no-ext-diff", f"{current.base_sha}..{checkpoint}")
+            artifacts_for(current).ensure().write_text("diff.patch", patch.stdout or "")
+        return checkpoint
     except Exception as exc:
         payload = {"label": label}
         if isinstance(exc, WorktreeError):
@@ -187,6 +199,12 @@ def _apply_outcome(
 
     if outcome.kind == "completed":
         checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-implementation")
+        if not checkpoint:
+            owned = service.store.finish_attempt_owned(
+                attempt_id, worker_id=worker_id, status="failed", error="host checkpoint or path guard failed",
+                cost_usd=outcome.cost_usd, cost_add=outcome.cost_usd, target_status=JobStatus.FAILED,
+                transition_reason="host checkpoint or path guard failed")
+            return 1 if owned else 5
         owned = service.store.finish_attempt_owned(
             attempt_id,
             worker_id=worker_id,
@@ -349,6 +367,10 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             service, job_id, generate_fn=generate_fn or stages.default_generate(service)
         )
     except Exception as exc:  # noqa: BLE001 - planner failure parks on a human
+        from .sandbox.runner import SandboxUnavailable
+        if isinstance(exc, SandboxUnavailable):
+            service.transition(job_id, JobStatus.FAILED, reason=str(exc), payload={"stage": "provisioning"})
+            return 3
         service.require_human(
             job_id,
             AttentionReason.PROVIDER_ERROR,
@@ -464,13 +486,9 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
         )
         job = service.transition(job_id, JobStatus.RUNNING, reason="isolated worker attempt started")
 
-        import mucli as mucli_entry
+        from .sandbox.runner import SandboxJobRunner
 
-        runner = SessionJobRunner(
-            service,
-            build_session_fn=mucli_entry.build_session,
-            base_args=_base_args(job),
-        )
+        runner = SandboxJobRunner(service)
         outcome = runner.run(job, attempt)
         if lease_lost.is_set():
             # Heartbeat failed mid-run: a replacement worker may own the
@@ -550,7 +568,11 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
             # this branch nothing was recorded and the job sat in PLANNING
             # forever after the worker exited.
             try:
-                service.require_human(
+                if not isinstance(exc, InteractionRequired):
+                    service.transition(job_id, JobStatus.FAILED, reason="worker crashed before an attempt started",
+                                       payload={"error": str(exc)[:500], "exception_type": type(exc).__name__})
+                else:
+                    service.require_human(
                     job_id,
                     AttentionReason.PROVIDER_ERROR,
                     f"Worker stopped before implementation: {type(exc).__name__}: {str(exc)[:400]}",
@@ -559,7 +581,7 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                         "exception_type": type(exc).__name__,
                         "process_id": os.getpid(),
                     },
-                )
+                    )
             except Exception:
                 try:
                     service.store.append_event(

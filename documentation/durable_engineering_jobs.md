@@ -307,6 +307,35 @@ issue text with ADF converted to plain text, and acceptance criteria come from a
 "Acceptance criteria" heading. `metadata.jira` holds the key, URL, status and
 type. An issue that already has a live (non-terminal) job is skipped.
 
+### Required job sandbox
+
+Plan, implementation and review now run in disposable containers from one
+shared `mucli-job-runtime:latest` image. Build it from the repository root:
+
+```bash
+python3 -m mu.jobs.sandbox.build
+```
+
+The builder copies only runtime source and the public pricing registry into its
+build context. Host sessions, credentials, `.git`, and reference archives are
+excluded. Jobs fail with an actionable error if Docker or the image is missing;
+there is no host agent fallback.
+
+The container runs as the host UID/GID with dropped capabilities, a read-only
+root filesystem, and `--network none`. A stage-scoped, authenticated streaming
+model relay is exposed through a Unix socket; provider credentials stay on the
+host. Plan and review mount the workspace read-only. Implementation may edit
+the worktree, while the host validates paths and creates the final commit.
+Existing tool approvals and the read-only plan gate remain enforced.
+
+Optional package registry access uses the existing domain/IP-checking egress
+proxy through a second Unix socket. Configure `sandbox.egress_extra` in
+`$MUCLI_HOME/jobs/settings.json`; it applies only to implementation and checks.
+Direct container networking remains disabled. `sandbox.cpu`, `memory`,
+`stage_timeout_s`, `max_tokens`, and `max_cost_usd` control stage limits. Usage
+is recorded in the job's `costs.jsonl`; a request already sent to a provider can
+still incur charges when its stream is interrupted at a budget limit.
+
 ### PR publish
 
 For git workspaces the default is `execution.publish_mode = "auto"`. For

@@ -121,3 +121,31 @@ def default_bus() -> ChangeBus:
         if _DEFAULT is None:
             _DEFAULT = ChangeBus()
         return _DEFAULT
+
+
+def collect_durable_changes(service, bus: ChangeBus, cursor: int) -> int:
+    """Bridge worker subprocess events into the GUI's coalescing bus."""
+    for event in service.store.events_since(cursor):
+        cursor = event.id
+        kind = event.event_type
+        parts = {"costs"}  # costs includes the durable audit trail
+        if kind in ("job_created", "status_changed", "worker_lease_acquired", "worker_lease_released"):
+            parts.update(("state", "pipeline", "session"))
+        if kind.startswith("plan_"):
+            parts.add("plan")
+        if kind.startswith("review_"):
+            parts.update(("review", "state", "pipeline"))
+        if kind.startswith(("checks_", "verification_")):
+            parts.add("checks")
+        if kind.startswith(("sandbox_", "stage_", "agent_", "tool_", "runtime_")):
+            parts.add("session")
+        if kind == "checkpoint_created":
+            parts.add("diff")
+        if kind == "command":
+            command = event.payload.get("command")
+            if command == "savePlanDraft":
+                parts.add("plan")
+            if command == "markFindings":
+                parts.update(("review", "state"))
+        bus.emit_job(event.job_id, parts)
+    return cursor

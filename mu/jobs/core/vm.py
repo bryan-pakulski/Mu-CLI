@@ -21,7 +21,7 @@ def _history(service, job_id: str) -> List[HistoryEntry]:
     """Core-state history derived from legacy ``status_changed`` events."""
     out: List[HistoryEntry] = []
     try:
-        events = service.events(job_id, limit=500)
+        events = service.store.list_events_by_type(job_id, ("status_changed", "job_created"))
     except Exception:  # noqa: BLE001 - history is cosmetic (timings)
         return out
     for ev in events:
@@ -82,8 +82,10 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
 
 
 def _summary(service, job, *, now: float) -> Dict[str, Any]:
+    from ..models import resolve_stage_model
     core = service.store.core_state(job.id)
-    steps = derive_pipeline(core, _history(service, job.id), now=now,
+    art = artifacts_for(job)
+    steps = derive_pipeline(core, _history(service, job.id), now=now, costs=art.stage_costs(),
                             plan_approval=bool((job.execution or {}).get("plan_approval", True)))
     review = _review(job) or {}
     meta = dict(job.metadata or {})
@@ -104,11 +106,13 @@ def _summary(service, job, *, now: float) -> Dict[str, Any]:
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "repository": job.repository,
+        "stage_models": {s: resolve_stage_model(job.execution, s) for s in ("plan", "implement", "review")},
+        "actions": [a.to_dict() for a in available_actions(facts_for(service, job, core))],
     }
 
 
 def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
-           now: Optional[float] = None) -> Dict[str, Any]:
+           now: Optional[float] = None, plan_version: Optional[int] = None) -> Dict[str, Any]:
     """Full job page VM, or only the requested ``parts`` (change-stream refetch)."""
     job = service.get(job_id)
     now = time.time() if now is None else now
@@ -126,7 +130,7 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         try:
             from .plan_ops import plan_view
 
-            out["plan"] = plan_view(job)
+            out["plan"] = plan_view(job, plan_version)
         except (OSError, ValueError) as exc:
             out["plan"] = {"error": str(exc)}
     if "review" in wanted:
@@ -142,18 +146,24 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
     if "costs" in wanted:
         art = artifacts_for(job)
         out["costs"] = {"total_usd": float(job.cost_usd or 0.0),
-                        "by_stage": art.stage_costs() if art.exists() else {}}
+                        "by_stage": art.stage_costs() if art.exists() else {},
+                        "events": [e.to_dict() for e in service.store.recent_events(job.id)]}
     if "diff" in wanted:
         art = artifacts_for(job)
         out["diff"] = {"patch": (art.read_text("diff.patch") if art.exists() else None)}
     if "session" in wanted:
-        out["session"] = {"session_name": job.session_name, "live": bool(job.worker_id)}
+        art = artifacts_for(job)
+        stages = {s: art.read_json(f"logs/{s}-transcript.json", []) or [] for s in ("plan", "implement", "review")}
+        events = [e.to_dict() for e in service.store.recent_events(job.id) if e.event_type in
+                  ("sandbox_event", "stage_message", "sandbox_starting", "sandbox_stopped", "runtime_error")]
+        out["session"] = {"session_name": job.session_name, "live": bool(job.worker_id),
+                          "stages": stages, "events": events}
     return out
 
 
 def jobs_vm(service, *, limit: int = 200, now: Optional[float] = None) -> Dict[str, Any]:
     now = time.time() if now is None else now
-    jobs = service.list(limit=limit) if hasattr(service, "list") else service.store.list_jobs(limit=limit)
+    jobs = service.list_unarchived(limit=limit)
     rows = [_summary(service, job, now=now) for job in jobs]
     return {"count": len(rows), "jobs": rows}
 

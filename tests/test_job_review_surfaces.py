@@ -45,14 +45,15 @@ def test_gui_exposes_first_class_engineering_work_surface():
     assert ".work-action-panel" in css
     assert "clip-path" not in css
 
-    assert "'/api/jobs/board'" in script
-    assert "/receipt" in script
-    assert "/diff" in script
-    assert "/respond" in script
-    assert "/request-changes" in script
-    assert "/continue" in script
-    assert "/discard" in script
-    assert "READY TO REVIEW" not in script  # readiness comes from job state/evidence, not UI invention
+    view = (WORK_JS.parent / "work/view.js").read_text()
+    assert "'/api/jobs/vm/home'" in view
+    assert "/api/jobs/vm/job/" in view
+    assert "'/api/jobs/cmd'" in view
+    assert "'/api/jobs/events'" in view
+    for tab in ("plan", "session", "diff", "review", "checks", "costs"):
+        assert tab in view
+    assert "job.actions" in view
+    assert "READY TO REVIEW" not in script
 
 
 def test_shared_job_api_exposes_board_evidence_and_review_actions():

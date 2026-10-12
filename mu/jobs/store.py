@@ -538,6 +538,31 @@ class JobStore:
             raise KeyError(event_id)
         return self._event_from_row(row)
 
+    def event_cursor(self) -> int:
+        conn = self._connect()
+        try:
+            return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM job_events").fetchone()[0])
+        finally:
+            conn.close()
+
+    def events_since(self, after_id: int, *, limit: int = 1000) -> List[JobEvent]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM job_events WHERE id > ? ORDER BY id LIMIT ?",
+                                (after_id, max(1, min(limit, 5000)))).fetchall()
+        finally:
+            conn.close()
+        return [self._event_from_row(row) for row in rows]
+
+    def recent_events(self, job_id: str, *, limit: int = 500) -> List[JobEvent]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM job_events WHERE job_id = ? ORDER BY id DESC LIMIT ?",
+                                (job_id, max(1, min(limit, 5000)))).fetchall()
+        finally:
+            conn.close()
+        return [self._event_from_row(row) for row in reversed(rows)]
+
     def list_events(self, job_id: str, *, after_id: int = 0, limit: int = 500) -> List[JobEvent]:
         conn = self._connect()
         try:

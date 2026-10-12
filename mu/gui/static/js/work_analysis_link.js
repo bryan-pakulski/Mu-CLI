@@ -8,6 +8,8 @@
     let costInFlight = false;
 
     function selectedJobId() {
+        const current = document.getElementById('work-detail')?.dataset.jobId;
+        if (current) return current;
         return String(document.querySelector('.work-job-card.is-selected[data-job-id]')?.dataset.jobId || '');
     }
 

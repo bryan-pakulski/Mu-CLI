@@ -121,9 +121,9 @@ def test_jira_import_requires_workspace_and_uses_top_level_session(tmp_path, mon
         assert "workspace" in missing.json()["detail"].lower()
 
 
-@pytest.mark.parametrize("needle", ["userIsInspectingDetail", "detailSignature", "markDetailStale"])
+@pytest.mark.parametrize("needle", ["editor?.isDirty()", "signatures.get(part) === signature", "refreshParts(change.parts)"])
 def test_work_page_background_refresh_preserves_drilldown(needle):
     from pathlib import Path
 
-    js = (Path(__file__).resolve().parents[1] / "mu/gui/static/js/work.js").read_text(encoding="utf-8")
+    js = (Path(__file__).resolve().parents[1] / "mu/gui/static/js/work/view.js").read_text(encoding="utf-8")
     assert needle in js

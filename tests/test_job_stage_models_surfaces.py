@@ -33,8 +33,9 @@ def test_submit_sends_only_filled_stages():
 
 
 def test_job_detail_renders_stage_rows():
-    assert "function stageRows(execution)" in JS
-    assert "${stageRows(execution)}" in JS
+    view = (ROOT / "mu/gui/static/js/work/view.js").read_text()
+    assert "job.stage_models" in view
+    assert "muOpenStageModels" in view
 
 
 def test_stage_inputs_have_focus_ring_and_narrow_layout():

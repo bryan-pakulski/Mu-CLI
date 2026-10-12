@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from mu.jobs.core import vm
-from mu.jobs.core.changes import default_bus
+from mu.jobs.core.changes import collect_durable_changes, default_bus
 from mu.jobs.core.commands import CommandError, CommandRejected, dispatch
 
 router = APIRouter()
@@ -35,26 +36,26 @@ def _bus(request: Request):
 
 
 @router.get("/vm/home")
-async def home(request: Request, limit: int = Query(200, ge=1, le=1000)):
+def home(request: Request, limit: int = Query(200, ge=1, le=1000)):
     return vm.home_vm(_service(request), limit=limit)
 
 
 @router.get("/vm/jobs")
-async def jobs(request: Request, limit: int = Query(200, ge=1, le=1000)):
+def jobs(request: Request, limit: int = Query(200, ge=1, le=1000)):
     return vm.jobs_vm(_service(request), limit=limit)
 
 
 @router.get("/vm/job/{job_id}")
-async def job(job_id: str, request: Request, parts: Optional[str] = None):
+def job(job_id: str, request: Request, parts: Optional[str] = None, plan_version: Optional[int] = None):
     wanted = [p for p in (parts or "").split(",") if p.strip()] or None
     try:
-        return vm.job_vm(_service(request), job_id, parts=wanted)
+        return vm.job_vm(_service(request), job_id, parts=wanted, plan_version=plan_version)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
 
 
 @router.post("/cmd")
-async def command(request: Request, payload: Dict[str, Any]):
+def command(request: Request, payload: Dict[str, Any]):
     service = _service(request)
     try:
         result = dispatch(service, payload, bus=_bus(request))
@@ -76,20 +77,26 @@ async def events(request: Request, after: int = Query(0, ge=0), once: bool = Fal
     bus = _bus(request)
 
     async def gen():
-        seq = after or bus.seq
+        service = _service(request)
+        cursor = await asyncio.to_thread(service.store.event_cursor)
+        seq = min(after or bus.seq, bus.seq)
         yield f"event: hello\ndata: {json.dumps({'seq': seq})}\n\n"
+        heartbeat = time.monotonic()
         while True:
             if await request.is_disconnected():
                 return
-            changes = await asyncio.to_thread(bus.wait, seq, 15.0)
+            cursor = await asyncio.to_thread(collect_durable_changes, service, bus, cursor)
+            changes = await asyncio.to_thread(bus.wait, seq, .25)
             if not changes:
-                yield ": keepalive\n\n"
+                if time.monotonic() - heartbeat >= 15:
+                    yield ": keepalive\n\n"
+                    heartbeat = time.monotonic()
                 if once:
                     return
                 continue
             for change in changes:
                 seq = max(seq, change.seq)
-                yield f"data: {json.dumps(change.to_dict())}\n\n"
+                yield f"id: {seq}\ndata: {json.dumps(change.to_dict())}\n\n"
             if once:
                 return
 

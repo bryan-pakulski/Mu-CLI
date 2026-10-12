@@ -58,20 +58,23 @@ def _parse_input(plan: Any) -> PlanDoc:
     raise PlanValidationError(["plan must be markdown text or a structured object"])
 
 
-def plan_view(job: Any) -> Dict[str, Any]:
+def plan_view(job: Any, version: Optional[int] = None) -> Dict[str, Any]:
     store = plan_store(job)
     versions = store.versions()
-    latest = store.load()
+    latest = store.load(version)
     approved = int((getattr(job, "metadata", None) or {}).get("plan_approved_version") or 0)
-    prev_text = store.load_text(versions[-2]) if len(versions) > 1 else ""
-    cur_text = store.load_text() or ""
+    current_version = latest.version if latest else 0
+    previous = [v for v in versions if v < current_version]
+    prev_text = store.load_text(previous[-1]) if previous else ""
+    cur_text = store.load_text(version) or ""
     return {
         "versions": versions,
         "version": latest.version if latest else 0,
+        "latest_version": store.latest_version(),
         "approved_version": approved,
         "doc": latest.to_dict() if latest else None,
         "markdown": cur_text,
-        "draft": store.load_draft(),
+        "draft": store.load_draft() if version is None else None,
         "diff_from_previous": diff_versions(prev_text or "", cur_text) if prev_text else "",
         "errors": latest.validate(_allowed(job)) if latest else ["no plan yet"],
     }

@@ -162,4 +162,7 @@ def test_gui_surfaces_present():
     html = (root / "templates" / "work.html").read_text(encoding="utf-8")
     js = (root / "static" / "js" / "work.js").read_text(encoding="utf-8")
     assert 'id="work-stage-models-form"' in html and "work_stage_models.js" in html
-    assert "'plan_review'" in js and "'models_unset'" in js and "plan-approve" in js
+    editor = (root / "static/js/work/plan_editor.js").read_text()
+    assert "/static/js/work/plan_editor.js" in html
+    assert "data-plan-save" in editor and "data-plan-approve" in editor
+    assert "data-plan-reject" in editor

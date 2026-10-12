@@ -24,6 +24,8 @@
     }
 
     function selectedJobId() {
+        const current = document.getElementById('work-detail')?.dataset.jobId;
+        if (current) return current;
         const selected = document.querySelector('.work-job-card.is-selected[data-job-id]');
         return selected ? String(selected.dataset.jobId || '') : '';
     }

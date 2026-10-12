@@ -10,14 +10,12 @@ def _read(rel: str) -> str:
 
 
 def test_work_detail_panel_offers_force_delete_for_every_status():
-    work = _read("mu/gui/static/js/work.js")
-    assert 'data-action="delete"' in work
-    assert "work-delete-panel" in work
-    assert "action === 'delete'" in work
-    assert "?force=1`, { method: 'DELETE' }" in work
+    work = _read("mu/gui/static/js/work/view.js")
+    assert "'delete'" in work
+    assert "const action = job?.actions?.find" in work
+    assert "api('/api/jobs/cmd'" in work
     assert "Git branch is preserved" in work
-    # deletion clears the selection instead of re-selecting a vanished job
-    assert "state.selectedId = null;" in work
+    assert "selectedId = ''; delete detailEl.dataset.jobId" in work
 
 
 def test_work_management_delete_is_available_for_active_rows_and_bulk_forces():

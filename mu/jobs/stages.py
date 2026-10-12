@@ -69,6 +69,40 @@ def merge_metadata(service, job_id: str, **updates: Any) -> Job:
     return service.store.update_runtime_fields(job_id, metadata_json=meta)
 
 
+def _render_plan_markdown(plan: Dict[str, Any]) -> str:
+    """Interim plan.md renderer (Phase 1); Phase 2 PlanDoc supersedes it."""
+    lines = ["## Summary", str(plan.get("summary") or "").strip(), "", "## Approach"]
+    lines += [f"{i}. {step}" for i, step in enumerate(plan.get("steps") or [], 1)]
+    lines += ["", "## Acceptance criteria"]
+    lines += [f"- [AC-{i}] {ac}" for i, ac in enumerate(plan.get("acceptance_criteria") or [], 1)]
+    lines += ["", "## Checks"]
+    lines += [f"- suite: check{i}   cmd: {cmd}"
+              for i, cmd in enumerate(plan.get("validation_commands") or [], 1)]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_plan_artifact(job: Job, plan: Dict[str, Any], raw_text: str) -> Dict[str, str]:
+    """Write plan.md (+ raw planner output) to the job artifact folder.
+
+    Best-effort: an artifact I/O failure must not fail the plan stage while
+    ``metadata.plan`` remains the compatibility copy (removed in Phase 9).
+    """
+    try:
+        from .core.artifacts import artifacts_for
+
+        from .core.plan_ops import record_planner_plan
+
+        art = artifacts_for(job).ensure()
+        art.write_text("plans/planner_raw.txt", str(raw_text or ""))
+        if record_planner_plan(job, plan) is None and not art.read_text("plan.md"):
+            # Invalid planner output: keep a readable plan.md for the editor.
+            art.write_text("plan.md", _render_plan_markdown(plan))
+        return art.pointers()
+    except (OSError, ValueError):
+        logger.debug("plan artifact write failed", exc_info=True)
+        return {}
+
+
 def job_workspace(job: Job) -> str:
     workspace = str(job.worktree or "")
     if not workspace or not os.path.isdir(workspace):
@@ -165,7 +199,8 @@ def run_plan_stage(service, job_id: str, *, generate_fn: GenerateFn) -> Job:
     plan["model"] = {"provider": model.get("provider", ""), "model": model.get("model", "")}
     plan["cost_usd"] = float((meta or {}).get("cost_usd", 0.0) or 0.0)
     service.store.append_event(job_id, "plan_created", reason="planning stage completed", payload=plan)
-    job = merge_metadata(service, job_id, plan=plan)
+    artifact_pointers = _write_plan_artifact(job, plan, text)
+    job = merge_metadata(service, job_id, plan=plan, artifacts=artifact_pointers)
     try:
         from .dynamic_checks import apply_plan_contract  # task 5 hook
 
@@ -288,7 +323,23 @@ def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
         "model": {"provider": model.get("provider", ""), "model": model.get("model", "")},
         "cost_usd": float((meta or {}).get("cost_usd", 0.0) or 0.0),
     })
+    _write_review_artifact(job, review, round_no)
     return apply_review_verdict(service, job_id, review)
+
+
+def _write_review_artifact(job: Job, review: Dict[str, Any], round_no: int) -> None:
+    """Persist review.json (report schema, guide §4.2). Best-effort in Phase 1."""
+    try:
+        from .core.artifacts import artifacts_for
+        from .core.review_report import ReviewReport
+
+        art = artifacts_for(job).ensure()
+        payload = dict(review, round=round_no)
+        report = ReviewReport.from_legacy(payload, job_id=job.id)
+        art.write_json("review.json", report.to_dict())
+        art.write_json(f"logs/review_raw.round{round_no}.json", payload)
+    except (OSError, ValueError):
+        logger.debug("review artifact write failed", exc_info=True)
 
 
 def review_feedback_lines(payload: Dict[str, Any]) -> List[str]:

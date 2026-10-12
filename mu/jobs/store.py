@@ -20,7 +20,7 @@ from utils.config import HISTORY_DIR
 from .models import AttentionReason, Job, JobAttempt, JobEvent, JobSpec, JobStatus, coerce_status
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def default_db_path() -> str:
@@ -167,6 +167,16 @@ class JobStore:
                     conn.execute(
                         "ALTER TABLE jobs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'"
                     )
+                # planos migration Phase 0: additive core-state columns.
+                for name, ddl in (
+                    ("state", "TEXT NOT NULL DEFAULT ''"),
+                    ("paused_from", "TEXT NOT NULL DEFAULT ''"),
+                    ("failed_from", "TEXT NOT NULL DEFAULT ''"),
+                    ("fix_attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ):
+                    if name not in columns:
+                        conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {ddl}")
+                self._backfill_core_state(conn)
                 conn.execute(
                     "INSERT OR REPLACE INTO job_meta(key, value) VALUES('schema_version', ?)",
                     (str(SCHEMA_VERSION),),
@@ -225,6 +235,7 @@ class JobStore:
                 {"title": normalized.title, "execution": normalized.execution},
                 now,
             )
+            self._sync_core_state(conn, identifier)
         return self.get_job(identifier)
 
     def get_job(self, job_id: str) -> Job:
@@ -412,6 +423,7 @@ class JobStore:
                 conn, job_id, "status_changed", current, target_status,
                 reason, payload or {}, now,
             )
+            self._sync_core_state(conn, job_id)
         return self.get_job(job_id)
 
     def update_runtime_fields(self, job_id: str, **fields: Any) -> Job:
@@ -904,6 +916,89 @@ class JobStore:
             ),
         )
         return int(cursor.lastrowid)
+
+    @staticmethod
+    def _legacy_history(conn: sqlite3.Connection, job_id: str, limit: int = 20) -> List[str]:
+        """Newest-first legacy statuses the job passed through (for paused/failed_from)."""
+        rows = conn.execute(
+            "SELECT from_status FROM job_events WHERE job_id = ? AND event_type = 'status_changed'"
+            " AND from_status IS NOT NULL ORDER BY id DESC LIMIT ?",
+            (job_id, int(limit)),
+        ).fetchall()
+        return [str(r[0]) for r in rows if r[0]]
+
+    @classmethod
+    def _core_columns(cls, conn: sqlite3.Connection, job_id: str, status: str,
+                      attention: str, fix_attempts: int = 0) -> Dict[str, Any]:
+        from .core.states import from_legacy
+
+        core = from_legacy(status, attention, history=cls._legacy_history(conn, job_id),
+                           fix_attempts=fix_attempts)
+        return {
+            "state": core.state.value,
+            "paused_from": core.paused_from.value if core.paused_from else "",
+            "failed_from": core.failed_from.value if core.failed_from else "",
+        }
+
+    def _backfill_core_state(self, conn: sqlite3.Connection) -> None:
+        """Populate core-state columns for rows written before schema v3."""
+        rows = conn.execute(
+            "SELECT id, status, attention_reason, fix_attempts FROM jobs WHERE state = ''"
+        ).fetchall()
+        for row in rows:
+            try:
+                cols = self._core_columns(conn, row["id"], row["status"], row["attention_reason"],
+                                          int(row["fix_attempts"] or 0))
+            except ValueError:
+                continue
+            conn.execute(
+                "UPDATE jobs SET state = ?, paused_from = ?, failed_from = ? WHERE id = ?",
+                (cols["state"], cols["paused_from"], cols["failed_from"], row["id"]),
+            )
+
+    def _sync_core_state(self, conn: sqlite3.Connection, job_id: str) -> None:
+        row = conn.execute(
+            "SELECT status, attention_reason, fix_attempts FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return
+        try:
+            cols = self._core_columns(conn, job_id, row["status"], row["attention_reason"],
+                                      int(row["fix_attempts"] or 0))
+        except ValueError:
+            return
+        conn.execute(
+            "UPDATE jobs SET state = ?, paused_from = ?, failed_from = ? WHERE id = ?",
+            (cols["state"], cols["paused_from"], cols["failed_from"], job_id),
+        )
+
+    def core_state(self, job_id: str):
+        """Authoritative ``CoreState`` for a job (read from the v3 columns)."""
+        from .core.states import CoreState, JobState, coerce_state
+
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT state, paused_from, failed_from, fix_attempts FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if not row["state"]:
+                self._sync_core_state(conn, job_id)
+                row = conn.execute(
+                    "SELECT state, paused_from, failed_from, fix_attempts FROM jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+        return CoreState(
+            coerce_state(row["state"]) or JobState.PROVISIONING,
+            paused_from=coerce_state(row["paused_from"] or None),
+            failed_from=coerce_state(row["failed_from"] or None),
+            fix_attempts=int(row["fix_attempts"] or 0),
+        )
+
+    def set_fix_attempts(self, job_id: str, value: int) -> None:
+        with self._transaction() as conn:
+            conn.execute("UPDATE jobs SET fix_attempts = ? WHERE id = ?", (int(value), job_id))
 
     @staticmethod
     def _job_from_row(row: sqlite3.Row) -> Job:

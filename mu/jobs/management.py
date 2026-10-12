@@ -592,6 +592,14 @@ class JobManagementService:
                     removed.append(log_path)
             except OSError as exc:
                 warnings.append(f"Could not remove worker log: {exc}")
+            try:
+                from .core.artifacts import artifacts_for
+
+                art = artifacts_for(job)
+                if art.remove():
+                    removed.append(art.dir)
+            except OSError as exc:
+                warnings.append(f"Could not remove job artifacts: {exc}")
         return {
             "job_id": job.id,
             "deleted": True,

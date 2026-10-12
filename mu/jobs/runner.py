@@ -210,8 +210,18 @@ class SessionJobRunner:
             if event.event_type == "verification_failed":
                 lines.extend(self._verification_feedback(event.payload))
                 break
+        approved_text = None
+        try:
+            from .core.plan_ops import approved_plan_text
+
+            approved_text = approved_plan_text(job)
+        except (OSError, ValueError):
+            approved_text = None
         plan = dict((job.metadata or {}).get("plan") or {})
-        if plan.get("summary") or plan.get("steps"):
+        if approved_text:
+            version = (job.metadata or {}).get("plan_approved_version")
+            lines.extend(["", f"Approved plan (v{version}, follow it verbatim):", approved_text.strip()])
+        elif plan.get("summary") or plan.get("steps"):
             lines.extend(["", "Agreed plan:"])
             if plan.get("summary"):
                 lines.append(str(plan["summary"]))

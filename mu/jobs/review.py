@@ -184,6 +184,14 @@ class JobReviewService:
                 if bad:
                     raise JobReviewError("Validation command not allowed: " + "; ".join(bad[:3]))
             metadata["plan_approved"] = {"by": "human", "detail": response["detail"]}
+            try:
+                from .core.plan_ops import legacy_approval_version
+
+                approved_version = legacy_approval_version(job, value)
+                if approved_version:
+                    metadata["plan_approved_version"] = approved_version
+            except (OSError, ValueError):
+                pass
             self.service.store.update_runtime_fields(job.id, metadata_json=metadata, **fields)
             self.service.store.append_event(
                 job.id, "plan_approved", reason="human approved plan",

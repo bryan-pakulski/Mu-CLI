@@ -56,14 +56,14 @@ def test_job_persists_across_store_instances(tmp_path):
     assert reopened.execution["auto_approve_writes"] is True
 
 
-def test_store_uses_wal_and_schema_v2(tmp_path):
+def test_store_uses_wal_and_schema_v3(tmp_path):
     path = str(tmp_path / "jobs.sqlite3")
     JobStore(path)
     conn = sqlite3.connect(path)
     try:
         assert str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal"
         version = conn.execute("SELECT value FROM job_meta WHERE key='schema_version'").fetchone()[0]
-        assert version == "2"
+        assert version == "3"
         columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
         assert "execution_json" in columns
     finally:

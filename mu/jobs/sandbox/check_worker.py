@@ -3,7 +3,27 @@ import json
 import shlex
 import subprocess
 import time
+import threading
 from pathlib import Path
+
+
+class LivePipe:
+    """Bounded reads and live output; neither logs nor a long line grow unbounded."""
+    lock = threading.Lock()
+
+    def __init__(self, pipe, stream):
+        self.pipe, self.stream, self.sent = pipe, stream, 0
+
+    def readline(self):
+        chunk = self.pipe.readline(4096)
+        if chunk and self.sent < 512 * 1024:
+            with self.lock:
+                print(json.dumps({"event": "check_output", "stream": self.stream, "text": chunk}), flush=True)
+            self.sent += len(chunk)
+        return chunk
+
+    def close(self):
+        self.pipe.close()
 
 
 def main():
@@ -19,7 +39,7 @@ def main():
         argv.append("--junitxml=" + junit)
     child = subprocess.Popen(argv, cwd="/workspace", shell=False,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
-    out, err = _CappedReader(child.stdout), _CappedReader(child.stderr)
+    out, err = _CappedReader(LivePipe(child.stdout, "stdout")), _CappedReader(LivePipe(child.stderr, "stderr"))
     out.start()
     err.start()
     timed_out = False

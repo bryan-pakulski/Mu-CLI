@@ -67,7 +67,8 @@ def _history(service, job_id: str) -> List[HistoryEntry]:
             continue
         payload = ev.payload or {}
         try:
-            core = from_legacy(ev.to_status.value, str(payload.get("attention_reason") or ""))
+            record = payload.get("core_state")
+            core = CoreState(JobState(record["state"])) if record else from_legacy(ev.to_status.value, str(payload.get("attention_reason") or ""))
         except ValueError:
             continue
         state = core.state
@@ -102,6 +103,12 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         except (OSError, ValueError):
             plan_version = 0
     from ..checks import push_check_reason
+    approval = None
+    if core.state == JobState.NEEDS_INPUT and job.attention_reason.value == "approval_required":
+        gates = service.store.list_events_by_type(job.id, ("status_changed",))
+        gate = next((e for e in reversed(gates) if e.to_status and e.to_status.value == "needs_human"), None)
+        if gate and gate.payload.get("tool_name"):
+            approval = {**gate.payload, "event_id": gate.id}
     return JobFacts(
         core=core,
         archived=archived,
@@ -115,6 +122,7 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         live_stage=bool(job.worker_id) and core.state in (JobState.PLANNING, JobState.IMPLEMENTING,
                                                           JobState.REVIEWING),
         git_workspace=True,
+        pending_approval=approval,
         push_check_reason=push_check_reason(service, job) if core.state == JobState.REVIEW_DONE else "push is available after review",
     )
 
@@ -140,7 +148,7 @@ def _summary(service, job, *, now: float) -> Dict[str, Any]:
         "mini": mini_indicator(steps),
         "steps": [s.to_dict() for s in steps],
         "verdict": review.get("verdict") or "",
-        "cost_usd": float(job.cost_usd or 0.0),
+        "cost_usd": max(float(job.cost_usd or 0.0), sum(art.stage_costs().values())),
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "repository": job.repository,
@@ -153,6 +161,8 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
            now: Optional[float] = None, plan_version: Optional[int] = None) -> Dict[str, Any]:
     """Full job page VM, or only the requested ``parts`` (change-stream refetch)."""
     job = service.get(job_id)
+    from .artifacts import migrate_metadata
+    job = migrate_metadata(service, job)
     now = time.time() if now is None else now
     wanted = set(parts or PARTS) | {"state"}
     core = service.store.core_state(job.id)
@@ -180,10 +190,11 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
             for n in art.check_runs():
                 summary = art.read_json(f"checks/run-{n}/summary.json", {}) or {}
                 runs.append(dict(summary, run=n))
-        out["checks"] = {"runs": runs}
+        live = [e.to_dict() for e in service.store.recent_events(job.id) if e.event_type == "checks_output"]
+        out["checks"] = {"runs": runs, "live": live}
     if "costs" in wanted:
         art = artifacts_for(job)
-        out["costs"] = {"total_usd": float(job.cost_usd or 0.0),
+        out["costs"] = {"total_usd": max(float(job.cost_usd or 0.0), sum(art.stage_costs().values())),
                         "by_stage": art.stage_costs() if art.exists() else {},
                         "events": [e.to_dict() for e in service.store.recent_events(job.id)]}
     if "diff" in wanted:
@@ -195,7 +206,8 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         events = [e.to_dict() for e in service.store.recent_events(job.id) if e.event_type in
                   ("sandbox_event", "stage_message", "sandbox_starting", "sandbox_stopped", "runtime_error")]
         out["session"] = {"session_name": job.session_name, "live": bool(job.worker_id),
-                          "stages": stages, "events": events}
+                          "stages": stages, "events": events,
+                          "approval": facts_for(service, job, core).pending_approval}
     return out
 
 

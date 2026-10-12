@@ -2,7 +2,7 @@ import { api } from './client';
 import { subscribeToEvents } from './sse';
 
 export type JobPart = 'state' | 'pipeline' | 'plan' | 'session' | 'diff' | 'review' | 'checks' | 'costs';
-export interface JobAction { id: string; label: string; enabled: boolean; reason: string; primary: boolean; danger: boolean; args?: { requires_override?: boolean } }
+export interface JobAction { id: string; label: string; enabled: boolean; reason: string; primary: boolean; danger: boolean; args?: { requires_override?: boolean; event_id?: number; version?: number } }
 export interface JobStep { id: string; label: string; status: string; glyph: string; elapsed: number; cost_usd: number; runs: number; detail: string }
 export interface Finding { id: string; severity: string; title: string; detail: string; suggestion: string; file: string | null; line_start: number | null; disposition: string }
 export interface JobSummary {
@@ -15,8 +15,8 @@ export interface JobVM extends JobSummary {
   plan?: { version: number; latest_version: number; approved_version: number; versions: number[]; markdown: string; draft: string | null; diff_from_previous: string; errors: string[] };
   review?: { verdict: string; merge_readiness: number; summary: string; counts: Record<string, number>; findings: Finding[]; plan_coverage: Array<{ criterion_id: string; status: string; evidence: string }> };
   diff?: { patch: string | null };
-  checks?: { runs: Array<{ run: number; passed: boolean; head_sha: string; new_failures: number; preexisting_failures: number; suites: Array<{ suite: string; command: string; passed: boolean; stdout: string; stderr: string; preexisting_failures: string[]; junit?: { passed: number; failed: number; skipped: number; total: number } }> }> };
-  session?: { live: boolean; events: AuditEvent[]; stages: Record<string, Array<{ role: string; parts: Array<{ type: string; text?: string }> }>> };
+  checks?: { live?: AuditEvent[]; runs: Array<{ run: number; passed: boolean; head_sha: string; new_failures: number; preexisting_failures: number; suites: Array<{ suite: string; command: string; passed: boolean; stdout: string; stderr: string; preexisting_failures: string[]; junit?: { passed: number; failed: number; skipped: number; total: number } }> }> };
+  session?: { approval?: { tool_name:string; tool_args:Record<string, unknown> } | null; live: boolean; events: AuditEvent[]; stages: Record<string, Array<{ role: string; parts: Array<{ type: string; text?: string }> }>> };
   costs?: { total_usd: number; by_stage: Record<string, number>; events: AuditEvent[] };
 }
 export interface AuditEvent { id: number; event_type: string; reason: string; created_at: number; payload: Record<string, unknown> }

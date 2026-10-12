@@ -1,5 +1,10 @@
 # Durable Engineering Jobs — Friday Five
 
+The milestones below record the original job implementation. For the current
+workflow, use **Durable job v2** and **Shared controls and migration** below.
+The staged pipeline keeps the worktree through Checks and human review, and
+requires an explicit push decision after the report.
+
 ## North star
 
 > Friday at 4pm: give MuCLI five real engineering tickets. Close every control
@@ -281,11 +286,12 @@ job contract (`mu/jobs/dynamic_checks.py`):
 - User-supplied criteria and commands are never dropped and always come first.
 - Planner commands must start with an allow-listed executable (pytest, npm,
   make, cargo, go, tsc, …). Shell operators (`; && || | > < ` $( &`) are
-  rejected. Rejected commands are recorded in `metadata.plan_contract`.
+  rejected. Rejected commands are recorded in `plans/contract.json`.
   `execution.validation_allowlist` extends the allow-list for a single job.
 - At most 8 planner commands are accepted.
 - Creating a job no longer requires validation commands. If no commands
-  remain after planning, the job goes to `needs_human` with `no_validation`.
+  remain after planning, the plan editor lets a human add checks before approval.
+  With plan approval disabled, missing checks park the job with `no_validation`.
 
 ### Jira intake
 
@@ -376,3 +382,53 @@ non-git workspaces it is `"none"`. Once a human requests push, the job moves to
 On success the PR details go into `metadata.pr` and the job moves to
 `READY_FOR_REVIEW`. If the push or PR call fails, the job goes to
 `needs_human` with `publish_failed`. Tokens are redacted from error text.
+
+### Shared controls and migration
+
+Browser, Android and `/job` now use the same core state, six-step pipeline and
+server-provided actions. The browser dashboard groups Needs you and Running
+above the jobs table. Job details offer Plan, Session, Diff, Review, Checks and
+Cost & audit; Android puts cost and diagnostics in More.
+
+Plan editing supports structured criteria/checks and Markdown. Drafts autosave
+every five seconds; Save draft creates a numbered version and approval records
+that exact version. An older client cannot approve or overwrite a newer plan.
+Review findings can be selected for re-prompting or given a disposition. Check
+logs stream while suites run, and Session supports messages, resume and stage
+restart. A pending write approval has separate Approve tool / Deny tool actions;
+approval is consumed once for the exact tool name and arguments.
+
+The shared endpoints are:
+
+- `GET /api/jobs/vm/home`, `/vm/jobs`, `/vm/job/{id}` (optional `parts` query).
+- `POST /api/jobs/cmd` with `{type, job_id, args}`.
+- `GET /api/jobs/events`, coalesced over 150 ms, indicating which parts changed.
+
+Disabled commands return 409 with their reason; malformed commands return 400.
+The terminal equivalent is `/job <command> <id> [arguments]`; `/job show <id>`
+lists available actions and the arguments needed for a pending tool approval.
+
+New Git worktrees live at `$MUCLI_HOME/jobs/<id>/worktree`. The containing job
+folder holds `ticket.json`, versioned plans, `diff.patch`, `review.json`, check
+evidence, stage transcripts and costs. Older paths remain supported. On opening
+an old job, embedded plan/review data is backed up to `legacy-handoffs.json`
+before metadata is replaced with artifact pointers. Database initialization also
+repairs early v3 worker completions that left core state behind the old status.
+
+Compatibility endpoints for existing clients delegate lifecycle commands to the
+core. Raw status/attention mutation endpoints return 410. Intake, Jira settings,
+history, receipts, diagnostics and trace APIs remain available. Historical
+`JobStatus` values remain a worker/storage compatibility projection; UI action
+logic and the automatic review send-back loop have been removed.
+
+Android 0.3.0 (version code 7) is built locally as
+`mobile/android/dist/mucli-mobile-0.3.0.apk`. The migration does not upload or
+publish it. Build with `make apk` from `mobile/android`; run `npm run typecheck`
+and `npm test -- --runInBand` before distributing a new build.
+
+Validation includes the full Python suite, browser plan-edit/stale-version/SSE
+tests, mobile tests and real Docker smoke tests using a fake provider. Docker
+tests check that provider credentials are absent, networking is isolated, and
+an exact tool approval resumes a write inside the managed worktree. Paid model
+runs, remote Jira access, remote Git push and an on-device Android walkthrough
+are separate deployment checks.

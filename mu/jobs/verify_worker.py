@@ -339,12 +339,12 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
             )
             if service.store.assert_lease(job_id, worker_id) and service.get(job_id).status == JobStatus.VERIFYING:
                 service.transition(job_id, JobStatus.FAILED, reason="checks stage failed",
-                                   payload={"error": str(exc)[:1000]})
+                                   payload={"error": str(exc)[:1000], "exception_type": type(exc).__name__})
             _refresh_receipt(service, job_id)
         except Exception:
             pass
-        # Leave VERIFYING in place. Once this lease releases/expires the
-        # controller starts a fresh deterministic verifier, not implementation.
+        # A failed check supervisor requires an explicit retry. No agent runs
+        # on the host when the container runtime is unavailable.
         return 4
     finally:
         heartbeat_stop.set()

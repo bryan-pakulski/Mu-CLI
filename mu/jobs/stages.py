@@ -55,25 +55,14 @@ def _render_plan_markdown(plan: Dict[str, Any]) -> str:
 
 
 def _write_plan_artifact(job: Job, plan: Dict[str, Any], raw_text: str) -> Dict[str, str]:
-    """Write plan.md (+ raw planner output) to the job artifact folder.
-
-    Best-effort: an artifact I/O failure must not fail the plan stage while
-    ``metadata.plan`` remains the compatibility copy (removed in Phase 9).
-    """
-    try:
-        from .core.artifacts import artifacts_for
-
-        from .core.plan_ops import record_planner_plan
-
-        art = artifacts_for(job).ensure()
-        art.write_text("plans/planner_raw.txt", str(raw_text or ""))
-        if record_planner_plan(job, plan) is None and not art.read_text("plan.md"):
-            # Invalid planner output: keep a readable plan.md for the editor.
-            art.write_text("plan.md", _render_plan_markdown(plan))
-        return art.pointers()
-    except (OSError, ValueError):
-        logger.debug("plan artifact write failed", exc_info=True)
-        return {}
+    """Persist the stage handoff; artifact failure fails the planning stage."""
+    from .core.artifacts import artifacts_for
+    from .core.plan_ops import record_planner_plan
+    art = artifacts_for(job).ensure()
+    art.write_text("plans/planner_raw.txt", str(raw_text or ""))
+    if record_planner_plan(job, plan) is None and not art.read_text("plan.md"):
+        art.write_text("plan.md", _render_plan_markdown(plan))
+    return art.pointers()
 
 
 def job_workspace(job: Job) -> str:
@@ -178,7 +167,7 @@ def run_plan_stage(service, job_id: str, *, generate_fn: GenerateFn) -> Job:
     plan["cost_usd"] = float((meta or {}).get("cost_usd", 0.0) or 0.0)
     service.store.append_event(job_id, "plan_created", reason="planning stage completed", payload=plan)
     artifact_pointers = _write_plan_artifact(job, plan, text)
-    job = merge_metadata(service, job_id, plan=plan, artifacts=artifact_pointers)
+    job = merge_metadata(service, job_id, artifacts=artifact_pointers)
     try:
         from .dynamic_checks import apply_plan_contract  # task 5 hook
 
@@ -262,12 +251,10 @@ def apply_review_verdict(service, job_id: str, review: Dict[str, Any]) -> int:
     for finding in report.findings:
         finding.disposition = "open"
     report.recompute()
-    rounds = list((job.metadata or {}).get("review_rounds") or [])
-    payload = {**report.to_dict(), "round": len(rounds) + 1}
+    round_no = len(service.store.list_events_by_type(job_id, ("review_completed",))) + 1
+    payload = {**report.to_dict(), "round": round_no}
     art.write_json("review.json", report.to_dict())
-    art.write_json(f"logs/review.round{len(rounds) + 1}.json", payload)
-    rounds.append(payload)
-    merge_metadata(service, job_id, review_rounds=rounds)
+    art.write_json(f"logs/review.round{round_no}.json", payload)
     service.store.append_event(job_id, "review_completed", reason=report.verdict, payload=payload)
     service.require_human(job_id, AttentionReason.REVIEW_DONE,
                           report.summary or "Review report ready. Choose push, re-prompt, recheck, or discard.",
@@ -281,7 +268,7 @@ def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
         return 0
     model = resolve_stage_model(job.execution, "review")
     patch, stat, head = _diff(service, job_id)
-    round_no = len((job.metadata or {}).get("review_rounds") or []) + 1
+    round_no = len(service.store.list_events_by_type(job_id, ("review_completed",))) + 1
     prompt = build_stage_review_prompt(job, patch, stat, round_no)
     text, meta = generate_fn(job, prompt, job_workspace(job), model)
     if job.worker_id and not service.store.assert_lease(job_id, job.worker_id):
@@ -291,7 +278,8 @@ def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
         service.store.update_runtime_fields(job_id, cost_usd=float(service.get(job_id).cost_usd or 0) + cost)
     raw = extract_json(text)
     review = raw if "findings" in raw else parse_stage_review(text)
-    if not raw:
+    malformed = "findings" in raw and (not isinstance(raw["findings"], list) or any(not isinstance(f, dict) or f.get("severity") not in {"blocker", "major", "minor", "nit"} for f in raw["findings"]))
+    if not raw or malformed:
         review = {"summary": "The reviewer did not return a valid report.", "findings": [
             {"id": "F-1", "severity": "blocker", "title": "Invalid reviewer output", "detail": str(text)[:4000]}]}
     review.update({

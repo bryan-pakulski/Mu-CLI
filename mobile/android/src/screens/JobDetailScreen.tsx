@@ -8,6 +8,7 @@ import { jobsApi, type JobDiagnosticsSnapshot } from '../api/jobs';
 import { Text } from '../components/Text';
 import { ModernBottomSheet } from '../components/ModernBottomSheet';
 import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
+import { JobPlanEditor } from '../components/JobPlanEditor';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -93,7 +94,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
       action.id === 'reprompt' ? {finding_ids:findings, guidance} : action.id === 'message' ? {text:guidance} :
       action.id === 'push' ? {override_reason:guidance} : {guidance};
     try {
-      const result = await jobCoreApi.command(jobId, action.id, {...args, ...extra});
+      const result = await jobCoreApi.command(jobId, action.id, {...action.args, ...args, ...extra});
       if (action.id === 'delete') { draftRef.current.dirty=false; navigation.goBack(); return; }
       if (action.id === 'savePlanDraft') {
         draftRef.current.version = result.data.version || current.version;
@@ -126,7 +127,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
       <ScrollView style={{width}} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <Text>Version {job.plan?.version || 0} · approved v{job.plan?.approved_version || 0}{dirty ? ' · Unsaved edits' : ''}</Text>
         <ScrollView horizontal>{button('Latest', () => { if (!dirty) void load(['plan']); },dirty)}{job.plan?.versions.map(version=>button(`v${version}`, () => { void jobCoreApi.job(jobId,['plan'],version).then(next=>{setJob(old=>({...old!,plan:next.plan}));setHistory(version);setDraft(next.plan?.markdown || '');}).catch(e=>setError(String(e))); },dirty))}</ScrollView>
-        {editable ? <TextInput accessibilityLabel="Plan Markdown" multiline value={draft} onChangeText={text=>{draftRef.current.text=text;draftRef.current.dirty=true;draftRef.current.revision++;setDraft(text);setDirty(true);}} style={[styles.editor,input]} /> : <Markdown style={{body:{color:colors.text}}}>{job.plan?.markdown || 'Planning has not finished.'}</Markdown>}
+        {editable ? <JobPlanEditor value={draft} onChange={text=>{draftRef.current.text=text;draftRef.current.dirty=true;draftRef.current.revision++;setDraft(text);setDirty(true);}} /> : <Markdown style={{body:{color:colors.text}}}>{job.plan?.markdown || 'Planning has not finished.'}</Markdown>}
         {!!job.plan?.diff_from_previous && <><Text>Changes from previous version</Text><Text variant="xs">{job.plan.diff_from_previous}</Text></>}
         {actions(['savePlanDraft','approvePlan','rejectPlan'])}
         <TextInput accessibilityLabel="Re-plan feedback" placeholder="Re-plan feedback" placeholderTextColor={colors.textDim} multiline value={guidance} onChangeText={setGuidance} style={[styles.input,input]} />
@@ -135,7 +136,8 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
         <View style={styles.row}>{['','plan','implement','review'].map(s=>button(s || 'Live',()=>setStage(s)))}</View>
         {stage ? (job.session?.stages[stage] || []).map((m,i)=><Transcript key={i} role={m.role} text={m.parts.filter(p=>p.type==='text').map(p=>p.text).join('\n')} />) : job.session?.events.map(e=><Transcript key={e.id} role={e.event_type} text={JSON.stringify(e.payload)} />)}
         <TextInput accessibilityLabel="Stage message or resume guidance" placeholder="Message or resume guidance" placeholderTextColor={colors.textDim} multiline value={guidance} onChangeText={setGuidance} style={[styles.input,input]} />
-        {actions(['message','resume','restartStage','retry'])}
+        {job.session?.approval && <><Text>Tool approval: {job.session.approval.tool_name}</Text><Text selectable>{JSON.stringify(job.session.approval.tool_args,null,2)}</Text></>}
+        {actions(['approveTool','denyTool','message','resume','restartStage','retry'])}
       </ScrollView>
       <ScrollView style={{width}} contentContainerStyle={styles.page}><Text selectable variant="xs" style={{fontFamily:'monospace'}}>{job.diff?.patch || 'No committed diff yet.'}</Text></ScrollView>
       <ScrollView style={{width}} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
@@ -149,7 +151,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
         <TextInput accessibilityLabel="Guidance or push override reason" placeholder="Guidance or push override reason" placeholderTextColor={colors.textDim} multiline value={guidance} onChangeText={setGuidance} style={[styles.input,input]} />
         {actions(['reprompt','push','recheck','markMerged'])}
       </ScrollView>
-      <ScrollView style={{width}} contentContainerStyle={styles.page}>{job.checks?.runs.slice().reverse().map(run=><View key={run.run} style={styles.finding}><Text>Run {run.run} · {run.passed ? '✓ Passed':'✗ Failed'}</Text><Text variant="xs">{run.new_failures} new · {run.preexisting_failures} preexisting</Text>{run.suites.map(s=><View key={s.suite}><Text>{s.passed?'✓':'✗'} {s.suite} {s.preexisting_failures?.length?'· preexisting':''}</Text>{s.junit && <Text variant="xs">{s.junit.passed} passed / {s.junit.failed} failed / {s.junit.skipped} skipped</Text>}<Transcript role={s.command} text={(s.stdout+'\n'+s.stderr).replace(/\u001b\[[0-9;]*m/g,'')} /></View>)}</View>)}{actions(['recheck'])}</ScrollView>
+      <ScrollView style={{width}} contentContainerStyle={styles.page}>{job.checks?.live?.map(e=><Transcript key={e.id} role={`Live: ${e.payload.suite}`} text={String(e.payload.text || '')} />)}{job.checks?.runs.slice().reverse().map(run=><View key={run.run} style={styles.finding}><Text>Run {run.run} · {run.passed ? '✓ Passed':'✗ Failed'}</Text><Text variant="xs">{run.new_failures} new · {run.preexisting_failures} preexisting</Text>{run.suites.map(s=><View key={s.suite}><Text>{s.passed?'✓':'✗'} {s.suite} {s.preexisting_failures?.length?'· preexisting':''}</Text>{s.junit && <Text variant="xs">{s.junit.passed} passed / {s.junit.failed} failed / {s.junit.skipped} skipped</Text>}<Transcript role={s.command} text={(s.stdout+'\n'+s.stderr).replace(/\u001b\[[0-9;]*m/g,'')} /></View>)}</View>)}{actions(['recheck'])}</ScrollView>
     </ScrollView>
     <ModernBottomSheet visible={more} onClose={()=>setMore(false)} title="Cost & audit">
       {button('Job settings',()=>setModels(true))}{button('Job performance',()=>{setMore(false);navigation.navigate('JobAnalysis',{jobId});})}

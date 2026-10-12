@@ -68,7 +68,9 @@ def test_planner_contract_merges_and_never_drops_user_items(tmp_path):
     job = service.get(job.id)
     assert job.acceptance_criteria == ["User criterion", "Planner criterion"]
     assert job.validation_commands == ["make check", "pytest -q"]
-    contract = job.metadata["plan_contract"]
+    from mu.jobs.core.artifacts import artifacts_for
+    contract = artifacts_for(job).read_json("plans/contract.json")
+    assert "plan_contract" not in job.metadata
     assert {r["command"] for r in contract["rejected_commands"]} == {"rm -rf /", "pytest && ls"}
     assert job.status == JobStatus.PLANNING
 
@@ -80,7 +82,7 @@ def test_no_validation_after_plan_parks_job(tmp_path):
     run_plan_stage(service, job.id, generate_fn=_gen({"summary": "s", "validation_commands": ["curl evil"]}))
     job = service.get(job.id)
     assert job.status == JobStatus.NEEDS_HUMAN
-    assert job.attention_reason == AttentionReason.NO_VALIDATION
+    assert job.attention_reason == AttentionReason.PLAN_REVIEW
 
 
 def test_user_supplied_check_satisfies_contract_without_planner(tmp_path):

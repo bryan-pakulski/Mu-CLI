@@ -19,6 +19,20 @@ class StageUI(JobUI):
     def _event(self, event_type, *, payload=None, reason=""):
         print(json.dumps({"event": event_type, "payload": payload or {}, "reason": reason}), flush=True)
 
+    def request_tool_approval(self, **kwargs):
+        self._approval_args = kwargs.get("tool_args") or kwargs.get("display_args") or {}
+        return super().request_tool_approval(**kwargs)
+
+    def _take_response(self, kind, *, tool_name=""):
+        import httpx
+        transport = httpx.HTTPTransport(uds=os.environ["MUCLI_MODEL_RELAY"])
+        with httpx.Client(transport=transport, timeout=15, trust_env=False) as client:
+            response = client.post("http://relay/interaction", headers={"X-Mucli-Stage-Token": os.environ["MUCLI_STAGE_TOKEN"]},
+                                   json={"kind": kind, "tool_name": tool_name,
+                                         "tool_args": getattr(self, "_approval_args", {})})
+            response.raise_for_status()
+            return response.json().get("response")
+
 
 def main():
     import mucli

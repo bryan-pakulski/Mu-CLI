@@ -338,8 +338,7 @@ def _schedule_next_run(service, job_id: str, next_run_at: float) -> None:
 def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
     """Durable job v2: PREPARING -> PLANNING -> (caller moves to RUNNING).
 
-    Runs once per job (a stored ``metadata.plan`` is reused on review rework
-    rounds). Returns an exit code when the job was parked, else None.
+    Runs once per job; the versioned plan artifact is reused on rework. Returns an exit code when the job was parked, else None.
     """
     from . import stages
     from .job_settings import missing_stages, plan_approval_required
@@ -359,7 +358,8 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             payload={"missing_stages": missing},
         )
         return 27
-    if not stages.is_staged(job) or ((job.metadata or {}).get("plan") and job.status != JobStatus.PLANNING):
+    from .core.plan_ops import plan_store
+    if not stages.is_staged(job) or (plan_store(job).latest_version() and job.status != JobStatus.PLANNING):
         return None
     service.transition(job_id, JobStatus.PLANNING, reason="planning stage started")
     try:
@@ -369,7 +369,8 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
     except Exception as exc:  # noqa: BLE001 - planner failure parks on a human
         from .sandbox.runner import SandboxUnavailable
         if isinstance(exc, SandboxUnavailable):
-            service.transition(job_id, JobStatus.FAILED, reason=str(exc), payload={"stage": "provisioning"})
+            service.transition(job_id, JobStatus.FAILED, reason=str(exc),
+                               payload={"stage": "provisioning", "exception_type": "SandboxUnavailable"})
             return 3
         service.require_human(
             job_id,
@@ -382,7 +383,8 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
     if current.status != JobStatus.PLANNING:
         return 0  # parked by the plan contract (e.g. NO_VALIDATION)
     if plan_approval_required(current.execution):
-        plan = dict((current.metadata or {}).get("plan") or {})
+        doc = plan_store(current).load()
+        plan = doc.to_dict() if doc else {}
         service.require_human(
             job_id,
             AttentionReason.PLAN_REVIEW,

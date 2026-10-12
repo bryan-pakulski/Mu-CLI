@@ -209,6 +209,11 @@ def _show_job(session: Any, token: str, allow_prompt: bool) -> CommandResult:
     if report:
         lines.extend([f"Verdict: {report['verdict']} · {report['merge_readiness']}/100", report['summary']])
         lines.extend(f"  {f['id']} {f['severity']} {f['disposition']}: {f['title']} ({f.get('file') or '—'}:{f.get('line_start') or ''})" for f in report['findings'])
+    import json
+    approval = (data.get("session") or {}).get("approval")
+    if approval:
+        lines.extend(["Pending tool: " + approval["tool_name"], json.dumps(approval["tool_args"], indent=2)])
+    lines.extend(f"  /job {a['id']} {job.id[:10]} {json.dumps(a['args'])}" for a in data['actions'] if a['enabled'] and a.get('args'))
     lines.append("Available: " + ", ".join(a['id'] for a in data['actions'] if a['enabled']))
     lines.extend(f"  {a['label']}: {a['reason']}" for a in data['actions'] if not a['enabled'])
     _emit(session, "\n".join(lines), allow_prompt)
@@ -536,7 +541,7 @@ def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
         return _create_job(session, rest, allow_prompt)
     if sub == "respond":
         return _respond_job(session, rest, allow_prompt)
-    if sub in {"changes", "continue", "discard", "cancel", "resume", "retry", "approve", "replan"} or head in {"approvePlan", "rejectPlan", "savePlanDraft", "message", "restartStage", "recheck", "reprompt", "markFindings", "push", "markMerged"}:
+    if sub in {"changes", "continue", "discard", "cancel", "resume", "retry", "approve", "replan"} or head in {"approvePlan", "rejectPlan", "savePlanDraft", "message", "restartStage", "recheck", "reprompt", "markFindings", "push", "markMerged", "approveTool", "denyTool"}:
         return _review_action(session, head, rest, allow_prompt)
     if sub == "jira":
         return _jira_job(session, rest, allow_prompt)

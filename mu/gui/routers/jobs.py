@@ -629,125 +629,66 @@ async def get_job_base_drift(job_id: str, request: Request, apply: bool = Query(
 
 @router.post("/{job_id}/respond")
 async def respond_to_job(job_id: str, request: Request, payload: Dict[str, Any]):
+    decision = payload.get("decision")
+    if decision == "approve":
+        return _core_command(request, job_id, "approvePlan", payload)
+    if decision == "replan":
+        return _core_command(request, job_id, "rejectPlan", {"feedback": payload.get("detail")})
+    return _core_command(request, job_id, "resume", {"guidance": payload.get("detail")})
+
+
+def _core_command(request, job_id, kind, args):
+    """Compatibility URL only: authorization and mutation belong to core."""
+    from mu.jobs.core.commands import CommandError, CommandRejected, dispatch
     service = _service(request)
     _job_or_404(service, job_id)
     try:
-        job = JobReviewService(service).respond(
-            job_id,
-            detail=str(payload.get("detail") or ""),
-            decision=str(payload.get("decision") or ""),
-            value=payload.get("value"),
-            selected=list(payload.get("selected") or []),
-        )
-    except (JobReviewError, JobStateError, ValueError) as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+        dispatch(service, {"type": kind, "job_id": job_id, "args": args or {}})
+    except CommandRejected as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except CommandError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"job": service.get(job_id).to_dict()}
 
 
 @router.post("/{job_id}/request-changes")
 async def request_job_changes(job_id: str, request: Request, payload: Dict[str, Any]):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    try:
-        job = JobReviewService(service).request_changes(job_id, str(payload.get("feedback") or ""))
-    except (JobReviewError, JobStateError) as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    return _core_command(request, job_id, "reprompt", {"finding_ids": payload.get("finding_ids"), "guidance": payload.get("feedback")})
 
 
 @router.post("/{job_id}/continue")
 async def continue_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    try:
-        job = JobReviewService(service).continue_job(job_id, str((payload or {}).get("detail") or ""))
-    except (JobReviewError, JobStateError) as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    return _core_command(request, job_id, "push", payload)
 
 
 @router.post("/{job_id}/discard")
 async def discard_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    try:
-        job = JobReviewService(service).discard(job_id, str((payload or {}).get("reason") or ""))
-    except (JobReviewError, JobStateError) as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    return _core_command(request, job_id, "discard", payload)
 
 
 @router.post("/{job_id}/transition")
 async def transition_job(job_id: str, request: Request, payload: Dict[str, Any]):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    target = str(payload.get("status") or "").strip()
-    if not target:
-        raise HTTPException(status_code=400, detail="status is required")
-    try:
-        job = service.transition(
-            job_id,
-            JobStatus(target),
-            reason=str(payload.get("reason") or ""),
-            payload=dict(payload.get("payload") or {}),
-            attention_reason=str(payload.get("attention_reason") or ""),
-            attention_detail=str(payload.get("attention_detail") or ""),
-            expected_version=payload.get("expected_version"),
-        )
-    except (JobStateError, RuntimeError, ValueError) as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    raise HTTPException(410, "Direct status mutations are retired. Use /api/jobs/cmd and the job's available actions.")
 
 
 # Compatibility controls retained while clients migrate to the review actions.
 @router.post("/{job_id}/cancel")
 async def cancel_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    try:
-        job = service.cancel(job_id, reason=str((payload or {}).get("reason") or "cancelled by user"))
-    except JobStateError as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    return _core_command(request, job_id, "discard", payload)
 
 
 @router.post("/{job_id}/attention")
 async def require_attention(job_id: str, request: Request, payload: Dict[str, Any]):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    reason = str(payload.get("reason") or "").strip()
-    detail = str(payload.get("detail") or "").strip()
-    if not reason or not detail:
-        raise HTTPException(status_code=400, detail="reason and detail are required")
-    try:
-        job = service.require_human(
-            job_id,
-            AttentionReason(reason),
-            detail,
-            payload=dict(payload.get("payload") or {}),
-        )
-    except (JobStateError, ValueError) as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    raise HTTPException(410, "Stage attention is managed by the worker. Use /api/jobs/cmd to message or resume it.")
 
 
 @router.post("/{job_id}/resume")
 async def resume_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    try:
-        job = service.resume(job_id, detail=str((payload or {}).get("detail") or ""))
-    except JobStateError as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    return _core_command(request, job_id, "resume", {"guidance": (payload or {}).get("detail")})
 
 
 @router.post("/{job_id}/retry")
 async def retry_job(job_id: str, request: Request, payload: Dict[str, Any] | None = None):
-    service = _service(request)
-    _job_or_404(service, job_id)
-    try:
-        job = service.retry(job_id, reason=str((payload or {}).get("reason") or "retry requested"))
-    except JobStateError as exc:
-        raise _state_error(exc) from exc
-    return {"job": job.to_dict()}
+    return _core_command(request, job_id, "retry", payload)

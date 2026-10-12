@@ -214,3 +214,25 @@ def to_legacy_status(core: CoreState) -> str:
         JobState.DONE: "merged", JobState.NEEDS_INPUT: "needs_human",
         JobState.FAILED: "failed", JobState.CANCELLED: "cancelled",
     }[s]
+
+
+def evolve_legacy(current: CoreState, status: str, attention: str, *, history=()) -> CoreState:
+    """Translate old worker scheduling signals while preserving the durable core origin.
+
+    A QUEUED/PREPARING scheduling round trip is not a return to Plan after an
+    approval, repair, re-prompt, resume or retry. Old non-staged jobs retain
+    their supported shortened paths; all new UI commands use transition().
+    """
+    mapped = from_legacy(status, attention, history=history, fix_attempts=current.fix_attempts)
+    if status in {"queued", "preparing", "recovering"}:
+        if current.state in {JobState.NEEDS_INPUT, JobState.FAILED}:
+            return CoreState(effective_state(current), fix_attempts=current.fix_attempts)
+        if current.state in {JobState.PLAN_REVIEW, JobState.REVIEW_DONE, JobState.PUSHED}:
+            return CoreState(JobState.IMPLEMENTING)
+        if current.state in {JobState.IMPLEMENTING, JobState.CHECKING}:
+            return CoreState(JobState.IMPLEMENTING, fix_attempts=current.fix_attempts)
+    if mapped.state == JobState.NEEDS_INPUT:
+        return CoreState(mapped.state, paused_from=effective_state(current), fix_attempts=current.fix_attempts)
+    if mapped.state == JobState.FAILED:
+        return CoreState(mapped.state, failed_from=effective_state(current), fix_attempts=current.fix_attempts)
+    return mapped

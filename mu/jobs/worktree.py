@@ -74,9 +74,9 @@ class JobWorktreeManager:
     def __init__(self, service: JobService, *, root: Optional[str] = None):
         self.service = service
         self.repositories = RepositoryRegistry(service.store)
-        self.root = os.path.abspath(
-            os.path.expanduser(root or os.path.join(HISTORY_DIR, "jobs", "worktrees"))
-        )
+        from .core.artifacts import jobs_root
+        self._per_job_layout = root is None
+        self.root = os.path.abspath(os.path.expanduser(root or jobs_root()))
         os.makedirs(self.root, exist_ok=True)
 
     @staticmethod
@@ -149,7 +149,9 @@ class JobWorktreeManager:
         return job.branch or f"mu/job-{job.id[:10]}-{self._slug(job.title)}"
 
     def worktree_path(self, job: Job) -> str:
-        return job.worktree or os.path.join(self.root, job.id)
+        if job.worktree:
+            return job.worktree
+        return os.path.join(self.root, job.id, "worktree") if self._per_job_layout else os.path.join(self.root, job.id)
 
     @staticmethod
     def _persisted_base_ref(job: Job) -> str:
@@ -591,7 +593,8 @@ class JobWorktreeManager:
                 stage="worktree_remove",
                 context={"worktree": worktree},
             )
-        if os.path.basename(real) != job.id:
+        own_directory = os.path.basename(real) == job.id or (os.path.basename(real) == "worktree" and os.path.basename(os.path.dirname(real)) == job.id)
+        if not own_directory:
             raise WorktreeError(
                 f"refusing to remove {worktree!r}: not this job's checkout "
                 f"(expected directory name {job.id!r})",

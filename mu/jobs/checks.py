@@ -52,6 +52,10 @@ def resolve_suites(job, settings=None):
             command = str(raw.get("command") or raw.get("cmd") or "").strip()
             if not name:
                 raise ValueError("configured checks require a suite name")
+            # Required configuration adds to the plan; a reused suite name must
+            # not silently erase an approved check with a different command.
+            if name in suites and suites[name].command != command:
+                name = f"{name}-required-{len(suites) + 1}"
             suites[name] = Suite(name, command, str(raw.get("junit") or ""))
     # Revalidate at execution, including configured commands and legacy jobs.
     for suite in suites.values():
@@ -104,11 +108,22 @@ class ChecksStage:
         self.service = service
         if run_suite is None:
             from .sandbox.check_runner import run_suite_in_container
-            run_suite = run_suite_in_container
+            run_suite = lambda job, workspace, suite: run_suite_in_container(
+                job, workspace, suite, service=service, restart_cursor=self._restart_cursor)
         self.run_suite = run_suite
         self.settings = settings
 
     def verify(self, job):
+        from .sandbox.runner import StageRestart
+        while True:
+            self._restart_cursor = self.service.store.event_cursor()
+            try:
+                return self._verify_once(job)
+            except StageRestart:
+                self.service.store.append_event(job.id, "stage_restarted", payload={"stage": "checks"})
+                job = self.service.get(job.id)
+
+    def _verify_once(self, job):
         started = time.time()
         suites = resolve_suites(job, self.settings)
         art = artifacts_for(job).ensure()
@@ -121,7 +136,10 @@ class ChecksStage:
             result.update(suite=suite.name, command=suite.command)
             results.append(result)
         failing = [r for r in results if not r.get("passed")]
-        if failing and job.base_sha:
+        from .job_settings import load_settings
+        settings = self.settings if self.settings is not None else load_settings()
+        baseline_enabled = (job.execution.get("checks") or {}).get("baseline_triage", (settings.get("checks") or {}).get("baseline_triage", True))
+        if failing and job.base_sha and baseline_enabled:
             with tempfile.TemporaryDirectory(prefix="mucli-check-base-") as tmp:
                 baseline = str(Path(tmp) / "worktree")
                 git(job.worktree, "worktree", "add", "--detach", baseline, job.base_sha)

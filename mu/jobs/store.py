@@ -377,6 +377,7 @@ class JobStore:
         attention_reason: AttentionReason | str = AttentionReason.NONE,
         attention_detail: str = "",
         expected_version: Optional[int] = None,
+        core_target=None,
     ) -> Job:
         target_status = coerce_status(target)
         now = float(self._clock())
@@ -396,7 +397,7 @@ class JobStore:
             # a transition that is illegal from the true current state.
             from .models import can_transition
 
-            if current != target_status and not can_transition(current, target_status):
+            if core_target is None and current != target_status and not can_transition(current, target_status):
                 from .service import JobStateError
 
                 raise JobStateError(
@@ -434,12 +435,38 @@ class JobStore:
                     job_id,
                 ),
             )
+            core = self._advance_core(conn, job_id, row, target_status.value, attention.value,
+                                      payload or {}, core_target=core_target)
             self._insert_event(
                 conn, job_id, "status_changed", current, target_status,
-                reason, payload or {}, now,
+                reason, {**(payload or {}), "attention_reason": attention.value, "core_state": core.to_dict()}, now,
             )
-            self._sync_core_state(conn, job_id)
         return self.get_job(job_id)
+
+    def _advance_core(self, conn, job_id, row, status, attention, payload, *, core_target=None):
+        from .core.states import CoreState, JobState, coerce_state, effective_state, evolve_legacy, transition
+        prior = CoreState(coerce_state(row["state"]), coerce_state(row["paused_from"]),
+                          coerce_state(row["failed_from"]), int(row["fix_attempts"] or 0))
+        if core_target is not None:
+            core = transition(prior, core_target) if prior.state != core_target else prior
+        else:
+            core = evolve_legacy(prior, status, attention, history=self._legacy_history(conn, job_id))
+            if status == "needs_human" and attention == "approval_required" and payload.get("tool_name"):
+                core = CoreState(JobState.NEEDS_INPUT, paused_from=effective_state(prior), fix_attempts=prior.fix_attempts)
+            if status == "failed" and payload.get("exception_type") == "SandboxUnavailable":
+                core = CoreState(JobState.FAILED, failed_from=JobState.PROVISIONING, fix_attempts=prior.fix_attempts)
+        conn.execute("UPDATE jobs SET state=?, paused_from=?, failed_from=?, fix_attempts=? WHERE id=?",
+                     (core.state.value, core.paused_from.value if core.paused_from else "",
+                      core.failed_from.value if core.failed_from else "", core.fix_attempts, job_id))
+        return core
+
+    def transition_core(self, job_id, target, *, reason="", payload=None, queued=False, attention_detail=""):
+        from .core.states import CoreState, JobState, coerce_state, to_legacy_status
+        target = coerce_state(target)
+        status = "queued" if queued and target == JobState.IMPLEMENTING else to_legacy_status(CoreState(target))
+        attention = {JobState.PLAN_REVIEW: "plan_review", JobState.REVIEW_DONE: "review_done"}.get(target, "")
+        return self.transition(job_id, status, reason=reason, payload=payload, core_target=target,
+                               attention_reason=attention, attention_detail=attention_detail)
 
     def update_runtime_fields(self, job_id: str, **fields: Any) -> Job:
         allowed = {
@@ -703,7 +730,7 @@ class JobStore:
                 return False
             job_id = attempt_row["job_id"]
             row = conn.execute(
-                "SELECT worker_id, lease_expires_at FROM jobs WHERE id = ?",
+                "SELECT * FROM jobs WHERE id = ?",
                 (job_id,),
             ).fetchone()
             if row is None:
@@ -773,9 +800,12 @@ class JobStore:
                         """,
                         (target.value, now, job_id),
                     )
+                core = self._advance_core(conn, job_id, row, target.value,
+                                          attention_value or "", transition_payload or {})
                 self._insert_event(
                     conn, job_id, "status_changed", current, target,
-                    transition_reason, transition_payload or {}, now,
+                    transition_reason, {**(transition_payload or {}), "attention_reason": attention_value or "",
+                                        "core_state": core.to_dict()}, now,
                 )
         return True
 
@@ -981,19 +1011,37 @@ class JobStore:
         }
 
     def _backfill_core_state(self, conn: sqlite3.Connection) -> None:
-        """Populate core-state columns for rows written before schema v3."""
+        """Populate pre-v3 rows and repair early v3 worker completion writes.
+
+        Modern status events include the core snapshot. Never remap those:
+        e.g. a queued implementation intentionally remains IMPLEMENTING.
+        """
         rows = conn.execute(
-            "SELECT id, status, attention_reason, fix_attempts FROM jobs WHERE state = ''"
+            "SELECT id, status, attention_reason, fix_attempts, state FROM jobs"
         ).fetchall()
         for row in rows:
+            event = conn.execute(
+                "SELECT id, payload_json FROM job_events WHERE job_id=? AND event_type='status_changed'"
+                " ORDER BY id DESC LIMIT 1", (row["id"],),
+            ).fetchone()
+            payload = _loads(event["payload_json"], {}) if event else {}
+            if row["state"] and (not event or payload.get("core_state")):
+                continue
             try:
                 cols = self._core_columns(conn, row["id"], row["status"], row["attention_reason"],
                                           int(row["fix_attempts"] or 0))
+                if row["status"] == "needs_human" and payload.get("tool_name"):
+                    from .core.states import from_legacy
+                    paused = from_legacy("needs_human", "question", history=self._legacy_history(conn, row["id"]))
+                    cols.update(state=paused.state.value, paused_from=paused.paused_from.value)
             except ValueError:
                 continue
             conn.execute(
-                "UPDATE jobs SET state = ?, paused_from = ?, failed_from = ? WHERE id = ?",
-                (cols["state"], cols["paused_from"], cols["failed_from"], row["id"]),
+                "UPDATE jobs SET state = ?, paused_from = ?, failed_from = ? WHERE id = ? AND state = ?"
+                " AND status = ? AND attention_reason = ? AND COALESCE((SELECT MAX(id) FROM job_events"
+                " WHERE job_id=jobs.id AND event_type='status_changed'), 0) = ?",
+                (cols["state"], cols["paused_from"], cols["failed_from"], row["id"], row["state"],
+                 row["status"], row["attention_reason"], event["id"] if event else 0),
             )
 
     def _sync_core_state(self, conn: sqlite3.Connection, job_id: str) -> None:

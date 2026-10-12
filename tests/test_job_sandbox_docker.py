@@ -61,5 +61,40 @@ def test_real_plan_stage_reaches_scoped_relay_without_provider_keys(docker, tmp_
     from mu.jobs.checks import Suite
     from mu.jobs.sandbox.check_runner import run_suite_in_container
     check = run_suite_in_container(service.get(job.id), service.get(job.id).worktree,
-                                   Suite("smoke", 'python3 -c "print(123)"'))
+                                   Suite("smoke", 'python3 -c "print(123)"'), service=service)
     assert check["passed"] and "123" in check["stdout"]
+    assert any(e.event_type == "checks_output" and "123" in e.payload["text"] for e in service.events(job.id))
+
+    class Implementer:
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, messages, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                yield StreamEvent(kind="tool_call_complete", tool_name="write_file", tool_call_id="write-1",
+                                  tool_args={"filename":"/workspace/widget.txt", "content":"approved write"})
+            else:
+                yield StreamEvent(kind="text_delta", text="Implementation complete.")
+            yield StreamEvent(kind="usage", input_tokens=10, output_tokens=10, total_tokens=20)
+            yield StreamEvent(kind="done")
+
+    def implement_relay(*args, **kwargs):
+        return ModelRelay(*args, **kwargs, provider_factory=lambda *a: Implementer())
+
+    from pathlib import Path
+    from mu.jobs.core.commands import dispatch
+    from mu.jobs.core.vm import job_vm
+    service.transition(job.id, "preparing")
+    service.transition(job.id, "running")
+    paused = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.", relay_factory=implement_relay)
+    assert paused["kind"] == "needs_human", paused
+    assert not (Path(service.get(job.id).worktree) / "widget.txt").exists()
+    service.require_human(job.id, paused["attention_reason"], paused["error"], payload=paused["attention_payload"])
+    action = next(a for a in job_vm(service, job.id)["actions"] if a["id"] == "approveTool")
+    assert action["enabled"]
+    dispatch(service, {"type":"approveTool", "job_id":job.id, "args":action["args"]})
+    finished = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.", relay_factory=implement_relay)
+    assert finished["kind"] == "completed", finished
+    assert (Path(service.get(job.id).worktree) / "widget.txt").read_text() == "approved write"
+    assert not (repo / "widget.txt").exists()

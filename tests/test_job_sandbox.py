@@ -84,6 +84,23 @@ def test_relay_rejects_exhausted_budget_and_lost_lease(tmp_path):
         list(obj.stream(obj.token, {}))
 
 
+def test_interrupted_stream_usage_survives_into_the_next_stage_budget(tmp_path):
+    obj, provider, art = relay(tmp_path)
+    def interrupted(*args, **kwargs):
+        yield StreamEvent(kind="text_delta", text="a partial answer before disconnect")
+        raise RuntimeError("provider disconnected before usage")
+    provider.stream = interrupted
+    with pytest.raises(RuntimeError, match="disconnected"):
+        list(obj.stream(obj.token, {"messages": wire([Message("user", [MessagePart("text", text="Explain the change")])])}))
+    usage = list(art.iter_costs())[0]
+    assert usage["estimated"] and usage["cost_usd"] > 0 and obj.tokens > 0
+    # The old job cost has not yet been updated by a completed stage.
+    resumed = ModelRelay(SimpleNamespace(id="j", max_cost_usd=obj.cost / 2, cost_usd=0),
+                         "implement", obj.model, SandboxPolicy(), art, provider_factory=lambda p,m:provider)
+    with pytest.raises(RelayDenied, match="budget exhausted"):
+        list(resumed.stream(resumed.token, {}))
+
+
 def test_relay_http_rejects_token_before_provider(tmp_path):
     obj, provider, _ = relay(tmp_path)
     with TestClient(obj.app()) as client:

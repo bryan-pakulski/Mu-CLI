@@ -217,7 +217,9 @@ class SessionJobRunner:
             approved_text = approved_plan_text(job)
         except (OSError, ValueError):
             approved_text = None
-        plan = dict((job.metadata or {}).get("plan") or {})
+        from .core.plan_ops import plan_store
+        doc = plan_store(job).load()
+        plan = {"summary": doc.summary, "steps": doc.approach} if doc else {}
         if approved_text:
             version = (job.metadata or {}).get("plan_approved_version")
             lines.extend(["", f"Approved plan (v{version}, follow it verbatim):", approved_text])

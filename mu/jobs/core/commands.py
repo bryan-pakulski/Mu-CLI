@@ -169,7 +169,7 @@ def _approve_plan(service, job, facts, args):
         raise CommandError("version must be an integer") from exc
     approve_plan(service, job.id, version=version, edited_plan=args.get("edited_plan"),
                  detail=str(args.get("detail") or ""))
-    _review_service(service).respond(job.id, decision="approve", detail=str(args.get("detail") or ""))
+    service.store.transition_core(job.id, JobState.IMPLEMENTING, queued=True, reason="approved plan")
     return ["state", "pipeline", "plan"], {"approved_version": service.get(job.id).metadata.get("plan_approved_version")}
 
 
@@ -180,7 +180,7 @@ def _reject_plan(service, job, facts, args):
     if not feedback:
         raise CommandError("rejectPlan requires feedback")
     reject_plan(service, job.id, feedback=feedback)
-    _review_service(service).respond(job.id, decision="replan", detail=feedback)
+    service.store.transition_core(job.id, JobState.PLANNING, reason="human requested re-plan")
     return ["state", "pipeline", "plan"], {}
 
 
@@ -212,6 +212,8 @@ def _message(service, job, facts, args):
 
 
 def _resume(service, job, facts, args):
+    if facts.pending_approval:
+        raise CommandRejected("Approve or deny the pending tool request before resuming")
     guidance = str(args.get("guidance") or "").strip()
     if guidance:
         _merge_meta(service, job.id, resume_guidance=guidance)
@@ -227,17 +229,24 @@ def _resume(service, job, facts, args):
 
 
 def _restart_stage(service, job, facts, args):
-    stage = str(args.get("stage") or facts.core.state.value)
+    from .states import effective_state
+    stage = effective_state(facts.core).value
+    aliases = {"plan": "planning", "implement": "implementing", "review": "reviewing", "checks": "checking"}
+    requested = str(args.get("stage") or stage)
+    if aliases.get(requested, requested) != stage:
+        raise CommandRejected("restartStage must target the current stage")
     service.store.append_event(job.id, "stage_restart_requested", reason="human restart",
                                payload={"stage": stage})
-    if job.status.value == "needs_human":
-        service.resume(job.id, detail=f"restart {stage}")
+    if facts.core.state == JobState.NEEDS_INPUT:
+        _resume(service, job, facts, args)
     return ["state", "pipeline", "session"], {"stage": stage}
 
 
 def _retry(service, job, facts, args):
     origin = facts.core.failed_from
-    if origin in (JobState.PLANNING, JobState.CHECKING, JobState.REVIEWING, JobState.PUSHING):
+    if origin in (JobState.PLAN_REVIEW, JobState.REVIEW_DONE):
+        service.store.transition_core(job.id, origin, reason="retry returns to human gate")
+    elif origin in (JobState.PLANNING, JobState.CHECKING, JobState.REVIEWING, JobState.PUSHING):
         target = {JobState.PLANNING: "planning", JobState.CHECKING: "verifying",
                   JobState.REVIEWING: "reviewing", JobState.PUSHING: "publishing"}[origin]
         service.transition(job.id, target, reason="retry failed stage")
@@ -282,7 +291,7 @@ def _reprompt(service, job, facts, args):
         "guidance": str(args.get("guidance") or "").strip(),
     })
     service.store.set_fix_attempts(job.id, 0)
-    service.transition(job.id, "queued", reason="re-prompt with selected findings")
+    service.store.transition_core(job.id, JobState.IMPLEMENTING, queued=True, reason="re-prompt with selected findings")
     return ["state", "pipeline", "review"], {"findings": ids}
 
 
@@ -314,12 +323,12 @@ def _push(service, job, facts, args):
     if override:
         service.store.append_event(job.id, "push_override", reason="human override",
                                    payload={"verdict": facts.verdict, "reason": override[:2000]})
-    service.transition(job.id, "publishing", reason="human push")
+    service.store.transition_core(job.id, JobState.PUSHING, reason="human push")
     return ["state", "pipeline"], {}
 
 
 def _mark_merged(service, job, facts, args):
-    service.transition(job.id, "merged", reason="marked merged")
+    service.store.transition_core(job.id, JobState.DONE, reason="marked merged")
     return ["state", "pipeline"], {}
 
 
@@ -335,7 +344,20 @@ def _delete(service, job, facts, args):
     return ["state"], data
 
 
+def _tool_response(service, job, facts, args, decision):
+    try:
+        matches = int(args.get("event_id", -1)) == facts.pending_approval["event_id"]
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
+        raise CommandRejected("tool request changed; reload before responding")
+    _review_service(service).respond(job.id, decision=decision)
+    return ["state", "pipeline", "session"], {}
+
+
 _HANDLERS = {
+    "approveTool": lambda s, j, f, a: _tool_response(s, j, f, a, "approve"),
+    "denyTool": lambda s, j, f, a: _tool_response(s, j, f, a, "deny"),
     "approvePlan": _approve_plan, "rejectPlan": _reject_plan, "savePlanDraft": _save_plan_draft,
     "message": _message, "resume": _resume, "restartStage": _restart_stage, "retry": _retry,
     "recheck": _recheck, "reprompt": _reprompt, "markFindings": _mark_findings, "push": _push,

@@ -27,8 +27,9 @@
             const action = job?.actions?.find(a => a.id === type);
             if (!action?.enabled) return toast(action?.reason || 'Action unavailable', true);
             if (['approvePlan','savePlanDraft','rejectPlan'].includes(type)) { selectTab('plan'); return; }
-            let args = {};
+            let args = {...(action.args || {})};
             if (['delete', 'discard'].includes(type) && !window.confirm(`${action.label}: ${job.title}? Running jobs are cancelled first and their worktree is removed. Git branch is preserved.`)) return;
+            if (type === 'approveTool') { selectTab('session'); if (!window.confirm('Approve this tool request?\n' + JSON.stringify(job.session?.approval?.tool_args || {},null,2))) return; }
             if (type === 'reprompt') {
                 if (!selectedFindings.size) { selectTab('review'); return toast('Select findings to include in the re-prompt.'); }
                 const guidance = window.prompt('Optional guidance for the implementer', ''); if (guidance === null) return;
@@ -81,7 +82,7 @@
             const latest = job.checks?.runs?.slice(-1)[0];
             rail.innerHTML = `<h4>Pending actions</h4>${buttons(job.actions.filter(a => a.primary))}<h4>Latest checks</h4><p>${latest ? (latest.passed ? '✓ Passed' : '✗ Failed') + ` · ${latest.new_failures || 0} new failures` : 'No checks yet'}</p>`;
             bindCommands(rail);
-            const bar = detailEl.querySelector('[data-actions]'); bar.innerHTML = buttons(job.actions, ['approvePlan','resume','retry','recheck','reprompt','push','markMerged','discard','delete']); bindCommands(bar);
+            const bar = detailEl.querySelector('[data-actions]'); bar.innerHTML = buttons(job.actions, ['approvePlan','approveTool','denyTool','resume','retry','recheck','reprompt','push','markMerged','discard','delete']); bindCommands(bar);
         }
         function renderPlan(panel) {
             if (editor?.isDirty()) return;
@@ -133,7 +134,7 @@
         }
         function renderChecks(panel) {
             const runs = job.checks?.runs || [];
-            panel.innerHTML = `<h3>Checks</h3>${runs.slice().reverse().map(run => `<article class="job-check-run"><h4>Run ${run.run} · ${run.passed ? '✓ Passed' : '✗ Failed'} · ${esc((run.head_sha || '').slice(0,12))}</h4><p>${run.new_failures || 0} new failures · ${run.preexisting_failures || 0} preexisting</p>${(run.suites || []).map(s => { const counts = s.junit || {passed:s.passed ? 1:0,failed:s.passed ? 0:1,skipped:0,total:1}; return `<details><summary>${s.passed ? '✓' : '✗'} ${esc(s.suite)} ${s.preexisting_failures?.length ? '<span class="job-preexisting">preexisting</span>' : ''}<span class="job-check-bar"><i style="flex:${counts.passed}" class="passed"></i><i style="flex:${counts.failed}" class="failed"></i><i style="flex:${counts.skipped}" class="skipped"></i></span>${counts.passed}/${counts.total} passed</summary><code>${esc(s.command)}</code><pre class="work-diff">${esc(String(s.stdout || '') + '\n' + String(s.stderr || '')).replace(/\u001b\[[0-9;]*m/g,'')}</pre></details>`; }).join('')}</article>`).join('') || '<p>No checks have completed.</p>'}<div class="work-action-row">${buttons(job.actions,['recheck'])}</div>`;
+            panel.innerHTML = `<h3>Checks</h3>${job.checks?.live?.length ? `<details open><summary>Live check output</summary><pre class="work-diff">${esc(job.checks.live.map(e => `[${e.payload.suite}${e.payload.baseline ? ' baseline' : ''}] ${e.payload.text}`).join('')).replace(/\u001b\[[0-9;]*m/g,'')}</pre></details>` : ''}${runs.slice().reverse().map(run => `<article class="job-check-run"><h4>Run ${run.run} · ${run.passed ? '✓ Passed' : '✗ Failed'} · ${esc((run.head_sha || '').slice(0,12))}</h4><p>${run.new_failures || 0} new failures · ${run.preexisting_failures || 0} preexisting</p>${(run.suites || []).map(s => { const counts = s.junit || {passed:s.passed ? 1:0,failed:s.passed ? 0:1,skipped:0,total:1}; return `<details><summary>${s.passed ? '✓' : '✗'} ${esc(s.suite)} ${s.preexisting_failures?.length ? '<span class="job-preexisting">preexisting</span>' : ''}<span class="job-check-bar"><i style="flex:${counts.passed}" class="passed"></i><i style="flex:${counts.failed}" class="failed"></i><i style="flex:${counts.skipped}" class="skipped"></i></span>${counts.passed}/${counts.total} passed</summary><code>${esc(s.command)}</code><pre class="work-diff">${esc(String(s.stdout || '') + '\n' + String(s.stderr || '')).replace(/\u001b\[[0-9;]*m/g,'')}</pre></details>`; }).join('')}</article>`).join('') || '<p>No checks have completed.</p>'}<div class="work-action-row">${buttons(job.actions,['recheck'])}</div>`;
             bindCommands(panel);
         }
         function renderSession(panel) {
@@ -141,7 +142,7 @@
             const messages = sessionStage ? (data.stages?.[sessionStage] || []).map(m => ({role:m.role,text:(m.parts || []).filter(p => p.type === 'text').map(p => p.text).join('\n')})) :
                 (data.events || []).map(e => ({role:e.payload?.event || e.event_type,text:e.payload?.payload?.text || e.payload?.payload?.preview || e.payload?.payload?.tool_name || e.payload?.text || e.reason}));
             const text = panel.querySelector('[data-message]')?.value || '';
-            panel.innerHTML = `<label>Stage<select data-session-stage><option value="">Live stage</option>${['plan','implement','review'].map(s => `<option value="${s}" ${s === sessionStage ? 'selected' : ''}>${s}</option>`).join('')}</select></label><div class="job-transcript">${messages.map(m => `<details ${String(m.role).includes('tool') ? '' : 'open'}><summary>${esc(m.role)}</summary><pre>${esc(m.text)}</pre></details>`).join('') || '<p>No stage activity yet.</p>'}</div><label>Message the stage<textarea data-message rows="3">${esc(text)}</textarea></label><button data-send-message ${job.actions.find(a => a.id === 'message')?.enabled ? '' : 'disabled'}>Send message</button><div class="work-action-row">${buttons(job.actions,['resume','restartStage'])}</div>`;
+            panel.innerHTML = `<label>Stage<select data-session-stage><option value="">Live stage</option>${['plan','implement','review'].map(s => `<option value="${s}" ${s === sessionStage ? 'selected' : ''}>${s}</option>`).join('')}</select></label><div class="job-transcript">${messages.map(m => `<details ${String(m.role).includes('tool') ? '' : 'open'}><summary>${esc(m.role)}</summary><pre>${esc(m.text)}</pre></details>`).join('') || '<p>No stage activity yet.</p>'}</div>${data.approval ? `<section class="work-attention-banner"><h4>Tool approval</h4><pre>${esc(JSON.stringify(data.approval.tool_args,null,2))}</pre>${buttons(job.actions,['approveTool','denyTool'])}</section>` : ''}<label>Message the stage<textarea data-message rows="3">${esc(text)}</textarea></label><button data-send-message ${job.actions.find(a => a.id === 'message')?.enabled ? '' : 'disabled'}>Send message</button><div class="work-action-row">${buttons(job.actions,['resume','restartStage'])}</div>`;
             panel.querySelector('[data-session-stage]').onchange = e => { sessionStage = e.target.value; renderSession(panel); };
             panel.querySelector('[data-send-message]').onclick = async () => { try { await send('message',{text:panel.querySelector('[data-message]').value}); panel.querySelector('[data-message]').value = ''; } catch(e) {toast(e.message,true);} };
             bindCommands(panel);

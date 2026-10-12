@@ -88,7 +88,9 @@ def test_plan_gate_parks_then_approve_with_edits_requeues(tmp_path):
     parked = service.get(job.id)
     assert parked.attention_reason == AttentionReason.PLAN_REVIEW
     assert parked.acceptance_criteria == ["timezone selection persists"]
-    assert (parked.metadata or {}).get("plan", {}).get("summary") == "Fix the timezone picker"
+    from mu.jobs.core.plan_ops import plan_store
+    assert plan_store(parked).load().summary == "Fix the timezone picker"
+    assert "plan" not in parked.metadata
 
     review = JobReviewService(service)
     with pytest.raises(JobReviewError):

@@ -167,6 +167,8 @@ class JobArtifacts:
     def remove(self) -> bool:
         if not os.path.isdir(self.dir):
             return False
+        if os.path.lexists(os.path.join(self.dir, "worktree")):
+            raise OSError("job worktree remains; remove it through the guarded worktree manager before purging artifacts")
         shutil.rmtree(self.dir)
         return True
 
@@ -202,3 +204,30 @@ def backfill(job: Any, root: Optional[str] = None) -> JobArtifacts:
         report = ReviewReport.from_legacy(rounds[-1], job_id=art.job_id)
         art.write_json("review.json", report.to_dict())
     return art
+
+
+def migrate_metadata(service, job):
+    """Archive legacy embedded handoffs before replacing them with file pointers."""
+    meta = dict(job.metadata or {})
+    keys = ("plan", "review_rounds", "plan_contract")
+    if not any(k in meta for k in keys):
+        return job
+    art = backfill(job)
+    if not art.read_json("legacy-handoffs.json"):
+        art.write_json("legacy-handoffs.json", {k: meta[k] for k in keys if k in meta})
+    for index, report in enumerate(meta.get("review_rounds") or [], 1):
+        name = f"logs/review.round{index}.json"
+        if art.read_json(name) is None:
+            art.write_json(name, report)
+    if meta.get("plan_contract") and not art.read_json("plans/contract.json"):
+        art.write_json("plans/contract.json", meta["plan_contract"])
+    for key in keys:
+        meta.pop(key, None)
+    meta["artifacts"] = art.pointers()
+    # A worker may have added runtime metadata while files were being written.
+    # Replace only the snapshot we migrated; a later open can retry otherwise.
+    from ..store import _json
+    with service.store._transaction() as conn:
+        conn.execute("UPDATE jobs SET metadata_json=?, version=version+1 WHERE id=? AND metadata_json=?",
+                     (_json(meta), job.id, _json(job.metadata or {})))
+    return service.get(job.id)

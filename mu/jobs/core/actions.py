@@ -18,6 +18,8 @@ COMMANDS: Sequence[tuple[str, str]] = (
     ("approvePlan", "Approve plan"),
     ("rejectPlan", "Request re-plan"),
     ("savePlanDraft", "Save draft"),
+    ("approveTool", "Approve tool"),
+    ("denyTool", "Deny tool"),
     ("message", "Message"),
     ("resume", "Resume"),
     ("restartStage", "Restart stage"),
@@ -52,6 +54,7 @@ class JobFacts:
     live_stage: bool = False  # a stage is attached and accepting messages
     git_workspace: bool = True
     push_check_reason: str = "push requires a successful check run"
+    pending_approval: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -77,6 +80,12 @@ def _rule(cmd: str, f: JobFacts) -> Optional[str]:
         return None  # always allowed; running work is cancelled first
     if terminal:
         return f"job is {s.value}"
+    if cmd in ("approveTool", "denyTool"):
+        if s != JobState.NEEDS_INPUT or not f.pending_approval:
+            return "no tool approval pending"
+        if cmd == "approveTool" and f.pending_approval.get("can_approve") is False:
+            return "tool preview failed; this request cannot be approved"
+        return None
     if cmd in ("approvePlan", "rejectPlan", "savePlanDraft"):
         if s != JobState.PLAN_REVIEW:
             return "plan is not awaiting approval"
@@ -90,8 +99,12 @@ def _rule(cmd: str, f: JobFacts) -> Optional[str]:
             return None
         return "no live stage to message"
     if cmd == "resume":
+        if f.pending_approval:
+            return "approve or deny the pending tool request first"
         return None if s == JobState.NEEDS_INPUT else "job is not paused"
     if cmd == "restartStage":
+        if f.pending_approval:
+            return "approve or deny the pending tool request first"
         if s in AGENT_STAGES or s == JobState.CHECKING:
             return None
         if s == JobState.NEEDS_INPUT and f.core.paused_from in AGENT_STAGES:
@@ -140,11 +153,15 @@ def available_actions(facts: JobFacts) -> List[ActionVM]:
         JobState.FAILED: "retry",
         JobState.PUSHED: "markMerged",
     }.get(s, "")
+    if s == JobState.NEEDS_INPUT and facts.pending_approval:
+        primary = "denyTool" if facts.pending_approval.get("can_approve") is False else "approveTool"
     for cid, label in COMMANDS:
         reason = _rule(cid, facts)
         args: Dict[str, Any] = {}
         if cid == "approvePlan":
             args["version"] = facts.plan_version
+        if cid in ("approveTool", "denyTool") and facts.pending_approval:
+            args["event_id"] = facts.pending_approval["event_id"]
         if cid == "push" and facts.verdict == "do_not_merge":
             args["requires_override"] = True
         out.append(ActionVM(

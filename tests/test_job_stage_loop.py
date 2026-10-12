@@ -62,10 +62,13 @@ def test_plan_stage_uses_plan_model_and_stores_plan(tmp_path):
     assert current.status == JobStatus.PLANNING
     assert gen.calls[0]["model"]["model"] == "big"
     assert gen.calls[0]["model"]["provider"] == "anthropic"
-    plan = current.metadata["plan"]
-    assert plan["summary"] == "Add the widget"
-    assert plan["steps"] == ["edit widget.py", "add test"]
-    assert plan["model"] == {"provider": "anthropic", "model": "big"}
+    from mu.jobs.core.plan_ops import plan_store
+    plan = plan_store(current).load()
+    assert plan.summary == "Add the widget"
+    assert plan.approach == ["edit widget.py", "add test"]
+    event = next(e for e in service.events(job.id) if e.event_type == "plan_created")
+    assert event.payload["model"] == {"provider": "anthropic", "model": "big"}
+    assert "plan" not in current.metadata
     assert any(e.event_type == "plan_created" for e in service.events(job.id))
 
 
@@ -106,7 +109,8 @@ def test_review_approve_stops_for_human_and_records_report(tmp_path):
     assert current.attention_reason == AttentionReason.REVIEW_DONE
     assert service.store.core_state(job.id).state.value == "review_done"
     assert gen.calls[0]["model"]["model"] == "big-reviewer"
-    rounds = current.metadata["review_rounds"]
+    from mu.jobs.core.artifacts import artifacts_for
+    rounds = [artifacts_for(current).read_json("logs/review.round1.json")]
     assert len(rounds) == 1 and rounds[0]["verdict"] == "ready" and rounds[0]["round"] == 1
 
 
@@ -150,7 +154,8 @@ def test_old_review_round_limit_never_starts_an_automatic_loop(tmp_path):
     current = service.get(job.id)
     assert current.status == JobStatus.NEEDS_HUMAN
     assert current.attention_reason == AttentionReason.REVIEW_DONE
-    assert len(current.metadata["review_rounds"]) == 1
+    assert len(service.store.list_events_by_type(job.id, ("review_completed",))) == 1
+    assert "review_rounds" not in current.metadata
 
 
 def test_controller_dispatches_review_phase():

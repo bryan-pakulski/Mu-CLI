@@ -137,7 +137,10 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     assert "job.actions" in detail
     assert "subscribeToJobChanges" in detail
     assert "pagingEnabled" in detail
-    assert "Plan Markdown" in detail
+    assert "<JobPlanEditor" in detail
+    plan_editor = (MOBILE_DETAIL.parent.parent / "components" / "JobPlanEditor.tsx").read_text(encoding="utf-8")
+    assert 'accessibilityLabel="Plan Markdown"' in plan_editor
+    assert "Acceptance criteria" in plan_editor and "Checks" in plan_editor
     for tab in ("Plan", "Session", "Diff", "Review", "Checks"):
         assert tab in detail
 

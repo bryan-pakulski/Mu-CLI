@@ -101,12 +101,15 @@ def apply_plan_contract(service, job_id: str, plan: Dict[str, Any]) -> Job:
         acceptance_json=contract["acceptance_criteria"],
         validation_json=contract["validation_commands"],
     )
-    job = merge_metadata(service, job_id, plan_contract=contract)
+    from .core.artifacts import artifacts_for
+    artifacts_for(job).ensure().write_json("plans/contract.json", contract)
+    job = service.get(job_id)
     service.store.append_event(job_id, "plan_contract_applied", reason="dynamic checks merged", payload=contract)
+    from .job_settings import plan_approval_required
     if not contract["validation_commands"] and job.status == JobStatus.PLANNING:
         service.require_human(
             job_id,
-            AttentionReason.NO_VALIDATION,
+            AttentionReason.PLAN_REVIEW if plan_approval_required(job.execution) else AttentionReason.NO_VALIDATION,
             "The planner produced no allow-listed validation commands and none were supplied; "
             "add a validation command so MuCLI can verify the change.",
             payload=contract,

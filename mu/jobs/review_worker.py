@@ -41,8 +41,14 @@ def run_review(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45, gene
                 service, job_id, generate_fn=generate_fn or stages.default_generate(service)
             )
         except Exception as exc:  # noqa: BLE001 - reviewer failure parks on a human
-            if lease_lost.is_set():
+            if lease_lost.is_set() or not service.store.assert_lease(job_id, worker_id):
                 return 6
+            from .sandbox.runner import SandboxUnavailable
+            if isinstance(exc, SandboxUnavailable):
+                service.transition(job_id, JobStatus.FAILED, reason=str(exc),
+                                   payload={"stage": "provisioning", "exception_type": "SandboxUnavailable"})
+                _refresh_receipt(service, job_id)
+                return 3
             service.require_human(
                 job_id,
                 AttentionReason.PROVIDER_ERROR,

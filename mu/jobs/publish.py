@@ -76,9 +76,10 @@ def _pr_text(job: Job) -> Tuple[str, str]:
         lines += ["", "Acceptance criteria:", *[f"- {c}" for c in job.acceptance_criteria]]
     if job.validation_commands:
         lines += ["", "Validation:", *[f"- `{c}`" for c in job.validation_commands]]
-    rounds = list((job.metadata or {}).get("review_rounds") or [])
-    if rounds:
-        lines += ["", f"Automated review: approved after {len(rounds)} round(s)."]
+    from .core.artifacts import artifacts_for
+    report = artifacts_for(job).read_json("review.json")
+    if report:
+        lines += ["", f"Review report: {report.get('verdict', 'unknown')} · readiness {report.get('merge_readiness', 0)}/100."]
     lines += ["", f"Opened by MuCLI durable job `{job.id[:12]}` (draft)."]
     return title, "\n".join(lines).strip()
 

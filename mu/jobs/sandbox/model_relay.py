@@ -53,11 +53,11 @@ class RelayDenied(RuntimeError):
 
 
 class ModelRelay:
-    def __init__(self, job, stage, model, policy, artifacts, *, provider_factory=None, alive=None, messages=None):
+    def __init__(self, job, stage, model, policy, artifacts, *, provider_factory=None, alive=None, messages=None, interaction=None):
         self.job, self.stage, self.model = job, stage, dict(model)
         if getattr(job, "max_cost_usd", None) is not None:
             policy = dataclasses.replace(policy, max_cost_usd=min(policy.max_cost_usd,
-                max(0, float(job.max_cost_usd) - float(job.cost_usd or 0))))
+                max(0, float(job.max_cost_usd) - max(float(job.cost_usd or 0), sum(artifacts.stage_costs().values())))))
         self.policy, self.artifacts = policy, artifacts
         self.token = secrets.token_urlsafe(32)
         self.revoked = False
@@ -66,6 +66,7 @@ class ModelRelay:
         self.lock = threading.Lock()
         self.alive = alive or (lambda: True)
         self.messages = messages or (lambda: [])
+        self.interaction = interaction or (lambda payload: None)
         if provider_factory is None:
             from mucli import init_provider
             provider_factory = init_provider
@@ -88,9 +89,10 @@ class ModelRelay:
             if self.tokens >= self.policy.max_tokens or self.cost >= self.policy.max_cost_usd:
                 raise RelayDenied("stage token/cost budget exhausted")
             messages = messages_from_wire(payload.get("messages", []))
-            messages.extend(Message("user", [MessagePart("text", text=text)]) for text in self.messages())
+            guidance = self.messages()
+            messages.extend(Message("user", [MessagePart("text", text=text)]) for text in guidance)
             from utils.token_estimator import estimate_tokens
-            request_tokens = estimate_tokens(json.dumps(payload))
+            request_tokens = estimate_tokens(json.dumps(payload)) + sum(estimate_tokens(text) for text in guidance)
             if request_tokens + self.tokens >= self.policy.max_tokens:
                 raise RelayDenied("request would exceed the stage token budget")
             from utils.model_pricing import estimate_model_cost
@@ -122,6 +124,12 @@ class ModelRelay:
                         usage = event
                     yield wire(event)
             finally:
+                estimated = usage is None
+                if usage is None:
+                    # Interrupted streams may never deliver provider usage.
+                    from providers.base import StreamEvent
+                    usage = StreamEvent(kind="usage", input_tokens=request_tokens, output_tokens=emitted_tokens,
+                                        total_tokens=request_tokens + emitted_tokens)
                 if usage is not None:
                     from utils.model_pricing import estimate_model_cost
                     price = estimate_model_cost(provider=self.model["provider"], model_name=self.model["model"],
@@ -132,7 +140,7 @@ class ModelRelay:
                     self.cost += float(cost or 0)
                     self.artifacts.append_cost({"stage": self.stage, "at": time.time(),
                         "provider": self.model["provider"], "model": self.model["model"],
-                        "cost_usd": cost, "tokens": wire(usage)})
+                        "cost_usd": cost, "tokens": wire(usage), "estimated": estimated})
         finally:
             self.lock.release()
 
@@ -140,6 +148,25 @@ class ModelRelay:
         from fastapi import FastAPI, Header, HTTPException, Request
         from fastapi.responses import StreamingResponse
         app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+        @app.post("/interaction")
+        async def interaction(request: Request, x_mucli_stage_token: str = Header(default="")):
+            try:
+                self.authorize(x_mucli_stage_token)
+            except RelayDenied as exc:
+                raise HTTPException(403, str(exc)) from exc
+            raw = bytearray()
+            async for chunk in request.stream():
+                raw.extend(chunk)
+                if len(raw) > 1024 * 1024:
+                    raise HTTPException(413, "interaction request is too large")
+            try:
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError()
+            except ValueError as exc:
+                raise HTTPException(400, "invalid interaction request") from exc
+            return {"response": self.interaction(payload)}
 
         @app.post("/stream")
         async def stream(request: Request, x_mucli_stage_token: str = Header(default="")):

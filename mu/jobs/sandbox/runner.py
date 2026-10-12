@@ -28,6 +28,40 @@ class StagePaused(RuntimeError):
     pass
 
 
+class StageRestart(RuntimeError):
+    pass
+
+
+def check_restart(service, job, stage, cursor):
+    names = {"plan": "planning", "implement": "implementing", "review": "reviewing", "checks": "checking"}
+    events = service.store.list_events_by_type(job.id, ("stage_restart_requested",))
+    if any(e.id > cursor and e.payload.get("stage") == names[stage] for e in events):
+        raise StageRestart(f"restart {stage}")
+
+
+def claim_stage_response(service, job, stage, payload):
+    """Approval is consumed once on the host and must match the exact tool args."""
+    from ..ui import JobUI
+    ui = JobUI(service, job.id)
+    kind = str(payload.get("kind") or "question")
+    if kind == "approval_required":
+        if stage != "implement":
+            return None
+        ui._responses = [e for e in ui._responses if
+            (e.payload.get("target") or {}).get("tool_name") == payload.get("tool_name") and
+            (e.payload.get("target") or {}).get("tool_args") == payload.get("tool_args")]
+    return ui._take_response(kind, tool_name=str(payload.get("tool_name") or ""))
+
+
+def run_stage_in_container(service, job, stage, prompt, **kwargs):
+    while True:
+        try:
+            return _run_stage_once(service, job, stage, prompt, **kwargs)
+        except StageRestart:
+            service.store.append_event(job.id, "stage_restarted", payload={"stage": stage})
+            job = service.get(job.id)
+
+
 def _read_output(directory: Path, name: str, limit=8 * 1024 * 1024):
     path = directory / name
     if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
@@ -54,7 +88,8 @@ def _guard(job, policy):
     validate_changes(job.worktree, paths, allowed_workflows=allowed, max_file_bytes=policy.max_file_bytes)
 
 
-def run_stage_in_container(service, job, stage, prompt, *, runner=None, relay_factory=ModelRelay):
+def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=ModelRelay):
+    restart_cursor = service.store.event_cursor()
     runner = runner or CommandRunner()
     policy = SandboxPolicy.for_stage(stage)
     try:
@@ -75,7 +110,8 @@ def run_stage_in_container(service, job, stage, prompt, *, runner=None, relay_fa
     def messages():
         events = service.store.list_events_by_type(job.id, ("stage_message",))
         return [str(e.payload.get("text") or "") for e in events if e.payload.get("stage") == stage_state][-20:]
-    relay = relay_factory(job, stage, model, policy, art, alive=alive, messages=messages)
+    relay = relay_factory(job, stage, model, policy, art, alive=alive, messages=messages,
+                          interaction=lambda payload: claim_stage_response(service, job, stage, payload))
     service.store.append_event(job.id, "sandbox_starting", payload={"stage": stage, "container": name, "image": policy.image})
     # Deliberately outside the job artifact folder: mounting that folder would
     # expose another stage's writable outputs and the durable worktree itself.
@@ -130,10 +166,12 @@ def run_stage_in_container(service, job, stage, prompt, *, runner=None, relay_fa
             thread.start()
             deadline = time.monotonic() + policy.timeout
             while not completed.wait(.25):
+                check_restart(service, job, stage, restart_cursor)
                 if not alive():
                     raise RuntimeError("sandbox stopped after losing the job lease")
                 if time.monotonic() >= deadline:
                     raise StagePaused(f"{stage} sandbox reached its {policy.timeout}s time limit; resume with guidance")
+            check_restart(service, job, stage, restart_cursor)
             if errors:
                 raise RuntimeError(f"{stage} container failed: {redact_secrets(str(errors[0]))[0][:1000]}")
             if not alive():

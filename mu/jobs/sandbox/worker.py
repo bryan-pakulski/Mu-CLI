@@ -36,6 +36,7 @@ class StageUI(JobUI):
 
 def main():
     import mucli
+    from ..models import DEFAULT_JOB_MAX_ITERATIONS
     from .egress import start_container_proxy
     start_container_proxy()
     request = json.loads(Path("/artifacts/request.json").read_text())
@@ -57,7 +58,7 @@ def main():
     try:
         session = mucli.build_session(args, ui, allow_prompt=False)
         session.variables.update(provider_recovery_policy="auto", internal_session_kind="durable_job",
-            max_iterations=int(request.get("max_iterations") or 32), yolo=args.yolo,
+            max_iterations=int(request.get("max_iterations") or DEFAULT_JOB_MAX_ITERATIONS), yolo=args.yolo,
             plan_mode=stage != "implement", security_allow_secret_paths=False)
         if stage != "implement":
             from mu.jobs.stages import STAGE_TOOL_ALLOWLIST

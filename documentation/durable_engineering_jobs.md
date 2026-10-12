@@ -335,6 +335,11 @@ host. Plan and review mount the workspace read-only. Implementation may edit
 the worktree, while the host validates paths and creates the final commit.
 Existing tool approvals and the read-only plan gate remain enforced.
 
+Plan, implementation and review each default to 1,000 agent iterations. A job's
+explicit `max_iterations` applies to all three; `execution.stage_max_iterations`
+can override planning and review. Existing jobs without an explicit limit use
+the new default when resumed. Interactive-session defaults are independent.
+
 Optional package registry access uses the existing domain/IP-checking egress
 proxy through a second Unix socket. Configure `sandbox.egress_extra` in
 `$MUCLI_HOME/jobs/settings.json`; it applies only to implementation and checks.

@@ -14,7 +14,7 @@ from pathlib import Path
 from mu.container.docker_cli import CommandRunner, ContainerRuntimeError, run_with_output
 from mu.security.secret_paths import redact_secrets
 from ..core.artifacts import artifacts_for, backfill
-from ..models import AttentionReason, resolve_stage_model
+from ..models import AttentionReason, resolve_stage_model, stage_iteration_limit
 from ..runner import JobRunOutcome, SessionJobRunner
 from .model_relay import ModelRelay
 from .policy import SandboxPolicy, container_args, validate_changes
@@ -132,7 +132,7 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
             prompt += "\n\nPrevious stage transcript (context only):\n" + json.dumps(previous)[-24000:] + "\nHuman guidance:\n" + guidance
         (inputs / "request.json").write_text(json.dumps({"model": model, "prompt": prompt,
             "auto_approve_writes": bool(job.execution.get("auto_approve_writes", False)),
-            "max_iterations": job.max_iterations if stage == "implement" else job.execution.get("stage_max_iterations", 16)}))
+            "max_iterations": stage_iteration_limit(job, stage)}))
         created = False
         try:
             relay.start(relay_dir)

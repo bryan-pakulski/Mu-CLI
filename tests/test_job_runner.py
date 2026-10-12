@@ -88,6 +88,7 @@ def test_runner_uses_existing_session_runtime_and_persists_job_context(tmp_path)
     assert built[0][0].trace is True
     assert built[0][2] is False
     assert session.variables["durable_job_id"] == job.id
+    assert session.variables["max_iterations"] == 1000
     assert "Acceptance criteria:" in session.prompts[0]
     assert "Validation expected by the controller:" in session.prompts[0]
     assert session.shutdown_called

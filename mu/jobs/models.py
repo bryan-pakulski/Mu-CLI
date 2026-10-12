@@ -157,6 +157,15 @@ def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
 
 
 STAGES = ("plan", "implement", "review")
+DEFAULT_JOB_MAX_ITERATIONS = 1000
+
+
+def stage_iteration_limit(job: "Job", stage: str) -> int:
+    """Job stages get a generous default independent of interactive sessions."""
+    limit = job.max_iterations
+    if stage in ("plan", "review"):
+        limit = (job.execution or {}).get("stage_max_iterations") or limit
+    return int(limit or DEFAULT_JOB_MAX_ITERATIONS)
 
 
 def normalize_stages(value: Any) -> Dict[str, Dict[str, str]]:

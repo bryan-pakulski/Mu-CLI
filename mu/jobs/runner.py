@@ -12,7 +12,7 @@ from mu.session.manager import RevisionConflict
 from mu.ui.exceptions import InteractionRequired
 from utils.model_pricing import estimate_model_cost
 
-from .models import AttentionReason, Job, JobAttempt
+from .models import AttentionReason, Job, JobAttempt, stage_iteration_limit
 from .service import JobService
 from .ui import JobUI
 
@@ -306,8 +306,7 @@ class SessionJobRunner:
             session.variables["durable_job_attempt"] = attempt.number
             session.variables["durable_job_branch"] = job.branch
             session.variables["durable_job_base_sha"] = job.base_sha
-            if job.max_iterations is not None:
-                session.variables["max_iterations"] = int(job.max_iterations)
+            session.variables["max_iterations"] = stage_iteration_limit(job, "implement")
             # Round-16 F18: durable-job sessions live in the same sessions
             # directory as user sessions — saving without expected_revision
             # selects LWW and can silently overwrite a concurrent GUI/CLI

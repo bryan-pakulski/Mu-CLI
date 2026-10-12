@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
-import { Text, Button, Skeleton, ErrorState } from '../components';
+import { Text, Button, Skeleton, ErrorState, SessionStatusBadge, sortSessions } from '../components';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { providersApi } from '../api/providers';
 import { spacing } from '../theme/tokens';
@@ -167,7 +167,7 @@ export function SessionsScreen() {
         </TouchableOpacity>
       </View>
       <FlatList
-        data={sessions}
+        data={sortSessions(sessions, activeSessionName)}
         keyExtractor={item => item.name}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: spacing.xl }}
@@ -175,15 +175,18 @@ export function SessionsScreen() {
           <TouchableOpacity
             onPress={() => switchSession(item.name)}
             activeOpacity={0.72}
-            style={[styles.sessionRow, { backgroundColor: colors.bgLift, borderColor: colors.border }, activeSessionName === item.name && { backgroundColor: colors.bgHover }]}
+            style={[styles.sessionRow, { backgroundColor: colors.bgLift, borderColor: colors.border }, activeSessionName === item.name && { backgroundColor: colors.bgHover, borderColor: colors.accent, borderWidth: 1 }]}
           >
             <View style={[styles.sessionGlyph, { backgroundColor: colors.bgHover }]}>
               <Ionicons name="chatbubble-ellipses-outline" size={17} color={colors.accent} />
             </View>
             <View style={styles.sessionCopy}>
-              <Text variant="base" style={styles.sessionName}>{item.name}</Text>
+              <View style={styles.sessionTitleRow}>
+                <Text variant="base" style={[styles.sessionName, activeSessionName === item.name && styles.sessionNameActive]} numberOfLines={1}>{item.name}</Text>
+                <SessionStatusBadge session={item} active={activeSessionName === item.name} size="sm" />
+              </View>
               <Text variant="xs" style={{ color: colors.textDim, marginTop: 3 }}>
-                {activeSessionName === item.name ? 'Active' : item.is_loaded ? 'Loaded' : 'Saved'}{item.modified_at ? ` · ${item.modified_at}` : ''}
+                {item.modified_at || (activeSessionName === item.name ? 'Active' : item.is_loaded ? 'Loaded' : 'Saved')}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
@@ -263,7 +266,8 @@ const styles = StyleSheet.create({
   headerAction: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   sessionRow: { minHeight: 68, borderWidth: StyleSheet.hairlineWidth, borderRadius: 17, paddingHorizontal: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 10 },
   sessionGlyph: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  sessionCopy: { flex: 1 }, sessionName: { fontWeight: '600' },
+  sessionCopy: { flex: 1 }, sessionName: { fontWeight: '600', flexShrink: 1 }, sessionNameActive: { fontWeight: '700' },
+  sessionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowIcon: { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   emptyGlyph: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },

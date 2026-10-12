@@ -418,12 +418,15 @@ class JobStore:
         allowed = {
             "base_sha", "cost_usd", "branch", "worktree", "environment_json",
             "execution_json", "metadata_json", "session_name",
+            "acceptance_json", "validation_json",
         }
         updates: Dict[str, Any] = {}
         for key, value in fields.items():
             if key not in allowed:
                 raise ValueError(f"unsupported job field: {key}")
-            if key in {"environment_json", "execution_json", "metadata_json"} and not isinstance(value, str):
+            if key in {"acceptance_json", "validation_json"} and not isinstance(value, str):
+                value = _json(list(value or []))
+            elif key in {"environment_json", "execution_json", "metadata_json"} and not isinstance(value, str):
                 value = _json(value or {})
             updates[key] = value
         if not updates:

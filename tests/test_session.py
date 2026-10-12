@@ -1133,12 +1133,29 @@ def test_sync_feature_state_refreshes_after_feature_task_status_change(
         },
     )
 
+    # All phases done but review_status is still pending: the feature must
+    # stay active so review_all_completed_tasks / approve_feature_task can
+    # still resolve it (regression: "Feature metadata not found").
     feature_state = sm.get_feature_state()
-    assert feature_state is None
+    assert feature_state is not None
+    assert sm.active_feature_id == updated_summary["feature_id"]
     feature = sm.get_feature(updated_summary["feature_id"])
     assert feature is not None
     assert feature["feature_plan"]["phases"][0]["status"] == "completed"
     assert feature["feature_plan"]["next_phase"] is None
+    assert feature["status"] == "completed"
+    assert feature.get("archived") is not True
+
+    # Review approved → terminal: archived and cleared from the active slot.
+    reviewed_summary = {**updated_summary, "review_status": "completed"}
+    session._sync_feature_state_for_tool(
+        "approve_feature_task",
+        {"approved": True, "review_status": "completed"},
+        raw_result=reviewed_summary,
+        structured_result={"ok": True, "data": reviewed_summary},
+    )
+    assert sm.get_feature_state() is None
+    feature = sm.get_feature(updated_summary["feature_id"])
     assert feature["status"] == "completed"
     assert feature["archived"] is True
     assert sm.active_feature_id is None
@@ -1519,3 +1536,34 @@ def test_build_messages_strips_duplicate_envelope_echoes():
     ]
     plain_msgs = session._build_messages_from_history(plain_history, new_user_msg)
     assert plain_msgs[0].parts[0].tool_result == "plain"
+
+
+def test_completed_tasks_pending_review_keep_feature_active(tmp_path, monkeypatch):
+    """All tasks done but review_status still pending must NOT archive/clear
+    the active feature — approve_feature_task has to be able to resolve it."""
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-pending-review")
+    plan_summary = {
+        "feature_id": "pending_review",
+        "feature_name": "Pending review",
+        "directory": str(tmp_path),
+        "metadata_path": str(tmp_path / "feature_plan.json"),
+        "approved": True,
+        "review_status": "pending",
+        "phases_completed": True,
+        "tasks_completed": True,
+        "next_phase": None,
+        "next_task": None,
+        "tasks": [{"id": 1, "status": "completed"}],
+    }
+    sm.set_feature_state({"feature_id": "pending_review", "feature_plan": plan_summary})
+
+    assert sm.active_feature_id == "pending_review"
+    assert sm.get_feature_state() is not None
+    assert sm.get_feature("pending_review").get("archived") is not True
+
+    reviewed = {**plan_summary, "review_status": "completed"}
+    sm.set_feature_state({"feature_id": "pending_review", "feature_plan": reviewed})
+    assert sm.active_feature_id is None
+    assert sm.get_feature_state() is None
+    assert sm.get_feature("pending_review")["archived"] is True

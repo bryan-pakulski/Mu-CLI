@@ -22,6 +22,7 @@ from typing import Any, Dict
 
 from mu.tools import tool
 from mu.tools._bounds import check_bounds as _check_bounds
+from mu.tools._bounds import resolve_tool_path as _resolve_path
 from mu.tools.capabilities import session_type_from_context
 from utils.logger import logger
 
@@ -36,6 +37,7 @@ def write_file(
     session_type: str = "workspace",
 ) -> str:
     """Creates or overwrites a file with the provided content."""
+    filename = _resolve_path(filename, folder_context, session_type)
     if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"write_file: Access denied or path ignored: {filename}")
         return f"Error: Access denied or path ignored. '{filename}'"
@@ -198,6 +200,7 @@ def _sanitize_diff(diff: str, filename: str) -> str:
 
 def apply_diff(filename: str, diff: str, folder_context, *, session_type: str = "workspace") -> str:
     """Applies a unified diff to a file."""
+    filename = _resolve_path(filename, folder_context, session_type)
     if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"apply_diff: Access denied or path ignored: {filename}")
         return f"Error: Access denied or path ignored. '{filename}'"
@@ -306,6 +309,7 @@ def search_and_replace_file(
     Returns a JSON string carrying success/matches_found/match_locations/
     modified/preview/diff/error fields. See docstring on the @tool
     registration below for the agent-facing semantics."""
+    filename = _resolve_path(filename, folder_context, session_type)
     if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(
             f"search_and_replace_file: Access denied or path ignored: {filename}"

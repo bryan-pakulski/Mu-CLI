@@ -15,12 +15,17 @@ import { Ionicons } from '@expo/vector-icons';
 
 import {
   jobsApi,
+  JOB_STAGE_NAMES,
   type EngineeringJob,
   type JobDiagnosticsSnapshot,
   type JobDiff,
   type JobEvent,
+  type JobInteractionResponse,
   type WorkReceipt,
+  planApprovalBody,
+  planReviewDraft,
 } from '../api/jobs';
+import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
 import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
@@ -75,6 +80,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState('');
+  const [stageSheetOpen, setStageSheetOpen] = useState(false);
   const [responseText, setResponseText] = useState('');
 
   const load = useCallback(async (quiet = false) => {
@@ -169,6 +175,34 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
     );
   };
 
+  const submitPlanDecision = async (body: JobInteractionResponse) => {
+    if (!job || acting) return;
+    setActing(true);
+    setError('');
+    try {
+      await jobsApi.respond(job.id, body);
+      await load(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const resumeJob = async () => {
+    if (!job || acting) return;
+    setActing(true);
+    setError('');
+    try {
+      await jobsApi.resume(job.id, 'stage models set');
+      await load(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActing(false);
+    }
+  };
+
   const confirmDiscard = () => {
     Alert.alert(
       job?.status === 'ready_for_review' ? 'Discard reviewed job?' : 'Cancel job?',
@@ -249,14 +283,31 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           </View>
         ) : null}
 
-        <ReviewActions
-          job={job}
-          context={attentionContext}
-          responseText={responseText}
-          setResponseText={setResponseText}
-          acting={acting}
-          onAction={run}
-          onDiscard={confirmDiscard}
+        {job.status === 'needs_human' && job.attention_reason === 'plan_review' ? (
+          <PlanReviewCard job={job} context={attentionContext} acting={acting} onSubmit={submitPlanDecision} />
+        ) : job.status === 'needs_human' && job.attention_reason === 'models_unset' ? (
+          <ModelsUnsetCard
+            job={job}
+            context={attentionContext}
+            acting={acting}
+            onOpenSettings={() => setStageSheetOpen(true)}
+            onResume={resumeJob}
+          />
+        ) : (
+          <ReviewActions
+            job={job}
+            context={attentionContext}
+            responseText={responseText}
+            setResponseText={setResponseText}
+            acting={acting}
+            onAction={run}
+            onDiscard={confirmDiscard}
+          />
+        )}
+        <JobStageModelsSheet
+          visible={stageSheetOpen}
+          onClose={() => setStageSheetOpen(false)}
+          onSaved={() => setStageSheetOpen(false)}
         />
 
         <View style={[styles.section, styles.deleteSection]}>
@@ -272,6 +323,17 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           <ReceiptRow label="Base" value={(job.base_sha || '—').slice(0, 12)} />
           <ReceiptRow label="Head" value={(git?.head_sha || '—').slice(0, 12)} />
           <ReceiptRow label="Runtime" value={`${job.execution?.provider || '—'} · ${job.execution?.model || '—'}`} />
+          {JOB_STAGE_NAMES.filter((stage) => job.execution?.stages?.[stage]?.provider || job.execution?.stages?.[stage]?.model).map((stage) => {
+            const entry = job.execution?.stages?.[stage] || {};
+            const label = `${stage.charAt(0).toUpperCase()}${stage.slice(1)} model`;
+            return (
+              <ReceiptRow
+                key={stage}
+                label={label}
+                value={`${entry.provider || job.execution?.provider || '—'} · ${entry.model || job.execution?.model || '—'}`}
+              />
+            );
+          })}
           <ReceiptRow label="Mode" value={job.execution?.agent_mode || 'default'} />
           <ReceiptRow label="Workspace clean" value={git?.dirty === false ? 'yes' : git?.dirty === true ? 'no' : 'unknown'} />
         </DetailSection>
@@ -469,6 +531,118 @@ function ReviewActions({ job, context, responseText, setResponseText, acting, on
         />
       ) : null}
       <View style={styles.actionButtons}>{controls}</View>
+      {acting ? <ActivityIndicator size="small" color={colors.accent} style={styles.actionSpinner} /> : null}
+    </View>
+  );
+}
+
+type PlanReviewCardProps = {
+  job: EngineeringJob;
+  context: Record<string, unknown>;
+  acting: boolean;
+  onSubmit: (body: JobInteractionResponse) => Promise<void>;
+};
+
+function PlanReviewCard({ job, context, acting, onSubmit }: PlanReviewCardProps) {
+  const { colors } = useTheme();
+  const draft = useMemo(() => planReviewDraft(job, context), [job, context]);
+  const [criteria, setCriteria] = useState(draft.criteria.join('\n'));
+  const [commands, setCommands] = useState(draft.commands.join('\n'));
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const plannedBy = draft.plan.model?.model ? `${draft.plan.model.provider || ''} · ${draft.plan.model.model}` : '';
+  const inputStyle = [styles.actionInput, { color: colors.text, borderBottomColor: colors.hairline }];
+
+  const approve = () => {
+    setError('');
+    void onSubmit(planApprovalBody(criteria, commands, note));
+  };
+  const replan = () => {
+    if (!note.trim()) {
+      setError('Tell the planner what to change first.');
+      return;
+    }
+    setError('');
+    void onSubmit({ decision: 'replan', detail: note.trim() });
+  };
+
+  return (
+    <View style={[styles.actionPanel, { borderBottomColor: colors.hairline }]}>
+      <Text variant="sm" style={styles.actionTitle}>Review plan</Text>
+      <Text variant="xs" dim style={styles.actionDescription}>
+        {job.attention_detail || 'Approve the plan to start implementation.'}
+      </Text>
+      {plannedBy ? <Text variant="xs" style={[styles.mono, { color: colors.textDim, marginBottom: 8 }]}>Planned by {plannedBy}</Text> : null}
+      {draft.plan.summary ? <Text variant="sm" style={{ marginBottom: 8 }}>{draft.plan.summary}</Text> : null}
+      {draft.steps.map((step, index) => (
+        <Text key={`step-${index}`} variant="xs" style={{ marginBottom: 4 }}>{index + 1}. {step}</Text>
+      ))}
+      <Text variant="xs" dim style={{ marginTop: 10 }}>Acceptance criteria (one per line)</Text>
+      <TextInput
+        accessibilityLabel="Acceptance criteria, one per line"
+        value={criteria}
+        onChangeText={setCriteria}
+        multiline
+        placeholder="One criterion per line"
+        placeholderTextColor={colors.textDim}
+        style={inputStyle}
+      />
+      <Text variant="xs" dim>Validation commands (one per line)</Text>
+      <TextInput
+        accessibilityLabel="Validation commands, one per line"
+        value={commands}
+        onChangeText={setCommands}
+        multiline
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder="pytest tests/"
+        placeholderTextColor={colors.textDim}
+        style={[...inputStyle, styles.mono]}
+      />
+      <Text variant="xs" dim>Note or re-plan feedback (optional)</Text>
+      <TextInput
+        accessibilityLabel="Note or re-plan feedback"
+        value={note}
+        onChangeText={setNote}
+        multiline
+        placeholder="What should the planner change?"
+        placeholderTextColor={colors.textDim}
+        style={inputStyle}
+      />
+      {error ? <Text variant="xs" style={{ color: colors.error, marginBottom: 8 }}>{error}</Text> : null}
+      <View style={styles.actionButtons}>
+        <ActionButton label="Approve & implement" primary disabled={acting} onPress={approve} />
+        <ActionButton label="Re-plan" disabled={acting} onPress={replan} />
+      </View>
+      {acting ? <ActivityIndicator size="small" color={colors.accent} style={styles.actionSpinner} /> : null}
+    </View>
+  );
+}
+
+type ModelsUnsetCardProps = {
+  job: EngineeringJob;
+  context: Record<string, unknown>;
+  acting: boolean;
+  onOpenSettings: () => void;
+  onResume: () => Promise<void>;
+};
+
+function ModelsUnsetCard({ job, context, acting, onOpenSettings, onResume }: ModelsUnsetCardProps) {
+  const { colors } = useTheme();
+  const missing = Array.isArray(context.missing_stages) ? context.missing_stages.map(String) : [];
+  return (
+    <View style={[styles.actionPanel, { borderBottomColor: colors.hairline }]}>
+      <Text variant="sm" style={styles.actionTitle}>Pick stage models</Text>
+      <Text variant="xs" dim style={styles.actionDescription}>
+        {job.attention_detail || 'Set a model for each pipeline stage, then resume the job.'}
+      </Text>
+      {missing.length ? (
+        <Text variant="xs" style={{ color: colors.warning, marginBottom: 8 }}>Missing: {missing.join(', ')}</Text>
+      ) : null}
+      <View style={styles.actionButtons}>
+        <ActionButton label="Set stage models" primary disabled={acting} onPress={onOpenSettings} />
+        <ActionButton label="Resume job" disabled={acting} onPress={() => void onResume()} />
+      </View>
       {acting ? <ActivityIndicator size="small" color={colors.accent} style={styles.actionSpinner} /> : null}
     </View>
   );

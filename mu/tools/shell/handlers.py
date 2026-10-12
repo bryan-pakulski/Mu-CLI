@@ -16,6 +16,7 @@ from mu.tools import tool
 from mu.tools._bounds import (
     check_bounds as _check_bounds,
     default_working_directory as _default_working_directory,
+    resolve_tool_path as _resolve_tool_path,
 )
 from mu.tools.capabilities import normalize_session_type, session_type_from_context
 from mu.tools._scrub import scrub_and_annotate as _scrub_and_annotate
@@ -166,6 +167,8 @@ def bash_command(
     workdir = str(
         cwd or _default_working_directory(folder_context, session_type)
     ).strip()
+    # Relative cwd anchors to the workspace, never the host process cwd.
+    workdir = _resolve_tool_path(workdir, folder_context, session_type)
     if not os.path.isdir(os.path.expanduser(workdir)):
         return f"Error: Working directory does not exist: '{workdir}'"
     if not _check_bounds(workdir, folder_context, session_type=session_type):

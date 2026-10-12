@@ -3,12 +3,13 @@
     "name": "mucli",
     "slug": "mucli-mobile",
     "scheme": "mucli",
-    "version": "0.1.0",
+    "version": "0.2.4",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "android": {
       "package": "com.mucli.mobile",
+      "versionCode": 6,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

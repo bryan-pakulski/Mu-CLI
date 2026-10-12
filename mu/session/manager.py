@@ -27,6 +27,7 @@ import shutil
 import tempfile
 
 from mu.session.fileowner import match_owner
+from mu.session.visibility import is_user_visible_session
 import time
 from copy import deepcopy
 from typing import Any
@@ -135,6 +136,16 @@ class RevisionConflict(Exception):
         super().__init__(
             f"Revision conflict: expected {expected}, current on-disk revision is {current}"
         )
+
+
+def _user_visible(name: str, path: str) -> bool:
+    """Discovery filter: hide durable-job execution sessions (jobs mode only)."""
+    try:
+        with open(path, "r") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        data = {}
+    return is_user_visible_session(name, data if isinstance(data, dict) else {})
 
 
 class SessionManager(HistoryMixin, HistorySearchMixin):
@@ -1362,9 +1373,18 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             record = self.upsert_feature(self.feature_state)
             if record:
                 feature_id = record["feature_id"]
-                if record.get("status") == "completed":
-                    # Keep the completed record available under Archived, but
-                    # do not leave a completed feature loaded.
+                plan = record.get("feature_plan")
+                review_done = (
+                    isinstance(plan, dict)
+                    and str(plan.get("review_status", "") or "") == "completed"
+                )
+                if record.get("status") == "completed" and review_done:
+                    # Terminal only once the review pass has been approved
+                    # (review_status == "completed"). Keep the record under
+                    # Archived, but do not leave a finished feature loaded.
+                    # A feature whose tasks are all done but still awaiting
+                    # review stays active so review_all_completed_tasks /
+                    # approve_feature_task can still resolve it.
                     archived_record = self.feature_registry[feature_id]
                     archived_record["archived"] = True
                     archived_record["updated_at"] = time.time()
@@ -1599,7 +1619,9 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         files = glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json"))
         sessions = []
         for f in files:
-            sessions.append(os.path.basename(os.path.dirname(f)))
+            name = os.path.basename(os.path.dirname(f))
+            if _user_visible(name, f):
+                sessions.append(name)
         return sorted(sessions)
 
     def get_session_list_with_type(self):
@@ -1617,8 +1639,11 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 with open(f, "r") as fh:
                     data = json.load(fh)
                 st = str((data.get("variables") or {}).get("session_type") or "workspace")
+                if not is_user_visible_session(name, data):
+                    continue
             except (OSError, ValueError):
-                pass
+                if not is_user_visible_session(name, {}):
+                    continue
             result.append((name, st))
         return sorted(result, key=lambda pair: pair[0])
 

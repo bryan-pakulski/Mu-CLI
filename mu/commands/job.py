@@ -223,7 +223,7 @@ def _show_job(session: Any, token: str, allow_prompt: bool) -> CommandResult:
         f"Job {job.id}",
         f"Status: {job.status.value}",
         f"Title: {job.title}",
-        f"Repository: {job.repository or '—'}",
+        f"Workspace: {job.repository or '—'}",
         f"Branch: {job.branch or '—'}",
         f"Base → head: {(job.base_sha or '—')[:12]} → {str(git.get('head_sha') or '—')[:12]}",
         f"Runtime: {execution.get('provider') or '—'} / {execution.get('model') or '—'} · {execution.get('agent_mode') or 'default'}",
@@ -320,16 +320,62 @@ def _show_diff(session: Any, token: str, allow_prompt: bool) -> CommandResult:
     return CommandResult(ok=True, message=f"{len(diff.files)} changed file(s).", data={"diff": diff.to_dict()})
 
 
+def _jira_job(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
+    """/job jira pull KEY [KEY...] | /job jira pull --jql "project = X" """
+    from mu.integrations.jira import JiraClient, JiraError, import_issues
+    from mu.integrations.jira_settings import resolve_config as _jira_resolve_config
+
+    try:
+        tokens = shlex.split(rest or "")
+    except ValueError as exc:
+        _emit(session, f"Invalid arguments: {exc}", allow_prompt, error=True)
+        return CommandResult(ok=False, message=str(exc), data={"error": str(exc)})
+    if not tokens or tokens[0] not in {"pull", "import"}:
+        message = 'Usage: /job jira pull KEY [KEY...] | /job jira pull --jql "<JQL>"'
+        _emit(session, message, allow_prompt, error=True)
+        return CommandResult(ok=False, message=message, data={"error": message})
+    keys, jql, args = [], "", tokens[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--jql" and i + 1 < len(args):
+            jql = args[i + 1]
+            i += 2
+            continue
+        keys.append(args[i])
+        i += 1
+    try:
+        result = import_issues(
+            get_default_job_service(), JiraClient(_jira_resolve_config()),
+            keys=keys, jql=jql, defaults=_session_defaults(session),
+        )
+    except (JiraError, TypeError, ValueError) as exc:
+        _emit(session, f"Jira import failed: {exc}", allow_prompt, error=True)
+        return CommandResult(ok=False, message=str(exc), data={"error": str(exc)})
+    lines = [f"Jira import: {len(result['created'])} created, {len(result['skipped'])} skipped"]
+    lines += [f"  + {c['key']} -> {c['job_id'][:10]} {c['title']}" for c in result["created"]]
+    lines += [f"  = {s['key']} already has job {str(s.get('job_id', ''))[:10]}" for s in result["skipped"]]
+    lines += [f"  ! {e['key']}: {e['error']}" for e in result["errors"]]
+    _emit(session, "\n".join(lines), allow_prompt, error=bool(result["errors"]) and not result["created"])
+    return CommandResult(ok=not (result["errors"] and not result["created"]), message="\n".join(lines), data=result)
+
+
 def _session_defaults(session: Any) -> Dict[str, Any]:
     provider = getattr(getattr(session, "provider", None), "name", "") or ""
     model = getattr(getattr(session, "provider", None), "model_name", "") or ""
     variables = getattr(session, "variables", {}) or {}
     folders = list(getattr(getattr(session, "folder_context", None), "folders", []) or [])
+    # Session model only fills stages Job settings leave unset; a job-level
+    # provider/model would outrank settings in resolve_stage_model.
+    from mu.jobs import job_settings
+
+    stages = {}
+    if provider and model:
+        stages = {s: {"provider": str(provider), "model": str(model)}
+                  for s in job_settings.missing_stages({})}
     return {
-        "repository": folders[0] if folders else "",
+        "workspace_root": folders[0] if folders else "",
         "execution": {
-            "provider": str(provider),
-            "model": str(model),
+            **({"stages": stages} if stages else {}),
             "agent_mode": str(variables.get("agent_mode", "default") or "default"),
             "session_type": str(variables.get("session_type", "workspace") or "workspace"),
             "auto_approve_writes": bool(variables.get("yolo", False)),
@@ -337,12 +383,12 @@ def _session_defaults(session: Any) -> Dict[str, Any]:
     }
 
 
-def _parse_create(raw: str, defaults: Dict[str, Any]) -> JobSpec:
+def _parse_create(raw: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
     parts = shlex.split(raw or "")
     title_parts: List[str] = []
     execution = dict(defaults.get("execution") or {})
     values: Dict[str, Any] = {
-        "repository": defaults.get("repository") or "",
+        "workspace_root": defaults.get("workspace_root") or "",
         "acceptance_criteria": [],
         "validation_commands": [],
         "execution": execution,
@@ -367,7 +413,7 @@ def _parse_create(raw: str, defaults: Dict[str, Any]) -> JobSpec:
             value = parts[index + 1]
             index += 1
         if name in {"repo", "repository"}:
-            values["repository"] = value
+            raise ValueError("--repo is no longer supported; jobs use the session's current workspace")
         elif name in {"description", "desc"}:
             values["description"] = value
         elif name == "base":
@@ -400,13 +446,13 @@ def _parse_create(raw: str, defaults: Dict[str, Any]) -> JobSpec:
             raise ValueError(f"unknown option --{name}")
         index += 1
     values["title"] = " ".join(title_parts).strip()
-    return JobSpec(**values).normalized()
+    return values
 
 
 def _create_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
     try:
-        spec = _parse_create(raw, _session_defaults(session))
-        job = get_default_job_service().create(spec)
+        payload = _parse_create(raw, _session_defaults(session))
+        job = get_default_job_service().create_from_payload(payload)
     except (TypeError, ValueError) as exc:
         message = f"Could not create job: {exc}"
         _emit(session, message, allow_prompt, error=True)
@@ -560,7 +606,7 @@ def _delete_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
     "/jobs",
     help=(
         "Engineering jobs: board, summary [N|all], list [status], show|receipt|diff <id>, "
-        "create <title> [--repo PATH --provider NAME --model NAME --accept TEXT --check CMD], "
+        "create <title> [--provider NAME --model NAME --accept TEXT --check CMD], "
         "respond <id> <answer>, changes <id> <feedback>, continue|discard <id> [detail], "
         "delete <id> [--yes] (cancel \u2192 archive \u2192 purge; branch preserved)."
     ),
@@ -590,6 +636,8 @@ def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
         return _respond_job(session, rest, allow_prompt)
     if sub in {"changes", "continue", "discard", "cancel", "resume", "retry"}:
         return _review_action(session, sub, rest, allow_prompt)
+    if sub == "jira":
+        return _jira_job(session, rest, allow_prompt)
     if sub in {"delete", "rm"}:
         return _delete_job(session, rest, allow_prompt)
     return _show_job(session, raw, allow_prompt)

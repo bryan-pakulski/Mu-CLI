@@ -150,6 +150,49 @@ class JobReviewService:
             payload={"validation_commands": commands},
         )
 
+    def _respond_plan_review(self, job, response: Dict[str, Any]):
+        """Plan gate: ``approve`` (optionally with edited criteria/commands) or ``replan``."""
+        decision = response["decision"]
+        if decision not in {"approve", "replan"}:
+            raise JobReviewError("Plan review responses require decision=approve or replan.")
+        value = response.get("value") if isinstance(response.get("value"), dict) else {}
+        metadata = dict(job.metadata or {})
+        if decision == "replan":
+            previous = metadata.pop("plan", None)
+            metadata.pop("plan_contract", None)
+            if response["detail"]:
+                metadata["replan_feedback"] = response["detail"]
+            self.service.store.update_runtime_fields(job.id, metadata_json=metadata)
+            self.service.store.append_event(
+                job.id, "plan_rejected", reason="human requested a new plan",
+                payload={"detail": response["detail"], "previous_summary": (previous or {}).get("summary", "")},
+            )
+        else:
+            fields: Dict[str, Any] = {}
+            for key, column in (("acceptance_criteria", "acceptance_json"),
+                                ("validation_commands", "validation_json")):
+                if key in value:
+                    items = value[key]
+                    if not isinstance(items, list):
+                        raise JobReviewError(f"{key} must be a list of strings.")
+                    fields[column] = [str(v).strip() for v in items if str(v or "").strip()][:50]
+            if "validation_json" in fields:
+                from .dynamic_checks import allowed_executables, check_command
+
+                allowed = allowed_executables(job)
+                bad = [c for c in fields["validation_json"] if not check_command(c, allowed)[0]]
+                if bad:
+                    raise JobReviewError("Validation command not allowed: " + "; ".join(bad[:3]))
+            metadata["plan_approved"] = {"by": "human", "detail": response["detail"]}
+            self.service.store.update_runtime_fields(job.id, metadata_json=metadata, **fields)
+            self.service.store.append_event(
+                job.id, "plan_approved", reason="human approved plan",
+                payload={"edited": sorted(k for k in value if k in {"acceptance_criteria", "validation_commands"}),
+                         "detail": response["detail"]},
+            )
+        self.service.store.append_event(job.id, "interaction_response", payload=response)
+        return self.service.resume(job.id, detail=response["detail"] or decision)
+
     def respond(
         self,
         job_id: str,
@@ -176,6 +219,8 @@ class JobReviewService:
                 raise JobReviewError("Approval responses require decision=approve, deny, or explain.")
             if response["decision"] == "approve" and context.get("can_approve") is False:
                 raise JobReviewError("This tool request cannot be approved because its modification preview failed.")
+        if job.attention_reason.value == "plan_review":
+            return self._respond_plan_review(job, response)
         if job.attention_reason.value == "verification_required":
             commands: List[str] = []
             if isinstance(value, list):

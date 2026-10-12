@@ -107,7 +107,21 @@ def _resolve_target(target: str, context=None) -> tuple[str | None, str | None]:
     if target.startswith("file://"):
         path = target[len("file://") :]
     else:
-        path = os.path.abspath(os.path.expanduser(target))
+        path = os.path.expanduser(target)
+        if not os.path.isabs(path):
+            # Relative targets anchor to the workspace, never the host
+            # process cwd (same contract as the file tools).
+            from mu.tools._bounds import resolve_tool_path
+
+            _session = getattr(context, "session", None)
+            _fc = getattr(context, "folder_context", None) or getattr(
+                _session, "folder_context", None
+            ) or getattr(getattr(_session, "session_manager", None), "folder_context", None)
+            _stype = str(
+                (getattr(_session, "variables", None) or {}).get("session_type", "workspace")
+                or "workspace"
+            )
+            path = resolve_tool_path(path, _fc, _stype)
     path = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
     if not os.path.isfile(path):
         return None, f"target not found: {target}"

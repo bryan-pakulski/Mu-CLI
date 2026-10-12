@@ -60,16 +60,22 @@
                 <template x-if="!sessions.length">
                     <div class="welcome-empty"><strong>No saved sessions</strong><span>Create one to begin.</span></div>
                 </template>
-                <template x-for="s in sessions" :key="s.name">
+                <template x-for="s in sortedSessions()" :key="s.name">
                     <article class="welcome-session-row" role="button" tabindex="0"
+                             :class="{'is-current': !!s.is_current, 'is-loaded': !!s.is_loaded, 'is-busy': !!s.is_busy}"
                              @click="loadSession(s.name)"
                              @keydown.enter.prevent="loadSession(s.name)"
                              @keydown.space.prevent="loadSession(s.name)"
-                             :aria-label="`Open session ${s.name}`">
+                             :aria-label="`Open session ${s.name}${sessionState(s) ? ' (' + sessionState(s).toLowerCase() + ')' : ''}`">
                         <span class="session-kind" x-text="sessionGlyph(s.session_type)" aria-hidden="true"></span>
                         <div class="welcome-session-copy">
                             <strong x-text="s.name"></strong>
                             <small x-text="`${s.session_type || 'workspace'} · ${formatDate(s.modified_at)}`"></small>
+                        </div>
+                        <span class="welcome-session-state" x-show="sessionState(s)" x-text="sessionState(s)"
+                              :class="{'is-current': !!s.is_current, 'is-busy': !!s.is_busy}"
+                              :title="sessionStateHint(s)"></span>
+                        <div class="welcome-session-spacer" aria-hidden="true">
                         </div>
                         <span class="welcome-session-open" aria-hidden="true">→</span>
                         <button class="welcome-row-icon danger-text" type="button"
@@ -334,6 +340,10 @@ function welcomeView() {
         nextStep(){ this.error=null; if(!this.canContinue){this.error='Complete the required fields before continuing.';return;} this.step=Math.min(4,this.step+1); },
         sessionIcon(type){ return sessionTypeIconMarkup(type, 'session-type-svg'); },
         sessionGlyph(type){ return type === 'container' ? '◇' : type === 'chat' ? '○' : '▱'; },
+        sessionState(s){ if(!s) return ''; if(s.is_current) return 'Active'; if(s.is_busy) return 'Working'; if(s.is_loaded) return 'Loaded'; return ''; },
+        sessionStateHint(s){ const st=this.sessionState(s); return st==='Active' ? 'Currently focused in this window' : st==='Working' ? 'Loaded and mid-turn' : st==='Loaded' ? 'Loaded in memory' : ''; },
+        sessionRank(s){ return s.is_current ? 0 : s.is_busy ? 1 : s.is_loaded ? 2 : 3; },
+        sortedSessions(){ return (this.sessions||[]).map((s,i)=>[s,i]).sort((a,b)=>(this.sessionRank(a[0])-this.sessionRank(b[0]))||(a[1]-b[1])).map(x=>x[0]); },
         formatDate(value){ if(!value)return 'unknown'; try{return new Date(value).toLocaleString();}catch{return value;} },
         syncContainerName(){ if(!this.form.containerName || this.form.containerName.startsWith('mucli-')) this.form.containerName=`mucli-${this.form.name||'session'}`; },
         lineCount(value){ return String(value||'').split(/\r?\n/).filter(x=>x.trim()).length; },

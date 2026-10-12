@@ -16,6 +16,9 @@ RUNNING_STATUSES = {
     JobStatus.RUNNING,
     JobStatus.VERIFYING,
     JobStatus.RECOVERING,
+    JobStatus.PLANNING,
+    JobStatus.REVIEWING,
+    JobStatus.PUBLISHING,
 }
 FAILED_STATUSES = {
     JobStatus.FAILED,

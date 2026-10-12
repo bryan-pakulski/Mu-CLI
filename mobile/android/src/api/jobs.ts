@@ -1,8 +1,19 @@
 import { api } from './client';
 
-export type JobStatus = 'queued' | 'preparing' | 'running' | 'needs_human' | 'verifying' | 'ready_for_review' | 'recovering' | 'conflicted' | 'failed' | 'timed_out' | 'budget_exceeded' | 'environment_error' | 'cancelled' | 'merged';
-export type AttentionReason = '' | 'question' | 'approval_required' | 'ambiguous_requirement' | 'secret_required' | 'merge_conflict' | 'budget_exceeded' | 'environment_failure' | 'verification_required' | 'test_failure' | 'unsafe_action' | 'worker_lost' | 'provider_error';
+export type JobStatus = 'queued' | 'preparing' | 'running' | 'needs_human' | 'verifying' | 'planning' | 'reviewing' | 'publishing' | 'ready_for_review' | 'recovering' | 'conflicted' | 'failed' | 'timed_out' | 'budget_exceeded' | 'environment_error' | 'cancelled' | 'merged';
+export type AttentionReason = '' | 'question' | 'approval_required' | 'ambiguous_requirement' | 'secret_required' | 'merge_conflict' | 'budget_exceeded' | 'environment_failure' | 'verification_required' | 'test_failure' | 'unsafe_action' | 'worker_lost' | 'provider_error' | 'models_unset' | 'plan_review' | 'no_validation' | 'review_stalled' | 'publish_failed' | string;
 export type JobBoardSection = 'needs_you' | 'running' | 'queued' | 'ready' | 'failed' | 'done';
+
+export type JobStageName = 'plan' | 'implement' | 'review';
+
+export const JOB_STAGE_NAMES: JobStageName[] = ['plan', 'implement', 'review'];
+
+export interface JobStageModel {
+  provider?: string;
+  model?: string;
+}
+
+export type JobStageModels = Partial<Record<JobStageName, JobStageModel>>;
 
 export interface JobExecutionProfile {
   provider: string;
@@ -10,7 +21,26 @@ export interface JobExecutionProfile {
   agent_mode: string;
   session_type: 'chat' | 'workspace' | 'container';
   auto_approve_writes: boolean;
+  stages?: JobStageModels;
   [key: string]: unknown;
+}
+
+/** Keep only stages with a provider or model; blank stages inherit server-side. */
+export function compactStageModels(
+  draft: Partial<Record<JobStageName, { provider?: string; model?: string }>>,
+): JobStageModels {
+  const out: JobStageModels = {};
+  for (const stage of JOB_STAGE_NAMES) {
+    const entry = draft[stage] || {};
+    const provider = (entry.provider || '').trim();
+    const model = (entry.model || '').trim();
+    if (!provider && !model) continue;
+    const item: JobStageModel = {};
+    if (provider) item.provider = provider;
+    if (model) item.model = model;
+    out[stage] = item;
+  }
+  return out;
 }
 
 export interface EngineeringJob {
@@ -198,7 +228,6 @@ export interface JobBoardResponse {
 export interface CreateJobInput extends Record<string, unknown> {
   title: string;
   description?: string;
-  repository?: string;
   session_name?: string;
   base_branch?: string;
   base_sha?: string;
@@ -221,6 +250,58 @@ export interface JobInteractionResponse extends Record<string, unknown> {
   selected?: unknown[];
 }
 
+/** Pipeline settings stored server-side in $MUCLI_HOME/jobs/settings.json. */
+export interface JobPipelineSettings {
+  stage_models: JobStageModels;
+  plan_approval: boolean;
+  stages?: JobStageName[];
+  missing?: JobStageName[];
+  configured?: boolean;
+}
+
+export interface JobPlan {
+  summary?: string;
+  steps?: string[];
+  acceptance_criteria?: string[];
+  validation_commands?: string[];
+  model?: { provider?: string; model?: string };
+}
+
+/** Plan awaiting review: job metadata wins, attention context is the fallback. */
+export function planReviewDraft(job: Pick<EngineeringJob, 'acceptance_criteria' | 'validation_commands'> & { metadata?: Record<string, unknown> }, context: Record<string, unknown> = {}) {
+  const meta = (job.metadata || {}) as Record<string, unknown>;
+  const plan = ((meta.plan as JobPlan) || (context.plan as JobPlan) || {}) as JobPlan;
+  const pick = (primary: unknown, fallback: unknown): string[] => {
+    const list = Array.isArray(primary) && primary.length ? primary : (Array.isArray(fallback) ? fallback : []);
+    return list.map(item => String(item)).filter(Boolean);
+  };
+  return {
+    plan,
+    steps: Array.isArray(plan.steps) ? plan.steps.map(String) : [],
+    criteria: pick(job.acceptance_criteria, context.acceptance_criteria ?? plan.acceptance_criteria),
+    commands: pick(job.validation_commands, context.validation_commands ?? plan.validation_commands),
+  };
+}
+
+export function splitLines(value: string): string[] {
+  return String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+}
+
+export function planApprovalBody(criteriaText: string, commandsText: string, detail = ''): JobInteractionResponse {
+  return {
+    decision: 'approve',
+    detail: detail.trim(),
+    value: { acceptance_criteria: splitLines(criteriaText), validation_commands: splitLines(commandsText) },
+  };
+}
+
+export function missingStageModels(models: JobStageModels | undefined): JobStageName[] {
+  return JOB_STAGE_NAMES.filter(stage => {
+    const entry = models?.[stage];
+    return !(entry && String(entry.provider || '').trim() && String(entry.model || '').trim());
+  });
+}
+
 export type JobDeleteResult = {
   job_id: string;
   deleted: boolean;
@@ -231,8 +312,93 @@ export type JobDeleteResult = {
   branch_preserved: string;
 };
 
+/** Secret-free Jira link view ($MUCLI_HOME/integrations/jira.json). */
+export interface JiraBoardPref { id: number; name: string; project?: string; type?: string }
+export interface JiraSettings {
+  base_url: string;
+  email: string;
+  mode: string;
+  configured: boolean;
+  api_token_set: boolean;
+  pat_set: boolean;
+  writeback: boolean;
+  sources: Record<string, string>;
+  preferences: { boards: JiraBoardPref[]; default_jql: string; assigned_to_me: boolean };
+  error?: string;
+}
+export interface JiraSettingsUpdate {
+  base_url?: string;
+  email?: string;
+  api_token?: string;
+  pat?: string;
+  preferences?: Partial<JiraSettings['preferences']>;
+}
+export interface JiraBoard extends JiraBoardPref { preferred?: boolean; suggested?: boolean }
+export interface JiraSprint { id: number; name: string; state: string }
+export interface JiraLinkedJob { job_id: string; title: string; status: string; attention_reason: string; live: boolean }
+export interface JiraTicket {
+  key: string;
+  summary: string;
+  url: string;
+  status: string;
+  status_category: string;
+  issue_type: string;
+  priority: string;
+  assignee: string;
+  labels: string[];
+  job?: JiraLinkedJob | null;
+}
+export interface JiraStatusCount { name: string; category: string; count: number }
+export interface JiraTicketQuery {
+  board_id?: number;
+  sprint_id?: number;
+  jql?: string;
+  mine?: boolean;
+  backlog?: boolean;
+  include_done?: boolean;
+  status?: string;
+}
+
+/** Drop empty/false query values so the server sees only real filters. */
+export function jiraTicketQuery(q: JiraTicketQuery): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(q)) {
+    if (value === undefined || value === null || value === '' || value === false || value === 0) continue;
+    out[key] = value as string | number | boolean;
+  }
+  return out;
+}
+
+/** Only send a token field when the user typed one (blank keeps the stored secret). */
+export function jiraSettingsBody(form: { base_url: string; email: string; token: string; mode: 'cloud' | 'dc' }): JiraSettingsUpdate {
+  const body: JiraSettingsUpdate = { base_url: form.base_url.trim(), email: form.email.trim() };
+  const token = form.token.trim();
+  if (token) {
+    if (form.mode === 'dc') body.pat = token;
+    else body.api_token = token;
+  }
+  return body;
+}
+
+export const jiraApi = {
+  settings: () => api.get<JiraSettings>('/api/jobs/jira/settings'),
+  save: (body: JiraSettingsUpdate) => api.put<JiraSettings>('/api/jobs/jira/settings', body),
+  unlink: () => api.delete<JiraSettings>('/api/jobs/jira/settings'),
+  test: () => api.post<{ ok: boolean; user: { displayName?: string; emailAddress?: string } }>('/api/jobs/jira/test', {}),
+  boards: (query = '') => api.get<{ boards: JiraBoard[]; my_projects: string[] }>('/api/jobs/jira/boards', { query: query ? { query } : {} }),
+  sprints: (boardId: number) => api.get<{ sprints: JiraSprint[] }>(`/api/jobs/jira/boards/${boardId}/sprints`),
+  tickets: (q: JiraTicketQuery) => api.get<{ tickets: JiraTicket[]; statuses: JiraStatusCount[]; jql: string }>(
+    '/api/jobs/jira/tickets', { query: jiraTicketQuery(q) },
+  ),
+  importKeys: (keys: string[], sessionName?: string | null) => api.post<{ created: Array<{ key: string; job_id: string }>; skipped?: unknown[]; errors?: unknown[] }>(
+    '/api/jobs/jira/import', { keys, session_name: sessionName || undefined },
+  ),
+};
+
 export const jobsApi = {
   list: () => api.get<{ jobs: EngineeringJob[] }>('/api/jobs'),
+  getSettings: () => api.get<JobPipelineSettings>('/api/jobs/settings'),
+  saveSettings: (settings: Partial<Pick<JobPipelineSettings, 'stage_models' | 'plan_approval'>>) => api.put<JobPipelineSettings>('/api/jobs/settings', settings),
   board: () => api.get<JobBoardResponse>('/api/jobs/board'),
   get: (jobId: string) => api.get<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}`),
   create: (input: CreateJobInput) => api.post<{ job: EngineeringJob }>('/api/jobs', input),

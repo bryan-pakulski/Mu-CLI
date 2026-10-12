@@ -222,3 +222,106 @@ Inject browser/mobile disconnect, controller restart, provider failure and base
 branch movement. Targets: zero workspace collisions, zero false-ready jobs,
 100% cost attribution, 100% surfaced blockers, and <2 minutes to understand all
 five outcomes.
+
+## Durable job v2 — staged pipeline, Jira intake, PR publish
+
+### Workspace-anchored jobs
+
+Jobs no longer take a `repository`. Creating a job resolves its workspace from
+the session that creates it (`workspace_root`, filled in by the GUI, mobile and
+TUI from the active session's folder context). Payloads that send
+`repository`/`repo` are rejected. Non-git workspaces are allowed; they run with
+`execution.git_enabled = false`, without a base commit, review branch or PR.
+Jobs stored before v2 that have `repository` set still load unchanged.
+
+### Stages and per-stage models
+
+New jobs default to `execution.pipeline = "staged"`:
+
+```
+QUEUED → PREPARING → PLANNING → RUNNING → VERIFYING → REVIEWING
+       → PUBLISHING (git + publish enabled) → READY_FOR_REVIEW
+REVIEWING --request_changes--> QUEUED (full re-implement + re-verify)
+```
+
+Each stage can use its own model. Lookup order is stage, then job execution,
+then session:
+
+```json
+{"execution": {
+  "provider": "anthropic", "model": "sonnet",
+  "stages": {
+    "plan":      {"provider": "anthropic", "model": "opus"},
+    "implement": {"model": "haiku"},
+    "review":    {"model": "opus"}
+  },
+  "max_review_rounds": 3
+}}
+```
+
+- **Plan** runs once per job and stores `metadata.plan` (summary, steps,
+  acceptance criteria, validation commands). If the planner fails, the job goes
+  to `needs_human` with `provider_error`.
+- **Implement** is the existing worker. Its prompt includes the plan and the
+  latest reviewer feedback.
+- **Review** is a read-only model session over the diff. It returns
+  `approve` or `request_changes`. A response that can't be parsed counts as
+  `request_changes`. Each round is appended to `metadata.review_rounds`.
+  After `max_review_rounds` (default 3, range 1–20) the job goes to
+  `needs_human` with `review_stalled`.
+
+The human `READY_FOR_REVIEW` gate stays in place: the pipeline never merges.
+
+### Dynamic acceptance and validation
+
+The planner's acceptance criteria and validation commands are merged into the
+job contract (`mu/jobs/dynamic_checks.py`):
+
+- User-supplied criteria and commands are never dropped and always come first.
+- Planner commands must start with an allow-listed executable (pytest, npm,
+  make, cargo, go, tsc, …). Shell operators (`; && || | > < ` $( &`) are
+  rejected. Rejected commands are recorded in `metadata.plan_contract`.
+  `execution.validation_allowlist` extends the allow-list for a single job.
+- At most 8 planner commands are accepted.
+- Creating a job no longer requires validation commands. If no commands
+  remain after planning, the job goes to `needs_human` with `no_validation`.
+
+### Jira intake
+
+Credentials are read from the server environment only. They are never taken
+from API payloads and never stored on a job.
+
+| Variable | Purpose |
+|---|---|
+| `JIRA_BASE_URL` | `https://acme.atlassian.net` or Data Center URL |
+| `JIRA_EMAIL` + `JIRA_API_TOKEN` | Cloud (basic auth, REST v3) |
+| `JIRA_PAT` | Data Center personal access token (bearer, REST v2) |
+| `JIRA_WRITEBACK` | `1` to post a "job created" comment (off by default) |
+
+- TUI: `/job jira pull PROJ-1 PROJ-2` or `/job jira pull --jql "project = PROJ AND assignee = currentUser()"`
+- API: `POST /api/jobs/jira/import` `{"keys": [...]}` or `{"jql": "..."}`.
+  Bodies that contain credential fields get a 400. Jira errors return 502.
+
+Each issue becomes one job: the title is `KEY: summary`, the description is the
+issue text with ADF converted to plain text, and acceptance criteria come from an
+"Acceptance criteria" heading. `metadata.jira` holds the key, URL, status and
+type. An issue that already has a live (non-terminal) job is skipped.
+
+### PR publish
+
+For git workspaces the default is `execution.publish_mode = "auto"`. For
+non-git workspaces it is `"none"`. Once the reviewer approves, the job moves to
+`PUBLISHING`. That stage pushes the review branch to `origin` and opens a
+**draft** PR:
+
+| Mode | Behaviour |
+|---|---|
+| `auto` | `gh` if it is installed and origin is GitHub; otherwise REST chosen by origin host |
+| `gh` | `gh pr create --draft` |
+| `github` | GitHub REST `draft: true` (`GITHUB_TOKEN` / `GH_TOKEN`) |
+| `gitlab` | GitLab merge request titled `Draft: …` (`GITLAB_TOKEN`) |
+| `none` | Stage skipped |
+
+On success the PR details go into `metadata.pr` and the job moves to
+`READY_FOR_REVIEW`. If the push or PR call fails, the job goes to
+`needs_human` with `publish_failed`. Tokens are redacted from error text.

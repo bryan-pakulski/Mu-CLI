@@ -4,7 +4,7 @@
 ANDROID_DIR  = android
 GRADLEW      = $(ANDROID_DIR)/gradlew
 APK_DIR      = $(ANDROID_DIR)/app/build/outputs/apk/release
-APK_NAME     = mucli-mobile-0.1.0.apk
+APK_NAME     = mucli-mobile-0.2.4.apk
 DIST_DIR     = dist
 JAVA_HOME   ?= $(shell dirname $$(dirname $$(readlink -f $$(which javac) 2>/dev/null) 2>/dev/null) 2>/dev/null)
 
@@ -17,7 +17,7 @@ help:
 	@echo "mucli mobile — local APK build"
 	@echo ""
 	@echo "  make prebuild  — generate android/ native project (expo prebuild)"
-	@echo "  make apk       — build release APK, copy to dist/mucli-mobile-0.1.0.apk"
+	@echo "  make apk       — build release APK, copy to dist/$(APK_NAME)"
 	@echo "  make install   — install APK to connected device via adb"
 	@echo "  make clean     — remove build outputs + dist/"
 	@echo ""

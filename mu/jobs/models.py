@@ -14,6 +14,9 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     NEEDS_HUMAN = "needs_human"
     VERIFYING = "verifying"
+    PLANNING = "planning"
+    REVIEWING = "reviewing"
+    PUBLISHING = "publishing"
     READY_FOR_REVIEW = "ready_for_review"
     RECOVERING = "recovering"
     CONFLICTED = "conflicted"
@@ -38,7 +41,12 @@ class AttentionReason(str, Enum):
     TEST_FAILURE = "test_failure"
     UNSAFE_ACTION = "unsafe_action"
     WORKER_LOST = "worker_lost"
+    REVIEW_STALLED = "review_stalled"
+    NO_VALIDATION = "no_validation"
+    PUBLISH_FAILED = "publish_failed"
     PROVIDER_ERROR = "provider_error"
+    MODELS_UNSET = "models_unset"
+    PLAN_REVIEW = "plan_review"
 
 
 TERMINAL_STATUSES = frozenset({JobStatus.CANCELLED, JobStatus.MERGED})
@@ -49,6 +57,7 @@ ALLOWED_TRANSITIONS = {
     # deadline — a hung provider call is equally possible while preparing
     # the worktree or verifying as while the agent runs.
     JobStatus.PREPARING: {
+        JobStatus.PLANNING,
         JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
         JobStatus.ENVIRONMENT_ERROR, JobStatus.FAILED, JobStatus.CANCELLED,
         JobStatus.TIMED_OUT,
@@ -62,9 +71,11 @@ ALLOWED_TRANSITIONS = {
         JobStatus.ENVIRONMENT_ERROR, JobStatus.CANCELLED, JobStatus.QUEUED,
     },
     JobStatus.NEEDS_HUMAN: {
+        JobStatus.PLANNING, JobStatus.REVIEWING,
         JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
     },
     JobStatus.VERIFYING: {
+        JobStatus.REVIEWING,
         JobStatus.READY_FOR_REVIEW, JobStatus.QUEUED, JobStatus.RUNNING,
         JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.CONFLICTED,
         JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
@@ -78,12 +89,34 @@ ALLOWED_TRANSITIONS = {
         JobStatus.MERGED, JobStatus.CANCELLED,
     },
     JobStatus.RECOVERING: {
+        JobStatus.PLANNING, JobStatus.REVIEWING, JobStatus.PUBLISHING,
         JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED, JobStatus.CANCELLED,
         JobStatus.TIMED_OUT,
     },
     JobStatus.CONFLICTED: {
         JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED,
         JobStatus.CANCELLED,
+    },
+    # Durable job v2 staged pipeline:
+    # PREPARING -> PLANNING -> RUNNING -> VERIFYING -> REVIEWING
+    #   REVIEWING -> RUNNING          reviewer request_changes (full re-verify)
+    #   REVIEWING -> PUBLISHING       approved, git workspace
+    #   REVIEWING -> READY_FOR_REVIEW approved, non-git / publish disabled
+    #   PUBLISHING -> READY_FOR_REVIEW (human gate kept)
+    JobStatus.PLANNING: {
+        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
+        JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
+        JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED, JobStatus.ENVIRONMENT_ERROR,
+    },
+    JobStatus.REVIEWING: {
+        JobStatus.RUNNING, JobStatus.PUBLISHING, JobStatus.READY_FOR_REVIEW,
+        JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.QUEUED,
+        JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
+        JobStatus.BUDGET_EXCEEDED,
+    },
+    JobStatus.PUBLISHING: {
+        JobStatus.READY_FOR_REVIEW, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
+        JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
     },
     JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.CANCELLED},
     JobStatus.TIMED_OUT: {JobStatus.QUEUED, JobStatus.CANCELLED},
@@ -117,7 +150,85 @@ def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
     for key, item in raw.items():
         if key not in execution:
             execution[str(key)] = item
+    execution["stages"] = normalize_stages(raw.get("stages"))
+    execution["max_review_rounds"] = normalize_max_review_rounds(raw.get("max_review_rounds"))
     return execution
+
+
+STAGES = ("plan", "implement", "review")
+DEFAULT_MAX_REVIEW_ROUNDS = 3
+
+
+def normalize_stages(value: Any) -> Dict[str, Dict[str, str]]:
+    """Normalize ``execution.stages`` to ``{stage: {provider, model}}``.
+
+    Unknown stage names are rejected so a typo cannot silently fall back to
+    the implementation model for an expensive planner/reviewer slot.
+    """
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("execution.stages must be an object keyed by plan/implement/review")
+    stages: Dict[str, Dict[str, str]] = {}
+    for name, cfg in value.items():
+        key = str(name or "").strip().lower()
+        if key not in STAGES:
+            raise ValueError(f"unknown execution stage '{name}' (expected plan, implement, review)")
+        if isinstance(cfg, str):
+            cfg = {"model": cfg}
+        if not isinstance(cfg, dict):
+            raise ValueError(f"execution.stages.{key} must be an object with provider/model")
+        entry = {
+            "provider": str(cfg.get("provider") or "").strip(),
+            "model": str(cfg.get("model") or "").strip(),
+        }
+        if entry["provider"] or entry["model"]:
+            stages[key] = entry
+    return stages
+
+
+def normalize_max_review_rounds(value: Any) -> int:
+    if value in (None, ""):
+        return DEFAULT_MAX_REVIEW_ROUNDS
+    rounds = int(value)
+    if rounds < 1 or rounds > 20:
+        raise ValueError("max_review_rounds must be between 1 and 20")
+    return rounds
+
+
+def resolve_stage_model(
+    execution: Dict[str, Any] | None,
+    stage: str,
+    *,
+    session_provider: str = "",
+    session_model: str = "",
+) -> Dict[str, str]:
+    """Pick provider/model for a pipeline stage.
+
+    Precedence per field: ``execution.stages[stage]`` -> ``execution`` job
+    default -> the submitting session's provider/model.
+    """
+    key = str(stage or "").strip().lower()
+    if key not in STAGES:
+        raise ValueError(f"unknown execution stage '{stage}'")
+    exe = dict(execution or {})
+    cfg = dict((exe.get("stages") or {}).get(key) or {})
+    if cfg.get("model") or exe.get("model"):
+        provider = cfg.get("provider") or exe.get("provider") or session_provider or ""
+        model = cfg.get("model") or exe.get("model") or ""
+        source = "stage" if cfg.get("model") else "job"
+        return {"stage": key, "provider": str(provider), "model": str(model), "source": source}
+    if session_model:
+        return {"stage": key, "provider": str(session_provider or ""), "model": str(session_model),
+                "source": "session"}
+    # Fallback: Job settings ($MUCLI_HOME/jobs/settings.json) per-stage defaults.
+    from .job_settings import stage_model
+
+    fallback = stage_model(key)
+    if fallback.get("model"):
+        return {"stage": key, "provider": str(fallback.get("provider") or ""),
+                "model": str(fallback["model"]), "source": "settings"}
+    return {"stage": key, "provider": "", "model": "", "source": "unset"}
 
 
 @dataclass(frozen=True)

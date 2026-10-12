@@ -178,6 +178,17 @@ def apply_verification_result(service, job_id: str, run: VerificationRun) -> int
         # A 'fail' verdict gates READY behind a human — "ready" must not hide
         # a criterion the reviewer believes is unmet. 'unknown' proceeds but
         # is recorded as evidence.
+        from .stages import is_staged
+
+        if is_staged(current):
+            service.transition(
+                job_id,
+                JobStatus.REVIEWING,
+                reason="deterministic verification passed; model review next",
+                payload=review_feedback,
+            )
+            _refresh_receipt(service, job_id)
+            return 0
         acceptance_gate = _maybe_acceptance_review(service, current, review_feedback)
         if acceptance_gate is not None:
             _refresh_receipt(service, job_id)

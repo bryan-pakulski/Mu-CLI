@@ -19,7 +19,8 @@ from typing import Any, Mapping
 # ``job-<first 20 chars of job id>`` before an explicit metadata marker was
 # guaranteed on every saved session.  Keep the fallback deliberately narrow so
 # a normal user session called e.g. ``job-notes`` is never hidden.
-_LEGACY_DURABLE_JOB_NAME = re.compile(r"^job-[0-9a-f]{20}$", re.IGNORECASE)
+# Stage sessions (plan/review/acceptance) append ``-<stage>``.
+_LEGACY_DURABLE_JOB_NAME = re.compile(r"^job-[0-9a-f]{20}(?:-[a-z_]+)?$", re.IGNORECASE)
 
 
 def is_durable_job_session(name: str, data: Mapping[str, Any] | None = None) -> bool:

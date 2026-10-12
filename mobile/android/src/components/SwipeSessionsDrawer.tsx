@@ -14,6 +14,7 @@ import { threadsApi, type ThreadStatus, type ThreadSummary } from '../api/thread
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
 import { SafeAreaModal } from './SafeAreaModal';
@@ -177,12 +178,6 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
     ]);
   };
 
-  const sessionStatusColor = (session: SessionSummary) => {
-    if (session.is_busy) return colors.accent;
-    if (session.is_loaded) return colors.textSoft;
-    return colors.textDim;
-  };
-
   const threadStatusColor = (status: ThreadStatus) => {
     if (status === 'error') return colors.error;
     if (status === 'interrupted') return colors.warning;
@@ -309,7 +304,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
                   </TouchableOpacity>
                 ) : null}
-                {sessions.map(session => (
+                {sortSessions(sessions, activeSessionName).map(session => (
                   <TouchableOpacity
                     key={session.name}
                     onPress={() => void switchSession(session.name)}
@@ -317,17 +312,16 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     style={[
                       styles.row,
                       { borderBottomColor: colors.hairline },
-                      activeSessionName === session.name && { backgroundColor: colors.bgHover },
+                      activeSessionName === session.name && { backgroundColor: colors.bgHover, borderWidth: 1, borderColor: colors.accent },
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
-                      <Ionicons name={typeIcon(session)} size={17} color={sessionStatusColor(session)} />
+                      <Ionicons name={typeIcon(session)} size={17} color={session.is_loaded || activeSessionName === session.name ? colors.accent : colors.textDim} />
                     </View>
                     <View style={styles.rowCopy}>
                       <Text variant="sm" style={styles.rowName} numberOfLines={1}>{session.name}</Text>
                       <Text variant="xs" dim>
-                        {switchingName === session.name ? 'Opening…' : session.is_busy ? 'Working' : session.is_loaded ? 'Loaded' : 'Saved'}
-                        {session.session_type ? ` · ${session.session_type}` : ''}
+                        {switchingName === session.name ? 'Opening…' : session.session_type || 'workspace'}
                       </Text>
                     </View>
                     <TouchableOpacity onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>

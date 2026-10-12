@@ -754,14 +754,23 @@ def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> s
         return "Error: This tool requires an active session context."
 
     approved = args.get("approved", True)
+    requested_feature_id = str(args.get("feature_id", "") or "").strip() or None
 
-    feature_state = session.session_manager.get_feature_state() or {}
+    # Resolve via the registry (explicit feature_id, else active pointer) so a
+    # feature whose active pointer was dropped can still be approved/reviewed.
+    feature_state = _resolve_feature_state(session, requested_feature_id) or {}
     directory = str(
         args.get("directory")
         or feature_state.get("directory", "")
         or ""
     ).strip()
-    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=requested_feature_id
+        or (str(feature_state.get("feature_id", "") or "").strip() or None),
+        directory=directory,
+    )
     if not metadata_path:
         metadata_path = str(
             getattr(context.folder_context, "feature_metadata_index", {}).get(
@@ -788,11 +797,13 @@ def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> s
     if context.ui:
         context.ui.show_info(f"Feature plan {status}: {plan.feature_id}")
 
-    # Update in-memory feature state so status reflects approval/review
-    feature_state = session.session_manager.get_feature_state() or {}
+    # Update feature state so status reflects approval/review. Prefer the
+    # resolved record over the (possibly empty) active pointer.
+    current = session.session_manager.get_feature_state() or feature_state or {}
     updated_feature = {
-        **feature_state,
-        "directory": directory or feature_state.get("directory", ""),
+        **current,
+        "feature_id": plan.feature_id,
+        "directory": directory or current.get("directory", ""),
         "metadata_path": metadata_path,
         "feature_plan": summary,
     }
@@ -1436,6 +1447,12 @@ def update_feature_task(args: Dict[str, Any], context) -> str:
         "type": "object",
         "properties": {
             "approved": {"type": "boolean", "default": True},
+            "feature_id": {
+                "type": "string",
+                "description": "Optional feature id; defaults to the active feature.",
+            },
+            "review_status": {"type": "string"},
+            "review_notes": {"type": "string"},
         },
     },
     requires_approval=True,

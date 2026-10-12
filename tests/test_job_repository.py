@@ -84,7 +84,7 @@ def test_payload_creation_snapshots_current_repository_head_instead_of_inventing
 
     job = service.create_from_payload({
         "title": "Queue from GUI",
-        "repository": str(repo),
+        "workspace_root": str(repo),
         "execution": {
             "provider": "ollama",
             "model": "test-model",
@@ -112,7 +112,7 @@ def test_payload_creation_from_existing_worktree_snapshots_that_worktree(tmp_pat
 
     job = service.create_from_payload({
         "title": "Queue from attached worktree",
-        "repository": str(secondary),
+        "workspace_root": str(secondary),
         "execution": {
             "provider": "ollama",
             "model": "test-model",
@@ -135,7 +135,7 @@ def test_payload_creation_rejects_invalid_repository_before_queueing(tmp_path):
     with pytest.raises(ValueError, match="Repository preflight failed"):
         service.create_from_payload({
             "title": "Bad workspace",
-            "repository": str(missing),
+            "workspace_root": str(missing),
             "execution": {
                 "provider": "ollama",
                 "model": "test-model",
@@ -152,7 +152,7 @@ def test_explicit_base_branch_is_preserved_for_worker_resolution(tmp_path):
 
     job = service.create_from_payload({
         "title": "Release job",
-        "repository": str(repo),
+        "workspace_root": str(repo),
         "base_branch": "release",
         "execution": {
             "provider": "ollama",

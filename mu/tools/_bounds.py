@@ -69,6 +69,23 @@ def check_bounds(
     return False
 
 
+def resolve_tool_path(filename: str, folder_context: Any, session_type: str = "workspace") -> str:
+    """Anchor a tool-supplied path to the session's working directory.
+
+    Relative paths must resolve against the attached workspace (or the
+    container cwd), never the host process cwd: the GUI may be launched from
+    any directory, which previously turned ``mu/x.py`` into a path outside the
+    workspace (spurious access_denied) or, worse, a write to the wrong file.
+    Absolute and ``~`` paths are returned expanded but otherwise unchanged, so
+    ``check_bounds`` still decides containment, ``..`` escapes, and secrets.
+    """
+    text = os.path.expanduser(str(filename or ""))
+    if not text or os.path.isabs(text):
+        return text
+    base = default_working_directory(folder_context, session_type)
+    return os.path.normpath(os.path.join(base, text))
+
+
 def default_working_directory(folder_context: Any, session_type: str) -> str:
     """Choose a useful cwd without turning mounts into a container boundary."""
     if normalize_session_type(session_type) == "container":
@@ -83,4 +100,4 @@ def default_working_directory(folder_context: Any, session_type: str) -> str:
     return os.getcwd()
 
 
-__all__ = ["check_bounds", "default_working_directory"]
+__all__ = ["check_bounds", "default_working_directory", "resolve_tool_path"]

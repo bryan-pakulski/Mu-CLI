@@ -210,6 +210,18 @@ class SessionJobRunner:
             if event.event_type == "verification_failed":
                 lines.extend(self._verification_feedback(event.payload))
                 break
+        plan = dict((job.metadata or {}).get("plan") or {})
+        if plan.get("summary") or plan.get("steps"):
+            lines.extend(["", "Agreed plan:"])
+            if plan.get("summary"):
+                lines.append(str(plan["summary"]))
+            lines.extend(f"- {step}" for step in plan.get("steps") or [])
+        for event in reversed(events):
+            if event.event_type == "review_changes_requested":
+                from .stages import review_feedback_lines
+
+                lines.extend(review_feedback_lines(event.payload or {}))
+                break
         for event in reversed(events):
             if event.event_type == "human_response":
                 detail = str(event.payload.get("detail") or "").strip()
@@ -268,6 +280,7 @@ class SessionJobRunner:
             # question. The loop retries transient errors with backoff and
             # aborts otherwise; the worker then decides requeue vs FAILED.
             session.variables["provider_recovery_policy"] = "auto"
+            session.variables["internal_session_kind"] = "durable_job"
             session.variables["durable_job_id"] = job.id
             session.variables["durable_job_attempt"] = attempt.number
             session.variables["durable_job_branch"] = job.branch

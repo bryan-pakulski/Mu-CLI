@@ -25,7 +25,16 @@ class JobService:
 
     def create_from_payload(self, payload: Dict[str, Any]) -> Job:
         value = dict(payload or {})
-        repository = str(value.get("repository") or value.get("repo") or "").strip()
+        # Durable job v2: jobs are anchored to the submitting session's
+        # workspace. Callers (GUI/mobile router, TUI) resolve it and pass
+        # ``workspace_root``; a user-chosen repository is no longer accepted.
+        for legacy_key in ("repository", "repo"):
+            if str(value.get(legacy_key) or "").strip():
+                raise ValueError(
+                    f"'{legacy_key}' is no longer accepted; jobs run in the session's "
+                    "current workspace (pass session_name or workspace_root)"
+                )
+        repository = str(value.get("workspace_root") or "").strip()
         execution = dict(value.get("execution") or {})
         metadata = dict(value.get("metadata") or {})
         supplied_base_branch = str(value.get("base_branch") or "").strip()
@@ -40,7 +49,34 @@ class JobService:
         # Snapshot the current committed HEAD: that is the actual code state
         # the user was looking at when delegating the ticket.
         session_type = str(execution.get("session_type") or "workspace").strip().lower()
-        if repository and session_type == "workspace" and not supplied_base_branch and not supplied_base_sha:
+        git_enabled = True
+        if repository and session_type == "workspace":
+            import os
+
+            if not os.path.isdir(repository):
+                raise ValueError(f"Repository preflight failed for {repository}: Workspace does not exist")
+            from .repository import RepositoryError, RepositoryRegistry
+
+            try:
+                RepositoryRegistry.inspect(repository)
+            except RepositoryError as exc:
+                if "not a git repository" not in str(exc).lower():
+                    raise ValueError(f"Repository preflight failed for {repository}: {exc}") from exc
+                # Approved decision: non-git workspaces are allowed; git-only
+                # stages (worktree, drift, publish) are skipped.
+                git_enabled = False
+        execution["git_enabled"] = bool(execution.get("git_enabled", git_enabled)) and git_enabled
+        # Durable job v2: new jobs run plan -> implement -> verify -> review.
+        execution.setdefault("pipeline", "staged")
+        # Approved default: git workspaces open a draft PR after review.
+        execution.setdefault("publish_mode", "auto" if execution.get("git_enabled") else "none")
+        if (
+            repository
+            and git_enabled
+            and session_type == "workspace"
+            and not supplied_base_branch
+            and not supplied_base_sha
+        ):
             try:
                 from .repository import RepositoryRegistry
 
@@ -267,7 +303,7 @@ class JobService:
                 job.id, worker, reason="expired lease claimed for recovery"
             ):
                 continue
-            if job.status in {JobStatus.PREPARING, JobStatus.RUNNING}:
+            if job.status in {JobStatus.PREPARING, JobStatus.PLANNING, JobStatus.RUNNING}:
                 # Round-16 F20: the worker commits the attempt result FIRST
                 # and the job transition SECOND — a crash between the two
                 # leaves a finished attempt attached to a RUNNING job. The
@@ -315,7 +351,7 @@ class JobService:
                     ))
                 except JobStateError:
                     pass
-            elif job.status == JobStatus.VERIFYING:
+            elif job.status in {JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING}:
                 self.store.append_event(
                     job.id,
                     "verification_lease_expired",

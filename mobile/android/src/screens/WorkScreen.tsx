@@ -12,8 +12,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
-import { jobsApi, type EngineeringJob, type JobBoardSection, type JobBoardResponse } from '../api/jobs';
+import {
+  jobsApi,
+  compactStageModels,
+  JOB_STAGE_NAMES,
+  type EngineeringJob,
+  type JobBoardSection,
+  type JobBoardResponse,
+  type JobStageName,
+} from '../api/jobs';
 import { ModernBottomSheet } from '../components/ModernBottomSheet';
+import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
+import { JiraSheet } from '../components/JiraSheet';
 import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
@@ -51,6 +61,20 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [jiraOpen, setJiraOpen] = useState(false);
+  const [missingStages, setMissingStages] = useState<JobStageName[]>([]);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const settings = await jobsApi.getSettings();
+      setMissingStages(Array.isArray(settings.missing) ? settings.missing : []);
+    } catch {
+      // Older servers have no settings endpoint; leave the banner hidden.
+    }
+  }, []);
+
+  useEffect(() => { void loadSettings(); }, [loadSettings]);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -97,6 +121,23 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
           </View>
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="Jira tickets and link settings"
+            onPress={() => setJiraOpen(true)}
+            style={[styles.newButton, { borderColor: colors.hairline, marginRight: 8 }]}
+          >
+            <Ionicons name="ticket-outline" size={18} color={colors.textSoft} />
+            <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>Jira</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Job settings: stage models"
+            onPress={() => setSettingsOpen(true)}
+            style={[styles.newButton, { borderColor: colors.hairline, marginRight: 8 }]}
+          >
+            <Ionicons name="options-outline" size={18} color={colors.textSoft} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
             accessibilityLabel="Create engineering job"
             onPress={() => setCreateOpen(true)}
             style={[styles.newButton, { borderColor: colors.hairline }]}
@@ -112,6 +153,21 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
             {activeSessionName ? `New jobs inherit ${activeSessionName}` : 'No active session profile'}
           </Text>
         </View>
+
+        {missingStages.length ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Stage models not set. Open job settings."
+            onPress={() => setSettingsOpen(true)}
+            style={[styles.errorLine, { borderBottomColor: colors.hairline }]}
+          >
+            <Ionicons name="warning-outline" size={17} color={colors.warning} />
+            <Text variant="xs" style={{ color: colors.warning, flex: 1 }}>
+              Pick models for {missingStages.join(', ')} before running jobs.
+            </Text>
+            <Text variant="xs" style={{ color: colors.accent, fontWeight: '600' }}>Set models</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {error ? (
           <View style={[styles.errorLine, { borderBottomColor: colors.hairline }]}>
@@ -155,6 +211,26 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
           </View>
         )}
       </ScrollView>
+
+      <JobStageModelsSheet
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={missing => {
+          setMissingStages(missing);
+          setSettingsOpen(false);
+        }}
+      />
+
+      <JiraSheet
+        visible={jiraOpen}
+        sessionName={activeSessionName}
+        onClose={() => setJiraOpen(false)}
+        onImported={() => { void load(true); }}
+        onOpenJob={jobId => {
+          setJiraOpen(false);
+          navigation.navigate('JobDetail', { jobId });
+        }}
+      />
 
       <NewJobSheet
         visible={createOpen}
@@ -221,7 +297,6 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
   const { colors } = useTheme();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [repository, setRepository] = useState('');
   const [acceptance, setAcceptance] = useState('');
   const [validation, setValidation] = useState('');
   const [cost, setCost] = useState('');
@@ -231,6 +306,12 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
   const [modelValue, setModelValue] = useState(model || '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showStages, setShowStages] = useState(false);
+  const [stageDraft, setStageDraft] = useState<Partial<Record<JobStageName, { provider?: string; model?: string }>>>({});
+
+  const setStageField = (stage: JobStageName, field: 'provider' | 'model', value: string) => {
+    setStageDraft((prev) => ({ ...prev, [stage]: { ...(prev[stage] || {}), [field]: value } }));
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -255,7 +336,6 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
       const input: Parameters<typeof jobsApi.create>[0] = {
         title: cleanTitle,
         description: description.trim(),
-        repository: repository.trim() || undefined,
         session_name: sessionName || undefined,
         acceptance_criteria: lines(acceptance),
         validation_commands: lines(validation),
@@ -265,20 +345,24 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
       const runtimeValue = Number(runtime || 0);
       if (costValue > 0) input.max_cost_usd = costValue;
       if (runtimeValue > 0) input.max_runtime_seconds = runtimeValue;
-      if (!sessionName || providerValue.trim() || modelValue.trim()) {
+      const stages = compactStageModels(stageDraft);
+      const hasStages = Object.keys(stages).length > 0;
+      if (!sessionName || providerValue.trim() || modelValue.trim() || hasStages) {
         input.execution = {};
         if (providerValue.trim()) input.execution.provider = providerValue.trim();
         if (modelValue.trim()) input.execution.model = modelValue.trim();
+        if (hasStages) input.execution.stages = stages;
       }
       const response = await jobsApi.create(input);
       setTitle('');
       setDescription('');
-      setRepository('');
       setAcceptance('');
       setValidation('');
       setCost('');
       setRuntime('');
       setRetries('2');
+      setStageDraft({});
+      setShowStages(false);
       onCreated(response.job);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -292,11 +376,10 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
       <Text variant="xs" dim style={styles.sheetIntro}>
         {sessionName
           ? `Provider, model, mode and workspace inherit from ${sessionName} unless overridden.`
-          : 'No active session is available, so enter a repository, provider and model.'}
+          : 'No active session is available. Jobs run in the active session workspace, so enter a provider and model.'}
       </Text>
       <SheetField label="Title" value={title} onChangeText={setTitle} placeholder="Fix OAuth callback validation" />
       <SheetField label="Description" value={description} onChangeText={setDescription} placeholder="What should change?" multiline />
-      <SheetField label="Repository" value={repository} onChangeText={setRepository} placeholder={sessionName ? 'Inherit current workspace' : '/path/to/repository'} />
       <SheetField label="Acceptance criteria" value={acceptance} onChangeText={setAcceptance} placeholder="One criterion per line" multiline />
       <SheetField label="Validation commands" value={validation} onChangeText={setValidation} placeholder={'pytest tests/auth\nnpm run typecheck'} multiline />
       <View style={styles.sheetGrid}>
@@ -308,6 +391,45 @@ function NewJobSheet({ visible, sessionName, provider, model, onClose, onCreated
         <>
           <SheetField label="Provider" value={providerValue} onChangeText={setProviderValue} placeholder="openai" />
           <SheetField label="Model" value={modelValue} onChangeText={setModelValue} placeholder="model name" />
+        </>
+      ) : null}
+      <TouchableOpacity
+        onPress={() => setShowStages((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showStages }}
+        accessibilityLabel="Stage models"
+        style={styles.stageToggle}
+      >
+        <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>
+          {showStages ? 'Hide stage models' : 'Stage models (optional)'}
+        </Text>
+      </TouchableOpacity>
+      {showStages ? (
+        <>
+          <Text variant="xs" dim style={styles.sheetIntro}>
+            Blank stages use the job model, then the session model.
+          </Text>
+          {JOB_STAGE_NAMES.map((stage) => {
+            const label = stage.charAt(0).toUpperCase() + stage.slice(1);
+            return (
+              <View key={stage} style={styles.sheetGrid}>
+                <SheetField
+                  label={`${label} provider`}
+                  value={stageDraft[stage]?.provider || ''}
+                  onChangeText={(v: string) => setStageField(stage, 'provider', v)}
+                  placeholder="provider"
+                  compact
+                />
+                <SheetField
+                  label={`${label} model`}
+                  value={stageDraft[stage]?.model || ''}
+                  onChangeText={(v: string) => setStageField(stage, 'model', v)}
+                  placeholder="model"
+                  compact
+                />
+              </View>
+            );
+          })}
         </>
       ) : null}
       {error ? <Text variant="xs" style={[styles.sheetError, { color: colors.error }]}>{error}</Text> : null}
@@ -431,6 +553,7 @@ const styles = StyleSheet.create({
   sheetInput: { minHeight: 38, paddingHorizontal: 1, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth, fontSize: 14 },
   sheetTextarea: { minHeight: 74, textAlignVertical: 'top' },
   sheetGrid: { flexDirection: 'row', gap: 12 },
+  stageToggle: { minHeight: 44, justifyContent: 'center', marginTop: 8 },
   sheetError: { marginTop: 2, lineHeight: 18 },
   sheetActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 18 },
   sheetButton: { minWidth: 88, minHeight: 38, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },

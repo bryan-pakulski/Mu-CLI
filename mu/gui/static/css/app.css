@@ -6459,3 +6459,16 @@ html.has-dialog, html.has-dialog body { overflow: hidden; }
         scroll-behavior: auto !important;
     }
 }
+
+/* Session picker — active / loaded / working state (session_active_state) */
+.welcome-session-row.is-loaded{border-color:var(--border)}
+.welcome-session-row.is-loaded::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--accent);opacity:.55}
+.welcome-session-row.is-loaded .welcome-session-copy strong{font-weight:700}
+.welcome-session-row.is-current{border-color:var(--accent-line);background:var(--accent-soft)}
+.welcome-session-row.is-current::before{opacity:1}
+.welcome-session-row.is-current:hover{background:var(--accent-soft)}
+.welcome-session-state{flex:0 0 auto;font-family:var(--mono);font-size:10px;line-height:1;letter-spacing:.06em;text-transform:uppercase;padding:4px 7px;border-radius:999px;border:1px solid var(--border);color:var(--text-dim);white-space:nowrap}
+.welcome-session-state.is-current{border-color:var(--accent);background:var(--accent);color:var(--bg)}
+.welcome-session-state.is-busy:not(.is-current){border-color:var(--accent-line);color:var(--accent);animation:welcome-state-pulse 1.6s ease-in-out infinite}
+@keyframes welcome-state-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion: reduce){.welcome-session-state.is-busy{animation:none}}

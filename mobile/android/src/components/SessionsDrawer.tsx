@@ -6,6 +6,7 @@ import { useConnectionStore } from '../store/connection';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { Text } from './Text';
 import { SafeAreaModal } from './SafeAreaModal';
+import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 
 export type SessionsDrawerProps = {
   visible: boolean;
@@ -85,12 +86,6 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
     }
   };
 
-  const statusColor = (s: SessionSummary) => {
-    if (s.is_busy) return colors.warning;
-    if (s.is_loaded) return colors.success;
-    return colors.textDim;
-  };
-
   return (
     <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -109,7 +104,7 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
           </View>
 
           <FlatList
-            data={sessions}
+            data={sortSessions(sessions, activeSessionName)}
             keyExtractor={item => item.name}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
             contentContainerStyle={{ paddingVertical: 8 }}
@@ -126,17 +121,17 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
                 style={[
                   styles.row,
                   { borderBottomColor: colors.border },
-                  activeSessionName === item.name && { backgroundColor: colors.bgHover },
+                  activeSessionName === item.name && { backgroundColor: colors.bgHover, borderWidth: 1, borderColor: colors.accent },
                 ]}
               >
-                <View style={[styles.statusDot, { backgroundColor: statusColor(item) }]} />
                 <Text
-                  style={[styles.rowName, { color: colors.text }]}
+                  style={[styles.rowName, { color: colors.text }, activeSessionName === item.name && styles.rowNameActive]}
                   numberOfLines={1}
                   ellipsizeMode="middle"
                 >
                   {item.name}
                 </Text>
+                <SessionStatusBadge session={item} active={activeSessionName === item.name} size="sm" />
                 <View style={styles.rowActions}>
                   <TouchableOpacity onPress={() => unloadSession(item.name)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={styles.actionBtn}>
                     <Ionicons name="remove-circle-outline" size={20} color={colors.textDim} />
@@ -203,14 +198,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     gap: 8,
   },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
   rowName: {
     flex: 1,
     fontSize: 14,
+  },
+  rowNameActive: {
+    fontWeight: '700',
   },
   rowActions: {
     flexDirection: 'row',

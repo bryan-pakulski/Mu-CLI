@@ -225,6 +225,8 @@ class AcceptanceReviewer:
         session.ui = ui
         session.session_manager.ui = ui
         session.variables["provider_recovery_policy"] = "auto"
+        session.variables["internal_session_kind"] = "durable_job"
+        session.variables["durable_job_id"] = job.id
         session.variables["agent_mode"] = "default"
         session.variables["yolo"] = False
         session.variables["plan_mode"] = True  # belt: write-side tools blocked

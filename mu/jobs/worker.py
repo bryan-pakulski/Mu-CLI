@@ -32,10 +32,13 @@ DEFAULT_JOB_SYSTEM = (
 
 def _base_args(job):
     execution = dict(job.execution or {})
+    from .models import resolve_stage_model
+
+    implement = resolve_stage_model(execution, "implement")
     return SimpleNamespace(
         session=SessionJobRunner.session_name(job),
-        provider=str(execution.get("provider") or ""),
-        model=str(execution.get("model") or ""),
+        provider=str(implement.get("provider") or ""),
+        model=str(implement.get("model") or ""),
         provider_prevalidated=True,
         session_type=str(execution.get("session_type") or "workspace"),
         workspace=[job.worktree] if job.worktree else [],
@@ -314,6 +317,66 @@ def _schedule_next_run(service, job_id: str, next_run_at: float) -> None:
         logging.getLogger("mucli").debug("next_run_at update failed", exc_info=True)
 
 
+def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
+    """Durable job v2: PREPARING -> PLANNING -> (caller moves to RUNNING).
+
+    Runs once per job (a stored ``metadata.plan`` is reused on review rework
+    rounds). Returns an exit code when the job was parked, else None.
+    """
+    from . import stages
+    from .job_settings import missing_stages, plan_approval_required
+
+    job = service.get(job_id)
+    missing = missing_stages(job.execution)
+    if not stages.is_staged(job):
+        missing = [s for s in missing if s == "implement"]
+    if missing:
+        service.require_human(
+            job_id,
+            AttentionReason.MODELS_UNSET,
+            "No model is set for the "
+            + ", ".join(missing)
+            + " stage(s). Open Work → Job settings → Stage models, pick a provider and model "
+            "for each stage, then resume this job.",
+            payload={"missing_stages": missing},
+        )
+        return 27
+    if not stages.is_staged(job) or (job.metadata or {}).get("plan"):
+        return None
+    service.transition(job_id, JobStatus.PLANNING, reason="planning stage started")
+    try:
+        stages.run_plan_stage(
+            service, job_id, generate_fn=generate_fn or stages.default_generate(service)
+        )
+    except Exception as exc:  # noqa: BLE001 - planner failure parks on a human
+        service.require_human(
+            job_id,
+            AttentionReason.PROVIDER_ERROR,
+            f"Planning stage failed: {str(exc)[:400]}",
+            payload={"stage": "plan"},
+        )
+        return 26
+    current = service.get(job_id)
+    if current.status != JobStatus.PLANNING:
+        return 0  # parked by the plan contract (e.g. NO_VALIDATION)
+    if plan_approval_required(current.execution):
+        plan = dict((current.metadata or {}).get("plan") or {})
+        service.require_human(
+            job_id,
+            AttentionReason.PLAN_REVIEW,
+            "Review the generated plan, acceptance criteria and validation commands, "
+            "then approve to start implementation (or request a re-plan).",
+            payload={
+                "stage": "plan",
+                "plan": plan,
+                "acceptance_criteria": list(current.acceptance_criteria or []),
+                "validation_commands": list(current.validation_commands or []),
+            },
+        )
+        return 0
+    return None
+
+
 def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
     service = get_default_job_service()
     manager = JobWorktreeManager(service)
@@ -347,6 +410,17 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
             return 0
 
         execution = dict(job.execution or {})
+        if str(execution.get("session_type") or "workspace") == "workspace" and not str(job.repository or "").strip():
+            # An empty workspace used to resolve against the worker's cwd,
+            # silently running the job in the GUI's own repository.
+            service.transition(
+                job_id,
+                JobStatus.ENVIRONMENT_ERROR,
+                reason="job has no workspace",
+                payload={"error": "Job was created without a workspace; recreate it from a session with an attached workspace."},
+            )
+            _refresh_receipt(service, job_id)
+            return 3
         if str(execution.get("session_type") or "workspace") == "workspace":
             try:
                 manager.prepare(job)
@@ -368,6 +442,13 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                 )
                 _refresh_receipt(service, job_id)
                 return 3
+            job = service.get(job_id)
+
+        if job.status == JobStatus.PREPARING:
+            plan_rc = _maybe_run_plan_stage(service, job_id)
+            if plan_rc is not None:
+                _refresh_receipt(service, job_id)
+                return plan_rc
             job = service.get(job_id)
 
         attempt = service.start_attempt(
@@ -464,6 +545,31 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                 )
             except Exception:
                 pass
+        elif attempt is None and still_owned:
+            # Crash before any attempt existed (preparing/planning). Without
+            # this branch nothing was recorded and the job sat in PLANNING
+            # forever after the worker exited.
+            try:
+                service.require_human(
+                    job_id,
+                    AttentionReason.PROVIDER_ERROR,
+                    f"Worker stopped before implementation: {type(exc).__name__}: {str(exc)[:400]}",
+                    payload={
+                        "stage": "pre_attempt",
+                        "exception_type": type(exc).__name__,
+                        "process_id": os.getpid(),
+                    },
+                )
+            except Exception:
+                try:
+                    service.store.append_event(
+                        job_id,
+                        "worker_crashed",
+                        reason="worker crashed before an attempt started",
+                        payload={"error": str(exc)[:500], "exception_type": type(exc).__name__},
+                    )
+                except Exception:
+                    pass
         elif attempt is not None:
             try:
                 service.store.append_event(

@@ -180,7 +180,13 @@ class JobController:
 
     @staticmethod
     def _phase_for_status(status: JobStatus) -> str:
-        return "verification" if status == JobStatus.VERIFYING else "implementation"
+        if status == JobStatus.VERIFYING:
+            return "verification"
+        if status == JobStatus.REVIEWING:
+            return "review"
+        if status == JobStatus.PUBLISHING:
+            return "publish"
+        return "implementation"
 
     def tick(self) -> int:
         """One deterministic scheduler pass; returns processes started."""
@@ -197,7 +203,7 @@ class JobController:
             return 0
 
         candidates = self.service.list(
-            statuses=[JobStatus.QUEUED, JobStatus.RECOVERING, JobStatus.VERIFYING],
+            statuses=[JobStatus.QUEUED, JobStatus.RECOVERING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING],
             limit=max(capacity * 5, 25),
         )
         started = 0
@@ -341,7 +347,11 @@ class JobController:
         ):
             return False
 
-        module = "mu.jobs.verify_worker" if phase == "verification" else "mu.jobs.worker"
+        module = {
+            "verification": "mu.jobs.verify_worker",
+            "review": "mu.jobs.review_worker",
+            "publish": "mu.jobs.publish",
+        }.get(phase, "mu.jobs.worker")
         log_path = os.path.join(self.log_root, f"{job_id}.{phase}.log")
         # Round-41 F7a: bound the log before re-opening it in append mode —
         # retries append forever to the same phase log, and a noisy worker

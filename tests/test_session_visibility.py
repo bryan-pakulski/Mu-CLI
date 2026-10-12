@@ -97,3 +97,22 @@ def test_hidden_internal_current_session_is_not_exposed_as_user_active(tmp_path,
     assert payload["current"] is None
     assert payload["active"] is False
     assert payload["sessions"] == []
+
+
+def test_stage_sessions_hidden_by_name():
+    for stage in ("plan", "review", "implement"):
+        assert is_durable_job_session(f"job-0123456789abcdefabcd-{stage}", {})
+    assert is_user_visible_session("job-notes-plan", {})
+
+
+def test_terminal_session_lists_hide_job_sessions(tmp_path, monkeypatch):
+    from mu.session import manager as mgr
+
+    monkeypatch.setattr(mgr, "_history_dir", lambda: str(tmp_path))
+    _write_session(tmp_path, "customer-work")
+    _write_session(tmp_path, "job-0123456789abcdefabcd")
+    _write_session(tmp_path, "job-0123456789abcdefabcd-plan")
+    _write_session(tmp_path, "stage-x", {"internal_session_kind": "durable_job"})
+    sm = mgr.SessionManager.__new__(mgr.SessionManager)
+    assert mgr.SessionManager.get_session_list(sm) == ["customer-work"]
+    assert [n for n, _ in mgr.SessionManager.get_session_list_with_type(sm)] == ["customer-work"]

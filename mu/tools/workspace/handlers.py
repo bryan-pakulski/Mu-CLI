@@ -20,6 +20,7 @@ from typing import Any, Dict
 from mu.tools import tool
 from mu.tools._bounds import (
     check_bounds as _check_bounds,
+    resolve_tool_path as _resolve_path,
     default_working_directory as _default_working_directory,
 )
 from mu.tools.capabilities import (
@@ -36,7 +37,7 @@ from utils.logger import logger
 def _runtime_root(folder_context, session_type: str, requested: str | None = None) -> str:
     """Resolve a search/list root for the active runtime."""
     if requested:
-        return os.path.realpath(os.path.abspath(os.path.expanduser(str(requested))))
+        return os.path.realpath(_resolve_path(str(requested), folder_context, session_type))
     if normalize_session_type(session_type) == "container":
         return os.path.realpath(_default_working_directory(folder_context, session_type))
     if folder_context and folder_context.folders:
@@ -158,6 +159,7 @@ def _get_workspace_details_tool(args: Dict[str, Any], context) -> str:
 
 def read_file(filename: str, folder_context, *, session_type: str = "workspace") -> str:
     """Returns the whole file contents."""
+    filename = _resolve_path(filename, folder_context, session_type)
     if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"read_file: Access denied or file ignored: {filename}")
         return (
@@ -222,6 +224,7 @@ def get_chunk(
     session_type: str = "workspace",
 ) -> str:
     """Returns a string of the file contents between the start and end line numbers."""
+    filename = _resolve_path(filename, folder_context, session_type)
     if not _check_bounds(filename, folder_context, session_type=session_type):
         logger.warning(f"get_chunk: Access denied or file ignored: {filename}")
         return (

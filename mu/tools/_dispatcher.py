@@ -19,12 +19,33 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import traceback
 from typing import Any, Callable, Dict, Optional
 
 from utils.logger import logger
 
 from ._envelope import _build_tool_envelope, _envelope_from_handler_result
+
+_STUB_MARKER = "__stubbed__"
+# Placeholder serialised as JSON ({"__stubbed__": ...) or mangled by the model
+# ({__stubbed__: ... — the exact text bash was asked to run). Anchored on the
+# first key so real content that merely mentions the marker passes.
+_STUB_STRING_RE = re.compile(r'^\s*\{\s*"?__stubbed__"?\s*:')
+
+
+def _find_stub_placeholder(args: dict) -> Optional[str]:
+    """Key of a top-level arg that is an elided-args placeholder, else None.
+
+    Matches the dict form produced by ``stub_oversized_arg_values`` and the
+    same object serialised (or mangled) into a string.
+    """
+    for key, value in args.items():
+        if isinstance(value, dict) and value.get(_STUB_MARKER) is True:
+            return str(key)
+        if isinstance(value, str) and _STUB_STRING_RE.match(value):
+            return str(key)
+    return None
 
 
 # =================================================================== handler registry
@@ -226,6 +247,26 @@ def dispatch(
                     f"Error: Tool '{tool_name}' arguments must be an "
                     f"object/dict, got {type(args).__name__}. Please re-issue "
                     "the tool call with JSON object arguments."
+                ),
+            )
+        )
+
+    # Context packaging elides long args of ALREADY-ANSWERED calls in the
+    # projected request ({"__stubbed__": true, ...}). A model that copies such
+    # a placeholder into a NEW call would otherwise run it as literal input
+    # (bash executed "{__stubbed__: ..."). Reject with a resend hint.
+    stubbed_key = _find_stub_placeholder(args)
+    if stubbed_key is not None:
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="invalid_args",
+                message=(
+                    f"Error: argument {stubbed_key!r} is a context-elision placeholder "
+                    "(__stubbed__), not real content. Earlier tool-call arguments are "
+                    "shortened in your context after they run; there is no size limit "
+                    "on new calls. Re-issue the call with the full literal value."
                 ),
             )
         )

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/static/css/work.css">
 <link rel="stylesheet" href="/static/css/work_management.css">
 <link rel="stylesheet" href="/static/css/work_polish.css">
+<link rel="stylesheet" href="/static/css/work_jira.css">
 
 <div class="work-app work-product-app" id="work-app" data-session="{{ session_name or '' }}">
     <header class="work-header product-header">
@@ -30,6 +31,12 @@
             <a class="product-icon-button work-header-icon" href="/static/model_costs.html" title="Model pricing" aria-label="Model pricing">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path></svg>
             </a>
+            <button class="product-icon-button work-header-icon" id="work-jira-open" type="button" title="Jira tickets" aria-label="Browse Jira tickets">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg>
+            </button>
+            <button class="product-icon-button work-header-icon" id="work-jira-settings-open" type="button" title="Job settings" aria-label="Job settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path></svg>
+            </button>
             <button class="product-icon-button work-header-icon" id="work-manage" title="Manage jobs" aria-label="Manage jobs">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path><circle cx="18" cy="18" r="2.5"></circle></svg>
             </button>
@@ -199,8 +206,7 @@
                     <textarea id="job-description" rows="4" placeholder="What should change, and what constraints matter?"></textarea>
                 </label>
                 <label class="work-field work-field-wide">
-                    <span>Repository</span>
-                    <input id="job-repository" placeholder="Inherited from the current session when left blank">
+                    <span>Workspace</span>
                     <small id="job-repository-hint"></small>
                 </label>
                 <label class="work-field work-field-wide">
@@ -248,12 +254,141 @@
                         <span>Auto-approve write tools for this job</span>
                     </label>
                 </details>
+                <details class="work-advanced" id="work-stage-details">
+                    <summary>Stage models</summary>
+                    <p id="work-stage-help">Optional. Blank stages use the job model above, then the session model.</p>
+                    <div class="work-stage-grid" role="group" aria-labelledby="work-stage-help">
+                        <span class="work-stage-name" id="job-stage-plan-label">Plan</span>
+                        <input id="job-stage-plan-provider" data-stage="plan" data-field="provider" placeholder="provider" aria-label="Plan stage provider">
+                        <input id="job-stage-plan-model" data-stage="plan" data-field="model" placeholder="model" aria-label="Plan stage model">
+                        <span class="work-stage-name" id="job-stage-implement-label">Implement</span>
+                        <input id="job-stage-implement-provider" data-stage="implement" data-field="provider" placeholder="provider" aria-label="Implement stage provider">
+                        <input id="job-stage-implement-model" data-stage="implement" data-field="model" placeholder="model" aria-label="Implement stage model">
+                        <span class="work-stage-name" id="job-stage-review-label">Review</span>
+                        <input id="job-stage-review-provider" data-stage="review" data-field="provider" placeholder="provider" aria-label="Review stage provider">
+                        <input id="job-stage-review-model" data-stage="review" data-field="model" placeholder="model" aria-label="Review stage model">
+                    </div>
+                </details>
                 <div class="work-form-error" id="work-create-error"></div>
                 <footer class="work-modal-actions">
                     <button type="button" class="work-secondary" id="work-create-cancel">Cancel</button>
                     <button type="submit" class="work-primary" id="work-create-submit">Queue job</button>
                 </footer>
             </form>
+        </section>
+    </div>
+
+    <div class="work-modal-backdrop" id="work-jira-settings-backdrop" hidden>
+        <section class="work-modal work-jira-modal" role="dialog" aria-modal="true" aria-labelledby="work-jira-settings-title">
+            <header class="work-modal-head">
+                <div>
+                    <span class="work-eyebrow">Job settings</span>
+                    <h2 id="work-jira-settings-title">Jira link</h2>
+                </div>
+                <button class="work-icon-button" id="work-jira-settings-close" type="button" aria-label="Close job settings">×</button>
+            </header>
+            <form id="work-stage-models-form" class="work-form" autocomplete="off" aria-labelledby="work-stage-models-title">
+                <h3 class="work-jira-section" id="work-stage-models-title">Stage models</h3>
+                <p class="work-jira-message" id="work-stage-models-warning" role="alert" hidden></p>
+                <p class="work-jira-muted">Default provider and model for each pipeline stage. A job's own settings win; blank stages make jobs stop and ask.</p>
+                <div id="work-stage-model-rows"></div>
+                <label class="work-jira-inline"><input id="work-plan-approval" type="checkbox" checked> Ask me to approve the plan and acceptance criteria before implementation</label>
+                <p class="work-jira-message" id="work-stage-models-message" role="status" hidden></p>
+                <footer class="work-form-actions">
+                    <button type="submit" class="work-primary">Save stage models</button>
+                </footer>
+            </form>
+            <form id="work-jira-settings-form" class="work-form" autocomplete="off">
+                <p class="work-jira-status" id="work-jira-link-status" role="status"></p>
+                <label class="work-field work-field-wide">
+                    <span>Jira URL</span>
+                    <input id="jira-base-url" type="url" placeholder="https://acme.atlassian.net">
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>Email (Jira Cloud)</span>
+                    <input id="jira-email" type="email" placeholder="you@company.com">
+                </label>
+                <label class="work-field work-field-wide">
+                    <span>API token (Jira Cloud)</span>
+                    <input id="jira-api-token" type="password" placeholder="Atlassian API token" autocomplete="new-password">
+                </label>
+                <label class="work-jira-inline" hidden><input id="jira-api-token-clear" type="checkbox"> Remove saved API token</label>
+                <label class="work-field work-field-wide">
+                    <span>Personal access token (Data Center / Server)</span>
+                    <input id="jira-pat" type="password" placeholder="Personal access token" autocomplete="new-password">
+                </label>
+                <label class="work-jira-inline" hidden><input id="jira-pat-clear" type="checkbox"> Remove saved PAT</label>
+                <small class="work-jira-muted">Saved to $MUCLI_HOME/integrations/jira.json (owner-only). Environment variables override saved values. Tokens are never sent back to the browser.</small>
+
+                <h3 class="work-jira-section">Preferences</h3>
+                <label class="work-field work-field-wide">
+                    <span>Default JQL</span>
+                    <input id="jira-default-jql" type="text" placeholder="project = ABC AND statusCategory != Done">
+                </label>
+                <label class="work-jira-inline"><input id="jira-assigned-to-me" type="checkbox"> Show only tickets assigned to me by default</label>
+                <div class="work-field work-field-wide">
+                    <span>Preferred boards</span>
+                    <ul class="work-jira-chips" id="jira-preferred-boards" aria-label="Preferred boards"></ul>
+                    <div class="work-jira-row">
+                        <input id="jira-board-query" type="search" placeholder="Filter boards" aria-label="Filter boards">
+                        <button type="button" class="work-secondary" id="jira-board-find">Refresh</button>
+                    </div>
+                    <p class="work-jira-muted">Boards load automatically. Suggested ones have open tickets assigned to you. Star a board to make it preferred.</p>
+                    <ul class="work-jira-list" id="jira-board-results" aria-label="Board search results"></ul>
+                </div>
+                <p class="work-jira-message" id="jira-settings-message" role="status" hidden></p>
+                <footer class="work-form-actions">
+                    <button type="button" class="work-secondary is-danger" id="jira-unlink">Unlink</button>
+                    <button type="button" class="work-secondary" id="jira-test">Test connection</button>
+                    <button type="submit" class="work-primary">Save</button>
+                </footer>
+            </form>
+        </section>
+    </div>
+
+    <div class="work-modal-backdrop" id="work-jira-backdrop" hidden>
+        <section class="work-modal work-jira-modal work-jira-browser-modal" role="dialog" aria-modal="true" aria-labelledby="work-jira-title">
+            <header class="work-modal-head">
+                <div>
+                    <span class="work-eyebrow">Pick up work</span>
+                    <h2 id="work-jira-title">Jira tickets</h2>
+                </div>
+                <button class="work-icon-button" id="work-jira-close" type="button" aria-label="Close Jira tickets">×</button>
+            </header>
+            <div class="work-form">
+                <div id="work-jira-unlinked" hidden>
+                    <p>Jira isn't linked yet. Add your Jira URL and token in Job settings.</p>
+                    <button type="button" class="work-primary" id="work-jira-browse-settings">Open job settings</button>
+                </div>
+                <div id="work-jira-browser" hidden>
+                    <div class="work-jira-row work-jira-filters">
+                        <select id="jira-browse-board" aria-label="Board"></select>
+                        <select id="jira-browse-sprint" aria-label="Sprint"></select>
+                        <input id="jira-browse-jql" type="search" placeholder="JQL filter (optional)" aria-label="JQL filter">
+                        <label class="work-jira-inline"><input id="jira-browse-mine" type="checkbox"> Mine</label>
+                        <label class="work-jira-inline"><input id="jira-browse-done" type="checkbox"> Show done</label>
+                        <button type="button" class="work-secondary" id="jira-browse-load">Load</button>
+                    </div>
+                    <div class="work-jira-chips work-jira-status-chips" id="jira-browse-statuses" role="group" aria-label="Filter by status"></div>
+                    <p class="work-jira-message" id="jira-browse-message" role="status" hidden></p>
+                    <div class="work-jira-table-wrap">
+                        <table class="work-jira-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="jira-ticket-select-all" aria-label="Select all importable tickets"></th>
+                                    <th>Ticket</th>
+                                    <th>Jira status</th>
+                                    <th>Linked job</th>
+                                </tr>
+                            </thead>
+                            <tbody id="jira-ticket-rows"></tbody>
+                        </table>
+                    </div>
+                    <footer class="work-form-actions">
+                        <button type="button" class="work-primary" id="jira-import-selected" disabled>Create jobs from selected</button>
+                    </footer>
+                </div>
+            </div>
         </section>
     </div>
 
@@ -265,4 +400,6 @@
 <script src="/static/js/work_trace.js"></script>
 <script src="/static/js/work_diagnostics.js"></script>
 <script src="/static/js/work_management.js"></script>
+<script src="/static/js/work_jira.js"></script>
+<script src="/static/js/work_stage_models.js"></script>
 {% endblock %}

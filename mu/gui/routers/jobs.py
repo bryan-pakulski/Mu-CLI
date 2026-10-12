@@ -76,14 +76,25 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
         raise HTTPException(status_code=409, detail=f"Session '{session_name}' is not loaded")
 
     folders = list(getattr(getattr(session, "folder_context", None), "folders", []) or [])
-    if not str(value.get("repository") or "").strip() and folders:
-        value["repository"] = folders[0]
+    if not str(value.get("workspace_root") or "").strip() and folders:
+        value["workspace_root"] = folders[0]
     execution = dict(value.get("execution") or {})
     provider = getattr(getattr(session, "provider", None), "name", "") or ""
     model = getattr(getattr(session, "provider", None), "model_name", "") or ""
     variables = getattr(session, "variables", {}) or {}
-    execution.setdefault("provider", str(provider))
-    execution.setdefault("model", str(model))
+    # Precedence: explicit job/stage values -> Job settings stage models ->
+    # loaded session. Never stamp the session model as the job-level default:
+    # resolve_stage_model ranks that above settings, so every stage would run
+    # on whatever model the session happened to use (e.g. ollama glm-5.3
+    # despite Anthropic stage models in settings).
+    if not execution.get("model") and provider and model:
+        from mu.jobs import job_settings
+
+        stages = {k: dict(v or {}) for k, v in dict(execution.get("stages") or {}).items()}
+        for stage in job_settings.missing_stages(execution):
+            stages[stage] = {"provider": str(provider), "model": str(model)}
+        if stages:
+            execution["stages"] = stages
     execution.setdefault("agent_mode", str(variables.get("agent_mode", "default") or "default"))
     execution.setdefault("session_type", str(variables.get("session_type", "workspace") or "workspace"))
     execution.setdefault("auto_approve_writes", bool(variables.get("yolo", False)))
@@ -237,6 +248,195 @@ async def bulk_manage_jobs(request: Request, payload: Dict[str, Any]):
         )
     except (ValueError, JobManagementError) as exc:
         raise _state_error(exc) from exc
+
+
+@router.post("/jira/import")
+async def import_jira_issues(request: Request, payload: Dict[str, Any]):
+    """Create durable jobs from Jira issues (keys and/or JQL).
+
+    Credentials come from the server environment only; any credential keys in
+    the request body are rejected so tokens never reach the job record.
+    """
+    from mu.integrations.jira import JiraClient, JiraConfig, JiraError, import_issues
+
+    body = dict(payload or {})
+    for forbidden in ("api_token", "token", "pat", "password", "JIRA_API_TOKEN", "JIRA_PAT"):
+        if forbidden in body:
+            raise HTTPException(status_code=400, detail="Jira credentials are read from the server environment only")
+    keys = body.get("keys") or ([body["key"]] if body.get("key") else [])
+    if isinstance(keys, str):
+        keys = [k for k in keys.replace(",", " ").split() if k]
+    jql = str(body.get("jql") or "").strip()
+    if not keys and not jql:
+        raise HTTPException(status_code=400, detail="Provide 'keys' or 'jql'")
+    try:
+        client = _jira_client()
+        raw_defaults = dict(body.get("defaults") or {})
+        # The Work page sends ``session_name`` at the top level of the body;
+        # without forwarding it the job got no workspace_root and the worker
+        # silently fell back to the GUI process's own repository.
+        if body.get("session_name") and not raw_defaults.get("session_name"):
+            raw_defaults["session_name"] = body.get("session_name")
+        defaults = _with_session_defaults(request, raw_defaults)
+        if not str(defaults.get("workspace_root") or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="No workspace for imported jobs: open Work from a session with an attached workspace.",
+            )
+        result = import_issues(
+            _service(request), client, keys=keys, jql=jql, defaults=defaults,
+            max_results=int(body.get("max_results") or 20),
+        )
+    except JiraError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+def _jira_client():
+    """Client from the saved link ($MUCLI_HOME/integrations/jira.json) + env overrides."""
+    from mu.integrations.jira import JiraClient, JiraError
+    from mu.integrations.jira_settings import resolve_config
+
+    try:
+        config = resolve_config()
+    except JiraError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not (config.base_url and config.mode):
+        raise HTTPException(status_code=400, detail="Jira is not linked. Add the URL and token in Job settings.")
+    return JiraClient(config)
+
+
+def _jira_call(fn, *args, **kwargs):
+    from mu.integrations.jira import JiraError
+
+    try:
+        return fn(*args, **kwargs)
+    except JiraError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/settings")
+async def get_job_settings():
+    """Pipeline settings: per-stage provider/model defaults + plan approval gate."""
+    from mu.jobs.job_settings import public_settings
+
+    return public_settings()
+
+
+@router.put("/settings")
+async def put_job_settings(payload: Dict[str, Any]):
+    from mu.jobs.job_settings import public_settings, save_settings
+
+    try:
+        save_settings(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return public_settings()
+
+
+@router.get("/jira/settings")
+async def get_jira_settings():
+    """Secret-free link status + browsing preferences."""
+    from mu.integrations.jira_settings import public_settings
+
+    return public_settings()
+
+
+@router.put("/jira/settings")
+async def put_jira_settings(payload: Dict[str, Any]):
+    """Save link fields/token/preferences. Blank token keeps the stored one."""
+    from mu.integrations.jira import JiraError
+    from mu.integrations.jira_settings import save_settings
+
+    try:
+        return save_settings(dict(payload or {}))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except JiraError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete("/jira/settings")
+async def delete_jira_settings():
+    """Unlink: drop URL/email/tokens, keep preferred boards and JQL."""
+    from mu.integrations.jira_settings import clear_settings
+
+    return clear_settings(keep_preferences=True)
+
+
+@router.post("/jira/test")
+async def test_jira_link():
+    client = _jira_client()
+    return {"ok": True, "user": _jira_call(client.myself), "jira": client.config.public()}
+
+
+@router.get("/jira/boards")
+async def list_jira_boards(query: str = ""):
+    from mu.integrations.jira_settings import public_settings
+
+    client = _jira_client()
+    boards = _jira_call(client.list_boards, query=query)
+    preferred = {b["id"] for b in public_settings()["preferences"]["boards"]}
+    # Suggest boards for projects where I have open assigned work.
+    mine = client.my_project_keys()
+    rank = {key: i for i, key in enumerate(mine)}
+    for board in boards:
+        board["preferred"] = board.get("id") in preferred
+        board["suggested"] = board.get("project", "") in rank
+    boards.sort(key=lambda b: (
+        not b["preferred"], not b["suggested"],
+        rank.get(b.get("project", ""), 1 << 20), str(b.get("name", "")).lower(),
+    ))
+    return {"boards": boards, "my_projects": mine}
+
+
+@router.get("/jira/boards/{board_id}/sprints")
+async def list_jira_sprints(board_id: int, state: str = "active,future"):
+    client = _jira_client()
+    return {"sprints": _jira_call(client.list_sprints, board_id, state=state)}
+
+
+@router.get("/jira/tickets")
+async def list_jira_tickets(
+    request: Request,
+    board_id: Optional[int] = None,
+    sprint_id: Optional[int] = None,
+    jql: str = "",
+    mine: bool = False,
+    backlog: bool = False,
+    include_done: bool = False,
+    status: str = "",
+    max_results: int = 300,
+):
+    """Tickets for a board/sprint/backlog or a JQL search, each with its linked job + status.
+
+    Done/closed tickets (status category Done) are hidden unless
+    ``include_done``; ``status`` is an optional comma-separated status-name
+    filter. All pages are fetched (Jira caps pages at 50).
+    """
+    from mu.integrations.jira import build_ticket_jql, linked_jobs, status_counts, ticket_summary
+    from mu.integrations.jira_settings import public_settings
+
+    client = _jira_client()
+    statuses = [s.strip() for s in str(status or "").split(",") if s.strip()]
+    user_jql = str(jql or "").strip()
+    if board_id or sprint_id:
+        query = build_ticket_jql(user_jql, mine=mine, include_done=include_done, statuses=statuses)
+        issues = _jira_call(client.board_issues, board_id or 0, sprint_id=sprint_id, jql=query,
+                            max_results=max_results, backlog=backlog and not sprint_id)
+    else:
+        user_jql = user_jql or public_settings()["preferences"]["default_jql"]
+        if not user_jql and not mine:
+            raise HTTPException(status_code=400, detail="Pick a board/sprint or provide a JQL query")
+        query = build_ticket_jql(user_jql, mine=mine, include_done=include_done, statuses=statuses)
+        issues = _jira_call(client.search, query, max_results=max_results)
+    linked = linked_jobs(_service(request))
+    base = client.config.base_url
+    tickets = [ticket_summary(i, base_url=base, linked=linked) for i in issues]
+    return {"tickets": tickets, "base_url": base, "statuses": status_counts(tickets),
+            "include_done": include_done, "jql": query}
 
 
 @router.get("/repositories")

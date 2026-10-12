@@ -685,3 +685,48 @@ def test_apply_diff_requires_approved_proposal_in_review_mode(tmp_path):
         session=session,
     )
     assert "requires proposal_id" in blocked
+
+
+def test_approve_feature_task_resolves_by_feature_id_when_pointer_lost(tmp_path):
+    """Regression: after all tasks completed the active-feature pointer was
+    cleared, so approve_feature_task returned "Feature metadata not found".
+    It must resolve the feature via the registry / explicit feature_id."""
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    metadata_path = str(tmp_path / "feature_plan.json")
+    session = _SessionStub(metadata_path)
+    tool_ctx = ToolExecutionContext(folder_context=ctx, session=session)
+    created = json.loads(
+        _handle_create_feature_task(
+            {
+                "feature_name": "Pointer loss",
+                "feature_request": "approve after review",
+                "tasks": [
+                    {
+                        "title": "Task 1",
+                        "objectives": ["o"],
+                        "action_points": ["a"],
+                        "exit_criteria": ["e"],
+                    }
+                ],
+            },
+            tool_ctx,
+        )
+    )
+    feature_id = created["feature_id"]
+    sm = session.session_manager
+    # Simulate the lost pointer: no active feature state, registry still has it.
+    sm.feature = {"feature_id": feature_id, "directory": str(tmp_path), "metadata_path": metadata_path}
+    sm.record = None
+    sm.feature_state = None
+    sm.active_feature_id = None
+
+    result = _handle_approve_feature_task(
+        {"approved": True, "feature_id": feature_id, "review_status": "completed"},
+        tool_ctx,
+    )
+    assert "Feature metadata not found" not in result
+    payload = json.loads(result)
+    assert payload["ok"] is True
+    assert payload["feature_id"] == feature_id
+    assert payload["plan"]["review_status"] == "completed"

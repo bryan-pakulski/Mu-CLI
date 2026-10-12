@@ -257,6 +257,7 @@
                 <div class="work-receipt-row"><span class="work-receipt-label">Base</span><span class="work-receipt-value">${escapeHtml(String(job.base_sha || '—').slice(0, 12))}</span></div>
                 <div class="work-receipt-row"><span class="work-receipt-label">Head</span><span class="work-receipt-value">${escapeHtml(String(git.head_sha || '—').slice(0, 12))}</span></div>
                 <div class="work-receipt-row"><span class="work-receipt-label">Runtime</span><span class="work-receipt-value">${escapeHtml(`${execution.provider || '—'} · ${execution.model || '—'}`)}</span></div>
+                ${stageRows(execution)}
                 <div class="work-receipt-row"><span class="work-receipt-label">Mode</span><span class="work-receipt-value">${escapeHtml(execution.agent_mode || 'default')}</span></div>
                 <div class="work-receipt-row"><span class="work-receipt-label">Workspace clean</span><span class="work-receipt-value">${git.dirty === false ? 'yes' : git.dirty === true ? 'no' : 'unknown'}</span></div>
             </div>
@@ -280,6 +281,54 @@
                             <button class="work-danger" data-action="deny">Deny</button>
                         </div>
                         ${!canApprove ? '<div class="work-action-note">This request cannot be approved because the modification preview failed.</div>' : ''}
+                    </aside>
+                `;
+            }
+            if (job.attention_reason === 'models_unset') {
+                const missing = Array.isArray(context.missing_stages) ? context.missing_stages : [];
+                return `
+                    <aside class="work-action-panel">
+                        <h3>Pick stage models</h3>
+                        <p>${escapeHtml(job.attention_detail || 'Set a model for each pipeline stage.')}</p>
+                        ${missing.length ? `<div class="work-action-note">Missing: ${missing.map(escapeHtml).join(', ')}</div>` : ''}
+                        <div class="work-action-row">
+                            <button class="work-primary" data-action="stage-models">Set stage models</button>
+                            <button class="work-action" data-action="resume">Resume job</button>
+                        </div>
+                    </aside>
+                `;
+            }
+            if (job.attention_reason === 'plan_review') {
+                const plan = (job.metadata && job.metadata.plan) || context.plan || {};
+                const criteria = (job.acceptance_criteria && job.acceptance_criteria.length)
+                    ? job.acceptance_criteria : (context.acceptance_criteria || []);
+                const commands = (job.validation_commands && job.validation_commands.length)
+                    ? job.validation_commands : (context.validation_commands || []);
+                const steps = Array.isArray(plan.steps) ? plan.steps : [];
+                const model = plan.model && plan.model.model ? `${plan.model.provider || ''} · ${plan.model.model}` : '';
+                return `
+                    <aside class="work-action-panel work-plan-review">
+                        <h3>Review plan</h3>
+                        <p>${escapeHtml(job.attention_detail || 'Approve the plan to start implementation.')}</p>
+                        ${model ? `<div class="work-action-note">Planned by ${escapeHtml(model)}</div>` : ''}
+                        ${plan.summary ? `<p class="work-plan-summary">${escapeHtml(plan.summary)}</p>` : ''}
+                        ${steps.length ? `<ol class="work-plan-steps">${steps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ol>` : ''}
+                        <label class="work-field work-field-wide">
+                            <span>Acceptance criteria (one per line)</span>
+                            <textarea id="work-plan-criteria" rows="6">${escapeHtml(criteria.join('\n'))}</textarea>
+                        </label>
+                        <label class="work-field work-field-wide">
+                            <span>Validation commands (one per line)</span>
+                            <textarea id="work-plan-commands" rows="4">${escapeHtml(commands.join('\n'))}</textarea>
+                        </label>
+                        <label class="work-field work-field-wide">
+                            <span>Note or re-plan feedback (optional)</span>
+                            <textarea id="work-response-detail" rows="3" placeholder="What should the planner change?"></textarea>
+                        </label>
+                        <div class="work-action-row">
+                            <button class="work-primary" data-action="plan-approve">Approve &amp; implement</button>
+                            <button class="work-action" data-action="plan-replan">Re-plan</button>
+                        </div>
                     </aside>
                 `;
             }
@@ -358,7 +407,23 @@
                 const detail = String((response && response.value) || (feedback && feedback.value) || '').trim();
                 button.disabled = true;
                 try {
-                    if (action === 'approve' || action === 'deny') {
+                    if (action === 'stage-models') {
+                        if (typeof window.muOpenStageModels === 'function') window.muOpenStageModels();
+                        return;
+                    } else if (action === 'resume') {
+                        await api(`/api/jobs/${encodeURIComponent(job.id)}/resume`, { method: 'POST', body: { detail: 'stage models set' } });
+                    } else if (action === 'plan-approve') {
+                        const criteria = lines((document.getElementById('work-plan-criteria') || {}).value);
+                        const commands = lines((document.getElementById('work-plan-commands') || {}).value);
+                        await api(`/api/jobs/${encodeURIComponent(job.id)}/respond`, {
+                            method: 'POST',
+                            body: { decision: 'approve', detail, value: { acceptance_criteria: criteria, validation_commands: commands } },
+                        });
+                    } else if (action === 'plan-replan') {
+                        await api(`/api/jobs/${encodeURIComponent(job.id)}/respond`, {
+                            method: 'POST', body: { decision: 'replan', detail },
+                        });
+                    } else if (action === 'approve' || action === 'deny') {
                         await api(`/api/jobs/${encodeURIComponent(job.id)}/respond`, {
                             method: 'POST', body: { decision: action, detail },
                         });
@@ -472,8 +537,33 @@
         wireActions(job);
     }
 
+    function userIsInspectingDetail() {
+        if (detailEl.querySelector('details[open]')) return true;
+        if (detailEl.contains(document.activeElement) && document.activeElement !== detailEl) return true;
+        const search = detailEl.querySelector('[data-trace-search]');
+        if (search && String(search.value || '').trim()) return true;
+        const category = detailEl.querySelector('[data-trace-category]');
+        if (category && category.value !== 'all') return true;
+        const view = detailEl.querySelector('[data-trace-view]');
+        return Boolean(view && view.value !== 'all');
+    }
+
+    function markDetailStale() {
+        if (detailEl.querySelector('.work-detail-stale')) return;
+        const bar = document.createElement('div');
+        bar.className = 'work-detail-stale';
+        bar.setAttribute('role', 'status');
+        bar.innerHTML = '<span>New activity for this job.</span> <button type="button">Refresh</button>';
+        bar.querySelector('button').addEventListener('click', () => {
+            state.detailSignature = null;
+            if (state.selectedId) selectJob(state.selectedId);
+        });
+        detailEl.prepend(bar);
+    }
+
     async function selectJob(jobId, { quiet = false } = {}) {
         if (!jobId) return;
+        if (!quiet || jobId !== state.selectedId) state.detailSignature = null;
         state.selectedId = jobId;
         renderBoard();
         state.loadingDetail = true;
@@ -493,7 +583,21 @@
             };
             const events = eventsResult.status === 'fulfilled' ? eventsResult.value.events || [] : [];
             const diff = diffResult.status === 'fulfilled' ? diffResult.value.diff : null;
+            const lastEvent = events.length ? events[events.length - 1] : null;
+            const signature = [job.id, job.status, job.updated_at, job.version, events.length,
+                lastEvent ? (lastEvent.id || lastEvent.created_at) : ''].join('|');
+            // Background refresh: re-rendering replaces the whole pane, which
+            // collapsed expanded activity events, reset filters and scroll every
+            // 5s. Only re-render when something changed AND the user is not
+            // currently drilling into the pane.
+            if (quiet && state.detailSignature === signature && state.selectedJob && state.selectedJob.id === job.id) return;
+            if (quiet && state.selectedJob && state.selectedJob.id === job.id && userIsInspectingDetail()) {
+                state.selectedJob = job;
+                markDetailStale();
+                return;
+            }
             state.selectedJob = job;
+            state.detailSignature = signature;
             renderDetail(job, receipt, events, diff);
         } catch (error) {
             detailEl.innerHTML = `<div class="work-empty-detail"><h2>Could not load job</h2><p>${escapeHtml(error.message)}</p></div>`;
@@ -512,13 +616,41 @@
         backdrop.hidden = true;
     }
 
+    const STAGE_NAMES = ['plan', 'implement', 'review'];
+
+    // Only stages with at least one filled field are sent; blank stages
+    // inherit the job model, then the session model, on the server.
+    function collectStageModels() {
+        const stages = {};
+        STAGE_NAMES.forEach((stage) => {
+            const entry = {};
+            ['provider', 'model'].forEach((field) => {
+                const input = document.getElementById(`job-stage-${stage}-${field}`);
+                const value = input ? input.value.trim() : '';
+                if (value) entry[field] = value;
+            });
+            if (Object.keys(entry).length) stages[stage] = entry;
+        });
+        return stages;
+    }
+
+    function stageRows(execution) {
+        const stages = execution.stages || {};
+        return STAGE_NAMES.filter((stage) => stages[stage] && (stages[stage].provider || stages[stage].model))
+            .map((stage) => {
+                const entry = stages[stage];
+                const label = stage.charAt(0).toUpperCase() + stage.slice(1);
+                const value = `${entry.provider || execution.provider || '—'} · ${entry.model || execution.model || '—'}`;
+                return `<div class="work-receipt-row"><span class="work-receipt-label">${escapeHtml(label)} model</span><span class="work-receipt-value">${escapeHtml(value)}</span></div>`;
+            }).join('');
+    }
+
     async function submitCreate(event) {
         event.preventDefault();
         createError.textContent = '';
         const submit = document.getElementById('work-create-submit');
         submit.disabled = true;
         const title = document.getElementById('job-title').value.trim();
-        const repository = document.getElementById('job-repository').value.trim();
         const provider = document.getElementById('job-provider').value.trim();
         const model = document.getElementById('job-model').value.trim();
         const mode = document.getElementById('job-mode').value.trim();
@@ -526,7 +658,6 @@
         const payload = {
             title,
             description: document.getElementById('job-description').value.trim(),
-            repository,
             acceptance_criteria: lines(document.getElementById('job-acceptance').value),
             validation_commands: lines(document.getElementById('job-validation').value),
             max_retries: Number(document.getElementById('job-retries').value || 2),
@@ -541,6 +672,8 @@
         if (model) execution.model = model;
         if (mode) execution.agent_mode = mode;
         if (autoApprove) execution.auto_approve_writes = true;
+        const stages = collectStageModels();
+        if (Object.keys(stages).length) execution.stages = stages;
         if (Object.keys(execution).length) payload.execution = execution;
         if (!sessionName && (!provider || !model)) {
             createError.textContent = 'Provider and model are required when no current session is available.';
@@ -564,13 +697,16 @@
 
     if (sessionName) {
         sessionEl.textContent = `Inherit from session · ${sessionName}`;
-        repoHint.textContent = `Leave blank to use the workspace attached to ${sessionName}.`;
+        repoHint.textContent = `Jobs run in the workspace attached to ${sessionName}.`;
         executionHelp.textContent = `Leave fields blank to inherit provider, model, mode and write-approval policy from ${sessionName}.`;
     } else {
         sessionEl.textContent = 'No session context';
-        repoHint.textContent = 'Enter the Git repository path available to the MuCLI host.';
+        repoHint.textContent = 'Load a session with an attached workspace to create jobs.';
         executionHelp.textContent = 'Provider and model are required when this page was not opened from a loaded session.';
     }
+
+    // Hook for sibling scripts (work_jira.js): open a job / refresh the board.
+    window.MuWork = Object.assign(window.MuWork || {}, { selectJob, refreshBoard });
 
     refreshBtn.addEventListener('click', () => refreshBoard({ refreshSelected: true }));
     newBtn.addEventListener('click', openCreate);

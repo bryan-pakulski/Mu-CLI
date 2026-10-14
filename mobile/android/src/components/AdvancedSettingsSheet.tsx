@@ -17,6 +17,7 @@ import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { ModernBottomSheet } from './ModernBottomSheet';
 import { Text } from './Text';
+import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget, typography } from '../theme/tokens';
 
 export type AdvancedSettingsSheetProps = {
   visible: boolean;
@@ -26,6 +27,8 @@ export type AdvancedSettingsSheetProps = {
 type GroupMeta = {
   title: string;
   description: string;
+  /** Extra guidance shown when the group is open. */
+  note?: string;
 };
 
 const GROUP_META: Record<string, GroupMeta> = {
@@ -41,6 +44,10 @@ const GROUP_META: Record<string, GroupMeta> = {
     title: 'Context & budgets',
     description: 'Provider window allocation, retrieval, skills, and collation.',
   },
+  'speed & effort': {
+    title: 'Speed & effort',
+    description: 'Reasoning effort, deferred turn summaries, small-window profile, and how much tool output stays inline.',
+  },
   'provider retry': {
     title: 'Provider resilience',
     description: 'Retry counts, backoff, and total wait limits.',
@@ -48,6 +55,12 @@ const GROUP_META: Record<string, GroupMeta> = {
   ollama: {
     title: 'Ollama',
     description: 'Endpoint, authentication, context, and sampling options.',
+    note: 'Cloud (ollama.com, or a :cloud model through the local daemon) ignores num_ctx and keep_alive. '
+      + 'Local models always get one fixed context of at least 64k so the daemon never reloads them.',
+  },
+  openai: {
+    title: 'OpenAI',
+    description: 'API path for reasoning models, prompt-cache retention, and xhigh-capable models.',
   },
   'loop mode': {
     title: 'Loop automation',
@@ -192,20 +205,20 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
             Runtime overrides for {activeSessionName}. Changed values can be reset individually.
           </Text>
 
-          <View style={[styles.searchShell, { borderBottomColor: colors.hairline }]}>
-            <Ionicons name="search-outline" size={17} color={colors.textDim} />
+          <View style={[styles.searchShell, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+            <Ionicons name="search-outline" size={17} color={colors.muted} />
             <TextInput
               value={search}
               onChangeText={setSearch}
               placeholder="Filter variables"
-              placeholderTextColor={colors.textDim}
+              placeholderTextColor={colors.muted}
               autoCapitalize="none"
               autoCorrect={false}
               style={[styles.searchInput, { color: colors.text }]}
             />
             {search ? (
               <TouchableOpacity onPress={() => setSearch('')} style={styles.clearButton}>
-                <Ionicons name="close" size={17} color={colors.textDim} />
+                <Ionicons name="close" size={17} color={colors.muted} />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -215,7 +228,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
           ) : filteredGroups.length === 0 ? (
             <Text variant="sm" dim style={styles.noResults}>No variables match this search.</Text>
           ) : (
-            <View style={[styles.groupList, { borderTopColor: colors.hairline }]}>
+            <View style={styles.groupList}>
               {filteredGroups.map(group => {
                 const meta = GROUP_META[group.name] || {
                   title: titleCase(group.name),
@@ -224,7 +237,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
                 const isOpen = search.length > 0 || expanded.has(group.name);
                 const changed = group.variables.filter(variable => !variable.is_default).length;
                 return (
-                  <View key={group.name} style={[styles.group, { borderBottomColor: colors.hairline }]}>
+                  <View key={group.name} style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                     <TouchableOpacity
                       onPress={() => toggleGroup(group.name)}
                       activeOpacity={0.72}
@@ -233,22 +246,25 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
                       <Ionicons
                         name={isOpen ? 'chevron-down' : 'chevron-forward'}
                         size={15}
-                        color={colors.textDim}
+                        color={colors.muted}
                       />
                       <View style={styles.groupCopy}>
                         <View style={styles.groupTitleRow}>
                           <Text variant="sm" style={styles.groupTitle}>{meta.title}</Text>
                           {changed > 0 ? (
-                            <Text variant="xs" style={{ color: colors.accent }}>{changed} changed</Text>
+                            <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.medium, fontVariant: ['tabular-nums'] }}>{changed} changed</Text>
                           ) : null}
                         </View>
                         <Text variant="xs" dim numberOfLines={2}>{meta.description}</Text>
                       </View>
-                      <Text variant="xs" dim>{group.variables.length}</Text>
+                      <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{group.variables.length}</Text>
                     </TouchableOpacity>
 
                     {isOpen ? (
                       <View style={styles.variableList}>
+                        {meta.note ? (
+                          <Text variant="xs" style={[styles.groupNote, { color: colors.textSoft, borderColor: colors.border }]}>{meta.note}</Text>
+                        ) : null}
                         {group.variables.map(variable => (
                           <VariableRow
                             key={variable.key}
@@ -269,8 +285,8 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
           )}
 
           {error ? (
-            <View style={[styles.errorLine, { borderTopColor: colors.hairline }]}>
-              <Ionicons name="alert-circle-outline" size={17} color={colors.error} />
+            <View style={styles.errorLine}>
+              <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
               <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
             </View>
           ) : null}
@@ -301,7 +317,7 @@ function VariableRow({
   const keyboardType = variable.type === 'int' || variable.type === 'float' ? 'numeric' : 'default';
 
   return (
-    <View style={[styles.variableRow, { borderTopColor: colors.hairline }]}>
+    <View style={styles.variableRow}>
       <View style={styles.variableHeader}>
         <View style={styles.variableCopy}>
           <View style={styles.variableTitleRow}>
@@ -309,16 +325,41 @@ function VariableRow({
             <Text variant="xs" dim>{variable.type}</Text>
           </View>
           <Text variant="xs" dim style={styles.variableKey}>{variable.key}</Text>
-          {variable.help ? <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4 }}>{variable.help}</Text> : null}
+          {variable.help ? <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{variable.help}</Text> : null}
         </View>
         {!variable.is_default ? (
           <TouchableOpacity onPress={onReset} disabled={saving} style={styles.resetButton} accessibilityLabel={`Reset ${variable.key}`}>
-            <Ionicons name="refresh-outline" size={15} color={colors.textDim} />
+            <Ionicons name="refresh-outline" size={15} color={colors.muted} />
           </TouchableOpacity>
         ) : null}
       </View>
 
-      {isBoolean ? (
+      {variable.options && variable.options.length ? (
+        <View style={styles.optionPills}>
+          {variable.options.map(option => {
+            const active = valueToDraft(option) === valueToDraft(variable.value);
+            return (
+              <TouchableOpacity
+                key={valueToDraft(option) || 'default'}
+                onPress={() => onSave(option)}
+                disabled={saving || active}
+                style={[styles.optionPill, {
+                  borderColor: active ? colors.accent : colors.border,
+                  backgroundColor: active ? colors.accentSubtle : colors.bg,
+                }]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${variable.key} ${optionLabel(option)}`}
+              >
+                <Text variant="xs" style={{ color: active ? colors.text : colors.textSoft, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>
+                  {optionLabel(option)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          {saving ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+        </View>
+      ) : isBoolean ? (
         <View style={styles.booleanControl}>
           <Text variant="xs" dim>{currentBoolean ? 'On' : 'Off'}</Text>
           {saving ? (
@@ -327,8 +368,8 @@ function VariableRow({
             <Switch
               value={currentBoolean}
               onValueChange={(value: boolean) => onSave(value)}
-              trackColor={{ false: colors.borderStrong, true: colors.accent }}
-              thumbColor={colors.glassStrong}
+              trackColor={{ false: colors.border, true: colors.accent }}
+              thumbColor={colors.raised}
             />
           )}
         </View>
@@ -342,8 +383,8 @@ function VariableRow({
             autoCapitalize="none"
             autoCorrect={false}
             placeholder={variable.secret && variable.is_set ? 'Configured — enter to replace' : valueToDraft(variable.default)}
-            placeholderTextColor={colors.textDim}
-            style={[styles.valueInput, { color: colors.text, borderBottomColor: colors.hairline }]}
+            placeholderTextColor={colors.muted}
+            style={[styles.valueInput, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
           />
           <TouchableOpacity
             onPress={() => onSave()}
@@ -354,7 +395,7 @@ function VariableRow({
             {saving ? (
               <ActivityIndicator size="small" color={colors.accent} />
             ) : (
-              <Ionicons name="checkmark" size={18} color={colors.accent} />
+              <Ionicons name="checkmark" size={18} color={colors.accentFg} />
             )}
           </TouchableOpacity>
         </View>
@@ -374,6 +415,12 @@ function valueToDraft(value: unknown): string {
   }
 }
 
+/** Picker label for an option value ("" = the provider/server default). */
+export function optionLabel(option: unknown): string {
+  const text = valueToDraft(option);
+  return text ? text : 'Default';
+}
+
 function humanizeKey(key: string): string {
   return key
     .split('_')
@@ -387,53 +434,58 @@ function titleCase(value: string): string {
 }
 
 const styles = StyleSheet.create({
-  intro: { lineHeight: 19, marginBottom: 18 },
+  intro: { lineHeight: typography.sm.lineHeight, marginBottom: spacing.base },
   searchShell: {
-    minHeight: 42,
+    minHeight: touchTarget,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 2,
-    marginBottom: 20,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.base,
+    borderWidth: 1,
+    borderRadius: radii.control,
   },
-  searchInput: { flex: 1, minHeight: 42, paddingHorizontal: 9, fontSize: 14 },
-  clearButton: { width: 34, height: 40, alignItems: 'center', justifyContent: 'center' },
-  loader: { marginVertical: 28 },
-  noResults: { textAlign: 'center', marginVertical: 28 },
-  groupList: { borderTopWidth: StyleSheet.hairlineWidth },
-  group: { borderBottomWidth: StyleSheet.hairlineWidth },
-  groupHeader: { minHeight: 62, flexDirection: 'row', alignItems: 'center', paddingVertical: 9, gap: 8 },
+  searchInput: { flex: 1, minHeight: touchTarget, paddingHorizontal: spacing.sm, fontSize: fontSizes.base },
+  clearButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  loader: { marginVertical: spacing.lg },
+  noResults: { textAlign: 'center', marginVertical: spacing.lg },
+  // planos Settings: each group is a panel (surface + 1px border + radius 10).
+  groupList: { gap: spacing.md },
+  group: { borderWidth: 1, borderRadius: radii.panel, paddingHorizontal: spacing.md, overflow: 'hidden' },
+  groupHeader: { minHeight: 62, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, gap: spacing.sm },
   groupCopy: { flex: 1 },
-  groupTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
-  groupTitle: { fontWeight: '600' },
-  variableList: { paddingLeft: 22 },
-  variableRow: { paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },
+  groupTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
+  groupTitle: { fontWeight: fontWeights.semibold },
+  variableList: { paddingLeft: 0 },
+  variableRow: { paddingVertical: spacing.md },
   variableHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  variableCopy: { flex: 1, paddingRight: 8 },
-  variableTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
-  variableTitle: { fontWeight: '600', flex: 1 },
-  variableKey: { marginTop: 1, fontFamily: 'monospace' },
-  resetButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  booleanControl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 9 },
-  editorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 9 },
+  variableCopy: { flex: 1, paddingRight: spacing.sm },
+  variableTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
+  variableTitle: { fontWeight: fontWeights.semibold, flex: 1 },
+  variableKey: { marginTop: 1, fontFamily: fonts.mono },
+  resetButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  groupNote: { lineHeight: typography.xs.lineHeight, paddingVertical: spacing.sm, borderBottomWidth: 1 },
+  optionPills: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
+  optionPill: { minHeight: 32, justifyContent: 'center', paddingHorizontal: spacing.md, borderWidth: 1, borderRadius: radii.control },
+  booleanControl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
+  editorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
   valueInput: {
     flex: 1,
-    minHeight: 40,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 2,
-    paddingVertical: 7,
-    fontSize: 13,
+    minHeight: touchTarget,
+    borderWidth: 1,
+    borderRadius: radii.control,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSizes.sm,
   },
-  saveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  saveButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
   errorLine: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
-    paddingVertical: 12,
-    marginVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    marginVertical: spacing.sm,
   },
-  emptyState: { alignItems: 'flex-start', paddingVertical: 28, paddingHorizontal: 2 },
-  emptyTitle: { fontWeight: '600' },
-  emptyBody: { marginTop: 6, lineHeight: 20 },
+  emptyState: { alignItems: 'flex-start', paddingVertical: spacing.xl, paddingHorizontal: 2 },
+  emptyTitle: { fontWeight: fontWeights.semibold },
+  emptyBody: { marginTop: spacing.xs, lineHeight: typography.sm.lineHeight },
 });

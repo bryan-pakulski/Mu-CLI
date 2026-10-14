@@ -53,6 +53,9 @@ def session(tmp_path, monkeypatch):
     sm = SessionManager()
     sess = Session(_Summarizer(), False, "system", sm)
     sess.variables["agent_mode"] = "default"
+    # These tests exercise the roll mechanics directly (the synchronous path);
+    # the deferred path is covered by the *_deferred tests below.
+    sess.variables["turn_roll_deferred"] = False
     sm.tool_result_cache.set_store(ResultStore("test", root=str(tmp_path / "results")))
     return sess
 
@@ -82,6 +85,7 @@ def test_variables_registered():
 
     assert VARIABLE_SCHEMA["turn_roll_enabled"]["default"] is True
     assert VARIABLE_SCHEMA["turn_keep_budget_tokens"]["default"] == 6000
+    assert VARIABLE_SCHEMA["turn_roll_deferred"]["default"] is True
 
 
 def test_over_budget_turn_is_rolled_into_l2(session):
@@ -186,3 +190,39 @@ def test_loop_seam_runs_fold_then_roll(session):
     assert sm.summary_anchor == len(sm.history) - 1
     kinds = [e["kind"] for e in (getattr(sm, "_compaction_log", None) or [])]
     assert kinds.index("turn_fold") < kinds.index("turn_roll")
+
+
+def test_deferred_roll_returns_at_once_and_merges_at_the_next_turn_start(session):
+    """Harness latency plan, Phase 3: no model call blocks the end of a turn."""
+    from mu.session.context_maintenance import apply_pending_turn_roll, roll_completed_turn
+    sm = session.session_manager
+    session.variables.update(turn_roll_deferred=True, turn_keep_budget_tokens=500)
+    start = _turn(sm, n_results=4, payload="line\n" * 400, prefix="a")
+    report = roll_completed_turn(session, turn_start_index=start)
+    assert report["reason"] == "deferred" and report["rolled"] is False
+    assert sm.summary_anchor == 0  # nothing applied mid-flight
+    applied = apply_pending_turn_roll(session, wait=5)
+    assert applied["applied"] is True and sm.summary_anchor == len(sm.history) - 1
+    assert sm.conversation_summary.startswith("### Task") and session.provider.calls == 1
+    kinds = [e["kind"] for e in (getattr(sm, "_compaction_log", None) or [])]
+    assert kinds.count("turn_roll") == 1
+
+
+def test_deferred_roll_is_discarded_when_history_changed_underneath(session):
+    from mu.session.context_maintenance import apply_pending_turn_roll, roll_completed_turn
+    sm = session.session_manager
+    session.variables.update(turn_roll_deferred=True, turn_keep_budget_tokens=500)
+    start = _turn(sm, n_results=4, payload="line\n" * 400, prefix="a")
+    roll_completed_turn(session, turn_start_index=start)
+    sm.history[1]["parts"][0]["tool_args"] = {"filename": "rewritten.py"}
+    assert apply_pending_turn_roll(session, wait=5)["reason"] == "stale"
+    assert sm.summary_anchor == 0 and not sm.conversation_summary
+
+
+def test_job_stage_sessions_skip_the_roll(session):
+    from mu.session.context_maintenance import roll_completed_turn
+    sm = session.session_manager
+    session.variables.update(turn_roll_deferred=True, turn_keep_budget_tokens=500, internal_session_kind="durable_job")
+    start = _turn(sm, n_results=4, payload="line\n" * 400, prefix="a")
+    assert roll_completed_turn(session, turn_start_index=start)["reason"] == "single_turn_session"
+    assert session.provider.calls == 0

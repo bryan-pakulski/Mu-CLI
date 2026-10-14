@@ -232,6 +232,64 @@ def _filter_goal_echo_entries(summary: str, goal_texts: list[str]) -> str:
     return "\n".join(kept)
 
 
+def _small_window_tools(session, tools, mode):
+    """Small context windows get the compact tool profile (mu.session.budgets.small_window)."""
+    try:
+        from mu.session.budgets import small_window
+        if small_window(session):
+            from mu.tools.descriptors import small_window_tools
+            return small_window_tools(tools, mode)
+    except Exception:  # noqa: BLE001 - never lose the tool list over a profile bug
+        logger.debug("small-window tool profile skipped", exc_info=True)
+    return tools
+
+
+def collation_threshold_tokens(session) -> int:
+    """Combined size of a batch of read results above which they are collated (deferred to
+    `flush`): ``collation_batch_share`` of the model's real window, capped."""
+    variables = getattr(session, "variables", None) or {}
+    try:
+        cap = int(variables.get("collation_batch_cap_tokens", 24000) or 24000)
+        share = float(variables.get("collation_batch_share", 0.10) or 0.10)
+    except (TypeError, ValueError):
+        cap, share = 24000, 0.10
+    try:
+        from mu.agent.context_guard import _resolve_real_context_window
+        window = int(_resolve_real_context_window(session) or 0)
+    except Exception:  # noqa: BLE001
+        window = 0
+    if not window:
+        return cap
+    # Collate only when the batch would eat a large part of the room that is actually
+    # left: half the free history budget, never below the window share. On a 64k local
+    # window a fixed 10% (6.5k) deferred an ordinary 8-result batch and cost two extra
+    # (minute-long) turns.
+    try:
+        from mu.session.context_maintenance import projected_tokens
+        free = max(0, int(session._compaction_token_budget()) - int(projected_tokens(session)))
+    except Exception:  # noqa: BLE001
+        free = 0
+    return min(cap, max(int(window * share), free // 2))
+
+
+def _batch_needs_collation(session, tool_calls, exec_results, early_results) -> bool:
+    """Collate a batch of read results only when together they are too big to deliver
+    inline; otherwise the model gets them in this turn instead of a `flush` turn."""
+    if len(tool_calls) <= 1:
+        return False
+    total = 0
+    from utils.token_estimator import estimate_tokens
+    for i, part in enumerate(tool_calls):
+        if part.tool_name not in COLLATED_TOOLS:
+            continue
+        result = early_results[i] if i in early_results else exec_results.get(i)
+        try:
+            total += int(estimate_tokens(str(result or "")) or 0)
+        except Exception:  # noqa: BLE001
+            continue
+    return total > collation_threshold_tokens(session)
+
+
 def _fold_turn_context(session, turn_start_index, iteration) -> dict | None:
     """Turn-boundary fold seam (context_packaging_v2 P2).
 
@@ -302,6 +360,15 @@ def run_turn(session, text, *, origin="user"):
     session._provider_auto_rollback_done = False
     session._last_provider_error_transient = None
     session.sync_runtime_state()
+    # Deferred turn roll (harness latency plan, Phase 3): merge the previous turn's
+    # background summary now, before any context is assembled for this turn.
+    try:
+        from mu.session.context_maintenance import apply_pending_turn_roll
+        _roll = apply_pending_turn_roll(session)
+        if _roll.get("applied"):
+            logger.info("Turn roll (deferred): anchor %d -> %d.", _roll["anchor_before"], _roll["anchor_after"])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Deferred turn roll skipped: %s", exc)
     # Round-51 T7: trim oversized restored history BEFORE the first request.
     # The traced 517-iter run resumed with L5 at 300k (another at 795k,
     # above the 580k configured limit) because restore hydrated saved
@@ -490,6 +557,7 @@ def run_turn(session, text, *, origin="user"):
             # phases are filtered unconditionally above.
             if session.variables.get("lazy_tools_enabled", False):
                 active_tools = filter_tools_by_phase(active_tools, active_tool_phases)
+            active_tools = _small_window_tools(session, active_tools, active_mode)
 
             agent_mode = str(session.variables.get("agent_mode", "default")).lower()
             # Prompt resolution priority (highest first):
@@ -866,6 +934,7 @@ def run_turn(session, text, *, origin="user"):
     # Spec #9: phased exposure (see the earlier filter site for details).
     if session.variables.get("lazy_tools_enabled", False):
         active_tools = filter_tools_by_phase(active_tools, active_tool_phases)
+    active_tools = _small_window_tools(session, active_tools, active_mode)
     provider_tools = active_tools if expose_tools else None
 
     total_in = 0
@@ -995,10 +1064,13 @@ def run_turn(session, text, *, origin="user"):
                     _should_wrap = True
             if _should_wrap:
                 session._subagent_wrap_up_injected = True
+                # User role, not system: providers that fold mid-history system messages
+                # into the system prompt (Ollama) would otherwise invalidate the whole
+                # cached prompt prefix.
                 session.session_manager.history.append({
-                    "role": "system",
+                    "role": "user",
                     "parts": [{"type": "text", "text": (
-                        "WRAP UP NOW: You are at iteration "
+                        "[Harness] WRAP UP NOW: You are at iteration "
                         f"{iteration}/{max_iterations}. Stop calling tools "
                         "immediately. Consolidate all findings into a single "
                         "final summary message. Do not call any more tools."
@@ -2125,140 +2197,117 @@ def run_turn(session, text, *, origin="user"):
 
             if pending_executions:
                 from mu.agent.parallel import (
-                    PARALLEL_SAFE_TOOLS,
                     ToolCall as _ParTC,
                     execute_calls as _exec_calls,
                 )
 
-                parallel_indices: list[int] = []
-                serial_indices: list[int] = []
-                for i in pending_executions:
-                    part = tool_calls[i]
-                    # `flush` must be serial (it reads the collation
-                    # buffer, which is populated by the post-processing
-                    # phase below for each preceding call).
-                    if part.tool_name == "flush":
-                        serial_indices.append(i)
-                    elif part.tool_name in PARALLEL_SAFE_TOOLS:
-                        parallel_indices.append(i)
-                    else:
-                        serial_indices.append(i)
+                from mu.agent.parallel import execution_segments, is_parallel_safe_call
 
-                # Order-preserving execution: a mixed batch like
-                # [write_file, read_file] must NOT be reordered so all
-                # "parallel-safe" calls run before serial mutations — the
-                # model's call order encodes read-after-write dependencies.
-                # Any serial call positioned BEFORE a parallel-safe call
-                # forces the whole batch serial (barrier semantics); a
-                # serial call after all parallel calls keeps the fast path.
-                if (
-                    parallel_indices
-                    and serial_indices
-                    and min(parallel_indices) > min(serial_indices)
-                ):
-                    parallel_indices, serial_indices = [], list(pending_executions)
-                # One call has nothing to parallelize. Keeping it on the
-                # agent thread avoids an event-loop/default-executor round
-                # trip and preserves straightforward hook/UI ordering.
-                if len(parallel_indices) == 1:
-                    serial_indices.extend(parallel_indices)
-                    serial_indices.sort()
-                    parallel_indices = []
-
-                # Parallel batch — preserves input-order results.
-                if parallel_indices:
-                    par_calls = [
-                        _ParTC(
-                            tool_name=tool_calls[i].tool_name,
-                            tool_args=tool_calls[i].tool_args or {},
-                            tool_call_id=str(i),
-                            thought_signature=tool_calls[i].thought_signature,
-                        )
-                        for i in parallel_indices
-                    ]
-                    max_concurrency = max(
-                        1,
-                        int(
-                            session.variables.get("parallel_tool_concurrency", 4) or 4
-                        ),
-                    )
-
-                    # Sub-agent progress is now rendered on demand from the
-                    # long-lived tracker owned by `session._subagent_registry`
-                    # (populated by async spawn_agent). We deliberately do NOT
-                    # run a continuous rich.Live here: a Live spanning the async
-                    # gap would corrupt the console while the parent loop keeps
-                    # writing tool results. Instead, when sub-agent spawns are
-                    # in this batch, we render a one-shot static snapshot so the
-                    # user sees the dispatch (single spawns included — the old
-                    # `spawn_count >= 2` gate is gone).
-                    spawn_count = sum(
-                        1
-                        for i in parallel_indices
-                        if tool_calls[i].tool_name == "spawn_agent"
-                    )
-                    if spawn_count >= 1 and session.ui is not None:
-                        try:
-                            _tracker = session._subagent_registry.tracker
-                            if _tracker.has_active():
-                                session.ui.show_info(_tracker.render_panel())
-                        except Exception:  # noqa: BLE001
-                            pass
-
-                    if len(par_calls) > 1 and session.ui:
-                        session.ui.show_info(
-                            f"⚡ Dispatching {len(par_calls)} tool call(s) in "
-                            f"parallel (max_concurrency={max_concurrency})."
-                        )
-
-                    try:
-                        par_results = _exec_calls(
-                            par_calls,
-                            lambda tc: _auto_recall_or_execute(
-                                int(tc.tool_call_id), tc
-                            ),
-                            max_concurrency=max_concurrency,
-                        )
-                    finally:
-                        # Keep the legacy transient attribute cleared for any
-                        # external readers; the authoritative tracker lives on
-                        # the registry now.
-                        session._subagent_progress = None
-                    for idx, pr in zip(parallel_indices, par_results):
-                        if pr.error is not None:
-                            logger.warning(
-                                "Parallel tool %s raised %s",
-                                tool_calls[idx].tool_name,
-                                pr.error,
+                # Order-preserving segments: consecutive parallel-safe calls run
+                # concurrently; any other call is a barrier that runs in place (the
+                # model's call order encodes read-after-write dependencies). Read-only
+                # `bash` joins a group only when it needs no approval prompt.
+                _approvals_needed = not bool(session.variables.get("yolo"))
+                _segments = execution_segments(
+                    [(i, (tool_calls[i].tool_name, tool_calls[i].tool_args)) for i in pending_executions],
+                    lambda name, args: is_parallel_safe_call(name, args, approvals_needed=_approvals_needed),
+                )
+                for parallel_indices, serial_indices in _segments:
+                    # Parallel batch — preserves input-order results.
+                    if parallel_indices:
+                        par_calls = [
+                            _ParTC(
+                                tool_name=tool_calls[i].tool_name,
+                                tool_args=tool_calls[i].tool_args or {},
+                                tool_call_id=str(i),
+                                thought_signature=tool_calls[i].thought_signature,
                             )
-                            exec_results[idx] = f"Error: {pr.error}"
-                        else:
-                            exec_results[idx] = pr.result
-
-                # Serial calls (executed in their original input order).
-                for idx in serial_indices:
-                    part = tool_calls[idx]
-                    if part.tool_name == "flush":
-                        # Flush is finalised inside the post-processing
-                        # phase below so it can read the freshly written
-                        # collation buffer. Placeholder result here.
-                        exec_results[idx] = None
-                        continue
-                    try:
-                        exec_results[idx] = _auto_recall_or_execute(idx, part)
-                    except Exception as serial_exc:
-                        # A serial tool raising must not abort the remaining
-                        # serial calls or leave the tool call without a
-                        # result (codex review finding #4) — that produced
-                        # an invalid conversation sequence and lost the
-                        # outcomes of earlier tools. Convert to an error
-                        # result so Phase 3 archives one result per call.
-                        logger.warning(
-                            "Serial tool %s raised: %s", part.tool_name, serial_exc
+                            for i in parallel_indices
+                        ]
+                        max_concurrency = max(
+                            1,
+                            int(
+                                session.variables.get("parallel_tool_concurrency", 4) or 4
+                            ),
                         )
-                        exec_results[idx] = f"Error: {serial_exc}"
+
+                        # Sub-agent progress is now rendered on demand from the
+                        # long-lived tracker owned by `session._subagent_registry`
+                        # (populated by async spawn_agent). We deliberately do NOT
+                        # run a continuous rich.Live here: a Live spanning the async
+                        # gap would corrupt the console while the parent loop keeps
+                        # writing tool results. Instead, when sub-agent spawns are
+                        # in this batch, we render a one-shot static snapshot so the
+                        # user sees the dispatch (single spawns included — the old
+                        # `spawn_count >= 2` gate is gone).
+                        spawn_count = sum(
+                            1
+                            for i in parallel_indices
+                            if tool_calls[i].tool_name == "spawn_agent"
+                        )
+                        if spawn_count >= 1 and session.ui is not None:
+                            try:
+                                _tracker = session._subagent_registry.tracker
+                                if _tracker.has_active():
+                                    session.ui.show_info(_tracker.render_panel())
+                            except Exception:  # noqa: BLE001
+                                pass
+
+                        if len(par_calls) > 1 and session.ui:
+                            session.ui.show_info(
+                                f"⚡ Dispatching {len(par_calls)} tool call(s) in "
+                                f"parallel (max_concurrency={max_concurrency})."
+                            )
+
+                        try:
+                            par_results = _exec_calls(
+                                par_calls,
+                                lambda tc: _auto_recall_or_execute(
+                                    int(tc.tool_call_id), tc
+                                ),
+                                max_concurrency=max_concurrency,
+                            )
+                        finally:
+                            # Keep the legacy transient attribute cleared for any
+                            # external readers; the authoritative tracker lives on
+                            # the registry now.
+                            session._subagent_progress = None
+                        for idx, pr in zip(parallel_indices, par_results):
+                            if pr.error is not None:
+                                logger.warning(
+                                    "Parallel tool %s raised %s",
+                                    tool_calls[idx].tool_name,
+                                    pr.error,
+                                )
+                                exec_results[idx] = f"Error: {pr.error}"
+                            else:
+                                exec_results[idx] = pr.result
+
+                    # Serial calls (executed in their original input order).
+                    for idx in serial_indices:
+                        part = tool_calls[idx]
+                        if part.tool_name == "flush":
+                            # Flush is finalised inside the post-processing
+                            # phase below so it can read the freshly written
+                            # collation buffer. Placeholder result here.
+                            exec_results[idx] = None
+                            continue
+                        try:
+                            exec_results[idx] = _auto_recall_or_execute(idx, part)
+                        except Exception as serial_exc:
+                            # A serial tool raising must not abort the remaining
+                            # serial calls or leave the tool call without a
+                            # result (codex review finding #4) — that produced
+                            # an invalid conversation sequence and lost the
+                            # outcomes of earlier tools. Convert to an error
+                            # result so Phase 3 archives one result per call.
+                            logger.warning(
+                                "Serial tool %s raised: %s", part.tool_name, serial_exc
+                            )
+                            exec_results[idx] = f"Error: {serial_exc}"
 
             # --- PHASE 3: post-processing (serial, in input order) -----------
+            collate_batch = _batch_needs_collation(session, tool_calls, exec_results, early_results)
             for i, part in enumerate(tool_calls):
                 current_tool_name = part.tool_name
                 current_tool_args = part.tool_args
@@ -2299,6 +2348,7 @@ def run_turn(session, text, *, origin="user"):
                     part.tool_name in COLLATED_TOOLS
                     and session.variables.get("collation_enabled", True)
                     and len(tool_calls) > 1
+                    and collate_batch
                 )
 
                 if is_flush:
@@ -2519,9 +2569,11 @@ def run_turn(session, text, *, origin="user"):
                         ) else None
                         if _wpath:
                             session.tool_result_cache.invalidate_path(_wpath)
-                    elif cache_key is not None and session.variables.get(
+                    elif cache_key is not None and not should_collate and session.variables.get(
                         "read_dedup_enabled", True
                     ):
+                        # A collated (deferred) read was not delivered to the model, so
+                        # it must not count as "already supplied" for dedup.
                         session.tool_result_cache.record_read_range(
                             part.tool_name, part.tool_args, cache_key
                         )

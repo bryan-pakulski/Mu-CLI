@@ -1,17 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 import {
+  doneSkippedKeys,
   jiraApi,
   type JiraBoard,
   type JiraSettings,
   type JiraSprint,
   type JiraStatusCount,
   type JiraTicket,
+  type TicketImportTarget,
 } from '../api/jobs';
 import { ModernBottomSheet } from './ModernBottomSheet';
+import { JobImportSheet } from './JobSessionPicker';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
+import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
+import { Banner, Field, Loading, Panel, PlanosButton, SwitchRow, TextField } from './planos';
 
 export type JiraSheetProps = {
   visible: boolean;
@@ -33,6 +38,28 @@ export function filterTickets(tickets: JiraTicket[], statuses: string[]): JiraTi
 }
 
 export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob }: JiraSheetProps) {
+  return (
+    <ModernBottomSheet visible={visible} onClose={onClose} title="Jira">
+      <JiraBrowser active={visible} sessionName={sessionName} onImported={onImported} onOpenJob={onOpenJob} />
+    </ModernBottomSheet>
+  );
+}
+
+export type JiraBrowserProps = {
+  /** Loads settings/boards/tickets while true (sheet visible or screen mounted). */
+  active: boolean;
+  /** Default session offered when importing (the app's session); the user confirms or picks another. */
+  sessionName: string | null;
+  onImported?: (jobIds: string[]) => void;
+  onOpenJob?: (jobId: string) => void;
+  /** 'link' renders only the link/unlink panel (Settings page). */
+  section?: 'all' | 'link';
+};
+
+/** The Jira browser (link, boards, filters, tickets, import) — used by the
+ * Boards screen, the Jira sheet and (link only) the jobs Settings screen. */
+export function JiraBrowser({ active, sessionName, onImported, onOpenJob, section = 'all' }: JiraBrowserProps) {
+  const visible = active;
   const { colors } = useTheme();
   const [settings, setSettings] = useState<JiraSettings | null>(null);
   const [editingLink, setEditingLink] = useState(false);
@@ -54,6 +81,10 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [askSession, setAskSession] = useState(false);
+  // Tickets skipped because their latest job is done: "Run again" re-imports them with force.
+  const [rerunKeys, setRerunKeys] = useState<string[]>([]);
+  const [rerun, setRerun] = useState(false);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -85,8 +116,8 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
   }), [run]);
 
   useEffect(() => {
-    if (visible && settings?.configured) void loadBoards('');
-  }, [visible, settings?.configured, loadBoards]);
+    if (visible && settings?.configured && section !== 'link') void loadBoards('');
+  }, [visible, settings?.configured, loadBoards, section]);
 
   useEffect(() => {
     setSprints([]);
@@ -109,8 +140,8 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
   }), [run, boardId, sprintId, mine, includeDone]);
 
   useEffect(() => {
-    if (visible && settings?.configured && (boardId != null || settings.preferences?.default_jql || mine)) void loadTickets();
-  }, [visible, settings?.configured, boardId, sprintId, mine, includeDone, loadTickets, settings?.preferences?.default_jql]);
+    if (visible && section !== 'link' && settings?.configured && (boardId != null || settings.preferences?.default_jql || mine)) void loadTickets();
+  }, [visible, section, settings?.configured, boardId, sprintId, mine, includeDone, loadTickets, settings?.preferences?.default_jql]);
 
   const saveLink = () => run('save', async () => {
     const body = usePat
@@ -146,80 +177,86 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
     void jiraApi.save({ preferences: { assigned_to_me: value } }).catch(() => undefined);
   };
 
-  const importSelected = () => run('import', async () => {
-    if (!sessionName) throw new Error('Open Work from a session with an attached workspace to import tickets.');
-    const res = await jiraApi.importKeys(selected, sessionName);
+  /** Import asks where the jobs run: workspace / git URL first, session optional (matched by workspace). */
+  const importSelected = () => { setRerun(false); setAskSession(true); };
+  const runAgain = () => { setSelected(rerunKeys); setRerun(true); setAskSession(true); };
+  const importInto = (target: TicketImportTarget) => run('import', async () => {
+    setAskSession(false);
+    const res = await jiraApi.importKeys(selected, target);
     const ids = (res.created || []).map(c => c.job_id);
-    const skipped = (res.skipped || []).length;
+    const skippedRows = (res.skipped || []) as Array<{ key?: string; reason?: string }>;
+    const doneKeys = doneSkippedKeys(res.skipped);
+    const done = doneKeys.length;
+    const skipped = skippedRows.length - done;
     const errors = (res.errors || []).length;
-    setNotice(`Created ${ids.length} job${ids.length === 1 ? '' : 's'}${skipped ? `, ${skipped} already linked` : ''}${errors ? `, ${errors} failed` : ''}.`);
+    const where = target.session || target.workspace || 'the workspace';
+    setNotice(`Created ${ids.length} job${ids.length === 1 ? '' : 's'} in ${where}${skipped ? `, ${skipped} already linked` : ''}${done ? `, ${done} already done` : ''}${errors ? `, ${errors} failed` : ''}.`);
+    setRerunKeys(doneKeys);
     onImported?.(ids);
     await loadTickets();
   });
 
   const visibleTickets = useMemo(() => filterTickets(tickets, statusFilter), [tickets, statusFilter]);
   const shownBoards = useMemo(() => boards.slice(0, 12), [boards]);
-  const inputStyle = [styles.input, { borderColor: colors.hairline, color: colors.text }];
-  const chip = (active: boolean) => [styles.chip, { borderColor: active ? colors.accent : colors.hairline, backgroundColor: active ? colors.accentSoft : 'transparent' }];
+  const chip = (activeChip: boolean) => [styles.chip, { backgroundColor: activeChip ? colors.accentSubtle : colors.raised, borderColor: activeChip ? colors.accent : colors.border }];
+  const linkOnly = section === 'link';
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Jira">
-      {error ? <Text variant="xs" style={{ color: colors.error, marginBottom: 8 }}>{error}</Text> : null}
-      {notice ? <Text variant="xs" style={{ color: colors.success, marginBottom: 8 }}>{notice}</Text> : null}
+    <View style={styles.root}>
+      {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
+      {notice ? <Banner tone="ok" glyph="✓" title={notice} /> : null}
+      {rerunKeys.length > 0 && !linkOnly ? (
+        <View style={styles.actions}>
+          <PlanosButton small testID="jira-run-again" label={`Run again (${rerunKeys.length})`} disabled={!!busy} onPress={runAgain} />
+          <Text variant="xs" style={{ color: colors.muted, flex: 1 }}>Start a new job for {rerunKeys.join(', ')}.</Text>
+        </View>
+      ) : null}
 
       {settings?.configured && !editingLink ? (
-        <View style={[styles.row, styles.section]}>
-          <Text variant="xs" dim style={{ flex: 1 }} numberOfLines={1}>
+        <Panel title="Jira link" glyph="✓" glyphTone="ok">
+          <Text variant="xs" style={{ color: colors.muted }} numberOfLines={2}>
             Linked · {settings.base_url}{settings.email ? ` · ${settings.email}` : ''}
           </Text>
-          <TouchableOpacity accessibilityRole="button" onPress={() => setEditingLink(true)}>
-            <Text variant="xs" style={{ color: colors.accent }}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" onPress={unlink} style={{ marginLeft: 14 }}>
-            <Text variant="xs" style={{ color: colors.error }}>Unlink</Text>
-          </TouchableOpacity>
-        </View>
+          <View style={styles.actions}>
+            <PlanosButton small label="Edit" onPress={() => setEditingLink(true)} />
+            <PlanosButton small tone="danger" label="Unlink" onPress={unlink} />
+          </View>
+        </Panel>
       ) : (
-        <View style={styles.section}>
-          <Text variant="sm" style={styles.heading}>Link Jira</Text>
-          <Text variant="xs" dim style={{ marginBottom: 8 }}>
+        <Panel title="Link Jira">
+          <Text variant="xs" style={{ color: colors.muted, marginBottom: spacing.sm }}>
             Saved on the server in $MUCLI_HOME/integrations/jira.json. Tokens are never shown again.
           </Text>
-          <TextInput accessibilityLabel="Jira URL" placeholder="https://your-org.atlassian.net" placeholderTextColor={colors.textDim}
-            autoCapitalize="none" autoCorrect={false} keyboardType="url" value={baseUrl} onChangeText={setBaseUrl} style={inputStyle} />
-          <View style={[styles.row, { marginVertical: 6 }]}>
-            <Text variant="xs" style={{ flex: 1, color: colors.textSoft }}>Data Center personal access token</Text>
-            <Switch value={usePat} onValueChange={setUsePat} />
-          </View>
+          <Field label="Jira URL">
+            <TextField accessibilityLabel="Jira URL" placeholder="https://your-org.atlassian.net"
+              autoCapitalize="none" autoCorrect={false} keyboardType="url" value={baseUrl} onChangeText={setBaseUrl} />
+          </Field>
+          <SwitchRow label="Data Center personal access token" hint="Use a PAT instead of email + API token." value={usePat} onValueChange={setUsePat} />
           {!usePat ? (
-            <TextInput accessibilityLabel="Jira email" placeholder="you@company.com" placeholderTextColor={colors.textDim}
-              autoCapitalize="none" autoCorrect={false} keyboardType="email-address" value={email} onChangeText={setEmail} style={inputStyle} />
+            <Field label="Email">
+              <TextField accessibilityLabel="Jira email" placeholder="you@company.com"
+                autoCapitalize="none" autoCorrect={false} keyboardType="email-address" value={email} onChangeText={setEmail} />
+            </Field>
           ) : null}
-          <TextInput accessibilityLabel={usePat ? 'Personal access token' : 'API token'} secureTextEntry autoCapitalize="none" autoCorrect={false}
-            placeholder={(usePat ? settings?.pat_set : settings?.api_token_set) ? 'Token saved — leave blank to keep' : usePat ? 'Personal access token' : 'API token'}
-            placeholderTextColor={colors.textDim} value={token} onChangeText={setToken} style={inputStyle} />
-          <View style={styles.row}>
-            <TouchableOpacity accessibilityRole="button" disabled={!!busy || !baseUrl.trim()} onPress={saveLink}
-              style={[styles.button, { backgroundColor: colors.accent, opacity: busy || !baseUrl.trim() ? 0.5 : 1 }]}>
-              <Text variant="xs" style={{ color: '#fff', fontWeight: '600' }}>Save and test</Text>
-            </TouchableOpacity>
-            {settings?.configured ? (
-              <TouchableOpacity accessibilityRole="button" onPress={() => setEditingLink(false)} style={{ marginLeft: 14 }}>
-                <Text variant="xs" dim>Cancel</Text>
-              </TouchableOpacity>
-            ) : null}
+          <Field label={usePat ? 'Personal access token' : 'API token'} hint={(usePat ? settings?.pat_set : settings?.api_token_set) ? 'Token saved — leave blank to keep it.' : undefined}>
+            <TextField accessibilityLabel={usePat ? 'Personal access token' : 'API token'} secureTextEntry autoCapitalize="none" autoCorrect={false}
+              placeholder={(usePat ? settings?.pat_set : settings?.api_token_set) ? 'Token saved — leave blank to keep' : usePat ? 'Personal access token' : 'API token'}
+              value={token} onChangeText={setToken} />
+          </Field>
+          <View style={styles.actions}>
+            <PlanosButton primary label="Save and test" disabled={!!busy || !baseUrl.trim()} onPress={saveLink} />
+            {settings?.configured ? <PlanosButton ghost label="Cancel" onPress={() => setEditingLink(false)} /> : null}
           </View>
-        </View>
+        </Panel>
       )}
 
-      {settings?.configured ? (
+      {settings?.configured && !linkOnly ? (
         <>
-          <View style={styles.section}>
-            <Text variant="sm" style={styles.heading}>Board</Text>
-            <Text variant="xs" dim style={{ marginBottom: 6 }}>Starred and suggested boards (projects with your open work) come first. Long-press to star.</Text>
-            <TextInput accessibilityLabel="Search boards" placeholder="Search boards" placeholderTextColor={colors.textDim}
+          <Panel title="Board">
+            <Text variant="xs" style={{ color: colors.muted }}>Starred and suggested boards (projects with your open work) come first. Long-press to star.</Text>
+            <TextField accessibilityLabel="Search boards" placeholder="Search boards"
               value={boardQuery} onChangeText={setBoardQuery} onSubmitEditing={() => void loadBoards(boardQuery.trim())}
-              returnKeyType="search" style={inputStyle} />
+              returnKeyType="search" />
             <View style={styles.wrap}>
               {shownBoards.map(board => (
                 <TouchableOpacity key={board.id} accessibilityRole="button" accessibilityState={{ selected: boardId === board.id }}
@@ -229,31 +266,25 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
                   </Text>
                 </TouchableOpacity>
               ))}
-              {busy === 'boards' ? <ActivityIndicator size="small" /> : null}
+              {busy === 'boards' ? <ActivityIndicator size="small" color={colors.running} /> : null}
             </View>
             {sprints.length ? (
               <View style={styles.wrap}>
-                <TouchableOpacity onPress={() => setSprintId(null)} style={chip(sprintId == null)}>
+                <TouchableOpacity accessibilityRole="button" accessibilityState={{ selected: sprintId == null }} onPress={() => setSprintId(null)} style={chip(sprintId == null)}>
                   <Text variant="xs" style={{ color: colors.text }}>Whole board</Text>
                 </TouchableOpacity>
                 {sprints.map(s => (
-                  <TouchableOpacity key={s.id} onPress={() => setSprintId(s.id)} style={chip(sprintId === s.id)}>
+                  <TouchableOpacity key={s.id} accessibilityRole="button" accessibilityState={{ selected: sprintId === s.id }} onPress={() => setSprintId(s.id)} style={chip(sprintId === s.id)}>
                     <Text variant="xs" style={{ color: colors.text }}>{s.name}{s.state === 'active' ? ' (active)' : ''}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             ) : null}
-          </View>
+          </Panel>
 
-          <View style={styles.section}>
-            <View style={styles.row}>
-              <Text variant="xs" style={{ flex: 1, color: colors.textSoft }}>Assigned to me</Text>
-              <Switch value={mine} onValueChange={saveMine} />
-            </View>
-            <View style={styles.row}>
-              <Text variant="xs" style={{ flex: 1, color: colors.textSoft }}>Show done / closed</Text>
-              <Switch value={includeDone} onValueChange={setIncludeDone} />
-            </View>
+          <Panel title="Filters">
+            <SwitchRow label="Assigned to me" value={mine} onValueChange={saveMine} />
+            <SwitchRow label="Show done / closed" value={includeDone} onValueChange={setIncludeDone} />
             {statuses.length ? (
               <View style={styles.wrap}>
                 {statuses.map(s => {
@@ -267,19 +298,15 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
                 })}
               </View>
             ) : null}
-          </View>
+          </Panel>
 
-          <View style={styles.section}>
-            <View style={styles.row}>
-              <Text variant="sm" style={[styles.heading, { flex: 1 }]}>Tickets {tickets.length ? `(${visibleTickets.length})` : ''}</Text>
-              {busy === 'tickets' ? <ActivityIndicator size="small" /> : (
-                <TouchableOpacity accessibilityRole="button" onPress={() => void loadTickets()}>
-                  <Text variant="xs" style={{ color: colors.accent }}>Refresh</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+          <Panel
+            title="Tickets"
+            badge={tickets.length ? visibleTickets.length : ''}
+            right={busy === 'tickets' ? <ActivityIndicator size="small" color={colors.running} /> : <PlanosButton small ghost label="Refresh" onPress={() => void loadTickets()} />}
+          >
             {!visibleTickets.length && busy !== 'tickets' ? (
-              <Text variant="xs" dim>{boardId == null && !mine ? 'Pick a board or turn on “Assigned to me”.' : 'No tickets match.'}</Text>
+              <Text variant="xs" style={{ color: colors.muted }}>{boardId == null && !mine ? 'Pick a board or turn on “Assigned to me”.' : 'No tickets match.'}</Text>
             ) : null}
             {visibleTickets.map(ticket => {
               const picked = selected.includes(ticket.key);
@@ -288,46 +315,50 @@ export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob
                 <TouchableOpacity key={ticket.key} accessibilityRole="checkbox" accessibilityState={{ checked: picked, disabled: !!job?.live }}
                   disabled={!!job?.live}
                   onPress={() => setSelected(prev => (picked ? prev.filter(k => k !== ticket.key) : [...prev, ticket.key]))}
-                  style={[styles.ticket, { borderColor: picked ? colors.accent : colors.hairline }]}>
+                  style={[styles.ticket, { backgroundColor: picked ? colors.accentSubtle : colors.bg, borderColor: picked ? colors.accent : colors.border }]}>
                   <View style={styles.row}>
-                    <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>{ticket.key}</Text>
-                    <Text variant="xs" dim style={{ marginLeft: 8, flex: 1 }} numberOfLines={1}>{ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ''}</Text>
+                    <Text variant="xs" style={{ color: picked ? colors.accent : colors.muted }}>{picked ? '☑' : '☐'}</Text>
+                    <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono, fontWeight: fontWeights.semibold }}>{ticket.key}</Text>
+                    <Text variant="xs" style={{ color: colors.muted, flex: 1 }} numberOfLines={1}>{ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ''}</Text>
                   </View>
                   <Text variant="sm" style={{ color: colors.text }} numberOfLines={2}>{ticket.summary}</Text>
                   {job ? (
-                    <TouchableOpacity accessibilityRole="link" onPress={() => onOpenJob?.(job.job_id)}>
-                      <Text variant="xs" style={{ color: job.live ? colors.warning : colors.textDim, marginTop: 4 }}>
-                        Job {job.job_id.slice(0, 10)} · {job.status.replace(/_/g, ' ')}{job.attention_reason ? ` · ${job.attention_reason.replace(/_/g, ' ')}` : ''}
+                    <TouchableOpacity accessibilityRole="link" onPress={() => onOpenJob?.(job.job_id)} style={styles.jobLink}>
+                      <Text variant="xs" style={{ color: job.live ? colors.warn : colors.accent }}>
+                        {job.live ? '● ' : '› '}Job {job.job_id.slice(0, 10)} · {job.status.replace(/_/g, ' ')}{job.attention_reason ? ` · ${job.attention_reason.replace(/_/g, ' ')}` : ''}
                       </Text>
                     </TouchableOpacity>
                   ) : null}
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </Panel>
 
-          <TouchableOpacity accessibilityRole="button" disabled={!selected.length || !!busy} onPress={importSelected}
-            style={[styles.button, styles.importButton, { backgroundColor: colors.accent, opacity: !selected.length || busy ? 0.5 : 1 }]}>
-            <Text variant="sm" style={{ color: '#fff', fontWeight: '600' }}>
-              {busy === 'import' ? 'Creating jobs…' : `Create ${selected.length || ''} job${selected.length === 1 ? '' : 's'}`}
-            </Text>
-          </TouchableOpacity>
-          {!sessionName ? <Text variant="xs" style={{ color: colors.warning, marginTop: 6 }}>No active session: jobs need a session with an attached workspace.</Text> : null}
+          <PlanosButton primary disabled={!selected.length || !!busy} onPress={importSelected}
+            label={busy === 'import' ? 'Creating jobs…' : `Create ${selected.length || ''} job${selected.length === 1 ? '' : 's'}`} />
+          <JobImportSheet
+            visible={askSession}
+            title="Import tickets"
+            intro={`Create ${selected.length} job${selected.length === 1 ? '' : 's'} in which workspace or repository? A saved session on that workspace supplies model, mode and environment.`}
+            defaultSession={sessionName}
+            initialForce={rerun}
+            confirmLabel={`Import ${selected.length || ''}`.trim()}
+            onClose={() => setAskSession(false)}
+            onConfirm={target => { void importInto(target); }}
+          />
         </>
       ) : null}
-      {busy === 'load' ? <ActivityIndicator style={{ marginTop: 12 }} /> : null}
-    </ModernBottomSheet>
+      {busy === 'load' ? <Loading label="Loading Jira settings…" /> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { marginBottom: 16 },
-  heading: { fontWeight: '600', marginBottom: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', minHeight: 36 },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8, fontSize: 14 },
-  chip: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: 'center' },
-  button: { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
-  importButton: { marginTop: 4 },
-  ticket: { borderWidth: 1, borderRadius: 8, padding: 10, marginTop: 8 },
+  root: { gap: spacing.md },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 24 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
+  chip: { borderWidth: 1, borderRadius: radii.control, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: touchTarget, justifyContent: 'center' },
+  ticket: { borderWidth: 1, borderRadius: radii.control, padding: spacing.md, gap: spacing.xs, minHeight: touchTarget },
+  jobLink: { minHeight: 32, justifyContent: 'center' },
 });

@@ -159,9 +159,10 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         app.state.job_service,
         max_workers=5,
         notify=_job_attention_notify,
-        # Retention: purge artifacts of ARCHIVED historic jobs older than N
-        # days (0 disables). Env-tunable so the daemon needs no session var.
-        retention_days=_env_float("MUCLI_JOBS_RETENTION_DAYS", 30.0),
+        # Concurrency, drift interval and retention come from Settings → Scheduling &
+        # retention (re-read live). MUCLI_JOBS_RETENTION_DAYS, when set, still wins.
+        retention_days=(_env_float("MUCLI_JOBS_RETENTION_DAYS", 30.0) if os.environ.get("MUCLI_JOBS_RETENTION_DAYS") else None),
+        settings_backed=True,
     )
 
     app.state.session_by_name = lambda name=None: session_by_name(app, name)

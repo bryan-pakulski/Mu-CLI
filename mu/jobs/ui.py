@@ -130,6 +130,10 @@ class JobUI(BaseUI):
                 return "y", None
             if decision == "explain":
                 return "e", detail
+            if decision == "deny" and detail:
+                # A deny with a reason reaches the agent as
+                # "User denied this tool call. Reason: <detail>".
+                return "e", detail
             return "n", None
         raise InteractionRequired(
             "approval_required",

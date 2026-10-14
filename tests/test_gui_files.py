@@ -447,7 +447,7 @@ def test_shell_animates_side_panels_and_centers_settings_modal():
     assert ".app.sidebar-hidden .sidebar" in css
     assert "transform: translateX(-16px)" in css
     assert ".app.panel-hidden .mode-panel" in css
-    assert "flex-basis 0.28s" in css
+    assert "flex-basis var(--dur-large)" in css
     assert "transform: translateX(16px)" in css
     assert 'class="inspector-backdrop"' in inspector
     assert "place-items: center" in css

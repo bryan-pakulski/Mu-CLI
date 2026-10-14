@@ -276,15 +276,24 @@ def test_css_has_memory_panel_classes():
 def test_css_has_context_observatory_light_theme_palette():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
-    assert 'html[data-theme="light"] .context-observatory' in content
+    tokens_path = os.path.join(os.path.dirname(CSS_PATH), "tokens.css")
+    with open(tokens_path, "r", encoding="utf-8") as f:
+        tokens = f.read()
+    # The observatory palette resolves in tokens.css for both themes; app.css
+    # carries no per-theme colour overrides for it.
+    assert 'html[data-theme="light"] .context-observatory' not in content
+    assert 'html[data-theme="light"]' in tokens
     for token in (
         "--context-card-surface",
         "--context-control-surface",
         "--context-plot-surface",
         "--context-tooltip-surface",
     ):
-        assert token in content
-    assert 'html[data-theme="light"] .context-pressure-pill' in content
+        assert token + ":" in tokens
+        assert "var(" + token + ")" in content
+    assert 'html[data-theme="light"] .context-pressure-pill' not in content
+    pill = content.split(".context-pressure-pill.hot", 1)[1].split("}", 1)[0]
+    assert "var(--error-subtle)" in pill
 
 
 # ============================================================ backend wiring

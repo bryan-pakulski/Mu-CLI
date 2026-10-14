@@ -46,7 +46,7 @@
                   x-text="$store.security.filteredFindings().length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.security.openSections.findings"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <!-- severity filter chips -->
             <div class="source-filters"
                  x-show="$store.security.severities().length > 1">
@@ -73,10 +73,10 @@
                             <span class="finding-title" x-text="f.title"></span>
                             <span class="finding-badges mono muted">
                                 <span x-show="f.has_proof"
-                                      :style="f.proof_verified ? 'color: var(--ok, #9ece6a)' : ''"
+                                      :style="f.proof_verified ? 'color: var(--success)' : ''"
                                       x-text="f.proof_verified ? 'PoC ✓' : 'PoC'"></span>
                                 <span x-show="f.has_remediation"
-                                      :style="f.remediation_verified ? 'color: var(--ok, #9ece6a)' : ''"
+                                      :style="f.remediation_verified ? 'color: var(--success)' : ''"
                                       x-text="f.remediation_verified ? 'fix ✓' : 'fix'"></span>
                             </span>
                         </div>
@@ -113,7 +113,7 @@
                                  x-show="(f.affected_paths || []).length">
                                 <h5>affected</h5>
                                 <template x-for="p in f.affected_paths" :key="p">
-                                    <div class="mono" x-text="p" style="font-size:11.5px;padding:1px 0;"></div>
+                                    <div class="mono" x-text="p" style="font-size:var(--fs-xs);padding:1px 0;"></div>
                                 </template>
                             </div>
 
@@ -170,7 +170,7 @@
             <span class="panel-section-name">stats</span>
         </button>
         <div class="panel-section-body" x-show="$store.security.openSections.stats"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-if="$store.security.summary && $store.security.summary.by_status">
                 <div class="scan-stats">
                     <template x-for="[status, count] in Object.entries($store.security.summary.by_status)" :key="status">

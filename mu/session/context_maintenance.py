@@ -311,7 +311,12 @@ def roll_completed_turn(session, *, turn_start_index: int | None = None, provide
     end_index = len(sm.history) - 1
     if end_index <= anchor_before:
         return {**report, "reason": "nothing_to_roll", "anchor_after": anchor_before}
+    if variables.get("internal_session_kind") == "durable_job":
+        # A job stage is one turn: the session ends right after, so a roll only costs time.
+        return {**report, "reason": "single_turn_session", "anchor_after": anchor_before}
     provider = provider if provider is not None else getattr(session, "provider", None)
+    if provider is not None and variables.get("turn_roll_deferred", True):
+        return {**report, **start_deferred_turn_roll(session, provider, end_index, turn_tokens, budget)}
     snap = sm._shrink_snapshot() if hasattr(sm, "_shrink_snapshot") else None
     sm._compact_focus = variables.get("compact_focus") or ""
     # The turn is over: its tool results are no longer floor-protected.
@@ -334,6 +339,79 @@ def roll_completed_turn(session, *, turn_start_index: int | None = None, provide
         )
     return {**report, "rolled": rolled, "anchor_after": anchor_after,
             "reason": "rolled" if rolled else "roll_declined"}
+
+
+def _history_fingerprint(entries) -> str:
+    import hashlib
+    import json
+    return hashlib.sha1(json.dumps(entries, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def start_deferred_turn_roll(session, provider, end_index: int, turn_tokens: int, budget: int) -> dict:
+    """Plan the turn roll now and summarize on a background thread.
+
+    The finished turn returns to the user immediately instead of waiting 15-30 s for
+    the summary call; :func:`apply_pending_turn_roll` merges it at the next turn start
+    (ledger kind ``turn_roll``) if the summarized history is unchanged."""
+    import threading
+    sm = session.session_manager
+    variables = getattr(session, "variables", None) or {}
+    pending = getattr(sm, "_pending_turn_roll", None)
+    if pending is not None:
+        if not pending["done"].is_set():
+            return {"reason": "roll_pending", "anchor_after": int(sm.summary_anchor or 0)}
+        apply_pending_turn_roll(session)
+    anchor = int(getattr(sm, "summary_anchor", 0) or 0)
+    prev_floor = getattr(sm, "_tool_result_floor", 0)
+    sm._tool_result_floor = 0  # the turn is over: its results are no longer floor-protected
+    try:
+        planned = sm.plan_history_roll(1, through_index=end_index)
+    finally:
+        sm._tool_result_floor = prev_floor
+    if planned is None:
+        return {"reason": "roll_declined", "anchor_after": anchor}
+    end, entries = planned
+    sm._compact_focus = variables.get("compact_focus") or ""
+    job = {"end": end, "entries": entries, "anchor": anchor, "result": None, "done": threading.Event(),
+           "fingerprint": _history_fingerprint(sm.history[anchor:end]), "turn_tokens": turn_tokens, "budget": budget}
+
+    def summarize() -> None:
+        try:
+            job["result"] = sm._generate_llm_summary(provider, entries)
+        except Exception:  # noqa: BLE001 - mechanical summary at apply time
+            job["result"] = None
+        finally:
+            job["done"].set()
+    sm._pending_turn_roll = job
+    threading.Thread(target=summarize, name="mucli-turn-roll", daemon=True).start()
+    return {"reason": "deferred", "anchor_after": anchor, "deferred": True}
+
+
+def apply_pending_turn_roll(session, *, wait: float = 0.0) -> dict:
+    """Merge a finished deferred turn roll. Called at turn start; never mid-turn."""
+    sm = getattr(session, "session_manager", None)
+    job = getattr(sm, "_pending_turn_roll", None) if sm is not None else None
+    if job is None:
+        return {"applied": False, "reason": "none"}
+    finished = job["done"].wait(wait) if wait else job["done"].is_set()
+    if not finished:
+        return {"applied": False, "reason": "running"}
+    sm._pending_turn_roll = None
+    end, anchor = job["end"], job["anchor"]
+    if int(getattr(sm, "summary_anchor", 0) or 0) != anchor or len(sm.history) < end \
+            or _history_fingerprint(sm.history[anchor:end]) != job["fingerprint"]:
+        return {"applied": False, "reason": "stale"}
+    snap = sm._shrink_snapshot() if hasattr(sm, "_shrink_snapshot") else None
+    sm._pending_compaction_kind = "turn_roll"
+    try:
+        rolled = bool(sm.apply_history_roll(end, job["entries"], job["result"]))
+    finally:
+        sm._pending_compaction_kind = None
+    if rolled and snap is not None and hasattr(sm, "_record_shrink_since"):
+        sm._record_shrink_since(snap, kind="turn_roll", summarizer=getattr(sm, "_last_summary_mode", "unknown"),
+                                keep_recent=1, turn_tokens=job["turn_tokens"], budget=job["budget"], deferred=True)
+    return {"applied": rolled, "reason": "applied" if rolled else "declined",
+            "anchor_before": anchor, "anchor_after": int(getattr(sm, "summary_anchor", 0) or 0)}
 
 
 def validate_checkpoint(checkpoint: Any) -> dict:

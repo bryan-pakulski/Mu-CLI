@@ -401,14 +401,22 @@ class InputHandler:
             }
         )
 
+        try:
+            from mu.jobs.job_settings import FIELD_BY_PATH as _JOB_RULE_PATHS
+        except ImportError:
+            _JOB_RULE_PATHS = {}
+        _job_rule_paths = {path: None for path in _JOB_RULE_PATHS}
+
         _JOB_SUBCOMMAND_COMPLETER = NestedCompleter.from_nested_dict(
             {
+                "ui": None,
                 "board": None,
                 "summary": None,
                 "list": None,
                 "show": None,
                 "receipt": None,
                 "diff": None,
+                "sessions": None,
                 "create": None,
                 "respond": None,
                 "changes": None,
@@ -418,6 +426,10 @@ class InputHandler:
                 "resume": None,
                 "retry": None,
                 "delete": None,
+                "settings": {"set": dict(_job_rule_paths), "reset": dict(_job_rule_paths)},
+                "toolchains": {"build": None},
+                "environments": None,
+                "env": {"refresh": None, "keep": None, "unkeep": None, "set": None, "clear": None},
             }
         )
 
@@ -586,6 +598,7 @@ class InputHandler:
             "/yolo": None,
             "/agentic": None,
             "/thinking": None,
+            "/effort": FuzzyWordCompleter(["none", "minimal", "low", "medium", "high", "xhigh", "max", "default"]),
             "/verbose": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
             "/show-thinking": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
             "/goal": NestedCompleter.from_nested_dict(

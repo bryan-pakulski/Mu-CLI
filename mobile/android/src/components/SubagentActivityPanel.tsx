@@ -4,6 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import type { LiveSubagent } from '../hooks/useChatSession';
 import { Text } from './Text';
+import { fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
+
+const NUM = { fontVariant: ['tabular-nums' as const] };
 
 type Props = {
   agents: LiveSubagent[];
@@ -33,11 +36,13 @@ function tokens(value: number): string {
   return String(value);
 }
 
-function statusIcon(status: string): keyof typeof Ionicons.glyphMap {
-  if (status === 'done') return 'checkmark-circle-outline';
-  if (status === 'error' || status === 'killed') return 'close-circle-outline';
-  if (status === 'stuck' || status === 'stall') return 'warning-outline';
-  return 'ellipse-outline';
+/** planos status glyph vocabulary: ✓ done · ✗ failed · ◆ needs attention · ● running. */
+function statusGlyph(status: string): string {
+  if (status === 'done') return '✓';
+  if (status === 'error' || status === 'killed') return '✗';
+  if (status === 'stuck' || status === 'stall') return '◆';
+  if (status === 'running') return '●';
+  return '○';
 }
 
 function taskTitle(agent: LiveSubagent): string {
@@ -115,8 +120,8 @@ export function SubagentActivityPanel({ agents }: Props) {
       style={[
         styles.panel,
         {
-          backgroundColor: colors.glassStrong,
-          borderColor: activeCount > 0 ? colors.accentSoft : colors.hairline,
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
           opacity: activeCount > 0 ? 1 : 0.82,
         },
       ]}
@@ -129,18 +134,18 @@ export function SubagentActivityPanel({ agents }: Props) {
         accessibilityLabel={panelOpen ? 'Collapse subagent history' : 'Expand subagent history'}
         onPress={() => setPanelOpen(value => !value)}
       >
-        <View style={[styles.headerIcon, { backgroundColor: colors.accentSoft }]}>
-          <Ionicons name="git-network-outline" size={17} color={colors.accent} />
+        <View style={[styles.headerIcon, { backgroundColor: colors.bgHover }]}>
+          <Ionicons name="git-network-outline" size={16} color={colors.textSoft} />
         </View>
         <View style={styles.headerCopy}>
-          <Text variant="xs" style={{ color: colors.text, fontWeight: '700', letterSpacing: 0.45 }}>
+          <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>
             SUBAGENTS
           </Text>
           <Text variant="xs" style={{ color: colors.textDim }}>
             {activeCount > 0 ? `${activeCount} of ${agents.length} running` : `${agents.length} completed`}
           </Text>
         </View>
-        <Text variant="xs" style={{ color: colors.textDim }}>{duration(totalElapsed)}</Text>
+        <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{duration(totalElapsed)}</Text>
         <Ionicons name={panelOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textDim} />
       </TouchableOpacity>
 
@@ -159,16 +164,23 @@ export function SubagentActivityPanel({ agents }: Props) {
               ? colors.error
               : (agent.status === 'stuck' || agent.status === 'stall')
                 ? colors.warning
-                : colors.accent;
+                : colors.running;
+          const statusBg = agent.status === 'done'
+            ? colors.successSubtle
+            : (agent.status === 'error' || agent.status === 'killed')
+              ? colors.errorSubtle
+              : (agent.status === 'stuck' || agent.status === 'stall')
+                ? colors.warningSubtle
+                : colors.infoSubtle;
           const iterationPct = agent.max_iter > 0
             ? Math.min(100, Math.max(0, (agent.iter / agent.max_iter) * 100))
             : 0;
           return (
-            <View key={agent.task_id} style={[styles.row, { borderColor: colors.hairline, backgroundColor: colors.bgLift }]}>
+            <View key={agent.task_id} style={styles.row}>
               <View style={[styles.accentRail, { backgroundColor: statusColor }]} />
               <View style={styles.rowHead}>
                 <View style={styles.identity}>
-                  <Text variant="sm" style={{ color: colors.text, fontWeight: '700', lineHeight: 19 }}>
+                  <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>
                     {taskTitle(agent)}
                   </Text>
                   <Text variant="xs" numberOfLines={1} style={{ color: colors.textDim, textTransform: 'capitalize' }}>
@@ -176,11 +188,11 @@ export function SubagentActivityPanel({ agents }: Props) {
                   </Text>
                 </View>
                 <View style={styles.stateColumn}>
-                  <View style={[styles.status, { backgroundColor: colors.accentSoft }]}>
-                    <Ionicons name={statusIcon(agent.status)} size={13} color={statusColor} />
+                  <View style={[styles.status, { backgroundColor: statusBg }]}>
+                    <Text variant="xs" importantForAccessibility="no" style={{ color: statusColor, fontWeight: fontWeights.semibold }}>{statusGlyph(agent.status)}</Text>
                     <Text variant="xs" numberOfLines={1} style={{ color: statusColor, maxWidth: 98 }}>{statusLabel(agent)}</Text>
                   </View>
-                  <Text variant="xs" style={{ color: colors.textDim }}>{duration(elapsedAt(agent, now))}</Text>
+                  <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{duration(elapsedAt(agent, now))}</Text>
                 </View>
               </View>
 
@@ -195,8 +207,8 @@ export function SubagentActivityPanel({ agents }: Props) {
                   label="Iteration progress"
                   value={`${agent.iter} / ${agent.max_iter} · ${Math.round(iterationPct)}%`}
                   percent={iterationPct}
-                  color={colors.accentStrong}
-                  track={colors.borderStrong}
+                  color={colors.accent}
+                  track={colors.bgHover}
                   text={colors.textDim}
                 />
               ) : null}
@@ -210,14 +222,14 @@ export function SubagentActivityPanel({ agents }: Props) {
                 <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textDim} />
                 <Text variant="xs" style={{ color: colors.textSoft }}>{isExpanded ? 'Hide activity' : 'View activity'}</Text>
                 <View style={[styles.countBadge, { backgroundColor: colors.bgHover }]}>
-                  <Text variant="xs" style={{ color: colors.textDim }}>{agent.actions.length}</Text>
+                  <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{agent.actions.length}</Text>
                 </View>
               </TouchableOpacity>
 
               {isExpanded ? (
-                <View style={[styles.activity, { borderColor: colors.hairline, backgroundColor: colors.glass }]}>
-                  <View style={[styles.activityHead, { borderBottomColor: colors.hairline }]}>
-                    <Text variant="xs" style={{ color: colors.textDim, fontWeight: '700', letterSpacing: 0.4 }}>ACTION TIMELINE</Text>
+                <View style={styles.activity}>
+                  <View style={styles.activityHead}>
+                    <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.medium }}>ACTION TIMELINE</Text>
                     <Text variant="xs" style={{ color: colors.textDim }}>oldest → newest</Text>
                   </View>
                   {agent.actions.length === 0 ? (
@@ -229,16 +241,16 @@ export function SubagentActivityPanel({ agents }: Props) {
                           ? colors.error
                           : (action.status === 'done' ? colors.success : colors.accent);
                         return (
-                          <View key={`${agent.task_id}-${action.seq}`} style={[styles.action, { borderBottomColor: colors.hairline }]}>
-                            <Text variant="xs" style={{ color: colors.textDim, width: 22 }}>{String(action.seq).padStart(2, '0')}</Text>
+                          <View key={`${agent.task_id}-${action.seq}`} style={styles.action}>
+                            <Text variant="xs" style={[{ color: colors.textDim, width: 24 }, NUM]}>{String(action.seq).padStart(2, '0')}</Text>
                             <View style={[styles.actionDot, { backgroundColor: actionColor }]} />
                             <View style={styles.actionCopy}>
-                              <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>{toolLabel(action.tool)}</Text>
+                              <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>{toolLabel(action.tool)}</Text>
                               {action.detail ? <Text variant="xs" numberOfLines={2} style={{ color: colors.textDim }}>{action.detail}</Text> : null}
                             </View>
                             <View style={styles.actionState}>
                               <Text variant="xs" style={{ color: actionColor }}>{action.status === 'done' ? 'Done' : (action.status === 'error' ? 'Failed' : 'Running')}</Text>
-                              {action.elapsed > 0 ? <Text variant="xs" style={{ color: colors.textDim }}>{action.elapsed.toFixed(1)}s</Text> : null}
+                              {action.elapsed > 0 ? <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{action.elapsed.toFixed(1)}s</Text> : null}
                             </View>
                           </View>
                         );
@@ -259,7 +271,7 @@ export function SubagentActivityPanel({ agents }: Props) {
 function Metric({ value, label, color, strong }: { value: string; label: string; color: string; strong: string }) {
   return (
     <View style={styles.metric}>
-      <Text variant="xs" style={{ color: strong, fontWeight: '700' }}>{value}</Text>
+      <Text variant="xs" style={[{ color: strong, fontWeight: fontWeights.semibold }, NUM]}>{value}</Text>
       <Text variant="xs" style={{ color }}>{label}</Text>
     </View>
   );
@@ -286,50 +298,45 @@ function Meter({
       <View style={[styles.meterTrack, { backgroundColor: track }]}>
         <View style={[styles.meterFill, { backgroundColor: color, width: `${percent}%` as `${number}%` }]} />
       </View>
-      <Text variant="xs" style={[styles.meterValue, { color: text }]}>{value}</Text>
+      <Text variant="xs" style={[styles.meterValue, { color: text }, NUM]}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   panel: {
-    marginTop: 8,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 3,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderRadius: radii.panel,
+    padding: spacing.md,
   },
-  header: { flexDirection: 'row', alignItems: 'center' },
-  headerIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  headerCopy: { flex: 1, marginLeft: 9 },
-  rowsViewport: { maxHeight: 380, marginTop: 10 },
-  rows: { gap: 9, paddingBottom: 1 },
-  row: { position: 'relative', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget },
+  headerIcon: { width: 32, height: 32, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  headerCopy: { flex: 1, marginLeft: spacing.sm },
+  rowsViewport: { maxHeight: 380, marginTop: spacing.sm },
+  rows: { gap: spacing.base, paddingBottom: 1 },
+  row: { position: 'relative', overflow: 'hidden', paddingLeft: spacing.md, paddingVertical: spacing.xs },
   accentRail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 2 },
-  rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
   identity: { flex: 1, gap: 2 },
-  stateColumn: { alignItems: 'flex-end', gap: 4 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 125, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999 },
-  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 13, marginTop: 10 },
-  metric: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-  meter: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10 },
+  stateColumn: { alignItems: 'flex-end', gap: spacing.xs },
+  status: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, maxWidth: 125, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radii.pill },
+  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
+  metric: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
+  meter: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   meterLabel: { width: 82 },
-  meterTrack: { flex: 1, height: 10, borderRadius: 999, overflow: 'hidden' },
-  meterFill: { height: '100%', borderRadius: 999 },
+  meterTrack: { flex: 1, height: 10, borderRadius: radii.pill, overflow: 'hidden' },
+  meterFill: { height: '100%', borderRadius: radii.pill },
   meterValue: { width: 76, textAlign: 'right' },
-  activityToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, marginLeft: -5, alignSelf: 'flex-start', paddingVertical: 3, paddingHorizontal: 5 },
-  countBadge: { minWidth: 20, height: 18, borderRadius: 99, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  activity: { marginTop: 7, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, overflow: 'hidden' },
-  activityHead: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 9, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth },
+  activityToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, marginLeft: -spacing.xs, alignSelf: 'flex-start', minHeight: touchTarget, paddingHorizontal: spacing.xs },
+  countBadge: { minWidth: 20, height: 20, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs },
+  activity: { marginTop: spacing.xs, overflow: 'hidden' },
+  activityHead: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
   actionScroll: { maxHeight: 190 },
-  action: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 9, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  actionDot: { width: 7, height: 7, borderRadius: 99, marginTop: 5 },
+  action: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  actionDot: { width: 8, height: 8, borderRadius: radii.pill, marginTop: spacing.xs },
   actionCopy: { flex: 1, gap: 2 },
   actionState: { alignItems: 'flex-end', gap: 1 },
-  emptyActivity: { padding: 12 },
+  emptyActivity: { padding: spacing.md },
 });

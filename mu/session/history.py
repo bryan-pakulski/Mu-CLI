@@ -27,7 +27,7 @@ Token estimate: `len(text) / 4` per part field (chars→tokens approximation).
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from providers.base import LLMProvider, Message, MessagePart
 from utils.logger import logger
@@ -571,20 +571,23 @@ class HistoryMixin:
 
     # ------------------------------------------------------ rolling summary
 
-    def roll_history_summary(
+    def plan_history_roll(
         self,
         keep_recent: int,
-        provider: Optional[LLMProvider] = None,
         *,
         max_segment_chars: Optional[int] = None,
         through_index: Optional[int] = None,
-    ) -> bool:
+    ) -> Optional[Tuple[int, List[Dict[str, Any]]]]:
+        """Which history a roll would summarize: ``(end, entries)`` or None.
+
+        Cheap and side-effect free apart from clamping a stale anchor, so the
+        summary itself can be produced off the agent loop (deferred turn roll)."""
         keep_recent = max(1, int(keep_recent or 1))
         if self.summary_anchor > len(self.history):
             self.summary_anchor = 0
         unsummarized_count = len(self.history) - self.summary_anchor
         if unsummarized_count <= keep_recent:
-            return False
+            return None
 
         target_anchor = len(self.history) - keep_recent
         # Advance target to the next 'user' boundary so we don't split a
@@ -609,12 +612,12 @@ class HistoryMixin:
                     target_anchor = oldest_floor
 
         if target_anchor <= self.summary_anchor:
-            return False
+            return None
 
         if through_index is not None:
             target_anchor = min(target_anchor, through_index + 1)
             if target_anchor <= self.summary_anchor:
-                return False
+                return None
 
         # Portion-based compaction (Claude Code "context collapse" style):
         # when ``max_segment_chars`` is set, summarize only the OLDEST
@@ -642,7 +645,7 @@ class HistoryMixin:
                 seg_end += 1
             end = min(seg_end, target_anchor)
             if end <= self.summary_anchor:
-                return False
+                return None
 
         # Keep the assistant call with its tool-result bundle in the live
         # tail. The result floor or a segment boundary can otherwise leave
@@ -664,7 +667,7 @@ class HistoryMixin:
             while end < target_anchor and starts_with_result(end):
                 end += 1
             if starts_with_result(end):
-                return False
+                return None
 
         # Exclude protected messages from summarization — they stay
         # verbatim in L5 even after the anchor advances past them.
@@ -678,9 +681,30 @@ class HistoryMixin:
             if (self.summary_anchor + idx) not in protected
         ]
 
+        return end, entries_to_summarize
+
+    def roll_history_summary(
+        self,
+        keep_recent: int,
+        provider: Optional[LLMProvider] = None,
+        *,
+        max_segment_chars: Optional[int] = None,
+        through_index: Optional[int] = None,
+    ) -> bool:
+        planned = self.plan_history_roll(keep_recent, max_segment_chars=max_segment_chars,
+                                         through_index=through_index)
+        if planned is None:
+            return False
+        end, entries_to_summarize = planned
+        return self.apply_history_roll(end, entries_to_summarize,
+                                       self._generate_llm_summary(provider, entries_to_summarize))
+
+    def apply_history_roll(self, end: int, entries_to_summarize: List[Dict[str, Any]],
+                           summary_batch: Optional[str]) -> bool:
+        """Merge a summary of ``entries_to_summarize`` into L2 and advance the anchor to
+        ``end``. ``summary_batch`` None (no or failed LLM summary) → mechanical summary."""
         # LLM-generated structured summary (Claude Code / Pi style).
         # Falls back to mechanical truncation on any failure.
-        summary_batch = self._generate_llm_summary(provider, entries_to_summarize)
         if summary_batch is None:
             summary_batch = self._summarize_history_batch(entries_to_summarize)
         else:

@@ -112,23 +112,24 @@ def test_product_css_covers_primary_web_surfaces():
         '.composer-mode-popout', '.composer-settings-popout',
     ):
         assert selector in combined
-    assert 'backdrop-filter' in combined
+    assert 'backdrop-filter' not in combined
     assert '@media (max-width: 760px)' in combined
     assert '@media (prefers-reduced-motion: reduce)' in combined
     assert 'padding: 0 !important;' in product
 
 
-def test_alpine_sunrise_is_atmospheric_not_css_scenery():
+def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
     css = CLARITY_CSS.read_text(encoding="utf-8")
     route = ROUTE_CSS.read_text(encoding="utf-8")
     for token in (
         '--sky-blue', '--glacier-blue', '--sunrise-pink', '--sunrise-peach',
         '--alpine-green', '--snow-glow',
     ):
-        assert token in css
-        assert token in route
-    assert 'radial-gradient' in css
-    assert 'radial-gradient' in route
+        assert token not in css
+        assert token not in route
+    assert 'radial-gradient' not in css
+    assert 'radial-gradient' not in route
+    assert 'backdrop-filter' not in css
     assert 'clip-path' not in css
     assert 'clip-path' not in route
     assert '--mountain-near' not in css
@@ -169,10 +170,10 @@ def test_composer_is_single_pane_with_controls_outside_typing_surface():
     assert 'content: none !important' in css
     assert '.composer-toolbar {' in css
     assert 'position: static !important' in css
-    assert 'margin: 0 0 16px' in css
+    assert 'margin: 0 0 var(--space-2)' in css
     assert 'justify-content: flex-end' in css
     assert '.composer form {' in css
-    assert 'background: color-mix(in srgb, var(--glass-strong) 72%, transparent) !important' in css
+    assert 'background: var(--bg-raised)' in css
     assert '.composer .hint {' in css
     assert 'min-height: 0 !important' in css
     assert 'background: transparent !important' in css
@@ -252,7 +253,14 @@ def test_settings_drawer_is_spacious_clean_and_consistent():
     assert 'Manage skills' in template
     assert '.settings-pane .var-group-head' in refinement
     assert '.settings-pane .var-row' in refinement
-    assert 'border-top: 1px solid color-mix' in refinement
+    # planos Settings: each group is a bordered panel; fields stack label
+    # above control with a muted hint, inline error and role=switch booleans.
+    assert '.settings-pane .var-group {' in refinement
+    assert 'border-radius: var(--radius-lg)' in refinement
+    assert '.settings-pane .var-hint' in refinement
+    assert '.settings-pane .var-error' in refinement
+    assert 'class="switch" role="switch"' in template
+    assert 'class="var-hint"' in template
     assert 'background: transparent !important' in refinement
     assert '.settings-pane .var-row > input' in refinement
     assert 'border-bottom: 1px solid var(--hairline)' in refinement
@@ -263,20 +271,20 @@ def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
     route = ROUTE_CSS.read_text(encoding="utf-8")
     assert '@import url("/static/css/route-product.css")' in css
     assert '.trace-section {' in css
-    assert 'border-radius: 22px' in css
-    assert 'background: color-mix(in srgb, var(--glass) 82%, transparent)' in css
-    assert 'backdrop-filter: blur(30px) saturate(108%)' in css
+    assert 'border-radius: 22px' not in css
+    assert 'background: color-mix(in srgb, var(--glass) 82%, transparent)' not in css
+    assert 'backdrop-filter' not in css
     assert '.trace-canvas-wrap {' in css
-    assert 'border-radius: 16px' in css
-    assert 'filter: saturate(.44) contrast(.96) brightness(.98)' in css
-    assert 'html[data-theme="light"] .trace-canvas' in css
+    assert 'border-radius: var(--radius-sm)' in css
+    assert 'filter: saturate' not in css
+    assert 'html[data-theme="light"] .trace-canvas' not in css
     assert '.trace-card {' in css
     assert 'background: transparent' in css
     assert '.trace-info-popout' in css
-    assert '--accent:#8ba9c6' in route
+    assert '--accent:' not in route
     assert '#79c2cb' not in route
     assert '#e0a040' not in route
-    assert '.trace-mu{color:var(--text-soft)!important}' in route
+    assert '.trace-mu{color:var(--text-secondary)}' in route
 
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():
@@ -293,4 +301,4 @@ def test_container_management_uses_current_product_surface_without_breaking_ids(
     assert '.manager-card{display:grid' in css
     assert 'border-bottom:1px solid var(--hairline)' in css
     assert '.manager-monitor-grid' in css
-    assert '.manager-overflow-menu' in css and 'var(--glass-strong)' in css
+    assert '.manager-overflow-menu' in css and 'var(--bg-raised)' in css

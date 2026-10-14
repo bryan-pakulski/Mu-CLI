@@ -5,6 +5,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { Button } from './Button';
 import { ModernBottomSheet } from './ModernBottomSheet';
 import { Text } from './Text';
+import { fontSizes, fontWeights, radii, spacing, typography } from '../theme/tokens';
 
 export type NewThreadSheetProps = {
   visible: boolean;
@@ -58,7 +59,7 @@ export function NewThreadSheet({
           <Text variant="sm" style={styles.parentName}>{parentSessionName || 'the current session'}</Text>.
           Chat history and working memory start clean.
         </Text>
-        <Text variant="xs" style={[styles.label, { color: colors.textDim }]}>THREAD TITLE</Text>
+        <Text variant="xs" style={[styles.label, { color: colors.textDim }]}>Thread title</Text>
         <TextInput
           testID="thread-title-input"
           value={title}
@@ -74,8 +75,8 @@ export function NewThreadSheet({
             styles.input,
             {
               color: colors.text,
-              backgroundColor: colors.bgLift,
-              borderColor: colors.hairline,
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
             },
           ]}
         />
@@ -99,20 +100,20 @@ export function NewThreadSheet({
 }
 
 const styles = StyleSheet.create({
-  content: { paddingTop: 10, paddingBottom: 8 },
-  intro: { lineHeight: 21, marginBottom: 22 },
-  parentName: { fontWeight: '600' },
-  label: { fontFamily: 'monospace', fontWeight: '700', letterSpacing: 1, marginBottom: 7 },
+  content: { paddingTop: spacing.md, paddingBottom: spacing.sm },
+  intro: { lineHeight: typography.base.lineHeight, marginBottom: spacing.lg },
+  parentName: { fontWeight: fontWeights.semibold },
+  label: { fontWeight: fontWeights.semibold, marginBottom: spacing.sm },
   input: {
     minHeight: 48,
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 9,
-    fontSize: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    fontSize: fontSizes.md,
   },
-  help: { lineHeight: 18, marginTop: 8 },
-  error: { lineHeight: 18, marginTop: 12 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 24 },
+  help: { lineHeight: typography.xs.lineHeight, marginTop: spacing.sm },
+  error: { lineHeight: typography.xs.lineHeight, marginTop: spacing.md },
+  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   action: { flex: 1 },
 });

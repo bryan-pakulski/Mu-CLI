@@ -7,6 +7,7 @@ import { sessionsApi, SessionSummary } from '../api/sessions';
 import { Text } from './Text';
 import { SafeAreaModal } from './SafeAreaModal';
 import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
+import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
 
 export type SessionsDrawerProps = {
   visible: boolean;
@@ -14,7 +15,7 @@ export type SessionsDrawerProps = {
 };
 
 export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { activeSessionName, setActiveSession } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -89,13 +90,13 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
   return (
     <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
-        <View style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: 16 }]}>
-          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+        <View style={[styles.drawer, elevation(2, colors, isDark), { borderWidth: 0, borderLeftWidth: 1, paddingTop: spacing.base }]}>
+          <View style={styles.header}>
             <View><Text style={[styles.title, { color: colors.text }]}>Sessions</Text><Text variant="xs" dim>Tap a row to open it.</Text></View>
             <View style={styles.headerActions}>
               <TouchableOpacity onPress={newSession} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn} accessibilityLabel="Create session">
-                <Ionicons name="add" size={22} color={colors.accent} />
+                <Ionicons name="add" size={22} color={colors.textSoft} />
               </TouchableOpacity>
               <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn} accessibilityLabel="Close sessions">
                 <Ionicons name="close" size={22} color={colors.textDim} />
@@ -107,11 +108,11 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
             data={sortSessions(sessions, activeSessionName)}
             keyExtractor={item => item.name}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-            contentContainerStyle={{ paddingVertical: 8 }}
+            contentContainerStyle={{ paddingVertical: spacing.sm }}
             ListEmptyComponent={
               loading ? null : (
-                <View style={{ padding: 24, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textDim, fontSize: 14 }}>No sessions</Text>
+                <View style={{ padding: spacing.lg, alignItems: 'center' }}>
+                  <Text style={{ color: colors.textDim, fontSize: fontSizes.base }}>No sessions</Text>
                 </View>
               )
             }
@@ -120,8 +121,7 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
                 onPress={() => switchSession(item.name)}
                 style={[
                   styles.row,
-                  { borderBottomColor: colors.border },
-                  activeSessionName === item.name && { backgroundColor: colors.bgHover, borderWidth: 1, borderColor: colors.accent },
+                  activeSessionName === item.name && { backgroundColor: colors.accentSubtle },
                 ]}
               >
                 <Text
@@ -157,61 +157,53 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.32)',
   },
   drawer: {
     width: '88%',
     maxWidth: 380,
-    shadowColor: '#000',
-    shadowOpacity: 0.14,
-    shadowRadius: 24,
-    shadowOffset: { width: 8, height: 0 },
-    elevation: 8,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 0,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.base,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: fontSizes.lg,
+    fontWeight: fontWeights.semibold,
   },
-  headerActions: { flexDirection: 'row', gap: 4 },
+  headerActions: { flexDirection: 'row', gap: spacing.xs },
   closeBtn: {
-    minHeight: 44,
-    minWidth: 44,
+    minHeight: touchTarget,
+    minWidth: touchTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.base,
     minHeight: 52,
-    borderBottomWidth: 0,
-    borderRadius: 14,
-    marginHorizontal: 8,
-    marginBottom: 4,
-    gap: 8,
+    borderRadius: radii.sm,
+    marginHorizontal: spacing.sm,
+    marginBottom: spacing.xs,
+    gap: spacing.sm,
   },
   rowName: {
     flex: 1,
-    fontSize: 14,
+    fontSize: fontSizes.base,
   },
   rowNameActive: {
-    fontWeight: '700',
+    fontWeight: fontWeights.semibold,
   },
   rowActions: {
     flexDirection: 'row',
-    gap: 4,
+    gap: spacing.xs,
   },
   actionBtn: {
-    minHeight: 44,
-    minWidth: 44,
+    minHeight: touchTarget,
+    minWidth: touchTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },

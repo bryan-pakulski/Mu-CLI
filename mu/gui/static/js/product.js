@@ -75,7 +75,12 @@
         const composer = toolbar.closest('.composer');
         if (composer) {
             composer.style.removeProperty('padding-top');
-            const updateHeight = () => composer.parentElement.style.setProperty('--composer-height', `${composer.offsetHeight}px`);
+            const updateHeight = () => {
+                const h = `${composer.offsetHeight}px`;
+                composer.parentElement.style.setProperty('--composer-height', h);
+                // Toasts (body level) lift clear of the composer on phones.
+                document.documentElement.style.setProperty('--composer-height', h);
+            };
             updateHeight();
             if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateHeight).observe(composer);
         }

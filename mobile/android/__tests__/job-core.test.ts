@@ -15,3 +15,18 @@ it('sends the reviewed version and selected findings through the shared command 
   await jobCoreApi.command('j', 'reprompt', {finding_ids:['F-2'],guidance:'Address the race'});
   expect(api.post).toHaveBeenLastCalledWith('/api/jobs/cmd', {type:'reprompt',job_id:'j',args:{finding_ids:['F-2'],guidance:'Address the race'}});
 });
+
+it('calls the CONTRACT endpoints for push preview, viewed marks, activity and status', async () => {
+  await jobCoreApi.pushPreview('j/1');
+  expect(api.get).toHaveBeenLastCalledWith('/api/jobs/vm/job/j%2F1/push-preview');
+  await jobCoreApi.markViewed('j', 'src/a.py', true);
+  expect(api.post).toHaveBeenLastCalledWith('/api/jobs/cmd', {type:'markViewed',job_id:'j',args:{path:'src/a.py',viewed:true}});
+  await jobCoreApi.activity();
+  expect(api.get).toHaveBeenLastCalledWith('/api/jobs/vm/activity', {timeoutMs:8000});
+  await jobCoreApi.activityLogs('j', 1024);
+  expect(api.get).toHaveBeenLastCalledWith('/api/jobs/vm/activity/logs/j', {query:{tail_bytes:1024}});
+  await jobCoreApi.removeContainer('mucli-job-0123456789ab-impl');
+  expect(api.post).toHaveBeenLastCalledWith('/api/jobs/activity/containers/mucli-job-0123456789ab-impl/remove', {});
+  await jobCoreApi.status();
+  expect(api.get).toHaveBeenLastCalledWith('/api/jobs/vm/status', {timeoutMs:5000});
+});

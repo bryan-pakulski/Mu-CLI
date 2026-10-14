@@ -7,7 +7,7 @@ import json
 from mu.jobs import JobService, JobStore
 from mu.jobs.controller import JobController
 from mu.jobs.models import AttentionReason, JobStatus
-from mu.jobs.runner import SessionJobRunner
+from mu.jobs.runner import implement_prompt
 from mu.jobs import stages
 from mu.jobs.worker import _maybe_run_plan_stage
 
@@ -129,8 +129,7 @@ def test_request_changes_waits_until_human_reprompts_selected_findings(tmp_path)
     dispatch(service, {"type": "reprompt", "job_id": job.id, "finding_ids": ["F-1"]})
     current = service.get(job.id)
     assert current.status == JobStatus.QUEUED
-    runner = SessionJobRunner(service, build_session_fn=None, base_args=None)
-    prompt = runner._prompt(current)
+    prompt = implement_prompt(service, current)
     assert "add a regression test for widget" in prompt
 
 

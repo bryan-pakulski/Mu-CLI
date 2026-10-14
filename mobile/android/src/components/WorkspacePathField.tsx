@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontSizes, radii, spacing, touchTarget, typography } from '../theme/tokens';
 
 export type WorkspacePathFieldProps = {
   value: string;
@@ -66,7 +67,7 @@ export function WorkspacePathField({
 
   return (
     <View>
-      <View style={[styles.inputShell, { backgroundColor: colors.bgLift }]}>
+      <View style={[styles.inputShell, { backgroundColor: colors.bg, borderColor: colors.border }]}>
         <Ionicons name="folder-outline" size={18} color={colors.textDim} />
         <TextInput
           value={value}
@@ -89,7 +90,7 @@ export function WorkspacePathField({
       </View>
 
       {focused && suggestions.length > 0 ? (
-        <View style={[styles.suggestions, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
+        <View style={[styles.suggestions, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
           {suggestions.map((path, index) => (
             <TouchableOpacity
               key={path}
@@ -97,7 +98,6 @@ export function WorkspacePathField({
               activeOpacity={0.65}
               style={[
                 styles.suggestion,
-                index < suggestions.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
               ]}
             >
               <Ionicons name="folder" size={16} color={colors.textDim} />
@@ -122,31 +122,31 @@ export function WorkspacePathField({
 const styles = StyleSheet.create({
   inputShell: {
     minHeight: 48,
-    borderRadius: 15,
-    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: spacing.sm,
   },
   input: {
     flex: 1,
     minHeight: 48,
-    paddingVertical: 11,
-    fontSize: 15,
+    paddingVertical: spacing.md,
+    fontSize: fontSizes.base,
   },
   suggestions: {
-    marginTop: 7,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
+    marginTop: spacing.sm,
+    borderRadius: radii.sm,
     overflow: 'hidden',
   },
   suggestion: {
-    minHeight: 44,
-    paddingHorizontal: 12,
+    minHeight: touchTarget,
+    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: spacing.sm,
   },
   suggestionText: { flex: 1 },
-  statusText: { marginTop: 7, lineHeight: 17 },
+  statusText: { marginTop: spacing.sm, lineHeight: typography.xs.lineHeight },
 });

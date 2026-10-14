@@ -3,7 +3,7 @@
      x-dialog="$store.inspector.open"
          x-cloak
          x-show="$store.inspector.open"
-     x-transition.opacity.duration.180ms
+     x-transition.opacity.duration.200ms
      @click.self="$store.inspector.close()"
      @dialog-close="$store.inspector.close()">
     <div class="inspector"
@@ -50,7 +50,7 @@
                  title="No folders attached — the agent has nothing indexed for this session yet.">
                 no folders attached
             </div>
-            <h4 class="label-mono" style="margin-top:24px;"
+            <h4 class="label-mono" style="margin-top:var(--space-5);"
                 title="Attach a folder so the agent can read its files. Absolute paths or ~-relative paths both work.">attach</h4>
             <form @submit.prevent="$store.inspector.addWorkspace()" class="inline-form">
                 <input type="text"
@@ -131,7 +131,7 @@
                 <div class="empty-row" x-show="!$store.inspector.memory.taskMemory.length"
                      title="Nothing saved yet — the agent populates task memory when it saves findings.">no task memory yet</div>
 
-                <h4 style="margin-top:24px;"
+                <h4 style="margin-top:var(--space-5);"
                     x-text="`scratchpad (${$store.inspector.memory.scratchpad.length})`"
                     title="Per-turn scratchpad — wiped between turns. The agent uses it for in-flight planning."></h4>
                 <template x-for="e in $store.inspector.memory.scratchpad" :key="e.id">
@@ -154,22 +154,22 @@
                 <div class="stat"><div class="stat-key">session</div><div class="stat-val mono" x-text="$store.inspector.stats?.name"></div></div>
                 <div class="stat"><div class="stat-key">provider · model</div><div class="stat-val mono" x-text="($store.inspector.stats?.provider || '') + ' · ' + ($store.inspector.stats?.model || '')"></div></div>
                 <div class="stat"><div class="stat-key">mode</div><div class="stat-val mono" x-text="$store.inspector.stats?.agent_mode"></div></div>
-                <h4 class="label-mono" style="margin-top:20px;">tokens</h4>
+                <h4 class="label-mono" style="margin-top:var(--space-5);">tokens</h4>
                 <div class="stat-grid">
                     <div><div class="stat-key">input</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.input || 0"></div></div>
                     <div><div class="stat-key">output</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.output || 0"></div></div>
                     <div><div class="stat-key">total</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.total || 0"></div></div>
                     <div><div class="stat-key">cached</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.cached || 0"></div></div>
                 </div>
-                <h4 class="label-mono" style="margin-top:20px;">cost (estimate)</h4>
+                <h4 class="label-mono" style="margin-top:var(--space-5);">cost (estimate)</h4>
                 <div class="stat-val mono large" x-text="'$' + (($store.inspector.stats?.estimated_cost_usd || 0).toFixed(4))"></div>
-                <h4 class="label-mono" style="margin-top:20px;">other</h4>
+                <h4 class="label-mono" style="margin-top:var(--space-5);">other</h4>
                 <div class="stat-grid">
                     <div><div class="stat-key">history</div><div class="stat-val mono" x-text="$store.inspector.stats?.history_length"></div></div>
                     <div><div class="stat-key">task mem</div><div class="stat-val mono" x-text="$store.inspector.stats?.task_memory_size"></div></div>
                     <div><div class="stat-key">scratch</div><div class="stat-val mono" x-text="$store.inspector.stats?.scratchpad_size"></div></div>
                 </div>
-                <p class="muted" style="margin-top:24px;">refresh: <button class="muted-btn" @click="$store.inspector.loadStats()">↻</button></p>
+                <p class="muted" style="margin-top:var(--space-5);">refresh: <button class="muted-btn" @click="$store.inspector.loadStats()">↻</button></p>
             </div>
             <div class="empty-row" x-show="!$store.inspector.stats?.active">no active session</div>
         </section>
@@ -200,12 +200,14 @@
                             :title="'Toggle ' + group.name + ' (' + group.variables.length + ' items)'"
                             :aria-expanded="$store.inspector.isGroupOpen(group.name)">
                         <span class="caret">›</span>
-                        <span class="var-group-name" x-text="group.name"></span>
+                        <span class="var-group-name" x-text="$store.inspector.groupLabel(group.name)"></span>
                         <span class="var-group-count mono muted" x-text="group.variables.length"></span>
                     </button>
                     <div class="var-group-body"
                          x-show="$store.inspector.isGroupOpen(group.name)"
-                         x-transition.opacity.duration.150ms>
+                         x-transition.opacity.duration.120ms>
+                        <p class="var-group-note muted" x-show="$store.inspector.groupNote(group.name)"
+                           x-text="$store.inspector.groupNote(group.name)"></p>
                         <template x-for="v in group.variables" :key="v.key">
                             <div class="var-row"
                                  :class="{ 'is-default': v.is_default }"
@@ -219,21 +221,47 @@
                                             @click="$store.confirm.ask('Reset ' + v.key + ' to ' + JSON.stringify(v.default) + '?', $event, () => $store.inspector.resetVariable(v.key))"
                                             title="Reset to default">↺</button>
                                 </div>
-                                <label class="var-bool" x-show="v.type === 'bool'" :title="v.help || v.key">
-                                    <input type="checkbox" :checked="!!v.value" @change="$store.inspector.setVariable(v.key, $event.target.checked)">
+                                <div class="var-bool" x-show="v.type === 'bool'" :title="v.help || v.key">
+                                    <button type="button" class="switch" role="switch"
+                                            :aria-checked="v.value ? 'true' : 'false'"
+                                            :aria-label="v.key"
+                                            @click="$store.inspector.setVariable(v.key, !v.value)"></button>
                                     <span x-text="v.value ? 'On' : 'Off'"></span>
-                                </label>
+                                </div>
                                 <input type="number"
                                        x-show="v.type === 'int' || v.type === 'float'"
                                        :value="v.value"
-                                       :step="v.type === 'int' ? 1 : 0.01"
+                                       :step="v.type === 'int' ? 1 : 'any'"
                                        :title="v.help || v.key"
-                                       @change="$store.inspector.setVariable(v.key, $event.target.value)">
+                                       :aria-label="v.key"
+                                       @input="$el.setAttribute('aria-invalid', $el.validity.valid ? 'false' : 'true')"
+                                       @change="$el.validity.valid && $store.inspector.setVariable(v.key, $event.target.value)">
+                                <select class="var-options"
+                                        x-show="v.options && v.options.length"
+                                        :title="v.help || v.key"
+                                        :aria-label="v.key"
+                                        @change="$event.target.value === '' ? $store.inspector.resetVariable(v.key) : $store.inspector.setVariable(v.key, $event.target.value)">
+                                    <template x-for="opt in (v.options || [])" :key="opt">
+                                        <option :value="opt" :selected="(v.value ?? '') === opt" x-text="opt === '' ? 'default' : opt"></option>
+                                    </template>
+                                </select>
                                 <input type="text"
-                                       x-show="v.type === 'str'"
+                                       x-show="v.type === 'str' && !(v.options && v.options.length)"
                                        :value="v.value"
                                        :title="v.help || v.key"
+                                       :aria-label="v.key"
                                        @change="$store.inspector.setVariable(v.key, $event.target.value)">
+                                <input type="text"
+                                       x-show="v.type === 'list'"
+                                       :value="Array.isArray(v.value) ? v.value.join(', ') : (v.value ?? '')"
+                                       placeholder="comma-separated"
+                                       :title="v.help || v.key"
+                                       :aria-label="v.key"
+                                       @change="$store.inspector.setVariable(v.key, $event.target.value)">
+                                <span class="var-error" role="alert"
+                                      x-show="v.type === 'int' || v.type === 'float'"
+                                      x-text="v.type === 'int' ? 'Enter a whole number.' : 'Enter a number.'"></span>
+                                <span class="var-hint" x-show="v.help" x-text="v.help"></span>
                             </div>
                         </template>
                     </div>

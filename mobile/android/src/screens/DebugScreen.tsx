@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Badge, Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
 import { debugApi, DebugEntry, DebugHypothesis, DebugState } from '../api/debug';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, fonts, radii } from '../theme/tokens';
 
 export function DebugScreen() {
   const { colors } = useTheme();
@@ -59,7 +59,7 @@ export function DebugScreen() {
 
 function DebugSection({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   const { colors } = useTheme();
-  return <View style={{ marginBottom: spacing.md }}><View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: '700', letterSpacing: .8, textTransform: 'uppercase' }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: 'monospace' }}>{count}</Text></View>{children}</View>;
+  return <View style={{ marginBottom: spacing.md }}><View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>{children}</View>;
 }
 
 function statusVariant(status: string) {
@@ -70,19 +70,19 @@ function statusVariant(status: string) {
 
 function HypothesisCard({ item, expanded, onToggle }: { item: DebugHypothesis; expanded: boolean; onToggle: () => void }) {
   const { colors } = useTheme();
-  return <Pressable onPress={onToggle}><Card style={{ marginBottom: spacing.sm }}>
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm }}><Badge label={item.status} variant={statusVariant(item.status)} /><Text variant="sm" style={{ flex: 1, color: colors.text, fontWeight: '500', lineHeight: 20 }}>{item.content}</Text></View>
-    {expanded && <View style={{ marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
-      <Text variant="xs" style={{ color: colors.textDim, lineHeight: 17 }}>{item.status === 'untested' ? 'Needs a discriminating test.' : `Investigation state: ${item.status}. This is not an independent accuracy score.`}</Text>
-      {!!item.source && <Text variant="xs" style={{ color: colors.textSoft, marginTop: 5, fontFamily: 'monospace' }}>↳ {item.source}</Text>}
-      <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>{item.tags.map(tag => <Badge key={tag} label={tag} variant="neutral" />)}</View>
+  return <Pressable onPress={onToggle} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><Card style={{ marginBottom: spacing.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm }}><Badge label={item.status} variant={statusVariant(item.status)} /><Text variant="sm" style={{ flex: 1, color: colors.text, fontWeight: fontWeights.medium }}>{item.content}</Text></View>
+    {expanded && <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
+      <Text variant="xs" style={{ color: colors.textDim }}>{item.status === 'untested' ? 'Needs a discriminating test.' : `Investigation state: ${item.status}. This is not an independent accuracy score.`}</Text>
+      {!!item.source && <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs, fontFamily: fonts.mono }}>↳ {item.source}</Text>}
+      <View style={{ flexDirection: 'row', gap: spacing.xs, flexWrap: 'wrap', marginTop: spacing.sm }}>{item.tags.map(tag => <Badge key={tag} label={tag} variant="neutral" />)}</View>
     </View>}
   </Card></Pressable>;
 }
 
 function EvidenceRow({ item, tone }: { item: DebugEntry; tone: 'neutral' | 'warning' | 'success' }) {
   const { colors } = useTheme();
-  return <Card style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm }}><View style={{ width: 6, height: 6, marginTop: 7, borderRadius: 3, backgroundColor: tone === 'success' ? colors.success : tone === 'warning' ? colors.warning : colors.textDim }} /><Text variant="sm" style={{ flex: 1, color: colors.textSoft, lineHeight: 20 }}>{item.content}</Text></View>{!!item.source && <Text variant="xs" style={{ color: colors.textDim, marginTop: 6, fontFamily: 'monospace' }}>↳ {item.source}</Text>}</Card>;
+  return <Card style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm }}><View style={{ width: 6, height: 6, marginTop: spacing.sm, borderRadius: radii.pill, backgroundColor: tone === 'success' ? colors.success : tone === 'warning' ? colors.warning : colors.textDim }} /><Text variant="sm" style={{ flex: 1, color: colors.textSoft }}>{item.content}</Text></View>{!!item.source && <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs, fontFamily: fonts.mono }}>↳ {item.source}</Text>}</Card>;
 }
 
 function EmptyLine({ text }: { text: string }) { const { colors } = useTheme(); return <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>{text}</Text>; }

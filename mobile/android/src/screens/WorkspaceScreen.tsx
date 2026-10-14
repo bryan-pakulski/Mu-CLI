@@ -10,6 +10,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { WORKSPACE_CATEGORIES } from '../navigation/workspace';
+import { fontSizes, fontWeights, radii, spacing, tracking } from '../theme/tokens';
 
 export type WorkspaceScreenProps = NativeStackScreenProps<RootStackParamList, 'Workspace'>;
 
@@ -39,7 +40,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
-        <Text variant="xs" style={[styles.kicker, { color: colors.accent }]}>WORKSPACE</Text>
+        <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Workspace</Text>
         <Text variant="xl" style={styles.pageTitle}>Tools</Text>
         <Text variant="sm" dim style={styles.pageSubtitle}>
           Tools are grouped by intent so the chat remains focused.
@@ -47,7 +48,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
 
         <View style={[styles.sessionSection, { borderBottomColor: colors.hairline }]}>
           <View style={styles.sessionHeader}>
-            <Text style={[styles.brandGlyph, { color: colors.accent }]}>μ</Text>
+            <Text style={[styles.brandGlyph, { color: colors.text }]}>μ</Text>
             <View style={styles.sessionCopy}>
               <Text variant="base" style={styles.sessionName} numberOfLines={1}>
                 {activeSessionName || 'New session'}
@@ -63,7 +64,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
               </Text>
             </View>
           </View>
-          <View style={[styles.workspaceRow, { borderTopColor: colors.hairline }]}>
+          <View style={styles.workspaceRow}>
             <Ionicons name="folder-outline" size={17} color={colors.textDim} />
             <Text variant="xs" dim style={styles.workspacePath} numberOfLines={1} ellipsizeMode="middle">
               {workspaces.length > 0
@@ -71,27 +72,27 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 : 'No workspace attached'}
             </Text>
             {activeSessionName ? (
-              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} style={[styles.editButton, { borderBottomColor: colors.accent }]}>
-                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>Edit</Text>
+              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.editButton}>
+                <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Edit</Text>
               </TouchableOpacity>
             ) : null}
           </View>
         </View>
 
-        <Text variant="xs" style={[styles.sectionLabel, { color: colors.textDim }]}>TOOL GROUPS</Text>
+        <Text variant="xs" style={[styles.sectionLabel, { color: colors.textDim }]}>Tool groups</Text>
         <View>
           {WORKSPACE_CATEGORIES.filter(category => category.id !== 'review').map(category => (
             <TouchableOpacity
               key={category.id}
               activeOpacity={0.72}
               onPress={() => navigation.navigate('WorkspaceCategory', { categoryId: category.id, title: category.title })}
-              style={[styles.categoryRow, { borderBottomColor: colors.hairline }]}
+              style={styles.categoryRow}
             >
               <Ionicons name={category.icon} size={20} color={colors.textDim} />
               <View style={styles.categoryCopy}>
                 <View style={styles.categoryTitleRow}>
                   <Text variant="base" style={styles.categoryTitle}>{category.title}</Text>
-                  <Text variant="xs" dim>{category.items.length} tools</Text>
+                  <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{category.items.length} tools</Text>
                 </View>
                 <Text variant="sm" dim>{category.description}</Text>
               </View>
@@ -112,23 +113,23 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { paddingBottom: 40 },
-  kicker: { fontWeight: '700', letterSpacing: 1.3, marginBottom: 5 },
-  pageTitle: { fontWeight: '700', letterSpacing: -0.5 },
-  pageSubtitle: { marginTop: 4, marginBottom: 30, maxWidth: 320 },
-  sessionSection: { paddingBottom: 22, marginBottom: 28, borderBottomWidth: StyleSheet.hairlineWidth },
+  content: { paddingBottom: spacing['2xl'] },
+  kicker: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
+  pageTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  pageSubtitle: { marginTop: spacing.xs, marginBottom: spacing.xl, maxWidth: 320 },
+  sessionSection: { paddingBottom: spacing.lg, marginBottom: spacing.lg, borderBottomWidth: 1 },
   sessionHeader: { flexDirection: 'row', alignItems: 'center' },
-  workspaceRow: { marginTop: 15, paddingTop: 13, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  workspaceRow: { marginTop: spacing.base, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   workspacePath: { flex: 1 },
-  editButton: { minHeight: 28, paddingHorizontal: 2, borderBottomWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  brandGlyph: { width: 28, fontSize: 22, fontWeight: '700' },
-  sessionCopy: { flex: 1, marginHorizontal: 12 },
-  sessionName: { fontWeight: '600' },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  sectionLabel: { fontFamily: 'monospace', fontWeight: '600', letterSpacing: 1.1, marginBottom: 4 },
-  categoryRow: { minHeight: 86, flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth },
-  categoryCopy: { flex: 1, marginHorizontal: 14 },
-  categoryTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 },
-  categoryTitle: { fontWeight: '600', marginBottom: 2 },
+  editButton: { minHeight: 28, paddingHorizontal: spacing.sm, alignItems: 'center', justifyContent: 'center' },
+  brandGlyph: { width: 28, fontSize: fontSizes.lg, fontWeight: fontWeights.semibold },
+  sessionCopy: { flex: 1, marginHorizontal: spacing.md },
+  sessionName: { fontWeight: fontWeights.semibold },
+  status: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  statusDot: { width: 8, height: 8, borderRadius: radii.pill },
+  sectionLabel: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
+  categoryRow: { minHeight: 80, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base },
+  categoryCopy: { flex: 1, marginHorizontal: spacing.md },
+  categoryTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.md },
+  categoryTitle: { fontWeight: fontWeights.semibold, marginBottom: 2 },
 });

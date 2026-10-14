@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { Button } from './Button';
 import { useTheme } from '../theme/ThemeContext';
+import { fontWeights, radii, tracking } from '../theme/tokens';
 
 export type EmptyStateProps = {
   title: string;
@@ -21,18 +22,20 @@ export function EmptyState({ title, message, icon, actionLabel, onAction }: Empt
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl }}>
       <View
         style={{
-          width: 58,
-          height: 58,
-          borderRadius: 20,
+          width: 56,
+          height: 56,
+          borderRadius: radii.panel,
+          borderWidth: 1,
+          borderColor: colors.border,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: colors.accentSoft,
+          backgroundColor: colors.surface,
           marginBottom: spacing.base,
         }}
       >
-        <Ionicons name={iconName} size={27} color={colors.accent} />
+        <Ionicons name={iconName} size={24} color={colors.muted} />
       </View>
-      <Text variant="xl" style={{ marginBottom: spacing.sm, textAlign: 'center', fontWeight: '700', letterSpacing: -0.4 }}>
+      <Text variant="md" style={{ marginBottom: spacing.sm, textAlign: 'center', fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }}>
         {title}
       </Text>
       {message && (

@@ -1,18 +1,22 @@
 import React from 'react';
 import {
-  TouchableOpacity,
+  Pressable,
   Text as RNText,
-  StyleSheet,
   TextStyle,
   ViewStyle,
   ActivityIndicator,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { fontWeights, touchTarget } from '../theme/tokens';
 
 export type ButtonProps = {
   title: string;
   onPress: () => void;
+  /** planos buttons: primary = accent fill (one per region), secondary =
+   * raised + 1px border, ghost = text only, danger = destructive (solid danger). */
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  /** planos tone variant: tinted text/border on secondary, solid fill on primary. */
+  tone?: 'ok' | 'warn' | 'danger';
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
@@ -31,48 +35,57 @@ export function Button({
   style,
   textStyle,
   accessibilityState,
+  tone,
 }: ButtonProps) {
   const { colors, spacing, radii, typography } = useTheme();
 
   const baseStyle: ViewStyle = {
-    minHeight: 44,
+    minHeight: touchTarget,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.base,
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    borderWidth: StyleSheet.hairlineWidth,
-    opacity: disabled ? 0.42 : 1,
+    borderWidth: 1,
+    opacity: disabled ? 0.5 : 1,
   };
 
+  const toneColor = tone ? colors[tone] : null;
   const variantStyles: Record<string, ViewStyle> = {
-    primary: { backgroundColor: colors.accentStrong, borderColor: colors.accentStrong },
-    secondary: { backgroundColor: 'transparent', borderColor: colors.hairline },
+    primary: { backgroundColor: toneColor || colors.accent, borderColor: toneColor || colors.accent },
+    secondary: { backgroundColor: colors.raised, borderColor: toneColor || colors.border },
     ghost: { backgroundColor: 'transparent', borderColor: 'transparent' },
-    danger: { backgroundColor: colors.error, borderColor: colors.error },
+    danger: { backgroundColor: colors.danger, borderColor: colors.danger },
+  };
+  const pressedStyles: Record<string, ViewStyle> = {
+    primary: toneColor ? { opacity: 0.86 } : { backgroundColor: colors.accentHover, borderColor: colors.accentHover },
+    secondary: { backgroundColor: colors.hover },
+    ghost: { backgroundColor: colors.hover },
+    danger: { opacity: 0.86 },
   };
 
   const textColor = variant === 'primary' || variant === 'danger'
-    ? colors.accentText
-    : variant === 'ghost'
-      ? colors.textDim
-      : colors.textSoft;
+    ? colors.accentOn
+    : toneColor
+      ? toneColor
+      : variant === 'ghost'
+        ? colors.muted
+        : colors.text;
   const fontSpec = typography.sm;
 
   return (
-    <TouchableOpacity
+    <Pressable
       accessibilityRole="button"
       accessibilityState={{ ...accessibilityState, disabled: !!(disabled || loading), busy: !!loading }}
       onPress={onPress}
       disabled={disabled || loading}
-      style={[baseStyle, variantStyles[variant], style]}
-      activeOpacity={0.72}
+      style={({ pressed }) => [baseStyle, variantStyles[variant], pressed && pressedStyles[variant], style]}
     >
-      {loading && <ActivityIndicator size="small" color={textColor} style={{ marginRight: 8 }} />}
-      <RNText style={[{ color: textColor, fontSize: fontSpec.fontSize, lineHeight: fontSpec.lineHeight, fontWeight: '600', flexShrink: 1, textAlign: 'center' }, textStyle]}>
+      {loading && <ActivityIndicator size="small" color={textColor} style={{ marginRight: spacing.sm }} />}
+      <RNText style={[{ color: textColor, fontSize: fontSpec.fontSize, lineHeight: fontSpec.lineHeight, fontWeight: fontWeights.medium, flexShrink: 1, textAlign: 'center' }, textStyle]}>
         {title}
       </RNText>
-    </TouchableOpacity>
+    </Pressable>
   );
 }

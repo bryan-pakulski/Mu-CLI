@@ -462,3 +462,27 @@ def variables_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comm
         message="Listed variables.",
         data={"variables": dict(session.variables)},
     )
+
+
+@command(
+    "/effort",
+    help="Model effort for agent turns: /effort none|minimal|low|medium|high|xhigh|max, /effort default (provider default), /effort to show.",
+)
+def effort_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
+    from mu.agent.retry import EFFORT_LEVELS
+    value = (args or "").strip().lower()
+    if not value:
+        current = str(session.variables.get("reasoning_effort") or "") or "default"
+        msg = f"Effort: {current}  (options: {', '.join(EFFORT_LEVELS)}, default)"
+        _emit(session, msg, allow_prompt)
+        return CommandResult(ok=True, message=msg, data={"effort": current})
+    if value in ("default", "auto", "none", "off"):
+        value = ""
+    elif value not in EFFORT_LEVELS:
+        msg = f"Unknown effort {value!r}; use one of {', '.join(EFFORT_LEVELS)} or default."
+        _emit(session, msg, allow_prompt, error=True)
+        return CommandResult(ok=False, message=msg)
+    session.variables["reasoning_effort"] = value
+    msg = f"Effort set to {value or 'default'}."
+    _emit(session, msg, allow_prompt)
+    return CommandResult(ok=True, message=msg, data={"effort": value or "default"})

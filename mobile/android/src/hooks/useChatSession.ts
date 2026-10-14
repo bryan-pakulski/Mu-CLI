@@ -8,6 +8,7 @@ import {
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
 import { revisionToken } from '../api/offlineQueue';
+import { isPlanModeBlocked, refreshPlanMode } from '../api/planMode';
 import type { ArtifactDescriptor } from '../api/artifacts';
 import type { AttachmentDescriptor } from '../api/attachments';
 
@@ -75,7 +76,7 @@ export interface LiveSubagent {
 }
 
 type StreamEvent = { kind: string; [key: string]: unknown };
-type ActiveSessionState = { active?: boolean; is_busy?: boolean; external_active?: boolean; external_last_at?: number; revision?: number | string };
+type ActiveSessionState = { active?: boolean; is_busy?: boolean; external_active?: boolean; external_last_at?: number; revision?: number | string; plan_mode?: boolean };
 
 function asVisualization(value: unknown): ArtifactDescriptor | null {
   if (!value || typeof value !== 'object') return null;
@@ -1018,6 +1019,11 @@ export function useChatSession(activeSessionName: string | null) {
       // that an agent turn is still running. Only the server-owned busy event
       // controls the mobile generating state.
       const busy = Boolean(response.active && response.is_busy);
+      // Plan mode rides on the same poll so the badge/strip follow `/plan`
+      // typed on another surface even if the SSE event was missed.
+      if (typeof response.plan_mode === 'boolean') {
+        useConnectionStore.getState().setPlanMode(response.plan_mode);
+      }
       const externalWriteAt = Number(response.external_last_at || 0);
       const sawExternalWrite = externalWriteAt > externalWriteAtRef.current;
       if (sawExternalWrite) externalWriteAtRef.current = externalWriteAt;
@@ -1133,7 +1139,29 @@ export function useChatSession(activeSessionName: string | null) {
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
-      setActivityLabel('Thinking');
+      if (isPlanModeBlocked(event.text)) {
+        // A write tool was refused by the plan-mode hook: say so, and make
+        // sure the indicator is showing.
+        useConnectionStore.getState().setPlanMode(true);
+        setActivityLabel('Blocked by plan mode');
+      } else {
+        setActivityLabel('Thinking');
+      }
+      return;
+    }
+
+    if (kind === 'plan_mode_changed') {
+      useConnectionStore.getState().setPlanMode(Boolean(event.plan_mode));
+      return;
+    }
+
+    if (kind === 'command_result') {
+      const data = (event.result && typeof event.result === 'object')
+        ? (event.result as { data?: { plan_mode?: unknown } }).data
+        : undefined;
+      if (data && typeof data.plan_mode === 'boolean') {
+        useConnectionStore.getState().setPlanMode(data.plan_mode);
+      }
       return;
     }
 
@@ -1489,6 +1517,9 @@ export function useChatSession(activeSessionName: string | null) {
       if (sendRevision !== null) {
         useConnectionStore.getState().setSessionRevision(sendRevision);
       }
+      // `/plan` (and anything else that flips plan mode) — re-read it in case
+      // the plan_mode_changed event raced the stream.
+      if (trimmed.startsWith('/')) void refreshPlanMode(activeSessionName);
       return true;
     } catch (sendError) {
       setError(String(sendError));

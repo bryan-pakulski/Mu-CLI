@@ -1,5 +1,10 @@
 # Friday Five — Implementation Progress
 
+> Historical progress log. The current job pipeline is described in
+> [durable_engineering_jobs.md](durable_engineering_jobs.md) and
+> [jobs_quickstart.md](jobs_quickstart.md); the milestone history is in
+> [archive/durable_jobs_history.md](archive/durable_jobs_history.md).
+
 North star:
 
 > Give MuCLI five real engineering tickets, close every control plane, return

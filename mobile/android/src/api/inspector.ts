@@ -48,6 +48,8 @@ export interface InspectorStats {
   scratchpad_size?: number;
   memory_status_counts?: Record<string, number>;
   agent_mode?: string;
+  /** Plan mode: read-only, write tools blocked. */
+  plan_mode?: boolean;
 }
 
 export interface InspectorVariable {
@@ -59,6 +61,8 @@ export interface InspectorVariable {
   help: string;
   secret?: boolean;
   is_set?: boolean;
+  /** Fixed set of allowed values (rendered as a picker). */
+  options?: unknown[];
 }
 
 export interface InspectorVariableGroup {

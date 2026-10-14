@@ -1,221 +1,237 @@
 .pricing-settings-pane {
-    padding-bottom: 84px;
+    padding-bottom: var(--space-8);
 }
 
 .pricing-settings-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 18px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+    padding-right: var(--space-6); /* clear of the dialog close button */
 }
 
 .pricing-settings-title {
     margin: 0;
-    color: var(--text);
-    font-size: 16px;
-    font-weight: 650;
-    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
 }
 
 .pricing-settings-copy {
-    margin: 5px 0 0;
+    margin: var(--space-1) 0 0;
     max-width: 560px;
-    color: var(--text-soft);
-    font-size: 12px;
-    line-height: 1.5;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-body);
 }
 
 .pricing-settings-advanced {
     flex: 0 0 auto;
-    color: var(--text-soft);
-    font-size: 11px;
+    color: var(--accent-fg);
+    font-size: var(--fs-sm);
     text-decoration: none;
-    border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent);
 }
 
 .pricing-settings-advanced:hover {
-    color: var(--text);
+    color: var(--accent-hover);
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 .pricing-settings-meta {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 16px;
+    gap: var(--space-2) var(--space-4);
     align-items: center;
-    margin-bottom: 14px;
-    padding: 11px 12px;
+    margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-4);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--bg-lift) 82%, transparent);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
 }
 
 .pricing-settings-source {
     overflow: hidden;
-    color: var(--text-soft);
-    font-family: var(--mono);
-    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .pricing-settings-state {
-    color: var(--text-soft);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: .07em;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
 }
 
 .pricing-settings-state.is-override {
-    color: var(--accent);
+    color: var(--accent-fg);
+    font-weight: var(--fw-medium);
 }
 
+/* planos Tabs: provider filter with a 2px accent underline. */
 .pricing-provider-filter {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 14px;
+    gap: 2px;
+    margin-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
 }
 
 .pricing-provider-filter button {
-    min-height: 30px;
-    padding: 5px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
+    min-height: 0;
+    margin-bottom: -1px;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
     background: transparent;
-    color: var(--text-soft);
-    font-size: 10px;
+    color: var(--muted);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
     text-transform: capitalize;
 }
 
+.pricing-provider-filter button:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+
 .pricing-provider-filter button.active {
-    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-    background: color-mix(in srgb, var(--accent) 11%, transparent);
+    border-bottom-color: var(--accent);
+    background: transparent;
     color: var(--text);
 }
 
 .pricing-settings-error {
-    margin-bottom: 12px;
-    padding: 9px 11px;
-    border-left: 2px solid var(--err);
-    background: color-mix(in srgb, var(--err) 8%, transparent);
-    color: var(--err);
-    font-size: 11px;
-    line-height: 1.45;
+    margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--error-subtle);
+    color: var(--error);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-body);
 }
 
 .pricing-model-list {
     display: grid;
-    gap: 8px;
+    gap: 0;
 }
 
+/* Dense rows: one hairline between models instead of a card per row. */
 .pricing-model-row {
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--bg-lift) 72%, transparent);
+    padding: var(--space-3) 0;
+    border: 0;
+    border-bottom: 1px solid var(--hairline-color);
+    border-radius: 0;
+    background: transparent;
 }
 
 .pricing-model-head {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
 }
 
 .pricing-provider-badge {
     flex: 0 0 auto;
     min-width: 48px;
-    color: var(--text-soft);
-    font-family: var(--mono);
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: .06em;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-xs);
+    text-transform: capitalize;
 }
 
 .pricing-model-name {
     min-width: 0;
     flex: 1;
     overflow: hidden;
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 600;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .pricing-billing-select {
     width: 132px;
-    min-height: 30px;
-    font-size: 10px;
+    min-height: var(--control-h-sm);
+    font-size: var(--fs-xs);
 }
 
 .pricing-capability-map {
     display: grid;
-    gap: 5px;
-    margin: -1px 0 11px;
+    gap: var(--space-1);
+    margin: 0 0 var(--space-3);
 }
 
 .pricing-capability-line {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1);
 }
 
 .pricing-capability-label {
-    width: 48px;
-    color: var(--text-dimmer);
-    font-size: 8px;
-    letter-spacing: .06em;
-    text-transform: uppercase;
+    width: 56px;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
 }
 
 .pricing-capability-chip {
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--text-soft);
-    font-family: var(--mono);
-    font-size: 8.5px;
-    line-height: 1.25;
+    padding: 1px var(--space-2);
+    border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-tight);
 }
 
 .pricing-capability-chip.is-input {
-    border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
-    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--text);
 }
 
 .pricing-capability-chip.is-feature {
-    font-family: var(--sans);
+    font-family: var(--font-sans);
 }
 
 .pricing-rate-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .pricing-rate-field {
     display: grid;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .pricing-rate-field span {
-    color: var(--text-soft);
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: .05em;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
 }
 
 .pricing-rate-field input {
     width: 100%;
     min-width: 0;
-    min-height: 32px;
-    font-family: var(--mono);
-    font-size: 11px;
+    height: var(--control-h);
+    min-height: var(--control-h);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
 }
 
 .pricing-rate-field input:disabled {
@@ -224,16 +240,16 @@
 }
 
 .pricing-model-note {
-    margin: 8px 0 0;
-    color: var(--text-soft);
-    font-size: 10px;
-    line-height: 1.4;
+    margin: var(--space-2) 0 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
 }
 
 .pricing-settings-empty {
-    padding: 22px 12px;
-    color: var(--text-soft);
-    font-size: 11px;
+    padding: var(--space-5) var(--space-3);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
     text-align: center;
 }
 
@@ -243,24 +259,37 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    margin: 16px -4px -4px;
-    padding: 12px 4px 4px;
-    background: linear-gradient(to bottom, transparent, var(--bg-lift) 28%);
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin: var(--space-4) calc(var(--space-1) * -1) calc(var(--space-1) * -1);
+    padding: var(--space-3) var(--space-1) var(--space-1);
+    padding-bottom: calc(var(--space-1) + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--hairline-color);
+    background: var(--bg-raised);
 }
 
 .pricing-settings-dirty {
-    color: var(--text-soft);
-    font-size: 10px;
+    color: var(--warning);
+    font-size: var(--fs-xs);
 }
 
 .pricing-settings-buttons {
     display: flex;
-    gap: 7px;
+    flex-wrap: wrap;
+    gap: var(--space-2);
 }
 
 .pricing-settings-buttons button {
-    min-height: 32px;
+    min-height: var(--control-h);
+}
+
+@media (pointer: coarse) {
+    .pricing-provider-filter button,
+    .pricing-billing-select,
+    .pricing-rate-field input,
+    .pricing-settings-buttons button {
+        min-height: var(--touch-target);
+    }
 }
 
 @media (max-width: 720px) {

@@ -54,6 +54,35 @@ def test_stage_has_no_credentials_host_network_or_gitdir(tmp_path, monkeypatch, 
     assert "docker.sock" not in rendered
 
 
+def _sandbox_ws(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / ".git").write_text("gitdir: /host/repo/.git/worktrees/job")
+    dirs = [tmp_path / n for n in ("input", "output", "relay")]
+    for path in dirs:
+        path.mkdir()
+    return ws, dirs
+
+
+@pytest.mark.parametrize("name", [".env.example", ".env.inference.example", ".env.sample",
+                                  "sub/.env.template", ".env.dist"])
+def test_sandbox_allows_committed_env_templates(tmp_path, name):
+    ws, dirs = _sandbox_ws(tmp_path)
+    (ws / name).parent.mkdir(parents=True, exist_ok=True)
+    (ws / name).write_text("API_KEY=changeme\n")
+    container_args("stage", "plan", str(ws), *map(str, dirs), SandboxPolicy(), "t")
+
+
+@pytest.mark.parametrize("name", [".env", ".env.local", ".env.production", ".env.example.local",
+                                  "deploy/.env", "server.pem"])
+def test_sandbox_still_rejects_real_secrets(tmp_path, name):
+    ws, dirs = _sandbox_ws(tmp_path)
+    (ws / name).parent.mkdir(parents=True, exist_ok=True)
+    (ws / name).write_text("secret")
+    with pytest.raises(ValueError, match="secret path must be removed"):
+        container_args("stage", "plan", str(ws), *map(str, dirs), SandboxPolicy(), "t")
+
+
 def test_relay_forces_host_model_and_revokes_token(tmp_path):
     obj, provider, art = relay(tmp_path)
     with pytest.raises(RelayDenied):

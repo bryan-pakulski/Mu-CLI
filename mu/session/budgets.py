@@ -44,6 +44,29 @@ KEEP_RECENT_EMERGENCY = 2
 TOOL_RESULT_FLOOR_DEFAULT = 4
 
 
+def small_window(session: Any) -> bool:
+    """True when the model's real context window is small (≤ ``small_window_threshold``,
+    default 32k): the fixed prompt (system + ~56 tool schemas) would take most of it, so
+    the small-window profile trims tools, schemas and optional prompt layers.
+    ``small_window_profile``: ``auto`` (default) | ``on`` | ``off``."""
+    variables = getattr(session, "variables", None) or {}
+    mode = str(variables.get("small_window_profile", "auto") or "auto").lower()
+    if mode in ("off", "false", "0"):
+        return False
+    if mode in ("on", "true", "1"):
+        return True
+    provider = getattr(session, "provider", None)
+    try:
+        window = provider.effective_context_window(getattr(provider, "model_name", None)) if provider else None
+    except Exception:  # noqa: BLE001
+        window = None
+    try:
+        threshold = int(variables.get("small_window_threshold", 32768) or 32768)
+    except (TypeError, ValueError):
+        threshold = 32768
+    return bool(window) and int(window) <= threshold
+
+
 def resolve_keep_recent(session: Any, *, emergency: bool = False) -> int:
     """How many trailing messages the compactor keeps verbatim.
 

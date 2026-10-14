@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import threading
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 from mu.session.fileowner import preserve_owner
@@ -256,6 +257,10 @@ class TraceEmitter:
             # dumps, stalling concurrent emitter threads. The seq is spliced
             # into the pre-serialized line (string surgery on the closing
             # brace) instead of re-serializing the whole record under lock.
+            if "ts" not in record:
+                # Absolute wall-clock time, so per-iteration latency and the gaps between
+                # requests can be measured from the trace alone.
+                record = {**record, "ts": round(time.time(), 3)}
             line = json.dumps(record, default=str, ensure_ascii=False)
             with self._lock:
                 if self._closed:
@@ -1033,7 +1038,13 @@ def build_iter_record(
         "cache_hit": bool(_cached_tok > 0),
         "cached_pct": round(_cached_tok / float(_full_prompt) * 100.0, 2) if _full_prompt > 0 else 0.0,
         "uncached_in": max(0, _full_prompt - _cached_tok),
+        "cache_write": int(getattr(response, "cache_creation_tokens", 0) or 0),
     }
+    _timings = getattr(response, "timings", None)
+    if isinstance(_timings, dict) and _timings:
+        # Provider-reported (Ollama): load_s > 0 on a warm turn = the model was reloaded;
+        # prompt_eval_s = how much prompt was (re)processed.
+        tokens["timings"] = dict(_timings)
 
     # Assistant text preview (first text part, truncated).
     preview = ""

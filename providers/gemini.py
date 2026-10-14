@@ -17,6 +17,7 @@ from google import genai
 from google.genai import types
 
 from .base import (
+    tool_result_json,
     CacheHint,
     FileReference,
     LLMProvider,
@@ -188,7 +189,7 @@ class GeminiProvider(LLMProvider):
                 elif part.type == "tool_result":
                     tool_result = part.tool_result
                     if isinstance(tool_result, (dict, list)):
-                        tool_result = json.dumps(tool_result, indent=2, sort_keys=True)
+                        tool_result = tool_result_json(tool_result)
                     response = {"result": str(tool_result)}
                     response_parts = None
                     if part.media_inputs and str(self.model_name).lower().replace("models/", "").startswith("gemini-3"):

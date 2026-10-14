@@ -37,7 +37,7 @@
                   x-text="$store.debug.hypotheses.length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.hypotheses"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="h in $store.debug.filtered($store.debug.hypotheses)" :key="h.id">
                 <div class="hypothesis-item"
                      :class="{ expanded: $store.debug.isHypothesisExpanded(h.id) }"
@@ -78,7 +78,7 @@
                   x-text="$store.debug.suspects.length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.suspects"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="s in $store.debug.filtered($store.debug.suspects)" :key="s.id">
                 <div class="suspect-row">
                     <span class="mono" x-text="s.content"></span>
@@ -100,7 +100,7 @@
                   x-text="$store.debug.notes.length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.notes"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="n in $store.debug.filtered($store.debug.notes)" :key="n.id">
                 <div class="finding-entry">
                     <div class="finding-head">
@@ -128,7 +128,7 @@
                   x-text="$store.debug.findings.length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.debug.openSections.findings"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="f in $store.debug.filtered($store.debug.findings)" :key="f.id">
                 <div class="finding-entry">
                     <div class="finding-head">

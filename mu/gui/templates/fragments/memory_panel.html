@@ -7,10 +7,12 @@
     <div class="memory-center-tabs" role="tablist" aria-label="Memory Center">
         <button type="button"
                 :class="{ active: $store.memory.tab === 'knowledge' }"
+                :aria-selected="$store.memory.tab === 'knowledge' ? 'true' : 'false'"
                 @click="$store.memory.tab='knowledge'; $store.memory.loadDurable()"
                 role="tab">memories</button>
         <button type="button"
                 :class="{ active: $store.memory.tab === 'context' }"
+                :aria-selected="$store.memory.tab === 'context' ? 'true' : 'false'"
                 @click="$store.memory.tab='context'; $store.memory.loadContext()"
                 role="tab">context map</button>
     </div>
@@ -274,7 +276,7 @@
                         <button type="button"
                                 x-show="layer.tokens > 0"
                                 :title="layer.id + ' · ' + layer.tokens + ' tokens'"
-                                :style="'flex:' + Math.max(1, layer.tokens) + ';background:hsl(' + layer.hue + ',76%,56%)'"
+                                :style="'flex:' + Math.max(1, layer.tokens) + ';background:' + $store.memory.layerColor(layer.hue)"
                                 @click="$store.memory.openLayer(layer)"></button>
                     </template>
                     <span class="context-composition-free"
@@ -284,7 +286,7 @@
                     <template x-for="layer in $store.memory.layers" :key="layer.id">
                         <button type="button" @click="$store.memory.openLayer(layer)"
                                 :class="{ empty: !layer.tokens }">
-                            <i :style="'background:hsl(' + layer.hue + ',76%,56%)'"></i>
+                            <i :style="'background:' + $store.memory.layerColor(layer.hue)"></i>
                             <span class="mono" x-text="layer.id"></span>
                             <span x-text="layer.tokens.toLocaleString()"></span>
                         </button>
@@ -402,7 +404,7 @@
                         <template x-for="layer in $store.memory.selectedTimelinePoint().layers" :key="layer.id">
                             <div class="memory-legend-row" :class="{ empty: !layer.tokens }">
                                 <span class="memory-legend-swatch"
-                                      :style="'background:hsl(' + layer.hue + ',76%,56%)'"></span>
+                                      :style="'background:' + $store.memory.layerColor(layer.hue)"></span>
                                 <span class="memory-legend-id mono" x-text="layer.id"></span>
                                 <span class="memory-legend-name" x-text="layer.name"></span>
                                 <span class="memory-legend-tok mono"

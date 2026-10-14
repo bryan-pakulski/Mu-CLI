@@ -502,6 +502,14 @@ def _delete_session_flow(session_manager, sessions):
 
 
 def sync_provider_settings(session):
+    if session.provider is not None and not isinstance(session.provider, OllamaProvider):
+        # Other providers read provider-scoped knobs (e.g. openai_xhigh_models,
+        # openai_prompt_cache_retention) from the session's variables.
+        try:
+            session.provider._session_variables = session.variables
+        except Exception:  # noqa: BLE001 - frozen/fake providers
+            pass
+        return
     if isinstance(session.provider, OllamaProvider):
         # `apply_session_variables` binds the variables dict AND recomputes
         # host + api_key from `ollama_host` / `ollama_mode` / `ollama_api_key`

@@ -80,6 +80,9 @@ def test_browser_plan_edit_save_approve_and_partial_refresh(tmp_path, monkeypatc
               boardEl:document.querySelector('#board'), detailEl:document.querySelector('#detail'), totalEl:document.querySelector('#total')
             }); await work.start();
         }""")
+        # planos flow: the plan renders read-only; "Edit plan" opens the editor.
+        page.locator('[data-plan-edit]').click()
+        page.locator('[data-mode="structured"]').click()
         page.locator('[data-summary]').fill("Human approved content")
         assert page.locator('[data-plan-approve]').is_disabled()
         page.evaluate("stream.onmessage({data:JSON.stringify({scope:'job',id:work.selectedId(),parts:['session','costs']})})")
@@ -92,7 +95,8 @@ def test_browser_plan_edit_save_approve_and_partial_refresh(tmp_path, monkeypatc
         stale = client.post("/api/jobs/cmd", json={"type":"approvePlan", "job_id":job.id, "args":{"version":1}})
         assert stale.status_code == 409
         page.locator('[data-plan-approve]').click()
-        page.wait_for_function("!document.querySelector('[data-plan-save]')")
+        # Read-only after approval: no editor and no "Edit plan" entry point.
+        page.wait_for_function("!document.querySelector('[data-plan-save]') && !document.querySelector('[data-plan-edit]')")
         updated = service.get(job.id)
         assert updated.metadata["plan_approved_version"] == 2
         from mu.jobs.core.plan_ops import approved_plan_text

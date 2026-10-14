@@ -21,7 +21,8 @@ SECTIONS = (
 )
 _TITLE_TO_KEY = {title.lower(): key for key, title in SECTIONS}
 _AC_RE = re.compile(r"^\s*[-*]\s*\[(?P<id>[A-Za-z0-9_.-]+)\]\s*(?P<text>.*)$")
-_CHECK_RE = re.compile(r"^\s*[-*]\s*suite:\s*(?P<suite>\S+)\s+cmd:\s*(?P<cmd>.+?)\s*$")
+_CHECK_RE = re.compile(r"^\s*[-*]\s*suite:\s*(?P<suite>\S+)(?:\s+env:\s*(?P<env>\S+))?(?:\s+cwd:\s*(?P<cwd>\S+))?"
+                       r"\s+cmd:\s*(?P<cmd>.+?)\s*$")
 _NUM_RE = re.compile(r"^\s*(?:\d+[.)]|[-*])\s+(?P<text>.*)$")
 
 
@@ -41,6 +42,8 @@ class Criterion:
 class CheckSpec:
     suite: str
     cmd: str
+    env: str = ""   # build environment that runs it (monorepos); blank = by path / primary
+    cwd: str = ""   # repository-relative working directory
 
 
 @dataclass
@@ -73,7 +76,8 @@ class PlanDoc:
         for i, item in enumerate(data.get("checks") or [], 1):
             if isinstance(item, dict):
                 checks.append(CheckSpec(str(item.get("suite") or f"check{i}").strip(),
-                                        str(item.get("cmd") or "").strip()))
+                                        str(item.get("cmd") or "").strip(), str(item.get("env") or "").strip(),
+                                        str(item.get("cwd") or "").strip()))
             else:
                 checks.append(CheckSpec(f"check{i}", str(item).strip()))
         based_on = data.get("based_on")
@@ -116,7 +120,8 @@ class PlanDoc:
         out += ["## Summary", self.summary.strip(), ""]
         out += ["## Approach"] + [f"{i}. {s}" for i, s in enumerate(self.approach, 1)] + [""]
         out += ["## Acceptance criteria"] + [f"- [{c.id}] {c.text}" for c in self.acceptance] + [""]
-        out += ["## Checks"] + [f"- suite: {c.suite}   cmd: {c.cmd}" for c in self.checks] + [""]
+        out += ["## Checks"] + [f"- suite: {c.suite}" + (f"   env: {c.env}" if c.env else "") + (f"   cwd: {c.cwd}" if c.cwd else "")
+                                 + f"   cmd: {c.cmd}" for c in self.checks] + [""]
         out += ["## Files likely touched"] + [f"- {f}" for f in self.files] + [""]
         out += ["## Risks / out of scope"] + [f"- {r}" for r in self.risks]
         return "\n".join(out).rstrip() + "\n"
@@ -145,7 +150,7 @@ class PlanDoc:
         for line in sections["checks"]:
             m = _CHECK_RE.match(line)
             if m:
-                checks.append(CheckSpec(m.group("suite"), m.group("cmd")))
+                checks.append(CheckSpec(m.group("suite"), m.group("cmd"), m.group("env") or "", m.group("cwd") or ""))
             elif line.strip():
                 item = _list_item(line)
                 if item:

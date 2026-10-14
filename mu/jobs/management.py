@@ -38,6 +38,13 @@ HISTORIC_STATUSES = frozenset(
 )
 
 
+
+def _display_text(text):
+    """Ticket text without the UNTRUSTED TICKET CONTENT frame (search/display/export only)."""
+    from mu.integrations.jira import strip_untrusted_frame
+
+    return strip_untrusted_frame(str(text or ""))
+
 class JobManagementError(RuntimeError):
     pass
 
@@ -57,6 +64,9 @@ class JobManagementService:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.store.path, timeout=15.0, isolation_level=None)
         conn.row_factory = sqlite3.Row
+        # History search matches the ticket text a human sees, not the untrusted-content
+        # frame wrapped around imported tickets (its marker words matched every import).
+        conn.create_function("mu_display_text", 1, _display_text, deterministic=True)
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=15000")
         conn.execute("PRAGMA journal_mode=WAL")
@@ -137,7 +147,7 @@ class JobManagementService:
                     [
                         "j.id LIKE ?",
                         "j.title LIKE ?",
-                        "j.description LIKE ?",
+                        "mu_display_text(j.description) LIKE ?",
                         "j.repository LIKE ?",
                         "j.branch LIKE ?",
                         "j.session_name LIKE ?",
@@ -255,6 +265,7 @@ class JobManagementService:
         jobs: List[Dict[str, Any]] = []
         for row in rows:
             item = self.store._job_from_row(row).to_dict()
+            item["description"] = _display_text(item.get("description") or "")
             archived_at = row["management_archived_at"]
             item.update(
                 {
@@ -440,6 +451,11 @@ class JobManagementService:
             reason=str(reason or "archived from Engineering Work"),
             payload={"archived_at": now},
         )
+        from .sandbox.environments import cleanup_quietly
+        cleanup_quietly(self.service, job.id, "job archived")
+        # W3: archived jobs drop their branches (local always; remote per settings).
+        from .worktree import delete_job_branches
+        delete_job_branches(self.service, self.service.get(job.id))
         return self.state(job.id)
 
     def restore(self, job_id: str) -> Dict[str, Any]:
@@ -566,6 +582,13 @@ class JobManagementService:
             if cursor.rowcount != 1:
                 raise KeyError(job.id)
 
+        # Build environment images, engine, volumes and networks go with the job (§6).
+        from .sandbox.environments import cleanup_job, job_states
+        if job_states(job):
+            try:
+                cleanup_job(job.id, reason="job deleted")
+            except Exception:  # noqa: BLE001 - the controller sweeper retries orphans
+                pass
         worktree_removed = False
         if purge_artifacts and job.worktree and os.path.exists(job.worktree):
             try:

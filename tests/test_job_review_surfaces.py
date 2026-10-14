@@ -118,7 +118,10 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     detail = MOBILE_DETAIL.read_text(encoding="utf-8")
 
     assert "Work: undefined" in nav
-    assert "JobDetail: { jobId: string }" in nav
+    # JobDetail keeps the jobId param; optional tab/action params open a tab or start a Needs-you action.
+    assert "JobDetail: { jobId: string" in nav
+    for page in ("JobsList", "JobActivity", "JobBoards", "JobHistory", "JobSettings"):
+        assert f"{page}: undefined" in nav
     assert 'name="Work"' in nav
     assert 'name="JobDetail"' in nav
     assert "onOpenWork" in nav
@@ -136,8 +139,12 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     assert "jobCoreApi.command" in detail
     assert "job.actions" in detail
     assert "subscribeToJobChanges" in detail
-    assert "pagingEnabled" in detail
-    assert "<JobPlanEditor" in detail
+    # planos tabs (2px accent underline) replace the swipe pager.
+    assert "<Tabs items={tabItems}" in detail
+    # The Plan tab (components/JobTabs.tsx) hosts the plan editor; the job page renders it.
+    assert "<PlanTab" in detail
+    tabs = (MOBILE_DETAIL.parent.parent / "components" / "JobTabs.tsx").read_text(encoding="utf-8")
+    assert "<JobPlanEditor" in tabs
     plan_editor = (MOBILE_DETAIL.parent.parent / "components" / "JobPlanEditor.tsx").read_text(encoding="utf-8")
     assert 'accessibilityLabel="Plan Markdown"' in plan_editor
     assert "Acceptance criteria" in plan_editor and "Checks" in plan_editor

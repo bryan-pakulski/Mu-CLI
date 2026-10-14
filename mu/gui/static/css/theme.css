@@ -1,0 +1,462 @@
+/* μcli base + primitives layer.
+ *
+ * Loaded LAST on every page (after page/route stylesheets) so the shared
+ * primitives — base typography, focus ring, selection, scrollbars,
+ * buttons, inputs, tabs, badges — read identically on every surface.
+ * Consumes tokens.css only. Component- and screen-specific rules live
+ * in their own stylesheets; nothing here sets layout.
+ */
+
+/* ------------------------------------------------------------ base */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-base);
+    line-height: var(--lh-body);
+    font-weight: var(--fw-regular);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+:where(h1, h2, h3, h4) {
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-tight);
+}
+
+:where(code, kbd, samp, pre) { font-family: var(--font-mono); }
+
+:where(time, .num, .tabular, [data-tabular]) { font-variant-numeric: tabular-nums; }
+
+:where(a) { color: var(--accent-fg); text-decoration: none; }
+:where(a:hover) { text-decoration: underline; text-underline-offset: 2px; }
+
+::selection { background: var(--accent-subtle); color: var(--text-primary); }
+
+/* One focus ring for every interactive element */
+:focus { outline: none; }
+:focus-visible {
+    outline: 2px solid var(--accent-solid);
+    outline-offset: 2px;
+}
+
+/* Scrollbars — thin and quiet */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-active) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--bg-active);
+    border: 2px solid transparent;
+    border-radius: var(--radius-full);
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--control-border); }
+
+/* ------------------------------------------------------------ buttons
+ * Default = secondary (quiet surface). .primary / .btn-primary = filled
+ * accent (one per region). .ghost = text-only. .danger = destructive. */
+:where(button, .btn) {
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    line-height: var(--lh-tight);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition:
+        background-color var(--dur-micro) var(--ease-out),
+        color var(--dur-micro) var(--ease-out),
+        border-color var(--dur-micro) var(--ease-out),
+        opacity var(--dur-micro) var(--ease-out),
+        transform var(--dur-micro) var(--ease-out);
+}
+:where(button, .btn):not(:disabled):active { transform: translateY(1px); }
+button:disabled, .btn:disabled, button[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+button.send-btn, button.feature-primary-action, button.feature-row-control-primary,
+button.approve, :is(button, a).btn-primary, :is(button, a).primary {
+    background: var(--accent-solid);
+    color: var(--accent-on);
+    border-color: transparent;
+}
+button.send-btn:not(:disabled):hover, button.feature-primary-action:not(:disabled):hover,
+button.feature-row-control-primary:not(:disabled):hover, button.approve:not(:disabled):hover,
+:is(button, a).btn-primary:not(:disabled):hover, :is(button, a).primary:not(:disabled):hover {
+    background: var(--accent-hover);
+    color: var(--accent-on);
+}
+
+:is(button, a):is(.danger, .work-danger, .is-danger, .row-action-danger) { color: var(--error); }
+:is(button, a):is(.danger, .work-danger, .is-danger, .row-action-danger):not(:disabled):hover {
+    background: var(--error-subtle);
+    color: var(--error);
+}
+
+/* ------------------------------------------------------------ inputs */
+:where(input, textarea, select) {
+    font-family: var(--font-sans);
+    font-size: var(--fs-base);
+    color: var(--text-primary);
+    transition:
+        border-color var(--dur-micro) var(--ease-out),
+        background-color var(--dur-micro) var(--ease-out);
+}
+:where(textarea, input[type="number"], .mono-input) { font-variant-numeric: tabular-nums; }
+input::placeholder, textarea::placeholder { color: var(--text-tertiary); opacity: 1; }
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent-solid);
+    outline-offset: 0;
+    border-color: transparent;
+}
+input:disabled, textarea:disabled, select:disabled { opacity: 0.55; cursor: not-allowed; }
+[aria-invalid="true"] { border-color: var(--error); }
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent-solid); }
+
+/* ------------------------------------------------------------ tabs + selection */
+.active[role="tab"], [role="tab"][aria-selected="true"] { color: var(--text-primary); }
+
+/* ------------------------------------------------------------ code */
+:where(pre) {
+    background: var(--code-bg);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-body);
+}
+:where(:not(pre) > code) {
+    font-size: var(--fs-sm);
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    padding: 0 var(--space-1);
+}
+
+/* highlight.js — strip the vendor theme's own panel so code sits on --code-bg */
+:where(.hljs) { background: transparent; }
+
+/* ------------------------------------------------------------ utilities */
+.visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Coarse pointers get 44px targets on the shared primitives */
+@media (pointer: coarse) {
+    :where(button, .btn, select, [role="button"], [role="tab"]) { min-height: var(--touch-target); }
+}
+
+/* Entrance used by popovers, toasts and menus */
+@keyframes mu-enter {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes mu-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ------------------------------------------------------------ reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ============================================================ planos primitives
+ * The planos design system (web/src/styles/global.css) for every non-jobs
+ * page. /work carries its own scoped copy (work.css, `.work-app …`), so these
+ * rules are fenced off from it with a zero-specificity :where() guard.
+ * Shapes: radius 6 controls / 10 panels+dialogs; 32px controls; type
+ * 12/14/16/20; status glyphs ✓ ● ◆ ✗ – ○ always paired with a label. */
+:where(html:not(:has(.work-app))) kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 var(--space-1);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--raised);
+    color: var(--text);
+    text-align: center;
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+}
+
+/* tones — colour helpers; never the only carrier of meaning */
+:where(html:not(:has(.work-app))) :is(.tone-accent) { color: var(--accent); }
+:where(html:not(:has(.work-app))) :is(.tone-ok) { color: var(--ok); }
+:where(html:not(:has(.work-app))) :is(.tone-warn) { color: var(--warn); }
+:where(html:not(:has(.work-app))) :is(.tone-danger) { color: var(--danger); }
+:where(html:not(:has(.work-app))) :is(.tone-running) { color: var(--running); }
+:where(html:not(:has(.work-app))) :is(.tone-muted) { color: var(--muted); }
+
+/* .btn — raised surface + border; primary = accent fill; tone + ghost + sm + icon */
+:where(html:not(:has(.work-app))) .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: var(--control-h);
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+}
+:where(html:not(:has(.work-app))) .btn:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--hover); text-decoration: none; }
+:where(html:not(:has(.work-app))) .btn:disabled,
+:where(html:not(:has(.work-app))) .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+:where(html:not(:has(.work-app))) .btn.sm { height: calc(var(--control-h) - 6px); padding: 0 8px; font-size: var(--fs-xs); }
+:where(html:not(:has(.work-app))) .btn.icon { width: var(--control-h); padding: 0; }
+:where(html:not(:has(.work-app))) .btn.sm.icon { width: calc(var(--control-h) - 6px); }
+:where(html:not(:has(.work-app))) .btn.ghost { background: transparent; border-color: transparent; }
+:where(html:not(:has(.work-app))) .btn.ghost:hover:not(:disabled) { background: var(--hover); }
+:where(html:not(:has(.work-app))) .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+:where(html:not(:has(.work-app))) .btn.primary:hover:not(:disabled):not([aria-disabled="true"]) { background: color-mix(in srgb, var(--accent) 85%, var(--text)); color: var(--surface); }
+:where(html:not(:has(.work-app))) .btn.tone-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
+:where(html:not(:has(.work-app))) .btn.tone-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
+:where(html:not(:has(.work-app))) .btn.tone-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+:where(html:not(:has(.work-app))) .btn.solid.tone-ok { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+:where(html:not(:has(.work-app))) .btn.solid.tone-danger { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+:where(html:not(:has(.work-app))) .btn.solid.tone-warn { background: var(--warn); border-color: var(--warn); color: var(--surface); }
+:where(html:not(:has(.work-app))) .btn kbd { font-size: 10px; min-width: 1.4em; padding: 0 3px; line-height: 1.3; opacity: .85; color: inherit; background: transparent; border-color: currentColor; }
+:where(html:not(:has(.work-app))) .btn svg { width: 16px; height: 16px; flex: none; }
+
+/* pills / badges / chips */
+:where(html:not(:has(.work-app))) .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+    border-radius: 11px;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+}
+:where(html:not(:has(.work-app))) .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    font-size: 11px;
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: tabular-nums;
+}
+:where(html:not(:has(.work-app))) .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 var(--space-2);
+    border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+    border-radius: 12px;
+    background: transparent;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-regular);
+    white-space: nowrap;
+    text-decoration: none;
+}
+:where(html:not(:has(.work-app))) :is(a, button).chip:hover { background: var(--hover); text-decoration: none; }
+:where(html:not(:has(.work-app))) .status-glyph { display: inline-block; width: 1.1em; text-align: center; font-weight: 700; }
+
+/* panels */
+:where(html:not(:has(.work-app))) .pl-panel {
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+}
+:where(html:not(:has(.work-app))) .pl-panel > header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
+
+/* switch (role=switch) */
+:where(html:not(:has(.work-app))) .switch {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 20px;
+    min-height: 20px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--hover);
+    cursor: pointer;
+}
+:where(html:not(:has(.work-app))) .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform var(--dur-micro) var(--ease-out);
+}
+:where(html:not(:has(.work-app))) .switch:is([aria-checked="true"], .on) {
+    background: color-mix(in srgb, var(--ok) 35%, var(--surface));
+    border-color: var(--ok);
+}
+:where(html:not(:has(.work-app))) .switch:is([aria-checked="true"], .on)::after { transform: translateX(16px); background: var(--ok); }
+
+/* field: label above control, muted hint, inline error */
+:where(html:not(:has(.work-app))) .field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+:where(html:not(:has(.work-app))) .field > .label { color: var(--text); font-weight: var(--fw-medium); }
+:where(html:not(:has(.work-app))) .field .hint { color: var(--muted); font-size: var(--fs-xs); }
+:where(html:not(:has(.work-app))) .field .error { color: var(--danger); font-size: var(--fs-xs); }
+
+/* ------------------------------------------------------------ density (planos [data-density=compact]) */
+html[data-density="compact"] {
+    --control-h: 26px;
+    --control-h-sm: 22px;
+    --fs-base: 13px;
+    --lh-body: 1.4;
+}
+
+/* ------------------------------------------------------------ planos defaults for plain controls
+ * Unclassed buttons and the shared .primary / .subtle / .danger hooks read as
+ * planos .btn; text inputs and selects are 32px fields on --bg. Component
+ * classes keep their own (more specific) styling. */
+/* Unclassed buttons stay at element specificity (0,0,1) so any component
+ * rule (`.parent button`) still wins; Alpine drops an empty class attr. */
+:where(html:not(:has(.work-app))) button:where(:not([class])),
+:where(html:not(:has(.work-app))) :is(button.subtle, button.primary, button.danger, .modal-actions button, .confirm-actions button) {
+    min-height: var(--control-h);
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+    color: var(--text);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    line-height: calc(var(--control-h) - 2px);
+    white-space: nowrap;
+}
+:where(html:not(:has(.work-app))) button:where(:not([class]):hover:not(:disabled)),
+:where(html:not(:has(.work-app))) :is(button.subtle, button.danger, .modal-actions button, .confirm-actions button):hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+}
+:where(html:not(:has(.work-app))) :is(button.primary, .modal-actions button.primary, .confirm-actions button.primary) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+}
+:where(html:not(:has(.work-app))) :is(button.primary, .modal-actions button.primary, .confirm-actions button.primary):hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 85%, var(--text));
+    color: var(--surface);
+}
+:where(html:not(:has(.work-app))) :is(button.danger, .modal-actions button.danger) {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+:where(html:not(:has(.work-app))) :is(button.primary.danger, .confirm-actions button.primary.danger) {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: var(--surface);
+}
+:where(html:not(:has(.work-app))) :is(button.primary.danger, .confirm-actions button.primary.danger):hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 85%, var(--text));
+    color: var(--surface);
+}
+
+/* Element specificity (0,0,1): component rules (`.parent input`) still win. */
+:where(html:not(:has(.work-app))) input:where(:not([type]), [type="text"], [type="search"], [type="password"], [type="number"], [type="url"], [type="email"]),
+:where(html:not(:has(.work-app))) select {
+    min-height: var(--control-h);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg);
+    color: var(--text);
+}
+:where(html:not(:has(.work-app))) textarea {
+    border-color: var(--border);
+    border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------ planos tabs
+ * Horizontal tablists read as planos Tabs: muted labels on one bottom
+ * border, the selected tab carries a 2px accent underline. */
+:where(html:not(:has(.work-app))) [role="tablist"]:not([aria-orientation="vertical"]) {
+    display: flex;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+:where(html:not(:has(.work-app))) [role="tablist"]:not([aria-orientation="vertical"]) > [role="tab"] {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 0;
+    margin: 0 0 -1px;
+    padding: var(--space-2) var(--space-4);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--muted);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+}
+:where(html:not(:has(.work-app))) [role="tablist"]:not([aria-orientation="vertical"]) > [role="tab"]:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+:where(html:not(:has(.work-app))) [role="tablist"]:not([aria-orientation="vertical"]) > [role="tab"]:is(.active, [aria-selected="true"]) {
+    border-bottom-color: var(--accent);
+    color: var(--text);
+}

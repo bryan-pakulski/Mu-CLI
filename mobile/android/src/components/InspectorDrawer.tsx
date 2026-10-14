@@ -6,6 +6,7 @@ import { useConnectionStore } from '../store/connection';
 import { Text } from './Text';
 import { memoryApi, type MemorySnapshot } from '../api/memory';
 import { SafeAreaModal } from './SafeAreaModal';
+import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
 
 export type InspectorDrawerProps = {
   visible: boolean;
@@ -22,7 +23,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 ];
 
 export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
-  const { colors, spacing } = useTheme();
+  const { colors, spacing, isDark } = useTheme();
   const { activeSessionName, activeProvider, activeModel, baseUrl, yolo } = useConnectionStore();
   const [tab, setTab] = useState<Tab>('workspace');
   const [memSnapshot, setMemSnapshot] = useState<MemorySnapshot | null>(null);
@@ -43,24 +44,24 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
   return (
     <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent edges={['bottom']}>
       <View style={styles.overlay}>
-        <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
-        <View style={[styles.drawer, { backgroundColor: colors.bgLift }]}>
-          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+        <View style={[styles.drawer, elevation(2, colors, isDark), { borderBottomWidth: 0 }]}>
+          <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <Text style={[styles.title, { color: colors.text }]}>Inspector</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn}>
               <Ionicons name="close" size={22} color={colors.textDim} />
             </TouchableOpacity>
           </View>
 
-          <View style={[styles.tabBar, { borderBottomColor: colors.border }]}>
+          <View style={[styles.tabBar, { borderBottomColor: colors.hairline }]}>
             {TABS.map(t => (
               <TouchableOpacity
                 key={t.id}
                 onPress={() => setTab(t.id)}
                 style={[styles.tab, tab === t.id && { borderBottomColor: colors.accent, borderBottomWidth: 2 }]}
               >
-                <Ionicons name={t.icon as any} size={18} color={tab === t.id ? colors.accent : colors.textDim} />
-                <Text style={[styles.tabLabel, { color: tab === t.id ? colors.accent : colors.textDim }]}>
+                <Ionicons name={t.icon as any} size={18} color={tab === t.id ? colors.accentFg : colors.textDim} />
+                <Text style={[styles.tabLabel, { color: tab === t.id ? colors.accentFg : colors.textDim }, tab === t.id && { fontWeight: fontWeights.semibold }]}>
                   {t.label}
                 </Text>
               </TouchableOpacity>
@@ -72,9 +73,9 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Session</Text>
                 <Text style={[styles.sectionValue, { color: colors.textDim }]}>{activeSessionName || 'None'}</Text>
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 12 }]}>Provider</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: spacing.md }]}>Provider</Text>
                 <Text style={[styles.sectionValue, { color: colors.textDim }]}>{activeProvider || 'None'}</Text>
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 12 }]}>Model</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: spacing.md }]}>Model</Text>
                 <Text style={[styles.sectionValue, { color: colors.textDim }]}>{activeModel || 'None'}</Text>
               </View>
             )}
@@ -82,17 +83,17 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
             {tab === 'memory' && (
               <View>
                 <TouchableOpacity onPress={loadMemory} style={[styles.searchRow, { borderColor: colors.border }]} activeOpacity={0.7}>
-                  <Text style={{ color: colors.text, fontSize: 14 }}>Load memory snapshot</Text>
+                  <Text style={{ color: colors.text, fontSize: fontSizes.base }}>Load memory snapshot</Text>
                 </TouchableOpacity>
-                {memLoading && <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />}
+                {memLoading && <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.base }} />}
                 {!memLoading && !memSnapshot && (
                   <Text style={[styles.emptyText, { color: colors.textDim }]}>Tap to load</Text>
                 )}
                 {memSnapshot && (
-                  <View style={{ marginTop: 12 }}>
+                  <View style={{ marginTop: spacing.md }}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Layers: {memSnapshot.layers?.length || 0}</Text>
                     {memSnapshot.layers?.map((layer, i) => (
-                      <View key={i} style={[styles.memItem, { borderColor: colors.border }]}>
+                      <View key={i} style={[styles.memItem, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
                         <Text style={[styles.memContent, { color: colors.text }]}>{layer.name}</Text>
                         <Text style={[styles.memTags, { color: colors.textDim }]}>{layer.tokens} tokens · {layer.fill_pct}%</Text>
                       </View>
@@ -106,7 +107,7 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Connection</Text>
                 <Text style={[styles.sectionValue, { color: colors.textDim }]}>{baseUrl}</Text>
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 12 }]}>YOLO</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: spacing.md }]}>YOLO</Text>
                 <Text style={[styles.sectionValue, { color: colors.textDim }]}>{yolo ? 'Enabled' : 'Disabled'}</Text>
               </View>
             )}
@@ -114,7 +115,7 @@ export function InspectorDrawer({ visible, onClose }: InspectorDrawerProps) {
             {tab === 'settings' && (
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Session Settings</Text>
-                <Text style={[styles.sectionValue, { color: colors.textDim, marginTop: 8 }]}>
+                <Text style={[styles.sectionValue, { color: colors.textDim, marginTop: spacing.sm }]}>
                   Configure provider, model, and variables via the Providers and Connection screens.
                 </Text>
               </View>
@@ -133,28 +134,27 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   drawer: {
     maxHeight: '85%',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
     borderBottomWidth: 1,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.semibold,
   },
   closeBtn: {
-    minHeight: 44,
-    minWidth: 44,
+    minHeight: touchTarget,
+    minWidth: touchTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -167,62 +167,60 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    minHeight: 44,
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    minHeight: touchTarget,
   },
   tabLabel: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.medium,
   },
   content: {
     flex: 1,
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
   },
   sectionValue: {
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: fontSizes.base,
+    marginTop: spacing.xs,
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    minHeight: 44,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: touchTarget,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
-    paddingVertical: 10,
+    fontSize: fontSizes.base,
+    paddingVertical: spacing.md,
   },
   searchBtn: {
-    minHeight: 44,
-    minWidth: 44,
+    minHeight: touchTarget,
+    minWidth: touchTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyText: {
-    fontSize: 14,
-    marginTop: 16,
+    fontSize: fontSizes.base,
+    marginTop: spacing.base,
     textAlign: 'center',
   },
   memItem: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    marginTop: spacing.sm,
   },
   memContent: {
-    fontSize: 13,
+    fontSize: fontSizes.sm,
   },
   memTags: {
-    fontSize: 11,
-    marginTop: 4,
+    fontSize: fontSizes.xs,
+    fontVariant: ['tabular-nums'],
+    marginTop: spacing.xs,
   },
 });

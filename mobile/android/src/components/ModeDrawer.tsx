@@ -17,6 +17,7 @@ import { TeacherScreen } from '../screens/TeacherScreen';
 import { Button } from './Button';
 import { Text } from './Text';
 import { SafeAreaModal } from './SafeAreaModal';
+import { elevation, fontSizes, fontWeights, spacing, touchTarget, typography } from '../theme/tokens';
 
 export type ModeDrawerProps = {
   visible: boolean;
@@ -34,7 +35,7 @@ const MODE_COMPONENTS: Record<string, React.ComponentType | undefined> = {
 };
 
 export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [activeMode, setActiveMode] = useState<ModeInfo | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -71,15 +72,18 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
   return (
     <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
+        <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         <View
           {...swipeResponder.panHandlers}
           style={[
             styles.drawer,
+            elevation(2, colors, isDark),
             {
+              borderWidth: 0,
+              borderLeftWidth: 1,
               backgroundColor: colors.glassStrong,
               borderLeftColor: colors.hairline,
-              paddingTop: 16,
+              paddingTop: spacing.base,
             },
           ]}
         >
@@ -103,7 +107,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               <ModeContent />
             ) : (
               <View style={styles.emptyState}>
-                <Ionicons name="options-outline" size={25} color={colors.textDim} />
+                <Ionicons name="options-outline" size={24} color={colors.textDim} />
                 <Text variant="lg" style={styles.emptyTitle}>No mode explorer</Text>
                 <Text variant="sm" dim style={styles.emptyBody}>
                   Select Feature, Research, Debug, Security, Loop, or Teacher mode to expose its dedicated controls here.
@@ -120,30 +124,25 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, flexDirection: 'row' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(5,10,16,0.42)' },
+  backdrop: { flex: 1 },
   drawer: {
     width: '92%',
     maxWidth: 520,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: -6, height: 0 },
+    borderLeftWidth: 1,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.base,
+    borderBottomWidth: 1,
   },
-  headerCopy: { flex: 1, paddingRight: 12 },
-  title: { fontSize: 18, lineHeight: 24, fontWeight: '600', letterSpacing: -0.25, marginTop: 2 },
-  iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerCopy: { flex: 1, paddingRight: spacing.md },
+  title: { fontSize: fontSizes.md, lineHeight: typography.md.lineHeight, fontWeight: fontWeights.semibold, marginTop: 2 },
+  iconButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
   content: { flex: 1 },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
-  emptyTitle: { fontWeight: '600', marginTop: 12 },
-  emptyBody: { textAlign: 'center', maxWidth: 330, marginTop: 6, lineHeight: 21 },
-  modeButton: { marginTop: 20, minWidth: 180 },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
+  emptyTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.md },
+  emptyBody: { textAlign: 'center', maxWidth: 330, marginTop: spacing.xs, lineHeight: typography.sm.lineHeight },
+  modeButton: { marginTop: spacing.base, minWidth: 180 },
 });

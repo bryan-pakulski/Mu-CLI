@@ -23,6 +23,8 @@ def _service(tmp_path):
 
 def test_stage_sessions_cannot_use_bash():
     assert "bash" not in stages.STAGE_TOOL_ALLOWLIST
+    for forbidden in ("write_file", "apply_diff", "search_and_replace_file", "spawn_agent", "bash_background"):
+        assert forbidden not in stages.STAGE_TOOL_ALLOWLIST
     assert "read_file" in stages.STAGE_TOOL_ALLOWLIST or "search_for_string" in stages.STAGE_TOOL_ALLOWLIST
 
 
@@ -94,7 +96,7 @@ def test_jira_import_requires_workspace_and_uses_top_level_session(tmp_path, mon
     ws.mkdir()
     created = []
 
-    def _import(svc, client, *, keys=(), jql="", defaults=None, max_results=20):
+    def _import(svc, client, *, keys=(), jql="", defaults=None, max_results=20, force=False):
         created.append(dict(defaults or {}))
         return {"created": [], "skipped": []}
 

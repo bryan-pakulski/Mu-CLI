@@ -59,15 +59,19 @@ class BaseDriftReport:
         }
 
 
-def _git(repo: str, *args: str, check: bool = True, timeout: int = 60) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        ["git", "-C", repo, *args],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-        timeout=timeout,
-    )
+def _git(repo: str, *args: str, check: bool = True, timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+    from .repository import git_timeout_seconds
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=timeout or git_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BaseDriftError(f"git {args[0] if args else ''} timed out (jobs.git_timeout_seconds)") from exc
     if check and result.returncode != 0:
         raise BaseDriftError((result.stderr or result.stdout or "git command failed").strip())
     return result
@@ -117,6 +121,29 @@ def _parse_conflicts(merge_tree_stdout: str) -> List[str]:
     return files
 
 
+def _base_remote() -> str:
+    try:
+        from .job_settings import rule_or
+        return str(rule_or("publish.pr_remote", "origin") or "origin").strip() or "origin"
+    except Exception:  # noqa: BLE001
+        return "origin"
+
+
+def comparison_ref(repo: str, base_ref: str, *, fetch: bool = True) -> str:
+    """The ref the base is judged by: ``<remote>/<base>`` after a best-effort
+    fetch when that remote-tracking ref exists, else the local ``base_ref``."""
+    from .repository import fetch_quietly
+
+    remote = _base_remote()
+    name = base_ref[len(remote) + 1:] if base_ref.startswith(f"{remote}/") else base_ref
+    if not name or name.upper() == "HEAD" or len(name) == 40 and all(c in "0123456789abcdef" for c in name):
+        return base_ref
+    if fetch:
+        fetch_quietly(repo, name, remote=remote)
+    tracking = _git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{name}^{{commit}}", check=False)
+    return f"{remote}/{name}" if tracking.returncode == 0 and tracking.stdout.strip() else base_ref
+
+
 def assess_base_drift(service: JobService, job_id: str) -> BaseDriftReport:
     """Read-only: compare the captured base with the current base tip and
     test-merge the job branch onto it."""
@@ -126,7 +153,7 @@ def assess_base_drift(service: JobService, job_id: str) -> BaseDriftReport:
     if not job.base_sha:
         raise BaseDriftError("Job has no captured base commit to compare against.")
     repo = _repository_root(service, job)
-    base_ref = _base_ref(job)
+    base_ref = comparison_ref(repo, _base_ref(job))
 
     branch_head = _git(repo, "rev-parse", "--verify", f"refs/heads/{job.branch}^{{commit}}").stdout.strip()
     current_base = _git(repo, "rev-parse", "--verify", f"{base_ref}^{{commit}}", check=False)
@@ -172,6 +199,18 @@ def assess_base_drift(service: JobService, job_id: str) -> BaseDriftReport:
     )
 
 
+def has_open_pr(job) -> bool:
+    """The job has a host PR that is not known closed/merged (``metadata.pr``).
+
+    Such a job's mergeability is the PR host's call: after a host squash-merge
+    the unsquashed local branch no longer test-merges onto the new base, so a
+    local drift check would wrongly flag it CONFLICTED."""
+    pr = (getattr(job, "metadata", None) or {}).get("pr")
+    if not isinstance(pr, dict) or not (pr.get("url") or pr.get("number")):
+        return False
+    return str(pr.get("state") or "open") not in ("closed", "merged")
+
+
 def apply_base_drift(service: JobService, job_id: str, *, source: str = "review") -> BaseDriftReport:
     """Assess and persist. READY_FOR_REVIEW + not mergeable -> CONFLICTED;
     CONFLICTED + mergeable again (base moved back / branch fixed) -> stays
@@ -181,14 +220,12 @@ def apply_base_drift(service: JobService, job_id: str, *, source: str = "review"
     report = assess_base_drift(service, job_id)
     payload = {**report.to_dict(), "source": source}
     service.store.append_event(job_id, "base_drift_assessed", reason=report.detail, payload=payload)
-    job = service.get(job_id)
-    metadata = dict(job.metadata or {})
-    metadata["base_drift"] = payload
     try:
-        service.store.update_runtime_fields(job_id, metadata_json=metadata)
+        service.store.patch_metadata(job_id, {"base_drift": payload})
     except Exception:  # noqa: BLE001 — metadata mirror is best-effort
         pass
-    if job.status == JobStatus.READY_FOR_REVIEW and report.mergeable is False:
+    job = service.get(job_id)
+    if job.status == JobStatus.READY_FOR_REVIEW and report.mergeable is False and not has_open_pr(job):
         service.transition(
             job_id,
             JobStatus.CONFLICTED,
@@ -202,4 +239,5 @@ def apply_base_drift(service: JobService, job_id: str, *, source: str = "review"
     return report
 
 
-__all__ = ["BaseDriftReport", "BaseDriftError", "assess_base_drift", "apply_base_drift"]
+__all__ = ["BaseDriftReport", "BaseDriftError", "assess_base_drift", "apply_base_drift", "comparison_ref",
+           "has_open_pr"]

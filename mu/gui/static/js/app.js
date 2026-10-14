@@ -10,6 +10,62 @@
 //
 // Bootstrap order is in DOMContentLoaded at the bottom.
 
+// Design-token access for canvas/SVG drawing. tokens.css is the only source
+// of visual values; canvas cannot resolve var(), so read the computed token.
+function muCssToken(name, fallback = "") {
+    try {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return value || fallback;
+    } catch (_) {
+        return fallback;
+    }
+}
+
+// Resolve any CSS colour string to [r, g, b, a] so canvas code can apply
+// data-driven alpha to a token colour.
+const _muColorCache = new Map();
+function muColorRgba(color) {
+    if (_muColorCache.has(color)) return _muColorCache.get(color);
+    let rgba = [128, 128, 128, 1];
+    try {
+        const probe = document.createElement("canvas").getContext("2d");
+        probe.fillStyle = "#000";
+        probe.fillStyle = color;
+        const v = String(probe.fillStyle);
+        if (v[0] === "#") {
+            const n = parseInt(v.slice(1, 7), 16);
+            rgba = [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
+        } else {
+            const m = v.match(/[\d.]+/g);
+            if (m && m.length >= 3) rgba = [+m[0], +m[1], +m[2], m.length > 3 ? +m[3] : 1];
+        }
+    } catch (_) { /* keep neutral fallback */ }
+    _muColorCache.set(color, rgba);
+    return rgba;
+}
+
+function muTokenAlpha(name, alpha) {
+    const [r, g, b, a] = muColorRgba(muCssToken(name));
+    return `rgba(${r}, ${g}, ${b}, ${(a * alpha).toFixed(3)})`;
+}
+
+// Context layers arrive with a server-side HSL hue (LAYER_HUES). Map each to
+// a data-visualisation series token; unknown hues (and FREE) stay neutral.
+const MU_LAYER_HUE_VIZ = Object.freeze({
+    210: "--viz-1",   // L0  system prompt
+    168: "--viz-7",   // L1B skills
+    280: "--viz-6",   // L2  summary
+    25: "--viz-3",    // L3  active goal
+    50: "--viz-2",    // L4B retrieved snippets
+    358: "--viz-4",   // L5  live history
+});
+function muLayerVizToken(hue) {
+    return MU_LAYER_HUE_VIZ[hue] || "--viz-8";
+}
+function muLayerColor(hue) {
+    return `var(${muLayerVizToken(hue)})`;
+}
+
 // MuCLI session type icons — same Ionicons used by the mobile app.
 // Kept as local inline SVG so the web GUI has no CDN or icon-font dependency.
 const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({
@@ -161,8 +217,11 @@ document.addEventListener("alpine:init", () => {
             // filter, or the newly focused session silently receives no
             // live events while the connection looks healthy. Guard: only
             // reconnect on an actual session change.
-            if ((prev || null) !== (this.currentName || null)) {
-                reconnectWithFocus();
+            if ((prev || null) !== (this.currentName || null)
+                && typeof window.__muReconnectWithFocus === "function") {
+                // bootSSE owns the stream; it publishes its reconnect hook
+                // on window (the function is scoped inside bootSSE).
+                window.__muReconnectWithFocus();
             }
             // Double-RAF: first frame lets Alpine swap the x-for turns to the
             // new session, second frame lets the DOM layout with the new
@@ -696,6 +755,7 @@ document.addEventListener("alpine:init", () => {
                 name: toolName || "",
                 jsonHtml: renderJSON(text),
                 rawText: typeof text === "string" ? text : null,
+                planBlocked: isPlanModeBlockedResult(text),
                 cacheKey: cacheKey || "",
                 at: Date.now(),
             });
@@ -1540,6 +1600,7 @@ document.addEventListener("alpine:init", () => {
                             name: part.tool_name || "",
                             jsonHtml: renderJSON(part.preview),
                             rawText: typeof part.preview === "string" ? part.preview : null,
+                            planBlocked: isPlanModeBlockedResult(part.preview),
                             at: 0,
                         });
                         const visualization = this._visualizationTurn(part.artifact, sessionKey);
@@ -1959,6 +2020,9 @@ ${problem.text}`, "error", 14000);
                 // mode.load() refreshes the active mode's panel store
                 // via panelModes — no explicit teacher/feature call needed.
                 Alpine.store("mode").load();
+                // Session-scoped safety state: approvals + plan mode.
+                Alpine.store("yolo").load();
+                Alpine.store("planMode").load();
                 // Refresh model selector for the newly-focused session.
                 await Alpine.store("inspector").loadCurrentProvider();
                 await Alpine.store("threads").load(name);
@@ -1982,6 +2046,8 @@ ${problem.text}`, "error", 16000);
             Alpine.store("chat").focus(name);
             await Alpine.store("chat").loadHistory(name);
             await Alpine.store("mode").load();
+            Alpine.store("yolo").load();
+            Alpine.store("planMode").load();
             // Refresh model selector for the newly-loaded session.
             await Alpine.store("inspector").loadCurrentProvider();
             await Alpine.store("threads").load(name);
@@ -2877,6 +2943,101 @@ ${problem.text}`, "error", 16000);
 
     Alpine.store("tokens", { input: 0, output: 0, total: 0, total_cost: 0 });
 
+    // Model effort for agent turns (`reasoning_effort`; "" = provider default). Each
+    // provider maps the neutral levels: Anthropic effort, OpenAI reasoning_effort,
+    // Ollama think. Lower = faster, less thinking.
+    Alpine.store("effort", {
+        value: "",
+        levels: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        label(level) {
+            return level ? ({ xhigh: "XHigh" }[level] || level.charAt(0).toUpperCase() + level.slice(1)) : "Default";
+        },
+        async load() {
+            try {
+                const r = await fetch("/api/providers/current");
+                const d = await r.json();
+                this.value = d.effort || "";
+                if (Array.isArray(d.effort_levels) && d.effort_levels.length) this.levels = d.effort_levels;
+            } catch (e) { console.error("effort.load", e); }
+        },
+        async set(level) {
+            const previous = this.value;
+            this.value = level || "";
+            try {
+                const r = level
+                    ? await fetch("/api/variables/reasoning_effort", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ value: level }),
+                    })
+                    : await fetch("/api/variables/reasoning_effort", { method: "DELETE" });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    throw new Error(d.detail || `effort update failed (${r.status})`);
+                }
+                Alpine.store("toast").show(`Effort → ${this.label(level)}`, "success");
+            } catch (e) {
+                this.value = previous;
+                Alpine.store("toast").show(String(e.message || e), "error");
+            }
+        },
+    });
+
+    // Plan mode (session.variables.plan_mode): read-only enforcement. The
+    // header pill + composer strip render only while it is on. State comes
+    // from GET /api/variables; `/plan` and POST /api/variables/plan_mode both
+    // publish a `plan_mode_changed` SSE event so the indicator stays live.
+    Alpine.store("planMode", {
+        active: false,
+        busy: false,
+        tooltip: "Plan mode: read-only. File edits, shell writes and other write tools are blocked.",
+        async load() {
+            try {
+                const r = await fetch("/api/variables");
+                const d = await r.json();
+                for (const g of (d.groups || [])) {
+                    for (const v of (g.variables || [])) {
+                        if (v.key === "plan_mode") { this.active = v.value === true || v.value === "true"; return; }
+                    }
+                }
+                this.active = false;
+            } catch (e) { console.error("planMode.load", e); }
+        },
+        apply(value) { this.active = !!value; },
+        async set(next) {
+            if (this.busy) return false;
+            this.busy = true;
+            try {
+                const r = await fetch("/api/variables/plan_mode", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ value: !!next }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || `Could not change plan mode (${r.status})`, "error");
+                    return false;
+                }
+                this.active = !!next;
+                Alpine.store("toast").show(
+                    next ? "Plan mode ON — writing is blocked" : "Plan mode OFF — write tools unblocked",
+                    next ? "info" : "success",
+                );
+                return true;
+            } catch (e) {
+                console.error("planMode.set", e);
+                return false;
+            } finally {
+                this.busy = false;
+            }
+        },
+        async turnOff({ confirmFirst = false } = {}) {
+            if (!this.active) return;
+            if (confirmFirst && !window.confirm("Turn off plan mode? The agent will be able to edit files and run write tools again.")) return;
+            await this.set(false);
+        },
+    });
+
     Alpine.store("yolo", {
         active: false,
         async load() {
@@ -2940,6 +3101,9 @@ ${problem.text}`, "error", 16000);
         form: { name: "", description: "", trigger: "", body: "", scope: "global" },
 
         async load() {
+            // The Work page (/work) shares base.html but has no chat session:
+            // GET /api/skills would only answer 412 there, so skip it.
+            if (document.getElementById("work-app")) return;
             try {
                 const r = await fetch("/api/skills");
                 if (!r.ok) return;
@@ -3081,7 +3245,9 @@ ${problem.text}`, "error", 16000);
     Alpine.store("layout", {
         sidebarOpen: true,
         panelOpen: true,
-        sidebarWidth: 220,
+        // planos side nav width (184px). 220 was the previous default and is
+        // treated as "never resized" so saved layouts adopt the new width.
+        sidebarWidth: 184,
         panelWidth: 360,
         _dragging: null,
 
@@ -3090,7 +3256,7 @@ ${problem.text}`, "error", 16000);
                 const saved = JSON.parse(localStorage.getItem("mucli-layout") || "{}");
                 if (saved.sidebarOpen === false) this.sidebarOpen = false;
                 if (saved.panelOpen === false) this.panelOpen = false;
-                if (saved.sidebarWidth > 0) this.sidebarWidth = saved.sidebarWidth;
+                if (saved.sidebarWidth > 0 && saved.sidebarWidth !== 220) this.sidebarWidth = saved.sidebarWidth;
                 if (saved.panelWidth > 0) this.panelWidth = saved.panelWidth;
             } catch (e) {}
             // Opening the mobile app should reveal the conversation first.
@@ -3947,12 +4113,12 @@ ${problem.text}`, "error", 16000);
         },
         severityColor(sev) {
             switch ((sev || "").toLowerCase()) {
-                case "critical": return "var(--err)";
-                case "high":     return "var(--risk-high)";
-                case "medium":   return "var(--risk-medium)";
-                case "low":      return "var(--risk-low)";
-                case "info":     return "var(--text-dimmer)";
-                default:         return "var(--text-dim)";
+                case "critical": return "var(--error)";
+                case "high":     return "color-mix(in srgb, var(--error) 60%, var(--warning))";
+                case "medium":   return "var(--warning)";
+                case "low":      return "var(--success)";
+                case "info":     return "var(--text-tertiary)";
+                default:         return "var(--text-tertiary)";
             }
         },
         formatTimestamp(unix) {
@@ -4191,6 +4357,8 @@ ${problem.text}`, "error", 16000);
         timelineHover: { visible: false, x: 0, y: 0, point: null, layer: null },
         cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
         _hoverTimer: null,
+        // Layer swatch colour: server hue -> --viz-N data-vis token.
+        layerColor(hue) { return muLayerColor(hue); },
         durable: {
             items: [],
             stats: {},
@@ -4501,20 +4669,20 @@ ${problem.text}`, "error", 16000);
 
         _contextPalette() {
             const light = document.documentElement.getAttribute("data-theme") === "light";
-            const styles = getComputedStyle(document.documentElement);
-            const css = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+            const font = `${muCssToken("--fs-xs", "12px")} ${muCssToken("--font-mono", "monospace")}`;
             return {
                 light,
-                text: css("--text", light ? "#171a20" : "#f2f4f7"),
-                textDim: css("--text-dim", light ? "#667080" : "#8b94a3"),
-                plotStart: light ? "rgba(89, 109, 255, .055)" : "rgba(99, 113, 255, .055)",
-                plotEnd: light ? "rgba(83, 99, 120, .012)" : "rgba(5, 8, 18, .02)",
-                grid: light ? "rgba(17, 24, 39, .105)" : "rgba(148, 163, 184, .10)",
-                selection: light ? "rgba(23, 26, 32, .68)" : "rgba(255, 255, 255, .78)",
-                churnTop: light ? "rgba(198, 51, 108, .27)" : "rgba(245, 92, 146, .48)",
-                churnBottom: light ? "rgba(89, 109, 255, .025)" : "rgba(99, 102, 241, .03)",
-                churnLine: light ? "rgba(179, 39, 94, .88)" : "rgba(248, 113, 163, .92)",
-                compaction: light ? "rgba(16, 132, 111, .76)" : "rgba(45, 212, 191, .72)",
+                text: muCssToken("--text-primary"),
+                textDim: muCssToken("--text-tertiary"),
+                plot: muCssToken("--bg-subtle"),
+                grid: muCssToken("--hairline-color"),
+                selection: muCssToken("--text-secondary"),
+                churnFill: muTokenAlpha("--viz-4", light ? .16 : .22),
+                churnLine: muCssToken("--viz-4"),
+                compaction: muCssToken("--viz-7"),
+                font,
+                fontEmpty: `${muCssToken("--fs-sm", "13px")} ${muCssToken("--font-mono", "monospace")}`,
+                layer: (hue, alpha) => muTokenAlpha(muLayerVizToken(hue), alpha),
             };
         },
 
@@ -4543,17 +4711,12 @@ ${problem.text}`, "error", 16000);
                         // Empty space is still space: a column with no text
                         // renders as a dim, desaturated layer hue so the
                         // band's full extent stays visible.
-                        ctx.fillStyle = palette.light
-                            ? `hsl(${hue},22%,96%)`
-                            : `hsl(${hue},30%,11%)`;
+                        ctx.fillStyle = palette.layer(hue, palette.light ? .08 : .1);
                     } else {
                         // v is 1..255: 1 = present & stable, 255 = churning.
                         const t = (v - 1) / 254;     // 0..1 change frequency
-                        const cellLight = palette.light
-                            ? (heat ? 91 - 48 * t : 52)
-                            : (heat ? 16 + 44 * t : 42);
-                        const saturation = palette.light ? 62 : 68;
-                        ctx.fillStyle = `hsl(${hue},${saturation}%,${cellLight.toFixed(1)}%)`;
+                        const alpha = heat ? .22 + .78 * t : .72;
+                        ctx.fillStyle = palette.layer(hue, alpha);
                     }
                     ctx.fillRect(ci, ri, 1, 1);
                 }
@@ -4588,10 +4751,7 @@ ${problem.text}`, "error", 16000);
             const { ctx, width, height, left, top, plotWidth, plotHeight } = g;
             const palette = this._contextPalette();
             ctx.clearRect(0, 0, width, height);
-            const bg = ctx.createLinearGradient(0, top, 0, top + plotHeight);
-            bg.addColorStop(0, palette.plotStart);
-            bg.addColorStop(1, palette.plotEnd);
-            ctx.fillStyle = bg;
+            ctx.fillStyle = palette.plot;
             ctx.fillRect(left, top, plotWidth, plotHeight);
             ctx.strokeStyle = palette.grid;
             ctx.lineWidth = 1;
@@ -4600,7 +4760,7 @@ ${problem.text}`, "error", 16000);
                 ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + plotWidth, y); ctx.stroke();
             }
             ctx.fillStyle = palette.textDim;
-            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.font = palette.font;
             ctx.textAlign = "left";
             if (points.length) {
                 ctx.fillText("call " + points[0].id, left, height - 8);
@@ -4617,8 +4777,9 @@ ${problem.text}`, "error", 16000);
             const points = this._visibleTimelinePoints(g.width);
             this._timelineBase(g, points);
             if (!points.length) {
-                g.ctx.fillStyle = this._contextPalette().textDim;
-                g.ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+                const emptyPalette = this._contextPalette();
+                g.ctx.fillStyle = emptyPalette.textDim;
+                g.ctx.font = emptyPalette.fontEmpty;
                 g.ctx.textAlign = "center";
                 g.ctx.fillText("waiting for the first provider call", g.left + g.plotWidth / 2, g.top + g.plotHeight / 2);
                 return;
@@ -4646,7 +4807,7 @@ ${problem.text}`, "error", 16000);
                 const layerMeta = legend[row];
                 const y = top + row * rowHeight;
                 ctx.fillStyle = palette.textDim;
-                ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+                ctx.font = palette.font;
                 ctx.textAlign = "right";
                 ctx.fillText(layerMeta.id, left - 8, y + rowHeight * .62);
                 for (let col = 0; col < points.length; col++) {
@@ -4657,10 +4818,7 @@ ${problem.text}`, "error", 16000);
                         ? Math.min(.96, (palette.light ? .38 : .28) + ratio * (palette.light ? .58 : .68))
                         : (occupied ? (palette.light ? .18 : .105) : (palette.light ? .055 : .035));
                     const inset = Math.min(1.5, cellWidth * .14);
-                    const lightness = palette.light
-                        ? (pointLayer.changed ? 45 : 68)
-                        : (pointLayer.changed ? 63 : 48);
-                    ctx.fillStyle = `hsla(${layerMeta.hue || 0}, 82%, ${lightness}%, ${alpha})`;
+                    ctx.fillStyle = palette.layer(layerMeta.hue || 0, alpha);
                     ctx.fillRect(
                         left + col * cellWidth + inset,
                         y + 1.5,
@@ -4698,18 +4856,11 @@ ${problem.text}`, "error", 16000);
                 }
                 ctx.closePath();
                 const hue = hueById[layerId] == null ? 210 : hueById[layerId];
-                const fill = ctx.createLinearGradient(0, top, 0, top + plotHeight);
-                fill.addColorStop(0, palette.light
-                    ? `hsla(${hue}, 72%, 46%, .66)`
-                    : `hsla(${hue}, 78%, 62%, .72)`);
-                fill.addColorStop(1, palette.light
-                    ? `hsla(${hue}, 66%, 72%, .25)`
-                    : `hsla(${hue}, 72%, 42%, .30)`);
-                ctx.fillStyle = fill;
+                ctx.fillStyle = palette.layer(hue, palette.light ? .55 : .6);
                 ctx.fill();
             }
             ctx.fillStyle = palette.textDim;
-            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.font = palette.font;
             ctx.textAlign = "left";
             ctx.fillText(peak.toLocaleString() + " tok peak", left + 6, top + 13);
         },
@@ -4720,15 +4871,12 @@ ${problem.text}`, "error", 16000);
             const maxChurn = Math.max(10, ...points.map(point => point.churn_score || 0));
             const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
             const yAt = value => top + plotHeight - (value / maxChurn) * plotHeight;
-            const gradient = ctx.createLinearGradient(0, top, 0, top + plotHeight);
-            gradient.addColorStop(0, palette.churnTop);
-            gradient.addColorStop(1, palette.churnBottom);
             ctx.beginPath();
             ctx.moveTo(xAt(0), top + plotHeight);
             points.forEach((point, index) => ctx.lineTo(xAt(index), yAt(point.churn_score || 0)));
             ctx.lineTo(xAt(points.length - 1), top + plotHeight);
             ctx.closePath();
-            ctx.fillStyle = gradient;
+            ctx.fillStyle = palette.churnFill;
             ctx.fill();
             ctx.beginPath();
             points.forEach((point, index) => {
@@ -4747,7 +4895,7 @@ ${problem.text}`, "error", 16000);
                 ctx.setLineDash([]);
             }
             ctx.fillStyle = palette.textDim;
-            ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+            ctx.font = palette.font;
             ctx.textAlign = "left";
             ctx.fillText(maxChurn.toFixed(1) + "% peak churn", left + 6, top + 13);
         },
@@ -5180,6 +5328,23 @@ ${problem.text}`, "error", 16000);
         toggleGroup(name) {
             this.openGroups[name] = !this.openGroups[name];
         },
+        groupLabel(name) {
+            return ({
+                "speed & effort": "Speed & effort",
+                "openai": "OpenAI",
+                "ollama": "Ollama",
+                "provider retry": "Provider retry",
+                "context budgets": "Context budgets",
+                "loop mode": "Loop mode",
+            })[name] || name;
+        },
+        groupNote(name) {
+            return ({
+                "speed & effort": "Lower effort = faster turns with less thinking. Each provider maps it: Anthropic effort, OpenAI reasoning_effort, Ollama think.",
+                "ollama": "Cloud models (ollama.com or a :cloud tag) never use num_ctx or keep_alive. Local models always get one fixed num_ctx of at least 64k so the daemon never reloads them.",
+                "openai": "auto uses the Responses API for reasoning models, so their reasoning carries across tool calls.",
+            })[name] || "";
+        },
         isGroupOpen(name) {
             // While the filter is active, auto-expand any group that has
             // matching entries so the user can actually see the results.
@@ -5206,6 +5371,7 @@ ${problem.text}`, "error", 16000);
                 return false;
             }
             await this.loadVariables();
+            if (key === "plan_mode") Alpine.store("planMode").apply(value === true || value === "true");
             return true;
         },
         async resetVariable(key) {
@@ -5392,6 +5558,7 @@ ${problem.text}`, "error", 16000);
             // Persist the switched model so the picker stays in sync and
             // a reload restores it (the backend already persisted it).
             this.currentModel = (await r.json().catch(() => ({}))).model || this.currentModel;
+            Alpine.store("effort").load();
             Alpine.store("toast").show(
                 `model → ${this.currentModel} (${this.currentProvider})`,
                 "success",
@@ -6317,6 +6484,7 @@ function bootSSE() {
         }
         reconnectAttempt = 0;
     }
+    window.__muReconnectWithFocus = reconnectWithFocus;
 
     function connect() {
         if (source) { try { source.close(); } catch {} source = null; }
@@ -6490,6 +6658,9 @@ function routeEvent(ev) {
         case "thread_wake_started":
             Alpine.store("threads").load();
             break;
+        case "plan_mode_changed":
+            if (isFocused) Alpine.store("planMode").apply(ev.plan_mode);
+            break;
         case "mode_changed": {
             if (isFocused) {
                 const mode = Alpine.store("mode");
@@ -6651,6 +6822,12 @@ function routeEvent(ev) {
                 }
                 refreshActivePanel();
                 Alpine.store("yolo").load();
+                if (ev.result && ev.result.data && typeof ev.result.data.plan_mode === "boolean") {
+                    Alpine.store("planMode").apply(ev.result.data.plan_mode);
+                } else {
+                    Alpine.store("planMode").load();
+                }
+                Alpine.store("effort").load();
                 Alpine.store("skills").load();
             }
             break;
@@ -6825,10 +7002,23 @@ function subagentStatusText(a) {
     }
 }
 
+// A write tool refused by the plan-mode pre_tool hook returns an envelope
+// with error_code "plan_mode_blocked" (mu/agent/plan_mode.py).
+function isPlanModeBlockedResult(value) {
+    if (value == null) return false;
+    if (typeof value === "string") return value.includes("plan_mode_blocked");
+    if (typeof value === "object") {
+        if (value.error_code === "plan_mode_blocked") return true;
+        try { return JSON.stringify(value).includes("plan_mode_blocked"); } catch (e) { return false; }
+    }
+    return false;
+}
+
 function eventLabel(ev) {
+    if (ev.kind === "tool_result" && ev.planBlocked) return "🔒 Blocked by plan mode";
     switch (ev.kind) {
-        case "tool_call":   return "→ tool";
-        case "tool_result": return "← result";
+        case "tool_call":   return "› tool";
+        case "tool_result": return "↳ result";
         case "thinking":    return "thinking";
         case "info":        return "info";
         default:            return ev.kind;
@@ -6912,10 +7102,10 @@ function promptModal() {
 
         okLabel() {
             switch (this.shape) {
-                case "tool_approval": return "approve";
-                case "confirm":       return "yes";
-                case "diff":          return "approve";
-                default:              return "ok";
+                case "tool_approval": return "Approve";
+                case "confirm":       return "Yes";
+                case "diff":          return "Approve";
+                default:              return "OK";
             }
         },
         optLabel(o) { return typeof o === "string" ? o : (o.label || o.name || JSON.stringify(o)); },
@@ -7134,6 +7324,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // teacher, feature, and every other view.
     Alpine.store("loop").load();
     Alpine.store("yolo").load();
+    Alpine.store("planMode").load();
+    Alpine.store("effort").load();
     Alpine.store("skills").load();
     Alpine.store("cmdComplete").load();
     Alpine.store("inspector").loadProviders();

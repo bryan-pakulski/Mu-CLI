@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import type { CompletionItem } from '../hooks/useCommandCompletion';
-import { spacing } from '../theme/tokens';
+import { spacing, fonts, radii, fontWeights, touchTarget, elevation } from '../theme/tokens';
 
 interface CommandSuggestionBarProps {
   visible: boolean;
@@ -21,33 +21,33 @@ interface CommandSuggestionBarProps {
  * handles the completion logic; this component is purely presentational.
  */
 export function CommandSuggestionBar({ visible, items, selectedIdx, onSelect }: CommandSuggestionBarProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
 
   if (!visible || items.length === 0) return null;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
+    <View style={[styles.container, elevation(1, colors, isDark)]}>
       <ScrollView
         style={{ maxHeight: 220 }}
         keyboardShouldPersistTaps="always"
         nestedScrollEnabled
       >
         {items.map((item, idx) => (
-          <TouchableOpacity
+          <Pressable
             key={item.value + idx}
             onPress={() => onSelect(item)}
-            style={[
+            style={({ pressed }) => [
               styles.item,
-              idx === selectedIdx ? { backgroundColor: colors.bgHover } : null,
+              idx === selectedIdx ? { backgroundColor: colors.accentSubtle } : pressed ? { backgroundColor: colors.bgHover } : null,
             ]}
           >
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text
                 variant="sm"
                 style={{
-                  color: idx === selectedIdx ? colors.accent : colors.text,
-                  fontFamily: 'monospace',
-                  fontWeight: idx === selectedIdx ? '600' : '400',
+                  color: idx === selectedIdx ? colors.accentFg : colors.text,
+                  fontFamily: fonts.mono,
+                  fontWeight: idx === selectedIdx ? fontWeights.semibold : fontWeights.regular,
                 }}
                 numberOfLines={1}
               >
@@ -63,7 +63,7 @@ export function CommandSuggestionBar({ visible, items, selectedIdx, onSelect }: 
                 </Text>
               ) : null}
             </View>
-          </TouchableOpacity>
+          </Pressable>
         ))}
       </ScrollView>
     </View>
@@ -72,16 +72,15 @@ export function CommandSuggestionBar({ visible, items, selectedIdx, onSelect }: 
 
 const styles = StyleSheet.create({
   container: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    marginHorizontal: 10,
+    borderRadius: radii.lg,
+    marginHorizontal: spacing.sm,
     marginBottom: 2,
     overflow: 'hidden',
   },
   item: {
     paddingHorizontal: spacing.base,
-    paddingVertical: 10,
-    minHeight: 44,
+    paddingVertical: spacing.md,
+    minHeight: touchTarget,
     justifyContent: 'center',
   },
 });

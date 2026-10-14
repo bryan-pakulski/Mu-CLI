@@ -1,0 +1,454 @@
+{
+ "schema": [
+  {
+   "id": "budget",
+   "title": "Model budget",
+   "hint": "Per pipeline stage, per run. A stage that hits a limit stops and asks you.",
+   "fields": [
+    {
+     "path": "sandbox.max_tokens",
+     "label": "Token budget per stage",
+     "kind": "int",
+     "default": 50000000,
+     "hint": "Tokens a single stage run may use before it stops.",
+     "min": 1,
+     "max": 10000000000,
+     "unit": "tokens"
+    },
+    {
+     "path": "sandbox.count_cache_reads",
+     "label": "Count cache reads",
+     "kind": "bool",
+     "default": false,
+     "hint": "Off: only new tokens (uncached input + output) count. On: every re-sent context token counts, which exhausts long stages quickly."
+    },
+    {
+     "path": "sandbox.max_cost_usd",
+     "label": "Cost budget per stage",
+     "kind": "float",
+     "default": 50.0,
+     "hint": "Estimated API spend a single stage run may reach before it stops.",
+     "min": 0,
+     "max": 100000,
+     "unit": "USD"
+    }
+   ]
+  },
+  {
+   "id": "defaults",
+   "title": "New job defaults",
+   "hint": "Applied when a job is created without its own value (the New job form prefills them).",
+   "fields": [
+    {
+     "path": "defaults.max_retries",
+     "label": "Repair retries",
+     "kind": "int",
+     "default": 2,
+     "hint": "Automatic re-attempts after a failed stage.",
+     "min": 0,
+     "max": 20
+    },
+    {
+     "path": "defaults.max_cost_usd",
+     "label": "Job cost limit",
+     "kind": "float",
+     "default": null,
+     "hint": "Total spend for the whole job. Blank = no job-level limit (stage budgets still apply).",
+     "min": 0.01,
+     "max": 1000000,
+     "unit": "USD",
+     "optional": true
+    },
+    {
+     "path": "defaults.max_runtime_seconds",
+     "label": "Job runtime limit",
+     "kind": "int",
+     "default": null,
+     "hint": "Wall-clock limit for the whole job. Blank = none.",
+     "min": 1,
+     "max": 604800,
+     "unit": "seconds",
+     "optional": true
+    },
+    {
+     "path": "defaults.acceptance_review",
+     "label": "Acceptance review",
+     "kind": "bool",
+     "default": false,
+     "hint": "Run the extra acceptance-criteria reviewer (env MUCLI_JOBS_ACCEPTANCE_REVIEW still forces it on)."
+    }
+   ]
+  },
+  {
+   "id": "iterations",
+   "title": "Agent iterations",
+   "hint": "How many agent loop turns a stage may take. A job's own limit wins.",
+   "fields": [
+    {
+     "path": "limits.max_iterations",
+     "label": "Default iterations per stage",
+     "kind": "int",
+     "default": 1000,
+     "hint": "Applies to every stage without a more specific limit.",
+     "min": 1,
+     "max": 100000
+    },
+    {
+     "path": "limits.stage_max_iterations.plan",
+     "label": "Plan stage iterations",
+     "kind": "int",
+     "default": null,
+     "hint": "Blank = default above.",
+     "min": 1,
+     "max": 100000,
+     "optional": true
+    },
+    {
+     "path": "limits.stage_max_iterations.implement",
+     "label": "Implement stage iterations",
+     "kind": "int",
+     "default": null,
+     "hint": "Blank = default above.",
+     "min": 1,
+     "max": 100000,
+     "optional": true
+    },
+    {
+     "path": "limits.stage_max_iterations.review",
+     "label": "Review stage iterations",
+     "kind": "int",
+     "default": null,
+     "hint": "Blank = default above.",
+     "min": 1,
+     "max": 100000,
+     "optional": true
+    }
+   ]
+  },
+  {
+   "id": "timeouts",
+   "title": "Stage time limits",
+   "hint": "Wall-clock limit for each sandboxed stage; reaching it pauses the job.",
+   "fields": [
+    {
+     "path": "sandbox.model_request_timeout_s",
+     "label": "Model request timeout",
+     "kind": "int",
+     "default": 300,
+     "hint": "How long one model call from inside the sandbox may take.",
+     "min": 10,
+     "max": 7200,
+     "unit": "seconds"
+    },
+    {
+     "path": "sandbox.stage_timeout_s.plan",
+     "label": "Plan",
+     "kind": "int",
+     "default": 900,
+     "hint": "",
+     "min": 1,
+     "max": 86400,
+     "unit": "seconds"
+    },
+    {
+     "path": "sandbox.stage_timeout_s.implement",
+     "label": "Implement",
+     "kind": "int",
+     "default": 3600,
+     "hint": "",
+     "min": 1,
+     "max": 86400,
+     "unit": "seconds"
+    },
+    {
+     "path": "sandbox.stage_timeout_s.review",
+     "label": "Review",
+     "kind": "int",
+     "default": 900,
+     "hint": "",
+     "min": 1,
+     "max": 86400,
+     "unit": "seconds"
+    },
+    {
+     "path": "sandbox.stage_timeout_s.checks",
+     "label": "Checks",
+     "kind": "int",
+     "default": 1800,
+     "hint": "",
+     "min": 1,
+     "max": 86400,
+     "unit": "seconds"
+    }
+   ]
+  },
+  {
+   "id": "checks",
+   "title": "Checks",
+   "hint": "Host-run verification after implement.",
+   "fields": [
+    {
+     "path": "checks.max_fix_attempts",
+     "label": "Automatic fix attempts",
+     "kind": "int",
+     "default": 2,
+     "hint": "Times a check failure is sent back to the implementer before a human is asked.",
+     "min": 0,
+     "max": 50
+    },
+    {
+     "path": "checks.baseline_triage",
+     "label": "Baseline triage",
+     "kind": "bool",
+     "default": true,
+     "hint": "Re-run failing checks on the base commit; failures that also happen there are reported, not sent back to the implementer."
+    },
+    {
+     "path": "checks.command_timeout_s",
+     "label": "Validation command timeout",
+     "kind": "int",
+     "default": 600,
+     "hint": "Per-command limit for host-run validation commands (legacy verifier).",
+     "min": 1,
+     "max": 3600,
+     "unit": "seconds"
+    },
+    {
+     "path": "checks.suites",
+     "label": "Required check suites",
+     "kind": "suites",
+     "default": [],
+     "hint": "Added to every job's plan checks. Commands run in the sandboxed checks stage."
+    }
+   ]
+  },
+  {
+   "id": "toolchains",
+   "title": "Toolchains",
+   "hint": "Per-repository build environments (planos-style). A matching repository's implement and checks stages run in an image derived from its base image (mucli adds Python + its agent code); the derived image is built on first use or with Build.",
+   "fields": [
+    {
+     "path": "sandbox.toolchains",
+     "label": "Repository toolchain images",
+     "kind": "rows",
+     "default": [],
+     "hint": "Base image = an image that already has the project's toolchain, e.g. the project's builder/CI image or rust:1.88. Add the package registries the build needs (crates.io, static.crates.io, index.crates.io, pypi.org \u2026) to Extra egress domains.",
+     "columns": [
+      {
+       "key": "repository",
+       "label": "Repository path",
+       "placeholder": "/home/me/src/project",
+       "required": true
+      },
+      {
+       "key": "base_image",
+       "label": "Base image",
+       "placeholder": "rust:1.88-bookworm",
+       "required": true,
+       "pattern": "[\\w./:@-]+"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sandbox",
+   "title": "Sandbox",
+   "hint": "The locked-down container each stage runs in.",
+   "fields": [
+    {
+     "path": "sandbox.image",
+     "label": "Runtime image",
+     "kind": "text",
+     "default": "mucli-job-runtime:latest",
+     "hint": "Local image; it is never pulled.",
+     "pattern": "[\\w./:@-]+"
+    },
+    {
+     "path": "sandbox.cpu",
+     "label": "CPUs",
+     "kind": "float",
+     "default": 4,
+     "hint": "",
+     "min": 0.1,
+     "max": 64
+    },
+    {
+     "path": "sandbox.memory",
+     "label": "Memory limit",
+     "kind": "text",
+     "default": "8g",
+     "hint": "Docker memory value, e.g. 8g or 16384m.",
+     "pattern": "[1-9][0-9]*[kmgKMG]?"
+    },
+    {
+     "path": "sandbox.max_file_bytes",
+     "label": "Largest changed file",
+     "kind": "int",
+     "default": 20971520,
+     "hint": "Changes with a bigger file are rejected.",
+     "min": 1,
+     "max": 1099511627776,
+     "unit": "bytes"
+    },
+    {
+     "path": "sandbox.egress_extra",
+     "label": "Extra egress domains",
+     "kind": "list",
+     "default": [],
+     "hint": "Domains implement and checks may reach in addition to the model relay, e.g. pypi.org or *.npmjs.org.",
+     "item_pattern": "(?:\\*\\.)?[a-zA-Z0-9.-]+"
+    }
+   ]
+  },
+  {
+   "id": "publish",
+   "title": "Push",
+   "hint": "What \u201cPush / open PR\u201d does.",
+   "fields": [
+    {
+     "path": "publish.timeout_s",
+     "label": "Push timeout",
+     "kind": "int",
+     "default": 300,
+     "hint": "Limit for git push and the PR/MR request.",
+     "min": 10,
+     "max": 3600,
+     "unit": "seconds"
+    },
+    {
+     "path": "publish.mode",
+     "label": "Publish mode",
+     "kind": "select",
+     "default": "",
+     "hint": "Used when a job does not set its own mode.",
+     "options": [
+      [
+       "",
+       "Per job (default)"
+      ],
+      [
+       "auto",
+       "Auto-detect"
+      ],
+      [
+       "gh",
+       "GitHub CLI"
+      ],
+      [
+       "github",
+       "GitHub API"
+      ],
+      [
+       "gitlab",
+       "GitLab API"
+      ],
+      [
+       "none",
+       "Don't publish"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "retry",
+   "title": "Automatic retries",
+   "hint": "Transient provider failures are retried with exponential backoff.",
+   "fields": [
+    {
+     "path": "retry.backoff_base_s",
+     "label": "First retry delay",
+     "kind": "float",
+     "default": 30.0,
+     "hint": "Doubles on every further attempt.",
+     "min": 1,
+     "max": 3600,
+     "unit": "seconds"
+    },
+    {
+     "path": "retry.backoff_max_s",
+     "label": "Longest retry delay",
+     "kind": "float",
+     "default": 600.0,
+     "hint": "Cap for the doubling delay.",
+     "min": 1,
+     "max": 86400,
+     "unit": "seconds"
+    }
+   ]
+  },
+  {
+   "id": "scheduling",
+   "title": "Scheduling & retention",
+   "hint": "How the job controller runs and cleans up work.",
+   "fields": [
+    {
+     "path": "jobs.max_concurrent",
+     "label": "Concurrent jobs",
+     "kind": "int",
+     "default": 5,
+     "hint": "Jobs that may run a stage at the same time.",
+     "min": 1,
+     "max": 50
+    },
+    {
+     "path": "jobs.drift_check_interval_s",
+     "label": "Base drift check interval",
+     "kind": "int",
+     "default": 300,
+     "hint": "How often finished jobs are checked against their base branch. 0 = off.",
+     "min": 0,
+     "max": 86400,
+     "unit": "seconds"
+    },
+    {
+     "path": "jobs.retention_days",
+     "label": "Archive retention",
+     "kind": "float",
+     "default": 30.0,
+     "hint": "Artifacts of archived jobs older than this are purged. 0 = keep forever (env MUCLI_JOBS_RETENTION_DAYS wins when set).",
+     "min": 0,
+     "max": 36500,
+     "unit": "days"
+    }
+   ]
+  }
+ ],
+ "values": {
+  "sandbox.max_tokens": 50000000,
+  "sandbox.count_cache_reads": false,
+  "sandbox.max_cost_usd": 50.0,
+  "defaults.max_retries": 2,
+  "defaults.max_cost_usd": null,
+  "defaults.max_runtime_seconds": null,
+  "defaults.acceptance_review": false,
+  "limits.max_iterations": 1000,
+  "limits.stage_max_iterations.plan": null,
+  "limits.stage_max_iterations.implement": null,
+  "limits.stage_max_iterations.review": null,
+  "sandbox.model_request_timeout_s": 300,
+  "sandbox.stage_timeout_s.plan": 900,
+  "sandbox.stage_timeout_s.implement": 3600,
+  "sandbox.stage_timeout_s.review": 900,
+  "sandbox.stage_timeout_s.checks": 1800,
+  "checks.max_fix_attempts": 2,
+  "checks.baseline_triage": true,
+  "checks.command_timeout_s": 600,
+  "checks.suites": [],
+  "sandbox.toolchains": [],
+  "sandbox.image": "mucli-job-runtime:latest",
+  "sandbox.cpu": 4,
+  "sandbox.memory": "8g",
+  "sandbox.max_file_bytes": 20971520,
+  "sandbox.egress_extra": [],
+  "publish.timeout_s": 300,
+  "publish.mode": "",
+  "retry.backoff_base_s": 30.0,
+  "retry.backoff_max_s": 600.0,
+  "jobs.max_concurrent": 5,
+  "jobs.drift_check_interval_s": 300,
+  "jobs.retention_days": 30.0
+ },
+ "overrides": {}
+}

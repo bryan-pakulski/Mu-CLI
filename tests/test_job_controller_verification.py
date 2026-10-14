@@ -55,7 +55,7 @@ def test_verifying_job_launches_verifier_not_implementation_worker(tmp_path):
 
     assert controller.tick() == 1
     command = factory.calls[0][0]
-    assert command[:3] == ["python-test", "-m", "mu.jobs.verify_worker"]
+    assert command[:5] == ["python-test", "-m", "mu.jobs.worker", "--phase", "verification"]
     assert controller.snapshot()["processes"][job.id]["phase"] == "verification"
 
 
@@ -73,7 +73,7 @@ def test_queued_job_launches_implementation_worker(tmp_path):
 
     assert controller.tick() == 1
     command = factory.calls[0][0]
-    assert command[:3] == ["python-test", "-m", "mu.jobs.worker"]
+    assert command[:5] == ["python-test", "-m", "mu.jobs.worker", "--phase", "implementation"]
     assert controller.snapshot()["processes"][job.id]["phase"] == "implementation"
 
 

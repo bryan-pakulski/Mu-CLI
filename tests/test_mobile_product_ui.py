@@ -27,7 +27,8 @@ def read(path: Path) -> str:
 def test_mobile_uses_same_alpine_environmental_palette_as_web():
     text = read(TOKENS)
     for value in (
-        "#0D1219", "#EDF3F8", "#8BA9C6", "#6286A8",
+        # planos palette (dark bg / light bg / dark accent / light accent)
+        "#16161e", "#f6f8fa", "#7aa2f7", "#2f5bd3",
         "skyField", "glacierField", "sunriseField", "peachField",
         "alpineField", "snowField", "glassStrong", "hairline",
     ):
@@ -35,16 +36,19 @@ def test_mobile_uses_same_alpine_environmental_palette_as_web():
     assert "#1A1814" not in text
     assert "#FAF8F5" not in text
     assert "#B0ACA0" not in text
+    # The previous indigo palette is fully replaced by planos.
+    assert "#0E0E10" not in text
+    assert "#8B95FF" not in text
 
 
 def test_mobile_atmosphere_is_smooth_colour_not_fake_landscape():
     app = read(APP)
     atmosphere = read(ATMOSPHERE)
     assert "<AtmosphericBackground>" in app
-    assert "data:image/png;base64" in atmosphere
-    assert "smooth atmospheric colour/light falloff" in atmosphere
-    assert "no scenery or geometric" in atmosphere
-    assert "resizeMode=\"stretch\"" in atmosphere
+    assert "data:image/png;base64" not in atmosphere
+    assert "backgroundColor: colors.bg" in atmosphere
+    assert "no gradient, glow or blur" in atmosphere
+    assert "resizeMode=\"stretch\"" not in atmosphere
     assert "styles.mountain" not in atmosphere
     assert "clipPath" not in atmosphere
     assert "polygon(" not in atmosphere
@@ -67,14 +71,21 @@ def test_mobile_shared_surfaces_are_quiet_glass_not_legacy_cards():
     button = read(BUTTON)
     input_text = read(INPUT)
     sheet = read(SHEET)
-    assert "backgroundColor: colors.glass" in card
-    assert "borderColor: colors.hairline" in card
-    assert "shadowOpacity: 0.04" in card
-    assert "primary: { backgroundColor: colors.accentStrong" in button
-    assert "secondary: { backgroundColor: 'transparent'" in button
-    assert "backgroundColor: colors.glass" in input_text
-    assert "backgroundColor: colors.glassStrong" in sheet
-    assert "borderTopWidth: StyleSheet.hairlineWidth" in sheet
+    # planos panels: surface + 1px border + radius 10, no shadow.
+    assert "backgroundColor: colors.surface" in card
+    assert "borderColor: colors.border" in card
+    assert "borderRadius: radii.panel" in card
+    assert "shadowOpacity" not in card
+    # planos buttons: primary = accent (or tone) fill, secondary = raised + border.
+    assert "primary: { backgroundColor: toneColor || colors.accent," in button
+    assert "secondary: { backgroundColor: colors.raised" in button
+    # planos inputs sit on the page background with a 1px border.
+    assert "backgroundColor: colors.bg" in input_text
+    assert "borderColor: colors.border" in input_text
+    # planos sheets: raised + 1px border, radius 10 top corners.
+    assert "backgroundColor: colors.raised" in sheet
+    assert "borderTopLeftRadius: radii.panel" in sheet
+    assert "borderTopWidth: 1" in sheet
 
 
 def test_mobile_header_matches_web_information_hierarchy():
@@ -83,10 +94,11 @@ def test_mobile_header_matches_web_information_hierarchy():
     assert 'accessibilityLabel="Open Trace Analyzer"' in text
     assert 'name="analytics-outline"' in text
     assert 'name="settings-outline"' in text
-    assert "backgroundColor: colors.glass" in text
-    assert "borderBottomColor: colors.hairline" in text
-    assert "sectionBody: { borderTopWidth: StyleSheet.hairlineWidth }" in text
-    assert "borderBottomWidth: StyleSheet.hairlineWidth" in text
+    # planos top bar: surface + 1px bottom border; settings groups are panels.
+    assert "backgroundColor: colors.surface" in text
+    assert "borderBottomColor: colors.border" in text
+    assert "sectionBody: { borderWidth: 1, borderRadius: radii.panel" in text
+    assert "borderBottomWidth: 1" in text
     assert "ellipsis-horizontal" not in text
 
 
@@ -94,8 +106,12 @@ def test_mobile_chat_is_flat_compact_and_single_pane():
     text = read(CHAT)
     assert "compact interim disclosures" in text
     assert "styles.interimHeader" in text
-    assert "borderLeftWidth: StyleSheet.hairlineWidth" in text
+    assert "borderLeftWidth: 1" in text
     assert "backgroundColor: colors.glassStrong" in text
+    # planos transcript bubbles: assistant squared top-left, user accent-tinted.
+    assert "borderTopLeftRadius: 2" in text
+    assert "backgroundColor: colors.accentSubtle, borderColor: colors.accent" in text
+    assert "fontFamily: fonts.mono" in text
     assert "styles.composerUtilities" in text
     assert "styles.composerPane" in text
     assert "onSettingsPress" in text
@@ -110,24 +126,25 @@ def test_mobile_settings_and_drawers_are_hairline_flat():
     settings = read(ADVANCED)
     sessions = read(SESSIONS)
     mode = read(MODE_DRAWER)
-    assert "groupList: { borderTopWidth: StyleSheet.hairlineWidth }" in settings
-    assert "group: { borderBottomWidth: StyleSheet.hairlineWidth }" in settings
-    assert "valueInput" in settings and "borderBottomWidth: StyleSheet.hairlineWidth" in settings
+    # planos Settings: grouped panels with 1px borders, bordered value inputs.
+    assert "groupList: { gap: spacing.md }" in settings
+    assert "group: { borderWidth: 1, borderRadius: radii.panel" in settings
+    assert "valueInput" in settings and "borderRadius: radii.control" in settings
     assert "changedBadge" not in settings
     assert "backgroundColor: colors.glassStrong" in sessions
-    assert "borderRightWidth: StyleSheet.hairlineWidth" in sessions
+    assert "borderRightWidth: 1" in sessions
     assert "borderRadius: 15" not in sessions
     assert "backgroundColor: colors.glassStrong" in mode
-    assert "borderLeftWidth: StyleSheet.hairlineWidth" in mode
+    assert "borderLeftWidth: 1" in mode
 
 
 def test_mobile_trace_inherits_shared_glass_and_alpine_semantics():
     trace = read(TRACE)
     assert "<Card" in trace
-    assert "color: colors.accent" in trace
-    assert "color: colors.info" in trace
-    assert "color: colors.success" in trace
-    assert "color: colors.error" in trace
+    assert "color: colors.viz[0]" in trace
+    assert "color: colors.viz[4]" in trace
+    assert "color: summary.status === 'completed' ? colors.success : colors.warning" in trace
+    assert "color: colors.viz[3]" in trace
     assert "#e0a040" not in trace.lower()
 
 

@@ -174,15 +174,14 @@ def test_assert_lease_rejects_expired_lease(tmp_path):
     assert stored.status == "running"  # untouched
 
 
-def test_timed_out_reachable_from_all_worker_active_states(tmp_path):
-    """Round-38 F3: the whole-job runtime deadline must be enforceable in
-    EVERY worker-active phase — PREPARING, VERIFYING, and RECOVERING were
-    missing TIMED_OUT transitions, so a hung worktree prepare or verifier
-    could never be reaped."""
+def test_no_status_moves_to_timed_out_or_budget_exceeded(tmp_path):
+    """A reached cap pauses and asks (needs_human / limit_reached); TIMED_OUT and
+    BUDGET_EXCEEDED are never written from any worker-active state any more (old rows
+    keep them readable and retryable). The pause itself is legal everywhere."""
     for setup in ("prepare", "verify", "recover"):
         clock = Clock()
         service = make_service(tmp_path / setup, clock)
-        job = service.create(JobSpec(title=f"Timeout {setup}"))
+        job = service.create(JobSpec(title=f"Limit {setup}"))
         if setup == "prepare":
             service.transition(job.id, JobStatus.PREPARING)
         elif setup == "verify":
@@ -192,8 +191,11 @@ def test_timed_out_reachable_from_all_worker_active_states(tmp_path):
         else:
             service.transition(job.id, JobStatus.PREPARING)
             service.transition(job.id, JobStatus.RECOVERING)
-        current = service.transition(job.id, JobStatus.TIMED_OUT)
-        assert current.status == JobStatus.TIMED_OUT, setup
+        for stopped in (JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED):
+            with pytest.raises(JobStateError):
+                service.transition(job.id, stopped)
+        current = service.require_human(job.id, AttentionReason.LIMIT_REACHED, "limit")
+        assert current.status == JobStatus.NEEDS_HUMAN, setup
 
 
 def test_attempt_records_survive_and_are_numbered(tmp_path):

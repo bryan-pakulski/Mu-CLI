@@ -1,4 +1,6 @@
-/* Viewport-aware anchored lists. Geometry is supplied by floating_popouts.js. */
+/* Viewport-aware anchored lists. Geometry is supplied by floating_popouts.js.
+ * Loaded before page stylesheets, so the geometry overrides stay important
+ * to win over each surface's own absolute positioning. */
 .cmd-complete[data-viewport-floating],
 .trace-info-popout[data-viewport-floating],
 .manager-overflow-menu[data-viewport-floating],
@@ -15,7 +17,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
-    z-index: 1000 !important;
+    z-index: var(--z-overlay) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

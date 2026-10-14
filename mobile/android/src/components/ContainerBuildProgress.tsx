@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
 
 export type ContainerProgressLog = {
   seq: number;
@@ -50,8 +51,9 @@ export function ContainerBuildProgress({
       style={[
         styles.container,
         {
-          backgroundColor: colors.bgLift,
-          borderColor: failed ? colors.error : colors.border,
+          backgroundColor: failed ? colors.errorSubtle : colors.surface,
+          borderColor: colors.border,
+          borderLeftColor: failed ? colors.danger : running ? colors.running : colors.ok,
         },
       ]}
     >
@@ -64,23 +66,25 @@ export function ContainerBuildProgress({
         style={styles.header}
       >
         {running ? (
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={colors.running} accessibilityLabel="in progress" />
         ) : (
-          <Ionicons
-            name={failed ? 'alert-circle-outline' : 'checkmark-circle-outline'}
-            size={20}
-            color={failed ? colors.error : colors.accent}
-          />
+          <Text
+            variant="base"
+            accessibilityLabel={failed ? 'failed' : 'done'}
+            style={{ color: failed ? colors.danger : colors.ok, fontWeight: fontWeights.semibold }}
+          >
+            {failed ? '✗' : '✓'}
+          </Text>
         )}
         <View style={styles.copy}>
-          <Text variant="sm" style={{ fontWeight: '600' }}>
+          <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>
             {message || 'Preparing container…'}
           </Text>
           <Text variant="xs" dim>
             {expanded ? 'Hide Docker output' : 'Tap to view Docker output'}
           </Text>
         </View>
-        <View style={[styles.chevron, { backgroundColor: colors.bgHover }]}>
+        <View style={styles.chevron}>
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={17}
@@ -90,10 +94,10 @@ export function ContainerBuildProgress({
       </TouchableOpacity>
 
       {expanded ? (
-        <View style={[styles.outputShell, { borderTopColor: colors.border, backgroundColor: colors.bg }]}>
+        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.codeBg }]}>
           <View style={styles.outputHeader}>
             <Text variant="xs" dim style={styles.outputTitle}>stdout / stderr</Text>
-            <Text variant="xs" dim>{logs.length} events</Text>
+            <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{logs.length} events</Text>
           </View>
           <ScrollView
             ref={outputRef}
@@ -108,8 +112,7 @@ export function ContainerBuildProgress({
                   variant="xs"
                   style={{
                     color: line.stream === 'stderr' ? colors.error : colors.textDim,
-                    fontWeight: '700',
-                    textTransform: 'uppercase',
+                    fontWeight: fontWeights.semibold,
                   }}
                 >
                   {line.stream || 'output'}
@@ -138,49 +141,48 @@ export function ContainerBuildProgress({
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 17,
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    borderRadius: radii.panel,
     overflow: 'hidden',
   },
   header: {
     minHeight: 70,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
+    gap: spacing.md,
   },
-  copy: { flex: 1, gap: 3 },
+  copy: { flex: 1, gap: spacing.xs },
   chevron: {
-    width: 32,
-    height: 32,
-    borderRadius: 11,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   outputShell: {
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
   },
   outputHeader: {
-    minHeight: 38,
-    paddingHorizontal: 13,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   outputTitle: {
-    fontWeight: '700',
-    letterSpacing: 0.45,
-    textTransform: 'uppercase',
+    fontWeight: fontWeights.semibold,
   },
   outputScroll: { maxHeight: 280 },
-  outputContent: { paddingHorizontal: 13, paddingBottom: 13 },
-  logEntry: { marginBottom: 11, gap: 4 },
+  outputContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  logEntry: { marginBottom: spacing.md, gap: spacing.xs },
   logText: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11.5,
-    lineHeight: 17,
+    fontFamily: fonts.mono,
+    fontSize: fontSizes.xs,
+    lineHeight: typography.xs.lineHeight,
   },
-  waitingText: { paddingVertical: 14 },
+  waitingText: { paddingVertical: spacing.base },
 });

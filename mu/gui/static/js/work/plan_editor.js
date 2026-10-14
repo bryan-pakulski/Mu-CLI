@@ -41,6 +41,8 @@
         return doc;
     }
     function preview(text) {
+        // Front matter (version/author/based_on) is metadata, shown as the version label instead.
+        text = String(text ?? '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
         // Escape first: plan content may contain repository-controlled HTML.
         if (!window.marked) return `<pre>${escape(text)}</pre>`;
         const template = document.createElement('template');
@@ -52,44 +54,53 @@
         });
         return template.innerHTML;
     }
-    function mount(container, plan, actions, send, onSaved = () => {}) {
+    /* planos plan editing: markdown with a live side-by-side preview (structured rows as an
+     * alternative view of the same document), Cancel / Save plan, ctrl+s, 5 s autosave of drafts.
+     * Approve and re-plan live in the job's action bar; approving is blocked while edits are unsaved. */
+    function mount(container, plan, actions, send, onSaved = () => {}, { onDirty = () => {}, onCancel = () => {} } = {}) {
         let doc = plan.doc || parse(plan.markdown || '');
         let markdown = plan.draft ?? plan.markdown ?? render(doc);
         if (plan.draft) doc = parse(plan.draft);
-        let dirty = Boolean(plan.draft), revision = 0, savedRevision = -1, mode = 'structured', busy = false;
+        let dirty = Boolean(plan.draft), revision = 0, savedRevision = -1, mode = 'markdown', busy = false;
         const editable = actions.some(a => a.id === 'savePlanDraft' && a.enabled);
-        const action = id => actions.find(a => a.id === id);
+        const confirmLeave = (text, opts) => window.MuJobUI?.confirm ? window.MuJobUI.confirm(text, opts) : Promise.resolve(window.confirm(text));
         const message = text => { const el = container.querySelector('[data-plan-status]'); if (el) el.textContent = text; };
+        const setDirty = value => { const was = dirty; dirty = value; if (was !== dirty) onDirty(dirty); };
         function changed() {
-            dirty = true; revision += 1; markdown = mode === 'markdown' ? container.querySelector('[data-markdown]').value : render(doc);
-            const preview = container.querySelector('[data-plan-preview]'); if (preview) preview.innerHTML = window.MuJobPlan.preview(markdown);
-            const approve = container.querySelector('[data-plan-approve]'); if (approve) approve.disabled = true;
-            message('Unsaved edits — save a version before approving.');
+            revision += 1; markdown = mode === 'markdown' ? container.querySelector('[data-markdown]').value : render(doc);
+            const out = container.querySelector('[data-plan-preview]'); if (out) out.innerHTML = window.MuJobPlan.preview(markdown);
+            const save = container.querySelector('[data-plan-save]'); if (save) save.disabled = false;
+            setDirty(true);
+            message('Unsaved edits — save the plan before approving.');
         }
         function draw() {
-            container.innerHTML = `<div class="job-plan-toolbar"><button data-mode="structured">Structured</button><button data-mode="markdown">Markdown</button><span>Version ${plan.version || 0}${plan.approved_version ? ` · approved v${plan.approved_version}` : ''}</span></div>
-                <div data-fields></div><p role="status" data-plan-status></p>
-                ${plan.diff_from_previous ? `<details open><summary>Changes from previous version</summary><pre class="work-diff">${escape(plan.diff_from_previous)}</pre></details>` : ''}
-                ${editable ? '<div class="work-action-row"><button data-plan-save>Save draft</button><button data-plan-approve>Approve plan</button></div><label>Re-plan feedback<textarea data-feedback rows="2"></textarea></label><button data-plan-reject>Request re-plan</button>' : '<p>Approved plans are read-only.</p>'}`;
+            container.innerHTML = `<div class="col">
+                <div class="row wrap"><strong>Editing plan · v${plan.version || 0}</strong><span class="muted small">Save, then approve from the action bar to implement your version.</span><span class="spacer"></span>
+                    <div class="work-segmented" role="group" aria-label="Editor view"><button type="button" data-mode="markdown" aria-pressed="${mode === 'markdown'}">Markdown</button><button type="button" data-mode="structured" aria-pressed="${mode === 'structured'}">Structured</button></div>
+                    <button type="button" class="btn" data-plan-cancel>Cancel</button>
+                    ${editable ? `<button type="button" class="btn primary" data-plan-save ${dirty ? '' : 'disabled'}>Save plan <kbd aria-hidden="true">ctrl+s</kbd></button>` : ''}</div>
+                <p role="status" class="small tone-warn" data-plan-status></p>
+                <div data-fields></div></div>`;
             container.querySelectorAll('[data-mode]').forEach(button => { button.onclick = () => {
                 if (mode === 'markdown') doc = parse(markdown);
                 mode = button.dataset.mode; draw();
             }; });
             const fields = container.querySelector('[data-fields]');
             if (mode === 'markdown') {
-                fields.innerHTML = `<div class="job-plan-split"><label>Markdown<textarea data-markdown rows="24" ${editable ? '' : 'readonly'}>${escape(markdown)}</textarea></label><div><h4>Live preview</h4><div data-plan-preview>${preview(markdown)}</div></div></div>`;
+                fields.innerHTML = `<div class="work-editor"><label class="sr-only" for="work-plan-markdown">Plan markdown</label><textarea id="work-plan-markdown" data-markdown spellcheck="true" ${editable ? '' : 'readonly'}>${escape(markdown)}</textarea><div class="work-preview md" aria-label="Preview" data-plan-preview>${preview(markdown)}</div></div>`;
                 fields.querySelector('textarea').oninput = changed;
             } else {
-                fields.innerHTML = `<label>Summary<textarea data-summary ${editable ? '' : 'readonly'}>${escape(doc.summary)}</textarea></label>`;
+                fields.innerHTML = `<div class="work-plan-structured"><label class="field"><span class="label">Summary</span><textarea data-summary ${editable ? '' : 'readonly'}>${escape(doc.summary)}</textarea></label></div>`;
+                const wrap = fields.firstElementChild;
                 fields.querySelector('[data-summary]').oninput = e => { doc.summary = e.target.value; changed(); };
                 for (const key of ['approach', 'acceptance', 'checks', 'files', 'risks']) {
-                    const section = document.createElement('section'); section.className = 'job-plan-section';
-                    section.innerHTML = `<h4>${sections[key]}</h4>`;
+                    const section = document.createElement('section'); section.className = 'col';
+                    section.innerHTML = `<h3>${sections[key]}</h3>`;
                     (doc[key] || []).forEach((item, i) => {
-                        const row = document.createElement('div'); row.className = 'job-plan-row';
+                        const row = document.createElement('div'); row.className = 'work-plan-row';
                         const keys = key === 'acceptance' ? ['id', 'text'] : key === 'checks' ? ['suite', 'cmd'] : ['value'];
-                        row.innerHTML = keys.map(k => `<input aria-label="${escape(sections[key])} ${k}" value="${escape(k === 'value' ? item : item[k])}" ${editable ? '' : 'readonly'}>`).join('') +
-                            (editable ? '<button data-up aria-label="Move up">↑</button><button data-down aria-label="Move down">↓</button><button data-remove aria-label="Remove">×</button>' : '');
+                        row.innerHTML = keys.map(k => `<input type="text" aria-label="${escape(sections[key])} ${k}" value="${escape(k === 'value' ? item : item[k])}" ${editable ? '' : 'readonly'}>`).join('') +
+                            (editable ? '<button type="button" class="btn ghost icon sm" data-up aria-label="Move up">↑</button><button type="button" class="btn ghost icon sm" data-down aria-label="Move down">↓</button><button type="button" class="btn ghost icon sm tone-danger" data-remove aria-label="Remove">×</button>' : '');
                         row.querySelectorAll('input').forEach((input, j) => { input.oninput = e => { if (keys[j] === 'value') doc[key][i] = e.target.value; else doc[key][i][keys[j]] = e.target.value; changed(); }; });
                         if (editable) {
                             row.querySelector('[data-remove]').onclick = () => { doc[key].splice(i, 1); changed(); draw(); };
@@ -100,45 +111,47 @@
                         }
                         section.append(row);
                     });
-                    if (editable) { const add = document.createElement('button'); add.textContent = '+ Add'; add.onclick = () => {
+                    if (editable) { const add = document.createElement('button'); add.type = 'button'; add.className = 'btn sm'; add.style.alignSelf = 'flex-start'; add.textContent = '+ Add'; add.onclick = () => {
                         doc[key].push(key === 'acceptance' ? { id: `AC-${Date.now()}`, text: '' } : key === 'checks' ? { suite: `check-${Date.now()}`, cmd: '' } : ''); changed(); draw();
                     }; section.append(add); }
-                    fields.append(section);
+                    wrap.append(section);
                 }
             }
-            if (editable) {
-                container.querySelector('[data-plan-approve]').disabled = dirty || !action('approvePlan')?.enabled;
-                container.querySelector('[data-plan-save]').onclick = () => perform('savePlanDraft', { plan: markdown, version: plan.version });
-                container.querySelector('[data-plan-approve]').onclick = () => perform('approvePlan', { version: plan.version });
-                container.querySelector('[data-plan-reject]').onclick = () => perform('rejectPlan', { feedback: container.querySelector('[data-feedback]').value });
-            }
-            if (dirty) message('Unsaved edits — save a version before approving.');
+            container.querySelector('[data-plan-cancel]').onclick = async () => {
+                if (dirty && !await confirmLeave('Discard your plan edits?', { title: 'Discard edits', okLabel: 'Discard', tone: 'danger' })) return;
+                setDirty(false); destroy(); onCancel();
+            };
+            if (editable) container.querySelector('[data-plan-save]').onclick = () => perform('savePlanDraft', { plan: markdown, version: plan.version });
+            container.querySelector('[data-fields]').addEventListener('keydown', e => { if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (editable && dirty) perform('savePlanDraft', { plan: markdown, version: plan.version }); } });
+            if (dirty) message('Unsaved edits — save the plan before approving.');
         }
         async function perform(type, args) {
             if (busy) return; busy = true;
             const current = revision;
+            const save = container.querySelector('[data-plan-save]'); if (save) { save.disabled = true; save.firstChild.textContent = 'Saving… '; }
             try {
                 const result = await send(type, args);
                 if (result.data?.version) plan.version = result.data.version;
-                dirty = revision !== current;
+                setDirty(revision !== current);
+                window.MuJobUI?.toast?.(`Plan saved as v${plan.version}`, 'ok');
                 await onSaved();
                 if (dirty) message('Version saved; newer edits remain unsaved.');
             }
-            catch (error) { message(error.message); }
+            catch (error) { message(error.message); if (save) { save.disabled = false; save.firstChild.textContent = 'Save plan '; } }
             finally { busy = false; }
         }
         const timer = setInterval(async () => {
             if (!editable || !dirty || busy || savedRevision === revision) return;
             const current = revision; busy = true;
-            try { await send('savePlanDraft', { plan: markdown, autosave: true, version: plan.version }); savedRevision = current; message('Draft autosaved. Save a version before approving.'); }
+            try { await send('savePlanDraft', { plan: markdown, autosave: true, version: plan.version }); savedRevision = current; message('Draft autosaved. Save the plan before approving.'); }
             catch (error) { message(`Autosave failed: ${error.message}`); }
             finally { busy = false; }
         }, 5000);
         const beforeUnload = e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
         window.addEventListener('beforeunload', beforeUnload);
+        function destroy() { clearInterval(timer); window.removeEventListener('beforeunload', beforeUnload); }
         draw();
-        return { isDirty: () => dirty, canLeave: () => !dirty || window.confirm('Leave this plan with unsaved edits?'),
-            destroy: () => { clearInterval(timer); window.removeEventListener('beforeunload', beforeUnload); } };
+        return { isDirty: () => dirty, canLeave: () => !dirty || window.confirm('Leave this plan with unsaved edits?'), destroy };
     }
     const api = { parse, render, preview, mount };
     if (typeof window !== 'undefined') window.MuJobPlan = api;

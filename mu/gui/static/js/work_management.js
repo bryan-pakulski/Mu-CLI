@@ -1,11 +1,11 @@
+/* Jobs mode — History page (#/history): query historic jobs, aggregate report, archive /
+ * restore / delete and exports. Loads whenever the router enters the history route. */
 (() => {
     'use strict';
 
-    const openBtn = document.getElementById('work-manage');
-    const backdrop = document.getElementById('work-management-backdrop');
-    if (!openBtn || !backdrop) return;
+    const page = document.getElementById('work-management-backdrop');
+    if (!page) return;
 
-    const closeBtn = document.getElementById('work-management-close');
     const applyBtn = document.getElementById('work-management-apply');
     const resetBtn = document.getElementById('work-management-reset');
     const queryEl = document.getElementById('work-management-query-text');
@@ -26,7 +26,6 @@
     const deleteSelectedBtn = document.getElementById('work-management-delete-selected');
     const exportJson = document.getElementById('work-management-export-json');
     const exportCsv = document.getElementById('work-management-export-csv');
-    const toastEl = document.getElementById('work-toast');
 
     const state = {
         rows: [],
@@ -47,16 +46,24 @@
     }
 
     function toast(message, isError = false) {
-        if (!toastEl) return;
-        toastEl.textContent = String(message || '');
-        toastEl.style.color = isError ? 'var(--err)' : 'var(--text-soft)';
-        toastEl.hidden = false;
-        clearTimeout(toast._timer);
-        toast._timer = setTimeout(() => { toastEl.hidden = true; }, 4200);
+        window.MuJobUI?.toast(String(message || ''), isError ? 'danger' : 'ok');
     }
+    const confirmDanger = (message, title) => (window.MuJobUI
+        ? window.MuJobUI.confirm(message, { title, okLabel: 'Delete', tone: 'danger' })
+        : Promise.resolve(window.confirm(message)));
 
     function statusLabel(value) {
         return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+    // planos status vocabulary: glyph + label, never colour alone.
+    const STATUS_TONE = {
+        failed: ['✗', 'danger'], environment_error: ['✗', 'danger'], timed_out: ['✗', 'danger'], budget_exceeded: ['✗', 'danger'],
+        cancelled: ['–', 'muted'], merged: ['✓', 'ok'], ready_for_review: ['◆', 'warn'], needs_human: ['◆', 'warn'],
+        running: ['●', 'running'], queued: ['○', 'muted'],
+    };
+    function statusPill(value) {
+        const [glyph, tone] = STATUS_TONE[value] || ['○', 'muted'];
+        return `<span class="pill tone-${tone} work-management-status"><span aria-hidden="true">${glyph}</span>${escapeHtml(statusLabel(value).toLowerCase())}</span>`;
     }
 
     function fmtMoney(value) {
@@ -123,34 +130,34 @@
     function renderReport(report) {
         const statusEntries = Object.entries(report?.status_counts || {}).slice(0, 6);
         const repositories = Array.isArray(report?.repositories) ? report.repositories.slice(0, 5) : [];
+        const failure = Number(report?.failure_rate || 0);
+        const metric = (value, label, tone = 'accent') => `<li class="work-stat work-report-metric tone-${tone}"><span class="work-stat-value">${value}</span><span class="work-stat-label">${escapeHtml(label)}</span></li>`;
         reportEl.innerHTML = `
-            <div class="work-report-metrics">
-                <div class="work-report-metric"><span>Jobs</span><strong>${Number(report?.total_jobs || 0)}</strong></div>
-                <div class="work-report-metric"><span>Archived</span><strong>${Number(report?.archived_jobs || 0)}</strong></div>
-                <div class="work-report-metric"><span>Attempts</span><strong>${Number(report?.attempts || 0)}</strong></div>
-                <div class="work-report-metric"><span>Cost</span><strong>${fmtMoney(report?.total_cost_usd)}</strong></div>
-                <div class="work-report-metric"><span>Avg runtime</span><strong>${fmtDuration(report?.average_elapsed_seconds)}</strong></div>
-                <div class="work-report-metric"><span>Failure rate</span><strong>${(Number(report?.failure_rate || 0) * 100).toFixed(1)}%</strong></div>
-            </div>
-            <div class="work-report-breakdown">
-                <strong>Breakdown</strong>
-                <div class="work-report-breakdown-list">
-                    ${statusEntries.map(([status, count]) => `<div><span>${escapeHtml(statusLabel(status))}</span><span>${Number(count)}</span><span></span></div>`).join('')}
-                    ${repositories.map(item => `<div><span title="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</span><span>${Number(item.jobs)}</span><span>${fmtMoney(item.cost_usd)}</span></div>`).join('')}
-                    ${!statusEntries.length && !repositories.length ? '<div><span>No matching history</span><span></span><span></span></div>' : ''}
-                </div>
+            <ul class="plain work-stats work-report-metrics">
+                ${metric(Number(report?.total_jobs || 0), 'jobs')}
+                ${metric(Number(report?.archived_jobs || 0), 'archived', 'muted')}
+                ${metric(Number(report?.attempts || 0), 'attempts', 'muted')}
+                ${metric(fmtMoney(report?.total_cost_usd), 'cost', 'muted')}
+                ${metric(fmtDuration(report?.average_elapsed_seconds), 'avg runtime', 'muted')}
+                ${metric(`${(failure * 100).toFixed(1)}%`, 'failure rate', failure > 0 ? 'danger' : 'ok')}
+            </ul>
+            <div class="grid-2 work-report-breakdown">
+                <section class="panel" aria-labelledby="work-report-status-h"><header><h2 id="work-report-status-h">By status</h2></header>
+                    <div class="panel-body">${statusEntries.length ? `<ul class="plain col work-report-breakdown-list">${statusEntries.map(([status, count]) => `<li class="row">${statusPill(status)}<span class="spacer"></span><span class="num">${Number(count)}</span></li>`).join('')}</ul>` : '<p class="empty">No matching history.</p>'}</div></section>
+                <section class="panel" aria-labelledby="work-report-repo-h"><header><h2 id="work-report-repo-h">By repository</h2></header>
+                    <div class="panel-body">${repositories.length ? `<ul class="plain col work-report-breakdown-list">${repositories.map(item => `<li class="row"><span class="mono small ellipsis grow" title="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</span><span class="num muted">${Number(item.jobs)} jobs</span><span class="num">${fmtMoney(item.cost_usd)}</span></li>`).join('')}</ul>` : '<p class="empty">No matching history.</p>'}</div></section>
             </div>
         `;
     }
 
     function rowActions(job) {
         return `
-            <div class="work-management-row-actions">
-                <a href="/api/jobs/${encodeURIComponent(job.id)}/debug-export" title="Export job telemetry">Debug export</a>
+            <div class="row work-management-row-actions">
+                <a class="btn sm" href="/api/jobs/${encodeURIComponent(job.id)}/debug-export" title="Export job telemetry">Debug export</a>
                 ${job.archived
-                    ? `<button type="button" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
-                    : job.manageable ? `<button type="button" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
-                <button type="button" class="delete" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
+                    ? `<button type="button" class="btn sm" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
+                    : job.manageable ? `<button type="button" class="btn sm" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
+                <button type="button" class="btn sm tone-danger delete" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" aria-label="Delete ${escapeHtml(job.title)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
             </div>
         `;
     }
@@ -161,18 +168,18 @@
         } else {
             resultsEl.innerHTML = state.rows.map(job => `
                 <tr data-history-job="${escapeHtml(job.id)}">
-                    <td><input type="checkbox" data-history-select="${escapeHtml(job.id)}" ${state.selected.has(job.id) ? 'checked' : ''}></td>
+                    <td><input type="checkbox" data-history-select="${escapeHtml(job.id)}" aria-label="Select ${escapeHtml(job.title)}" ${state.selected.has(job.id) ? 'checked' : ''}></td>
                     <td>
                         <div class="work-management-title">
-                            <strong title="${escapeHtml(job.title)}">${escapeHtml(job.title)}</strong>
+                            <a href="#/job/${encodeURIComponent(job.id)}" title="${escapeHtml(job.title)}">${escapeHtml(job.title)}</a>
                             <span>${escapeHtml(job.id.slice(0, 12))}${job.archived ? ' · archived' : ''}</span>
                         </div>
                     </td>
-                    <td><span class="work-management-status">${escapeHtml(statusLabel(job.status))}</span>${job.archived ? '<span class="work-management-archive-mark">A</span>' : ''}</td>
+                    <td>${statusPill(job.status)}${job.archived ? '<span class="pill tone-muted work-management-archive-mark" title="archived">archived</span>' : ''}</td>
                     <td class="work-management-repo" title="${escapeHtml(job.repository || '')}">${escapeHtml(job.repository || '—')}</td>
-                    <td>${fmtMoney(job.cost_usd)}</td>
-                    <td>${Number(job.attempt_count || 0)}</td>
-                    <td title="Worked ${escapeHtml(fmtDuration(job.elapsed_seconds))}">${escapeHtml(fmtDate(job.updated_at))}</td>
+                    <td class="num">${fmtMoney(job.cost_usd)}</td>
+                    <td class="num">${Number(job.attempt_count || 0)}</td>
+                    <td class="num muted small" title="Worked ${escapeHtml(fmtDuration(job.elapsed_seconds))}">${escapeHtml(fmtDate(job.updated_at))}</td>
                     <td>${rowActions(job)}</td>
                 </tr>
             `).join('');
@@ -245,12 +252,12 @@
                 await api(`/api/jobs/${encodeURIComponent(jobId)}/restore`, { method: 'POST', body: {} });
                 toast('Job restored.');
             } else if (action === 'delete') {
-                if (!window.confirm('Delete this job? Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.')) return;
+                if (!await confirmDanger('Delete this job? Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.', 'Delete job')) return;
                 await api(`/api/jobs/${encodeURIComponent(jobId)}?force=1`, { method: 'DELETE' });
                 state.selected.delete(jobId);
                 toast('Job deleted. Git branch preserved.');
             }
-            document.getElementById('work-refresh')?.click();
+            window.MuWork?.refreshBoard?.().catch(() => {});
             await load();
         } catch (error) {
             toast(error.message, true);
@@ -260,7 +267,7 @@
     async function bulk(action) {
         const ids = [...state.selected];
         if (!ids.length) return;
-        if (action === 'delete' && !window.confirm(`Delete ${ids.length} selected jobs? Running jobs are cancelled first; records, telemetry, evidence and managed worktrees are removed. Git branches are preserved.`)) return;
+        if (action === 'delete' && !await confirmDanger(`Delete ${ids.length} selected jobs? Running jobs are cancelled first; records, telemetry, evidence and managed worktrees are removed. Git branches are preserved.`, `Delete ${ids.length} jobs`)) return;
         try {
             const result = await api('/api/jobs/manage/bulk', {
                 method: 'POST',
@@ -271,23 +278,16 @@
             if (action === 'delete') {
                 result.results?.filter(item => item.ok).forEach(item => state.selected.delete(item.job_id));
             }
-            document.getElementById('work-refresh')?.click();
+            window.MuWork?.refreshBoard?.().catch(() => {});
             await load();
         } catch (error) {
             toast(error.message, true);
         }
     }
 
+    // The History page is a route (#/history): entering it (re)queries; nothing to close.
     function open() {
-        backdrop.hidden = false;
-        document.body.classList.add('work-management-open');
         void load({ resetOffset: true });
-        setTimeout(() => queryEl.focus(), 20);
-    }
-
-    function close() {
-        backdrop.hidden = true;
-        document.body.classList.remove('work-management-open');
     }
 
     function reset() {
@@ -301,9 +301,7 @@
         void load({ resetOffset: true });
     }
 
-    openBtn.addEventListener('click', open);
-    closeBtn.addEventListener('click', close);
-    backdrop.addEventListener('click', event => { if (event.target === backdrop) close(); });
+    window.addEventListener('mu:work-route', event => { if (event.detail?.name === 'history') open(); });
     applyBtn.addEventListener('click', () => void load({ resetOffset: true }));
     resetBtn.addEventListener('click', reset);
     previousBtn.addEventListener('click', () => { state.offset = Math.max(0, state.offset - state.limit); void load(); });
@@ -321,7 +319,4 @@
         if (event.key === 'Enter') { event.preventDefault(); void load({ resetOffset: true }); }
     });
     [statusEl, archiveEl, scopeEl, ageEl].forEach(input => input.addEventListener('change', () => void load({ resetOffset: true })));
-    document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && !backdrop.hidden) close();
-    });
 })();

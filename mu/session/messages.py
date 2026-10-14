@@ -606,18 +606,31 @@ def prepare_runtime_history(
     projected = session._build_messages_from_history(
         session_manager.history[projection_start:], {"role": "system", "parts": []}
     )[:-1]
-    start_index = len(session_manager.history)
-    running_tokens = 0
-    while start_index > session_manager.summary_anchor:
-        next_index = start_index - 1
-        next_tokens = _estimate_messages_tokens([projected[next_index - projection_start]])
-        if (
-            running_tokens + next_tokens > token_budget
-            and next_index < len(session_manager.history) - 1
-        ):
-            break
-        running_tokens += next_tokens
-        start_index = next_index
+    def window_start(budget: int) -> int:
+        start = len(session_manager.history)
+        running = 0
+        while start > session_manager.summary_anchor:
+            next_index = start - 1
+            next_tokens = _estimate_messages_tokens([projected[next_index - projection_start]])
+            if running + next_tokens > budget and next_index < len(session_manager.history) - 1:
+                break
+            running += next_tokens
+            start = next_index
+        return start
+
+    start_index = window_start(token_budget)
+    # Stepped trimming: once history no longer fits, a window that moved by one message
+    # every turn would shift the whole request prefix (no prompt-cache hits). Trim to a
+    # low watermark instead and keep that start while the window still fits.
+    previous = getattr(session, "_runtime_window_start", None)
+    if start_index <= session_manager.summary_anchor:
+        session._runtime_window_start = None
+    elif isinstance(previous, int) and start_index <= previous < len(session_manager.history) \
+            and previous > session_manager.summary_anchor:
+        start_index = previous
+    else:
+        start_index = window_start(int(token_budget * 0.75))
+        session._runtime_window_start = start_index
     # R4 / FM-2: if any single message in the runtime slice is oversized
     # relative to the L5 budget, substitute a chunk-summarized
     # CONTEXT-OVERFLOW envelope BEFORE assembling recent_history. Cached

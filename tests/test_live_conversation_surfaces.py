@@ -135,8 +135,9 @@ def test_mobile_input_required_banner_is_centered_and_prominent():
     assert "top: '50%'" in style
     assert "transform: [{ translateY: -38 }]" in style
     assert "bottom:" not in style
-    assert "backgroundColor: colors.glassStrong" in source
-    assert "borderColor: colors.accent" in source
+    # planos approval banner: raised surface with a warn-tone left border + ◆.
+    assert "backgroundColor: colors.raised" in source
+    assert "borderLeftColor: colors.warn" in source
 
 
 def test_handoff_animations_exist_on_both_clients():

@@ -32,14 +32,16 @@ def publish_mode(job: Job) -> str:
     execution = dict(job.execution or {})
     if not execution.get("git_enabled", True):
         return "none"
-    return str(execution.get("publish_mode") or "none").strip().lower() or "none"
+    mode = str(execution.get("publish_mode") or "").strip().lower()
+    if not mode:
+        from .job_settings import rule
+        mode = str(rule("publish.mode") or "").strip().lower()
+    return mode or "none"
 
 
 def merge_metadata(service, job_id: str, **updates: Any) -> Job:
-    job = service.get(job_id)
-    meta = dict(job.metadata or {})
-    meta.update(updates)
-    return service.store.update_runtime_fields(job_id, metadata_json=meta)
+    """Atomic merge of top-level metadata keys (no lost concurrent updates)."""
+    return service.store.patch_metadata(job_id, updates)
 
 
 def _render_plan_markdown(plan: Dict[str, Any]) -> str:
@@ -63,6 +65,49 @@ def _write_plan_artifact(job: Job, plan: Dict[str, Any], raw_text: str) -> Dict[
     if record_planner_plan(job, plan) is None and not art.read_text("plan.md"):
         art.write_text("plan.md", _render_plan_markdown(plan))
     return art.pointers()
+
+
+def ledger_cost(job: Job) -> Optional[float]:
+    """Total spend in the job's cost ledger (``costs.jsonl``, written by every stage relay);
+    None when the job has no ledger yet."""
+    from .core.artifacts import artifacts_for
+    art = artifacts_for(job)
+    if not os.path.isfile(art.costs):
+        return None
+    return float(sum(art.stage_costs().values()))
+
+
+def sync_job_cost(service, job_id: str) -> float:
+    """Make ``job.cost_usd`` equal the cost ledger (the single source of truth).
+
+    Idempotent, so it is safe after paused, failed or restarted stages and never double
+    counts; a job without a ledger keeps its stored total."""
+    job = service.get(job_id)
+    total = ledger_cost(job)
+    if total is None:
+        return float(job.cost_usd or 0.0)
+    if abs(total - float(job.cost_usd or 0.0)) > 1e-9:
+        service.store.update_runtime_fields(job_id, cost_usd=total)
+    return total
+
+
+def _generate_and_record(service, job_id: str, generate_fn: GenerateFn, job: Job, prompt: str, model):
+    """Run a stage; its spend (also when it pauses or fails) lands in ``job.cost_usd``."""
+    reported = 0.0
+    try:
+        text, meta = generate_fn(job, prompt, job_workspace(job), model)
+        reported = max(0.0, float((meta or {}).get("cost_usd") or 0))
+        return text, meta
+    finally:
+        try:
+            current = service.get(job_id)
+            if ledger_cost(current) is None and reported:
+                # A generator that keeps no ledger (tests, legacy): count what it reported.
+                service.store.update_runtime_fields(job_id, cost_usd=float(current.cost_usd or 0) + reported)
+            else:
+                sync_job_cost(service, job_id)
+        except Exception:  # noqa: BLE001 - cost bookkeeping never masks the stage outcome
+            logger.debug("job cost sync failed for %s", job_id, exc_info=True)
 
 
 def job_workspace(job: Job) -> str:
@@ -127,6 +172,13 @@ def build_plan_prompt(job: Job) -> str:
     feedback = str((job.metadata or {}).get("replan_feedback") or "").strip()
     if feedback:
         lines.extend(["", "A human rejected the previous plan. Address this feedback:", feedback])
+    try:
+        from .sandbox.detect import planner_hint
+        hint = str(planner_hint(job) or "").strip()
+    except Exception:  # noqa: BLE001 - toolchain detection is a hint, never a failure
+        hint = ""
+    if hint:
+        lines.extend(["", hint])
     lines.extend([
         "",
         "Always produce concrete, testable acceptance_criteria derived from the ticket.",
@@ -156,12 +208,9 @@ def parse_plan(text: str) -> Dict[str, Any]:
 def run_plan_stage(service, job_id: str, *, generate_fn: GenerateFn) -> Job:
     job = service.get(job_id)
     model = resolve_stage_model(job.execution, "plan")
-    text, meta = generate_fn(job, build_plan_prompt(job), job_workspace(job), model)
+    text, meta = _generate_and_record(service, job_id, generate_fn, job, build_plan_prompt(job), model)
     if job.worker_id and not service.store.assert_lease(job_id, job.worker_id):
         return service.get(job_id)
-    cost = max(0, float((meta or {}).get("cost_usd") or 0))
-    if cost:
-        service.store.update_runtime_fields(job_id, cost_usd=float(service.get(job_id).cost_usd or 0) + cost)
     plan = parse_plan(text)
     plan["model"] = {"provider": model.get("provider", ""), "model": model.get("model", "")}
     plan["cost_usd"] = float((meta or {}).get("cost_usd", 0.0) or 0.0)
@@ -179,6 +228,83 @@ def run_plan_stage(service, job_id: str, *, generate_fn: GenerateFn) -> Job:
 
 # ----------------------------------------------------------------- review
 
+_BRIEF_READ_TOOLS = {"read_file": "filename", "get_chunk": "filename", "list_dir": "path",
+                     "search_for_string": "query", "search_references": "query", "retrieve_relevant_context": "query"}
+
+
+def stage_brief(job: Job, stage: str, *, limit: int = 4000) -> str:
+    """A compact hand-off from a finished stage to the next (no re-exploring the repo):
+    what it inspected, the commands it ran, and its final message. Saved as
+    ``briefs/<stage>.md``; empty when the stage left no transcript."""
+    from .core.artifacts import artifacts_for
+    art = artifacts_for(job)
+    transcript = art.read_json(f"logs/{stage}-transcript.json", []) if art.exists() else []
+    if not isinstance(transcript, list) or not transcript:
+        return ""
+    inspected, commands, final = [], [], ""
+    for message in transcript:
+        if not isinstance(message, dict):
+            continue
+        for part in message.get("parts") or []:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "tool_call":
+                args = part.get("tool_args") if isinstance(part.get("tool_args"), dict) else {}
+                name = str(part.get("tool_name") or "")
+                if name in _BRIEF_READ_TOOLS and args.get(_BRIEF_READ_TOOLS[name]):
+                    value = str(args[_BRIEF_READ_TOOLS[name]]).replace("/workspace/", "")
+                    entry = f"{name}: {value}"[:200]
+                    if entry not in inspected:
+                        inspected.append(entry)
+                elif name == "bash" and args.get("command"):
+                    command = str(args["command"])[:200]
+                    if command not in commands:
+                        commands.append(command)
+            elif part.get("type") == "text" and message.get("role") == "assistant" and str(part.get("text") or "").strip():
+                final = str(part["text"]).strip()
+    lines = [f"Brief from the {stage} stage (what it already established; don't redo it):"]
+    if inspected:
+        lines += ["Inspected:"] + [f"- {item}" for item in inspected[-40:]]
+    if commands:
+        lines += ["Commands run:"] + [f"- {item}" for item in commands[-15:]]
+    if final:
+        lines += ["Final message:", final[-1500:]]
+    text = "\n".join(lines)[:limit]
+    try:
+        art.write_text(f"briefs/{stage}.md", text)
+    except (OSError, ValueError):
+        pass
+    return text
+
+
+def budget_patch(patch: str, limit: Optional[int] = None) -> str:
+    """The review prompt's patch, bounded by ``limits.review_patch_chars``.
+
+    Whole per-file diffs are included in order until the budget is spent; a single file
+    larger than half the budget is cut; the rest are listed so the reviewer reads them
+    from the workspace. Keeps the review stage far from the model's context window."""
+    if limit is None:
+        from .job_settings import rule_or
+        limit = int(rule_or("limits.review_patch_chars", 60000))
+    if len(patch) <= limit:
+        return patch
+    files = re.split(r"(?m)^(?=diff --git )", patch)
+    kept, omitted, used = [], [], 0
+    for chunk in (f for f in files if f):
+        header = chunk.split("\n", 1)[0]
+        if used + len(chunk) <= limit:
+            kept.append(chunk)
+            used += len(chunk)
+        elif len(chunk) > limit // 2 and used + limit // 2 <= limit:
+            kept.append(chunk[: limit // 2] + f"\n[... diff of this file cut at {limit // 2:,} characters; read the file ...]\n")
+            used += limit // 2
+        else:
+            omitted.append(f"{header[len('diff --git '):]} ({len(chunk):,} characters)")
+    if omitted:
+        kept.append("[Diffs not included (read them in the workspace):\n- " + "\n- ".join(omitted) + "]\n")
+    return "".join(kept)
+
+
 def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) -> str:
     from .core.artifacts import artifacts_for
     from .core.plan_ops import approved_plan_text
@@ -190,7 +316,8 @@ def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) ->
         f"Title: {job.title}", job.description or "",
         "Approved plan:", approved_plan_text(job) or art.read_text("plan.md") or "",
         "Acceptance criteria:", *job.acceptance_criteria,
-        "Checks:", json.dumps(checks), "Diff stat:", stat, "Patch:", patch[:120000],
+        stage_brief(job, "implement"),
+        "Checks:", json.dumps(checks), "Diff stat:", stat, "Patch:", budget_patch(patch),
         "Respond with JSON only, with this schema:",
         '{"summary":"overview and risks", "plan_coverage":[{"criterion_id":"AC-1",'
         '"status":"met|partial|unmet|unverifiable","evidence":"file:line or test"}],'
@@ -270,12 +397,9 @@ def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
     patch, stat, head = _diff(service, job_id)
     round_no = len(service.store.list_events_by_type(job_id, ("review_completed",))) + 1
     prompt = build_stage_review_prompt(job, patch, stat, round_no)
-    text, meta = generate_fn(job, prompt, job_workspace(job), model)
+    text, meta = _generate_and_record(service, job_id, generate_fn, job, prompt, model)
     if job.worker_id and not service.store.assert_lease(job_id, job.worker_id):
         return 6
-    cost = max(0, float((meta or {}).get("cost_usd") or 0))
-    if cost:
-        service.store.update_runtime_fields(job_id, cost_usd=float(service.get(job_id).cost_usd or 0) + cost)
     raw = extract_json(text)
     review = raw if "findings" in raw else parse_stage_review(text)
     malformed = "findings" in raw and (not isinstance(raw["findings"], list) or any(not isinstance(f, dict) or f.get("severity") not in {"blocker", "major", "minor", "nit"} for f in raw["findings"]))
@@ -289,21 +413,6 @@ def run_review_stage(service, job_id: str, *, generate_fn: GenerateFn) -> int:
         "cost_usd": float((meta or {}).get("cost_usd", 0.0) or 0.0),
     })
     return apply_review_verdict(service, job_id, review)
-
-
-def _write_review_artifact(job: Job, review: Dict[str, Any], round_no: int) -> None:
-    """Persist review.json (report schema, guide §4.2). Best-effort in Phase 1."""
-    try:
-        from .core.artifacts import artifacts_for
-        from .core.review_report import ReviewReport
-
-        art = artifacts_for(job).ensure()
-        payload = dict(review, round=round_no)
-        report = ReviewReport.from_legacy(payload, job_id=job.id)
-        art.write_json("review.json", report.to_dict())
-        art.write_json(f"logs/review_raw.round{round_no}.json", payload)
-    except (OSError, ValueError):
-        logger.debug("review artifact write failed", exc_info=True)
 
 
 def review_feedback_lines(payload: Dict[str, Any]) -> List[str]:
@@ -320,13 +429,13 @@ class StageInteractionError(RuntimeError):
     """An unattended stage session hit a human gate (approval/question)."""
 
 
-def _stage_tool_allowlist() -> frozenset:
-    from .acceptance import REVIEWER_TOOL_ALLOWLIST
-
-    return frozenset(REVIEWER_TOOL_ALLOWLIST) - {"bash"}
-
-
-STAGE_TOOL_ALLOWLIST = _stage_tool_allowlist()
+# Tools an unattended plan/review stage may use: inspect only. Anything that
+# mutates the worktree or session, runs commands or spawns work is excluded.
+STAGE_TOOL_ALLOWLIST = frozenset({
+    "read_file", "get_chunk", "list_dir", "search_for_string", "search_references",
+    "retrieve_relevant_context", "get_workspace_details", "flush",
+    "recall", "result_range", "result_head", "result_tail", "result_search",
+})
 
 
 def default_generate(service) -> GenerateFn:

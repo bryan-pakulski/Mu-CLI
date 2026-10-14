@@ -7,6 +7,7 @@ import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { ModernBottomSheet } from './ModernBottomSheet';
 import { Text } from './Text';
+import { fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
 
 export function ArtifactsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { colors } = useTheme();
@@ -56,22 +57,22 @@ export function ArtifactsSheet({ visible, onClose }: { visible: boolean; onClose
       {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
       {!loading && items.length === 0 ? (
         <View style={styles.empty}>
-          <Ionicons name="document-attach-outline" size={28} color={colors.textDim} />
+          <Ionicons name="document-attach-outline" size={24} color={colors.textDim} />
           <Text variant="base" style={styles.emptyTitle}>No artifacts yet</Text>
           <Text variant="sm" dim style={styles.emptyBody}>The agent can publish reports, archives, images, and other deliverables with upload_artifact.</Text>
         </View>
       ) : items.map(item => (
-        <View key={item.artifact_id} style={[styles.row, { borderBottomColor: colors.border }]}>
+        <View key={item.artifact_id} style={styles.row}>
           <TouchableOpacity
             style={styles.open}
             onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, item.artifact_id))}
           >
             <View style={[styles.icon, { backgroundColor: colors.bgHover }]}>
-              <Ionicons name="document-outline" size={20} color={colors.accent} />
+              <Ionicons name="document-outline" size={20} color={colors.textSoft} />
             </View>
             <View style={styles.copy}>
               <Text variant="sm" style={styles.name} numberOfLines={1}>{item.name}</Text>
-              <Text variant="xs" dim>{formatBytes(item.size)} · {item.mime_type}</Text>
+              <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{formatBytes(item.size)} · {item.mime_type}</Text>
             </View>
             <Ionicons name="download-outline" size={19} color={colors.textDim} />
           </TouchableOpacity>
@@ -91,14 +92,14 @@ function formatBytes(value: number): string {
 }
 
 const styles = StyleSheet.create({
-  loader: { marginVertical: 24 },
-  empty: { alignItems: 'center', paddingHorizontal: 24, paddingVertical: 30 },
-  emptyTitle: { fontWeight: '700', marginTop: 12 },
-  emptyBody: { textAlign: 'center', marginTop: 5, lineHeight: 20 },
-  row: { minHeight: 68, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
-  open: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 9 },
-  icon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  copy: { flex: 1, marginHorizontal: 12 },
-  name: { fontWeight: '600' },
-  delete: { width: 42, height: 48, alignItems: 'center', justifyContent: 'center' },
+  loader: { marginVertical: spacing.lg },
+  empty: { alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.xl },
+  emptyTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.md },
+  emptyBody: { textAlign: 'center', marginTop: spacing.xs, lineHeight: typography.sm.lineHeight },
+  row: { minHeight: 64, flexDirection: 'row', alignItems: 'center' },
+  open: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
+  icon: { width: 40, height: 40, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  copy: { flex: 1, marginHorizontal: spacing.md },
+  name: { fontWeight: fontWeights.semibold },
+  delete: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
 });

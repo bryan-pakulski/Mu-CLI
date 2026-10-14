@@ -54,6 +54,59 @@ def job(job_id: str, request: Request, parts: Optional[str] = None, plan_version
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
 
 
+@router.get("/vm/job/{job_id}/push-preview")
+def push_preview(job_id: str, request: Request):
+    try:
+        return vm.push_preview_vm(_service(request), job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
+
+
+@router.get("/vm/environments")
+def environments(request: Request, repository: str = "", session: str = "", images: bool = True):
+    return vm.environments_vm(_service(request), repository=repository, session=session, include_images=images)
+
+
+@router.get("/vm/job/{job_id}/environments")
+def job_environments(job_id: str, request: Request):
+    try:
+        return vm.job_environments_vm(_service(request), job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
+
+
+@router.get("/vm/activity")
+def activity(request: Request):
+    return vm.activity_vm(_service(request))
+
+
+@router.get("/vm/activity/logs/{job_id}")
+def activity_logs(job_id: str, request: Request, tail_bytes: int = Query(65536, ge=1024, le=512 * 1024)):
+    try:
+        return vm.activity_logs_vm(_service(request), job_id, tail_bytes=tail_bytes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
+
+
+@router.get("/vm/status")
+def status(request: Request):
+    return vm.activity_status_vm(_service(request))
+
+
+@router.post("/activity/containers/{name}/remove")
+def remove_container(name: str, request: Request):
+    try:
+        return vm.remove_container(_service(request), name)
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"container {name!r} not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.post("/cmd")
 def command(request: Request, payload: Dict[str, Any]):
     service = _service(request)

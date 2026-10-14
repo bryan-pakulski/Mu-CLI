@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import type { ChatMessage } from '../hooks/useChatSession';
+import { radii, spacing } from '../theme/tokens';
 
 interface Props {
   messages: ChatMessage[];
@@ -79,7 +80,7 @@ export function ConversationStageRail({
               <Ionicons
                 name={loadingHistory ? 'hourglass-outline' : 'chevron-up'}
                 size={13}
-                color={colors.accent}
+                color={colors.textSoft}
               />
             </View>
           </TouchableOpacity>
@@ -98,7 +99,7 @@ export function ConversationStageRail({
             >
               <View style={[
                 styles.dot,
-                { backgroundColor: active ? colors.accent : colors.borderStrong },
+                { backgroundColor: active ? colors.accent : colors.border },
                 active && styles.activeDot,
               ]} />
             </TouchableOpacity>
@@ -110,20 +111,19 @@ export function ConversationStageRail({
 }
 
 const styles = StyleSheet.create({
-  rail: { position: 'absolute', zIndex: 20, right: 3, top: 12, bottom: 12, width: 30 },
-  list: { paddingVertical: 7, alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 15 },
+  rail: { position: 'absolute', zIndex: 20, right: spacing.xs, top: spacing.md, bottom: spacing.md, width: 30 },
+  list: { paddingVertical: spacing.sm, alignItems: 'center', borderWidth: 1, borderRadius: radii.sm },
   marker: { width: 28, height: 24, alignItems: 'center', justifyContent: 'center' },
-  dot: { width: 5, height: 5, borderRadius: 4 },
+  dot: { width: 5, height: 5, borderRadius: radii.pill },
   activeDot: { width: 9, height: 9 },
   // Round-51: "more history above" indicator at the top of the rail.
   moreBadge: {
     width: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 3,
+    marginBottom: spacing.xs,
     backgroundColor: 'transparent',
-    borderWidth: StyleSheet.hairlineWidth,
   },
 });

@@ -295,7 +295,9 @@ def test_editor_can_disable_reasoning_without_changing_default_requests(monkeypa
     payloads = []
 
     def fake_urlopen(request, **kwargs):
-        payloads.append(json.loads(request.data))
+        body = json.loads(request.data) if request.data else {}
+        if "messages" in body:  # /api/chat (route/window probes are not chat requests)
+            payloads.append(body)
         return _mock_urlopen_factory(b'{"message":{"content":"code"},"done":true}\n')
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)

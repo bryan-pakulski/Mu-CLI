@@ -17,6 +17,13 @@ from .verification import VerificationStore
 RECEIPT_SCHEMA_VERSION = 3
 
 
+def _display_text(text: str) -> str:
+    """Ticket text without the untrusted-content frame (display/export only)."""
+    from mu.integrations.jira import strip_untrusted_frame
+
+    return strip_untrusted_frame(text or "")
+
+
 class JobReceiptBuilder:
     def __init__(self, service: JobService, *, root: str | None = None):
         self.service = service
@@ -128,7 +135,9 @@ class JobReceiptBuilder:
             "job": {
                 "id": job.id,
                 "title": job.title,
-                "description": job.description,
+                # Imported tickets frame their text in UNTRUSTED TICKET CONTENT markers
+                # for the agent; receipts are for humans, so the frame is stripped.
+                "description": _display_text(job.description),
                 "status": job.status.value,
                 "needs_attention": job.needs_attention,
                 "attention_reason": job.attention_reason.value,
@@ -174,7 +183,9 @@ class JobReceiptBuilder:
             "verification": verification.to_dict() if verification else None,
             # Milestone 5: freshness of the review artifact vs the moving base.
             "base_drift": metadata.get("base_drift") or None,
-            # Milestone 3: optional independent verifier-agent verdict.
+            # Retired verifier-agent verdict: nothing writes it any more; jobs created
+            # before the review stage replaced it still carry it, so it is read tolerantly
+            # (None for every new job) and no surface displays it.
             "acceptance_review": metadata.get("acceptance_review") or None,
             "attempts": [attempt.to_dict() for attempt in attempts],
             "usage": {
@@ -221,3 +232,11 @@ class JobReceiptBuilder:
             payload={"path": path, "schema_version": RECEIPT_SCHEMA_VERSION},
         )
         return path
+
+
+def refresh_receipt(service, job_id: str) -> None:
+    """Rewrite the job's receipt; a failure is recorded as an event, never raised."""
+    try:
+        JobReceiptBuilder(service).write(job_id)
+    except Exception as exc:  # noqa: BLE001
+        service.store.append_event(job_id, "work_receipt_failed", reason=str(exc))

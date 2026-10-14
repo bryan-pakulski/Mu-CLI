@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 
 logger = logging.getLogger("mucli")
@@ -221,6 +221,86 @@ PARALLEL_SAFE_TOOLS = frozenset(
 
 def is_parallel_safe(tool_name: str) -> bool:
     return bool(tool_name) and tool_name in PARALLEL_SAFE_TOOLS
+
+
+# Read-only shell commands that may run concurrently with other reads (harness latency
+# plan, Phase 4). Anything else — writes, redirects, pipes into other programs, command
+# chaining, subshells — stays serial.
+READ_ONLY_COMMANDS = frozenset({"ls", "cat", "head", "tail", "wc", "rg", "grep", "egrep", "fgrep", "find", "stat",
+                                "file", "tree", "du", "pwd", "which", "realpath", "basename", "dirname", "sha256sum",
+                                "md5sum", "diff", "jq"})
+READ_ONLY_GIT = frozenset({"status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "branch", "grep"})
+_SHELL_META = ("&&", "||", ";", "`", "$(", ">", "<", "\n", "&")
+_FIND_WRITES = ("-delete", "-exec", "-execdir", "-ok", "-fprint", "-fprintf", "-fls")
+
+
+def is_read_only_command(command: str) -> bool:
+    """True for a single allow-listed read-only command, optionally piped into other
+    read-only commands (``rg foo | head``)."""
+    import shlex
+    text = str(command or "").strip()
+    if not text or any(meta in text for meta in _SHELL_META):
+        return False
+    for segment in text.split("|"):
+        try:
+            argv = shlex.split(segment)
+        except ValueError:
+            return False
+        if not argv:
+            return False
+        name = argv[0].rsplit("/", 1)[-1]
+        if name == "git":
+            sub = next((a for a in argv[1:] if not a.startswith("-")), "")
+            if sub not in READ_ONLY_GIT or any(a in ("--output", "-o") or a.startswith("--output=") for a in argv):
+                return False
+            if sub == "branch" and any(a.startswith("-") and a not in ("-a", "--all", "-r", "-v", "-vv", "--list") for a in argv[2:]):
+                return False
+        elif name not in READ_ONLY_COMMANDS:
+            return False
+        if name == "find" and any(a in _FIND_WRITES for a in argv):
+            return False
+        if name == "tree" and any(a == "-o" or a.startswith("-o") and len(a) > 2 for a in argv[1:]):
+            return False
+        if name == "rg" and any(a == "--pre" or a.startswith("--pre=") for a in argv):
+            return False
+    return True
+
+
+def is_parallel_safe_call(tool_name: str, tool_args: Any = None, *, approvals_needed: bool = True) -> bool:
+    """Per-call parallel safety: the static set, plus read-only ``bash`` when no
+    approval prompt would be needed (approval dialogs must stay on the agent thread)."""
+    if is_parallel_safe(tool_name):
+        return True
+    if tool_name == "bash" and not approvals_needed:
+        command = (tool_args or {}).get("command") if isinstance(tool_args, dict) else ""
+        return is_read_only_command(str(command or ""))
+    return False
+
+
+def execution_segments(calls: Sequence[Tuple[str, Any]], safe) -> List[Tuple[List[int], List[int]]]:
+    """Order-preserving plan: consecutive parallel-safe calls form one concurrent group
+    (≥2 calls), everything else runs serially in place. Returns ``[(parallel, serial)]``
+    segments, each with exactly one non-empty side."""
+    segments: List[Tuple[List[int], List[int]]] = []
+    run: List[int] = []
+
+    def close_run() -> None:
+        if len(run) >= 2:
+            segments.append((list(run), []))
+        elif run:
+            segments.append(([], list(run)))
+        run.clear()
+    for index, (name, args) in calls:
+        if name != "flush" and safe(name, args):
+            run.append(index)
+            continue
+        close_run()
+        if segments and segments[-1][1] and not segments[-1][0]:
+            segments[-1][1].append(index)
+        else:
+            segments.append(([], [index]))
+    close_run()
+    return segments
 
 
 __all__ = [

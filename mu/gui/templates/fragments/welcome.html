@@ -1,6 +1,6 @@
 <div class="welcome welcome-launcher" x-data="welcomeView()" x-init="load()">
     <header class="welcome-hero">
-        <div class="welcome-mark">μ</div>
+        <div class="welcome-mark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 32 32"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg><span>mucli</span></div>
         <div>
             <p class="welcome-kicker">MuCLI control centre</p>
             <h1>Choose where to begin.</h1>
@@ -115,7 +115,7 @@
 
             <div class="welcome-modal-body wizard-body">
                 <!-- Step 1 -->
-                <div x-show="step === 1" x-transition.opacity.duration.180ms>
+                <div x-show="step === 1" x-transition.opacity.duration.200ms>
                     <p class="wizard-intro">Name the session and choose its execution boundary.</p>
                     <label class="wizard-field"><span>Session name</span>
                         <input x-model.trim="form.name" @input="syncContainerName()" placeholder="project-research" autofocus>
@@ -134,7 +134,7 @@
                 </div>
 
                 <!-- Step 2 -->
-                <div x-show="step === 2" x-transition.opacity.duration.180ms>
+                <div x-show="step === 2" x-transition.opacity.duration.200ms>
                     <p class="wizard-intro">Select the provider and model used for this session.</p>
                     <label class="wizard-field"><span>Provider</span>
                         <select x-model="form.provider" @change="onProviderChange()">
@@ -165,7 +165,7 @@
                 </div>
 
                 <!-- Step 3 -->
-                <div x-show="step === 3" x-transition.opacity.duration.180ms>
+                <div x-show="step === 3" x-transition.opacity.duration.200ms>
                     <template x-if="form.sessionType === 'chat'">
                         <div class="wizard-summary-card"><span class="wizard-choice-icon session-type-icon" x-html="sessionIcon('chat')" aria-hidden="true"></span><div><strong>Chat boundary</strong><p>No host filesystem or shell access. Research, memory, and artifacts remain available.</p></div></div>
                     </template>
@@ -245,7 +245,7 @@
                 </div>
 
                 <!-- Step 4 -->
-                <div x-show="step === 4" x-transition.opacity.duration.180ms>
+                <div x-show="step === 4" x-transition.opacity.duration.200ms>
                     <p class="wizard-intro">Review the configuration before MuCLI creates and loads the session.</p>
                     <dl class="wizard-review">
                         <dt>Session</dt><dd x-text="form.name"></dd>

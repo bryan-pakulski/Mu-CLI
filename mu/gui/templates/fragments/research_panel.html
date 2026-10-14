@@ -27,7 +27,7 @@
                               ? ' / ' + $store.research.sourceCount : '')"></span>
         </button>
         <div class="panel-section-body" x-show="$store.research.openSections.sources"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <!-- topic filter -->
             <div class="source-topic-filter"
                  x-show="$store.research.topics.length > 1">
@@ -140,7 +140,7 @@
                   x-text="$store.research.sourceCount + ' sources'"></span>
         </button>
         <div class="panel-section-body" x-show="$store.research.openSections.bibliography"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <pre class="bibliography-block"><code x-text="$store.research.bibliography"></code></pre>
             <button class="bib-copy-btn"
                     @click="$store.research.copyBibliography()"
@@ -161,7 +161,7 @@
                   x-text="$store.research.findingCount"></span>
         </button>
         <div class="panel-section-body" x-show="$store.research.openSections.findings"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="f in $store.research.filteredFindings()" :key="f.id">
                 <div class="finding-entry">
                     <div class="finding-head">

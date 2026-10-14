@@ -38,3 +38,10 @@ describe('jobsApi.delete', () => {
     expect(String(url)).toContain('/api/jobs/abc?force=0');
   });
 });
+
+describe('job history / management client', () => {
+  it('builds history and report queries without empty filters', () => {
+    const { jobHistoryQuery } = jest.requireActual('../src/api/jobs');
+    expect(jobHistoryQuery({ q: '', archive: 'archived', limit: 50, offset: 0, sort: 'updated' })).toEqual({ archive: 'archived', limit: 50, offset: 0, sort: 'updated' });
+  });
+});

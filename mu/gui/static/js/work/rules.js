@@ -1,0 +1,247 @@
+/* Jobs mode Settings → run rules. One planos-style panel per section of the server's rule
+ * schema (GET /api/jobs/settings → rules.{schema,values,overrides}); every field renders
+ * from its definition. Saves send only changed paths as a nested partial update; null resets
+ * a rule to its default. Validation errors come back from the server (HTTP 400). */
+(() => {
+    'use strict';
+    const host = document.getElementById('work-run-rules');
+    if (!host) return;
+    const ui = window.MuJobUI;
+    const esc = ui.esc;
+    const toast = (text, tone) => ui.toast(text, tone);
+    let rules = null;
+    const dirty = new Map(); // path -> value (null = reset)
+
+    async function api(path, options = {}) {
+        const init = { ...options, headers: { 'Content-Type': 'application/json' } };
+        if (init.body && typeof init.body !== 'string') init.body = JSON.stringify(init.body);
+        const response = await fetch(path, init);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `${response.status} ${response.statusText}`);
+        return data;
+    }
+
+    const fmt = (field, value) => {
+        if (value === null || value === undefined || value === '') return field.kind === 'select' ? (field.options.find(o => o[0] === '')?.[1] || 'none') : 'none';
+        if (field.kind === 'bool') return value ? 'on' : 'off';
+        if (field.kind === 'int' || field.kind === 'float') return `${Number(value).toLocaleString()}${field.unit ? ` ${field.unit === 'USD' ? 'USD' : field.unit}` : ''}`;
+        if (field.kind === 'select') return field.options.find(o => o[0] === value)?.[1] || value;
+        if (field.kind === 'list') return value.length ? value.join(', ') : 'none';
+        if (field.kind === 'suites') return value.length ? `${value.length} suite${value.length === 1 ? '' : 's'}` : 'none';
+        if (field.kind === 'rows') return value.length ? `${value.length} row${value.length === 1 ? '' : 's'}` : 'none';
+        return String(value);
+    };
+    const current = path => (dirty.has(path) ? (dirty.get(path) ?? FIELD[path].default) : rules.values[path]);
+    let FIELD = {};
+
+    function control(field, id) {
+        const value = current(field.path);
+        const attrs = `id="${id}" data-rule="${esc(field.path)}" aria-describedby="${id}-hint"`;
+        switch (field.kind) {
+            case 'bool':
+                return `<button type="button" class="switch" role="switch" aria-checked="${Boolean(value)}" ${attrs} aria-label="${esc(field.label)}"></button>`;
+            case 'int': case 'float':
+                return `<span class="row"><input type="number" ${attrs} value="${value ?? ''}" step="${field.kind === 'int' ? 1 : 'any'}"${field.min != null ? ` min="${field.min}"` : ''}${field.max != null ? ` max="${field.max}"` : ''} placeholder="${field.optional ? 'default' : ''}" style="max-width:200px">${field.unit ? `<span class="muted small">${esc(field.unit)}</span>` : ''}</span>`;
+            case 'select':
+                return `<select ${attrs}>${field.options.map(([v, l]) => `<option value="${esc(v)}" ${v === (value ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+            case 'list':
+                return `<textarea ${attrs} rows="3" placeholder="one per line">${esc((value || []).join('\n'))}</textarea>`;
+            case 'suites':
+                return `<div class="col" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
+                    ${(value || []).map((s, i) => `<div class="row work-rule-suite" data-index="${i}">
+                        <input type="text" data-suite-key="name" aria-label="Suite name" placeholder="name" value="${esc(s.name || '')}" style="max-width:140px">
+                        <input type="text" data-suite-key="command" aria-label="Suite command" placeholder="command" value="${esc(s.command || '')}" class="grow">
+                        <input type="text" data-suite-key="junit" aria-label="JUnit report path (optional)" placeholder="junit path (optional)" value="${esc(s.junit || '')}" style="max-width:180px">
+                        <button type="button" class="btn ghost icon sm tone-danger" data-suite-remove aria-label="Remove suite">×</button></div>`).join('')}
+                    <button type="button" class="btn sm" data-suite-add style="align-self:flex-start">+ Add suite</button></div>`;
+            case 'rows':
+                return `<div class="col" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
+                    ${(value || []).map((row, i) => `<div class="row work-rule-suite" data-index="${i}">
+                        ${field.columns.map(c => `<input type="text" data-row-key="${esc(c.key)}" aria-label="${esc(c.label)}" placeholder="${esc(c.placeholder || c.label)}" value="${esc(row[c.key] || '')}" class="grow">`).join('')}
+                        <button type="button" class="btn ghost icon sm tone-danger" data-row-remove aria-label="Remove row">×</button></div>`).join('')}
+                    <button type="button" class="btn sm" data-row-add style="align-self:flex-start">+ Add</button>
+                    ${field.path === 'sandbox.toolchains' ? '<div class="col" data-toolchain-status style="gap:var(--s-half)"></div>' : ''}</div>`;
+            default:
+                return `<input type="text" ${attrs} value="${esc(value ?? '')}">`;
+        }
+    }
+
+    function render(errorSection = '', errorText = '') {
+        FIELD = Object.fromEntries(rules.schema.flatMap(s => s.fields).map(f => [f.path, f]));
+        host.innerHTML = rules.schema.map(section => {
+            const changed = section.fields.some(f => dirty.has(f.path));
+            return `<section class="panel" aria-labelledby="rules-${esc(section.id)}"><header><h2 id="rules-${esc(section.id)}">${esc(section.title)}</h2>${changed ? '<span class="pill tone-warn">◆ unsaved</span>' : ''}<span class="spacer"></span></header>
+                <form class="panel-body work-form" data-section="${esc(section.id)}" novalidate>
+                    ${section.hint ? `<p class="work-jira-muted">${esc(section.hint)}</p>` : ''}
+                    ${section.id === 'build_environments' ? '<div class="col work-env-status" data-env-status></div>' : ''}
+                    ${section.id === 'harness' ? '<div class="col work-agents-status" data-agents-status></div>' : ''}
+                    ${section.fields.map((f, i) => {
+                        const id = `rule-${section.id}-${i}`;
+                        const overridden = Object.prototype.hasOwnProperty.call(rules.overrides, f.path) && dirty.get(f.path) !== null;
+                        const meta = overridden || (dirty.has(f.path) && dirty.get(f.path) !== null)
+                            ? `<span class="small"><span class="tone-accent">set</span> · default ${esc(fmt(f, f.default))} · <button type="button" class="link-btn small" data-reset="${esc(f.path)}">Reset</button></span>`
+                            : `<span class="small muted">default</span>`;
+                        return `<div class="work-field work-rule${errorSection === section.id && errorText.includes(f.label) ? ' has-error' : ''}">
+                            <span><label for="${id}">${esc(f.label)}</label>${f.hint ? `<small class="hint" id="${id}-hint">${esc(f.hint)}</small>` : `<small id="${id}-hint"></small>`}</span>
+                            <div class="col" style="gap:var(--s-half)">${control(f, id)}${meta}</div></div>`;
+                    }).join('')}
+                    ${errorSection === section.id ? `<p class="error-box small" role="alert">✗ ${esc(errorText)}</p>` : ''}
+                    <footer class="work-form-actions"><button type="button" class="btn" data-discard ${changed ? '' : 'disabled'}>Discard</button><button type="submit" class="btn primary" ${changed ? '' : 'disabled'}>Save ${esc(section.title.toLowerCase())}</button></footer>
+                </form></section>`;
+        }).join('');
+        bind();
+        void environmentStatus(host.querySelector('[data-env-status]'));
+        void window.MuJobAgents?.card(host.querySelector('[data-agents-status]'), { api, toast });
+    }
+
+    // Build environments: Docker-in-Docker (Sysbox) status + install steps, GPUs, kept jobs.
+    let envStatus = null;
+    async function environmentStatus(target, force = false) {
+        if (!target) return;
+        if (!envStatus || force) {
+            try { envStatus = await api('/api/jobs/environments?images=false'); }
+            catch (_) { target.innerHTML = ''; return; }
+        }
+        const fmtBytes = window.MuJobEnvironments?.bytes || (n => `${n} B`);
+        const dind = envStatus.docker_in_docker || {}, gpu = envStatus.gpu || {}, kept = envStatus.kept_jobs || [];
+        target.innerHTML = `<div class="row wrap small">
+                <span class="pill tone-${dind.available ? 'ok' : 'muted'}"><span aria-hidden="true">${dind.available ? '✓' : '○'}</span>Docker-in-Docker: ${dind.available ? `available (${esc(dind.engine || 'sysbox')})` : 'Sysbox not installed'}</span>
+                <span class="pill tone-${gpu.supported ? 'ok' : 'muted'}" title="${esc(gpu.reason || '')}"><span aria-hidden="true">${gpu.supported ? '✓' : '○'}</span>GPUs: ${gpu.supported ? esc(gpu.reason || 'available') : 'unavailable'}</span></div>
+            ${dind.available ? '' : `<details class="small"><summary>Install Sysbox to enable Docker = yes bindings</summary><ol>${(dind.install || []).map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>`}
+            <div class="col" style="gap:var(--s-half)"><span class="small"><strong>Kept jobs</strong> <span class="muted">(exempt from idle retention)</span></span>
+                ${kept.length ? `<ul class="plain col" style="gap:var(--s-half)">${kept.map(j => `<li class="row wrap small"><a class="mono" href="#/job/${esc(j.id)}">#${esc(String(j.id).slice(0, 8))}</a><span class="grow ellipsis" title="${esc(j.bindings || '')}">${esc(j.title || '')}${j.bindings ? ` · <span class="muted">${esc(j.bindings)}</span>` : ''}</span><span class="num muted">${esc(fmtBytes(j.bytes) || '—')}</span><button type="button" class="btn sm" data-unkeep="${esc(j.id)}">Unkeep</button></li>`).join('')}</ul>`
+                    : '<span class="small muted">No kept jobs.</span>'}</div>`;
+        target.querySelectorAll('[data-unkeep]').forEach(b => b.addEventListener('click', async () => {
+            b.disabled = true;
+            try { await api('/api/jobs/cmd', { method: 'POST', body: { type: 'keepEnvironments', job_id: b.dataset.unkeep, args: { keep: false } } }); toast('Unkept: its images follow idle retention again', 'ok'); }
+            catch (error) { toast(error.message, 'danger'); }
+            void environmentStatus(target, true);
+        }));
+    }
+
+    function read(field, el) {
+        if (field.kind === 'bool') return el.getAttribute('aria-checked') === 'true';
+        if (field.kind === 'int' || field.kind === 'float') {
+            if (el.value.trim() === '') return null;
+            const n = Number(el.value);
+            return Number.isFinite(n) ? n : el.value;
+        }
+        if (field.kind === 'list') return el.value.split(/[\n,]/).map(v => v.trim()).filter(Boolean);
+        if (field.kind === 'suites') return [...el.querySelectorAll('.work-rule-suite')].map(row => {
+            const item = {};
+            row.querySelectorAll('[data-suite-key]').forEach(i => { if (i.value.trim()) item[i.dataset.suiteKey] = i.value.trim(); });
+            return item;
+        });
+        if (field.kind === 'rows') return [...el.querySelectorAll('.work-rule-suite')].map(row => {
+            const item = {};
+            row.querySelectorAll('[data-row-key]').forEach(i => { if (i.value.trim()) item[i.dataset.rowKey] = i.value.trim(); });
+            return item;
+        });
+        return el.value;
+    }
+
+    function mark(path, value) {
+        const field = FIELD[path];
+        const original = rules.values[path];
+        const same = JSON.stringify(value ?? field.default) === JSON.stringify(original);
+        if (same && !(value === null && Object.prototype.hasOwnProperty.call(rules.overrides, path))) dirty.delete(path);
+        else dirty.set(path, value);
+    }
+
+    function bind() {
+        host.querySelectorAll('[data-rule]').forEach(el => {
+            const path = el.dataset.rule, field = FIELD[path];
+            if (field.kind === 'bool') el.addEventListener('click', () => { el.setAttribute('aria-checked', String(el.getAttribute('aria-checked') !== 'true')); mark(path, read(field, el)); render(); host.querySelector(`[data-rule="${CSS.escape(path)}"]`)?.focus(); });
+            else if (field.kind === 'suites') {
+                el.addEventListener('input', () => { mark(path, read(field, el)); refreshChrome(el); });
+                el.querySelector('[data-suite-add]').addEventListener('click', () => { mark(path, [...read(field, el), { name: '', command: '' }]); render(); });
+                el.querySelectorAll('[data-suite-remove]').forEach(b => b.addEventListener('click', () => {
+                    const items = read(field, el); items.splice(Number(b.closest('[data-index]').dataset.index), 1); mark(path, items); render();
+                }));
+            } else if (field.kind === 'rows') {
+                el.addEventListener('input', () => { mark(path, read(field, el)); refreshChrome(el); });
+                el.querySelector('[data-row-add]').addEventListener('click', () => { mark(path, [...read(field, el), {}]); render(); });
+                el.querySelectorAll('[data-row-remove]').forEach(b => b.addEventListener('click', () => {
+                    const items = read(field, el); items.splice(Number(b.closest('[data-index]').dataset.index), 1); mark(path, items); render();
+                }));
+                if (path === 'sandbox.toolchains') void toolchainStatus(el.querySelector('[data-toolchain-status]'));
+            } else el.addEventListener(field.kind === 'select' ? 'change' : 'input', () => { mark(path, read(field, el)); refreshChrome(el); });
+        });
+        host.querySelectorAll('[data-reset]').forEach(b => b.addEventListener('click', () => { dirty.set(b.dataset.reset, null); render(); }));
+        host.querySelectorAll('form[data-section]').forEach(form => {
+            form.querySelector('[data-discard]').addEventListener('click', () => {
+                rules.schema.find(s => s.id === form.dataset.section).fields.forEach(f => dirty.delete(f.path)); render();
+            });
+            form.addEventListener('submit', event => { event.preventDefault(); void save(form.dataset.section); });
+        });
+    }
+
+    function refreshChrome(el) {
+        // Keep focus while typing: only toggle the section's save state, don't re-render it.
+        const form = el.closest('form[data-section]');
+        const changed = rules.schema.find(s => s.id === form.dataset.section).fields.some(f => dirty.has(f.path));
+        form.querySelectorAll('[data-discard], [type=submit]').forEach(b => { b.disabled = !changed; });
+    }
+
+    async function save(sectionId) {
+        const section = rules.schema.find(s => s.id === sectionId);
+        const payload = {};
+        for (const field of section.fields) {
+            if (!dirty.has(field.path)) continue;
+            const parts = field.path.split('.');
+            let node = payload;
+            parts.slice(0, -1).forEach(p => { node = node[p] = node[p] || {}; });
+            node[parts[parts.length - 1]] = dirty.get(field.path);
+        }
+        try {
+            const data = await api('/api/jobs/settings', { method: 'PUT', body: payload });
+            section.fields.forEach(f => dirty.delete(f.path));
+            rules = data.rules;
+            render();
+            toast(`${section.title} saved`, 'ok');
+        } catch (error) {
+            render(sectionId, error.message);
+            toast(error.message, 'danger');
+        }
+    }
+
+    // Derived toolchain images: status per saved row + Build (planos Setup's "build image" step).
+    let toolchainTimer = 0;
+    async function toolchainStatus(target) {
+        if (!target) return;
+        clearTimeout(toolchainTimer);
+        let list = [];
+        try { list = (await api('/api/jobs/toolchains')).toolchains || []; } catch (_) { target.innerHTML = ''; return; }
+        if (!list.length) { target.innerHTML = '<span class="small muted">Save a row to build its image.</span>'; return; }
+        const tone = { built: 'ok', building: 'running', failed: 'danger', missing: 'muted' };
+        const glyph = { built: '✓', building: '●', failed: '✗', missing: '○' };
+        target.innerHTML = list.map(t => `<div class="col" style="gap:2px"><div class="row wrap small">
+            <span class="pill tone-${tone[t.status] || 'muted'}"><span aria-hidden="true" class="${t.status === 'building' ? 'status-icon active' : ''}">${glyph[t.status] || '○'}</span>${esc(t.status === 'missing' ? 'not built' : t.status)}</span>
+            <span class="mono ellipsis" title="${esc(t.repository)}">${esc(t.repository)}</span><span class="muted">←</span><code>${esc(t.base_image)}</code>
+            <span class="spacer"></span>${t.status === 'building' ? '' : `<button type="button" class="btn sm" data-build="${esc(t.base_image)}">${t.status === 'built' ? 'Rebuild' : 'Build'}</button>`}</div>
+            ${t.error ? `<div class="small tone-danger">${esc(t.error)}</div>` : ''}
+            ${t.log_tail && t.status !== 'built' ? `<details><summary class="small muted">Build log</summary><pre class="work-log">${esc(t.log_tail)}</pre></details>` : ''}</div>`).join('');
+        target.querySelectorAll('[data-build]').forEach(b => b.addEventListener('click', async () => {
+            b.disabled = true;
+            try { await api('/api/jobs/toolchains/build', { method: 'POST', body: { base_image: b.dataset.build } }); toast('Building toolchain image…', 'running'); }
+            catch (error) { toast(error.message, 'danger'); }
+            void toolchainStatus(target);
+        }));
+        if (list.some(t => t.status === 'building')) toolchainTimer = setTimeout(() => toolchainStatus(target), 3000);
+    }
+
+    async function load() {
+        try {
+            const data = await api('/api/jobs/settings');
+            if (!data.rules) { host.innerHTML = '<p class="empty">This server has no configurable run rules.</p>'; return; }
+            rules = data.rules;
+            if (!dirty.size) render();
+        } catch (error) {
+            host.innerHTML = `<div class="error-box" role="alert">✗ Could not load run rules: ${esc(error.message)}</div>`;
+        }
+    }
+
+    window.addEventListener('mu:work-route', event => { if (event.detail?.name === 'settings') void load(); });
+    window.addEventListener('beforeunload', event => { if (dirty.size) { event.preventDefault(); event.returnValue = ''; } });
+    if (location.hash.startsWith('#/settings')) void load();
+})();

@@ -9,14 +9,14 @@
      x-dialog="$store.memory.layerModal.open"
          x-show="$store.memory.layerModal.open"
      x-cloak
-     x-transition.opacity.duration.150ms
+     x-transition.opacity.duration.120ms
      @click.self="$store.memory.closeLayer()"
      @dialog-close="$store.memory.layerModal.open && $store.memory.closeLayer()">
     <div class="modal modal-lg memory-layer-modal">
         <div class="modal-head">
             <div class="memory-layer-heading">
                 <span class="memory-layer-swatch"
-                      :style="'background:hsl(' + ($store.memory.layerModal.hue || 0) + ',68%,42%)'"></span>
+                      :style="'background:' + $store.memory.layerColor($store.memory.layerModal.hue || 0)"></span>
                 <span class="modal-title"
                       x-text="$store.memory.layerModal.id + ' · ' + $store.memory.layerModal.name"></span>
             </div>

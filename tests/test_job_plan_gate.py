@@ -165,6 +165,8 @@ def test_gui_surfaces_present():
     js = (root / "static" / "js" / "work.js").read_text(encoding="utf-8")
     assert 'id="work-stage-models-form"' in html and "work_stage_models.js" in html
     editor = (root / "static/js/work/plan_editor.js").read_text()
+    view = (root / "static/js/work/view.js").read_text()
     assert "/static/js/work/plan_editor.js" in html
-    assert "data-plan-save" in editor and "data-plan-approve" in editor
-    assert "data-plan-reject" in editor
+    # planos flow: the editor saves; approve / re-plan live in the job action bar.
+    assert "data-plan-save" in editor and "data-plan-approve" in view
+    assert "data-plan-reject" in view and "data-plan-edit" in view

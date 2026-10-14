@@ -1,9 +1,8 @@
 """Toast notification placement + styling.
 
-Toasts used to stack in the top-right, where they overlapped the header's
-view / tools / yolo / inspector / theme / leave controls and read as a thin
-border-left strip. They now anchor top-center just below the header, render
-as a frosted pill with a colored type glyph, and slide down from the header.
+Toasts follow the planos design: a bottom-right stack (clear of every
+header control), raised notes with a 4px tone left border and a status glyph
+(✓ ● ◆ ✗) paired with the message text, rising in from the corner.
 """
 
 import os
@@ -22,31 +21,34 @@ def test_toast_css_exists():
     assert os.path.isfile(CSS_PATH)
 
 
-def test_toast_container_is_top_center_below_header():
+def test_toast_container_is_bottom_right_clear_of_header():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         css = f.read()
-    # Anchored below the 56px header (not top-right anymore).
+    # planos placement: bottom-right, never over the header controls.
     assert ".toast-container" in css
     block = css.split(".toast-container", 1)[1].split("}", 2)[0]
-    assert "top: 64px" in block
-    assert "left: 50%" in block
-    assert "translateX(-50%)" in block
-    # Must NOT pin to the right edge (the old behavior that overlapped the
-    # header controls).
-    assert "right:" not in block
+    assert "right: var(--space-4)" in block
+    assert "bottom: var(--space-4)" in block
+    # Must NOT pin to the top (where it overlapped the header controls).
+    assert "top:" not in block
 
 
-def test_toast_is_frosted_pill_with_type_glyph():
+def test_toast_is_tone_bordered_note_with_type_glyph():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         css = f.read()
-    # Pill shape.
-    assert "border-radius: var(--radius-pill)" in css
-    # Frosted backdrop (more legible over chat content).
-    assert "backdrop-filter" in css
+    block = css.split("\n.toast {", 1)[1].split("}", 1)[0]
+    # planos toast: raised surface, 4px tone left border, control radius.
+    assert "background: var(--raised)" in block
+    assert "border-left-width: 4px" in block
+    assert "border-radius: var(--radius-sm)" in block
+    # Flat surface: no frosted backdrop blur anywhere in app.css.
+    assert "backdrop-filter" not in css
     # Colored type glyphs give instant intent recognition.
     assert '.toast--success::before' in css
     assert '.toast--error::before' in css
     assert '.toast--info::before' in css
+    # Shared status vocabulary glyphs.
+    assert 'content: "✓"' in css and 'content: "✗"' in css
 
 
 def test_toast_template_wraps_message_and_dismisses():

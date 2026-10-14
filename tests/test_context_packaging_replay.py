@@ -95,7 +95,11 @@ def _replay(session, *, turns=TURNS, iters=ITERS_PER_TURN):
     sm = session.session_manager
     fills = []
     call_no = 0
+    from mu.session.context_maintenance import apply_pending_turn_roll
+
     for t in range(turns):
+        # Turn-start seam: run_turn merges the previous turn's deferred roll.
+        apply_pending_turn_roll(session, wait=5)
         turn_start = len(sm.history)
         sm.history.append({"role": "user", "parts": [{"type": "text", "text": f"turn {t}: keep working"}]})
         sm._active_turn_start_index = turn_start
@@ -125,6 +129,7 @@ def _replay(session, *, turns=TURNS, iters=ITERS_PER_TURN):
         sm.history.append({"role": "assistant", "parts": [{"type": "text", "text": f"turn {t} done"}]})
         # Turn-end seam: fold + roll.
         loop_body._fold_turn_context(session, turn_start, iters)
+    apply_pending_turn_roll(session, wait=5)  # the next turn's start
     return fills
 
 
@@ -199,3 +204,29 @@ def test_replay_without_packaging_would_exceed_the_window(session):
     })
     fills = _replay(session, turns=3)
     assert max(fills) > 100.0, max(fills)
+
+
+def test_pressure_clears_are_rare_when_the_fixed_prompt_is_large(session):
+    """provider_latency_ollama_openai.md §7: a clear frees half the history headroom, so a long
+    turn on a window dominated by the fixed prompt doesn't clear (and invalidate the local KV /
+    prompt cache) almost every iteration."""
+    from mu.agent import compactor
+
+    big_fixed = "policy " * 120_000  # ~120k cl100k → ~42% of the window after drift
+    sm = session.session_manager
+    turn_start = len(sm.history)
+    sm.history.append({"role": "user", "parts": [{"type": "text", "text": "long turn"}]})
+    sm._active_turn_start_index = turn_start
+    session._current_turn_start_index = turn_start
+    clears = 0
+    for i in range(60):
+        session._trace_current_iter = i + 1
+        compactor._compact_history(HookContext(point="pre_provider_call", session=session,
+                                               variables=session.variables, system_prompt=big_fixed, tools=None))
+        cid = f"c{i}"
+        sm.history.append({"role": "assistant", "parts": [{"type": "tool_call", "tool_name": "read_file",
+                                                            "tool_args": {"filename": f"f{i}.py"}, "tool_call_id": cid}]})
+        sm.history.append({"role": "tool", "parts": [{"type": "tool_result", "tool_name": "read_file",
+                                                       "tool_result": RESULT_PAYLOAD, "tool_call_id": cid}]})
+    kinds = [e["kind"] for e in (getattr(sm, "_compaction_log", None) or [])]
+    assert 1 <= kinds.count("pressure_clear") <= 3, kinds

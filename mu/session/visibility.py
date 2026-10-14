@@ -40,10 +40,19 @@ def is_durable_job_session(name: str, data: Mapping[str, Any] | None = None) -> 
     return bool(_LEGACY_DURABLE_JOB_NAME.fullmatch(session_name))
 
 
+def is_job_workspace_session(data: Mapping[str, Any] | None = None) -> bool:
+    """Return True for the hidden per-workspace session behind ``/job ... --in PATH``."""
+
+    variables = data.get("variables") if isinstance(data, Mapping) else None
+    if not isinstance(variables, Mapping):
+        return False
+    return str(variables.get("internal_session_kind") or "").strip().lower() == "job_workspace"
+
+
 def is_user_visible_session(name: str, data: Mapping[str, Any] | None = None) -> bool:
     """Return whether a session belongs in ordinary user conversation lists."""
 
-    return not is_durable_job_session(name, data)
+    return not is_durable_job_session(name, data) and not is_job_workspace_session(data)
 
 
-__all__ = ["is_durable_job_session", "is_user_visible_session"]
+__all__ = ["is_durable_job_session", "is_job_workspace_session", "is_user_visible_session"]

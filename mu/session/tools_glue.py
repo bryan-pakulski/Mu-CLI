@@ -327,10 +327,20 @@ def result_exceeds_inline_budget(session: Any, tool_name: str, raw_result: Any) 
 
             is_error = infer_tool_error_code(tool_name, raw_text) is not None
         variables = getattr(session, "variables", {}) or {}
-        budget = resolve_inline_budget(tool_name, is_error, variables)
+        budget = resolve_inline_budget(tool_name, is_error, variables, model_context_window(session))
         return int(estimate_tokens(raw_text) or 0) > budget
     except Exception:  # noqa: BLE001
         return False
+
+
+def model_context_window(session: Any) -> Optional[int]:
+    """The active model's real input window (None when the provider can't tell)."""
+    try:
+        provider = getattr(session, "provider", None)
+        window = provider.effective_context_window(provider.model_name) if provider is not None else None
+        return int(window) if window else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _apply_observation_transform(
@@ -351,7 +361,7 @@ def _apply_observation_transform(
         variables = getattr(session, "variables", {}) or {}
         tool_name = structured["tool_name"]
         raw_tokens = int(estimate_tokens(raw_text) or 0)
-        budget = resolve_inline_budget(tool_name, is_error, variables)
+        budget = resolve_inline_budget(tool_name, is_error, variables, model_context_window(session))
         structured["telemetry"]["raw_token_count"] = raw_tokens
         structured["telemetry"]["inline_budget"] = budget
         if raw_tokens <= budget:
@@ -363,6 +373,7 @@ def _apply_observation_transform(
             structured["data"]["omitted"] = False
             structured["telemetry"]["injected_token_count"] = raw_tokens
             return
+        original_data, original_raw = dict(structured["data"]), structured.get("raw")
         obs, note = build_observation(
             tool_name, None, raw_text, structured["data"],
             budget_tokens=budget, is_error=is_error,
@@ -383,12 +394,19 @@ def _apply_observation_transform(
         from mu.session.messages import _lean_tool_result
 
         try:
-            projected = _json.dumps(
-                _lean_tool_result(structured), indent=2, sort_keys=True, default=str
-            )
+            from providers.base import tool_result_json
+            projected = tool_result_json(_lean_tool_result(structured))
         except Exception:  # noqa: BLE001
             projected = str(structured["data"])
         injected = int(estimate_tokens(projected) or 0)
+        if injected >= raw_tokens:
+            # The "compact" observation would be larger than the result itself: keep the
+            # original inline (no stored-ref round trip needed to read it).
+            structured["data"], structured["raw"] = original_data, original_raw
+            structured["data"]["omitted"] = False
+            structured["telemetry"].pop("delivery_mode", None)
+            structured["telemetry"]["injected_token_count"] = raw_tokens
+            return
         structured["telemetry"]["injected_token_count"] = injected
         structured["telemetry"]["compression_ratio"] = round(
             (raw_tokens - injected) / max(1, raw_tokens), 3

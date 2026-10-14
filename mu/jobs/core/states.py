@@ -1,8 +1,20 @@
-"""Core job state machine (guide §3.1).
+"""The one job transition model (guide §3.1).
 
-``JobState`` is the authoritative lifecycle. The legacy ``JobStatus`` stays
-readable during the migration; ``from_legacy`` maps old status/attention pairs
-onto the core model so existing rows keep loading.
+Two views of the same lifecycle live here, and only here:
+
+* ``JobState`` / ``CoreState`` — the authoritative pipeline state (plan →
+  implement → checks → review → push), with ``TRANSITIONS`` as its legal moves
+  and ``transition()`` as the pure transition function.
+* the stored ``status`` column (``JobStatus`` values in ``models.py``) — kept
+  for compatibility because the DB, the REST/SSE API, the web UI, the terminal
+  and the mobile client all read it. ``STATUS_TRANSITIONS`` is its legal-move
+  table; ``advance()`` is the explicit, total mapping that derives the next
+  ``CoreState`` from the previous one and the status being written. It reads
+  no event history, so the derived state is a pure function of its inputs.
+
+``from_legacy`` is migration-only: it maps a row written before the core
+columns existed (schema < v3) and old events without a ``core_state`` snapshot.
+Live writes never use it.
 """
 
 from __future__ import annotations
@@ -50,7 +62,8 @@ TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     _S.REVIEWING: frozenset({_S.REVIEW_DONE}),
     _S.REVIEW_DONE: frozenset({_S.PUSHING, _S.IMPLEMENTING, _S.CHECKING}),
     _S.PUSHING: frozenset({_S.PUSHED}),
-    _S.PUSHED: frozenset({_S.DONE, _S.IMPLEMENTING}),
+    # PUSHED -> PUSHING: re-push after the host PR was closed unmerged (opens a new PR).
+    _S.PUSHED: frozenset({_S.DONE, _S.IMPLEMENTING, _S.PUSHING}),
     _S.DONE: frozenset(),
     _S.NEEDS_INPUT: frozenset(),  # resume -> paused_from (handled specially)
     _S.FAILED: frozenset(),       # retry -> failed_from (handled specially)
@@ -139,30 +152,231 @@ def effective_state(core: CoreState) -> JobState:
     return core.state
 
 
-# ---------------------------------------------------------------- legacy map
-_ACTIVE_LEGACY = {
-    "queued": JobState.PROVISIONING,
-    "preparing": JobState.PROVISIONING,
-    "planning": JobState.PLANNING,
-    "running": JobState.IMPLEMENTING,
-    "recovering": JobState.IMPLEMENTING,
-    "verifying": JobState.CHECKING,
-    "reviewing": JobState.REVIEWING,
-    "publishing": JobState.PUSHING,
+# ------------------------------------------------------- stored status table
+# Status values (``JobStatus``) as plain strings so this module stays free of
+# model imports. ``timed_out`` and ``budget_exceeded`` are no longer written by
+# any code path: a reached cost/token/time/iteration cap pauses the stage with
+# ``needs_human`` + attention ``limit_reached`` (core NEEDS_INPUT, paused_from =
+# the stage) and ``raiseLimit`` resumes it. Both stay legal stored values (as
+# sources only) because old rows and every reader (web, terminal, mobile types)
+# still recognise them.
+QUEUED, PREPARING, RUNNING, NEEDS_HUMAN, VERIFYING = "queued", "preparing", "running", "needs_human", "verifying"
+PLANNING_S, REVIEWING_S, PUBLISHING = "planning", "reviewing", "publishing"
+READY_FOR_REVIEW, RECOVERING, CONFLICTED = "ready_for_review", "recovering", "conflicted"
+FAILED_S, TIMED_OUT, BUDGET_EXCEEDED, ENVIRONMENT_ERROR = "failed", "timed_out", "budget_exceeded", "environment_error"
+CANCELLED_S, MERGED = "cancelled", "merged"
+# NEEDS_HUMAN attention reason of a reached cap (``mu/jobs/limits.py``).
+LIMIT_REACHED = "limit_reached"
+
+_RETRY_TARGETS = frozenset({QUEUED, PLANNING_S, VERIFYING, REVIEWING_S, PUBLISHING, CANCELLED_S})
+
+STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    QUEUED: frozenset({PREPARING, CANCELLED_S}),
+    # Every worker-active status can pause on a human (including a reached cap).
+    PREPARING: frozenset({PLANNING_S, RUNNING, NEEDS_HUMAN, RECOVERING, ENVIRONMENT_ERROR, FAILED_S,
+                          CANCELLED_S}),
+    # RUNNING -> QUEUED is the unattended transient-failure retry (backoff).
+    RUNNING: frozenset({NEEDS_HUMAN, VERIFYING, RECOVERING, FAILED_S, ENVIRONMENT_ERROR, CANCELLED_S, QUEUED}),
+    NEEDS_HUMAN: frozenset({PLANNING_S, REVIEWING_S, PUBLISHING, VERIFYING, RUNNING, QUEUED, FAILED_S,
+                            CANCELLED_S}),
+    VERIFYING: frozenset({REVIEWING_S, READY_FOR_REVIEW, QUEUED, RUNNING, NEEDS_HUMAN, RECOVERING,
+                          CONFLICTED, FAILED_S, CANCELLED_S}),
+    # A pushed job keeps its branch; more agent work requeues it. NEEDS_HUMAN:
+    # the host PR was closed without merging (attention ``pr_closed``).
+    READY_FOR_REVIEW: frozenset({VERIFYING, QUEUED, RUNNING, CONFLICTED, MERGED, NEEDS_HUMAN, CANCELLED_S}),
+    # RECOVERING -> ENVIRONMENT_ERROR: the recovered run could not re-prepare its worktree.
+    RECOVERING: frozenset({PLANNING_S, REVIEWING_S, PUBLISHING, RUNNING, NEEDS_HUMAN, FAILED_S,
+                           CANCELLED_S, ENVIRONMENT_ERROR}),
+    # CONFLICTED -> MERGED: the PR host merged the branch (e.g. squash) despite local drift.
+    CONFLICTED: frozenset({QUEUED, RUNNING, NEEDS_HUMAN, MERGED, FAILED_S, CANCELLED_S}),
+    # Staged pipeline: PREPARING -> PLANNING -> RUNNING -> VERIFYING -> REVIEWING
+    # -> (human) PUBLISHING -> READY_FOR_REVIEW.
+    PLANNING_S: frozenset({RUNNING, NEEDS_HUMAN, RECOVERING, QUEUED, FAILED_S, CANCELLED_S, ENVIRONMENT_ERROR}),
+    REVIEWING_S: frozenset({RUNNING, PUBLISHING, READY_FOR_REVIEW, NEEDS_HUMAN, RECOVERING, QUEUED,
+                            FAILED_S, CANCELLED_S}),
+    PUBLISHING: frozenset({READY_FOR_REVIEW, NEEDS_HUMAN, RECOVERING, FAILED_S, CANCELLED_S}),
+    FAILED_S: _RETRY_TARGETS,
+    # Old rows only (never written now): still retryable by a human.
+    TIMED_OUT: _RETRY_TARGETS,
+    BUDGET_EXCEEDED: _RETRY_TARGETS,
+    ENVIRONMENT_ERROR: _RETRY_TARGETS,
+    CANCELLED_S: frozenset(),
+    MERGED: frozenset(),
 }
-_FAILED_LEGACY = {"failed", "timed_out", "budget_exceeded", "environment_error"}
+
+TERMINAL_STATUSES = frozenset({CANCELLED_S, MERGED})
+FAILURE_STATUSES = frozenset({FAILED_S, TIMED_OUT, BUDGET_EXCEEDED, ENVIRONMENT_ERROR})
+# Statuses a human ``retry`` may restart from.
+RETRYABLE_STATUSES = FAILURE_STATUSES | {NEEDS_HUMAN}
+# Statuses that wait on a human (attention push, boards).
+ATTENTION_STATUSES = frozenset({NEEDS_HUMAN, CONFLICTED})
+# Worker phase the controller launches for each schedulable status.
+STATUS_PHASE: dict[str, str] = {
+    QUEUED: "implementation",
+    PLANNING_S: "implementation",
+    RECOVERING: "implementation",
+    VERIFYING: "verification",
+    REVIEWING_S: "review",
+    PUBLISHING: "publish",
+}
+SCHEDULABLE_STATUSES = tuple(STATUS_PHASE)
+PHASES = ("implementation", "verification", "review", "publish")
+# Lease expiry in these statuses re-dispatches the same stage (no status change).
+STAGE_RETRY_STATUSES = frozenset({PLANNING_S, VERIFYING, REVIEWING_S, PUBLISHING})
+
+
+def _value(status: Any) -> str:
+    return str(getattr(status, "value", status) or "")
+
+
+def can_transition_status(current: Any, target: Any) -> bool:
+    return _value(target) in STATUS_TRANSITIONS[_value(current)]
+
+
+def phase_for_status(status: Any) -> str:
+    return STATUS_PHASE.get(_value(status), "implementation")
+
+
+# ------------------------------------------------------- status -> core state
+# A write of one of these statuses puts the pipeline in a fixed core state.
+STAGE_STATUS_STATE: dict[str, JobState] = {
+    PLANNING_S: JobState.PLANNING,
+    RUNNING: JobState.IMPLEMENTING,
+    VERIFYING: JobState.CHECKING,
+    REVIEWING_S: JobState.REVIEWING,
+    PUBLISHING: JobState.PUSHING,
+    READY_FOR_REVIEW: JobState.PUSHED,
+    MERGED: JobState.DONE,
+    CANCELLED_S: JobState.CANCELLED,
+}
+# Scheduling statuses: the worker picks the job up again.
+SCHEDULING_STATUSES = frozenset({QUEUED, PREPARING, RECOVERING})
+# NEEDS_HUMAN attention reasons that are pipeline gates rather than pauses.
+GATE_REASONS: dict[str, JobState] = {
+    "plan_review": JobState.PLAN_REVIEW,
+    "review_done": JobState.REVIEW_DONE,
+    "review_stalled": JobState.REVIEW_DONE,  # old saved jobs only
+    # The host PR was closed unmerged: still pushed, waiting on a human
+    # decision (re-push opens a new PR, or mark done).
+    "pr_closed": JobState.PUSHED,
+}
+# Where a scheduling round trip lands, by the prior core state. ``None`` = the
+# paused/failed origin (resume and retry return to the step they left).
+# ``_FRESH`` = new work: PROVISIONING for queued/preparing, IMPLEMENTING for a
+# recovered implementation run.
+_ORIGIN, _FRESH = None, "fresh"
+RESCHEDULE: dict[JobState, Any] = {
+    JobState.NEEDS_INPUT: _ORIGIN,
+    JobState.FAILED: _ORIGIN,
+    # Leaving a human gate (approved plan, re-prompt, more work on a pushed
+    # branch) is a fresh implementation run with a fresh fix budget.
+    JobState.PLAN_REVIEW: JobState.IMPLEMENTING,
+    JobState.REVIEW_DONE: JobState.IMPLEMENTING,
+    JobState.PUSHED: JobState.IMPLEMENTING,
+    # Fix loop / transient retry / crash recovery of an implementation run.
+    JobState.IMPLEMENTING: JobState.IMPLEMENTING,
+    JobState.CHECKING: JobState.IMPLEMENTING,
+    JobState.SELECTED: _FRESH,
+    JobState.PROVISIONING: _FRESH,
+    JobState.PLANNING: _FRESH,
+    JobState.REVIEWING: _FRESH,
+    JobState.PUSHING: _FRESH,
+    JobState.DONE: _FRESH,
+    JobState.CANCELLED: _FRESH,
+}
+_RESETS_FIX_BUDGET = frozenset({JobState.PLAN_REVIEW, JobState.REVIEW_DONE, JobState.PUSHED})
+
+
+def origin_of(core: CoreState) -> JobState:
+    """The pipeline step a paused/failed job belongs to (total: falls back to
+    IMPLEMENTING / PROVISIONING when an old row lost its origin)."""
+    if core.state == JobState.NEEDS_INPUT:
+        return core.paused_from or JobState.IMPLEMENTING
+    if core.state == JobState.FAILED:
+        return core.failed_from or JobState.PROVISIONING
+    return core.state
+
+
+def advance(prior: CoreState, status: Any, attention: Any = "", *, stage: str = "") -> CoreState:
+    """Next ``CoreState`` for a write of ``status`` (+ attention reason).
+
+    Total over every (prior state, status, attention) triple and free of event
+    history. A ``failed`` write with ``stage == "provisioning"`` marks a failure
+    of the sandbox itself, which a retry must provision again. A
+    ``needs_human``/``approval_required`` write is always a tool-approval pause
+    (the plan gate uses ``plan_review``).
+    """
+    status, reason = _value(status), _value(attention)
+    fixes = prior.fix_attempts
+    if status in STAGE_STATUS_STATE:
+        return CoreState(STAGE_STATUS_STATE[status], fix_attempts=fixes)
+    if status in SCHEDULING_STATUSES:
+        landing = RESCHEDULE[prior.state]
+        gate = prior.state
+        if landing is _ORIGIN:
+            origin = origin_of(prior)
+            if prior.state != JobState.NEEDS_INPUT or origin not in _RESETS_FIX_BUDGET:
+                return CoreState(origin, fix_attempts=fixes)
+            # Paused while parked at a human gate (e.g. a pushed branch
+            # that went conflicted): scheduling it is new work on that gate,
+            # exactly like leaving the gate directly — never back to the gate
+            # itself (that would re-fire its writeback while queued).
+            gate, landing = origin, RESCHEDULE[origin]
+        if landing == _FRESH:
+            landing = JobState.IMPLEMENTING if status == RECOVERING else JobState.PROVISIONING
+        return CoreState(landing, fix_attempts=0 if gate in _RESETS_FIX_BUDGET else fixes)
+    if status == NEEDS_HUMAN and reason in GATE_REASONS:
+        return CoreState(GATE_REASONS[reason], fix_attempts=fixes)
+    if status in (NEEDS_HUMAN, CONFLICTED):
+        # Every other pause — a question, a tool approval and a reached cap
+        # (``limit_reached``) — keeps the stage it paused in, so ``resume`` /
+        # ``raiseLimit`` return the job to exactly that stage.
+        return CoreState(JobState.NEEDS_INPUT, paused_from=origin_of(prior), fix_attempts=fixes)
+    if status in FAILURE_STATUSES:
+        origin = JobState.PROVISIONING if status == FAILED_S and stage == "provisioning" else origin_of(prior)
+        return CoreState(JobState.FAILED, failed_from=origin, fix_attempts=fixes)
+    raise ValueError(f"unknown job status {status!r}")
+
+
+def initial_core() -> CoreState:
+    """Core state of a freshly created (QUEUED) job."""
+    return CoreState(JobState.PROVISIONING)
+
+
+def to_legacy_status(core: CoreState) -> str:
+    """Status written for a human/command-driven core transition."""
+    s = core.state
+    return {
+        JobState.SELECTED: QUEUED, JobState.PROVISIONING: PREPARING,
+        JobState.PLANNING: PLANNING_S, JobState.PLAN_REVIEW: NEEDS_HUMAN,
+        JobState.IMPLEMENTING: RUNNING, JobState.CHECKING: VERIFYING,
+        JobState.REVIEWING: REVIEWING_S, JobState.REVIEW_DONE: NEEDS_HUMAN,
+        JobState.PUSHING: PUBLISHING, JobState.PUSHED: READY_FOR_REVIEW,
+        JobState.DONE: MERGED, JobState.NEEDS_INPUT: NEEDS_HUMAN,
+        JobState.FAILED: FAILED_S, JobState.CANCELLED: CANCELLED_S,
+    }[s]
+
+
+# ------------------------------------------------------------ migration only
+_ACTIVE_LEGACY = {
+    QUEUED: JobState.PROVISIONING,
+    PREPARING: JobState.PROVISIONING,
+    PLANNING_S: JobState.PLANNING,
+    RUNNING: JobState.IMPLEMENTING,
+    RECOVERING: JobState.IMPLEMENTING,
+    VERIFYING: JobState.CHECKING,
+    REVIEWING_S: JobState.REVIEWING,
+    PUBLISHING: JobState.PUSHING,
+}
+# Pre-v3 rows: ``approval_required`` was the plan gate's reason.
 PLAN_REVIEW_REASONS = frozenset({"approval_required", "plan_review"})
 REVIEW_DONE_REASONS = frozenset({"review_stalled", "review_done"})
-
-
-def legacy_active_state(status: str) -> Optional[JobState]:
-    return _ACTIVE_LEGACY.get(str(status or ""))
 
 
 def _origin(history: Iterable[str]) -> Optional[JobState]:
     """Most recent active state from newest-first legacy status history."""
     for status in history:
-        mapped = legacy_active_state(status)
+        mapped = _ACTIVE_LEGACY.get(str(status or ""))
         if mapped is not None:
             return mapped
     return None
@@ -170,69 +384,33 @@ def _origin(history: Iterable[str]) -> Optional[JobState]:
 
 def from_legacy(status: str, attention_reason: str = "", *, history: Iterable[str] = (),
                 fix_attempts: int = 0) -> CoreState:
-    """Map a legacy ``JobStatus`` (+ attention) onto the core model (§3.1 table).
+    """Migration-only map of a pre-v3 ``JobStatus`` (+ attention) onto the core model.
 
-    ``history`` is legacy statuses the job passed through, newest first
-    (usually the ``from_status`` of recent ``status_changed`` events); it
-    supplies ``paused_from`` / ``failed_from``.
+    ``history`` is legacy statuses the row passed through, newest first (the
+    ``from_status`` of its ``status_changed`` events): the only record of
+    ``paused_from`` / ``failed_from`` an old row has. Live transitions use
+    ``advance()``.
     """
-    status = str(getattr(status, "value", status) or "")
-    reason = str(getattr(attention_reason, "value", attention_reason) or "")
+    status, reason = _value(status), _value(attention_reason)
     if status in _ACTIVE_LEGACY:
         return CoreState(_ACTIVE_LEGACY[status], fix_attempts=fix_attempts)
-    if status == "needs_human":
+    if status == NEEDS_HUMAN:
         if reason in PLAN_REVIEW_REASONS:
             return CoreState(JobState.PLAN_REVIEW, fix_attempts=fix_attempts)
         if reason in REVIEW_DONE_REASONS:
             return CoreState(JobState.REVIEW_DONE, fix_attempts=fix_attempts)
         return CoreState(JobState.NEEDS_INPUT, paused_from=_origin(history) or JobState.IMPLEMENTING,
                          fix_attempts=fix_attempts)
-    if status == "conflicted":
+    if status == CONFLICTED:
         return CoreState(JobState.NEEDS_INPUT, paused_from=_origin(history) or JobState.IMPLEMENTING,
                          fix_attempts=fix_attempts)
-    if status == "ready_for_review":
+    if status == READY_FOR_REVIEW:
         return CoreState(JobState.PUSHED, fix_attempts=fix_attempts)
-    if status == "merged":
+    if status == MERGED:
         return CoreState(JobState.DONE, fix_attempts=fix_attempts)
-    if status in _FAILED_LEGACY:
+    if status in FAILURE_STATUSES:
         return CoreState(JobState.FAILED, failed_from=_origin(history) or JobState.PROVISIONING,
                          fix_attempts=fix_attempts)
-    if status in {"cancelled", "archived"}:
+    if status in {CANCELLED_S, "archived"}:
         return CoreState(JobState.CANCELLED, fix_attempts=fix_attempts)
     raise ValueError(f"unknown legacy status {status!r}")
-
-
-def to_legacy_status(core: CoreState) -> str:
-    """Read-only compatibility projection core -> legacy ``JobStatus`` value."""
-    s = core.state
-    return {
-        JobState.SELECTED: "queued", JobState.PROVISIONING: "preparing",
-        JobState.PLANNING: "planning", JobState.PLAN_REVIEW: "needs_human",
-        JobState.IMPLEMENTING: "running", JobState.CHECKING: "verifying",
-        JobState.REVIEWING: "reviewing", JobState.REVIEW_DONE: "needs_human",
-        JobState.PUSHING: "publishing", JobState.PUSHED: "ready_for_review",
-        JobState.DONE: "merged", JobState.NEEDS_INPUT: "needs_human",
-        JobState.FAILED: "failed", JobState.CANCELLED: "cancelled",
-    }[s]
-
-
-def evolve_legacy(current: CoreState, status: str, attention: str, *, history=()) -> CoreState:
-    """Translate old worker scheduling signals while preserving the durable core origin.
-
-    A QUEUED/PREPARING scheduling round trip is not a return to Plan after an
-    approval, repair, re-prompt, resume or retry. Old non-staged jobs retain
-    their supported shortened paths; all new UI commands use transition().
-    """
-    mapped = from_legacy(status, attention, history=history, fix_attempts=current.fix_attempts)
-    if status in {"queued", "preparing", "recovering"}:
-        if current.state in {JobState.NEEDS_INPUT, JobState.FAILED}:
-            return CoreState(effective_state(current), fix_attempts=current.fix_attempts)
-        if current.state in {JobState.PLAN_REVIEW, JobState.REVIEW_DONE, JobState.PUSHED}:
-            return CoreState(JobState.IMPLEMENTING)
-        if current.state in {JobState.IMPLEMENTING, JobState.CHECKING}:
-            return CoreState(JobState.IMPLEMENTING, fix_attempts=current.fix_attempts)
-    if mapped.state == JobState.NEEDS_INPUT:
-        return CoreState(mapped.state, paused_from=effective_state(current), fix_attempts=current.fix_attempts)
-    if mapped.state == JobState.FAILED:
-        return CoreState(mapped.state, failed_from=effective_state(current), fix_attempts=current.fix_attempts)
-    return mapped

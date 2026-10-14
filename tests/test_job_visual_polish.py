@@ -13,17 +13,27 @@ TRACE_HTML = ROOT / "mu" / "gui" / "static" / "job_trace.html"
 TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace.js"
 TRACE_SINGLE_TASK = ROOT / "mu" / "gui" / "static" / "js" / "job_trace_signed_delta.js"
 MODEL_HTML = ROOT / "mu" / "gui" / "static" / "model_costs.html"
-RUNNER = ROOT / "mu" / "jobs" / "runner.py"
+# Stage sessions run in the sandbox worker; their harness trace must be on.
+RUNNER = ROOT / "mu" / "jobs" / "sandbox" / "worker.py"
 PRICING = ROOT / "config" / "model_pricing.json"
 
 
-def test_engineering_work_uses_primary_mucli_chrome_and_theme_switcher():
+def test_engineering_work_uses_planos_chrome_and_theme_switcher():
     html = WORK.read_text(encoding="utf-8")
     css = WORK_POLISH.read_text(encoding="utf-8")
     theme = ROUTE_THEME.read_text(encoding="utf-8")
+    work_css = (ROOT / "mu" / "gui" / "static" / "css" / "work.css").read_text(encoding="utf-8")
 
-    assert '/static/css/product.css' in html
-    assert '/static/css/clarity.css' in html
+    # Jobs mode mirrors the planos shell: its own scoped design system, not the chat chrome.
+    assert '/static/css/product.css' not in html
+    assert '/static/css/clarity.css' not in html
+    assert '/static/css/work.css' in html
+    assert 'class="work-side" aria-label="Main"' in html
+    assert 'class="work-crumbs"' in html and 'id="work-chips"' in html
+    assert '/static/js/work/ui.js' in html
+    for token in ('--accent: #7aa2f7', '--ok: #73c991', '--warn: #e0af68', '--danger: #f7768e',
+                  '--running: #7dcfff', '--accent: #2f5bd3', '[data-density="compact"]'):
+        assert token in work_css
     assert '/static/css/work_polish.css' in html
     assert '/static/js/route_theme.js' in html
     assert 'work-header product-header' in html
@@ -40,17 +50,41 @@ def test_engineering_work_uses_primary_mucli_chrome_and_theme_switcher():
     assert "localStorage.setItem('mucli-theme'" in theme
 
 
-def test_job_management_is_a_full_viewport_modal_not_document_flow():
+def test_job_management_boards_and_settings_are_routed_pages_not_dialogs():
+    """planos: History, Boards, Settings and Activity are full pages (page-head + panels)."""
     html = WORK.read_text(encoding="utf-8")
     css = WORK_POLISH.read_text(encoding="utf-8")
+    work_js = (ROOT / "mu" / "gui" / "static" / "js" / "work.js").read_text(encoding="utf-8")
+    mgmt_js = (ROOT / "mu" / "gui" / "static" / "js" / "work_management.js").read_text(encoding="utf-8")
+    jira_js = (ROOT / "mu" / "gui" / "static" / "js" / "work_jira.js").read_text(encoding="utf-8")
+    stage_js = (ROOT / "mu" / "gui" / "static" / "js" / "work_stage_models.js").read_text(encoding="utf-8")
 
-    assert 'id="work-management-backdrop"' in html
-    assert 'class="work-management-pane" role="dialog" aria-modal="true"' in html
-    assert '.work-product-app > .work-management-backdrop' in css
+    # Ids the scripts and other tests rely on are kept, now inside route sections.
+    for page_id in ('work-management-backdrop', 'work-jira-backdrop', 'work-jira-settings-backdrop'):
+        assert f'id="{page_id}"' in html
+    for route in ('activity', 'boards', 'history', 'settings'):
+        section = html.index(f'data-route="{route}"')
+        assert html.rfind('<section class="work-route page stack"', 0, section) > html.rfind('</section>', 0, section)
+        assert f'href="#/{route}"' in html
+    assert html.index('id="work-management-backdrop"') > html.index('data-route="history"')
+    assert html.index('id="work-jira-backdrop"') > html.index('data-route="boards"')
+    assert html.index('id="work-jira-settings-backdrop"') > html.index('data-route="settings"')
+    # No modal wrappers around them any more; nav entries are links that navigate.
+    assert 'class="work-management-pane" role="dialog"' not in html
+    assert 'work-jira-modal' not in html
+    assert '<a href="#/history" id="work-manage"' in html
+    assert '<a href="#/boards" id="work-jira-open"' in html
+    assert '<a href="#/settings" id="work-jira-settings-open"' in html
+    assert "PAGES = { activity: 'Activity', boards: 'Tickets', history: 'History', settings: 'Settings', setup: 'Setup' }" in work_js
+    assert "mu:work-route" in work_js
+    for script in (mgmt_js, jira_js, stage_js):
+        assert "mu:work-route" in script
+    assert 'body.work-management-open' not in css
+    assert '.work-management-backdrop[hidden]' not in css
+    # The New job sheet is still a viewport-level modal layer.
+    assert '.work-product-app > .work-modal-backdrop' in css
     assert 'position: fixed;' in css
     assert 'height: 100dvh;' in css
-    assert 'body.work-management-open { overflow: hidden; }' in css
-    assert '.work-product-app > .work-management-backdrop[hidden]' in css
 
 
 def test_job_trace_and_model_pricing_share_product_visual_language():
@@ -98,7 +132,7 @@ def test_job_analyzer_explains_state_residence_and_links_full_harness_trace():
     assert 'interpretation' in script
     assert 'entry_event' in script
     assert 'exit_event' in script
-    assert 'args.trace = True' in runner
+    assert 'trace=True' in runner
 
 
 def test_glm_cloud_default_estimate_uses_separate_input_and_output_rates():

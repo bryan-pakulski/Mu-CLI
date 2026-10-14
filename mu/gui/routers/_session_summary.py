@@ -103,7 +103,7 @@ def _skip_value(blob: str, index: int) -> tuple[object, int] | None:
         return None
 
 
-def read_session_summary(path: str, *, max_bytes: int = _MAX_BYTES) -> dict:
+def read_session_summary(path: str, *, max_bytes: int = _MAX_BYTES, keys: tuple = ()) -> dict:
     """Read the card-relevant top-level fields from session.json cheaply.
 
     Reads at most ``max_bytes`` from the head of the file, scans the root
@@ -171,7 +171,7 @@ def read_session_summary(path: str, *, max_bytes: int = _MAX_BYTES) -> dict:
             # Round-45 F7: match json.loads semantics — duplicate keys
             # overwrite (LAST one wins), so never early-break on having
             # found every card key once; keep scanning to root close/trunc.
-            if key_name in _CARD_KEYS:
+            if key_name in _CARD_KEYS or key_name in keys:
                 out[key_name] = value
             index = next_index
             key_start = -1

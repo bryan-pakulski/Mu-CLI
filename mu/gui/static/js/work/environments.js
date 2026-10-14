@@ -1,0 +1,161 @@
+/* Jobs mode — build environments (documentation/plans/job_build_environments.md §10).
+ *
+ * Shared by the New job sheet (work.js), the job page (work/view.js) and Settings (work/rules.js):
+ * the resolved-set summary, the editor dialog (environment / template / image per row, plus
+ * paths, Docker and GPUs) and the job page panel. Data: GET /api/jobs/environments
+ * (sources + resolved preview + Docker-in-Docker/GPU status + kept jobs); job VM
+ * `build_environments`; commands setEnvironments / refreshEnvironments / keepEnvironments.
+ */
+(() => {
+    'use strict';
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const pill = (tone, html, title = '') => `<span class="pill tone-${tone}"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+    const SOURCE_LABEL = {job:'this job', repo:'repo config', session:'session', settings:'settings', default:'default runtime', error:'error'};
+    const STATUS = {ready:['ok', '✓', 'ready'], preparing:['running', '●', 'preparing'], failed:['danger', '✗', 'failed'], cleaned:['muted', '○', 'cleaned']};
+    const ACTIONS = new Set(['setEnvironments', 'refreshEnvironments', 'keepEnvironments']);
+
+    function bytes(n) {
+        const v = Number(n || 0);
+        if (!v) return '';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.min(units.length - 1, Math.floor(Math.log(v) / Math.log(1024)));
+        return `${(v / 1024 ** i).toFixed(i >= 3 ? 1 : 0)} ${units[i]}`;
+    }
+
+    /* ``rust-build → resq-backend, stream-processor-rs`` · ``compose-it ⬢ docker`` */
+    function label(b) {
+        const paths = Array.isArray(b.paths) ? b.paths : String(b.paths || '').split(',').map(p => p.trim()).filter(Boolean);
+        return `${b.name || b.ref || b.env || ''}${paths.length ? ` → ${paths.join(', ')}` : ''}${b.docker ? ' ⬢ docker' : ''}${b.gpus ? ` · gpus ${b.gpus}` : ''}`;
+    }
+    function summary(bindings) { return (bindings || []).map(b => b.label || label(b)).join(' · '); }
+
+    /* A binding (VM / preview shape) → the editor row / setEnvironments payload shape. */
+    function toRow(b) {
+        const spec = b.env || (b.source && b.ref ? `${b.source}:${b.ref}` : b.ref || '');
+        return {env:spec, as:b.name || '', paths:(b.paths || []).join(', '), docker:!!b.docker, primary:!!b.primary,
+            gpus:b.gpus ? String(b.gpus) : ''}; // blank = inherit from the source environment
+    }
+    function toBinding(row) {
+        const out = {env:row.env.trim(), paths:row.paths, docker:!!row.docker, primary:!!row.primary};
+        if (row.as) out.as = row.as;
+        if (String(row.gpus || '').trim()) out.gpus = row.gpus.trim();
+        return out;
+    }
+    function rowName(row) {
+        if (row.as) return row.as;
+        const [head, ...rest] = row.env.split(':');
+        const ref = ['template', 'image', 'environment', 'env'].includes(head) ? rest.join(':') : row.env;
+        return head === 'image' ? ref.split('@')[0].split('/').pop().split(':')[0] : ref.replace(/^mucli-/, '');
+    }
+
+    async function sources(api, {repository = '', session = '', images = true} = {}) {
+        const q = new URLSearchParams({repository, session, images:images ? 'true' : 'false'});
+        return api(`/api/jobs/environments?${q}`);
+    }
+
+    /* Editor dialog. Resolves to a list of bindings (``[]`` = no override), or null on cancel. */
+    function editor({api, ui, title = 'Build environments', initial = [], context = {}, allowClear = true, clearLabel = 'Use default'}) {
+        return new Promise(resolve => {
+            let result = null;
+            let rows = initial.map(toRow);
+            if (!rows.length) rows = [{env:'', as:'', paths:'', docker:false, primary:false, gpus:''}];
+            const listId = `work-env-sources-${Math.random().toString(36).slice(2, 8)}`;
+            const form = document.createElement('form');
+            form.className = 'col work-env-editor';
+            form.noValidate = true;
+            const foot = document.createElement('div');
+            foot.className = 'row';
+            foot.innerHTML = `${allowClear ? `<button type="button" class="btn ghost" data-env-clear>${esc(clearLabel)}</button>` : ''}<span class="spacer"></span><button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" data-env-save>Save</button>`;
+            let info = null;
+            const draw = () => {
+                const dind = info?.docker_in_docker, gpu = info?.gpu;
+                form.innerHTML = `<p class="small muted">Each job snapshots these at start and removes the images when it ends. Source: a container-mode environment, <code>template:&lt;name&gt;</code> or <code>image:&lt;ref&gt;</code>. Paths are repository-relative components (blank = whole repository).</p>
+                    <datalist id="${listId}">${(info?.environments || []).map(e => `<option value="${esc(e.spec)}">environment · ${esc(e.status || '')}${e.gpus ? ` · gpus ${esc(e.gpus)}` : ''}</option>`).join('')}
+                        ${(info?.templates || []).map(t => `<option value="${esc(t.spec)}">template${t.description ? ` · ${esc(t.description)}` : ''}</option>`).join('')}
+                        ${(info?.images || []).map(i => `<option value="${esc(i.spec)}">image · ${esc(i.size || '')}</option>`).join('')}</datalist>
+                    <div class="table-wrap"><table class="table work-env-table"><thead><tr><th scope="col">Source</th><th scope="col">Paths</th><th scope="col">Docker</th><th scope="col">Primary</th><th scope="col">GPUs</th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead><tbody>
+                    ${rows.map((r, i) => `<tr data-env-row="${i}">
+                        <td><input type="text" list="${listId}" data-env-key="env" aria-label="Source of row ${i + 1}" placeholder="rust-build · template:x · image:rust:1.89" value="${esc(r.env)}" class="grow" style="min-width:220px"></td>
+                        <td><input type="text" data-env-key="paths" aria-label="Paths of row ${i + 1}" placeholder="whole repository" value="${esc(r.paths)}"></td>
+                        <td><input type="checkbox" data-env-key="docker" aria-label="Docker engine for row ${i + 1}" ${r.docker ? 'checked' : ''}></td>
+                        <td><input type="checkbox" data-env-key="primary" aria-label="Primary environment (row ${i + 1})" ${r.primary ? 'checked' : ''}></td>
+                        <td><input type="text" data-env-key="gpus" aria-label="GPUs of row ${i + 1}" placeholder="inherit" value="${esc(r.gpus)}" style="max-width:90px"></td>
+                        <td><button type="button" class="btn ghost icon sm tone-danger" data-env-remove="${i}" aria-label="Remove row ${i + 1}">×</button></td></tr>`).join('')}
+                    </tbody></table></div>
+                    <div class="row wrap"><button type="button" class="btn sm" data-env-add>+ Add environment</button><span class="spacer"></span>
+                        ${info ? `<span class="small ${dind?.available ? 'tone-ok' : 'muted'}" title="${esc(dind?.message || '')}">Docker-in-Docker: ${dind?.available ? 'Sysbox available' : 'needs Sysbox'}</span>
+                        <span class="small ${gpu?.supported ? 'tone-ok' : 'muted'}" title="${esc(gpu?.reason || '')}">GPUs: ${gpu?.supported ? 'available' : 'unavailable'}</span>` : '<span class="small muted">Loading sources…</span>'}</div>
+                    <span class="error" data-env-error></span>`;
+                form.querySelectorAll('[data-env-remove]').forEach(b => { b.onclick = () => { read(); rows.splice(Number(b.dataset.envRemove), 1); draw(); }; });
+                form.querySelector('[data-env-add]').onclick = () => { read(); rows.push({env:'', as:'', paths:'', docker:false, primary:false, gpus:''}); draw(); form.querySelector(`[data-env-row="${rows.length - 1}"] [data-env-key="env"]`)?.focus(); };
+            };
+            const read = () => {
+                rows = [...form.querySelectorAll('[data-env-row]')].map((tr, i) => {
+                    const v = k => tr.querySelector(`[data-env-key="${k}"]`);
+                    return {env:v('env').value.trim(), as:rows[i]?.env === v('env').value.trim() ? rows[i].as : '', paths:v('paths').value.trim(),
+                        docker:v('docker').checked, primary:v('primary').checked, gpus:v('gpus').value.trim()};
+                });
+            };
+            draw();
+            const d = ui.dialog({title, body:form, footer:foot, wide:true, onClose:() => resolve(result)});
+            sources(api, context).then(data => { info = data; read(); draw(); }).catch(() => { info = {}; read(); draw(); });
+            foot.querySelector('[data-cancel]').onclick = () => d.close();
+            foot.querySelector('[data-env-clear]')?.addEventListener('click', () => { result = []; d.close(); });
+            foot.querySelector('[data-env-save]').onclick = () => {
+                read();
+                const chosen = rows.filter(r => r.env);
+                if (!chosen.length) { result = []; d.close(); return; }
+                const names = chosen.map(rowName);
+                const dup = names.find((n, i) => names.indexOf(n) !== i);
+                if (dup) { form.querySelector('[data-env-error]').textContent = `Two rows are both named ${dup}; give one of them a different source.`; return; }
+                result = chosen.map(toBinding).map(b => ({...b, label:label({...b, name:b.as || rowName(b)})}));
+                d.close();
+            };
+        });
+    }
+
+    /* Job page header pill (``⬢ 3 environments`` / ``⬢ kept`` / status tint). */
+    function headerPill(summaryInfo, open) {
+        const s = summaryInfo || {};
+        const count = Number(s.count || 0);
+        const tone = s.status === 'failed' ? 'danger' : s.status === 'preparing' ? 'running' : count ? 'accent' : 'muted';
+        const text = count ? `${count} environment${count === 1 ? '' : 's'}` : 'shared runtime';
+        const title = count ? `${s.summary || ''}${s.source ? ` (from ${SOURCE_LABEL[s.source] || s.source})` : ''}` : 'Stages run in the shared mucli-job-runtime image';
+        return `<button type="button" class="pill tone-${tone} work-env-pill" data-env-pill aria-expanded="${!!open}" aria-controls="work-env-panel" title="${esc(title)}"><span aria-hidden="true" class="${s.status === 'preparing' ? 'status-icon active' : ''}">⬢</span> ${esc(text)}${s.kept ? ' · kept' : ''}</button>`;
+    }
+
+    /* Job page panel: one row per binding plus Refresh (E) / Keep (K) / Change. */
+    function panel(info, buttons) {
+        const b = info || {bindings:[]};
+        const rows = (b.bindings || []).map(x => {
+            const [tone, glyph, word] = STATUS[x.status] || ['muted', '○', x.status || 'not prepared'];
+            const probe = (x.probed_env || []).length ? `probed ${x.probed_env.join(', ')}` : '';
+            return `<li class="work-env-binding col" data-env-binding="${esc(x.name)}">
+                <div class="row wrap">${pill(tone, `<span aria-hidden="true" class="${x.status === 'preparing' ? 'status-icon active' : ''}">${glyph}</span>${esc(word)}`)}
+                    <strong class="mono">${esc(x.name)}</strong><span class="muted small">${esc(x.source)} <code>${esc(x.ref)}</code></span>
+                    ${x.primary ? pill('accent', 'primary') : ''}${x.docker ? pill('accent', `<span aria-hidden="true">⬢</span> docker${x.engine ? ` · ${esc(x.engine)}` : ''}`) : ''}${x.gpus ? pill('accent', `gpus ${esc(x.gpus)}`) : ''}
+                    <span class="spacer"></span>${x.image_bytes ? `<span class="small num" title="job image size">${esc(bytes(x.image_bytes))}</span>` : ''}</div>
+                <div class="small muted">${esc((x.paths || []).length ? x.paths.join(', ') : 'whole repository')}${probe ? ` · ${esc(probe)}` : ''}${x.home_bytes ? ` · home ${esc(bytes(x.home_bytes))}` : ''}</div>
+                ${x.error ? `<div class="error-box small" role="alert"><span aria-hidden="true">✗ </span>${esc(x.error)}</div>` : ''}
+                ${(x.secret_paths || []).length ? `<details open><summary class="small tone-danger">Secret scan blocked ${x.secret_paths.length} path${x.secret_paths.length === 1 ? '' : 's'}</summary><ul class="mono small">${x.secret_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
+                ${(x.skipped_paths || []).length ? `<details><summary class="small muted">${x.skipped_paths.length} home path${x.skipped_paths.length === 1 ? '' : 's'} left out of the snapshot</summary><ul class="mono small muted">${x.skipped_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}</li>`;
+        }).join('');
+        const src = b.source ? `<span class="small muted">from ${esc(SOURCE_LABEL[b.source] || b.source)}</span>` : '';
+        return `<section class="panel work-env-panel" id="work-env-panel" aria-labelledby="work-env-h"><header><h2 id="work-env-h"><span aria-hidden="true">⬢</span> Build environments</h2>${src}
+                ${b.kept ? pill('accent', '<span aria-hidden="true">⬢</span> kept', 'Exempt from idle retention') : ''}${b.refresh_pending ? pill('warn', 'refresh pending') : ''}
+                ${b.bytes ? `<span class="small muted num">${esc(bytes(b.bytes))}</span>` : ''}<span class="spacer"></span>
+                <div class="row wrap" role="toolbar" aria-label="Build environment actions">${buttons || ''}</div></header>
+            <div class="panel-body">${rows ? `<ul class="plain col">${rows}</ul>` : '<p class="empty">No build environments: stages run in the shared <code>mucli-job-runtime</code> image. Use Change to pick environments.</p>'}</div></section>`;
+    }
+
+    /* Session tab: ``› [node-build] npm test`` for run_in_environment calls. */
+    function toolSummary(name, args) {
+        if (name !== 'run_in_environment') return null;
+        let a = args;
+        if (typeof a === 'string') { try { a = JSON.parse(a); } catch (_) { a = {}; } }
+        a = a || {};
+        return `[${a.env || '?'}] ${a.command || ''}${a.cwd && a.cwd !== '.' ? `  (in ${a.cwd})` : ''}`;
+    }
+
+    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow};
+})();

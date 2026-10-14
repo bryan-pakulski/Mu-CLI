@@ -12,8 +12,37 @@ from typing import Any, Dict, List, Optional, Sequence
 from utils.config import HISTORY_DIR
 
 from .models import Job
-from .repository import RepositoryRecord, RepositoryRegistry
+from .repository import RepositoryRecord, RepositoryRegistry, fetch_quietly, git_timeout_seconds
 from .service import JobService
+
+
+FALLBACK_NAME = "MuCLI"
+FALLBACK_EMAIL = "mucli@localhost"
+
+
+def git_identity_env(repo: str, base_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Commit environment that keeps the user's own identity.
+
+    Git already prefers ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` env vars over
+    ``user.name``/``user.email``; only when neither the environment nor the
+    repository's (or global) git config names someone does MuCLI fill in."""
+    env = dict(os.environ if base_env is None else base_env)
+
+    def config(key: str) -> str:
+        try:
+            result = subprocess.run(["git", "-C", repo, "config", "--get", key], text=True,
+                                    capture_output=True, timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+    name, email = config("user.name"), config("user.email")
+    for role in ("AUTHOR", "COMMITTER"):
+        if not env.get(f"GIT_{role}_NAME") and not name:
+            env[f"GIT_{role}_NAME"] = FALLBACK_NAME
+        if not env.get(f"GIT_{role}_EMAIL") and not email:
+            env[f"GIT_{role}_EMAIL"] = FALLBACK_EMAIL
+    return env
 
 
 class WorktreeError(RuntimeError):
@@ -93,7 +122,7 @@ class JobWorktreeManager:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=60,
+                timeout=git_timeout_seconds(),
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
@@ -192,6 +221,9 @@ class JobWorktreeManager:
             return sha, base_ref
 
         requested = str(job.base_branch or "main").strip() or "main"
+        # Best effort: refresh origin/<base> so a fresh job starts from the
+        # remote tip when the local branch is missing or stale (offline ok).
+        fetch_quietly(repo, requested)
         candidates: List[str] = []
 
         def add(ref: str) -> None:
@@ -288,6 +320,24 @@ class JobWorktreeManager:
             key, _, value = line.partition(" ")
             current[key] = value
         return entries
+
+    def _init_submodules(self, job_id: str, worktree: str) -> None:
+        """Initialise submodules in a fresh job worktree; offline-tolerant (warns, never fails)."""
+        if not os.path.isfile(os.path.join(worktree, ".gitmodules")):
+            return
+        from .clone import _setting, init_submodules
+
+        if not bool(_setting("jobs.clone.submodules", True)):
+            return
+
+        try:
+            warning = init_submodules(worktree, timeout=git_timeout_seconds())
+        except Exception as exc:  # noqa: BLE001 - submodules must never block a job
+            warning = f"submodules could not be initialised: {exc}"
+        if warning:
+            self._event(job_id, "worktree_submodules_skipped", reason=warning, payload={"worktree": worktree})
+        else:
+            self._event(job_id, "worktree_submodules_ready", payload={"worktree": worktree})
 
     def prepare(self, job: Job) -> WorktreeInfo:
         branch = self.branch_name(job)
@@ -439,6 +489,7 @@ class JobWorktreeManager:
                         base_sha,
                         stage="worktree_add_new_branch",
                     )
+                self._init_submodules(job.id, worktree)
 
             metadata = {
                 **dict(job.metadata or {}),
@@ -524,24 +575,24 @@ class JobWorktreeManager:
             return (head.stdout or "").strip() or None
 
         self._run(worktree, "add", "-A", stage="checkpoint_stage")
-        env = os.environ.copy()
-        env.setdefault("GIT_AUTHOR_NAME", "MuCLI")
-        env.setdefault("GIT_AUTHOR_EMAIL", "mucli@localhost")
-        env.setdefault("GIT_COMMITTER_NAME", "MuCLI")
-        env.setdefault("GIT_COMMITTER_EMAIL", "mucli@localhost")
+        env = git_identity_env(worktree)
         command = [
             "git", "-c", "core.hooksPath=/dev/null", "-C", worktree, "commit", "--no-gpg-sign",
             "-m", f"mu checkpoint: {label}",
         ]
-        result = subprocess.run(
-            command,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=60,
-            env=env,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=git_timeout_seconds(),
+                env=env,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise WorktreeError("Git command timed out during checkpoint_commit",
+                                stage="checkpoint_commit", command=command) from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "checkpoint commit failed").strip()
             raise WorktreeError(
@@ -680,3 +731,103 @@ class JobWorktreeManager:
             payload={"worktree": worktree, "force": bool(force)},
         )
         return True
+
+
+_MANAGED_BRANCH_PREFIXES = ("mu/job-", "mucli/")
+
+
+def delete_job_branches(service: JobService, job: Job) -> Dict[str, Any]:
+    """Archive cleanup: delete the job's local branch and, when the job was
+    pushed, finished (merged/cancelled) and ``publish.delete_remote_branch``
+    is on, the remote branch too. Best effort, never raises.
+
+    Only managed job branches are touched (never the base branch or the
+    branch checked out in the primary checkout). The deleted head SHA is
+    recorded in the ``job_branches_deleted`` event so the work stays
+    recoverable (``git branch <name> <sha>``) until Git garbage-collects it."""
+    from .models import JobStatus
+
+    branch = str(job.branch or "").strip()
+    metadata = dict(job.metadata or {})
+    result: Dict[str, Any] = {"branch": branch, "local_deleted": False, "remote_deleted": False}
+    if not branch:
+        return result
+    managed = bool(metadata.get("worktree_managed")) or branch.startswith(_MANAGED_BRANCH_PREFIXES)
+    bases = {str(job.base_branch or ""), str(metadata.get("resolved_base_ref") or "")}
+    bases |= {b.split("/", 1)[1] for b in bases if b.startswith("origin/")}
+    if not managed or branch in bases:
+        result["skipped"] = "not a managed job branch"
+        return result
+    repo = str(metadata.get("repository_root") or "")
+    try:
+        if not repo or not os.path.isdir(repo):
+            repo = RepositoryRegistry(service.store).register(job.repository).canonical_path
+    except Exception as exc:  # noqa: BLE001
+        result["skipped"] = f"repository unavailable: {exc}"[:300]
+        return result
+    run = JobWorktreeManager._run
+    try:
+        current = run(repo, "symbolic-ref", "--quiet", "--short", "HEAD", check=False, stage="branch_cleanup")
+        if (current.stdout or "").strip() == branch:
+            result["skipped"] = "branch is checked out in the primary checkout"
+            return result
+        if job.worktree and os.path.exists(job.worktree):
+            try:
+                JobWorktreeManager(service).remove(job)
+            except Exception as exc:  # noqa: BLE001 - dirty or foreign worktree: keep the branch
+                result["skipped"] = f"worktree not removable: {exc}"[:300]
+                return result
+        head = run(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}",
+                   check=False, stage="branch_cleanup")
+        result["head_sha"] = (head.stdout or "").strip()
+        if head.returncode == 0 and result["head_sha"]:
+            deleted = run(repo, "branch", "-D", branch, check=False, stage="branch_cleanup")
+            result["local_deleted"] = deleted.returncode == 0
+            if deleted.returncode != 0:
+                result["local_error"] = (deleted.stderr or "").strip()[:300]
+    except WorktreeError as exc:
+        result["local_error"] = str(exc)[:300]
+
+    pushed = bool(metadata.get("pr") or metadata.get("pushed_sha"))
+    try:
+        from .job_settings import rule_or
+        delete_remote = bool(rule_or("publish.delete_remote_branch", False))
+        remote = str(rule_or("publish.push_remote", "origin") or "origin")
+        timeout = int(rule_or("publish.timeout_s", 3600))
+    except Exception:  # noqa: BLE001
+        delete_remote, remote, timeout = False, "origin", 300
+    if pushed and delete_remote and job.status in {JobStatus.MERGED, JobStatus.CANCELLED}:
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+        # Delete only what this job pushed: a lease on the pushed head keeps commits a
+        # reviewer (or anyone) added to the branch since.
+        lease = str(metadata.get("pushed_sha") or (metadata.get("pr") or {}).get("head_sha") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", lease):
+            result["remote_skipped"] = "the job's pushed commit is unknown; remote branch kept"
+        else:
+            try:
+                proc = subprocess.run(["git", "-C", repo, "push", f"--force-with-lease=refs/heads/{branch}:{lease}",
+                                       remote, f":refs/heads/{branch}"], text=True,
+                                      capture_output=True, timeout=min(timeout, 300), env=env, check=False,
+                                      stdin=subprocess.DEVNULL)
+                result["remote_deleted"] = proc.returncode == 0
+                if proc.returncode != 0:
+                    stderr = re.sub(r"//[^@/]+@", "//***@", (proc.stderr or "").strip())
+                    if "stale info" in stderr:
+                        result["remote_skipped"] = ("remote branch has commits this job did not push; kept "
+                                                    f"(expected {lease[:12]})")
+                    else:
+                        result["remote_error"] = stderr[:300]
+            except (OSError, subprocess.SubprocessError) as exc:
+                result["remote_error"] = str(exc)[:300]
+        if result.get("remote_skipped"):
+            try:
+                service.store.append_event(job.id, "job_remote_branch_kept", reason=result["remote_skipped"],
+                                           payload={"branch": branch, "remote": remote, "expected_sha": lease})
+            except Exception:  # noqa: BLE001
+                pass
+    try:
+        service.store.append_event(job.id, "job_branches_deleted", reason="job archived", payload=result)
+    except Exception:  # noqa: BLE001
+        pass
+    return result

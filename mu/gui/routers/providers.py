@@ -166,12 +166,17 @@ async def current_provider(request: Request) -> Dict[str, Any]:
             "ollama_api_key_set": bool(os.environ.get("OLLAMA_API_KEY")),
         }
     cfg = session.session_manager.provider_config
+    from mu.agent.retry import EFFORT_LEVELS
     return {
         "provider": cfg.get("provider"),
         "model": cfg.get("model"),
         "ollama_api_key_set": bool(
             session.variables.get("ollama_api_key") or os.environ.get("OLLAMA_API_KEY")
         ),
+        # Composer effort picker: "" = provider default; each provider maps the
+        # neutral levels to what its API accepts.
+        "effort": str(session.variables.get("reasoning_effort") or ""),
+        "effort_levels": list(EFFORT_LEVELS),
     }
 
 

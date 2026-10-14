@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
+import { fontSizes, fontWeights, spacing, tint, typography } from '../theme/tokens';
 
 /** Minimal shape shared by every session list surface. */
 export type SessionStateSource = {
@@ -55,19 +56,17 @@ export type SessionStatusBadgeProps = {
 /**
  * Pill + dot that makes active / working / loaded sessions stand out.
  * Renders nothing for plain saved sessions so the list stays quiet.
- * Active = filled accent; Working = accent outline; Loaded = neutral outline.
+ * Active = ● accent (selection); Working = ● running; Loaded = ○ muted.
  */
 export function SessionStatusBadge({ session, active, size = 'md' }: SessionStatusBadgeProps) {
   const { colors, radii } = useTheme();
   const state = sessionState(session, active);
   if (!state) return null;
   const label = SESSION_STATE_LABEL[state];
-  const palette =
-    state === 'active'
-      ? { bg: colors.accent, border: colors.accent, text: colors.bg, dot: colors.bg }
-      : state === 'working'
-        ? { bg: 'transparent', border: colors.accent, text: colors.accent, dot: colors.accent }
-        : { bg: 'transparent', border: colors.border, text: colors.textSoft, dot: colors.textDim };
+  // planos pill: tone text + tint of the same tone; status glyph + label.
+  const tone = state === 'active' ? colors.accent : state === 'working' ? colors.running : colors.muted;
+  const glyph = state === 'loaded' ? '○' : '●';
+  const palette = { bg: tint(tone, 0.14), border: tint(tone, 0.4), text: state === 'loaded' ? colors.text : tone, dot: tone };
   const sm = size === 'sm';
   return (
     <View
@@ -80,7 +79,7 @@ export function SessionStatusBadge({ session, active, size = 'md' }: SessionStat
         { backgroundColor: palette.bg, borderColor: palette.border, borderRadius: radii.pill },
       ]}
     >
-      <View style={[styles.dot, { backgroundColor: palette.dot }]} />
+      <Text variant="xs" importantForAccessibility="no" style={[styles.label, { color: palette.dot }]}>{glyph}</Text>
       <Text variant="xs" style={[styles.label, sm && styles.labelSm, { color: palette.text }]}>
         {label}
       </Text>
@@ -92,14 +91,13 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+    borderWidth: 1,
     alignSelf: 'flex-start',
   },
-  pillSm: { paddingHorizontal: 6, paddingVertical: 2, gap: 4 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  label: { fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' },
-  labelSm: { fontSize: 10 },
+  pillSm: { paddingHorizontal: spacing.sm, paddingVertical: 1, gap: spacing.xs },
+  label: { fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight, fontWeight: fontWeights.medium },
+  labelSm: { fontSize: fontSizes.xs },
 });

@@ -28,12 +28,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import socket
 import urllib.error
+import uuid
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional
 
 from .base import (
+    tool_result_json,
     CacheHint,
     FileReference,
     LLMProvider,
@@ -62,6 +65,16 @@ _OLLAMA_OPTION_KEYS = (
     "tfs_z",
     "stop",
 )
+
+
+# Local models never plan for (or send) less context than this; a model whose trained window
+# is smaller uses its trained window (decision 2026-10-14: larger is better).
+LOCAL_MIN_NUM_CTX = 65536
+# Output cap for side calls (summaries, chunking) so they stay short on local hardware.
+SIDE_CALL_NUM_PREDICT = 2048
+# cl100k → Ollama tokenizer drift seed before the learned ratio takes over; measured drift
+# for glm-class models is ~1.0–1.1, so 2.5 shrank windows far more than needed.
+DEFAULT_SAFETY_FACTOR = 1.3
 
 
 @dataclass
@@ -297,6 +310,108 @@ class OllamaProvider(LLMProvider):
         # Populated lazily by `_fetch_context_length`.
         self._context_length_cache: Dict[str, Optional[int]] = {}
         self._model_capabilities_cache: Dict[str, tuple[str, ...]] = {}
+        # /api/tags rows by model name (remote_host marks a daemon-proxied cloud model).
+        self._tag_rows: Dict[str, Dict[str, Any]] = {}
+        # (host, model) → resolved local num_ctx; constant for the process so the daemon
+        # never reloads the model because a request changed it.
+        self._num_ctx_cache: Dict[tuple, int] = {}
+
+    # ----------------------------------------------------------- routes
+
+    ROUTE_CLOUD = "cloud"            # https://ollama.com directly
+    ROUTE_DAEMON_CLOUD = "daemon-cloud"  # local daemon proxying a :cloud model
+    ROUTE_LOCAL = "local"            # model runs on this machine
+
+    def route(self, model_name: Optional[str] = None) -> str:
+        """Where the model actually runs (provider_latency_ollama_openai.md §1). Cached per
+        (host, model); an unreachable daemon is treated as local."""
+        from urllib.parse import urlparse
+        model = str(model_name or self.model_name or "")
+        cache = self.__dict__.setdefault("_route_cache", {})
+        key = (self.host, model)
+        if key in cache:
+            return cache[key]
+        host = (urlparse(self.host).hostname or "").lower()
+        tag = model.split(":", 1)[1] if ":" in model else ""
+        if host == "ollama.com" or host.endswith(".ollama.com"):
+            route = self.ROUTE_CLOUD
+        elif tag == "cloud" or tag.endswith("-cloud") or model.endswith("-cloud"):
+            route = self.ROUTE_DAEMON_CLOUD
+        else:
+            if not self.__dict__.get("_tag_rows"):
+                try:
+                    self._fetch_models()
+                except Exception:  # noqa: BLE001 - unreachable/odd daemon: assume local
+                    pass
+            rows = self.__dict__.get("_tag_rows") or {}
+            row = rows.get(model) or rows.get(f"{model}:latest") or {}
+            route = self.ROUTE_DAEMON_CLOUD if isinstance(row, dict) and row.get("remote_host") else self.ROUTE_LOCAL
+        cache[key] = route
+        return route
+
+    def _variables(self) -> Dict[str, Any]:
+        return getattr(self, "_session_variables", None) or {}
+
+    def resolved_num_ctx(self, model_name: Optional[str] = None) -> Optional[int]:
+        """The context size sent to a local model: the user's ``ollama_num_ctx`` if set,
+        else ``ollama_num_ctx_default`` (never below 64k) capped by the trained window.
+        None for cloud routes (the hosted service ignores ``num_ctx``)."""
+        model = str(model_name or self.model_name or "")
+        if self.route(model) != self.ROUTE_LOCAL:
+            return None
+        variables = self._variables()
+        try:
+            explicit = int(variables.get("ollama_num_ctx") or 0)
+        except (TypeError, ValueError):
+            explicit = 0
+        if explicit > 0:
+            return explicit
+        configured = getattr(self.options, "num_ctx", None)
+        if configured:
+            return int(configured)
+        key = (self.host, model)
+        if key in self._num_ctx_cache:
+            return self._num_ctx_cache[key]
+        try:
+            default = int(variables.get("ollama_num_ctx_default") or 0)
+        except (TypeError, ValueError):
+            default = 0
+        value = max(LOCAL_MIN_NUM_CTX, default)
+        trained = self._fetch_context_length(model)
+        if trained:
+            value = min(value, int(trained))
+        self._num_ctx_cache[key] = value
+        return value
+
+    def request_timeout_for(self, model_name: Optional[str] = None) -> float:
+        """Read timeout: local prompt processing streams nothing until it finishes, so
+        local routes wait longer (``ollama_request_timeout`` overrides)."""
+        try:
+            explicit = float(self._variables().get("ollama_request_timeout") or 0)
+        except (TypeError, ValueError):
+            explicit = 0.0
+        if explicit > 0:
+            return explicit
+        if self.request_timeout != 300.0:  # constructor override
+            return self.request_timeout
+        return 900.0 if self.route(model_name) == self.ROUTE_LOCAL else 300.0
+
+    def _think_value(self, thinking: bool, reasoning_effort: Optional[str], *, side_call: bool = False,
+                     model_name: Optional[str] = None):
+        """Ollama's top-level ``think``: constructor value, else mapped from effort; side
+        calls (summaries) never think. None = leave the model default."""
+        if self.think is not None:
+            return self.think
+        if side_call:
+            return False if "thinking" in self._fetch_runtime_capabilities(model_name or self.model_name) else None
+        effort = str(reasoning_effort or "").strip().lower()
+        if not effort:
+            return None
+        if "thinking" not in self._fetch_runtime_capabilities(model_name or self.model_name):
+            return None
+        if "gpt-oss" in str(model_name or self.model_name or "").lower():
+            return {"max": "high", "minimal": "low", "none": "low"}.get(effort, effort if effort in ("low", "medium", "high") else "medium")
+        return effort not in ("low", "minimal", "none")
 
     # ----------------------------------------------------------- preflight
 
@@ -306,6 +421,9 @@ class OllamaProvider(LLMProvider):
         self._cached_models = None
         self._context_length_cache: Dict[str, Optional[int]] = {}
         self._model_capabilities_cache = {}
+        self._tag_rows = {}
+        self._num_ctx_cache = {}
+        self._route_cache = {}
 
     def _fetch_runtime_capabilities(self, model_name: str) -> tuple[str, ...]:
         """Read Ollama's authoritative /api/show capability list."""
@@ -328,12 +446,7 @@ class OllamaProvider(LLMProvider):
                 for item in (value.get("capabilities") or [])
                 if str(item).strip()
             )
-        except (
-            urllib.error.URLError,
-            urllib.error.HTTPError,
-            OSError,
-            json.JSONDecodeError,
-        ):
+        except Exception:  # noqa: BLE001 - best-effort probe
             capabilities = ()
         self._model_capabilities_cache[model_name] = capabilities
         return capabilities
@@ -379,7 +492,7 @@ class OllamaProvider(LLMProvider):
             )
             with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
+        except Exception:  # noqa: BLE001 - best-effort probe (unreachable, odd proxy, non-JSON)
             self._context_length_cache[model_name] = None
             return None
         # Ollama's /api/show returns a `model_info` dict whose keys are
@@ -439,17 +552,19 @@ class OllamaProvider(LLMProvider):
         a prompt that's larger than the model can read — preventing the
         "prompt too long; exceeded max context length" 400 from Ollama.
         """
-        # Resolve from session variables first.
+        target_model = model_name or self.model_name
+        # Local models: exactly the num_ctx every request sends (the daemon's own
+        # default — often 4096 — is never what we plan for).
+        local = self.resolved_num_ctx(target_model)
+        if local:
+            return local
+        # Cloud routes: an explicit ollama_num_ctx still caps planning.
         try:
-            vars_ = getattr(self, "_session_variables", None) or {}
-            raw = vars_.get("ollama_num_ctx")
-            if raw is not None:
-                num_ctx = int(raw)
-                if num_ctx > 0:
-                    return num_ctx
+            explicit = int(self._variables().get("ollama_num_ctx") or 0)
+            if explicit > 0:
+                return explicit
         except (TypeError, ValueError):
             pass
-        target_model = model_name or self.model_name
         return self._fetch_context_length(target_model)
 
     def preflight(self) -> None:
@@ -486,7 +601,9 @@ class OllamaProvider(LLMProvider):
             )
             with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            return [m.get("name", "") for m in data.get("models", [])]
+            rows = [m for m in data.get("models", []) if isinstance(m, dict)]
+            self._tag_rows = {str(m.get("name", "")): m for m in rows}
+            return [m.get("name", "") for m in rows]
         except urllib.error.URLError as exc:
             raise _classify_url_error(self.host, exc)
         except (json.JSONDecodeError, OSError) as exc:
@@ -575,9 +692,7 @@ class OllamaProvider(LLMProvider):
                     role = "assistant"
                 elif part.type == "tool_result":
                     if isinstance(part.tool_result, (dict, list)):
-                        result_content = json.dumps(
-                            part.tool_result, indent=2, sort_keys=True
-                        )
+                        result_content = tool_result_json(part.tool_result)
                     else:
                         result_content = str(part.tool_result)
                     result_message = {"role": "tool", "content": result_content}
@@ -658,6 +773,7 @@ class OllamaProvider(LLMProvider):
         thinking: bool,
         reasoning_effort: Optional[str],
         session_variables: Optional[Dict[str, Any]] = None,
+        model_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build the `options` dict for an /api/chat call.
 
@@ -682,9 +798,14 @@ class OllamaProvider(LLMProvider):
                     opts[key] = val
         if thinking and "temperature" not in opts:
             opts["temperature"] = 0.7
-        # `reasoning_effort` is intentionally NOT forwarded: Ollama's native
-        # `options` object has no such knob, and unknown options can be
-        # rejected or silently ignored depending on the server version.
+        # One stable num_ctx per (host, model) for local models — a request with a different
+        # (or missing) value makes the daemon reload the model. An explicitly configured
+        # value (constructor / ollama_num_ctx) is kept as is; cloud routes ignore num_ctx.
+        if "num_ctx" not in opts:
+            num_ctx = self.resolved_num_ctx(model_name)
+            if num_ctx:
+                opts["num_ctx"] = num_ctx
+        # `reasoning_effort` maps to the top-level `think` field (see _think_value).
         return opts
 
     # --------------------------------------------------------------- streaming
@@ -697,6 +818,8 @@ class OllamaProvider(LLMProvider):
         tools: Optional[List[ToolDefinition]] = None,
         cache_hint: Optional[CacheHint] = None,
         reasoning_effort: Optional[str] = None,
+        *,
+        side_call: bool = False,
     ) -> Iterator[StreamEvent]:
         # Surface preflight errors as actionable messages instead of opaque
         # transport errors mid-stream. We only check once per provider.
@@ -721,22 +844,34 @@ class OllamaProvider(LLMProvider):
         # Pull session variables off the provider if a caller set them.
         session_variables = getattr(self, "_session_variables", None)
         ollama_messages = self._prepare_chat_messages(messages, system_prompt)
+        # Side calls may go to a separate model so they never evict the main model's
+        # KV cache on a local daemon (`ollama_side_model`).
+        model = self.model_name
+        side_model = str(self._variables().get("ollama_side_model") or "").strip() if side_call else ""
+        if side_model:
+            model = side_model
 
         payload: Dict[str, Any] = {
-            "model": self.model_name,
+            "model": model,
             "messages": ollama_messages,
             "stream": True,
             "options": self._build_options(
                 thinking=thinking,
                 reasoning_effort=reasoning_effort,
                 session_variables=session_variables,
+                model_name=model,
             ),
         }
-        # keep_alive keeps the model warm across turns.
-        keep_alive = cache_hint.keep_alive_seconds if cache_hint else 600
-        payload["keep_alive"] = keep_alive
-        if self.think is not None:
-            payload["think"] = self.think
+        # keep_alive only when the user set one: a request value overrides the daemon's
+        # OLLAMA_KEEP_ALIVE (and cloud routes have nothing to keep warm).
+        keep_alive = str(self._variables().get("ollama_keep_alive") or "").strip()
+        if keep_alive and self.route(model) == self.ROUTE_LOCAL:
+            payload["keep_alive"] = int(keep_alive) if keep_alive.lstrip("-").isdigit() else keep_alive
+        think = self._think_value(thinking, reasoning_effort, side_call=side_call, model_name=model)
+        if think is not None:
+            payload["think"] = think
+        if side_call:
+            payload["options"].setdefault("num_predict", SIDE_CALL_NUM_PREDICT)
         if tools:
             payload["tools"] = [
                 {
@@ -757,15 +892,16 @@ class OllamaProvider(LLMProvider):
             headers=headers,
         )
 
-        emitted_tool_index = 0
         last_in = 0
         last_out = 0
+        timings: Dict[str, float] = {}
+        timeout = self.request_timeout_for()
         saw_done = False  # only a chunk with done:true ends a valid stream
         think_carry = ""  # partial delimiter held back across chunks
         in_think = False  # state for cross-chunk <think>…</think> tracking
 
         try:
-            with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 line_buffer = ""  # partial NDJSON record across reads
                 for raw in response:
                     if not raw:
@@ -832,8 +968,8 @@ class OllamaProvider(LLMProvider):
 
                         for tc in msg.get("tool_calls", []) or []:
                             fn = tc.get("function") or {}
-                            cid = f"ollama_call_{emitted_tool_index}"
-                            emitted_tool_index += 1
+                            # Unique across responses: ids that restart at 0 repeat in history.
+                            cid = f"ollama_{uuid.uuid4().hex[:12]}"
                             yield StreamEvent(
                                 kind="tool_call_start",
                                 tool_name=fn.get("name"),
@@ -848,6 +984,10 @@ class OllamaProvider(LLMProvider):
 
                         last_in = chunk.get("prompt_eval_count", last_in) or last_in
                         last_out = chunk.get("eval_count", last_out) or last_out
+                        for field_name, label in (("load_duration", "load_s"), ("prompt_eval_duration", "prompt_eval_s"),
+                                                  ("eval_duration", "eval_s"), ("total_duration", "total_s")):
+                            if chunk.get(field_name):
+                                timings[label] = round(float(chunk[field_name]) / 1e9, 3)
                         if chunk.get("done"):
                             saw_done = True
                             break
@@ -890,8 +1030,32 @@ class OllamaProvider(LLMProvider):
             except Exception:
                 pass
             err = _classify_api_error_body(self.host, self.model_name, body or str(exc))
+            retry_after = (exc.headers or {}).get("Retry-After") if getattr(exc, "headers", None) else None
+            if retry_after:
+                try:
+                    err.retry_after = float(retry_after)
+                except (TypeError, ValueError):
+                    pass
+            if exc.code in (429, 503) and "429" not in str(err) and "rate" not in str(err).lower():
+                err = OllamaError(f"Ollama rate limited ({exc.code}): {str(err)[:300]}", actionable=err.actionable)
+                if retry_after:
+                    try:
+                        err.retry_after = float(retry_after)
+                    except (TypeError, ValueError):
+                        pass
             yield StreamEvent(kind="error", text=err.actionable)
             raise err
+        except (TimeoutError, socket.timeout) as exc:
+            if self.route() == self.ROUTE_LOCAL:
+                # Not a transient network blip: the local prompt took longer than the read
+                # timeout to process. Retrying would process it again from scratch.
+                err = OllamaError(
+                    f"Local Ollama model {self.model_name} produced no output within {timeout:.0f}s.",
+                    actionable=(f"Local prompt processing exceeded {timeout:.0f}s before the first token. Raise "
+                                "`/set ollama_request_timeout <seconds>`, lower `ollama_num_ctx`, or use a smaller model."))
+                yield StreamEvent(kind="error", text=err.actionable)
+                raise err from exc
+            raise
         except urllib.error.URLError as exc:
             err = _classify_url_error(self.host, exc)
             yield StreamEvent(kind="error", text=err.actionable)
@@ -911,6 +1075,7 @@ class OllamaProvider(LLMProvider):
             input_tokens=last_in,
             output_tokens=last_out,
             total_tokens=last_in + last_out,
+            timings=timings,
         )
         yield StreamEvent(kind="done")
 
@@ -923,12 +1088,15 @@ class OllamaProvider(LLMProvider):
         thinking: bool = False,
         tools: Optional[List[ToolDefinition]] = None,
     ) -> ProviderResponse:
+        # Non-streaming calls are side calls (summaries, chunking): no thinking and a
+        # bounded output, so they cost seconds rather than minutes on a local model.
         return self.drain_stream(
             self.stream(
                 messages=messages,
                 system_prompt=system_prompt,
                 thinking=thinking,
                 tools=tools,
+                side_call=True,
             )
         )
 
@@ -990,7 +1158,7 @@ class OllamaProvider(LLMProvider):
                     return f
         except (TypeError, ValueError):
             pass
-        return 2.5
+        return DEFAULT_SAFETY_FACTOR
 
 
 __all__ = [

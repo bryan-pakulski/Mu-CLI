@@ -23,6 +23,7 @@ import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from '../components/Text';
 import { EmptyState } from '../components/EmptyState';
+import { fontSizes, fontWeights, lightColors, radii, spacing, touchTarget } from '../theme/tokens';
 
 type UnifiedItem =
   | { kind: 'visualization'; artifact: ArtifactDescriptor }
@@ -158,9 +159,9 @@ export function ArtifactsScreen() {
   const renderItem = ({ item }: { item: UnifiedItem | { kind: 'header'; title: string; subtitle: string; count: number } }) => {
     if (item.kind === 'header') {
       return (
-        <View style={[styles.sectionHeader, { borderBottomColor: colors.border }]}>
+        <View style={styles.sectionHeader}>
           <View style={{ flex: 1 }}>
-            <Text variant="xs" style={{ fontWeight: '700', letterSpacing: 0.8, color: colors.textDim }}>
+            <Text variant="xs" style={{ fontWeight: fontWeights.semibold, color: colors.textDim }}>
               {item.title.toUpperCase()}
             </Text>
             <Text variant="xs" dim style={{ marginTop: 2 }}>
@@ -168,7 +169,7 @@ export function ArtifactsScreen() {
             </Text>
           </View>
           <View style={[styles.countBadge, { backgroundColor: colors.bgHover }]}>
-            <Text variant="xs" style={{ fontWeight: '700', color: colors.textDim }}>{item.count}</Text>
+            <Text variant="xs" style={{ fontWeight: fontWeights.medium, color: colors.textSoft, fontVariant: ['tabular-nums'] }}>{item.count}</Text>
           </View>
         </View>
       );
@@ -179,14 +180,14 @@ export function ArtifactsScreen() {
       return (
         <TouchableOpacity
           onPress={() => setViewingArtifact(a)}
-          style={[styles.row, { borderBottomColor: colors.border }]}
+          style={styles.row}
           activeOpacity={0.7}
         >
-          <View style={[styles.rowIcon, { backgroundColor: colors.accentSoft }]}>
-            <Ionicons name="analytics-outline" size={20} color={colors.accent} />
+          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+            <Ionicons name="analytics-outline" size={20} color={colors.textSoft} />
           </View>
           <View style={styles.rowCopy}>
-            <Text variant="sm" style={{ fontWeight: '600' }} numberOfLines={1}>
+            <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
               {a.title || a.name}
             </Text>
             <Text variant="xs" dim numberOfLines={1}>
@@ -196,7 +197,7 @@ export function ArtifactsScreen() {
           <TouchableOpacity
             onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
             style={styles.rowAction}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
             accessibilityRole="button"
             accessibilityLabel="Download visualization"
           >
@@ -205,7 +206,7 @@ export function ArtifactsScreen() {
           <TouchableOpacity
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="trash-outline" size={18} color={colors.error} />
           </TouchableOpacity>
@@ -218,14 +219,14 @@ export function ArtifactsScreen() {
       return (
         <TouchableOpacity
           onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
-          style={[styles.row, { borderBottomColor: colors.border }]}
+          style={styles.row}
           activeOpacity={0.7}
         >
-          <View style={[styles.rowIcon, { backgroundColor: colors.accentSoft }]}>
-            <Ionicons name="document-attach-outline" size={20} color={colors.accent} />
+          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+            <Ionicons name="document-attach-outline" size={20} color={colors.textSoft} />
           </View>
           <View style={styles.rowCopy}>
-            <Text variant="sm" style={{ fontWeight: '600' }} numberOfLines={1}>
+            <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
               {a.title || a.name}
             </Text>
             <Text variant="xs" dim numberOfLines={1}>
@@ -235,14 +236,14 @@ export function ArtifactsScreen() {
           <TouchableOpacity
             onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
             style={styles.rowAction}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="download-outline" size={18} color={colors.textDim} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="trash-outline" size={18} color={colors.error} />
           </TouchableOpacity>
@@ -255,14 +256,14 @@ export function ArtifactsScreen() {
     return (
       <TouchableOpacity
         onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
-        style={[styles.row, { borderBottomColor: colors.border }]}
+        style={styles.row}
         activeOpacity={0.7}
       >
-        <View style={[styles.rowIcon, { backgroundColor: colors.bgHover }]}>
-          <Ionicons name="cloud-upload-outline" size={20} color={colors.textDim} />
+        <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+          <Ionicons name="cloud-upload-outline" size={20} color={colors.textSoft} />
         </View>
         <View style={styles.rowCopy}>
-          <Text variant="sm" style={{ fontWeight: '600' }} numberOfLines={1}>
+          <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
             {u.name}
           </Text>
           <Text variant="xs" dim numberOfLines={1}>
@@ -272,14 +273,14 @@ export function ArtifactsScreen() {
         <TouchableOpacity
           onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
           style={styles.rowAction}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
           <Ionicons name="download-outline" size={18} color={colors.textDim} />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => removeUpload(u)}
           style={styles.rowAction}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
           <Ionicons name="trash-outline" size={18} color={colors.error} />
         </TouchableOpacity>
@@ -310,8 +311,8 @@ export function ArtifactsScreen() {
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: insets.top + 4 }]}>
-        <Text variant="lg" style={{ fontWeight: '700' }}>Session files</Text>
+      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: insets.top + spacing.xs }]}>
+        <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Session files</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity
             onPress={pickFiles}
@@ -323,7 +324,7 @@ export function ArtifactsScreen() {
             ) : (
               <Ionicons name="cloud-upload-outline" size={18} color={colors.accentText} />
             )}
-            <Text variant="xs" style={{ color: colors.accentText, fontWeight: '700', marginLeft: 6 }}>
+            <Text variant="xs" style={{ color: colors.accentText, fontWeight: fontWeights.semibold, marginLeft: spacing.xs }}>
               {uploading ? 'Uploading' : 'Upload'}
             </Text>
           </TouchableOpacity>
@@ -339,7 +340,7 @@ export function ArtifactsScreen() {
           return `att-${item.attachment.attachment_id}`;
         }}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: spacing['2xl'] }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
         ListEmptyComponent={
           totalCount === 0 ? (
@@ -363,10 +364,10 @@ export function ArtifactsScreen() {
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
           <View style={[styles.visHeader, { borderBottomColor: colors.border }]}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text variant="xs" dim style={{ fontWeight: '700', letterSpacing: 0.8 }}>
+              <Text variant="xs" dim style={{ fontWeight: fontWeights.semibold }}>
                 VISUALIZATION
               </Text>
-              <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>
+              <Text numberOfLines={1} style={{ fontSize: fontSizes.base, fontWeight: fontWeights.semibold, color: colors.text }}>
                 {viewingArtifact?.title || viewingArtifact?.name || ''}
               </Text>
             </View>
@@ -392,7 +393,7 @@ export function ArtifactsScreen() {
           {sessionName && viewingArtifact && (
             <WebView
               source={{ uri: artifactUri }}
-              style={{ flex: 1, backgroundColor: '#ffffff' }}
+              style={{ flex: 1, backgroundColor: lightColors.bgRaised }}
               originWhitelist={['http://*', 'https://*']}
               javaScriptEnabled
               domStorageEnabled
@@ -432,30 +433,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.base,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+    minHeight: touchTarget,
+    borderRadius: radii.sm,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
   countBadge: {
-    minWidth: 26,
+    minWidth: 24,
     height: 24,
-    borderRadius: 12,
-    paddingHorizontal: 8,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -463,45 +465,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 64,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.base,
   },
   rowIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
+    width: 40,
+    height: 40,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rowCopy: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: spacing.md,
   },
   rowAction: {
-    width: 40,
-    height: 44,
+    width: touchTarget,
+    height: touchTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
   visHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
   },
   iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },

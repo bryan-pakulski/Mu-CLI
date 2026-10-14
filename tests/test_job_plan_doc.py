@@ -10,7 +10,7 @@ from mu.jobs import JobService, JobStore
 from mu.jobs.core.artifacts import artifacts_for
 from mu.jobs.core.plan_doc import PlanDoc, PlanStore, PlanValidationError
 from mu.jobs.core import plan_ops
-from mu.jobs.runner import SessionJobRunner
+from mu.jobs.runner import implement_prompt
 
 
 @pytest.fixture(autouse=True)
@@ -121,8 +121,7 @@ def test_implement_prompt_contains_approved_version_verbatim(tmp_path):
     edited.summary = "Human-approved approach XYZZY"
     plan_ops.save_plan_draft(service, job.id, edited.render())
     plan_ops.approve_plan(service, job.id, version=2)
-    runner = SessionJobRunner(service, build_session_fn=lambda *a, **k: None, base_args=None)
-    prompt = runner._prompt(service.get(job.id))
+    prompt = implement_prompt(service, service.get(job.id))
     assert "Approved plan (v2" in prompt
     assert "Human-approved approach XYZZY" in prompt
     assert PlanStore(artifacts_for(job)).load_text(2).strip() in prompt

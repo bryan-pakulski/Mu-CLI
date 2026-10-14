@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import glob
+import json
+import os
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -60,6 +64,38 @@ def _history_filters(
     }
 
 
+_JOB_SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _is_job_worker_session(name: str) -> bool:
+    """Durable-job execution sessions (``job-<id>[-stage]``) are plumbing, not user sessions."""
+    return bool(re.match(r"^job-[0-9a-f]{12,}", name))
+
+
+def _saved_session(name: str, *, full: bool = True) -> Optional[Dict[str, Any]]:
+    """Workspace/model/policy of a saved session without loading it into the GUI."""
+    from utils import config as _config
+    from ._session_summary import read_session_summary
+
+    if not _JOB_SESSION_RE.match(name or "") or _is_job_worker_session(name):
+        return None
+    path = os.path.join(_config.HISTORY_DIR, "sessions", name, "session.json")
+    if not os.path.isfile(path):
+        return None
+    data = read_session_summary(path, max_bytes=1024 * 1024, keys=("provider_config", "folder_context"))
+    if full and not (data.get("provider_config") and data.get("folder_context")):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            data = data or {}
+    provider_config = dict(data.get("provider_config") or {})
+    folders = [str(f) for f in (dict(data.get("folder_context") or {}).get("folders") or []) if f]
+    return {"name": name, "folders": folders, "provider": str(provider_config.get("provider") or ""),
+            "model": str(provider_config.get("model") or ""), "variables": dict(data.get("variables") or {}),
+            "updated_at": os.path.getmtime(path)}
+
+
 def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Allow GUI/mobile job creation to inherit the currently loaded session.
 
@@ -68,20 +104,53 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
     """
     value = dict(payload or {})
     session_name = str(value.get("session_name") or "").strip()
-    if not session_name:
-        return value
+    workspace = str(value.get("workspace_root") or "").strip()
+    if not session_name and workspace:
+        # Workspace-first creation (no dead end without a chosen session): reuse the most
+        # recent saved session on that workspace for its model, mode and environment.
+        session_name = _session_for_workspace(workspace)
     resolver = getattr(request.app.state, "session_by_name", None)
-    session = resolver(session_name) if callable(resolver) else None
-    if session is None:
-        raise HTTPException(status_code=409, detail=f"Session '{session_name}' is not loaded")
+    if not session_name:
+        # No session uses this workspace: blank stages take the GUI's current session
+        # model (its workspace/environment are not borrowed and no origin is recorded).
+        current = getattr(request.app.state, "current_session_name", None)
+        live = resolver(current) if callable(resolver) and current else None
+        execution = dict(value.get("execution") or {})
+        provider = getattr(getattr(live, "provider", None), "name", "") or ""
+        model = getattr(getattr(live, "provider", None), "model_name", "") or ""
+        if workspace and not execution.get("model") and provider and model:
+            from mu.jobs import job_settings
 
-    folders = list(getattr(getattr(session, "folder_context", None), "folders", []) or [])
+            stages = {k: dict(v or {}) for k, v in dict(execution.get("stages") or {}).items()}
+            for stage in job_settings.missing_stages(execution):
+                stages[stage] = {"provider": str(provider), "model": str(model)}
+            if stages:
+                execution["stages"] = stages
+        if workspace:
+            from mu.jobs.core.vm import unattended_default
+
+            execution.setdefault("auto_approve_writes", unattended_default())
+            value["execution"] = execution
+        return value
+    session = resolver(session_name) if callable(resolver) else None
+    if session is not None:
+        folders = list(getattr(getattr(session, "folder_context", None), "folders", []) or [])
+        provider = getattr(getattr(session, "provider", None), "name", "") or ""
+        model = getattr(getattr(session, "provider", None), "model_name", "") or ""
+        variables = getattr(session, "variables", {}) or {}
+    else:
+        # Jobs mode is one management plane across sessions: a saved session that is
+        # not loaded in this GUI still supplies its workspace, model and policy.
+        saved = _saved_session(session_name)
+        if saved is None:
+            raise HTTPException(status_code=404, detail=f"Session '{session_name}' does not exist")
+        folders, provider, model, variables = saved["folders"], saved["provider"], saved["model"], saved["variables"]
+
     if not str(value.get("workspace_root") or "").strip() and folders:
         value["workspace_root"] = folders[0]
+    # Record which session the job belongs to (jobs mode lists every session's jobs).
+    value["metadata"] = {**dict(value.get("metadata") or {}), "origin_session": session_name}
     execution = dict(value.get("execution") or {})
-    provider = getattr(getattr(session, "provider", None), "name", "") or ""
-    model = getattr(getattr(session, "provider", None), "model_name", "") or ""
-    variables = getattr(session, "variables", {}) or {}
     # Precedence: explicit job/stage values -> Job settings stage models ->
     # loaded session. Never stamp the session model as the job-level default:
     # resolve_stage_model ranks that above settings, so every stage would run
@@ -97,9 +166,29 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
             execution["stages"] = stages
     execution.setdefault("agent_mode", str(variables.get("agent_mode", "default") or "default"))
     execution.setdefault("session_type", str(variables.get("session_type", "workspace") or "workspace"))
-    execution.setdefault("auto_approve_writes", bool(variables.get("yolo", False)))
+    # Unattended sandbox writes are an explicit per-job choice (Settings default off);
+    # the session's YOLO is never inherited.
+    from mu.jobs.core.vm import unattended_default
+
+    execution.setdefault("auto_approve_writes", unattended_default())
     value["execution"] = execution
     return value
+
+
+def _session_for_workspace(workspace: str) -> str:
+    """Most recently saved user session whose workspaces include ``workspace`` ('' if none)."""
+    from utils import config as _config
+
+    def norm(path: str) -> str:
+        return os.path.realpath(os.path.expanduser(str(path or "")))
+
+    target = norm(workspace)
+    best, best_time = "", -1.0
+    for path in glob.glob(os.path.join(_config.HISTORY_DIR, "sessions", "*", "session.json")):
+        saved = _saved_session(os.path.basename(os.path.dirname(path)), full=False)
+        if saved and any(norm(f) == target for f in saved["folders"]) and saved["updated_at"] > best_time:
+            best, best_time = saved["name"], saved["updated_at"]
+    return best
 
 
 @router.get("")
@@ -118,11 +207,24 @@ async def list_jobs(
 
 @router.post("")
 async def create_job(request: Request, payload: Dict[str, Any]):
+    """Create a job. ``repository`` (URL or local path) is an alternative to
+    ``workspace_root``: URLs are cloned/refreshed under $MUCLI_HOME/repos first, so
+    the session defaults are looked up for the clone's path. Clone failures return
+    400 ``{"detail": <actionable message>, "error": {"kind", "host"}}``."""
+    from fastapi.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
+
+    from mu.jobs.clone import CloneError, apply_repository
+
     service = _service(request)
     try:
-        job = service.create_from_payload(_with_session_defaults(request, payload))
+        resolved = await run_in_threadpool(apply_repository, payload)
+        job = service.create_from_payload(_with_session_defaults(request, resolved))
     except HTTPException:
         raise
+    except CloneError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc),
+                                                      "error": {"kind": exc.kind, "host": exc.host}})
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"job": job.to_dict()}
@@ -254,44 +356,105 @@ async def bulk_manage_jobs(request: Request, payload: Dict[str, Any]):
 async def import_jira_issues(request: Request, payload: Dict[str, Any]):
     """Create durable jobs from Jira issues (keys and/or JQL).
 
-    Credentials come from the server environment only; any credential keys in
-    the request body are rejected so tokens never reach the job record.
+    Credentials come from the saved link / server environment only; any
+    credential keys in the request body are rejected so tokens never reach
+    the job record. ``force`` re-imports tickets whose latest job is done.
     """
-    from mu.integrations.jira import JiraClient, JiraConfig, JiraError, import_issues
+    return await _import_tickets(request, {**dict(payload or {}), "tracker": "jira"})
 
-    body = dict(payload or {})
-    for forbidden in ("api_token", "token", "pat", "password", "JIRA_API_TOKEN", "JIRA_PAT"):
+
+@router.post("/tracker/import")
+async def import_tracker_tickets(request: Request, payload: Dict[str, Any]):
+    """Create durable jobs from tracker tickets.
+
+    ``tracker``: ``jira`` (keys like PROJ-1 and/or ``query``/``jql``) or
+    ``github`` (keys like owner/repo#12 or issue URLs, and/or a GitHub search
+    ``query`` such as ``repo:acme/api is:open label:mucli``).
+    """
+    return await _import_tickets(request, dict(payload or {}))
+
+
+_CREDENTIAL_KEYS = ("api_token", "token", "pat", "password", "JIRA_API_TOKEN", "JIRA_PAT",
+                    "github_token", "GITHUB_TOKEN", "GH_TOKEN")
+
+
+async def _import_tickets(request: Request, body: Dict[str, Any]):
+    from starlette.concurrency import run_in_threadpool
+
+    from mu.integrations.http import TrackerError
+    from mu.integrations.tracker import parse_ticket_ref
+
+    for forbidden in _CREDENTIAL_KEYS:
         if forbidden in body:
-            raise HTTPException(status_code=400, detail="Jira credentials are read from the server environment only")
+            raise HTTPException(status_code=400, detail="Tracker credentials are read from the server settings only")
+    tracker_name = str(body.get("tracker") or "jira").strip().lower()
+    if tracker_name not in {"jira", "github"}:
+        raise HTTPException(status_code=400, detail=f"Unknown tracker {tracker_name!r}")
     keys = body.get("keys") or ([body["key"]] if body.get("key") else [])
     if isinstance(keys, str):
         keys = [k for k in keys.replace(",", " ").split() if k]
-    jql = str(body.get("jql") or "").strip()
-    if not keys and not jql:
-        raise HTTPException(status_code=400, detail="Provide 'keys' or 'jql'")
+    if tracker_name == "github":
+        refs = [parse_ticket_ref(k) for k in keys]
+        bad = [k for k, r in zip(keys, refs) if not r or r["tracker"] != "github"]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"Not GitHub issue keys (owner/repo#N): {', '.join(map(str, bad))}")
+        keys = [r["key"] for r in refs]
+    query = str(body.get("query") or body.get("jql") or "").strip()
+    if not keys and not query:
+        raise HTTPException(status_code=400, detail="Provide 'keys' or 'jql'" if tracker_name == "jira"
+                            else "Provide 'keys' or 'query'")
+    raw_defaults = dict(body.get("defaults") or {})
+    # The Work page sends ``session_name`` at the top level of the body;
+    # without forwarding it the job got no workspace_root and the worker
+    # silently fell back to the GUI process's own repository.
+    if body.get("session_name") and not raw_defaults.get("session_name"):
+        raw_defaults["session_name"] = body.get("session_name")
+    from fastapi.responses import JSONResponse
+
+    from mu.jobs.clone import CloneError, apply_repository
+
     try:
-        client = _jira_client()
-        raw_defaults = dict(body.get("defaults") or {})
-        # The Work page sends ``session_name`` at the top level of the body;
-        # without forwarding it the job got no workspace_root and the worker
-        # silently fell back to the GUI process's own repository.
-        if body.get("session_name") and not raw_defaults.get("session_name"):
-            raw_defaults["session_name"] = body.get("session_name")
-        defaults = _with_session_defaults(request, raw_defaults)
-        if not str(defaults.get("workspace_root") or "").strip():
-            raise HTTPException(
-                status_code=400,
-                detail="No workspace for imported jobs: open Work from a session with an attached workspace.",
-            )
-        result = import_issues(
-            _service(request), client, keys=keys, jql=jql, defaults=defaults,
-            max_results=int(body.get("max_results") or 20),
+        # ``defaults.repository`` (git URL or local path) resolves to a workspace the
+        # same way POST /api/jobs does; the clone runs off the event loop.
+        resolved_defaults = await run_in_threadpool(apply_repository, raw_defaults)
+        defaults = _with_session_defaults(request, resolved_defaults)
+    except CloneError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc),
+                                                      "error": {"kind": exc.kind, "host": exc.host}})
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not str(defaults.get("workspace_root") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a workspace or repository for the imported jobs.",
         )
-    except JiraError as exc:
+    service = _service(request)
+    try:
+        max_results = int(body.get("max_results") or 20)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="max_results must be a number") from exc
+    force = bool(body.get("force", False))
+
+    def work():
+        if tracker_name == "jira":
+            from mu.integrations.jira import import_issues
+
+            return import_issues(service, _jira_client(), keys=keys, jql=query, defaults=defaults,
+                                 max_results=max_results, force=force)
+        from mu.jobs import tracker_sync
+
+        result = tracker_sync.import_tickets(service, tracker_sync.tracker_for("github"), keys=keys,
+                                             query=query, defaults=defaults, max_results=max_results,
+                                             force=force)
+        return result
+
+    try:
+        # Tracker HTTP is blocking; keep it off the event loop.
+        return await run_in_threadpool(work)
+    except TrackerError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return result
 
 
 def _jira_client():
@@ -315,6 +478,157 @@ def _jira_call(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except JiraError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+async def _jira_run(fn, *args, **kwargs):
+    """Run a blocking Jira call in the threadpool (never on the event loop)."""
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(_jira_call, fn, *args, **kwargs)
+
+
+@router.get("/sessions")
+async def list_job_sessions(request: Request):
+    """Sessions a job can run in (single management plane across sessions)."""
+    from utils import config as _config
+    from mu.jobs.sandbox.environments import session_environment
+
+    state = request.app.state
+    loaded = set(getattr(state, "sessions", {}) or {})
+    current = getattr(state, "current_session_name", None)
+    out = []
+    for path in sorted(glob.glob(os.path.join(_config.HISTORY_DIR, "sessions", "*", "session.json"))):
+        name = os.path.basename(os.path.dirname(path))
+        saved = _saved_session(name, full=False)
+        if saved is None:
+            continue
+        variables = saved["variables"]
+        out.append({"name": name, "workspace": saved["folders"][0] if saved["folders"] else "",
+                    "workspaces": saved["folders"], "provider": saved["provider"], "model": saved["model"],
+                    "agent_mode": str(variables.get("agent_mode") or "default"), "yolo": bool(variables.get("yolo", False)),
+                    "session_type": str(variables.get("session_type") or "workspace"),
+                    "environment": session_environment(name),
+                    "loaded": name in loaded, "current": name == current, "updated_at": saved["updated_at"]})
+    out.sort(key=lambda s: (not s["current"], -s["updated_at"]))
+    return {"sessions": out, "current": current}
+
+
+@router.get("/environments")
+def list_build_environments(request: Request, repository: str = "", workspace: str = "", session: str = "",
+                            images: bool = True):
+    """Build environment sources (environments, templates, local images, Docker-in-Docker/GPU status)
+    and the environment set a new job for ``repository``/``session`` would resolve to."""
+    from mu.jobs.core.vm import environments_vm
+    service = getattr(request.app.state, "job_service", None)
+    return environments_vm(service, repository=repository or workspace, session=session, include_images=images)
+
+
+@router.post("/environments/approve")
+def approve_build_environment(payload: Dict[str, Any]):
+    """New job sheet: approve the image/devcontainer the repository declares (explicit human action).
+
+    Only a fingerprint the repository currently requests is accepted; parked jobs use the
+    ``approveEnvironment`` command instead (it also requeues the job)."""
+    from mu.jobs.core.commands import approve_repository_environment
+    body = payload or {}
+    try:
+        return approve_repository_environment(str(body.get("repository") or body.get("workspace") or ""),
+                                              str(body.get("fingerprint") or ""),
+                                              session=str(body.get("session") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/toolchains")
+async def list_toolchains():
+    """Settings → Toolchains rows with their derived image status (built/building/failed/missing)."""
+    from mu.jobs.sandbox.toolchain import toolchains_status
+    return {"toolchains": toolchains_status()}
+
+
+@router.post("/toolchains/build")
+async def build_toolchain(payload: Dict[str, Any]):
+    """Build a repository toolchain image now (in the background) instead of on first use."""
+    from mu.jobs.sandbox.toolchain import IMAGE_RE, build_in_background, toolchain_rows
+    base = str((payload or {}).get("base_image") or "").strip()
+    if not base or not IMAGE_RE.fullmatch(base) or base.startswith("-"):
+        raise HTTPException(status_code=400, detail="base_image is required")
+    if base not in {row["base_image"] for row in toolchain_rows()}:
+        raise HTTPException(status_code=400, detail="Add this base image to Settings → Toolchains first")
+    return build_in_background(base)
+
+
+@router.get("/setup")
+def get_setup_vm(recheck: bool = False):
+    """Guided setup checklist (planos-style): live step states, the actions that fix each step and
+    the log of the running setup job. The first call checks every step."""
+    from mu.jobs.setup import get_setup
+    setup = get_setup()
+    if recheck or not setup.status:
+        setup.recheck()
+    return setup.vm()
+
+
+@router.post("/setup/recheck")
+def post_setup_recheck(payload: Optional[Dict[str, Any]] = None):
+    from mu.jobs.setup import STEP_IDS, get_setup
+    steps = [s for s in ((payload or {}).get("steps") or STEP_IDS) if s in STEP_IDS]
+    setup = get_setup()
+    setup.recheck(steps)
+    return setup.vm()
+
+
+@router.post("/setup/action")
+def post_setup_action(payload: Dict[str, Any]):
+    """Run a setup action: ``{step, action, inputs?}``. ``job`` actions start in the background
+    (poll ``GET /setup`` for the log); ``terminal`` actions just re-check after the user ran the
+    command; secret inputs are stored and never echoed."""
+    from mu.jobs.setup import get_setup
+    setup = get_setup()
+    try:
+        result = setup.action(str(payload.get("step") or ""), str(payload.get("action") or ""),
+                              [str(v) for v in (payload.get("inputs") or [])])
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "setup": setup.vm()}
+
+
+@router.post("/setup/finish")
+def post_setup_finish():
+    from mu.jobs.setup import get_setup
+    try:
+        return get_setup().finish()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/doctor")
+def get_doctor(deep: bool = False):
+    """Everything job runs depend on, pass/warn/fail. ``deep`` also runs the sandbox self-test
+    (real containers, no model calls; ~10-20s)."""
+    from mu.jobs.setup import doctor, needs_setup
+    checks = doctor(deep=deep)
+    return {"checks": checks, "failed": sum(1 for c in checks if c["status"] == "fail"),
+            "warnings": sum(1 for c in checks if c["status"] == "warn"), "needs_setup": needs_setup()}
+
+
+@router.get("/agents")
+def list_agents():
+    """Agent harnesses (mucli / Claude Code / Codex): install, credential kind, readiness, per-stage
+    defaults. Secret values are never returned, only where each one is set."""
+    from mu.jobs.harness import status
+    return status()
+
+
+@router.put("/agents/secret")
+def put_agent_secret(payload: Dict[str, Any]):
+    """Store (or with an empty value, clear) a harness secret in ``$MUCLI_HOME/secrets.env`` (0600)."""
+    from mu.jobs.harness import status, write_secret
+    try:
+        write_secret(str((payload or {}).get("key") or ""), (payload or {}).get("value"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return status()
 
 
 @router.get("/settings")
@@ -369,7 +683,9 @@ async def delete_jira_settings():
 @router.post("/jira/test")
 async def test_jira_link():
     client = _jira_client()
-    return {"ok": True, "user": _jira_call(client.myself), "jira": client.config.public()}
+    user = await _jira_run(client.myself)
+    deployment = await _jira_run(lambda: client.deployment)
+    return {"ok": True, "user": user, "jira": {**client.config.public(), "deployment": deployment}}
 
 
 @router.get("/jira/boards")
@@ -377,10 +693,10 @@ async def list_jira_boards(query: str = ""):
     from mu.integrations.jira_settings import public_settings
 
     client = _jira_client()
-    boards = _jira_call(client.list_boards, query=query)
+    boards = await _jira_run(client.list_boards, query=query)
     preferred = {b["id"] for b in public_settings()["preferences"]["boards"]}
     # Suggest boards for projects where I have open assigned work.
-    mine = client.my_project_keys()
+    mine = await _jira_run(client.my_project_keys)
     rank = {key: i for i, key in enumerate(mine)}
     for board in boards:
         board["preferred"] = board.get("id") in preferred
@@ -395,7 +711,7 @@ async def list_jira_boards(query: str = ""):
 @router.get("/jira/boards/{board_id}/sprints")
 async def list_jira_sprints(board_id: int, state: str = "active,future"):
     client = _jira_client()
-    return {"sprints": _jira_call(client.list_sprints, board_id, state=state)}
+    return {"sprints": await _jira_run(client.list_sprints, board_id, state=state)}
 
 
 @router.get("/jira/tickets")
@@ -416,6 +732,8 @@ async def list_jira_tickets(
     ``include_done``; ``status`` is an optional comma-separated status-name
     filter. All pages are fetched (Jira caps pages at 50).
     """
+    from starlette.concurrency import run_in_threadpool
+
     from mu.integrations.jira import build_ticket_jql, linked_jobs, status_counts, ticket_summary
     from mu.integrations.jira_settings import public_settings
 
@@ -424,19 +742,29 @@ async def list_jira_tickets(
     user_jql = str(jql or "").strip()
     if board_id or sprint_id:
         query = build_ticket_jql(user_jql, mine=mine, include_done=include_done, statuses=statuses)
-        issues = _jira_call(client.board_issues, board_id or 0, sprint_id=sprint_id, jql=query,
-                            max_results=max_results, backlog=backlog and not sprint_id)
+        issues = await _jira_run(client.board_issues, board_id or 0, sprint_id=sprint_id, jql=query,
+                                 max_results=max_results, backlog=backlog and not sprint_id)
     else:
         user_jql = user_jql or public_settings()["preferences"]["default_jql"]
         if not user_jql and not mine:
             raise HTTPException(status_code=400, detail="Pick a board/sprint or provide a JQL query")
         query = build_ticket_jql(user_jql, mine=mine, include_done=include_done, statuses=statuses)
-        issues = _jira_call(client.search, query, max_results=max_results)
-    linked = linked_jobs(_service(request))
+        issues = await _jira_run(client.search, query, max_results=max_results)
+    linked = await run_in_threadpool(linked_jobs, _service(request))
     base = client.config.base_url
     tickets = [ticket_summary(i, base_url=base, linked=linked) for i in issues]
     return {"tickets": tickets, "base_url": base, "statuses": status_counts(tickets),
             "include_done": include_done, "jql": query}
+
+
+@router.post("/tracker/watch/poll")
+async def poll_tracker_watches(request: Request):
+    """Run the ticket watcher now (only queries that are due; off unless enabled)."""
+    from starlette.concurrency import run_in_threadpool
+
+    from mu.jobs import tracker_sync
+
+    return await run_in_threadpool(tracker_sync.poll_watches, _service(request))
 
 
 @router.get("/repositories")

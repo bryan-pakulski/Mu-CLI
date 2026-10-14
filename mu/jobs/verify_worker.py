@@ -1,41 +1,19 @@
-"""Subprocess verifier for durable engineering jobs."""
+"""Checks phase of a durable job: run the check suites, then apply the readiness policy.
+
+Launched through ``mu.jobs.worker --phase verification`` (``python -m
+mu.jobs.verify_worker`` remains a compatibility shim).
+"""
 
 from __future__ import annotations
 
-import argparse
 import os
-import threading
 from typing import Optional
 
+from .lease import run_leased
 from .models import AttentionReason, JobStatus
-from .receipt import JobReceiptBuilder
-from .review_branch import materialize_review_branch
-from .service import JobStateError, get_default_job_service
-from .verification import DeterministicVerifier, VerificationRun
-from .worktree import WorktreeError
-
-
-def _heartbeat(
-    service,
-    job_id: str,
-    worker_id: str,
-    ttl: int,
-    stop: threading.Event,
-    lease_lost: "Optional[threading.Event]" = None,
-) -> None:
-    interval = max(3.0, float(ttl) / 3.0)
-    while not stop.wait(interval):
-        try:
-            if not service.heartbeat(job_id, worker_id, ttl_seconds=ttl):
-                # Lease gone: signal the verifier to stop before it can
-                # apply results it no longer owns.
-                if lease_lost is not None:
-                    lease_lost.set()
-                return
-        except Exception:
-            if lease_lost is not None:
-                lease_lost.set()
-            return
+from .receipt import refresh_receipt as _refresh_receipt
+from .service import get_default_job_service
+from .verification import VerificationRun
 
 
 def verification_feedback(run: VerificationRun) -> dict:
@@ -62,90 +40,84 @@ def verification_feedback(run: VerificationRun) -> dict:
     }
 
 
-def _refresh_receipt(service, job_id: str) -> None:
+_ENVIRONMENT_PATTERNS = (
+    r"ModuleNotFoundError: No module named", r"ImportError: No module named", r"Cannot find module '",
+    r"Error: Cannot find package", r"ERR_MODULE_NOT_FOUND", r"getaddrinfo (?:ENOTFOUND|EAI_AGAIN)",
+    r"Temporary failure in name resolution", r"Could not resolve host", r"command not found",
+    r"node_modules(?:/\.bin)?: No such file", r"Failed to download|failed to fetch|Network is unreachable",
+)
+
+
+def environment_failure(result: dict) -> str:
+    """The missing-dependency / no-network symptom in a failing suite's output ('' when none)."""
+    import re
+    text = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}"
+    for pattern in _ENVIRONMENT_PATTERNS:
+        match = re.search(pattern + r"[^\n]{0,120}", text)
+        if match:
+            return match.group(0).strip()
+    return ""
+
+
+def futile_fix_reason(job, run: VerificationRun) -> str:
+    """Why an automatic fix attempt cannot help ('' = schedule one).
+
+    * every newly failing suite fails for an environment reason (missing dependency, no
+      network) — the implementer cannot fix the sandbox;
+    * the previous fix attempt changed nothing (same HEAD and worktree status as the run
+      before it)."""
+    failing = [s for s in run.summary.get("suites", []) if s.get("new_failures")]
+    symptoms = [(s.get("suite"), environment_failure(s)) for s in failing]
+    if failing and all(symptom for _suite, symptom in symptoms):
+        detail = "; ".join(f"`{suite}`: {symptom}" for suite, symptom in symptoms[:4])
+        envs = sorted({s.get("environment") for s in failing if s.get("environment")})
+        where = f"build environment {', '.join(f'`{e}`' for e in envs)}" if envs else "the job sandbox"
+        return (f"environment: checks fail because {where} lacks dependencies or network access ({detail}). "
+                "A code fix cannot change that; add the dependencies to the environment (or allow the registry "
+                "in Extra egress domains), then re-run checks.")
     try:
-        JobReceiptBuilder(service).write(job_id)
-    except Exception as exc:
-        service.store.append_event(
-            job_id,
-            "work_receipt_failed",
-            reason=str(exc),
-        )
+        from .core.artifacts import artifacts_for
+        art = artifacts_for(job)
+        runs = art.check_runs()
+        if len(runs) >= 2 and run.summary.get("trigger") == "auto":
+            previous = art.read_json(f"checks/run-{runs[-2]}/summary.json", {}) or {}
+            current = run.summary
+            same_head = previous.get("head_sha") and previous.get("head_sha") == current.get("head_sha")
+            same_failures = sorted(s.get("suite") for s in previous.get("suites", []) if s.get("new_failures")) == \
+                sorted(s.get("suite") for s in failing)
+            if same_head and same_failures and previous.get("dirty_worktree") == current.get("dirty_worktree") \
+                    and (job.metadata or {}).get("last_fix_head") == current.get("head_sha"):
+                return "the previous fix attempt changed nothing (same commit and the same failing suites)"
+    except (OSError, ValueError):
+        pass
+    return ""
 
 
-def _materialize_for_review(service, job_id: str, feedback: dict) -> tuple[bool, dict]:
-    """Convert the verified execution worktree into a normal review branch.
-
-    Verification success is necessary but review state is only entered once the
-    branch is confirmed and the temporary worktree is safely retired.  This
-    keeps READY_FOR_REVIEW usable from ordinary Git tooling instead of requiring
-    callers to navigate MuCLI's managed worktree directory.
-    """
-
-    try:
-        info = materialize_review_branch(
-            service,
-            job_id,
-            expected_head_sha=str(feedback.get("verified_head_sha") or "") or None,
-        )
-        return True, {**feedback, "review_branch": info.to_dict()}
-    except WorktreeError as exc:
-        payload = {**feedback, "review_branch_error": exc.to_dict()}
-        service.store.append_event(
-            job_id,
-            "review_branch_materialization_failed",
-            reason=str(exc),
-            payload=payload,
-        )
-        service.require_human(
-            job_id,
-            AttentionReason.ENVIRONMENT_FAILURE,
-            "Verification passed, but MuCLI could not safely move the completed work into branch-only review state.",
-            payload=payload,
-        )
-        return False, payload
-    except Exception as exc:
-        payload = {**feedback, "review_branch_error": {"error": str(exc)}}
-        service.store.append_event(
-            job_id,
-            "review_branch_materialization_failed",
-            reason=str(exc),
-            payload=payload,
-        )
-        service.require_human(
-            job_id,
-            AttentionReason.ENVIRONMENT_FAILURE,
-            "Verification passed, but MuCLI could not safely move the completed work into branch-only review state.",
-            payload=payload,
-        )
-        return False, payload
-
-
-def _maybe_acceptance_review(service, job, feedback: dict) -> Optional[int]:
-    """Run the reviewer when enabled. Returns an exit code when the job was
-    parked on a human (verdict fail), else None to continue to READY."""
-    from .acceptance import AcceptanceReviewer, acceptance_review_enabled
-
-    if not acceptance_review_enabled(job):
-        return None
-    try:
-        review = AcceptanceReviewer(service).review(
-            job.id, head_sha=str(feedback.get("verified_head_sha") or "")
-        )
-    except Exception as exc:  # noqa: BLE001 — reviewer failure never blocks READY
-        service.store.append_event(job.id, "acceptance_review_failed", reason=str(exc)[:400])
-        return None
-    if review.verdict != "fail":
-        return None
-    unmet = [c.criterion for c in review.criteria if c.verdict == "fail"]
-    service.require_human(
-        job.id,
-        AttentionReason.VERIFICATION_REQUIRED,
-        "Validation commands passed, but the independent acceptance review judged "
-        f"{review.unmet} of {review.total} criteria unmet: " + "; ".join(unmet)[:600],
-        payload={**feedback, "acceptance_review": review.to_dict()},
-    )
-    return 24
+def missing_tool_message(summary: dict) -> str:
+    """Name the build environment that lacks a tool (or the shared image when there is none)."""
+    missing = list(summary.get("missing_tools") or [])
+    owners = dict(summary.get("missing_tool_environments") or {})
+    docker_suites = list(summary.get("missing_docker_suites") or [])
+    parts = []
+    for item in docker_suites:
+        if item.get("environment"):
+            parts.append(f"Suite `{item['suite']}` needs Docker; enable Docker for binding `{item['environment']}`.")
+    by_env: dict = {}
+    for tool in missing:
+        if tool == "docker" and any(d.get("environment") for d in docker_suites):
+            continue
+        by_env.setdefault(owners.get(tool) or "", []).append(tool)
+    for env, tools in by_env.items():
+        names = ", ".join(f"`{t}`" for t in tools)
+        if env:
+            parts.append(f"Checks need {names}, which build environment `{env}` doesn't include. Install it in that "
+                         "environment (container mode), or choose another (Change), then re-run checks.")
+        else:
+            from .job_settings import rule_or
+            image = rule_or("sandbox.image", "mucli-job-runtime:latest")
+            parts.append(f"Checks need {names}, which the job sandbox image {image} doesn't include. "
+                         "Use a toolchain image that has it (Settings → Sandbox), then re-run checks.")
+    return " ".join(parts)
 
 
 def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
@@ -160,12 +132,30 @@ def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
         service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED,
                               "Configure at least one check suite before review and push.", payload=feedback)
         return 21
+    missing = list(run.summary.get("missing_tools") or [])
+    if missing:
+        # The implementer cannot install toolchains, so a repair loop would be wasted spend.
+        service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED, missing_tool_message(run.summary),
+            payload={**feedback, "missing_tools": missing,
+                     "missing_tool_environments": run.summary.get("missing_tool_environments") or {}})
+        _refresh_receipt(service, job_id)
+        return 22
     from .job_settings import load_settings
     settings = load_settings().get("checks") or {}
     maximum = max(0, int((current.execution.get("checks") or {}).get("max_fix_attempts", settings.get("max_fix_attempts", 2))))
     core = service.store.core_state(job_id)
-    if run.summary.get("new_failures", 0) > 0 and core.fix_attempts < maximum:
+    futile = futile_fix_reason(current, run) if run.summary.get("new_failures", 0) > 0 else ""
+    if futile:
+        service.store.append_event(job_id, "fix_attempt_skipped", reason=futile, payload=feedback)
+        if futile.startswith("environment"):
+            service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED, futile, payload=feedback)
+            _refresh_receipt(service, job_id)
+            return 22
+    if run.summary.get("new_failures", 0) > 0 and core.fix_attempts < maximum and not futile:
         service.store.set_fix_attempts(job_id, core.fix_attempts + 1)
+        meta = dict(service.get(job_id).metadata or {})
+        meta["last_fix_head"] = run.summary.get("head_sha") or ""
+        service.store.update_runtime_fields(job_id, metadata_json=meta)
         service.store.append_event(job_id, "verification_failed", reason="new failures; fix attempt scheduled", payload=feedback)
         service.transition(job_id, JobStatus.QUEUED, reason="checks require implementation fixes", payload=feedback)
         return 10
@@ -175,139 +165,22 @@ def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
     return 0
 
 
-def apply_verification_result(service, job_id: str, run: VerificationRun) -> int:
-    """Apply deterministic readiness policy to persisted verification evidence."""
-    if "new_failures" in run.summary:
-        return apply_checks_result(service, job_id, run)
-    feedback = verification_feedback(run)
-    current = service.get(job_id)
-    if current.status == JobStatus.CANCELLED:
-        _refresh_receipt(service, job_id)
-        return 0
-    if current.status != JobStatus.VERIFYING:
-        _refresh_receipt(service, job_id)
-        return 0
-
-    if run.status == "missing_contract":
-        service.require_human(
-            job_id,
-            AttentionReason.VERIFICATION_REQUIRED,
-            "No validation commands are configured, so MuCLI cannot automatically verify this job.",
-            payload=feedback,
-        )
-        _refresh_receipt(service, job_id)
-        return 21
-
-    if run.passed:
-        materialized, review_feedback = _materialize_for_review(service, job_id, feedback)
-        if not materialized:
-            _refresh_receipt(service, job_id)
-            return 23
-        # Milestone 3 (optional): independent acceptance-criteria review.
-        # A 'fail' verdict gates READY behind a human — "ready" must not hide
-        # a criterion the reviewer believes is unmet. 'unknown' proceeds but
-        # is recorded as evidence.
-        from .stages import is_staged
-
-        if is_staged(current):
-            service.transition(
-                job_id,
-                JobStatus.REVIEWING,
-                reason="deterministic verification passed; model review next",
-                payload=review_feedback,
-            )
-            _refresh_receipt(service, job_id)
-            return 0
-        acceptance_gate = _maybe_acceptance_review(service, current, review_feedback)
-        if acceptance_gate is not None:
-            _refresh_receipt(service, job_id)
-            return acceptance_gate
-        service.transition(
-            job_id,
-            JobStatus.READY_FOR_REVIEW,
-            reason="deterministic verification passed; review branch materialized",
-            payload=review_feedback,
-        )
-        # Milestone 5: READY must also mean "still merges". Assess base drift
-        # right away so a base that moved during the run is caught here, not
-        # by the reviewer.
-        try:
-            from .base_drift import apply_base_drift
-
-            apply_base_drift(service, job_id, source="verification")
-        except Exception as exc:  # noqa: BLE001 — drift check must not undo READY
-            service.store.append_event(
-                job_id, "base_drift_check_failed", reason=str(exc)[:400]
-            )
-        _refresh_receipt(service, job_id)
-        return 0
-
-    attempts = service.attempts(job_id)
-    latest_attempt = max((attempt.number for attempt in attempts), default=0)
-    if latest_attempt <= int(current.max_retries):
-        service.store.append_event(
-            job_id,
-            "verification_failed",
-            reason="automatic repair attempt scheduled",
-            payload=feedback,
-        )
-        service.transition(
-            job_id,
-            JobStatus.QUEUED,
-            reason="verification failed; requeueing implementation",
-            payload={
-                "verification_id": run.id,
-                "attempt": latest_attempt,
-                "max_retries": current.max_retries,
-            },
-        )
-        _refresh_receipt(service, job_id)
-        return 10
-
-    service.store.append_event(
-        job_id,
-        "verification_failed",
-        reason="automatic retry budget exhausted",
-        payload=feedback,
-    )
-    service.require_human(
-        job_id,
-        AttentionReason.TEST_FAILURE,
-        "Verification failed and the automatic implementation retry budget is exhausted.",
-        payload=feedback,
-    )
-    _refresh_receipt(service, job_id)
-    return 22
-
-
 def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
-    service = get_default_job_service()
-    heartbeat_stop = threading.Event()
-    lease_lost = threading.Event()
-    heartbeat_thread = threading.Thread(
-        target=_heartbeat,
-        args=(service, job_id, worker_id, lease_ttl_seconds, heartbeat_stop, lease_lost),
-        name=f"mucli-job-verify-heartbeat-{job_id[:8]}",
-        daemon=True,
+    return run_leased(
+        get_default_job_service(), job_id, worker_id, phase="verification",
+        lease_ttl_seconds=lease_ttl_seconds, body=_verify, statuses=(JobStatus.VERIFYING,),
+        reject_event="verification_worker_rejected", release_reason="verification worker exited",
     )
+
+
+def _verify(service, job, lease) -> int:
+    job_id, worker_id = job.id, lease.worker_id
     try:
-        job = service.get(job_id)
-        if job.worker_id != worker_id:
-            service.store.append_event(
-                job_id,
-                "verification_worker_rejected",
-                reason="worker does not own job lease",
-                payload={"expected": job.worker_id, "received": worker_id},
-            )
-            return 2
-        if job.status != JobStatus.VERIFYING:
-            return 0
-        heartbeat_thread.start()
         from .checks import ChecksStage
         run = ChecksStage(service).verify(job)
-        if lease_lost.is_set():
-            # Lease expired mid-verification: a retried verifier will take
-            # over. Do not apply results this worker no longer owns.
+        if not lease.owned():
+            # Lease expired mid-run: a retried verifier takes over. Do not
+            # apply results this worker no longer owns.
             service.store.append_event(
                 job_id,
                 "verification_lease_lost_midrun",
@@ -315,21 +188,21 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
                 payload={"worker_id": worker_id},
             )
             return 6
-        if not service.store.assert_lease(job_id, worker_id):
-            # Final transactional gate before apply_verification_result:
-            # closes the check-then-act window against takeover.
-            service.store.append_event(
-                job_id,
-                "verification_lease_lost_midrun",
-                reason="lease lost before result application",
-                payload={"worker_id": worker_id},
-            )
-            return 6
-        return apply_verification_result(service, job_id, run)
-
-    except JobStateError:
-        return 0
+        return apply_checks_result(service, job_id, run)
     except Exception as exc:
+        from .service import JobStateError
+        from .sandbox.environments import EnvironmentBlocked
+        if isinstance(exc, JobStateError):
+            raise
+        if isinstance(exc, EnvironmentBlocked):
+            try:
+                if lease.owned() and service.get(job_id).status == JobStatus.VERIFYING:
+                    service.require_human(job_id, AttentionReason.ENVIRONMENT_FAILURE, str(exc)[:2000],
+                                          payload={"stage": "checks"})
+                    _refresh_receipt(service, job_id)
+            except Exception:
+                pass
+            return 23
         try:
             service.store.append_event(
                 job_id,
@@ -337,7 +210,7 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
                 reason=str(exc),
                 payload={"process_id": os.getpid()},
             )
-            if service.store.assert_lease(job_id, worker_id) and service.get(job_id).status == JobStatus.VERIFYING:
+            if lease.owned() and service.get(job_id).status == JobStatus.VERIFYING:
                 service.transition(job_id, JobStatus.FAILED, reason="checks stage failed",
                                    payload={"error": str(exc)[:1000], "exception_type": type(exc).__name__})
             _refresh_receipt(service, job_id)
@@ -346,23 +219,11 @@ def run_verification(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45
         # A failed check supervisor requires an explicit retry. No agent runs
         # on the host when the container runtime is unavailable.
         return 4
-    finally:
-        heartbeat_stop.set()
-        if heartbeat_thread.is_alive():
-            heartbeat_thread.join(timeout=1.0)
-        try:
-            service.release(job_id, worker_id, reason="verification worker exited")
-        except Exception:
-            pass
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify one MuCLI durable engineering job")
-    parser.add_argument("--job-id", required=True)
-    parser.add_argument("--worker-id", required=True)
-    parser.add_argument("--lease-ttl", type=int, default=45)
-    args = parser.parse_args()
-    return run_verification(args.job_id, args.worker_id, lease_ttl_seconds=args.lease_ttl)
+def main(argv: Optional[list] = None) -> int:
+    from .worker import main as worker_main
+    return worker_main(argv, phase="verification")
 
 
 if __name__ == "__main__":

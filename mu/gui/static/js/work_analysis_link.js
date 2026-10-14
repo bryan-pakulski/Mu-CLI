@@ -14,7 +14,7 @@
     }
 
     function syncHeaderAnalysisLink() {
-        const headerLink = document.querySelector('.work-header-actions a.work-header-icon[href^="/static/job_trace.html"]');
+        const headerLink = document.querySelector('a.work-header-icon[href^="/static/job_trace.html"]');
         if (!headerLink) return;
         const jobId = selectedJobId();
         headerLink.href = jobId
@@ -34,13 +34,13 @@
         let link = header.querySelector('.work-job-analyze-link');
         if (!link) {
             link = document.createElement('a');
-            link.className = 'work-job-analyze-link';
+            link.className = 'btn sm work-job-analyze-link';
             link.textContent = 'Analyze trace';
             link.title = 'Open retrospective Job Trace Analyzer';
-            const right = header.querySelector('.work-card-cost');
+            const right = header.querySelector('.work-detail-cost');
             if (right) {
                 const group = document.createElement('span');
-                group.className = 'work-detail-head-actions';
+                group.className = 'row work-detail-head-actions';
                 right.replaceWith(group);
                 group.appendChild(link);
                 group.appendChild(right);

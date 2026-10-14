@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import type { SyntaxColors } from '../theme/tokens';
-import { spacing } from '../theme/tokens';
+import { spacing, fontSizes, fonts, radii, typography } from '../theme/tokens';
 
 // ── Token types ───────────────────────────────────────────────────────────
 
@@ -264,10 +264,10 @@ function tokenize(code: string, lang: string): Token[][] {
 interface CodeBlockProps {
   code: string;
   language?: string;
-  colors: { bgHover: string; textSoft: string; textDim: string; syntax: SyntaxColors };
+  colors: { bgHover: string; textSoft: string; textDim: string; syntax: SyntaxColors; codeBg?: string; border?: string; muted?: string };
 }
 
-const LINE_HEIGHT = 19;
+const LINE_HEIGHT = typography.xs.lineHeight;
 const VISIBLE_LINES = 25;
 const OVERSCAN = 8;
 
@@ -305,15 +305,15 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
   }, [needsWindowing]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bgHover }]}>
+    <View style={[styles.container, { backgroundColor: colors.codeBg ?? colors.bgHover, borderColor: colors.border ?? colors.bgHover }]}>
       <View style={styles.header}>
         {langLabel ? (
-          <Text style={[styles.langLabel, { color: colors.textDim }]}>
+          <Text style={[styles.langLabel, { color: colors.muted ?? colors.textDim }]}>
             {langLabel}
           </Text>
         ) : null}
-        <TouchableOpacity onPress={copy} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
-          <Ionicons name="copy-outline" size={15} color={colors.textDim} />
+        <TouchableOpacity onPress={copy} accessibilityRole="button" accessibilityLabel="Copy code" hitSlop={{ top: spacing.base, bottom: spacing.base, left: spacing.base, right: spacing.base }}>
+          <Ionicons name="copy-outline" size={15} color={colors.muted ?? colors.textDim} />
         </TouchableOpacity>
       </View>
       <ScrollView
@@ -336,8 +336,8 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
                 key={tokIdx}
                 style={{
                   color: colors.syntax[tok.type],
-                  fontFamily: 'monospace',
-                  fontSize: 13,
+                  fontFamily: fonts.mono,
+                  fontSize: fontSizes.xs,
                   lineHeight: LINE_HEIGHT,
                 }}
               >
@@ -357,28 +357,27 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 10,
-    padding: 12,
-    marginVertical: 5,
+    borderRadius: radii.control,
+    borderWidth: 1,
+    padding: spacing.md,
+    marginVertical: spacing.xs,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
   },
   langLabel: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontFamily: fonts.mono,
+    fontSize: fontSizes.xs,
     flex: 1,
   },
   line: {
-    fontFamily: 'monospace',
-    fontSize: 13,
-    lineHeight: 19,
+    fontFamily: fonts.mono,
+    fontSize: fontSizes.xs,
+    lineHeight: LINE_HEIGHT,
   },
   codeScroll: {
     maxHeight: 400,

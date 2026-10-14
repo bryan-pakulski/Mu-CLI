@@ -1,11 +1,13 @@
 """Static integration guards for the shared Mode OS surfaces."""
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "mu" / "gui" / "templates" / "fragments"
 APP_JS = ROOT / "mu" / "gui" / "static" / "js" / "app.js"
 APP_CSS = ROOT / "mu" / "gui" / "static" / "css" / "app.css"
+TOKENS_CSS = ROOT / "mu" / "gui" / "static" / "css" / "tokens.css"
 MOBILE_COMPONENT = (
     ROOT / "mobile" / "android" / "src" / "components" / "ModeWorkspace.tsx"
 )
@@ -27,8 +29,11 @@ def test_mode_workspace_exploration_state_survives_page_reload():
 
 def test_web_mode_os_has_explicit_light_and_dark_palette_tokens():
     css = APP_CSS.read_text(encoding="utf-8")
-    assert ':root, html[data-theme="dark"]' in css
-    assert 'html[data-theme="light"]' in css
+    tokens = TOKENS_CSS.read_text(encoding="utf-8")
+    # Light and dark palettes live in tokens.css, the single source of
+    # visual values; app.css consumes the mode tokens without redefining them.
+    assert 'html[data-theme="dark"]' in tokens
+    assert 'html[data-theme="light"]' in tokens
     for token in (
         "--mode-research",
         "--mode-security",
@@ -37,8 +42,10 @@ def test_web_mode_os_has_explicit_light_and_dark_palette_tokens():
         "--mode-feature",
         "--mode-teacher",
     ):
-        assert css.count(token) >= 3
-    assert "color-mix(in srgb, var(--bg" in css
+        assert token + ":" in tokens
+        assert "var(" + token + ")" in css
+        assert token + ":" not in css
+    assert re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", css) is None
 
 
 def test_web_mode_workspace_uses_one_glass_plane_not_nested_cards_or_pills():

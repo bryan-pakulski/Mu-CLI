@@ -147,5 +147,7 @@ def collect_durable_changes(service, bus: ChangeBus, cursor: int) -> int:
                 parts.add("plan")
             if command == "markFindings":
                 parts.update(("review", "state"))
+            if command == "markViewed":
+                parts.add("diff")
         bus.emit_job(event.job_id, parts)
     return cursor

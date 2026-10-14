@@ -18,6 +18,48 @@ class RepositoryError(RuntimeError):
     pass
 
 
+def git_timeout_seconds() -> int:
+    """``jobs.git_timeout_seconds`` (default 120): limit for one local git call."""
+    try:
+        from .job_settings import rule_or
+        return max(5, int(rule_or("jobs.git_timeout_seconds", 120)))
+    except (TypeError, ValueError):
+        return 120
+
+
+def remote_exists(repo: str, remote: str) -> bool:
+    try:
+        result = subprocess.run(["git", "-C", repo, "config", "--get", f"remote.{remote}.url"],
+                                text=True, capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and bool((result.stdout or "").strip())
+
+
+def fetch_quietly(repo: str, branch: str, *, remote: str = "origin", timeout: Optional[int] = None) -> bool:
+    """Best-effort ``git fetch <remote> <branch>``; never raises, never prompts.
+
+    Offline hosts, missing remotes, missing branches and credential prompts all
+    return ``False`` so callers fall back to whatever refs are already local.
+    The fetch updates the remote-tracking ref (``<remote>/<branch>``)."""
+    name = str(branch or "").strip()
+    if name.startswith(f"{remote}/"):
+        name = name[len(remote) + 1:]
+    if not repo or not name or name.lower() in {"auto", "head"} or not remote_exists(repo, remote):
+        return False
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    limit = int(timeout) if timeout else min(30, git_timeout_seconds())
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo, "fetch", "--quiet", "--no-tags", remote,
+             f"+refs/heads/{name}:refs/remotes/{remote}/{name}"],
+            text=True, capture_output=True, timeout=limit, check=False, env=env, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 @dataclass(frozen=True)
 class RepositoryRecord:
     id: str
@@ -77,14 +119,22 @@ class RepositoryRegistry:
 
     @staticmethod
     def _git(path: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-        result = subprocess.run(
-            ["git", "-C", path, *args],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "-C", path, *args],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=git_timeout_seconds(),
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RepositoryError(
+                f"git {' '.join(args[:2])} timed out after {exc.timeout:.0f}s "
+                "(raise jobs.git_timeout_seconds for large repositories)"
+            ) from exc
+        except OSError as exc:
+            raise RepositoryError(f"could not run git: {exc}") from exc
         if check and result.returncode != 0:
             raise RepositoryError((result.stderr or result.stdout or "git command failed").strip())
         return result

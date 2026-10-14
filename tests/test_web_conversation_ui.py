@@ -41,7 +41,7 @@ def test_completed_model_turns_receive_worked_duration_metadata():
 def test_interim_updates_are_compact_and_do_not_stack_horizontal_rules():
     css = CONVERSATION_CSS.read_text(encoding="utf-8")
     assert ".chat-history .collapse-group" in css
-    assert "margin: 3px 0 13px !important" in css
+    assert "margin: var(--space-1) 0 var(--space-3) !important" in css
     assert ".chat-history .collapse-header" in css
     assert "min-height: 28px !important" in css
     assert ".chat-history .collapse-body" in css
@@ -54,5 +54,6 @@ def test_interim_updates_are_compact_and_do_not_stack_horizontal_rules():
 def test_main_response_spacing_is_compact():
     css = CONVERSATION_CSS.read_text(encoding="utf-8")
     assert ".chat-history > .turn-wrap > .msg" in css
-    assert "margin-bottom: 24px !important" in css
-    assert "padding-top: 36px !important" in css
+    # planos transcript rhythm: bubbles sit 12px apart.
+    assert "margin-bottom: var(--space-3) !important" in css
+    assert "padding-top: var(--space-6) !important" in css

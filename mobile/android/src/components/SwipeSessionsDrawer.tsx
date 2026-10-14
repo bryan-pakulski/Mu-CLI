@@ -18,6 +18,7 @@ import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
 import { SafeAreaModal } from './SafeAreaModal';
+import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
 
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
@@ -32,7 +33,7 @@ function threadStatusLabel(status: ThreadStatus): string {
 }
 
 export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }: SwipeSessionsDrawerProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { activeSessionName, setActiveSession, setActiveProviderModel } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
@@ -201,10 +202,13 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
             {...swipeResponder.panHandlers}
             style={[
               styles.drawer,
+              elevation(2, colors, isDark),
               {
+                borderWidth: 0,
+                borderRightWidth: 1,
                 backgroundColor: colors.glassStrong,
                 borderRightColor: colors.hairline,
-                paddingTop: 16,
+                paddingTop: spacing.base,
               },
             ]}
           >
@@ -235,11 +239,11 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 <TouchableOpacity
                   onPress={() => setCreateThreadOpen(true)}
                   activeOpacity={0.72}
-                  style={[styles.primaryAction, { backgroundColor: colors.accentSoft }]}
+                  style={[styles.primaryAction, { backgroundColor: colors.accentSubtle }]}
                 >
-                  <Ionicons name="git-branch-outline" size={18} color={colors.accent} />
-                  <Text variant="sm" style={{ color: colors.accent, fontWeight: '700' }}>New thread</Text>
-                  <Ionicons name="add" size={18} color={colors.accent} />
+                  <Ionicons name="git-branch-outline" size={18} color={colors.accentFg} />
+                  <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>New thread</Text>
+                  <Ionicons name="add" size={18} color={colors.accentFg} />
                 </TouchableOpacity>
               ) : null}
 
@@ -253,8 +257,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                       activeOpacity={0.7}
                       style={[
                         styles.row,
-                        { borderBottomColor: colors.hairline },
-                        activeSessionName === thread.session_name && { backgroundColor: colors.bgHover },
+                        activeSessionName === thread.session_name && { backgroundColor: colors.accentSubtle },
                       ]}
                     >
                       <View style={styles.typeIconWrap}>
@@ -270,12 +273,12 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                         </Text>
                       </View>
                       {thread.unread_count > 0 ? (
-                        <View style={[styles.unreadBadge, { backgroundColor: colors.accentSoft }] }>
-                          <Text variant="xs" style={{ color: colors.accent, fontWeight: '700' }}>{thread.unread_count}</Text>
+                        <View style={[styles.unreadBadge, { backgroundColor: colors.accentSubtle }] }>
+                          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{thread.unread_count}</Text>
                         </View>
                       ) : null}
                       {activeSessionName === thread.session_name ? (
-                        <Ionicons name="checkmark" size={17} color={colors.accent} />
+                        <Ionicons name="checkmark" size={17} color={colors.accentFg} />
                       ) : !ACTIVE_THREAD_STATUSES.includes(thread.status) ? (
                         <TouchableOpacity
                           onPress={() => deleteThread(thread)}
@@ -301,7 +304,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 ) : null}
                 {loadError ? (
                   <TouchableOpacity onPress={() => void load()} style={styles.retryAction}>
-                    <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
+                    <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>Retry</Text>
                   </TouchableOpacity>
                 ) : null}
                 {sortSessions(sessions, activeSessionName).map(session => (
@@ -311,12 +314,11 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     activeOpacity={0.7}
                     style={[
                       styles.row,
-                      { borderBottomColor: colors.hairline },
-                      activeSessionName === session.name && { backgroundColor: colors.bgHover, borderWidth: 1, borderColor: colors.accent },
+                      activeSessionName === session.name && { backgroundColor: colors.accentSubtle },
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
-                      <Ionicons name={typeIcon(session)} size={17} color={session.is_loaded || activeSessionName === session.name ? colors.accent : colors.textDim} />
+                      <Ionicons name={typeIcon(session)} size={17} color={activeSessionName === session.name ? colors.accentFg : session.is_loaded ? colors.textSoft : colors.textDim} />
                     </View>
                     <View style={styles.rowCopy}>
                       <Text variant="sm" style={styles.rowName} numberOfLines={1}>{session.name}</Text>
@@ -337,14 +339,14 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
               <TouchableOpacity
                 onPress={() => setCreateSessionOpen(true)}
                 activeOpacity={0.72}
-                style={[styles.secondaryAction, { borderColor: colors.hairline }]}
+                style={[styles.secondaryAction, { borderColor: colors.border }]}
               >
                 <Ionicons name="add-circle-outline" size={17} color={colors.textDim} />
-                <Text variant="sm" dim style={{ fontWeight: '600' }}>New session</Text>
+                <Text variant="sm" dim style={{ fontWeight: fontWeights.semibold }}>New session</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
-          <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
+          <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         </View>
       </SafeAreaModal>
       <NewSessionSheet
@@ -367,88 +369,83 @@ function SectionTitle({ label, count }: { label: string; count: number }) {
   return (
     <View style={styles.sectionTitleRow}>
       <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>{label}</Text>
-      <Text variant="xs" dim>{count}</Text>
+      <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{count}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, flexDirection: 'row' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(5,10,16,0.42)' },
+  backdrop: { flex: 1 },
   drawer: {
     width: '88%',
     maxWidth: 380,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 6, height: 0 },
+    borderRightWidth: 1,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 15,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.base,
+    borderBottomWidth: 1,
   },
   headerCopy: { flex: 1 },
   headerActions: { flexDirection: 'row', gap: 2 },
-  title: { fontSize: 19, fontWeight: '600', letterSpacing: -0.25 },
-  iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  listContent: { paddingHorizontal: 10, paddingBottom: 24 },
+  title: { fontSize: fontSizes.lg, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  iconButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  listContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.lg },
   primaryAction: {
-    minHeight: 46,
-    marginHorizontal: 4,
-    marginTop: 12,
-    paddingHorizontal: 13,
-    borderRadius: 10,
+    minHeight: touchTarget,
+    marginHorizontal: spacing.xs,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing.sm,
   },
   secondaryAction: {
-    minHeight: 44,
-    marginHorizontal: 4,
-    marginTop: 18,
-    paddingHorizontal: 13,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    minHeight: touchTarget,
+    marginHorizontal: spacing.xs,
+    marginTop: spacing.base,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderRadius: radii.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
-  section: { marginTop: 20 },
+  section: { marginTop: spacing.base },
   sectionTitleRow: {
     minHeight: 28,
-    paddingHorizontal: 8,
+    paddingHorizontal: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionTitle: { fontFamily: 'monospace', fontWeight: '700', letterSpacing: 1 },
-  empty: { paddingHorizontal: 8, paddingVertical: 18, alignItems: 'center' },
-  retryAction: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 8 },
+  sectionTitle: { fontWeight: fontWeights.semibold },
+  empty: { paddingHorizontal: spacing.sm, paddingVertical: spacing.base, alignItems: 'center' },
+  retryAction: { alignSelf: 'center', minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 58,
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.sm,
   },
-  typeIconWrap: { width: 28, alignItems: 'flex-start', justifyContent: 'center', marginRight: 8 },
-  threadDot: { width: 8, height: 8, borderRadius: 4 },
-  rowCopy: { flex: 1, paddingVertical: 8 },
-  rowName: { fontWeight: '600' },
-  rowAction: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
+  typeIconWrap: { width: 28, alignItems: 'flex-start', justifyContent: 'center', marginRight: spacing.sm },
+  threadDot: { width: 8, height: 8, borderRadius: radii.pill },
+  rowCopy: { flex: 1, paddingVertical: spacing.sm },
+  rowName: { fontWeight: fontWeights.semibold },
+  rowAction: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
   unreadBadge: {
-    minWidth: 23,
-    height: 23,
-    paddingHorizontal: 6,
-    marginHorizontal: 7,
-    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: spacing.sm,
+    marginHorizontal: spacing.sm,
+    borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },

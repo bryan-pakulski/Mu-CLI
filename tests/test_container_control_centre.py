@@ -178,6 +178,6 @@ def test_file_browser_is_cloaked_and_above_nested_creation_modals():
     assert 'x-show="$store.fileBrowser.open"' in html
     assert "x-cloak" in html
     browser_rule = css.split(".file-browser-backdrop {", 1)[1].split("}", 1)[0]
-    assert "z-index: 2400" in browser_rule
-    assert "z-index:1350" in css  # guided welcome modal
-    assert "z-index:1400" in css  # nested Docker/network editor
+    assert "z-index: var(--z-popover)" in browser_rule
+    assert "z-index:calc(var(--z-modal) - 50)" in css  # guided welcome modal
+    assert "z-index:var(--z-modal)" in css  # nested Docker/network editor

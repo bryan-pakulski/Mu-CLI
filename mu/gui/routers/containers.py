@@ -165,9 +165,21 @@ async def list_managed_containers(request: Request):
     refs = await asyncio.to_thread(supervisor.list_environments)
     templates = supervisor.template_registry.list_templates()
     return {
-        "containers": [ref.to_dict(include_secret=False) for ref in refs],
+        "containers": [{**ref.to_dict(include_secret=False), **_job_usage(request, ref.name)} for ref in refs],
         "templates": [item.to_dict() for item in templates],
     }
+
+
+def _job_usage(request: Request, name: str) -> dict[str, Any]:
+    """Environments page: "Used by N jobs" and secret-scan blocks (job build environments)."""
+    service = getattr(request.app.state, "job_service", None)
+    if service is None:
+        return {"jobs_using": 0, "job_scan_blocks": []}
+    try:
+        from mu.jobs.sandbox.environments import jobs_using, scan_blocked
+        return {"jobs_using": len(jobs_using(service, name)), "job_scan_blocks": scan_blocked(service, name)}
+    except Exception:  # noqa: BLE001 - the badge is informational
+        return {"jobs_using": 0, "job_scan_blocks": []}
 
 
 @router.get("/api/containers/stats")

@@ -1,4 +1,5 @@
-/* Engineering Work — Job settings (Jira link) + Jira ticket browser.
+/* Engineering Work — Jira link (Settings page, #/settings) + Jira ticket browser (Tickets page, #/boards).
+ * Both are routes: the router's `mu:work-route` event loads them; nav links navigate.
  *
  * Settings mirror the Ollama key pattern: the token field is a password input
  * whose placeholder says "token set — type to replace"; a blank field keeps the
@@ -9,9 +10,10 @@
 
     const settingsBtn = document.getElementById('work-jira-settings-open');
     const browseBtn = document.getElementById('work-jira-open');
-    const settingsBackdrop = document.getElementById('work-jira-settings-backdrop');
-    const browseBackdrop = document.getElementById('work-jira-backdrop');
-    if (!settingsBtn || !settingsBackdrop || !browseBtn || !browseBackdrop) return;
+    const settingsPage = document.getElementById('work-jira-settings-backdrop');
+    const browsePage = document.getElementById('work-jira-backdrop');
+    if (!settingsBtn || !settingsPage || !browseBtn || !browsePage) return;
+    const go = hash => (window.MuWork?.go ? window.MuWork.go(hash) : (location.hash = hash));
 
     const appEl = document.getElementById('work-app');
     const $ = id => document.getElementById(id);
@@ -32,9 +34,7 @@
         preferred: $('jira-preferred-boards'),
         test: $('jira-test'),
         unlink: $('jira-unlink'),
-        settingsClose: $('work-jira-settings-close'),
         settingsMsg: $('jira-settings-message'),
-        browseClose: $('work-jira-close'),
         browseSettings: $('work-jira-browse-settings'),
         browseEmpty: $('work-jira-unlinked'),
         browseBody: $('work-jira-browser'),
@@ -55,6 +55,8 @@
     let preferredBoards = [];
     let tickets = [];
     const selected = new Set();
+    // Set by the "Run again" offer: the next import dialog starts with Run again (force) checked.
+    let rerunNext = false;
     let allBoards = null;          // every board the link can see (auto-discovered, cached)
     let boardsPromise = null;
     const statusFilter = new Set(); // status names picked in the chip row (empty = all)
@@ -146,6 +148,109 @@
         preferredBoards = (prefs.boards || []).map(b => ({ ...b }));
         renderPreferred();
         renderLinkStatus();
+        fillTrackerForm();
+    }
+
+    // ------------------------------------------------------------ trackers (writeback, watcher)
+    // Built here (not in work.html) so the tracker controls ship with this script.
+
+    const EVENT_LABELS = {
+        created: 'Job created', plan_ready: 'Plan ready', pushed: 'Change pushed (PR)',
+        done: 'Job done', failed: 'Job failed', needs_human: 'Needs a human',
+    };
+    const tracker = (function buildTrackerSection() {
+        const box = document.createElement('div');
+        box.className = 'work-jira-trackers stack';
+        box.innerHTML = `
+            <h3 class="work-jira-section">Jira deployment</h3>
+            <label class="work-field work-field-wide"><span>Deployment</span>
+                <select data-tr="deployment">
+                    <option value="auto">Detect automatically (/serverInfo)</option>
+                    <option value="cloud">Jira Cloud (REST v3)</option>
+                    <option value="dc">Data Center / Server (REST v2)</option>
+                </select></label>
+            <label class="work-field work-field-wide"><span>Acceptance criteria field (optional)</span>
+                <input data-tr="acceptance" type="text" placeholder="customfield_10035"></label>
+            <h3 class="work-jira-section">Ticket writeback</h3>
+            <label class="work-jira-inline"><input data-tr="wb-enabled" type="checkbox"> Comment on tickets and update their status as jobs progress</label>
+            <small class="work-jira-muted" data-tr="wb-source"></small>
+            <label class="work-jira-inline"><input data-tr="wb-linkpr" type="checkbox"> Link the pull request on the Jira ticket</label>
+            <table class="work-jira-events"><thead><tr><th>Event</th><th>Comment</th><th>Jira status</th><th>GitHub action</th></tr></thead>
+                <tbody data-tr="events"></tbody></table>
+            <small class="work-jira-muted">Jira statuses are matched by name against the ticket's workflow transitions. GitHub actions: close, reopen, label:NAME, unlabel:NAME (comma-separated).</small>
+            <h3 class="work-jira-section">Ticket watcher</h3>
+            <label class="work-jira-inline"><input data-tr="watch-enabled" type="checkbox"> Import new tickets from saved queries automatically</label>
+            <label class="work-field work-field-wide"><span>Check every (minutes)</span>
+                <input data-tr="watch-interval" type="number" min="1" step="1"></label>
+            <label class="work-field work-field-wide"><span>Queries — one per line: tracker | query | workspace path</span>
+                <textarea data-tr="watch-queries" rows="3" placeholder="jira | project = ABC AND labels = mucli | /home/me/src/abc&#10;github | repo:acme/api is:open label:mucli | /home/me/src/api"></textarea></label>
+            <small class="work-jira-muted" data-tr="github-status"></small>`;
+        els.form.insertBefore(box, els.settingsMsg);
+        const q = name => box.querySelector(`[data-tr="${name}"]`);
+        return {
+            box, deployment: q('deployment'), acceptance: q('acceptance'), wbEnabled: q('wb-enabled'),
+            wbSource: q('wb-source'), wbLinkPr: q('wb-linkpr'), events: q('events'),
+            watchEnabled: q('watch-enabled'), watchInterval: q('watch-interval'), watchQueries: q('watch-queries'),
+            githubStatus: q('github-status'),
+        };
+    })();
+
+    function fillTrackerForm() {
+        const s = settings || {};
+        const wb = s.writeback_settings || {};
+        const events = wb.events || {};
+        tracker.deployment.value = s.deployment || 'auto';
+        tracker.acceptance.value = s.acceptance_field || '';
+        tracker.wbEnabled.checked = !!wb.enabled;
+        tracker.wbEnabled.disabled = wb.source === 'env';
+        tracker.wbSource.textContent = wb.source === 'env' ? 'Set by JIRA_WRITEBACK in the server environment.' : '';
+        tracker.wbLinkPr.checked = wb.link_pr !== false;
+        tracker.events.innerHTML = (s.events || Object.keys(EVENT_LABELS)).map(name => {
+            const ev = events[name] || {};
+            return `<tr data-event="${escapeHtml(name)}">
+                <td>${escapeHtml(EVENT_LABELS[name] || name)}</td>
+                <td><input type="checkbox" data-field="comment" aria-label="Comment on ${escapeHtml(EVENT_LABELS[name] || name)}" ${ev.comment !== false ? 'checked' : ''}></td>
+                <td><input type="text" data-field="jira_status" aria-label="Jira status for ${escapeHtml(EVENT_LABELS[name] || name)}" placeholder="leave" value="${escapeHtml(ev.jira_status || '')}"></td>
+                <td><input type="text" data-field="github" aria-label="GitHub action for ${escapeHtml(EVENT_LABELS[name] || name)}" placeholder="none" value="${escapeHtml(ev.github || '')}"></td>
+            </tr>`;
+        }).join('');
+        const watch = (s.trackers || {}).watch || {};
+        tracker.watchEnabled.checked = !!watch.enabled;
+        tracker.watchInterval.value = Math.max(1, Math.round((watch.interval_seconds || 900) / 60));
+        tracker.watchQueries.value = (watch.queries || [])
+            .map(w => [w.tracker, w.query, w.workspace_root].join(' | ')).join('\n');
+        const gh = (s.trackers || {}).github || {};
+        tracker.githubStatus.textContent = gh.mode === 'token' ? 'GitHub Issues: using GITHUB_TOKEN/GH_TOKEN from the server environment.'
+            : gh.mode === 'gh' ? 'GitHub Issues: using the gh CLI login on the server.'
+                : 'GitHub Issues: set GITHUB_TOKEN or GH_TOKEN on the server, or log in with the gh CLI.';
+    }
+
+    function trackerPayload() {
+        const events = {};
+        tracker.events.querySelectorAll('tr[data-event]').forEach(row => {
+            events[row.dataset.event] = {
+                comment: row.querySelector('[data-field="comment"]').checked,
+                jira_status: row.querySelector('[data-field="jira_status"]').value.trim(),
+                github: row.querySelector('[data-field="github"]').value.trim(),
+            };
+        });
+        const queries = tracker.watchQueries.value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+            const parts = line.split('|').map(p => p.trim());
+            if (parts.length < 3) return null;
+            return { tracker: parts[0].toLowerCase(), query: parts.slice(1, -1).join(' | '), workspace_root: parts[parts.length - 1] };
+        }).filter(Boolean);
+        const body = {
+            deployment: tracker.deployment.value,
+            acceptance_field: tracker.acceptance.value.trim(),
+            writeback: { link_pr: tracker.wbLinkPr.checked, events },
+            trackers: { watch: {
+                enabled: tracker.watchEnabled.checked,
+                interval_seconds: Math.max(1, Number(tracker.watchInterval.value) || 15) * 60,
+                queries,
+            } },
+        };
+        if (!tracker.wbEnabled.disabled) body.writeback.enabled = tracker.wbEnabled.checked;
+        return body;
     }
 
     async function loadSettings() {
@@ -156,7 +261,6 @@
     async function openSettings() {
         say(els.settingsMsg, '');
         els.boardResults.innerHTML = '';
-        settingsBackdrop.hidden = false;
         try {
             await loadSettings();
             fillSettingsForm();
@@ -164,17 +268,17 @@
         } catch (err) {
             say(els.settingsMsg, err.message, 'error');
         }
-        els.baseUrl.focus();
     }
 
+    // Leaving the Settings page drops any typed-but-unsaved secrets.
     function closeSettings() {
-        settingsBackdrop.hidden = true;
         els.token.value = '';
         els.pat.value = '';
     }
 
     function settingsPayload() {
         const body = {
+            ...trackerPayload(),
             base_url: els.baseUrl.value.trim(),
             email: els.email.value.trim(),
             preferences: {
@@ -212,7 +316,10 @@
     }
 
     async function unlink() {
-        if (!window.confirm('Remove the saved Jira URL, email and token? Preferred boards are kept.')) return;
+        const ok = window.MuJobUI
+            ? await window.MuJobUI.confirm('Remove the saved Jira URL, email and token? Preferred boards are kept.', { title: 'Unlink Jira', okLabel: 'Unlink', tone: 'danger' })
+            : window.confirm('Remove the saved Jira URL, email and token? Preferred boards are kept.');
+        if (!ok) return;
         try {
             settings = await api('/api/jobs/jira/settings', { method: 'DELETE' });
             fillSettingsForm();
@@ -446,20 +553,35 @@
 
     async function importSelected() {
         if (!selected.size) return;
+        // Workspace / repository first (like the New job sheet); the session is optional.
+        let target = null;
+        if (window.MuWork && typeof window.MuWork.chooseImportTarget === 'function') {
+            target = await window.MuWork.chooseImportTarget({
+                title: `Import ${selected.size} ticket${selected.size === 1 ? '' : 's'} into…`, okLabel: 'Create jobs', force: rerunNext });
+            if (!target) return;
+        }
+        rerunNext = false;
         els.importBtn.disabled = true;
         say(els.browseMsg, 'Creating jobs…');
         try {
             const body = { keys: [...selected] };
-            const sessionName = String((appEl && appEl.dataset.session) || '').trim();
-            if (sessionName) body.session_name = sessionName;
+            if (target) {
+                body.defaults = { ...target.defaults };
+                if (target.session) body.session_name = target.session;
+                if (target.force) body.force = true;
+            } else {
+                const sessionName = String((appEl && appEl.dataset.session) || '').trim();
+                if (sessionName) body.session_name = sessionName;
+            }
             const res = await api('/api/jobs/jira/import', { method: 'POST', body });
             const parts = [];
             if ((res.created || []).length) parts.push(`${res.created.length} created`);
-            if ((res.skipped || []).length) parts.push(`${res.skipped.length} already linked`);
+            if ((res.skipped || []).length) parts.push(`${res.skipped.length} skipped: ${res.skipped.map(k => `${k.key} (${k.reason || 'already linked'})`).join('; ')}`);
             if ((res.errors || []).length) parts.push(`${res.errors.length} failed: ${res.errors.map(e => `${e.key} ${e.error}`).join('; ')}`);
             selected.clear();
             await loadTickets();
             say(els.browseMsg, parts.join(' · ') || 'Nothing to import.', (res.errors || []).length ? 'error' : 'ok');
+            offerRunAgain((res.skipped || []).filter(k => /latest job is done/.test(String(k.reason || ''))).map(k => k.key));
             if (window.MuWork && typeof window.MuWork.refreshBoard === 'function') {
                 window.MuWork.refreshBoard({ quiet: true });
             }
@@ -469,15 +591,31 @@
         }
     }
 
+    // Tickets skipped because their latest job is done: one click re-selects them and opens
+    // the import dialog with "Run again" (force) checked.
+    function offerRunAgain(keys) {
+        if (!keys.length || !els.browseMsg) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn sm';
+        btn.dataset.jiraRunAgain = '';
+        btn.textContent = `Run again (${keys.length})`;
+        btn.title = `Start a new job for ${keys.join(', ')}`;
+        btn.onclick = () => {
+            keys.forEach(k => selected.add(k));
+            rerunNext = true;
+            void importSelected();
+        };
+        els.browseMsg.append(' ', btn);
+    }
+
     function openJob(jobId) {
-        closeBrowser();
         if (window.MuWork && typeof window.MuWork.selectJob === 'function') {
             window.MuWork.selectJob(jobId);
         }
     }
 
     async function openBrowser() {
-        browseBackdrop.hidden = false;
         say(els.browseMsg, '');
         try {
             await loadSettings();
@@ -489,10 +627,7 @@
         const linked = !!(settings && settings.configured);
         els.browseEmpty.hidden = linked;
         els.browseBody.hidden = !linked;
-        if (!linked) {
-            els.browseSettings.focus();
-            return;
-        }
+        if (!linked) return;
         const prefs = settings.preferences || {};
         const previousBoard = els.board.value;
         try { await fetchBoards(); } catch (_) { /* board list is optional; JQL still works */ }
@@ -515,20 +650,19 @@
             els.rows.innerHTML = '<tr><td colspan="6" class="work-jira-muted">Pick a preferred board or enter a JQL query.</td></tr>';
             updateImportState();
         }
-        els.board.focus();
-    }
-
-    function closeBrowser() {
-        browseBackdrop.hidden = true;
     }
 
     // ------------------------------------------------------------ wiring
 
-    settingsBtn.addEventListener('click', openSettings);
-    browseBtn.addEventListener('click', openBrowser);
-    els.settingsClose.addEventListener('click', closeSettings);
-    els.browseClose.addEventListener('click', closeBrowser);
-    els.browseSettings.addEventListener('click', () => { closeBrowser(); openSettings(); });
+    let current = '';
+    window.addEventListener('mu:work-route', event => {
+        const name = event.detail?.name;
+        if (current === 'settings' && name !== 'settings') closeSettings();
+        current = name;
+        if (name === 'settings') openSettings();
+        else if (name === 'boards') openBrowser();
+    });
+    els.browseSettings.addEventListener('click', () => go('#/settings'));
     els.form.addEventListener('submit', async event => {
         event.preventDefault();
         try { await saveSettings(); } catch (err) { say(els.settingsMsg, err.message, 'error'); }
@@ -555,14 +689,6 @@
         renderTickets();
     });
     els.importBtn.addEventListener('click', importSelected);
-    [settingsBackdrop, browseBackdrop].forEach(bd => {
-        bd.addEventListener('click', event => { if (event.target === bd) bd.hidden = true; });
-    });
-    window.addEventListener('keydown', event => {
-        if (event.key !== 'Escape') return;
-        if (!settingsBackdrop.hidden) closeSettings();
-        else if (!browseBackdrop.hidden) closeBrowser();
-    });
 
     // Reflect link state on the header chip without opening anything.
     loadSettings().then(renderLinkStatus).catch(() => {});

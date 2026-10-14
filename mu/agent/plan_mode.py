@@ -151,9 +151,62 @@ def install(registry: Optional[HookRegistry] = None) -> None:
     )
 
 
+def set_plan_mode(session, enabled: bool, *, persist: bool = True, announce: bool = True) -> bool:
+    """Set ``session.variables['plan_mode']`` and propagate it to every UI.
+
+    Shared by ``/plan`` and the GUI ``POST /api/variables/plan_mode`` route so
+    both paths have identical side effects: the input handler is refreshed
+    (terminal prompt badge), a ``plan_mode_changed`` event is published for
+    web/mobile indicators, and — for terminal UIs — a one-line banner is shown.
+    ``persist`` saves the session (the GUI route persists under its own lock).
+    """
+    value = bool(enabled)
+    variables = getattr(session, "variables", None)
+    if variables is None:
+        return value
+    variables["plan_mode"] = value
+
+    if persist and hasattr(session, "session_manager") and hasattr(session, "folder_context"):
+        try:
+            session.session_manager.save_history(session.folder_context)
+        except Exception:
+            pass
+
+    ui = getattr(session, "ui", None)
+    if ui is not None and hasattr(ui, "set_variables"):
+        try:
+            ui.set_variables(variables)
+        except Exception:
+            pass
+
+    publish = getattr(ui, "publish_event", None) if ui is not None else None
+    if callable(publish):
+        # Web/mobile clients render their own persistent indicator; Rich
+        # markup banners would show up as raw text there.
+        try:
+            publish({"kind": "plan_mode_changed", "plan_mode": value})
+        except Exception:
+            pass
+    elif announce and ui is not None and hasattr(ui, "show_info"):
+        try:
+            if value:
+                ui.show_info(
+                    "[bold black on cyan] 🔒 PLAN MODE ENABLED [/bold black on cyan] "
+                    "Write-side tools are blocked. /plan off to disable."
+                )
+            else:
+                ui.show_info(
+                    "[bold black on green] ✓ PLAN MODE DISABLED [/bold black on green] "
+                    "Write-side tools are unblocked."
+                )
+        except Exception:
+            pass
+    return value
+
+
 # Auto-install on import. Tests can `remove("plan_mode_block_writes")` to
 # disable, then re-install.
 install()
 
 
-__all__ = ["WRITE_TOOLS", "install", "is_plan_mode"]
+__all__ = ["WRITE_TOOLS", "install", "is_plan_mode", "set_plan_mode"]

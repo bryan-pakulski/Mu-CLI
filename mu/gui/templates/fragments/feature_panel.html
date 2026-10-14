@@ -230,7 +230,7 @@
                         </button>
                         <div class="phase-body"
                              x-show="$store.feature.isPhaseOpen(phase.id)"
-                             x-transition.opacity.duration.150ms>
+                             x-transition.opacity.duration.120ms>
                             <p class="phase-goal muted" x-show="phase.goal" x-text="phase.goal"></p>
                             <ul class="task-list">
                                 <template x-for="task in phase.tasks"
@@ -313,7 +313,7 @@
                 </button>
                 <div class="panel-section-body"
                      x-show="$store.feature.openSections.events"
-                     x-transition.opacity.duration.150ms>
+                     x-transition.opacity.duration.120ms>
                     <template x-for="(ev, i) in $store.feature.recentEvents()"
                               :key="$store.feature.planRenderKey() + ':event:' + (ev.id || i)">
                         <div class="event-row">
@@ -339,7 +339,7 @@
                 </button>
                 <div class="panel-section-body"
                      x-show="$store.feature.openSections.reviews"
-                     x-transition.opacity.duration.150ms>
+                     x-transition.opacity.duration.120ms>
                     <template x-for="r in $store.feature.reviews()"
                               :key="$store.feature.planRenderKey() + ':review:' + r.id">
                         <div class="review-row">

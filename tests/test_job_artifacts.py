@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from mu.jobs import JobService, JobStore, stages
+from mu.jobs import JobService, JobStore
 from mu.jobs.core.artifacts import JobArtifacts, artifacts_for, backfill
 from mu.jobs.core.plan_doc import PlanDoc
 from mu.jobs.models import JobStatus
@@ -88,19 +88,6 @@ def test_plan_stage_writes_plan_md_and_metadata_pointers(tmp_path):
     assert pointers.get("plan") == "plan.md"
     # metadata stores pointers, not paths outside the folder
     assert all(not str(v).startswith("..") for v in pointers.values())
-
-
-def test_review_artifact_written_in_report_schema(tmp_path):
-    service, job = _job(tmp_path)
-    stages._write_review_artifact(job, {
-        "verdict": "request_changes", "summary": "needs a test",
-        "feedback": ["add a unit test"], "head_sha": "deadbeef",
-    }, 1)
-    report = artifacts_for(job).read_json("review.json")
-    assert report["version"] == 1
-    assert report["reviewed_head"] == "deadbeef"
-    assert report["findings"] and report["findings"][0]["disposition"] == "open"
-    assert report["verdict"] in {"ready", "ready_with_nits", "needs_work", "do_not_merge"}
 
 
 def test_backfill_from_legacy_metadata_is_non_destructive(tmp_path):

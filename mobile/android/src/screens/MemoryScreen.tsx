@@ -3,6 +3,7 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -30,7 +31,13 @@ import {
   RecallReceipt,
   memoryApi,
 } from '../api/memory';
-import { spacing } from '../theme/tokens';
+import { spacing, fontSizes, fontWeights, fonts, radii, touchTarget, elevation, typography } from '../theme/tokens';
+
+/** Append an alpha channel to a #RRGGBB token (a tint of a viz token). */
+function withAlpha(hex: string, alpha: number): string {
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
+  return hex.slice(0, 7) + a;
+}
 import { SafeAreaModal } from '../components/SafeAreaModal';
 
 
@@ -215,12 +222,12 @@ export function MemoryScreen() {
         alignItems: 'center',
         justifyContent: 'center',
         borderBottomWidth: 2,
-        borderBottomColor: tab === target ? colors.accent : 'transparent',
+        borderBottomColor: tab === target ? colors.accent : colors.border,
       }}
     >
       <Text
         variant="sm"
-        style={{ color: tab === target ? colors.accent : colors.textDim, fontWeight: '600' }}
+        style={{ color: tab === target ? colors.text : colors.textDim, fontWeight: tab === target ? fontWeights.semibold : fontWeights.medium }}
       >
         {title}
       </Text>
@@ -228,6 +235,12 @@ export function MemoryScreen() {
   );
 
   const contextPoints = (contextTimeline?.points || []).slice(-96);
+  // Layer series colours come from the viz palette, keyed by the layer's
+  // position in the live snapshot so every chart agrees.
+  const layerColor = (id: string) => {
+    const index = Math.max(0, (snapshot?.layers || []).findIndex(layer => layer.id === id));
+    return colors.viz[index % colors.viz.length];
+  };
   const contextSummary = contextTimeline?.summary || { samples: 0 };
   const activeContextPoint = selectedContextPoint
     || (contextPoints.length ? contextPoints[contextPoints.length - 1] : null);
@@ -254,26 +267,26 @@ export function MemoryScreen() {
           <Card style={{ marginBottom: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
-                <Text variant="base" style={{ fontWeight: '600' }}>Memory Plane</Text>
+                <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Memory Plane</Text>
                 <Text variant="xs" style={{ color: colors.textDim }}>
                   Automatic model-managed capture · no approval prompts
                 </Text>
               </View>
               <Badge
                 label={String(ledger?.stats.total || 0)}
-                variant="accent"
+                variant="neutral"
               />
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
               <Badge label={String(ledger?.stats.pinned || 0) + ' pinned'} />
-              <TouchableOpacity onPress={showLastRecall}>
+              <TouchableOpacity onPress={showLastRecall} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.xs, right: spacing.xs }}>
                 <Badge label="Why last recall" variant="accent" />
               </TouchableOpacity>
             </View>
           </Card>
 
           <Card style={{ marginBottom: spacing.sm }}>
-            <Text variant="sm" style={{ fontWeight: '600', marginBottom: spacing.sm }}>
+            <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
               Remember explicitly
             </Text>
             <Input
@@ -287,10 +300,10 @@ export function MemoryScreen() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.sm }}
+              contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.xs }}
             >
               {['auto', 'repository', 'workspace', 'branch', 'personal'].map(scope => (
-                <TouchableOpacity key={scope} onPress={() => setSelectedScope(scope)}>
+                <TouchableOpacity key={scope} onPress={() => setSelectedScope(scope)} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
                   <Badge label={scope} variant={selectedScope === scope ? 'accent' : 'neutral'} />
                 </TouchableOpacity>
               ))}
@@ -301,7 +314,7 @@ export function MemoryScreen() {
               contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.sm }}
             >
               {['observation', 'decision', 'finding', 'constraint', 'preference', 'procedure'].map(kind => (
-                <TouchableOpacity key={kind} onPress={() => setSelectedKind(kind)}>
+                <TouchableOpacity key={kind} onPress={() => setSelectedKind(kind)} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
                   <Badge label={kind} variant={selectedKind === kind ? 'accent' : 'neutral'} />
                 </TouchableOpacity>
               ))}
@@ -329,7 +342,7 @@ export function MemoryScreen() {
             >
               <Card style={{ marginBottom: spacing.sm }}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-                  <Badge label={memory.scope.type} variant="accent" />
+                  <Badge label={memory.scope.type} />
                   <Badge label={memory.kind} />
                   <Badge
                     label={memory.lifecycle}
@@ -337,7 +350,7 @@ export function MemoryScreen() {
                   />
                   {memory.pinned && <Badge label="pinned" variant="accent" />}
                 </View>
-                <Text variant="sm" style={{ marginTop: spacing.sm, lineHeight: 21 }}>
+                <Text variant="sm" style={{ marginTop: spacing.sm }}>
                   {memory.statement}
                 </Text>
                 <View
@@ -347,10 +360,10 @@ export function MemoryScreen() {
                     marginTop: spacing.sm,
                   }}
                 >
-                  <Text variant="xs" style={{ color: colors.textDim }}>
+                  <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>
                     {memory.id.slice(0, 8)} · v{memory.version}
                   </Text>
-                  <Text variant="xs" style={{ color: colors.textDim }}>
+                  <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
                     recalled {memory.recall_count || 0}
                   </Text>
                 </View>
@@ -383,10 +396,10 @@ export function MemoryScreen() {
           ) : (
             <>
               <Card style={{ marginBottom: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.accent, letterSpacing: 1.2 }}>
+                <Text variant="xs" style={{ color: colors.textDim }}>
                   MODEL INPUT · LIVE
                 </Text>
-                <Text variant="lg" style={{ fontWeight: '600', marginTop: spacing.xs }}>
+                <Text variant="lg" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.xs }}>
                   Context Observatory
                 </Text>
                 <Text variant="xs" style={{ color: colors.textDim }}>
@@ -404,15 +417,11 @@ export function MemoryScreen() {
                       key={String(label)}
                       style={{
                         width: '47%',
-                        borderWidth: 1,
-                        borderColor: colors.hairline,
-                        borderRadius: 10,
-                        padding: spacing.sm,
-                        backgroundColor: colors.bgHover,
+                        paddingVertical: spacing.sm,
                       }}
                     >
                       <Text variant="xs" style={{ color: colors.textDim }}>{label}</Text>
-                      <Text variant="base" style={{ fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+                      <Text variant="base" style={{ fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>
                         {value}
                       </Text>
                     </View>
@@ -428,13 +437,12 @@ export function MemoryScreen() {
                   </View>
                   <View
                     style={{
-                      height: 14,
+                      height: 12,
                       flexDirection: 'row',
                       gap: 2,
                       padding: 2,
-                      borderRadius: 999,
-                      borderWidth: 1,
-                      borderColor: colors.hairline,
+                      borderRadius: radii.pill,
+                      backgroundColor: colors.bgHover,
                       overflow: 'hidden',
                     }}
                   >
@@ -443,16 +451,16 @@ export function MemoryScreen() {
                         key={layer.id}
                         style={{
                           flex: Math.max(1, layer.tokens),
-                          borderRadius: 999,
-                          backgroundColor: `hsl(${layer.hue}, 72%, ${isDark ? 56 : 47}%)`,
+                          borderRadius: radii.pill,
+                          backgroundColor: layerColor(layer.id),
                         }}
                       />
                     ))}
                     <View
                       style={{
                         flex: Math.max(1, snapshot.free_tokens),
-                        borderRadius: 999,
-                        backgroundColor: colors.borderStrong,
+                        borderRadius: radii.pill,
+                        backgroundColor: colors.bgActive,
                       }}
                     />
                   </View>
@@ -462,11 +470,10 @@ export function MemoryScreen() {
               <View
                 style={{
                   flexDirection: 'row',
-                  padding: 3,
+                  padding: spacing.xs,
                   marginBottom: spacing.sm,
-                  borderRadius: 10,
-                  borderWidth: 1,
-                  borderColor: colors.hairline,
+                  borderRadius: radii.sm,
+                  backgroundColor: colors.surface,
                 }}
               >
                 {(['heatmap', 'churn'] as ContextView[]).map(view => (
@@ -476,12 +483,13 @@ export function MemoryScreen() {
                     style={{
                       flex: 1,
                       alignItems: 'center',
-                      paddingVertical: spacing.sm,
-                      borderRadius: 7,
-                      backgroundColor: contextView === view ? colors.accentSoft : 'transparent',
+                      justifyContent: 'center',
+                      minHeight: touchTarget,
+                      borderRadius: radii.sm,
+                      backgroundColor: contextView === view ? colors.accentSubtle : 'transparent',
                     }}
                   >
-                    <Text variant="xs" style={{ color: contextView === view ? colors.accent : colors.textDim }}>
+                    <Text variant="xs" style={{ color: contextView === view ? colors.accentFg : colors.textDim, fontWeight: contextView === view ? fontWeights.semibold : fontWeights.regular }}>
                       {view === 'heatmap' ? 'Evolution heatmap' : 'Churn pulse'}
                     </Text>
                   </TouchableOpacity>
@@ -491,7 +499,7 @@ export function MemoryScreen() {
               <Card style={{ marginBottom: spacing.sm }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                   <View>
-                    <Text variant="sm" style={{ fontWeight: '600' }}>
+                    <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>
                       {contextView === 'heatmap' ? 'Layer evolution' : 'Context churn'}
                     </Text>
                     <Text variant="xs" style={{ color: colors.textDim }}>
@@ -514,7 +522,7 @@ export function MemoryScreen() {
                     <View style={{ width: 38, paddingRight: spacing.xs }}>
                       {snapshot.layers.map(layer => (
                         <View key={layer.id} style={{ height: 20, justifyContent: 'center' }}>
-                          <Text variant="xs" style={{ color: colors.textDim, fontFamily: 'monospace', fontSize: 10 }}>
+                          <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono, fontSize: fontSizes.xs, lineHeight: typography.sm.lineHeight }}>
                             {layer.id}
                           </Text>
                         </View>
@@ -539,10 +547,10 @@ export function MemoryScreen() {
                                     width: 9,
                                     height: 16,
                                     marginRight: 2,
-                                    borderRadius: 2,
+                                    borderRadius: radii.sm,
                                     borderWidth: activeContextPoint?.id === point.id ? 1 : 0,
                                     borderColor: colors.text,
-                                    backgroundColor: `hsla(${layer.hue}, 78%, ${changed ? (isDark ? 60 : 44) : (isDark ? 46 : 67)}%, ${alpha})`,
+                                    backgroundColor: withAlpha(layerColor(layer.id), alpha),
                                   }}
                                 />
                               );
@@ -554,7 +562,7 @@ export function MemoryScreen() {
                   </View>
                 ) : (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ height: 150, flexDirection: 'row', alignItems: 'flex-end', gap: 3, paddingTop: spacing.sm }}>
+                    <View style={{ height: 150, flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, paddingTop: spacing.sm }}>
                       {contextPoints.map(point => (
                         <TouchableOpacity
                           key={point.id}
@@ -562,10 +570,8 @@ export function MemoryScreen() {
                           style={{
                             width: 8,
                             height: Math.max(3, (point.churn_score || 0) / maxChurn * 128),
-                            borderRadius: 4,
-                            backgroundColor: point.compaction
-                              ? (isDark ? '#2dd4bf' : colors.success)
-                              : (isDark ? '#f471a5' : '#b83269'),
+                            borderRadius: radii.pill,
+                            backgroundColor: point.compaction ? colors.viz[6] : colors.viz[3],
                             opacity: activeContextPoint?.id === point.id ? 1 : 0.68,
                           }}
                         />
@@ -579,10 +585,10 @@ export function MemoryScreen() {
                 <Card style={{ marginBottom: spacing.sm }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                     <View>
-                      <Text variant="sm" style={{ fontWeight: '600' }}>
+                      <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>
                         Provider call {activeContextPoint.id}
                       </Text>
-                      <Text variant="xs" style={{ color: colors.textDim }}>
+                      <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
                         {new Date(activeContextPoint.at * 1000).toLocaleTimeString()}
                       </Text>
                     </View>
@@ -603,18 +609,18 @@ export function MemoryScreen() {
                       <TouchableOpacity
                         key={layer.id}
                         onPress={() => currentLayer && openLayer(currentLayer)}
-                        style={{ flexDirection: 'row', alignItems: 'center', minHeight: 34 }}
+                        style={{ flexDirection: 'row', alignItems: 'center', minHeight: touchTarget }}
                       >
                         <View
                           style={{
                             width: 8,
                             height: 8,
-                            borderRadius: 3,
+                            borderRadius: radii.pill,
                             marginRight: spacing.sm,
-                            backgroundColor: `hsl(${layer.hue}, 72%, ${isDark ? 56 : 47}%)`,
+                            backgroundColor: layerColor(layer.id),
                           }}
                         />
-                        <Text variant="xs" style={{ width: 34, fontFamily: 'monospace', color: colors.textDim }}>
+                        <Text variant="xs" style={{ width: 34, fontFamily: fonts.mono, color: colors.textDim }}>
                           {layer.id}
                         </Text>
                         <Text variant="xs" style={{ flex: 1 }} numberOfLines={1}>{layer.name}</Text>
@@ -641,26 +647,25 @@ export function MemoryScreen() {
         animationType="slide"
         onRequestClose={() => setDetail(null)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+        <View style={{ flex: 1, backgroundColor: colors.scrim, justifyContent: 'flex-end' }}>
           <View
-            style={{
-              backgroundColor: colors.bgLift,
-              borderTopLeftRadius: 16,
-              borderTopRightRadius: 16,
+            style={[elevation(2, colors, isDark), {
+              borderTopLeftRadius: radii.lg,
+              borderTopRightRadius: radii.lg,
               padding: spacing.base,
               maxHeight: '92%',
-            }}
+            }]}
           >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>Memory detail</Text>
-              <TouchableOpacity onPress={() => setDetail(null)}>
-                <Text variant="sm" style={{ color: colors.accent }}>Close</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Memory detail</Text>
+              <TouchableOpacity onPress={() => setDetail(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
+                <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
               </TouchableOpacity>
             </View>
             {detail && (
               <ScrollView keyboardShouldPersistTaps="handled">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm }}>
-                  <Badge label={detail.memory.scope.type} variant="accent" />
+                  <Badge label={detail.memory.scope.type} />
                   <Badge label={detail.memory.kind} />
                   <Badge label={'confidence ' + detail.memory.trust.confidence.toFixed(2)} />
                 </View>
@@ -697,13 +702,13 @@ export function MemoryScreen() {
                     onPress={() => runAction(detail.memory, 'forget')}
                   />
                 </View>
-                <Text variant="sm" style={{ fontWeight: '600', marginTop: spacing.sm }}>
+                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>
                   Sources
                 </Text>
-                <Text variant="xs" style={{ color: colors.textDim, fontFamily: 'monospace' }}>
+                <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono }}>
                   {JSON.stringify(detail.memory.source_refs, null, 2)}
                 </Text>
-                <Text variant="sm" style={{ fontWeight: '600', marginTop: spacing.base }}>
+                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.base }}>
                   Relationships
                 </Text>
                 {(detail.graph.edges || []).map((edge, index) => (
@@ -714,18 +719,18 @@ export function MemoryScreen() {
                 {!detail.graph.edges.length && (
                   <Text variant="xs" style={{ color: colors.textDim }}>No related memories.</Text>
                 )}
-                <Text variant="sm" style={{ fontWeight: '600', marginTop: spacing.base }}>
+                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.base }}>
                   Timeline
                 </Text>
                 {detail.events.map((event, index) => (
-                  <Card key={String(event.event_id || index)} style={{ marginTop: spacing.sm }}>
-                    <Text variant="xs" style={{ fontFamily: 'monospace' }}>
+                  <View key={String(event.event_id || index)} style={{ marginTop: spacing.sm, padding: spacing.md, borderRadius: radii.sm, backgroundColor: colors.surface }}>
+                    <Text variant="xs" style={{ fontFamily: fonts.mono }}>
                       {String(event.type || 'event')} · {String(event.actor || 'system')}
                     </Text>
                     <Text variant="xs" style={{ color: colors.textDim }}>
                       {JSON.stringify(event.after || {})}
                     </Text>
-                  </Card>
+                  </View>
                 ))}
               </ScrollView>
             )}
@@ -739,16 +744,16 @@ export function MemoryScreen() {
         animationType="slide"
         onRequestClose={() => setReceipt(null)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' }}>
-          <View style={{ margin: spacing.base, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base, maxHeight: '85%' }}>
+        <View style={{ flex: 1, backgroundColor: colors.scrim, justifyContent: 'center' }}>
+          <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>Why memory was used</Text>
-              <TouchableOpacity onPress={() => setReceipt(null)}>
-                <Text variant="sm" style={{ color: colors.accent }}>Close</Text>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Why memory was used</Text>
+              <TouchableOpacity onPress={() => setReceipt(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
+                <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
               </TouchableOpacity>
             </View>
             <ScrollView>
-              <Text variant="xs" style={{ color: colors.textDim, fontFamily: 'monospace' }}>
+              <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono }}>
                 {receipt ? JSON.stringify(receipt, null, 2) : ''}
               </Text>
             </ScrollView>
@@ -762,19 +767,19 @@ export function MemoryScreen() {
         animationType="slide"
         onRequestClose={() => setSelectedLayer(null)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center' }}>
-          <View style={{ margin: spacing.base, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base, maxHeight: '85%' }}>
+        <View style={{ flex: 1, backgroundColor: colors.scrim, justifyContent: 'center' }}>
+          <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>{selectedLayer?.name}</Text>
-              <TouchableOpacity onPress={() => setSelectedLayer(null)}>
-                <Text variant="sm" style={{ color: colors.accent }}>Close</Text>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selectedLayer?.name}</Text>
+              <TouchableOpacity onPress={() => setSelectedLayer(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
+                <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 400 }}>
               {layerLoading ? (
                 <Skeleton height={40} />
               ) : (
-                <Text variant="xs" style={{ color: colors.text, fontFamily: 'monospace' }}>
+                <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }}>
                   {selectedLayer?.content}
                 </Text>
               )}

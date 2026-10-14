@@ -8,7 +8,7 @@ import { useConnectionStore } from '../store/connection';
 import { Text, Button, Skeleton, ErrorState, SessionStatusBadge, sortSessions } from '../components';
 import { sessionsApi, SessionSummary } from '../api/sessions';
 import { providersApi } from '../api/providers';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, radii, tracking, touchTarget, elevation, type ThemeColors } from '../theme/tokens';
 import { SafeAreaModal } from '../components/SafeAreaModal';
 
 export function SessionsScreen() {
@@ -136,11 +136,11 @@ export function SessionsScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
         <View style={styles.emptyState}>
-          <View style={[styles.emptyGlyph, { backgroundColor: colors.bgLift }]}><Ionicons name="chatbubbles-outline" size={24} color={colors.textDim} /></View>
+          <View style={[styles.emptyGlyph, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}><Ionicons name="chatbubbles-outline" size={24} color={colors.muted} /></View>
           <Text variant="lg" style={styles.emptyTitle}>No sessions</Text>
-          <Text variant="sm" style={{ color: colors.textDim }}>Create one when you are ready to begin.</Text>
+          <Text variant="sm" style={{ color: colors.muted }}>Create one when you are ready to begin.</Text>
           <TouchableOpacity onPress={() => setShowCreate(true)} style={styles.emptyAction}>
-            <Ionicons name="add" size={18} color={colors.accent} /><Text variant="sm" style={{ color: colors.accent, fontWeight: '700' }}>Create session</Text>
+            <Ionicons name="add" size={18} color={colors.accentFg} /><Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Create session</Text>
           </TouchableOpacity>
         </View>
         <CreateSessionModal
@@ -160,10 +160,10 @@ export function SessionsScreen() {
       <View style={styles.screenHeader}>
         <View>
           <Text variant="xl" style={styles.screenTitle}>Sessions</Text>
-          <Text variant="xs" style={{ color: colors.textDim }}>Tap a session to open it.</Text>
+          <Text variant="xs" style={{ color: colors.muted }}>Tap a session to open it.</Text>
         </View>
-        <TouchableOpacity onPress={() => setShowCreate(true)} style={[styles.headerAction, { backgroundColor: colors.bgLift }]} accessibilityLabel="Create session">
-          <Ionicons name="add" size={21} color={colors.accent} />
+        <TouchableOpacity onPress={() => setShowCreate(true)} style={[styles.headerAction, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} accessibilityLabel="Create session">
+          <Ionicons name="add" size={20} color={colors.accentFg} />
         </TouchableOpacity>
       </View>
       <FlatList
@@ -175,28 +175,28 @@ export function SessionsScreen() {
           <TouchableOpacity
             onPress={() => switchSession(item.name)}
             activeOpacity={0.72}
-            style={[styles.sessionRow, { backgroundColor: colors.bgLift, borderColor: colors.border }, activeSessionName === item.name && { backgroundColor: colors.bgHover, borderColor: colors.accent, borderWidth: 1 }]}
+            style={[styles.sessionRow, { backgroundColor: colors.surface, borderColor: colors.border }, activeSessionName === item.name && { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}
           >
-            <View style={[styles.sessionGlyph, { backgroundColor: colors.bgHover }]}>
-              <Ionicons name="chatbubble-ellipses-outline" size={17} color={colors.accent} />
+            <View style={[styles.sessionGlyph, { backgroundColor: colors.hover }]}>
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textSoft} />
             </View>
             <View style={styles.sessionCopy}>
               <View style={styles.sessionTitleRow}>
                 <Text variant="base" style={[styles.sessionName, activeSessionName === item.name && styles.sessionNameActive]} numberOfLines={1}>{item.name}</Text>
                 <SessionStatusBadge session={item} active={activeSessionName === item.name} size="sm" />
               </View>
-              <Text variant="xs" style={{ color: colors.textDim, marginTop: 3 }}>
+              <Text variant="xs" style={{ color: colors.muted, marginTop: spacing.xs, fontVariant: ['tabular-nums'] }}>
                 {item.modified_at || (activeSessionName === item.name ? 'Active' : item.is_loaded ? 'Loaded' : 'Saved')}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+            <Ionicons name="chevron-forward" size={18} color={colors.muted} />
             <TouchableOpacity
               onPress={event => { event.stopPropagation(); deleteSession(item.name); }}
-              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
               style={styles.rowIcon}
               accessibilityLabel={`Delete session ${item.name}`}
             >
-              <Ionicons name="trash-outline" size={18} color={colors.textDim} />
+              <Ionicons name="trash-outline" size={18} color={colors.muted} />
             </TouchableOpacity>
           </TouchableOpacity>
         )}
@@ -219,20 +219,20 @@ interface CreateSessionModalProps {
   setNewName: (s: string) => void;
   onCreate: () => void;
   onCancel: () => void;
-  colors: { bg: string; bgLift: string; text: string; textDim: string; accent: string; border: string };
+  colors: ThemeColors;
 }
 
 function CreateSessionModal({ visible, newName, setNewName, onCreate, onCancel, colors }: CreateSessionModalProps) {
+  const { isDark } = useTheme();
   return (
     <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
-      <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={onCancel} activeOpacity={1}>
-        <View style={{
+      <TouchableOpacity style={{ flex: 1, backgroundColor: colors.scrim }} onPress={onCancel} activeOpacity={1}>
+        <View style={[elevation(2, colors, isDark), {
           margin: spacing.base,
-          marginTop: 80,
-          backgroundColor: colors.bgLift,
-          borderRadius: 12,
+          marginTop: spacing['3xl'],
+          borderRadius: radii.panel,
           padding: spacing.base,
-        }}>
+        }]}>
           <Text variant="lg" style={{ marginBottom: spacing.base }}>New Session</Text>
           <TextInput
             value={newName}
@@ -243,15 +243,16 @@ function CreateSessionModal({ visible, newName, setNewName, onCreate, onCancel, 
             autoCorrect={false}
             style={{
               color: colors.text,
+              backgroundColor: colors.bg,
               borderWidth: 1,
               borderColor: colors.border,
-              borderRadius: 6,
-              padding: 12,
-              minHeight: 44,
+              borderRadius: radii.sm,
+              padding: spacing.md,
+              minHeight: touchTarget,
               marginBottom: spacing.base,
             }}
           />
-          <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }}>
             <Button title="Cancel" variant="ghost" onPress={onCancel} />
             <Button title="Create" onPress={onCreate} disabled={!newName.trim()} />
           </View>
@@ -262,15 +263,15 @@ function CreateSessionModal({ visible, newName, setNewName, onCreate, onCancel, 
 }
 const styles = StyleSheet.create({
   screenHeader: { paddingHorizontal: spacing.base, paddingTop: spacing.base, paddingBottom: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  screenTitle: { fontWeight: '700', letterSpacing: -0.5 },
-  headerAction: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  sessionRow: { minHeight: 68, borderWidth: StyleSheet.hairlineWidth, borderRadius: 17, paddingHorizontal: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sessionGlyph: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  sessionCopy: { flex: 1 }, sessionName: { fontWeight: '600', flexShrink: 1 }, sessionNameActive: { fontWeight: '700' },
-  sessionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowIcon: { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
-  emptyGlyph: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  emptyTitle: { fontWeight: '700', marginBottom: 6 },
-  emptyAction: { marginTop: 20, minHeight: 40, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  screenTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  headerAction: { width: touchTarget, height: touchTarget, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  sessionRow: { minHeight: 64, borderWidth: 1, borderRadius: radii.panel, paddingHorizontal: spacing.md, marginBottom: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sessionGlyph: { width: 36, height: 36, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  sessionCopy: { flex: 1 }, sessionName: { fontWeight: fontWeights.semibold, flexShrink: 1 }, sessionNameActive: { fontWeight: fontWeights.semibold },
+  sessionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  rowIcon: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  emptyGlyph: { width: 48, height: 48, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.base },
+  emptyTitle: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
+  emptyAction: { marginTop: spacing.base, minHeight: touchTarget, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 });

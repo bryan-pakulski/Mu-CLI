@@ -40,6 +40,195 @@ Sessions and logs live under `MUCLI_HOME`:
 - `~/.mucli/sessions/` — saved session JSON files
 - `~/.mucli/logs/` — log output
 - `~/.mucli/trace/` — per-run JSONL traces (one file per run; see [tracing.md](tracing.md))
+- `~/.mucli/secrets.env` — agent-harness secrets (`CLAUDE_CODE_OAUTH_TOKEN`, optionally
+  `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`), mode 0600; set with `/job agents secret KEY value`
+  or Settings → Agents. Environment variables win over this file.
+
+### Job agent harnesses
+
+Each job stage (plan, implement, review) can run on mucli, Claude Code or Codex
+(`/job create … --agent plan=claude,implement=codex:gpt-5.5`, or the New job sheet). Defaults,
+binaries, per-stage models and the credential source live in Job settings under `harness.*`
+(`/job settings`). `/job agents` shows install and credential status. External agents run in the
+same sandboxed stage container with the host CLI mounted read-only and one copied credential;
+rebuild the runtime image after upgrading mucli (`python3 -m mu.jobs.sandbox.build`). See
+[plans/agent_harnesses.md](plans/agent_harnesses.md) for the approval model and limitations.
+
+### Jobs Setup and Doctor
+
+`/job setup` (web: Jobs → Setup; Android: Job settings → Setup; dashboard: `g u`) is a planos-style
+checklist: Docker, git identity, the job runtime image, the job controller, mucli stage models,
+Claude Code, Codex, default agents, the sandbox self-test, JIRA, Docker-in-Docker and GPUs. Every
+step checks the machine live and offers the actions that fix it (`/job setup <step> <action>`),
+e.g. `/job setup runtime build`, `/job setup claude paste-token`, `/job setup sandbox selftest`,
+`/job setup codex test`. Choices and self-test results live in `~/.mucli/jobs/setup.json`.
+
+Doctor is a tab of Setup on every surface (dashboard: `g d` opens it directly, `tab` switches).
+`/job doctor` reports everything a job run depends on as ok / warn / fail in about a second;
+`/job doctor --deep` also runs the sandbox self-test. The self-test starts real stage containers
+for mucli and every ready external agent (plan and implement) and checks from inside: no
+capabilities, seccomp, read-only paths, loopback only, egress limited to the agent's provider, and
+only that agent's credential visible. The agent test stages make one small model request each.
+
+The runtime image is labelled with a fingerprint of the code stages execute; the doctor flags the
+image as stale whenever mucli's Python code or prompts change, until it is rebuilt.
+
+### Job settings
+
+Job run rules live in `$MUCLI_HOME/jobs/settings.json` (default
+`~/.mucli/jobs/settings.json`). Change them with `/job settings set <key> <value>`,
+reset them with `/job settings reset <key>`, or use Jobs → Settings on the web
+or Android, or `g s` in the terminal dashboard. Blank means no value: the
+default, or no limit. Two top-level keys sit outside the rule sections.
+`plan_approval` (default on) stops every job at Plan review. `stage_models`
+holds the provider and model for each stage (`plan`, `implement`, `review`).
+Repository overrides go in `.mucli/jobs.toml` (`[[environments]]`,
+`[[checks.suites]]`); see
+[durable_engineering_jobs.md](durable_engineering_jobs.md).
+
+The table below is generated from the settings schema: run
+`python3 -m mu.jobs.settings_doc --write` after changing it (a test fails while
+the table is stale).
+
+<!-- job-settings:begin (generated from mu/jobs/job_settings.py RULES_SCHEMA) -->
+**Model budget**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `sandbox.max_tokens` | 50,000,000 tokens | Token budget per stage. Tokens one stage may use across its runs in a job; then the job pauses and asks you to approve more or cancel. |
+| `sandbox.count_cache_reads` | off | Count cache reads. Off: only new tokens (uncached input + output) count. On: every re-sent context token counts, which exhausts long stages quickly. |
+| `sandbox.max_cost_usd` | 50 USD | Cost budget per stage. Estimated API spend one stage may reach across its runs in a job; then the job pauses and asks you to approve more or cancel. |
+| `limits.review_patch_chars` | 60,000 characters | Review patch in prompt. Largest diff embedded in the review prompt; larger diffs list the remaining files for the reviewer to read. |
+
+**New job defaults**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `defaults.max_retries` | 2 | Repair retries. Automatic re-attempts after a failed stage. |
+| `defaults.max_cost_usd` | 100 USD | Job cost limit. Total spend for the whole job (every stage, run and fix attempt). Reaching it pauses the job and asks you to approve more or cancel. 0 = no cap (stage budgets still apply). |
+| `defaults.max_runtime_seconds` | — | Job runtime limit. Active (worker) time for the whole job. Reaching it pauses the running stage and asks you to approve more time or cancel. Blank = none. |
+| `defaults.run_unattended` | off | Run unattended in sandbox. Default for the New job toggle. On: the implement stage auto-approves its writes inside the job's disposable container. Off: each write waits for your approval. Never inherited from a chat session's auto-approve. |
+
+**Agent iterations**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `limits.max_iterations` | 1,000 | Default iterations per stage. Applies to every stage without a more specific limit. |
+| `limits.stage_max_iterations.plan` | — | Plan stage iterations. Blank = default above. |
+| `limits.stage_max_iterations.implement` | — | Implement stage iterations. Blank = default above. |
+| `limits.stage_max_iterations.review` | — | Review stage iterations. Blank = default above. |
+| `jobs.stage_effort.plan` | — | Plan stage effort. Model effort (thinking) per request. Lower is faster. |
+| `jobs.stage_effort.implement` | — | Implement stage effort. |
+| `jobs.stage_effort.review` | — | Review stage effort. |
+
+**Stage time limits**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `sandbox.model_request_timeout_s` | 3,600 seconds | Model request timeout. How long one model call from inside the sandbox may take. |
+| `sandbox.tool_timeout_s` | 3,600 seconds | Tool command timeout. Default limit for one shell command the agent runs inside a stage (when it doesn't set its own). |
+| `sandbox.stage_timeout_s.plan` | 3,600 seconds | Plan. |
+| `sandbox.stage_timeout_s.implement` | 3,600 seconds | Implement. |
+| `sandbox.stage_timeout_s.review` | 3,600 seconds | Review. |
+| `sandbox.stage_timeout_s.checks` | 3,600 seconds | Checks. |
+
+**Checks**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `checks.max_fix_attempts` | 2 | Automatic fix attempts. Times a check failure is sent back to the implementer before a human is asked. |
+| `checks.baseline_triage` | on | Baseline triage. Re-run failing checks on the base commit; failures that also happen there are reported, not sent back to the implementer. |
+| `checks.command_timeout_s` | 3,600 seconds | Validation command timeout. Per-command limit for host-run validation commands (legacy verifier). |
+| `checks.suites` | — | Required check suites. Added to every job's plan checks. Commands run in the sandboxed checks stage. |
+
+**Toolchains**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `sandbox.toolchains` | — | Repository toolchain images. Base image = an image that already has the project's toolchain (e.g. rust:1.88 or the project's CI image), template:<name> or environment:<name> (a container-mode environment). Paths limit the row to repository-relative components (comma-separated; blank = whole repository). Docker = yes gives the job a private Docker engine (needs Sysbox). Add the package registries the build needs (crates.io, static.crates.io, index.crates.io, pypi.org …) to Extra egress domains. |
+
+**Build environments**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `environments.use_session_environment` | on | Use the session's environment. A job created from a container session runs in a snapshot of that session's environment. |
+| `environments.inherit_egress` | on | Inherit environment egress. Implement and checks may reach the environment's egress allowlist (model-provider hosts are always dropped). |
+| `environments.home_exclude_extra` | — | Extra home excludes. Paths under /root (globs allowed) never copied into a job snapshot, in addition to secrets, caches and history. |
+| `environments.probe_env_extra` | — | Extra probed variables. Environment variables kept from the environment's login shell, in addition to PATH and the toolchain homes. |
+| `environments.secret_scan_allow` | — | Allowed secret-scan paths. Paths (globs allowed) the post-build secret scan accepts, e.g. /root/.config/tool/test.pem. |
+| `jobs.environment_retention_h` | 72 hours | Idle environment retention. How long a failed or waiting job keeps its build environment images. Kept jobs are exempt; images are re-created on retry. |
+| `sandbox.gpus_enabled` | on | GPUs for jobs. Off: no job container gets a GPU, whatever its build environment requests. |
+| `sandbox.docker_engine_image` | `docker:dind` | Docker engine image. Image of the per-job Docker engine, run under the Sysbox runtime. |
+| `sandbox.docker_storage_gb` | 20 GB | Docker engine storage cap. Space a job's Docker engine may use for images, containers and volumes. |
+
+**Sandbox**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `sandbox.image` | `mucli-job-runtime:latest` | Runtime image. Local image; it is never pulled. |
+| `sandbox.cpu` | 4 | CPUs. |
+| `sandbox.memory` | `8g` | Memory limit. Docker memory value, e.g. 8g or 16384m. |
+| `sandbox.max_file_bytes` | 20,971,520 bytes | Largest changed file. Changes with a bigger file are rejected. |
+| `sandbox.pids_limit` | 4,096 | Process limit. Most processes and threads one stage or check container may run (builds and parallel test runners need many). |
+| `sandbox.cache_max_gb` | 20 GB | Dependency cache cap. Shared package caches reused across jobs; least recently used entries are pruned. 0 = unlimited. |
+| `jobs.container_cli` | `auto` | Container CLI. Auto uses Docker when present, else Podman. Podman cannot run the per-job Docker engine. |
+| `sandbox.egress_extra` | — | Extra egress domains. Domains implement and checks may reach in addition to the model relay, e.g. pypi.org or *.npmjs.org. |
+
+**Push**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `publish.timeout_s` | 3,600 seconds | Push timeout. Limit for git push and the PR/MR request. |
+| `publish.mode` | — | Publish mode. Used when a job does not set its own mode. |
+
+**Agent harnesses**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `harness.default.plan` | `mucli` | Plan agent. |
+| `harness.default.implement` | `mucli` | Implement agent. |
+| `harness.default.review` | `mucli` | Review agent. |
+| `harness.claude.binary` | — | Claude Code binary. Blank = ~/.local/bin/claude or claude on PATH. |
+| `harness.claude.auth` | `auto` | Claude credential. Copied into the stage sandbox. Auto: ANTHROPIC_API_KEY, then a `claude setup-token` token, then your ~/.claude login. |
+| `harness.claude.models.plan` | `claude-opus-5-5` | Claude plan model. |
+| `harness.claude.models.implement` | `claude-sonnet-5-5` | Claude implement model. |
+| `harness.claude.models.review` | `claude-opus-5-5` | Claude review model. |
+| `harness.codex.binary` | — | Codex binary. Blank = ~/.local/bin/codex or codex on PATH. |
+| `harness.codex.auth` | `auto` | Codex credential. Copied into the stage sandbox. Auto: your ~/.codex login (auth.json, as Codex itself prefers), then OPENAI_API_KEY. |
+| `harness.codex.models.plan` | — | Codex plan model. Blank = Codex's configured model. |
+| `harness.codex.models.implement` | — | Codex implement model. |
+| `harness.codex.models.review` | — | Codex review model. |
+
+**Automatic retries**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `retry.backoff_base_s` | 30 seconds | First retry delay. Doubles on every further attempt. |
+| `retry.backoff_max_s` | 600 seconds | Longest retry delay. Cap for the doubling delay. |
+
+**Scheduling & retention**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `jobs.max_concurrent` | 5 | Concurrent jobs. Jobs that may run a stage at the same time. |
+| `jobs.max_stage_crash_retries` | 2 | Stage crash retries. Crash retries per stage before a human is asked. |
+| `jobs.drift_check_interval_s` | 300 seconds | Base drift check interval. How often finished jobs are checked against their base branch. 0 = off. |
+| `jobs.retention_days` | 30 days | Archive retention. Artifacts of archived jobs older than this are purged. 0 = keep forever (env MUCLI_JOBS_RETENTION_DAYS wins when set). |
+
+**Git & PR hosts**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `publish.push_remote` | `origin` | Push remote. Remote the job branch is pushed to. |
+| `publish.pr_remote` | `origin` | PR remote. Remote whose host receives the PR/MR (also the base branch's remote). Differs from the push remote for forks. |
+| `publish.provider_hosts` | — | PR provider hosts. Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea. |
+| `publish.run_hooks` | off | Run commit-msg hook. Run the repository's commit-msg hook on the squashed publish commit (checkpoints never run hooks). |
+| `publish.delete_remote_branch` | off | Delete remote branch on archive. Archiving a pushed, merged or cancelled job also deletes its remote branch (the local branch is always deleted). |
+| `publish.merge_poll_seconds` | 300 seconds | PR merge check interval. How often pushed jobs check whether their PR was merged (merged → done; closed → needs you). 0 = off. |
+| `jobs.git_timeout_seconds` | 120 seconds | Git command timeout. Limit for one local git command on a job repository (raise for very large repositories). |
+| `jobs.clone.submodules` | on | Clone submodules. Initialise submodules when a job clones a repository by URL and in every job worktree. |
+| `jobs.clone.lfs` | `auto` | Git LFS. auto: run git lfs pull when the repository uses LFS and git-lfs is installed (otherwise warn). |
+<!-- job-settings:end -->
 
 ## Configuration files
 
@@ -218,7 +407,23 @@ global-cap remainder; use `context_status` / `compact` or adjust
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `collation_enabled` | bool | `true` | Defer read-side tool results into a single collated payload. The model drains the buffer via the `flush` tool. |
+| `collation_enabled` | bool | `true` | Allow deferring a batch of read-side tool results into the collation buffer (drained with `flush`). |
+| `collation_batch_share` | float | `0.10` | A batch is deferred only when its combined size exceeds this share of the model's real context window (capped below); smaller batches come back in the same turn. |
+| `collation_batch_cap_tokens` | int | `24000` | Cap for the collation threshold. |
+| `tool_result_inline_budget` | int | `4000` | Tokens of a tool result kept inline; larger results become an observation + stored ref. Capped at `tool_result_inline_share` of the window. |
+| `tool_result_inline_share` | float | `0.05` | Window share that caps the inline budget (protects small local models). |
+
+### Speed and effort
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `reasoning_effort` | str | `""` | Effort for agent turns (`/effort`): `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; empty = provider default. Mapped per provider (Anthropic effort, OpenAI `reasoning_effort`, Ollama `think`). |
+| `turn_roll_deferred` | bool | `true` | Summarize a finished turn on a background thread and merge it at the next turn start instead of blocking the end of the turn. |
+| `small_window_profile` | str | `auto` | `auto`: compact tools/schemas, no skills index and capped context files when the model's real window is ≤ `small_window_threshold`; `on`/`off` force it. |
+| `small_window_threshold` | int | `32768` | Window size (tokens) at or below which the small-window profile applies. |
+| `openai_api` | str | `auto` | `auto`: the Responses API for OpenAI reasoning models (encrypted reasoning replayed between tool-loop turns); `chat` / `responses` force one API. |
+| `openai_prompt_cache_retention` | str | `""` | e.g. `24h` for models that support extended prompt-cache retention. |
+| `openai_xhigh_models` | list | `[]` | OpenAI model prefixes that accept `reasoning_effort: xhigh` (`/effort max`); others get `high`. |
 
 ### Loop mode
 
@@ -233,13 +438,23 @@ global-cap remainder; use `context_status` / `compact` or adjust
 
 ### Ollama tuning
 
-These map directly to Ollama generation parameters. `0` typically means
-"use the server default."
+Ollama runs a model one of three ways: **directly on ollama.com** (`ollama_mode cloud`), **through
+the local daemon to a `:cloud` model** (detected from the tag or `/api/tags` `remote_host`), or
+**locally**. Local models always get one explicit, constant `num_ctx` of at least 64k (capped by
+the model's trained window): a missing or changing value makes the daemon reload the model (tens
+of seconds) and its default is often only 4096. Cloud routes never send `num_ctx` or `keep_alive`.
+Each extra `OLLAMA_NUM_PARALLEL` slot on the daemon costs another `num_ctx` of KV memory; mucli
+does not serialize subagents itself. Generation parameters below: `0` means "server default".
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `ollama_host` | str | `""` | Ollama server URL. Falls back to `OLLAMA_HOST`. |
-| `ollama_num_ctx` | int | `0` | Context window override. |
+| `ollama_num_ctx` | int | `0` | Explicit context size (sent on every request). `0` = automatic: `ollama_num_ctx_default` for local models, nothing for cloud. |
+| `ollama_num_ctx_default` | int | `65536` | Automatic local context size (never below 65536; capped by the trained window). |
+| `ollama_keep_alive` | str | `""` | Sent only when set (e.g. `30m`, `-1`); empty lets the daemon's `OLLAMA_KEEP_ALIVE` apply. |
+| `ollama_request_timeout` | float | `0` | Read timeout; `0` = 900 s local (prompt processing streams nothing), 300 s cloud. A local first-token timeout fails with advice instead of being retried. |
+| `ollama_side_model` | str | `""` | Model for summaries/chunking so side calls never evict the main local model's KV cache. |
+| `ollama_token_safety_factor` | float | `1.3` | Seed divisor for the compaction limit until the learned token drift takes over. |
 | `ollama_num_predict` | int | `0` | Max tokens to predict. |
 | `ollama_temperature` | float | `0.0` | Sampling temperature. |
 | `ollama_top_p` | float | `0.0` | Nucleus sampling cutoff. |

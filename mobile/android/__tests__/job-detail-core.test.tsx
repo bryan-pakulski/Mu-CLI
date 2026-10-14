@@ -17,6 +17,9 @@ it('keeps mobile edits during partial refresh and approves the saved version', a
   (jobCoreApi.command as jest.Mock).mockResolvedValue({ok:true,parts:['plan'],data:{version:2}});
   const navigation = {setOptions:jest.fn(),addListener:jest.fn(()=>jest.fn()),navigate:jest.fn()};
   const screen = render(<JobDetailScreen route={{params:{jobId:'j'}} as any} navigation={navigation as any} />);
+  // planos flow: the Plan tab renders the plan; "Edit plan" opens the editor (with preview).
+  fireEvent.press(await screen.findByTestId('plan-edit'));
+  fireEvent.press(await screen.findByText('Edit Markdown'));
   const editor = await screen.findByLabelText('Plan Markdown');
   fireEvent.changeText(editor, 'Human edits');
   (jobCoreApi.job as jest.Mock).mockResolvedValue({...vm,plan:undefined});

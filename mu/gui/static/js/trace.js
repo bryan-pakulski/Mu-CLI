@@ -24,42 +24,75 @@
 
 // Shared palette — within-panel colors are distinct; cross-panel reuse is
 // intentional only for semantically-identical signals (e.g. red = error/bad
-// everywhere). Kept in one place so the charts read consistently.
-const PALETTE = {
-    actual: "#e0a040",        // amber — real prompt tokens
-    est: "#b0aca0",           // accent-ish — harness estimate (dashed)
-    drift: "#e07aa0",         // pink — tokenizer drift (the headline line)
-    tokIn: "#e0a040",
-    tokOut: "#7ec96b",        // green
-    tokCached: "#5b9bd0",     // blue
-    tokReasoning: "#c08ae0",  // purple
-    attribution: {
-        system: "#8f7ac8", user: "#5b9bd0", assistant: "#7ec96b",
-        tool_calls: "#d0b05b", tool_results: "#e08b40",
-        files_images: "#54b6b0", other: "#8b8b8b", tool_schemas: "#c06b8a",
-    },
-    taskMem: "#7ec96b",
-    scratchpad: "#c98a4b",    // amber-brown (distinct from taskMem)
-    subBar: "#5b9bd0",
-    read: "#5b9bd0",
-    redundant: "#d9534f",
-    ok: "#5b9bd0",
-    err: "#d9534f",
-    cache: "#7ec96b",
-    stuck: "#d9534f",
-    stall: "#e0a040",
-    limit: "rgba(220,100,100,0.55)",
-    compaction: "rgba(120,180,220,0.7)",
-    warnBand: "rgba(220,160,60,0.12)",
-    heat: [224, 160, 64],      // amber ramp for the layer heat strip
-    driftPos: [91, 155, 208],  // teal — positive drift (est > actual)
-    driftNeg: [217, 83, 79],   // red — negative drift (est < actual)
-    status: {                  // memory by_status colors
-        active: "#7ec96b", stale: "#e0a040", done: "#5b9bd0",
-        pending: "#c08ae0", pruned: "#8b8b8b",
-    },
-    statusDefault: "#8b8b8b",
-};
+// everywhere). Canvas cannot read var(), so every colour is resolved from the
+// design tokens (tokens.css --viz-N and state tokens) at draw time by
+// refreshTracePalette(); the values below are filled in before each render.
+const PALETTE = { attribution: {}, status: {} };
+
+// Read a CSS custom property from the document root (current theme).
+function traceToken(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// Parse "#rgb", "#rrggbb" or "rgb(a)(r,g,b[,a])" into an [r,g,b] triplet.
+function traceRgb(color) {
+    const c = String(color || "").trim();
+    let m = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (m) {
+        let h = m[1];
+        if (h.length === 3) h = h.split("").map((ch) => ch + ch).join("");
+        return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    }
+    m = c.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+    return [128, 128, 128];
+}
+
+// A token at a given alpha, as a canvas-safe colour string.
+function traceAlpha(name, alpha) {
+    const [r, g, b] = traceRgb(traceToken(name));
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function refreshTracePalette() {
+    const v = (n) => traceToken("--viz-" + n);
+    Object.assign(PALETTE, {
+        actual: v(3),             // real prompt tokens
+        est: v(8),                // harness estimate (dashed)
+        drift: v(6),              // tokenizer drift (the headline line)
+        tokIn: v(3),
+        tokOut: v(2),
+        tokCached: v(5),
+        tokReasoning: v(6),
+        taskMem: v(2),
+        scratchpad: v(3),         // distinct from taskMem
+        subBar: v(5),
+        read: v(5),
+        redundant: traceToken("--error"),
+        ok: v(5),
+        err: traceToken("--error"),
+        cache: v(2),
+        stuck: traceToken("--error"),
+        stall: traceToken("--warning"),
+        limit: traceAlpha("--error", 0.55),
+        compaction: traceAlpha("--viz-5", 0.7),
+        warnBand: traceAlpha("--warning", 0.12),
+        heat: traceRgb(traceToken("--accent-solid")),  // accent ramp for the layer heat strip
+        driftPos: traceRgb(v(7)),                       // positive drift (est > actual)
+        driftNeg: traceRgb(traceToken("--error")),     // negative drift (est < actual)
+        statusDefault: v(8),
+    });
+    PALETTE.attribution = {
+        system: v(1), user: v(5), assistant: v(2),
+        tool_calls: v(3), tool_results: v(4),
+        files_images: v(7), other: v(8), tool_schemas: v(6),
+    };
+    PALETTE.status = {           // memory by_status colors
+        active: v(2), stale: v(3), done: v(5),
+        pending: v(6), pruned: v(8),
+    };
+    return PALETTE;
+}
 
 const READ_TOOLS = new Set([
     "read_file", "get_chunk", "list_dir", "search_for_string",
@@ -242,6 +275,23 @@ function traceApp() {
         fmtMs(v) { v = Number(v || 0); if (v >= 60000) return (v / 60000).toFixed(1) + "m"; if (v >= 1000) return (v / 1000).toFixed(1) + "s"; return Math.round(v) + "ms"; },
         fmtCost(v) { v = Number(v || 0); return v ? "$" + (v < 0.01 ? v.toFixed(6) : v.toFixed(4)) : "—"; },
         fmtStatus(r) { return r.iters > 0 ? "done" : "—"; },
+        // Shared status vocabulary (✓ ok · ● running · ◆ waiting · ✗ failed · ○ pending);
+        // the glyph is always rendered next to the status text, never alone.
+        statusKind(status) {
+            const s = String(status || "").toLowerCase();
+            if (!s) return "pending";
+            if (/err|fail|crash|abort/.test(s)) return "failed";
+            if (/interrupt|stop|cancel|wait/.test(s)) return "waiting";
+            if (/run|active|progress/.test(s)) return "active";
+            if (/complete|done|ok|success/.test(s)) return "done";
+            return "pending";
+        },
+        statusGlyph(status) {
+            return ({done: "✓", active: "●", waiting: "◆", failed: "✗", pending: "○"})[this.statusKind(status)];
+        },
+        statusTone(status) {
+            return ({done: "tone-ok", active: "tone-running", waiting: "tone-warn", failed: "tone-danger", pending: "tone-muted"})[this.statusKind(status)];
+        },
         attributionLabel(key) {
             return ({system: "system", user: "user", assistant: "assistant",
                 tool_calls: "tool calls", tool_results: "tool results",
@@ -493,7 +543,7 @@ function traceApp() {
             const sw = this._slotW(pad, w);
             const x0 = this._xAtPos(lo, pad, w) - sw / 2, x1 = this._xAtPos(hi, pad, w) + sw / 2;
             const t = this._theme();
-            ctx.fillStyle = "rgba(176,172,160,0.16)";
+            ctx.fillStyle = traceAlpha("--text-tertiary", 0.16);
             ctx.fillRect(x0, pad.t, x1 - x0, h - pad.t - pad.b);
             ctx.strokeStyle = t.accent; ctx.lineWidth = 1; ctx.setLineDash([]);
             ctx.beginPath(); ctx.moveTo(x0, pad.t); ctx.lineTo(x0, h - pad.b);
@@ -725,7 +775,7 @@ function traceApp() {
             for (let bi = 1; bi < this.runBounds.length; bi++) {
                 const x = this._xOf(this.runBounds[bi].start_iter, pad, w);
                 if (x == null) continue;
-                ctx.strokeStyle = "rgba(176,172,160,0.22)";
+                ctx.strokeStyle = traceAlpha("--text-tertiary", 0.22);
                 ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
                 ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
                 ctx.setLineDash([]);
@@ -743,14 +793,13 @@ function traceApp() {
 
         // ---- canvas theme ---------------------------------------------
         _theme() {
-            const css = getComputedStyle(document.documentElement);
-            const pick = (v, fb) => (css.getPropertyValue(v).trim() || fb);
+            refreshTracePalette();
             return {
-                text: pick("--text", "#d4d0c8"),
-                dim: pick("--text-dim", "#6b6860"),
-                border: pick("--border-strong", "rgba(255,255,255,0.10)"),
-                accent: pick("--accent", "#b0aca0"),
-                bg: pick("--bg", "#1a1814"),
+                text: traceToken("--text-primary"),
+                dim: traceToken("--text-tertiary"),
+                border: traceToken("--hairline-color"),
+                accent: traceToken("--accent-solid"),
+                bg: traceToken("--bg"),
             };
         },
 
@@ -979,7 +1028,7 @@ function traceApp() {
                 }
                 if ((point.delta || 0) > 0) {
                     const top = h - pad.b - ((point.total || 0) / max * plotH);
-                    ctx.fillStyle = point.delta > max * 0.1 ? PALETTE.err : "rgba(220,160,60,0.85)";
+                    ctx.fillStyle = point.delta > max * 0.1 ? PALETTE.err : traceAlpha("--warning", 0.85);
                     ctx.beginPath(); ctx.moveTo(x + barW / 2, Math.max(pad.t + 2, top - 7));
                     ctx.lineTo(x + barW / 2 - 3, Math.max(pad.t + 8, top - 1));
                     ctx.lineTo(x + barW / 2 + 3, Math.max(pad.t + 8, top - 1));
@@ -1263,7 +1312,7 @@ function traceApp() {
             ctx.textAlign = "right"; ctx.textBaseline = "top";
             ctx.fillStyle = PALETTE.drift; ctx.fillText("● drift", w - pad.r - 2, 2);
             ctx.textAlign = "left";
-            ctx.fillStyle = "rgba(220,160,60,0.9)"; ctx.fillRect(pad.l + 2, h - pad.b - 14, 8, 8);
+            ctx.fillStyle = traceAlpha("--warning", 0.9); ctx.fillRect(pad.l + 2, h - pad.b - 14, 8, 8);
             ctx.fillStyle = t.dim; ctx.fillText("±15% warn", pad.l + 12, h - pad.b - 16);
 
             // selected + hover
@@ -1622,13 +1671,13 @@ function traceApp() {
             this._clipPlot(ctx, w, h, pad);
             // saved band: between raw (top) and injected (bottom) — tokens kept
             // out of context by storing raw externally + observing.
-            ctx.fillStyle = "rgba(224,160,64,0.18)";
+            ctx.fillStyle = traceAlpha("--viz-3", 0.18);
             ctx.beginPath();
             for (let i = 0; i < n; i++) ctx.lineTo(xs[i], y(eff[i].raw_tokens));
             for (let i = n - 1; i >= 0; i--) ctx.lineTo(xs[i], y(eff[i].injected_tokens));
             ctx.closePath(); ctx.fill();
             // injected tokens — filled area (what actually entered context)
-            ctx.fillStyle = "rgba(126,201,107,0.32)";
+            ctx.fillStyle = traceAlpha("--viz-2", 0.32);
             ctx.beginPath();
             for (let i = 0; i < n; i++) ctx.lineTo(xs[i], y(eff[i].injected_tokens));
             ctx.lineTo(xs[n - 1], pad.t + plotH); ctx.lineTo(xs[0], pad.t + plotH);
@@ -1689,7 +1738,7 @@ function traceApp() {
                 if (cx == null) continue;
                 const x = cx - barW / 2;
                 const bh = (lat[i].wall_ms / max) * plotH;
-                ctx.fillStyle = (this.selectedIter === lat[i].iter) ? PALETTE.actual : "rgba(176,172,160,0.6)";
+                ctx.fillStyle = (this.selectedIter === lat[i].iter) ? PALETTE.actual : traceAlpha("--viz-8", 0.6);
                 ctx.fillRect(x, pad.t + plotH - bh, barW, bh);
             }
             this._runMarks(ctx, w, h, pad);

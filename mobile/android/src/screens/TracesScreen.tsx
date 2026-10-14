@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { tracesApi, TraceRun, TraceSummary } from '../api/traces';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, fonts } from '../theme/tokens';
 
 export function TracesScreen() {
   const { colors } = useTheme();
@@ -74,11 +74,11 @@ export function TracesScreen() {
     const s = selectedSummary;
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-          <TouchableOpacity onPress={() => setSelectedSummary(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="arrow-back" size={24} color={colors.accent} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
+          <TouchableOpacity onPress={() => setSelectedSummary(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
+          <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
             {s.run_id}
           </Text>
         </View>
@@ -108,7 +108,7 @@ export function TracesScreen() {
           keyExtractor={item => item.k}
           contentContainerStyle={{ padding: spacing.base }}
           renderItem={({ item }) => (
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', minHeight: 36, paddingVertical: 6 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', minHeight: 36, paddingVertical: spacing.sm }}>
               <Text variant="sm" style={{ color: colors.textDim }}>{item.k}</Text>
               <Text variant="sm" style={{ color: colors.text, fontVariant: ['tabular-nums'] }}>{item.v}</Text>
             </View>
@@ -130,14 +130,14 @@ export function TracesScreen() {
             <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View style={{ flex: 1 }}>
-                  <Text variant="sm" style={{ fontWeight: '500' }} numberOfLines={1}>{item.run_id}</Text>
+                  <Text variant="sm" style={{ fontWeight: fontWeights.medium, fontFamily: fonts.mono }} numberOfLines={1}>{item.run_id}</Text>
                   <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
                     {item.provider} · {item.model} · {item.mode}
                   </Text>
                 </View>
                 <Badge label={`${item.iters}/${item.max_iterations}`} variant="neutral" />
               </View>
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
+              <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.xs }}>
                 <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
                   {item.session}
                 </Text>

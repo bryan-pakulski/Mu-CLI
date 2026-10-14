@@ -37,7 +37,7 @@ No Expo account needed. Produces a shareable `.apk` you can install on multiple 
 ```bash
 cd mobile/android
 npm install        # one-time
-make apk           # builds dist/mucli-mobile-0.2.4.apk
+make apk           # builds dist/mucli-mobile-0.4.2.apk
 ```
 
 Install to a connected device:
@@ -45,7 +45,7 @@ Install to a connected device:
 make install       # builds + installs via adb (USB debugging enabled)
 ```
 
-Or transfer `dist/mucli-mobile-0.2.4.apk` to any device, enable "Install unknown apps", tap to install.
+Or transfer `dist/mucli-mobile-0.4.2.apk` to any device, enable "Install unknown apps", tap to install.
 
 ### Build (EAS cloud)
 

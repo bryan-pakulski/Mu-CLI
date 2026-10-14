@@ -16,6 +16,7 @@ Encoder choice (cached per model on first use):
 
 from __future__ import annotations
 
+import functools
 import threading
 from typing import Any, Optional
 
@@ -70,7 +71,21 @@ def estimate_tokens(text: Any, model: Optional[str] = None) -> int:
             text = str(text)
         except Exception:
             return 0
+    if len(text) >= _MEMO_MIN_CHARS:
+        return _memo_count(text, (model or "").lower())
     encoder = _get_encoder(model)
+    return len(encoder.encode(text, disallowed_special=()))
+
+
+# The agent loop re-estimates the same large strings (history entries, system prompt,
+# tool results) several times per iteration; BPE is the expensive part, a str hash is
+# cached on the object. Small strings are cheaper to encode than to memoize.
+_MEMO_MIN_CHARS = 2048
+
+
+@functools.lru_cache(maxsize=4096)
+def _memo_count(text: str, model_key: str) -> int:
+    encoder = _get_encoder(model_key or None)
     return len(encoder.encode(text, disallowed_special=()))
 
 
@@ -78,6 +93,7 @@ def clear_cache() -> None:
     """Drop cached encoders. Used by tests; rarely useful otherwise."""
     with _LOCK:
         _ENCODERS.clear()
+    _memo_count.cache_clear()
 
 
 __all__ = ["estimate_tokens", "clear_cache"]

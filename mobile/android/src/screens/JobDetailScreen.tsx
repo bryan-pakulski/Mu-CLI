@@ -1,710 +1,455 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
-import {
-  jobsApi,
-  JOB_STAGE_NAMES,
-  type EngineeringJob,
-  type JobDiagnosticsSnapshot,
-  type JobDiff,
-  type JobEvent,
-  type JobInteractionResponse,
-  type WorkReceipt,
-  planApprovalBody,
-  planReviewDraft,
-} from '../api/jobs';
-import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
+import { jobCoreApi, subscribeToJobChanges, type Finding, type JobPart, type JobVM } from '../api/jobCore';
+import { jobsApi, type JobAttempt, type JobDiagnosticsSnapshot } from '../api/jobs';
 import { Text } from '../components/Text';
+import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
+import { EnvironmentsPill, JobEnvironmentsSheet } from '../components/JobEnvironments';
+import { stageAgentsLabel } from '../api/agents';
+import { ApprovalBanner, EnvironmentApprovalBanner, JobActionBar, LimitBanner, useJobCommands } from '../components/JobActions';
+import { budgetSummary } from '../components/jobViews';
+import { ChecksTab, DiffTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
+import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, defaultTab, eventTone, parsePatch, type JobTab } from '../components/jobViews';
+import { PrPill, jobKey } from '../components/JobsChrome';
+import {
+  Banner, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, PlanosButton, Pre, Tabs,
+  type TabItem,
+} from '../components/planos';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
+import { fontWeights, fonts, spacing, toneColor, touchTarget } from '../theme/tokens';
+import { STATUS, duration, money, stateLabel, stateStatus, verdictStyle, when } from '../theme/status';
+
+export const LIVE_DIFF_REFRESH_MS = 5000;
 
 export type JobDetailScreenProps = NativeStackScreenProps<RootStackParamList, 'JobDetail'>;
-
-function statusLabel(value: string): string {
-  return String(value || '').split('_').map(part => part ? part[0].toUpperCase() + part.slice(1) : part).join(' ');
-}
-
-function formatDuration(value: number): string {
-  let seconds = Math.max(0, Math.round(Number(value || 0)));
-  const hours = Math.floor(seconds / 3600);
-  seconds -= hours * 3600;
-  const minutes = Math.floor(seconds / 60);
-  seconds -= minutes * 60;
-  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
-function eventSummary(event: JobEvent): string {
-  const payload = event.payload || {};
-  if (event.event_type === 'agent_message') return String(payload.text || '').slice(0, 1000);
-  if (event.event_type === 'tool_call_ui') return String(payload.tool_name || '');
-  if (event.event_type === 'human_response' || event.event_type === 'review_feedback') return String(payload.detail || '');
-  if (event.event_type === 'status_changed') {
-    const underlying = String(payload.error || '');
-    return `${event.from_status || 'new'} → ${event.to_status || ''}${event.reason ? ` · ${event.reason}` : ''}${underlying ? ` · ${underlying}` : ''}`;
-  }
-  if (event.event_type === 'checkpoint_created') return `${String(payload.label || 'checkpoint')} · ${String(payload.sha || '').slice(0, 12)}`;
-  if (event.reason) return event.reason;
-  return String(payload.text || payload.summary || payload.error || '');
-}
-
-function latestAttentionContext(events: JobEvent[]): Record<string, unknown> {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    if (events[index].to_status === 'needs_human') return events[index].payload || {};
-  }
-  return {};
-}
+// Tab order (planos Task page): Session · Plan · Diff · Review · Checks · Diagnostics · Cost & audit
+// (JOB_TABS / JOB_TAB_LABELS in components/jobViews.ts).
 
 export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
-  const { colors } = useTheme();
   const { jobId } = route.params;
-  const [job, setJob] = useState<EngineeringJob | null>(null);
-  const [receipt, setReceipt] = useState<WorkReceipt | null>(null);
-  const [events, setEvents] = useState<JobEvent[]>([]);
-  const [diagnostics, setDiagnostics] = useState<JobDiagnosticsSnapshot | null>(null);
-  const [diff, setDiff] = useState<JobDiff | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [acting, setActing] = useState(false);
+  const requestedAction = route.params.action;
+  const { colors } = useTheme();
+  const [job, setJob] = useState<JobVM | null>(null);
   const [error, setError] = useState('');
-  const [stageSheetOpen, setStageSheetOpen] = useState(false);
-  const [responseText, setResponseText] = useState('');
+  const [tab, setTab] = useState<JobTab | null>(null);
+  const [draft, setDraft] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [findings, setFindings] = useState<string[]>([]);
+  const [models, setModels] = useState(false);
+  const [environments, setEnvironments] = useState(false);
+  const [history, setHistory] = useState<number | undefined>();
+  const [diagnostics, setDiagnostics] = useState<JobDiagnosticsSnapshot | null>(null);
+  const [attempts, setAttempts] = useState<JobAttempt[] | null>(null);
+  const [localViewed, setLocalViewed] = useState<Record<string, boolean>>({});
+  const [focus, setFocus] = useState<{ file: string; line: number | null; seq: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const scroller = useRef<ScrollView>(null);
+  const contentY = useRef(0);
+  const fileY = useRef<Record<string, number>>({});
+  const draftRef = useRef({ text: '', dirty: false, revision: 0, savedRevision: -1, version: 0 });
+  const requestBusy = useRef(false);
+  const autoActionDone = useRef(false);
+  const savedRevision = useRef(0);
 
-  const load = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true);
+  const load = useCallback(async (parts?: JobPart[]) => {
     try {
-      const [jobResult, receiptResult, eventsResult, diagnosticsResult, diffResult] = await Promise.allSettled([
-        jobsApi.get(jobId),
-        jobsApi.receipt(jobId),
-        jobsApi.events(jobId),
-        jobsApi.diagnostics(jobId),
-        jobsApi.diff(jobId),
-      ]);
-      if (jobResult.status !== 'fulfilled') throw jobResult.reason;
-      const nextJob = jobResult.value.job;
-      setJob(nextJob);
-      navigation.setOptions({ title: nextJob.title });
-      setReceipt(receiptResult.status === 'fulfilled' ? receiptResult.value.receipt : null);
-      setEvents(eventsResult.status === 'fulfilled' ? eventsResult.value.events || [] : []);
-      setDiagnostics(diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value.diagnostics : null);
-      setDiff(diffResult.status === 'fulfilled' ? diffResult.value.diff : null);
+      const next = await jobCoreApi.job(jobId, parts);
+      setJob(old => ({ ...(old || {}), ...next } as JobVM));
+      setTab(old => old ?? defaultTab(next));
+      navigation.setOptions({ title: next.key || next.title });
+      if (next.plan && !draftRef.current.dirty) {
+        const text = next.plan.draft ?? next.plan.markdown;
+        draftRef.current = { text, dirty: !!next.plan.draft, revision: 0, savedRevision: -1, version: next.plan.version };
+        setDraft(text); setDirty(!!next.plan.draft); setHistory(undefined);
+      }
+      if (next.diff?.viewed) setLocalViewed({});
       setError('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (!quiet) setLoading(false);
-      setRefreshing(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   }, [jobId, navigation]);
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => { void load(true); }, 5000);
+    const stream = subscribeToJobChanges(change => {
+      if (change.scope === 'job' && change.id === jobId) void load(change.parts);
+    }, () => { void load(); });
+    return () => stream.close();
+  }, [jobId, load]);
+
+  useEffect(() => navigation.addListener('beforeRemove', event => {
+    if (!draftRef.current.dirty) return;
+    event.preventDefault();
+    Alert.alert('Unsaved plan edits', 'Leave this plan? Your last autosaved draft is kept.', [
+      { text: 'Stay', style: 'cancel' },
+      { text: 'Leave', onPress: () => { draftRef.current.dirty = false; navigation.dispatch(event.data.action); } },
+    ]);
+  }), [navigation]);
+
+  const editable = !!job?.actions.find(a => a.id === 'savePlanDraft' && a.enabled) && history === undefined;
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      const current = { ...draftRef.current };
+      if (!editable || !current.dirty || requestBusy.current || current.savedRevision === current.revision) return;
+      requestBusy.current = true;
+      try {
+        await jobCoreApi.command(jobId, 'savePlanDraft', { plan: current.text, version: current.version, autosave: true });
+        draftRef.current.savedRevision = current.revision;
+      } catch (err) { setError(String(err)); }
+      finally { requestBusy.current = false; }
+    }, 5000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [jobId, editable]);
 
-  const attentionContext = useMemo(() => latestAttentionContext(events), [events]);
+  const selectTab = useCallback((next: JobTab) => { setTab(next); }, []);
 
-  const run = async (action: 'approve' | 'deny' | 'respond' | 'changes' | 'continue' | 'discard') => {
-    if (!job || acting) return;
-    setActing(true);
-    setError('');
-    try {
-      if (action === 'approve' || action === 'deny') {
-        await jobsApi.respond(job.id, { decision: action, detail: responseText.trim() });
-      } else if (action === 'respond') {
-        if (!responseText.trim()) throw new Error('Enter a response first.');
-        if (job.attention_reason === 'verification_required') {
-          const commands = responseText.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-          await jobsApi.respond(job.id, { detail: responseText.trim(), value: commands });
-        } else {
-          await jobsApi.respond(job.id, { detail: responseText.trim(), value: responseText.trim(), selected: [responseText.trim()] });
-        }
-      } else if (action === 'changes') {
-        if (!responseText.trim()) throw new Error('Add review feedback first.');
-        await jobsApi.requestChanges(job.id, responseText.trim());
-      } else if (action === 'continue') {
-        await jobsApi.continue(job.id, responseText.trim());
-      } else if (action === 'discard') {
-        await jobsApi.discard(job.id, responseText.trim() || 'discarded from mobile review');
+  // Live diff: while the Diff tab is open and the job is active (diff.live set), refetch the diff part.
+  const liveDiff = !!job?.diff?.live;
+  useEffect(() => {
+    if (tab !== 'diff' || !liveDiff) return undefined;
+    const timer = setInterval(() => { void load(['diff']); }, LIVE_DIFF_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [tab, liveDiff, load]);
+
+  const cmd = useJobCommands({
+    jobId,
+    actions: job?.actions || [],
+    planDirty: dirty,
+    planVersion: draftRef.current.version || job?.plan?.latest_version || job?.plan?.version,
+    selectedFindings: findings,
+    onEditPlan: () => { setEditing(true); selectTab('plan'); },
+    onNeedFindings: () => selectTab('review'),
+    onEditEnvironments: () => setEnvironments(true),
+    onError: message => setError(message),
+    onDone: async (result, actionId) => {
+      setError('');
+      if (actionId === 'delete') { draftRef.current.dirty = false; navigation.goBack(); return; }
+      if (actionId === 'reprompt') setFindings([]);
+      if (actionId === 'savePlanDraft') {
+        const current = draftRef.current;
+        current.version = result.data?.version || current.version;
+        current.dirty = current.revision !== savedRevision.current;
+        current.savedRevision = current.revision;
+        setDirty(current.dirty);
+        if (!current.dirty) setEditing(false);
       }
-      setResponseText('');
-      await load(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setActing(false);
-    }
+      await load(result.parts?.length ? result.parts : undefined);
+    },
+  });
+
+  // Dashboard "Needs you" primary actions open the job and start the action.
+  useEffect(() => {
+    if (!job || !requestedAction || autoActionDone.current) return;
+    autoActionDone.current = true;
+    const action = job.actions.find(a => a.id === requestedAction);
+    if (action) cmd.invoke(action);
+  }, [job, requestedAction, cmd]);
+
+  const loadDiagnostics = useCallback(() => {
+    void jobsApi.diagnostics(jobId).then(r => setDiagnostics(r.diagnostics)).catch(e => setError(String(e)));
+  }, [jobId]);
+  useEffect(() => {
+    if (tab === 'diagnostics' && !diagnostics) loadDiagnostics();
+    if (tab === 'costs' && !attempts) void jobsApi.attempts(jobId).then(r => setAttempts((r.attempts || []).slice().reverse())).catch(() => setAttempts([]));
+  }, [tab, diagnostics, attempts, jobId, loadDiagnostics]);
+
+  const viewed = useMemo(() => {
+    const set = new Set(job?.diff?.viewed || []);
+    for (const [path, on] of Object.entries(localViewed)) { if (on) set.add(path); else set.delete(path); }
+    return set;
+  }, [job?.diff?.viewed, localViewed]);
+
+  const setViewed = (path: string, on: boolean) => {
+    setLocalViewed(v => ({ ...v, [path]: on }));
+    // CONTRACT §4: server-side marks; older servers keep the mark for this visit only.
+    jobCoreApi.markViewed(jobId, path, on).catch(() => undefined);
   };
 
-  const deleteJob = async () => {
-    if (!job || acting) return;
-    setActing(true);
-    setError('');
-    try {
-      await jobsApi.delete(job.id, true);
-      navigation.goBack();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setActing(false);
-    }
+  const jumpToDiff = (f: Finding) => {
+    if (!f.file) return;
+    setFocus({ file: f.file, line: f.line_start, seq: Date.now() });
+    selectTab('diff');
+    setTimeout(() => {
+      const y = fileY.current[f.file || ''];
+      if (y != null) scroller.current?.scrollTo({ y: Math.max(0, contentY.current + y - spacing.base), animated: true });
+    }, 120);
   };
 
-  const confirmDelete = () => {
-    if (!job) return;
-    Alert.alert(
-      'Delete job?',
-      'Running work is cancelled first; the record, telemetry, evidence and managed worktree are removed. The Git branch is preserved.',
-      [
-        { text: 'Keep job', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => { void deleteJob(); } },
-      ],
-    );
-  };
-
-  const submitPlanDecision = async (body: JobInteractionResponse) => {
-    if (!job || acting) return;
-    setActing(true);
-    setError('');
-    try {
-      await jobsApi.respond(job.id, body);
-      await load(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const resumeJob = async () => {
-    if (!job || acting) return;
-    setActing(true);
-    setError('');
-    try {
-      await jobsApi.resume(job.id, 'stage models set');
-      await load(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const confirmDiscard = () => {
-    Alert.alert(
-      job?.status === 'ready_for_review' ? 'Discard reviewed job?' : 'Cancel job?',
-      'The job will stop running. Its branch, worktree and evidence remain available for inspection.',
-      [
-        { text: 'Keep job', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => { void run('discard'); } },
-      ],
-    );
-  };
-
-  if (loading && !job) {
-    return (
-      <SafeAreaView edges={['bottom']} style={styles.centered}>
-        <ActivityIndicator color={colors.accent} />
-      </SafeAreaView>
-    );
-  }
+  const fixOne = (id: string) => cmd.invoke('reprompt', { finding_ids: [id] });
 
   if (!job) {
     return (
-      <SafeAreaView edges={['bottom']} style={styles.centered}>
-        <Text variant="base" style={{ color: colors.error }}>Could not load job</Text>
-        <Text variant="sm" dim style={styles.centeredCopy}>{error}</Text>
-      </SafeAreaView>
+      <View style={[styles.loading, { backgroundColor: colors.bg }]}>
+        {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : <Loading label="Loading job…" />}
+      </View>
     );
   }
 
-  const outcome = receipt?.outcome;
-  const git = receipt?.git;
-  const verification = receipt?.verification;
-  const statusColor = job.status === 'ready_for_review'
-    ? colors.success
-    : job.status === 'needs_human' || job.status === 'conflicted'
-      ? colors.warning
-      : ['failed', 'environment_error', 'timed_out', 'budget_exceeded'].includes(job.status)
-        ? colors.error
-        : ['running', 'preparing', 'verifying', 'recovering'].includes(job.status)
-          ? colors.accent
-          : colors.textDim;
+  const st = stateStatus(job.state);
+  const failed = job.state === 'failed';
+  const [vTone, vLabel] = verdictStyle(job.verdict);
+  const agentsLabel = stageAgentsLabel(job.stage_agents);
+  // Stages run by Claude Code / Codex show that agent instead of an (unused) mucli model.
+  const stageModels = Object.entries(job.stage_models || {}).filter(([s, m]) => m?.model && (job.stage_agents?.[s]?.agent || 'mucli') === 'mucli');
+  const files = job.diff ? parsePatch(job.diff.live ? job.diff.live.patch : job.diff.patch) : [];
+  const budget = budgetSummary(job);
+  const openFindings = (job.review?.findings || []).filter(f => (f.disposition || 'open') === 'open');
+  const lastRun = (job.checks?.runs || []).slice(-1)[0];
+  const liveSession = st === 'active' && ['planning', 'implementing', 'reviewing'].includes(job.state);
+  const badge = (id: JobTab): React.ReactNode => {
+    switch (id) {
+      case 'session': return liveSession ? <Text variant="xs" accessibilityLabel="live" style={{ color: colors.running }}>●</Text> : job.session?.approval ? <Text variant="xs" accessibilityLabel="approval needed" style={{ color: colors.warn }}>◆</Text> : null;
+      case 'plan': return job.plan?.draft || job.state === 'plan_review' ? <Text variant="xs" accessibilityLabel="needs you" style={{ color: colors.warn }}>◆</Text> : null;
+      case 'diff': return files.length ? <Text variant="xs"><Text variant="xs" style={{ color: colors.ok }}>+{files.reduce((n, f) => n + f.added, 0)}</Text> <Text variant="xs" style={{ color: colors.danger }}>−{files.reduce((n, f) => n + f.removed, 0)}</Text></Text> : null;
+      case 'review': return job.review ? <CountBadge tone={openFindings.some(f => ['blocker', 'major'].includes(f.severity)) ? 'danger' : openFindings.some(f => f.severity === 'minor') ? 'warn' : 'muted'}>{openFindings.length}</CountBadge> : null;
+      case 'checks': return job.state === 'checking' ? <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running }}>●</Text> : lastRun ? <Text variant="xs" accessibilityLabel={lastRun.passed ? 'passed' : 'failed'} style={{ color: lastRun.passed ? colors.ok : colors.danger }}>{lastRun.passed ? '✓' : '✗'}</Text> : null;
+      case 'diagnostics': return failed ? <CountBadge tone="danger">!</CountBadge> : null;
+      default: return null;
+    }
+  };
+  const tabItems: TabItem[] = JOB_TABS.map(id => ({ id, label: JOB_TAB_LABELS[id], badge: badge(id), testID: `job-tab-${id}` }));
+  const current = tab || 'session';
+  // Paused on a cost/tokens/time/iterations cap: the limit banner owns raiseLimit + Cancel job.
+  const limitPaused = !!job.limit;
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
       <ScrollView
+        ref={scroller}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={colors.textDim} />}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.muted} />}
       >
-        <View style={[styles.hero, { borderBottomColor: colors.hairline }]}>
-          <Text variant="xs" style={[styles.status, { color: statusColor }]}>{statusLabel(job.status)}</Text>
-          <Text variant="xl" style={styles.title}>{job.title}</Text>
-          {job.description ? <Text variant="sm" dim style={styles.description}>{job.description}</Text> : null}
-          {job.status === 'ready_for_review' ? (
-            <View style={[styles.banner, { borderLeftColor: colors.success, backgroundColor: colors.bgHover }]}>
-              <Text variant="xs" style={{ color: colors.textSoft }}>
-                Ready for review. Every configured deterministic check passed on a clean isolated worktree.
-              </Text>
+        <View style={styles.header} testID="job-header">
+          <View style={styles.wrap}>
+            <Text variant="lg" accessibilityRole="header" style={[styles.mono, { fontWeight: fontWeights.semibold }]}>{jobKey(job)}</Text>
+            <Pill tone={STATUS[st].tone} glyph={STATUS[st].icon} testID="job-state-pill">{stateLabel(job.state)}</Pill>
+            {st === 'active' ? <Pill tone="running" glyph="●">{`live · ${stateLabel(job.state)}`}</Pill> : null}
+            {job.paused_from ? <Pill tone="warn">{`paused in ${stateLabel(job.paused_from)}`}</Pill> : null}
+            {job.fix_attempts ? <Pill tone="muted">{`fix attempts ${job.fix_attempts}`}</Pill> : null}
+            {job.verdict ? <Pill tone={vTone}>{vLabel}</Pill> : null}
+            <EnvironmentsPill summary={job.environments} onPress={() => setEnvironments(true)} />
+            <PrPill pr={job.pr} testID="job-pr-pill" />
+            <View style={{ flex: 1 }} />
+            <View style={{ alignItems: 'flex-end' }} testID="job-budget">
+              <Text variant="md" accessibilityLabel={budget.costLabel} style={[styles.num, { fontWeight: fontWeights.semibold, color: budget.tone === 'danger' ? colors.danger : budget.tone === 'warn' ? colors.warn : colors.text }]}>{budget.cost}</Text>
+              <Text variant="xs" accessibilityLabel={budget.timeLabel} style={[styles.num, { color: colors.muted }]}>{budget.time}</Text>
             </View>
-          ) : null}
-          {job.needs_attention ? (
-            <View style={[styles.banner, { borderLeftColor: colors.warning, backgroundColor: colors.bgHover }]}>
-              <Text variant="xs" style={{ color: colors.warning, fontWeight: '600' }}>{statusLabel(job.attention_reason)}</Text>
-              <Text variant="xs" style={{ color: colors.textSoft, marginTop: 3 }}>{job.attention_detail}</Text>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={[styles.metrics, { borderBottomColor: colors.hairline }]}>
-          <Metric label="Worked" value={formatDuration(outcome?.elapsed_seconds || 0)} />
-          <Metric label="Cost" value={`$${Number(outcome?.cost_usd || job.cost_usd || 0).toFixed(2)}`} />
-          <Metric label="Attempts" value={String(outcome?.attempts || 0)} />
-          <Metric label="Changes" value={`+${git?.additions || 0} / -${git?.deletions || 0}`} />
-        </View>
-
-        {error ? (
-          <View style={[styles.errorLine, { borderBottomColor: colors.hairline }]}>
-            <Ionicons name="alert-circle-outline" size={17} color={colors.error} />
-            <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
           </View>
-        ) : null}
-
-        {job.status === 'needs_human' && job.attention_reason === 'plan_review' ? (
-          <PlanReviewCard job={job} context={attentionContext} acting={acting} onSubmit={submitPlanDecision} />
-        ) : job.status === 'needs_human' && job.attention_reason === 'models_unset' ? (
-          <ModelsUnsetCard
-            job={job}
-            context={attentionContext}
-            acting={acting}
-            onOpenSettings={() => setStageSheetOpen(true)}
-            onResume={resumeJob}
-          />
-        ) : (
-          <ReviewActions
-            job={job}
-            context={attentionContext}
-            responseText={responseText}
-            setResponseText={setResponseText}
-            acting={acting}
-            onAction={run}
-            onDiscard={confirmDiscard}
-          />
-        )}
-        <JobStageModelsSheet
-          visible={stageSheetOpen}
-          onClose={() => setStageSheetOpen(false)}
-          onSaved={() => setStageSheetOpen(false)}
-        />
-
-        <View style={[styles.section, styles.deleteSection]}>
-          <Text variant="sm" dim style={styles.deleteCopy}>
-            Delete this job permanently. Running work is cancelled first; the Git branch is preserved.
-          </Text>
-          <ActionButton label="Delete job" destructive disabled={acting} onPress={confirmDelete} />
+          <Text variant="md">{job.title}</Text>
+          <View style={styles.wrap}>
+            {job.branch ? <View style={styles.row} accessible accessibilityLabel={`branch ${job.branch}`}><Ionicons name="git-branch-outline" size={14} color={colors.muted} /><Text variant="xs" style={[styles.mono, { color: colors.muted }]}>{job.branch}</Text></View> : null}
+            {job.repository ? <Text variant="xs" style={{ color: colors.muted }}>repo: <Text variant="xs" style={styles.mono}>{job.repository}</Text></Text> : null}
+            {failed && job.failed_from ? <Text variant="xs" style={{ color: colors.danger }}>failed in {stateLabel(job.failed_from)}</Text> : null}
+            {agentsLabel ? <Text variant="xs" testID="job-stage-agents" style={{ color: colors.muted }}>agents: {agentsLabel}</Text> : null}
+            {!agentsLabel || stageModels.length ? <Text variant="xs" style={{ color: colors.muted }}>models: {stageModels.length ? stageModels.map(([s, m]) => `${s} ${m?.model}`).join(' · ') : 'unset'}</Text> : null}
+            <Pressable accessibilityRole="button" onPress={() => setModels(true)} style={styles.link}><Text variant="xs" style={{ color: colors.accent }}>Job settings</Text></Pressable>
+          </View>
+          {job.attention_detail && !(job.session?.approval && job.state === 'needs_input') && !limitPaused
+            ? failed ? <Banner tone="danger" glyph="✗" role="alert" title={job.attention_detail} /> : <Banner tone="warn" glyph="◆" title={job.attention_detail} />
+            : null}
+          {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} testID="job-error" /> : null}
         </View>
 
-        <DetailSection title="Work receipt">
-          <ReceiptRow label="Repository" value={job.repository || '—'} />
-          <ReceiptRow label="Branch" value={job.branch || '—'} />
-          <ReceiptRow label="Base" value={(job.base_sha || '—').slice(0, 12)} />
-          <ReceiptRow label="Head" value={(git?.head_sha || '—').slice(0, 12)} />
-          <ReceiptRow label="Runtime" value={`${job.execution?.provider || '—'} · ${job.execution?.model || '—'}`} />
-          {JOB_STAGE_NAMES.filter((stage) => job.execution?.stages?.[stage]?.provider || job.execution?.stages?.[stage]?.model).map((stage) => {
-            const entry = job.execution?.stages?.[stage] || {};
-            const label = `${stage.charAt(0).toUpperCase()}${stage.slice(1)} model`;
-            return (
-              <ReceiptRow
-                key={stage}
-                label={label}
-                value={`${entry.provider || job.execution?.provider || '—'} · ${entry.model || job.execution?.model || '—'}`}
-              />
-            );
-          })}
-          <ReceiptRow label="Mode" value={job.execution?.agent_mode || 'default'} />
-          <ReceiptRow label="Workspace clean" value={git?.dirty === false ? 'yes' : git?.dirty === true ? 'no' : 'unknown'} />
-        </DetailSection>
+        <Panel flush>
+          <PipelineStepper steps={job.pipeline || job.steps || []} onStep={id => selectTab(STEP_TABS[id] || 'session')} />
+        </Panel>
 
-        {diagnostics && (diagnostics.diagnostics.length || diagnostics.worker_log_exists) ? (
-          <DetailSection title="Job diagnostics">
-            {diagnostics.latest_failure ? (
-              <View style={[styles.diagnosticFailure, { borderLeftColor: colors.error, backgroundColor: colors.bgHover }]}>
-                <Text variant="xs" style={{ color: colors.error, fontWeight: '600' }}>
-                  {statusLabel(diagnostics.latest_failure.event_type)}
-                </Text>
-                <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4 }} selectable>
-                  {eventSummary(diagnostics.latest_failure)}
-                </Text>
-              </View>
-            ) : null}
-            <ReceiptRow label="Worker" value={diagnostics.worker_id || '—'} />
-            <ReceiptRow label="Worker log" value={diagnostics.worker_log_exists ? `${diagnostics.worker_log_size} bytes` : 'not created'} />
-            {diagnostics.worker_log_tail ? (
-              <ScrollView style={[styles.logBox, { borderTopColor: colors.hairline, borderBottomColor: colors.hairline }]}>
-                <Text variant="xs" style={[styles.mono, { color: colors.textSoft }]} selectable>
-                  {diagnostics.worker_log_tail}
-                </Text>
-              </ScrollView>
-            ) : null}
-            {diagnostics.diagnostics.slice(-15).reverse().map(event => (
-              <View key={`diag-${event.id}`} style={[styles.timelineRow, { borderBottomColor: colors.hairline }]}>
-                <View style={[styles.timelineDot, { backgroundColor: colors.textDim }]} />
-                <View style={styles.timelineCopy}>
-                  <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>{statusLabel(event.event_type)}</Text>
-                  {eventSummary(event) ? <Text variant="xs" dim style={styles.timelineBody} selectable>{eventSummary(event)}</Text> : null}
-                </View>
-              </View>
-            ))}
-          </DetailSection>
-        ) : null}
+        <ApprovalBanner approval={job.session?.approval} actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} />
+        <EnvironmentApprovalBanner approval={job.environment_approval} actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} />
 
-        <DetailSection title="Acceptance criteria">
-          {job.acceptance_criteria.length ? job.acceptance_criteria.map((item, index) => (
-            <View key={`${index}-${item}`} style={styles.bulletRow}>
-              <Text variant="xs" style={{ color: colors.textDim }}>•</Text>
-              <Text variant="sm" style={{ color: colors.textSoft, flex: 1 }}>{item}</Text>
-            </View>
-          )) : <Text variant="sm" dim>No explicit acceptance criteria.</Text>}
-        </DetailSection>
+        <LimitBanner limit={job.limit} actions={job.actions} onInvoke={(a, extra) => cmd.invoke(a, extra)} busy={cmd.busy}
+          error={cmd.lastError?.actionId === 'raiseLimit' ? cmd.lastError.message : null} />
 
-        <DetailSection title={`Verification · ${verification ? statusLabel(verification.status) : 'Not run'}`}>
-          {verification?.checks?.length ? verification.checks.map((check, index) => (
-            <View key={`${index}-${check.command}`} style={[styles.checkRow, { borderBottomColor: colors.hairline }]}>
-              <Ionicons name={check.passed ? 'checkmark' : 'close'} size={17} color={check.passed ? colors.success : colors.error} />
-              <View style={styles.checkCopy}>
-                <Text variant="xs" style={[styles.mono, { color: colors.textSoft }]} numberOfLines={2}>{check.command}</Text>
-                {!check.passed && (check.error || check.stderr || check.stdout) ? (
-                  <Text variant="xs" style={{ color: colors.error, marginTop: 4 }} numberOfLines={8}>
-                    {String(check.error || check.stderr || check.stdout).slice(-4000)}
-                  </Text>
-                ) : null}
-              </View>
-              <Text variant="xs" dim>{Number(check.duration_seconds || 0).toFixed(2)}s</Text>
-            </View>
-          )) : <Text variant="sm" dim>No deterministic checks have run yet.</Text>}
-        </DetailSection>
+        <JobActionBar actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} planDirty={dirty} exclude={limitPaused ? ['raiseLimit', 'discard'] : []} />
 
-        <DetailSection title={`Git diff · ${diff?.files?.length || git?.changed_files?.length || 0} files`}>
-          <Text variant="xs" dim style={[styles.mono, styles.diffStat]}>{diff?.stat || git?.diff_stat || 'No diff available yet.'}</Text>
-          {diff ? (
-            <ScrollView horizontal style={[styles.diffBox, { borderTopColor: colors.hairline, borderBottomColor: colors.hairline }]}>
-              <Text variant="xs" style={[styles.mono, { color: colors.textSoft }]} selectable>
-                {diff.patch || 'No changed lines.'}
-              </Text>
-            </ScrollView>
+        <Tabs items={tabItems} value={current} onChange={id => selectTab(id as JobTab)} accessibilityLabel="Job views" />
+
+        <View onLayout={e => { contentY.current = e.nativeEvent.layout.y; }} accessibilityLabel={`${JOB_TAB_LABELS[current]} tab`} style={styles.tabBody}>
+          {current === 'session' ? <SessionTab job={job} invoke={cmd.invoke} busy={cmd.busy} /> : null}
+          {current === 'plan' ? (
+            <PlanTab
+              job={job}
+              editing={editing && editable}
+              draft={draft}
+              dirty={dirty}
+              historyVersion={history}
+              busy={cmd.busy}
+              onEdit={() => setEditing(true)}
+              onChangeDraft={text => { draftRef.current.text = text; draftRef.current.dirty = true; draftRef.current.revision++; setDraft(text); setDirty(true); }}
+              onSave={() => { savedRevision.current = draftRef.current.revision; cmd.invoke('savePlanDraft', { plan: draftRef.current.text, version: draftRef.current.version }); }}
+              onCancel={() => setEditing(false)}
+              onVersion={version => {
+                if (version === undefined) { setHistory(undefined); if (!dirty) void load(['plan']); return; }
+                void jobCoreApi.job(jobId, ['plan'], version).then(next => { setJob(old => ({ ...old!, plan: next.plan })); setHistory(version); }).catch(e => setError(String(e)));
+              }}
+            />
           ) : null}
-        </DetailSection>
-
-        <DetailSection title="Activity">
-          {events.length ? events.slice(-35).reverse().map(event => (
-            <View key={event.id} style={[styles.timelineRow, { borderBottomColor: colors.hairline }]}>
-              <View style={[styles.timelineDot, { backgroundColor: colors.textDim }]} />
-              <View style={styles.timelineCopy}>
-                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>{statusLabel(event.event_type)}</Text>
-                {eventSummary(event) ? <Text variant="xs" dim style={styles.timelineBody}>{eventSummary(event)}</Text> : null}
+          {current === 'diff' ? (
+            <DiffTab job={job} viewed={viewed} onViewed={setViewed} onFix={fixOne} focus={focus}
+              onFileLayout={(path, y) => { fileY.current[path] = y; }} />
+          ) : null}
+          {current === 'review' ? (
+            <ReviewTab
+              job={job}
+              selected={findings}
+              busy={cmd.busy}
+              onToggle={id => setFindings(old => (old.includes(id) ? old.filter(x => x !== id) : [...old, id]))}
+              onFixSelected={() => cmd.invoke('reprompt')}
+              onFixOne={fixOne}
+              onDisposition={(id, disposition) => cmd.invoke('markFindings', { ids: [id], disposition })}
+              onJump={jumpToDiff}
+            />
+          ) : null}
+          {current === 'checks' ? <ChecksTab job={job} invoke={cmd.invoke} busy={cmd.busy} /> : null}
+          {current === 'diagnostics' ? (
+            <View style={styles.col}>
+              <View style={styles.row}>
+                <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold, flex: 1 }}>Job diagnostics</Text>
+                <PlanosButton small label="Refresh" onPress={loadDiagnostics} />
+                <PlanosButton small label="Job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId })} />
               </View>
+              {diagnostics ? (
+                <>
+                  <Panel title="Worker">
+                    <KV label="Status">{diagnostics.status.replace(/_/g, ' ')}{diagnostics.attention_reason ? ` · ${diagnostics.attention_reason.replace(/_/g, ' ')}` : ''}</KV>
+                    <KV label="Worker">{diagnostics.worker_id || '—'}</KV>
+                    <KV label="Heartbeat">{diagnostics.heartbeat_at ? when(diagnostics.heartbeat_at) : '—'}</KV>
+                    <KV label="Base"><Text variant="xs" style={styles.mono}>{diagnostics.base_branch} {diagnostics.base_sha?.slice(0, 12)}</Text></KV>
+                    <KV label="Worktree"><Text variant="xs" style={styles.mono}>{diagnostics.worktree || '—'}</Text></KV>
+                  </Panel>
+                  {diagnostics.latest_failure ? (
+                    <Banner tone="danger" glyph="✗" role="alert" title={`Latest failure: ${diagnostics.latest_failure.event_type}`}>
+                      <Text variant="xs">{diagnostics.latest_failure.reason}</Text>
+                      <Pre numberOfLines={20}>{JSON.stringify(diagnostics.latest_failure.payload, null, 2)}</Pre>
+                    </Banner>
+                  ) : null}
+                  <Panel title="Worker log" right={<Text variant="xs" style={{ color: colors.muted }}>{diagnostics.worker_log_truncated ? 'tail' : ''}</Text>}>
+                    <Pre testID="job-worker-log">{diagnostics?.worker_log_tail || 'No worker log.'}</Pre>
+                  </Panel>
+                  {diagnostics.diagnostics?.length ? (
+                    <Panel title="Diagnostic events" badge={diagnostics.diagnostics.length}>
+                      {diagnostics.diagnostics.slice().reverse().map(e => <AuditRow key={e.id} event={e} />)}
+                    </Panel>
+                  ) : null}
+                </>
+              ) : <Loading label="Loading diagnostics…" />}
             </View>
-          )) : <Text variant="sm" dim>No activity recorded yet.</Text>}
-        </DetailSection>
+          ) : null}
+          {current === 'costs' ? <CostsTab job={job} attempts={attempts} /> : null}
+        </View>
       </ScrollView>
+      {cmd.sheets}
+      <JobStageModelsSheet visible={models} onClose={() => setModels(false)} onSaved={() => setModels(false)} />
+      <JobEnvironmentsSheet visible={environments} onClose={() => setEnvironments(false)} environments={job.build_environments}
+        actions={job.actions} invoke={cmd.invoke} busy={cmd.busy} repository={job.repository} session={job.origin_session} />
     </SafeAreaView>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+type AuditLike = { id: number; event_type: string; reason: string; created_at: number; payload: Record<string, unknown>; to_status?: string | null };
+
+/** Audit row: tone dot, time, type → status, reason; tap to expand the payload. */
+function AuditRow({ event: e }: { event: AuditLike }) {
   const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  const tone = eventTone(`${e.event_type} ${e.to_status || ''}`);
   return (
-    <View style={[styles.metric, { borderRightColor: colors.hairline }]}>
-      <Text variant="xs" style={[styles.metricLabel, { color: colors.textDim }]}>{label}</Text>
-      <Text variant="base" style={styles.metricValue}>{value}</Text>
+    <View style={styles.audit}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${when(e.created_at)} ${e.event_type}${e.to_status ? ` to ${e.to_status}` : ''}`}
+        onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget, alignItems: 'flex-start' }]}>
+        <Text variant="xs" style={{ color: toneColor(colors, tone), marginTop: 2 }}>●</Text>
+        <View style={{ flex: 1 }}>
+          <Text variant="xs"><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{e.event_type}</Text>{e.to_status ? <Text variant="xs" style={{ color: colors.muted }}> → {e.to_status}</Text> : null}</Text>
+          {e.reason ? <Text variant="xs" style={{ color: colors.muted }} numberOfLines={open ? undefined : 2}>{e.reason}</Text> : null}
+        </View>
+        <Text variant="xs" style={[styles.mono, { color: colors.muted }]}>{when(e.created_at).slice(5)}</Text>
+      </Pressable>
+      {open ? <Pre>{JSON.stringify(e.payload)}</Pre> : null}
     </View>
   );
 }
 
-function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+/** Cost & audit: cost per stage bars, attempts and the audit timeline. */
+function CostsTab({ job, attempts }: { job: JobVM; attempts: JobAttempt[] | null }) {
   const { colors } = useTheme();
+  const costs = job.costs;
+  const stages = Object.entries(costs?.by_stage || {}).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(0.0001, ...stages.map(([, v]) => v));
+  const events = (costs?.events || []).filter(e => !['sandbox_event', 'checks_output'].includes(e.event_type));
+  const times = events.map(e => Number(e.created_at)).filter(Number.isFinite);
+  const t0 = Math.min(...times), t1 = Math.max(...times);
   return (
-    <View style={[styles.section, { borderBottomColor: colors.hairline }]}>
-      <Text variant="sm" style={styles.sectionTitle}>{title}</Text>
-      {children}
+    <View style={styles.col}>
+      <Panel title="Cost per stage" right={<Text variant="sm" style={[styles.num, { fontWeight: fontWeights.bold }]}>{money(costs?.total_usd ?? job.cost_usd)}</Text>} testID="job-costs">
+        {stages.length ? stages.map(([s, v]) => (
+          <View key={s} style={styles.costRow}>
+            <Text variant="xs" style={{ width: 84 }}>{s}</Text>
+            <Meter value={v} max={max} tone="accent" accessibilityLabel={`${s} ${money(v)}`} />
+            <Text variant="xs" style={[styles.num, { width: 56, textAlign: 'right' }]}>{money(v)}</Text>
+          </View>
+        )) : <Empty>No cost recorded.</Empty>}
+      </Panel>
+      <Panel title="Attempts" badge={attempts?.length ?? ''}>
+        {attempts == null ? <Loading label="Loading attempts…" /> : attempts.length ? attempts.map(a => {
+          const tone = /fail|error/.test(a.status) ? 'danger' : /run/.test(a.status) ? 'running' : /succ|done|complete|pass/.test(a.status) ? 'ok' : 'muted';
+          return (
+            <View key={a.id} style={[styles.attempt, { borderBottomColor: colors.border }]}>
+              <View style={styles.row}>
+                <Text variant="xs" style={styles.num}>#{a.number}</Text>
+                <Pill tone={tone}>{a.status}</Pill>
+                <View style={{ flex: 1 }} />
+                <Text variant="xs" style={styles.num}>{money(a.cost_usd)}</Text>
+                <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{a.finished_at && a.started_at ? duration((a.finished_at - a.started_at) * 1000) : ''}</Text>
+              </View>
+              <Text variant="xs" style={{ color: colors.muted }}>{when(a.started_at)}</Text>
+              {a.error ? <Text variant="xs" style={{ color: colors.danger }} numberOfLines={3}>{a.error}</Text> : null}
+            </View>
+          );
+        }) : <Empty>None.</Empty>}
+      </Panel>
+      <Panel title="Audit timeline" badge={events.length} testID="job-audit">
+        {times.length > 1 ? (
+          <View accessible accessibilityRole="image" accessibilityLabel={`Timeline: ${events.length} events from ${when(t0)} to ${when(t1)}`}>
+            <View style={styles.timeline}>
+              <View style={[styles.timelineAxis, { backgroundColor: colors.border }]} />
+              {events.map(e => (
+                <View key={e.id} style={[styles.timelineDot, { left: `${((Number(e.created_at) - t0) / Math.max(1, t1 - t0)) * 96 + 2}%`, backgroundColor: toneColor(colors, eventTone(`${e.event_type} ${e.to_status || ''}`)) }]} />
+              ))}
+            </View>
+            <View style={styles.row}>
+              <Text variant="xs" style={[styles.mono, { color: colors.muted, flex: 1 }]}>{when(t0)}</Text>
+              <Text variant="xs" style={[styles.mono, { color: colors.muted }]}>{when(t1)}</Text>
+            </View>
+          </View>
+        ) : null}
+        {events.length ? events.slice().reverse().map(e => <AuditRow key={e.id} event={e} />) : <Empty>No audit entries.</Empty>}
+      </Panel>
     </View>
-  );
-}
-
-function ReceiptRow({ label, value }: { label: string; value: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={[styles.receiptRow, { borderTopColor: colors.hairline }]}>
-      <Text variant="xs" dim style={styles.receiptLabel}>{label}</Text>
-      <Text variant="xs" style={[styles.receiptValue, styles.mono, { color: colors.textSoft }]} numberOfLines={2} ellipsizeMode="middle">{value}</Text>
-    </View>
-  );
-}
-
-type ReviewActionsProps = {
-  job: EngineeringJob;
-  context: Record<string, unknown>;
-  responseText: string;
-  setResponseText: (value: string) => void;
-  acting: boolean;
-  onAction: (action: 'approve' | 'deny' | 'respond' | 'changes' | 'continue' | 'discard') => Promise<void>;
-  onDiscard: () => void;
-};
-
-function ReviewActions({ job, context, responseText, setResponseText, acting, onAction, onDiscard }: ReviewActionsProps) {
-  const { colors } = useTheme();
-  if (['merged', 'cancelled'].includes(job.status)) return null;
-
-  let title = statusLabel(job.status);
-  let description = 'MuCLI is working in the background. Closing mobile does not affect execution.';
-  let placeholder = 'Optional guidance';
-  let controls: React.ReactNode = (
-    <ActionButton label="Cancel job" destructive disabled={acting} onPress={onDiscard} />
-  );
-
-  if (job.status === 'needs_human' && job.attention_reason === 'approval_required') {
-    title = 'Approval required';
-    description = job.attention_detail || `Approve ${String(context.tool_name || 'tool request')}?`;
-    placeholder = 'Optional explanation';
-    controls = (
-      <>
-        {context.can_approve !== false ? <ActionButton label="Approve" primary disabled={acting} onPress={() => void onAction('approve')} /> : null}
-        <ActionButton label="Deny" destructive disabled={acting} onPress={() => void onAction('deny')} />
-      </>
-    );
-  } else if (job.status === 'needs_human') {
-    title = job.attention_reason === 'verification_required' ? 'Validation required' : 'Input required';
-    description = job.attention_detail || 'The agent needs your input to continue.';
-    placeholder = job.attention_reason === 'verification_required' ? 'One validation command per line' : 'Your response';
-    controls = <ActionButton label="Respond & continue" primary disabled={acting} onPress={() => void onAction('respond')} />;
-  } else if (job.status === 'ready_for_review') {
-    title = 'Review decision';
-    description = 'Verification passed. Review the evidence and diff before sending it back for more work.';
-    placeholder = 'Feedback for another implementation pass';
-    controls = (
-      <>
-        <ActionButton label="Request changes" primary disabled={acting} onPress={() => void onAction('changes')} />
-        <ActionButton label="Continue work" disabled={acting} onPress={() => void onAction('continue')} />
-        <ActionButton label="Discard" destructive disabled={acting} onPress={onDiscard} />
-      </>
-    );
-  } else if (['failed', 'timed_out', 'budget_exceeded', 'environment_error'].includes(job.status)) {
-    title = 'Recovery';
-    description = 'Add guidance and retry the same durable branch and job session.';
-    placeholder = 'Optional guidance for the retry';
-    controls = (
-      <>
-        <ActionButton label="Retry / continue" primary disabled={acting} onPress={() => void onAction('continue')} />
-        <ActionButton label="Discard" destructive disabled={acting} onPress={onDiscard} />
-      </>
-    );
-  }
-
-  return (
-    <View style={[styles.actionPanel, { borderBottomColor: colors.hairline }]}>
-      <Text variant="sm" style={styles.actionTitle}>{title}</Text>
-      <Text variant="xs" dim style={styles.actionDescription}>{description}</Text>
-      {job.status === 'needs_human' && job.attention_reason === 'approval_required' && context.tool_name ? (
-        <Text variant="xs" style={[styles.mono, { color: colors.textDim, marginBottom: 8 }]}>{String(context.tool_name)}</Text>
-      ) : null}
-      {!['queued', 'preparing', 'running', 'verifying', 'recovering'].includes(job.status) ? (
-        <TextInput
-          value={responseText}
-          onChangeText={setResponseText}
-          placeholder={placeholder}
-          placeholderTextColor={colors.textDim}
-          multiline
-          style={[styles.actionInput, { color: colors.text, borderBottomColor: colors.hairline }]}
-        />
-      ) : null}
-      <View style={styles.actionButtons}>{controls}</View>
-      {acting ? <ActivityIndicator size="small" color={colors.accent} style={styles.actionSpinner} /> : null}
-    </View>
-  );
-}
-
-type PlanReviewCardProps = {
-  job: EngineeringJob;
-  context: Record<string, unknown>;
-  acting: boolean;
-  onSubmit: (body: JobInteractionResponse) => Promise<void>;
-};
-
-function PlanReviewCard({ job, context, acting, onSubmit }: PlanReviewCardProps) {
-  const { colors } = useTheme();
-  const draft = useMemo(() => planReviewDraft(job, context), [job, context]);
-  const [criteria, setCriteria] = useState(draft.criteria.join('\n'));
-  const [commands, setCommands] = useState(draft.commands.join('\n'));
-  const [note, setNote] = useState('');
-  const [error, setError] = useState('');
-  const plannedBy = draft.plan.model?.model ? `${draft.plan.model.provider || ''} · ${draft.plan.model.model}` : '';
-  const inputStyle = [styles.actionInput, { color: colors.text, borderBottomColor: colors.hairline }];
-
-  const approve = () => {
-    setError('');
-    void onSubmit(planApprovalBody(criteria, commands, note));
-  };
-  const replan = () => {
-    if (!note.trim()) {
-      setError('Tell the planner what to change first.');
-      return;
-    }
-    setError('');
-    void onSubmit({ decision: 'replan', detail: note.trim() });
-  };
-
-  return (
-    <View style={[styles.actionPanel, { borderBottomColor: colors.hairline }]}>
-      <Text variant="sm" style={styles.actionTitle}>Review plan</Text>
-      <Text variant="xs" dim style={styles.actionDescription}>
-        {job.attention_detail || 'Approve the plan to start implementation.'}
-      </Text>
-      {plannedBy ? <Text variant="xs" style={[styles.mono, { color: colors.textDim, marginBottom: 8 }]}>Planned by {plannedBy}</Text> : null}
-      {draft.plan.summary ? <Text variant="sm" style={{ marginBottom: 8 }}>{draft.plan.summary}</Text> : null}
-      {draft.steps.map((step, index) => (
-        <Text key={`step-${index}`} variant="xs" style={{ marginBottom: 4 }}>{index + 1}. {step}</Text>
-      ))}
-      <Text variant="xs" dim style={{ marginTop: 10 }}>Acceptance criteria (one per line)</Text>
-      <TextInput
-        accessibilityLabel="Acceptance criteria, one per line"
-        value={criteria}
-        onChangeText={setCriteria}
-        multiline
-        placeholder="One criterion per line"
-        placeholderTextColor={colors.textDim}
-        style={inputStyle}
-      />
-      <Text variant="xs" dim>Validation commands (one per line)</Text>
-      <TextInput
-        accessibilityLabel="Validation commands, one per line"
-        value={commands}
-        onChangeText={setCommands}
-        multiline
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="pytest tests/"
-        placeholderTextColor={colors.textDim}
-        style={[...inputStyle, styles.mono]}
-      />
-      <Text variant="xs" dim>Note or re-plan feedback (optional)</Text>
-      <TextInput
-        accessibilityLabel="Note or re-plan feedback"
-        value={note}
-        onChangeText={setNote}
-        multiline
-        placeholder="What should the planner change?"
-        placeholderTextColor={colors.textDim}
-        style={inputStyle}
-      />
-      {error ? <Text variant="xs" style={{ color: colors.error, marginBottom: 8 }}>{error}</Text> : null}
-      <View style={styles.actionButtons}>
-        <ActionButton label="Approve & implement" primary disabled={acting} onPress={approve} />
-        <ActionButton label="Re-plan" disabled={acting} onPress={replan} />
-      </View>
-      {acting ? <ActivityIndicator size="small" color={colors.accent} style={styles.actionSpinner} /> : null}
-    </View>
-  );
-}
-
-type ModelsUnsetCardProps = {
-  job: EngineeringJob;
-  context: Record<string, unknown>;
-  acting: boolean;
-  onOpenSettings: () => void;
-  onResume: () => Promise<void>;
-};
-
-function ModelsUnsetCard({ job, context, acting, onOpenSettings, onResume }: ModelsUnsetCardProps) {
-  const { colors } = useTheme();
-  const missing = Array.isArray(context.missing_stages) ? context.missing_stages.map(String) : [];
-  return (
-    <View style={[styles.actionPanel, { borderBottomColor: colors.hairline }]}>
-      <Text variant="sm" style={styles.actionTitle}>Pick stage models</Text>
-      <Text variant="xs" dim style={styles.actionDescription}>
-        {job.attention_detail || 'Set a model for each pipeline stage, then resume the job.'}
-      </Text>
-      {missing.length ? (
-        <Text variant="xs" style={{ color: colors.warning, marginBottom: 8 }}>Missing: {missing.join(', ')}</Text>
-      ) : null}
-      <View style={styles.actionButtons}>
-        <ActionButton label="Set stage models" primary disabled={acting} onPress={onOpenSettings} />
-        <ActionButton label="Resume job" disabled={acting} onPress={() => void onResume()} />
-      </View>
-      {acting ? <ActivityIndicator size="small" color={colors.accent} style={styles.actionSpinner} /> : null}
-    </View>
-  );
-}
-
-function ActionButton({ label, primary = false, destructive = false, disabled = false, onPress }: { label: string; primary?: boolean; destructive?: boolean; disabled?: boolean; onPress: () => void }) {
-  const { colors } = useTheme();
-  const color = destructive ? colors.error : primary ? colors.text : colors.textSoft;
-  const borderColor = destructive ? colors.error : primary ? colors.accent : colors.hairline;
-  return (
-    <TouchableOpacity
-      disabled={disabled}
-      onPress={onPress}
-      style={[
-        styles.actionButton,
-        { borderColor, backgroundColor: primary ? colors.accentSoft : 'transparent', opacity: disabled ? 0.5 : 1 },
-      ]}
-    >
-      <Text variant="xs" style={{ color, fontWeight: '600' }}>{label}</Text>
-    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
-  centered: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  centeredCopy: { marginTop: 6, textAlign: 'center' },
-  content: { paddingBottom: 60 },
-  hero: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 20, borderBottomWidth: StyleSheet.hairlineWidth },
-  status: { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '600' },
-  title: { marginTop: 5, fontWeight: '600', letterSpacing: -0.5 },
-  description: { marginTop: 7, lineHeight: 20 },
-  banner: { marginTop: 15, paddingHorizontal: 11, paddingVertical: 10, borderLeftWidth: 2 },
-  metrics: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
-  metric: { flex: 1, paddingHorizontal: 12, paddingVertical: 14, borderRightWidth: StyleSheet.hairlineWidth },
-  metricLabel: { textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '600' },
-  metricValue: { marginTop: 4, fontWeight: '600', fontSize: 15 },
-  errorLine: { minHeight: 46, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  actionPanel: { paddingHorizontal: 18, paddingVertical: 18, borderBottomWidth: StyleSheet.hairlineWidth },
-  actionTitle: { fontWeight: '600' },
-  actionDescription: { marginTop: 4, marginBottom: 8, lineHeight: 18 },
-  actionInput: { minHeight: 68, paddingHorizontal: 1, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, textAlignVertical: 'top', fontSize: 13, marginBottom: 12 },
-  actionButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  actionButton: { minHeight: 36, paddingHorizontal: 11, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  actionSpinner: { marginTop: 12, alignSelf: 'flex-start' },
-  section: { paddingHorizontal: 18, paddingVertical: 19, borderBottomWidth: StyleSheet.hairlineWidth },
-  deleteSection: { borderBottomWidth: 0, gap: 12 },
-  deleteCopy: { lineHeight: 18 },
-  sectionTitle: { fontWeight: '600', marginBottom: 11 },
-  receiptRow: { minHeight: 39, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  receiptLabel: { width: 102 },
-  receiptValue: { flex: 1, textAlign: 'right' },
-  bulletRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  checkRow: { minHeight: 46, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  checkCopy: { flex: 1 },
-  mono: { fontFamily: 'monospace' },
-  diffStat: { lineHeight: 17, marginBottom: 10 },
-  diffBox: { maxHeight: 420, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
-  logBox: { maxHeight: 300, marginTop: 10, marginBottom: 8, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
-  diagnosticFailure: { paddingHorizontal: 10, paddingVertical: 9, marginBottom: 10, borderLeftWidth: 2 },
-  timelineRow: { minHeight: 48, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 10 },
-  timelineDot: { width: 4, height: 4, borderRadius: 2, marginTop: 6 },
-  timelineCopy: { flex: 1 },
-  timelineBody: { marginTop: 3, lineHeight: 17 },
+  root: { flex: 1 },
+  loading: { flex: 1, padding: spacing.base },
+  content: { padding: spacing.base, gap: spacing.md, paddingBottom: spacing['3xl'] },
+  header: { gap: spacing.xs },
+  col: { gap: spacing.md },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  mono: { fontFamily: fonts.mono },
+  num: { fontVariant: ['tabular-nums'] },
+  link: { minHeight: 32, justifyContent: 'center' },
+  tabBody: { gap: spacing.md },
+  costRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 28 },
+  attempt: { paddingVertical: spacing.xs, borderBottomWidth: 1, gap: 2 },
+  audit: { gap: spacing.xs },
+  timeline: { height: 20, justifyContent: 'center', marginBottom: spacing.xs },
+  timelineAxis: { height: 1, alignSelf: 'stretch' },
+  timelineDot: { position: 'absolute', width: 8, height: 8, borderRadius: 4, top: 6 },
 });
+

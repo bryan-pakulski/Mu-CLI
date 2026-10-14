@@ -17,7 +17,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { Text, Badge } from '../components';
 import { useConnectionStore } from '../store/connection';
 import { sessionsApi } from '../api/sessions';
-import { spacing } from '../theme/tokens';
+import { spacing, fontSizes, fontWeights, fonts, radii, typography, touchTarget } from '../theme/tokens';
 
 const MUCLI_SHELL_QOL_V1 = true;
 const SHELL_HISTORY = new Map<string, string[]>();
@@ -299,17 +299,17 @@ export function ShellScreen() {
       justifyContent: 'space-between',
       paddingHorizontal: spacing.base,
       paddingVertical: spacing.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.hairline,
     },
-    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    headerActions: { flexDirection: 'row', gap: 12 },
-    actionBtn: { padding: 4 },
-    outputWrap: { flex: 1, paddingHorizontal: spacing.sm },
+    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    headerActions: { flexDirection: 'row', gap: spacing.xs },
+    actionBtn: { minWidth: touchTarget, minHeight: touchTarget, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm },
+    outputWrap: { flex: 1, paddingHorizontal: spacing.sm, backgroundColor: colors.codeBg },
     output: {
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 12,
-      lineHeight: 16,
+      fontFamily: fonts.mono,
+      fontSize: fontSizes.xs,
+      lineHeight: typography.xs.lineHeight,
       color: colors.text,
       includeFontPadding: false,
     },
@@ -318,38 +318,41 @@ export function ShellScreen() {
       alignItems: 'center',
       paddingHorizontal: spacing.sm,
       paddingVertical: spacing.xs,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.border,
-      gap: 5,
+      borderTopWidth: 1,
+      borderTopColor: colors.hairline,
+      gap: spacing.xs,
     },
     prompt: {
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 13,
-      color: colors.accent,
+      fontFamily: fonts.mono,
+      fontSize: fontSizes.sm,
+      color: colors.textDim,
     },
     input: {
       flex: 1,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 13,
+      fontFamily: fonts.mono,
+      fontSize: fontSizes.sm,
       color: colors.text,
-      paddingVertical: 6,
-      paddingHorizontal: 8,
-      backgroundColor: colors.card,
-      borderRadius: 6,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      backgroundColor: colors.bg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radii.sm,
+      minHeight: touchTarget,
     },
     keyButton: {
-      minWidth: 32,
-      height: 32,
-      borderRadius: 7,
+      minWidth: touchTarget,
+      height: touchTarget,
+      borderRadius: radii.sm,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.card,
-      paddingHorizontal: 5,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.xs,
     },
     errorBar: {
       paddingHorizontal: spacing.base,
       paddingVertical: spacing.xs,
-      backgroundColor: colors.errorBg || colors.card,
+      backgroundColor: colors.errorSubtle,
     },
     emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.base },
   });
@@ -358,17 +361,17 @@ export function ShellScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Ionicons name="terminal-outline" size={18} color={colors.accent} />
-          <Text variant="base" style={{ fontWeight: '600' }}>Shell</Text>
+          <Ionicons name="terminal-outline" size={18} color={colors.textSoft} />
+          <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Shell</Text>
           <Badge
             label={connected ? 'Connected' : connecting ? 'Connecting…' : 'Disconnected'}
-            variant={connected ? 'accent' : 'neutral'}
+            variant={connected ? 'success' : 'neutral'}
           />
         </View>
         <View style={styles.headerActions}>
           {!followingOutput && output ? (
             <TouchableOpacity onPress={() => jumpToEnd()} style={styles.actionBtn} accessibilityLabel="Jump to latest shell output">
-              <Ionicons name="arrow-down-circle-outline" size={21} color={colors.accent} />
+              <Ionicons name="arrow-down-circle-outline" size={20} color={colors.textSoft} />
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity onPress={clear} style={styles.actionBtn} accessibilityLabel="Clear output">
@@ -439,7 +442,7 @@ export function ShellScreen() {
               editable={connected}
             />
             <TouchableOpacity onPress={complete} disabled={!connected} style={styles.keyButton} accessibilityLabel="Complete shell input">
-              <Text variant="xs" style={{ color: colors.textDim, fontWeight: '700' }}>TAB</Text>
+              <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>TAB</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => cycleHistory(-1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Previous shell command">
               <Ionicons name="chevron-up" size={17} color={colors.textDim} />

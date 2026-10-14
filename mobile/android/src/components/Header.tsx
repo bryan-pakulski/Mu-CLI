@@ -6,6 +6,7 @@ import { useConnectionStore } from '../store/connection';
 import { BottomSheet } from './BottomSheet';
 import { Text } from './Text';
 import { sessionsApi } from '../api/sessions';
+import { fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
 
 export type ViewPanel = 'chat' | 'modes' | 'prompts' | 'systemPrompts' | 'teacher' | 'feature' | 'research' | 'security' | 'loop' | 'debug' | 'history' | 'memory' | 'files' | 'skills' | 'audio' | 'traces' | 'providers' | 'connection';
 
@@ -59,7 +60,7 @@ export function Header({ activeView, onViewChange, onOpenSessions, onOpenInspect
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bgLift, borderBottomColor: colors.border }]}>
+    <View style={[styles.container, { backgroundColor: colors.bg, borderBottomColor: colors.hairline }]}>
       {/* Left: hamburger + brand */}
       <View style={styles.left}>
         <TouchableOpacity onPress={onOpenSessions} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.iconBtn}>
@@ -72,7 +73,7 @@ export function Header({ activeView, onViewChange, onOpenSessions, onOpenInspect
       <View style={styles.center}>
         <TouchableOpacity
           onPress={() => setViewPickerOpen(true)}
-          style={[styles.viewPicker, { backgroundColor: colors.bg, borderColor: colors.border }]}
+          style={[styles.viewPicker, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
           <Ionicons name={currentPanel?.icon || 'apps'} size={16} color={colors.textDim} />
@@ -87,10 +88,10 @@ export function Header({ activeView, onViewChange, onOpenSessions, onOpenInspect
       <View style={styles.right}>
         <TouchableOpacity
           onPress={() => setYolo(!yolo)}
-          style={[styles.yoloPill, { backgroundColor: yolo ? colors.accent : 'transparent', borderColor: yolo ? colors.accent : colors.border }]}
-          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          style={[styles.yoloPill, { backgroundColor: yolo ? colors.accent : colors.border, borderColor: yolo ? colors.accent : colors.border }]}
+          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
         >
-          <Text style={[styles.yoloText, { color: yolo ? '#fff' : colors.textDim }]}>YOLO</Text>
+          <Text style={[styles.yoloText, { color: yolo ? colors.accentOn : colors.textSoft }]}>YOLO</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={onOpenInspector} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.iconBtn}>
@@ -121,12 +122,12 @@ export function Header({ activeView, onViewChange, onOpenSessions, onOpenInspect
               }}
               style={[
                 styles.viewPickerItem,
-                { backgroundColor: activeView === item.id ? colors.accent : colors.bg, borderColor: activeView === item.id ? colors.accent : colors.border },
+                { backgroundColor: activeView === item.id ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: activeView === item.id ? colors.accent : colors.border },
               ]}
             >
-              <Ionicons name={item.icon} size={24} color={activeView === item.id ? '#fff' : colors.text} />
+              <Ionicons name={item.icon} size={24} color={activeView === item.id ? colors.accentFg : colors.textSoft} />
               <Text
-                style={[styles.viewPickerLabel, { color: activeView === item.id ? '#fff' : colors.text }]}
+                style={[styles.viewPickerLabel, { color: activeView === item.id ? colors.accentFg : colors.text, fontWeight: activeView === item.id ? fontWeights.semibold : fontWeights.medium }]}
                 numberOfLines={1}
               >
                 {item.label}
@@ -144,76 +145,73 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
   },
   left: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
   center: {
     flex: 1,
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: spacing.sm,
   },
   right: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing.xs,
   },
   iconBtn: {
-    minHeight: 44,
-    minWidth: 44,
+    minHeight: touchTarget,
+    minWidth: touchTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
   brand: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.semibold,
   },
   viewPicker: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    borderWidth: 1,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
     minHeight: 36,
   },
   viewLabel: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.medium,
   },
   yoloPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
     borderWidth: 1,
     minHeight: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   yoloText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.semibold,
   },
   viewPickerItem: {
     flex: 1 / 3,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 16,
-    margin: 4,
-    borderRadius: 8,
-    borderWidth: 1,
+    gap: spacing.sm,
+    paddingVertical: spacing.base,
+    margin: spacing.xs,
+    borderRadius: radii.sm,
     minHeight: 80,
   },
   viewPickerLabel: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.medium,
   },
 });

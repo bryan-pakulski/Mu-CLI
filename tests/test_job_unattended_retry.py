@@ -18,7 +18,7 @@ import pytest
 
 from mu.jobs import JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.controller import JobController
-from mu.jobs.runner import JobRunOutcome, SessionJobRunner
+from mu.jobs.runner import JobRunOutcome
 from mu.jobs.ui import JobUI
 from mu.jobs.worker import _apply_outcome, _retry_backoff_seconds
 from mu.jobs.worktree import JobWorktreeManager
@@ -254,8 +254,3 @@ def test_auto_policy_aborts_non_transient(monkeypatch):
     assert s._provider_error_recovery_choice() == "abort"
 
 
-def test_runner_sets_auto_policy_and_flags_transient_outcomes():
-    assert SessionJobRunner._is_transient_error(None, "429 Too Many Requests") is True
-    assert SessionJobRunner._is_transient_error(None, "KeyError: 'x'") is False
-    flagged = SimpleNamespace(_last_provider_error_transient=True)
-    assert SessionJobRunner._is_transient_error(flagged, "anything") is True

@@ -1,4 +1,4 @@
-"""Deterministic verification and durable evidence manifests for jobs."""
+"""Durable check-run evidence (``VerificationRun`` manifests) and shared check helpers."""
 
 from __future__ import annotations
 
@@ -8,16 +8,12 @@ import sqlite3
 import re
 import subprocess
 import threading
-import time
-import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 from utils.config import HISTORY_DIR
 
-from .models import Job
-from .service import JobService
 from .store import JobStore
 
 
@@ -333,241 +329,49 @@ class _CappedReader:
         return head_text[: self._cap // 2] + marker + tail_text[-self._cap // 2 :], True
 
 
-class DeterministicVerifier:
-    def __init__(self, service: JobService, *, store: Optional[VerificationStore] = None):
-        self.service = service
-        self.store = store or VerificationStore(service.store)
+def _git(worktree: str, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", worktree, *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=60,
+        check=False,
+    )
+    return (result.stdout or "").strip()
 
-    @staticmethod
-    def _git(worktree: str, *args: str, check: bool = True) -> str:
-        result = subprocess.run(
-            ["git", "-C", worktree, *args],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=60,
-            check=False,
-        )
-        if check and result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout or "git command failed").strip())
-        return (result.stdout or "").strip()
 
-    @staticmethod
-    def _changed_files(worktree: str, base_sha: str, head_sha: str) -> tuple[List[Dict[str, Any]], int, int]:
-        if not base_sha or not head_sha:
-            return [], 0, 0
-        status_text = DeterministicVerifier._git(
-            worktree, "diff", "--name-status", f"{base_sha}..{head_sha}", check=False
-        )
-        numstat_text = DeterministicVerifier._git(
-            worktree, "diff", "--numstat", f"{base_sha}..{head_sha}", check=False
-        )
-        stats: Dict[str, tuple[Optional[int], Optional[int]]] = {}
-        additions = 0
-        deletions = 0
-        for line in numstat_text.splitlines():
-            parts = line.split("\t", 2)
-            if len(parts) != 3:
-                continue
-            add_raw, del_raw, path = parts
-            add = int(add_raw) if add_raw.isdigit() else None
-            delete = int(del_raw) if del_raw.isdigit() else None
-            stats[path] = (add, delete)
-            additions += add or 0
-            deletions += delete or 0
-        changed: List[Dict[str, Any]] = []
-        for line in status_text.splitlines():
-            parts = line.split("\t")
-            if len(parts) < 2:
-                continue
-            change = parts[0]
-            path = parts[-1]
-            add, delete = stats.get(path, (None, None))
-            changed.append({
-                "status": change,
-                "path": path,
-                "additions": add,
-                "deletions": delete,
-            })
-        return changed, additions, deletions
-
-    def verify(self, job: Job) -> VerificationRun:
-        if not job.worktree or not os.path.isdir(job.worktree):
-            raise RuntimeError(f"Job worktree is unavailable: {job.worktree or 'not prepared'}")
-        started_at = time.time()
-        monotonic_start = time.monotonic()
-        verification_id = uuid.uuid4().hex
-        head_before = self._git(job.worktree, "rev-parse", "HEAD^{commit}")
-        checks: List[VerificationCheck] = []
-        timeout_seconds = int(job.execution.get("validation_timeout_seconds", 600) or 600)
-        timeout_seconds = max(1, min(timeout_seconds, 3600))
-
-        for command in job.validation_commands:
-            command_start = time.monotonic()
-            try:
-                # Own process group: on timeout we must kill the entire
-                # tree (shell + spawned descendants), not just the shell —
-                # survivors could keep mutating the worktree after
-                # verification inspects it.
-                child = subprocess.Popen(
-                    command,
-                    cwd=job.worktree,
-                    shell=True,
-                    text=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    start_new_session=True,  # child leads its own process group
-                    bufsize=_STREAM_BUF_SIZE,
-                )
-                # Round-35 F5: initialize BEFORE the child starts — on a
-                # timeout these are referenced by the outer TimeoutExpired
-                # handler; when the FIRST command times out they were never
-                # assigned, raising UnboundLocalError and aborting the whole
-                # verifier (job stuck VERIFYING, relaunched forever).
-                stdout = ""
-                stderr = ""
-                out_reader = _CappedReader(child.stdout)
-                err_reader = _CappedReader(child.stderr)
-                out_reader.start()
-                err_reader.start()
-                try:
-                    child.wait(timeout=timeout_seconds)
-                    stdout, _trunc1 = out_reader.join(timeout=5)
-                    stderr, _trunc2 = err_reader.join(timeout=5)
-                    result = subprocess.CompletedProcess(
-                        command, child.returncode, stdout, stderr
-                    )
-                except subprocess.TimeoutExpired:
-                    # subprocess.run would kill only the shell; kill the
-                    # whole group so descendants die too.
-                    _kill_process_group(child.pid)
-                    # A descendant that escaped the group may still hold the
-                    # pipe descriptors; bound this drain so the worker can
-                    # never hang forever on it.
-                    try:
-                        child.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        try:
-                            child.kill()
-                        except OSError:
-                            pass
-                    # Round-35 F5: capture whatever the readers drained so
-                    # the timed-out check's diagnostics are not lost.
-                    stdout, _trunc1 = out_reader.join(timeout=2)
-                    stderr, _trunc2 = err_reader.join(timeout=2)
-                    raise
-                checks.append(VerificationCheck(
-                    command=command,
-                    return_code=int(result.returncode),
-                    passed=result.returncode == 0,
-                    timed_out=False,
-                    duration_ms=int((time.monotonic() - command_start) * 1000),
-                    stdout=_bounded(result.stdout),
-                    stderr=_bounded(result.stderr),
-                ))
-            except subprocess.TimeoutExpired:
-                checks.append(VerificationCheck(
-                    command=command,
-                    return_code=None,
-                    passed=False,
-                    timed_out=True,
-                    duration_ms=int((time.monotonic() - command_start) * 1000),
-                    stdout=_bounded(stdout or ""),
-                    stderr=_bounded(stderr or ""),
-                    error=f"timed out after {timeout_seconds}s (process group killed)",
-                ))
-            except Exception as exc:
-                checks.append(VerificationCheck(
-                    command=command,
-                    return_code=None,
-                    passed=False,
-                    timed_out=False,
-                    duration_ms=int((time.monotonic() - command_start) * 1000),
-                    error=str(exc),
-                ))
-
-        head_sha = self._git(job.worktree, "rev-parse", "HEAD^{commit}")
-        dirty_status = self._git(job.worktree, "status", "--porcelain", check=False)
-        dirty = bool(dirty_status.strip())
-        changed_files, additions, deletions = self._changed_files(
-            job.worktree, job.base_sha, head_sha
-        )
-        diff_stat = self._git(
-            job.worktree,
-            "diff",
-            "--stat",
-            f"{job.base_sha}..{head_sha}",
-            check=False,
-        ) if job.base_sha else ""
-
-        has_contract = bool(job.validation_commands)
-        checks_passed = has_contract and all(check.passed for check in checks)
-        head_changed = head_before != head_sha
-        # A validation command that commits (or anything else advancing HEAD
-        # mid-run) means the final commit was never exercised by the checks
-        # above — that is a verification failure, not a pass.
-        passed = checks_passed and not dirty and not head_changed
-        if not has_contract:
-            status = "missing_contract"
-        elif head_changed:
-            status = "head_moved_during_verification"
-        elif dirty:
-            status = "dirty_worktree"
-        elif passed:
-            status = "passed"
-        else:
-            status = "failed"
-        finished_at = time.time()
-        summary = {
-            "checks_total": len(checks),
-            "checks_passed": sum(1 for check in checks if check.passed),
-            "checks_failed": sum(1 for check in checks if not check.passed),
-            "acceptance_criteria": list(job.acceptance_criteria),
-            "acceptance_criteria_count": len(job.acceptance_criteria),
-            # Set truthfully by the optional independent acceptance review
-            # (mu/jobs/acceptance.py); deterministic checks alone never
-            # claim to have verified acceptance criteria.
-            "acceptance_criteria_machine_verified": bool(
-                ((job.metadata or {}).get("acceptance_review") or {}).get("verdict") == "pass"
-            ),
-            "changed_files": len(changed_files),
-            "additions": additions,
-            "deletions": deletions,
-            "head_changed_during_verification": head_changed,
-            "head_moved_is_failure": True,
-            "dirty_worktree": dirty,
-        }
-        run = VerificationRun(
-            id=verification_id,
-            job_id=job.id,
-            status=status,
-            passed=passed,
-            started_at=started_at,
-            finished_at=finished_at,
-            duration_ms=int((time.monotonic() - monotonic_start) * 1000),
-            base_sha=job.base_sha,
-            head_sha=head_sha,
-            branch=job.branch,
-            worktree=job.worktree,
-            checks=checks,
-            changed_files=changed_files,
-            additions=additions,
-            deletions=deletions,
-            diff_stat=diff_stat,
-            dirty=dirty,
-            dirty_status=_bounded(dirty_status, 8000),
-            summary=summary,
-        )
-        saved = self.store.save(run)
-        self.service.store.append_event(
-            job.id,
-            "verification_evidence_created",
-            reason=saved.status,
-            payload={
-                "verification_id": saved.id,
-                "passed": saved.passed,
-                "manifest_path": saved.manifest_path,
-                "summary": saved.summary,
-            },
-        )
-        return saved
+def changed_files(worktree: str, base_sha: str, head_sha: str) -> tuple[List[Dict[str, Any]], int, int]:
+    """Per-file name-status + numstat of ``base_sha..head_sha`` (evidence for a check run)."""
+    if not base_sha or not head_sha:
+        return [], 0, 0
+    status_text = _git(worktree, "diff", "--name-status", f"{base_sha}..{head_sha}")
+    numstat_text = _git(worktree, "diff", "--numstat", f"{base_sha}..{head_sha}")
+    stats: Dict[str, tuple[Optional[int], Optional[int]]] = {}
+    additions = 0
+    deletions = 0
+    for line in numstat_text.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        add_raw, del_raw, path = parts
+        add = int(add_raw) if add_raw.isdigit() else None
+        delete = int(del_raw) if del_raw.isdigit() else None
+        stats[path] = (add, delete)
+        additions += add or 0
+        deletions += delete or 0
+    changed: List[Dict[str, Any]] = []
+    for line in status_text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        change = parts[0]
+        path = parts[-1]
+        add, delete = stats.get(path, (None, None))
+        changed.append({
+            "status": change,
+            "path": path,
+            "additions": add,
+            "deletions": delete,
+        })
+    return changed, additions, deletions

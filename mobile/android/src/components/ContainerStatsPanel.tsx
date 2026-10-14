@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { ContainerStats } from '../api/containers';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontWeights, radii, spacing } from '../theme/tokens';
 
 const MUCLI_CONTAINER_MONITOR_V1 = true;
 
@@ -70,10 +71,10 @@ export function ContainerStatsPanel({ stats, status }: Props) {
   ];
 
   return (
-    <View style={[styles.root, { borderTopColor: colors.border }]}>
+    <View style={styles.root}>
       <View style={styles.heading}>
         <View style={styles.headingCopy}>
-          <Text variant="xs" style={{ fontWeight: '700' }}>Live monitor</Text>
+          <Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>Live monitor</Text>
           <Text variant="xs" dim>
             {running
               ? `${stats?.pids ?? 0} processes · up ${formatDuration(stats?.uptime_seconds)}${stats?.restart_count ? ` · ${stats.restart_count} restarts` : ''}`
@@ -85,20 +86,20 @@ export function ContainerStatsPanel({ stats, status }: Props) {
 
       <View style={styles.grid}>
         {metrics.map(metric => (
-          <View key={metric.label} style={[styles.metric, { backgroundColor: colors.bgHover }]}>
+          <View key={metric.label} style={styles.metric}>
             <View style={styles.metricHead}>
               <Ionicons name={metric.icon} size={14} color={colors.textDim} />
               <Text variant="xs" dim>{metric.label}</Text>
             </View>
-            <Text variant="xs" style={styles.value} numberOfLines={1}>{metric.value}</Text>
-            {metric.detail ? <Text variant="xs" dim numberOfLines={1}>{metric.detail}</Text> : null}
+            <Text variant="xs" style={[styles.value, { color: colors.text }]} numberOfLines={1}>{metric.value}</Text>
+            {metric.detail ? <Text variant="xs" dim numberOfLines={1} style={styles.num}>{metric.detail}</Text> : null}
             {typeof metric.progress === 'number' ? (
-              <View style={[styles.track, { backgroundColor: colors.border }]}>
+              <View style={[styles.track, { backgroundColor: colors.bgHover }]}>
                 <View
                   style={[
                     styles.fill,
                     {
-                      backgroundColor: colors.accent,
+                      backgroundColor: colors.viz[0],
                       width: `${Math.max(0, Math.min(100, metric.progress))}%`,
                     },
                   ]}
@@ -150,41 +151,39 @@ function formatDuration(value?: number | null): string {
 
 const styles = StyleSheet.create({
   root: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 12,
-    marginTop: 11,
+    marginTop: spacing.xs,
   },
   heading: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 9,
+    marginBottom: spacing.sm,
   },
   headingCopy: { flex: 1 },
-  liveDot: { width: 7, height: 7, borderRadius: 4 },
+  liveDot: { width: 8, height: 8, borderRadius: radii.pill },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 7,
+    gap: spacing.sm,
   },
   metric: {
     width: '48.7%',
-    minHeight: 72,
-    borderRadius: 12,
-    padding: 9,
+    minHeight: 64,
+    paddingVertical: spacing.xs,
   },
   metricHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    marginBottom: 5,
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
   },
-  value: { fontWeight: '700' },
+  value: { fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] },
+  num: { fontVariant: ['tabular-nums'] },
   track: {
     height: 4,
-    borderRadius: 2,
-    marginTop: 7,
+    borderRadius: radii.pill,
+    marginTop: spacing.sm,
     overflow: 'hidden',
   },
-  fill: { height: 4, borderRadius: 2 },
-  note: { marginTop: 8, lineHeight: 16 },
+  fill: { height: 4, borderRadius: radii.pill },
+  note: { marginTop: spacing.sm },
 });

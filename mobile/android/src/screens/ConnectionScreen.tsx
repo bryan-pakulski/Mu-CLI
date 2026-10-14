@@ -5,11 +5,12 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeContext';
 import { refreshPendingMutations, useConnectionStore } from '../store/connection';
-import { Text, Input, Button, Card } from '../components';
+import { Text, Input, Button } from '../components';
+import { Field, Panel, StatusIcon } from '../components/planos';
 import { checkHealth } from '../api/client';
 import { validateBaseUrl } from '../api/urlSafety';
 import type { RootStackParamList } from '../navigation/AppNavigator';
-import { spacing } from '../theme/tokens';
+import { fontWeights, spacing } from '../theme/tokens';
 
 export function ConnectionScreen() {
   const { colors } = useTheme();
@@ -88,34 +89,27 @@ export function ConnectionScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ flex: 1, padding: spacing.base }}>
-        <Text variant="lg" style={{ marginBottom: spacing.base }}>
+      <View style={{ flex: 1, padding: spacing.base, gap: spacing.base }}>
+        <Text variant="lg" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>
           Connection Settings
         </Text>
-        <Card style={{ marginBottom: spacing.base }}>
-          <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.xs }}>
-            Server URL
-          </Text>
-          <Input
-            value={url}
-            onChangeText={setUrl}
-            placeholder="http://localhost:30311"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm, gap: 6 }}>
-            <View style={{
-              width: 8, height: 8, borderRadius: 4,
-              backgroundColor: isConnected ? colors.success : colors.error,
-            }} />
-            <Text variant="xs" style={{ color: colors.textDim }}>
-              {isConnected ? 'Connected' : 'Not connected'}
-            </Text>
-          </View>
-        </Card>
-        <Button title={testing ? 'Testing…' : 'Test Connection'} onPress={testConnection} disabled={testing} />
-        {testing && <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />}
+        <Panel
+          title="Server"
+          right={<StatusIcon status={isConnected ? 'done' : 'failed'} label={isConnected ? 'Connected' : 'Not connected'} showLabel size="xs" />}
+        >
+          <Field label="Server URL" hint="The mucli GUI address, e.g. http://192.168.1.20:30311. The saved host only changes after it answers.">
+            <Input
+              value={url}
+              onChangeText={setUrl}
+              placeholder="http://localhost:30311"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+          </Field>
+          <Button title={testing ? 'Testing…' : 'Test Connection'} onPress={testConnection} disabled={testing} />
+          {testing && <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />}
+        </Panel>
       </View>
     </SafeAreaView>
   );

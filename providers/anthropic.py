@@ -39,6 +39,7 @@ import anthropic
 from anthropic import Anthropic
 
 from .base import (
+    tool_result_json,
     CacheHint,
     FileReference,
     LLMProvider,
@@ -148,6 +149,8 @@ def _default_max_tokens(model_name: str) -> int:
 
 def _normalise_effort(effort: Optional[str], model_name: str) -> Optional[str]:
     value = str(effort or "").strip().lower()
+    if value in ("none", "minimal"):
+        value = "low"  # Anthropic's lowest effort
     if value not in _EFFORT_LEVELS:
         return None
     if value == "xhigh" and _model_version(model_name) < (4, 7):
@@ -288,7 +291,9 @@ class AnthropicProvider(LLMProvider):
         self.timeout_seconds = float(
             timeout_seconds or env_timeout or self.DEFAULT_TIMEOUT_SECONDS
         )
-        client_kwargs: Dict[str, Any] = {"timeout": self.timeout_seconds}
+        # mu/agent/retry.py owns retries (backoff, Retry-After, budget); SDK retries underneath
+        # it would multiply attempts and hide the delays.
+        client_kwargs: Dict[str, Any] = {"timeout": self.timeout_seconds, "max_retries": 0}
         if api_key:
             client_kwargs["api_key"] = api_key
         # ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / profiles are resolved
@@ -487,7 +492,7 @@ class AnthropicProvider(LLMProvider):
                         continue
                     payload = part.tool_result
                     if isinstance(payload, (dict, list)):
-                        payload = json.dumps(payload, indent=2, sort_keys=True)
+                        payload = tool_result_json(payload)
                     text = str(payload if payload is not None else "")
                     media_blocks = [
                         block
@@ -658,11 +663,56 @@ class AnthropicProvider(LLMProvider):
             payload["thinking"] = thinking_param
         if output_config:
             payload["output_config"] = output_config
-        if cache_tail:
+        volatile = int(getattr(cache_hint, "volatile_tail_parts", 0) or 0) if cache_hint is not None else 0
+        if cache_tail and volatile > 0:
+            # The request ends with blocks that change every iteration, so an
+            # automatic (last-block) breakpoint would write a prefix the next
+            # request never repeats. Mark the conversation explicitly instead.
+            self._mark_history_breakpoints(payload["messages"], volatile)
+        elif cache_tail:
             # Automatic breakpoint on the last cacheable block: the whole
             # prefix built this iteration is what the next iteration reads.
             payload["cache_control"] = {"type": "ephemeral"}
         return payload
+
+    _UNCACHEABLE_BLOCKS = frozenset({"thinking", "redacted_thinking"})
+
+    @classmethod
+    def _mark_history_breakpoints(cls, messages: List[Dict[str, Any]], volatile_blocks: int) -> None:
+        """Explicit history cache breakpoints for a request with a volatile tail.
+
+        1. The last block before the ``volatile_blocks`` trailing blocks of the final
+           message: everything up to here is identical in the next request.
+        2. The last block of the previous user turn: the position the previous request
+           wrote, so a large multi-tool turn still reads the long prefix directly
+           (Anthropic only looks ~20 blocks back from a breakpoint).
+        With the system breakpoint this uses at most 3 of the 4 allowed breakpoints.
+        """
+        positions: List[Tuple[int, int]] = [
+            (mi, bi) for mi, msg in enumerate(messages) for bi in range(len(msg.get("content") or []))
+        ]
+        if not positions:
+            return
+        skip = volatile_blocks if messages[-1]["role"] == "user" else 0
+        stable = positions[: max(0, len(positions) - skip)]
+        marked = []
+        for mi, bi in reversed(stable):
+            if messages[mi]["content"][bi].get("type") not in cls._UNCACHEABLE_BLOCKS:
+                marked.append((mi, bi))
+                break
+        if marked:
+            first_mi = marked[0][0]
+            for mi in range(first_mi - 1, -1, -1):
+                if messages[mi]["role"] != "user":
+                    continue
+                content = messages[mi]["content"]
+                for bi in range(len(content) - 1, -1, -1):
+                    if content[bi].get("type") not in cls._UNCACHEABLE_BLOCKS:
+                        marked.append((mi, bi))
+                        break
+                break
+        for mi, bi in marked:
+            messages[mi]["content"][bi]["cache_control"] = {"type": "ephemeral"}
 
     @staticmethod
     def _is_thinking_replay_error(exc: BaseException) -> bool:

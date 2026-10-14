@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from openai import OpenAI
 
 from .base import (
+    tool_result_json,
     CacheHint,
     FileReference,
     ImageData,
@@ -48,7 +49,43 @@ def _sanitize_stream_error(exc: BaseException, *, cap: int = 300) -> str:
 
 def _is_reasoning_model(name: str) -> bool:
     n = (name or "").lower()
+    # `gpt-5-chat-*` / `*-chat-latest` are non-reasoning chat models and reject reasoning_effort.
+    if "-chat" in n:
+        return False
     return any(n.startswith(p) for p in _REASONING_MODEL_PREFIXES)
+
+
+def _gpt5_minor(name: str) -> int:
+    """5 for gpt-5, 51 for gpt-5.1, 52 for gpt-5.2 … (0 when not a gpt-5 model)."""
+    import re
+    match = re.match(r"gpt-5(?:\.(\d+))?", (name or "").lower())
+    if not match:
+        return 0
+    return 50 + int(match.group(1)) if match.group(1) else 5
+
+
+def openai_reasoning_effort(model: str, effort: Optional[str], thinking: bool,
+                            xhigh_models: Optional[List[str]] = None) -> Optional[str]:
+    """mucli effort → OpenAI ``reasoning_effort`` (None = omit, API default).
+
+    ``max``/``xhigh`` become ``xhigh`` only for models listed in ``openai_xhigh_models``,
+    else ``high``; ``none`` needs gpt-5.1+ (older gpt-5 → ``minimal``, o-series → ``low``);
+    ``minimal`` needs gpt-5 (o-series → ``low``). Unset effort is omitted unless thinking was
+    switched on explicitly (→ ``high``)."""
+    if not _is_reasoning_model(model):
+        return None
+    value = str(effort or "").strip().lower()
+    if not value:
+        return "high" if thinking else None
+    minor = _gpt5_minor(model)
+    if value in ("max", "xhigh"):
+        allowed = [m.lower() for m in (xhigh_models or [])]
+        return "xhigh" if any(model.lower().startswith(m) for m in allowed if m) else "high"
+    if value == "none":
+        return "none" if minor >= 51 else "minimal" if minor else "low"
+    if value == "minimal":
+        return "minimal" if minor else "low"
+    return value if value in ("low", "medium", "high") else None
 
 
 _OPENAI_IMAGE_MIMES = {
@@ -110,13 +147,70 @@ class OpenAIProvider(LLMProvider):
             )
         super().__init__(model_name)
         self.name = "openai"
-        self._client = OpenAI(api_key=api_key, base_url=self.BASE_URL)
+        # mu/agent/retry.py owns retries; no second retry layer inside the SDK.
+        self._client = OpenAI(api_key=api_key, base_url=self.BASE_URL, max_retries=0)
+        self._models_cache: Optional[List[str]] = None
+
+    # ------------------------------------------------------------- Responses API
+
+    def _use_responses(self, model: str, messages: List[Message], variables: Dict[str, Any]) -> bool:
+        """``openai_api``: ``auto`` (default) = Responses for reasoning models on the official
+        API (reasoning is replayed between tool-loop turns); ``chat`` / ``responses`` force."""
+        mode = str(variables.get("openai_api") or "auto").strip().lower()
+        if mode == "chat":
+            return False
+        if mode == "responses":
+            return True
+        if not _is_reasoning_model(model) or "api.openai.com" not in (self.BASE_URL or ""):
+            return False
+        # Audio/video inputs only have a Chat Completions shape in this provider.
+        return not any(part.type == "media_input" for message in messages for part in message.parts)
+
+    def _stream_responses(self, model, messages, system_prompt, thinking, tools, cache_hint, reasoning_effort,
+                          variables) -> Iterator[StreamEvent]:
+        from .openai_responses import build_input, convert_tools, stream_events
+        payload: Dict[str, Any] = {"model": model, "input": build_input(self, messages), "stream": True,
+                                   "store": False, "include": ["reasoning.encrypted_content"]}
+        if system_prompt:
+            payload["instructions"] = system_prompt
+        tool_defs = convert_tools(tools)
+        if tool_defs:
+            payload["tools"] = tool_defs
+            payload["tool_choice"] = "auto"
+            payload["parallel_tool_calls"] = True
+        effort = openai_reasoning_effort(model, reasoning_effort, thinking, list(variables.get("openai_xhigh_models") or []))
+        if effort:
+            payload["reasoning"] = {"effort": effort}
+        if cache_hint is not None and getattr(cache_hint, "cache_key", ""):
+            payload["prompt_cache_key"] = cache_hint.cache_key
+        retention = str(variables.get("openai_prompt_cache_retention") or "").strip()
+        if retention:
+            payload["prompt_cache_retention"] = retention
+        stream = None
+        try:
+            stream = self._client.responses.create(**payload)
+            yield from stream_events(stream)
+        except Exception as exc:
+            yield StreamEvent(kind="error", text=_sanitize_stream_error(exc))
+            raise
+        finally:
+            closer = getattr(stream, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:  # noqa: BLE001
+                    pass
 
     # ------------------------------------------------------------------ models
 
     def get_available_models(self) -> List[str]:
+        """Model ids, fetched once per provider (it was a network call per subagent spawn)."""
+        cached = getattr(self, "_models_cache", None)
+        if cached:
+            return list(cached)
         try:
-            return [m.id for m in self._client.models.list().data]
+            self._models_cache = [m.id for m in self._client.models.list().data]
+            return list(self._models_cache)
         except Exception:
             return ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
 
@@ -158,7 +252,7 @@ class OpenAIProvider(LLMProvider):
                         continue
                     payload = part.tool_result
                     if isinstance(payload, (dict, list)):
-                        payload = json.dumps(payload, indent=2, sort_keys=True)
+                        payload = tool_result_json(payload)
                     out.append(
                         {
                             "role": "tool",
@@ -284,6 +378,11 @@ class OpenAIProvider(LLMProvider):
     ) -> Iterator[StreamEvent]:
 
         model = self.model_name or "gpt-4o-mini"
+        variables = getattr(self, "_session_variables", None) or {}
+        if self._use_responses(model, messages, variables):
+            yield from self._stream_responses(model, messages, system_prompt, thinking, tools, cache_hint,
+                                              reasoning_effort, variables)
+            return
 
         openai_msgs = self._convert_messages(messages)
         if system_prompt:
@@ -301,15 +400,19 @@ class OpenAIProvider(LLMProvider):
             payload["tools"] = tool_defs
             payload["tool_choice"] = "auto"
 
-        if _is_reasoning_model(model):
-            effort = reasoning_effort or ("high" if thinking else "medium")
+        effort = openai_reasoning_effort(model, reasoning_effort, thinking,
+                                         list(variables.get("openai_xhigh_models") or []))
+        if effort:
             payload["reasoning_effort"] = effort
 
-        # OpenAI Chat Completions caches stable prefixes automatically; the
-        # `cache_hint` argument is informational here. We still rely on stable
-        # ordering: system prompt first, then tools, then history. That's the
-        # order callers already build.
-        _ = cache_hint  # explicitly unused
+        # Chat Completions caches stable prefixes automatically (system prompt first, then
+        # tools, history, volatile tail last). A per-session cache key keeps a session's
+        # requests on the same cache shard; extended retention is opt-in per model support.
+        if cache_hint is not None and getattr(cache_hint, "cache_key", ""):
+            payload["prompt_cache_key"] = cache_hint.cache_key
+        retention = str(variables.get("openai_prompt_cache_retention") or "").strip()
+        if retention:
+            payload["prompt_cache_retention"] = retention
 
         # ------------------------------------------------------ stream events
 

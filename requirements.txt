@@ -17,6 +17,7 @@ fastapi
 uvicorn[standard]
 jinja2
 python-multipart
+tomli>=2; python_version < "3.11"
 
 # For voice / audio capabilities (optional)
 sse-starlette

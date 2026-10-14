@@ -88,7 +88,9 @@ def test_plan_gate_parks_then_approve_with_edits_requeues(tmp_path):
     parked = service.get(job.id)
     assert parked.attention_reason == AttentionReason.PLAN_REVIEW
     assert parked.acceptance_criteria == ["timezone selection persists"]
-    assert (parked.metadata or {}).get("plan", {}).get("summary") == "Fix the timezone picker"
+    from mu.jobs.core.plan_ops import plan_store
+    assert plan_store(parked).load().summary == "Fix the timezone picker"
+    assert "plan" not in parked.metadata
 
     review = JobReviewService(service)
     with pytest.raises(JobReviewError):
@@ -162,4 +164,9 @@ def test_gui_surfaces_present():
     html = (root / "templates" / "work.html").read_text(encoding="utf-8")
     js = (root / "static" / "js" / "work.js").read_text(encoding="utf-8")
     assert 'id="work-stage-models-form"' in html and "work_stage_models.js" in html
-    assert "'plan_review'" in js and "'models_unset'" in js and "plan-approve" in js
+    editor = (root / "static/js/work/plan_editor.js").read_text()
+    view = (root / "static/js/work/view.js").read_text()
+    assert "/static/js/work/plan_editor.js" in html
+    # planos flow: the editor saves; approve / re-plan live in the job action bar.
+    assert "data-plan-save" in editor and "data-plan-approve" in view
+    assert "data-plan-reject" in view and "data-plan-edit" in view

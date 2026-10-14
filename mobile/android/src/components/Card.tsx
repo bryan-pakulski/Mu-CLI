@@ -1,10 +1,12 @@
 import React from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { View, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 
 export type CardProps = {
   children: React.ReactNode;
   style?: ViewStyle;
+  /** Retained for API compatibility. planos panels are always surface +
+   * 1px border + radius 10; an "elevated" card uses the raised surface. */
   elevated?: boolean;
 };
 
@@ -14,19 +16,13 @@ export function Card({ children, style, elevated }: CardProps) {
     <View
       style={[
         {
-          backgroundColor: colors.glass,
-          borderColor: colors.hairline,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderRadius: radii.lg,
+          backgroundColor: colors.surface,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: radii.panel,
           padding: spacing.base,
         },
-        elevated && {
-          shadowColor: '#000',
-          shadowOpacity: 0.04,
-          shadowRadius: 14,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 1,
-        },
+        elevated && { backgroundColor: colors.raised },
         style,
       ]}
     >

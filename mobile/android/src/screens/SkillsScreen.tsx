@@ -6,10 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button } from '../components';
 import { skillsApi, Skill } from '../api/skills';
-import { spacing } from '../theme/tokens';
+import { elevation, radii, spacing, fontWeights, fonts } from '../theme/tokens';
 
 export function SkillsScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selected, setSelected] = useState<Skill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,14 +87,14 @@ export function SkillsScreen() {
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1 }}>
-                <Text variant="base" style={{ fontWeight: '500' }}>{item.name}</Text>
+                <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{item.name}</Text>
                 <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }} numberOfLines={2}>
                   {item.description}
                 </Text>
               </View>
               <Badge label={item.enabled ? 'Enabled' : 'Disabled'} variant={item.enabled ? 'success' : 'neutral'} />
             </View>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: spacing.sm }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
               <Button title="Details" variant="ghost" onPress={() => setSelected(item)} />
               <Button title={item.enabled ? 'Disable' : 'Enable'} onPress={() => toggle(item)} />
               <TouchableOpacity onPress={() => remove(item.name)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ minHeight: 44, justifyContent: 'center' }}>
@@ -105,22 +105,22 @@ export function SkillsScreen() {
         )}
       />
       {selected && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim }}>
           <View style={{ flex: 1, justifyContent: 'center', padding: spacing.base }}>
-            <Card style={{ maxHeight: '80%' }}>
+            <View style={[elevation(2, colors, isDark), { maxHeight: '80%', borderRadius: radii.lg, padding: spacing.base }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
-                <Text variant="base" style={{ fontWeight: '600' }}>{selected.name}</Text>
-                <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text variant="sm" style={{ color: colors.accent }}>Close</Text>
+                <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selected.name}</Text>
+                <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
                 </TouchableOpacity>
               </View>
-              <Text variant="xs" style={{ color: colors.textDim, marginBottom: 4 }}>Trigger: {selected.trigger}</Text>
-              <Text variant="xs" style={{ color: colors.textDim, marginBottom: 4 }}>Source: {selected.source}</Text>
-              <Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm, fontFamily: 'monospace' }}>
+              <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs }}>Trigger: {selected.trigger}</Text>
+              <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs }}>Source: {selected.source}</Text>
+              <Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm, fontFamily: fonts.mono }}>
                 {selected.body.slice(0, 500)}
                 {selected.body.length > 500 ? '...' : ''}
               </Text>
-            </Card>
+            </View>
           </View>
         </View>
       )}

@@ -17,6 +17,7 @@ import { openExternalUrl } from '../api/urlSafety';
 import type { ThemeColors } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
 
 const MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1 = true;
 
@@ -70,10 +71,10 @@ function InteractiveWebView({
     >
       {failed ? (
         <View style={styles.fallback}>
-          <Ionicons name="warning-outline" size={20} color={colors.error} />
+          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
           <Text variant="sm" dim style={styles.fallbackText}>Inline preview failed.</Text>
-          <TouchableOpacity onPress={() => onOpenExternal()}>
-            <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>
+          <TouchableOpacity onPress={() => onOpenExternal()} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
+            <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>
               Open in browser
             </Text>
           </TouchableOpacity>
@@ -82,7 +83,7 @@ function InteractiveWebView({
         <>
           <WebView
             source={{ uri }}
-            style={styles.webview}
+            style={[styles.webview, { backgroundColor: colors.bg }]}
             originWhitelist={['http://*', 'https://*']}
             javaScriptEnabled
             domStorageEnabled
@@ -119,7 +120,7 @@ function InteractiveWebView({
             }}
           />
           {loading ? (
-            <View style={[styles.loading, { backgroundColor: colors.bgLift }]}>
+            <View style={[styles.loading, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
               <ActivityIndicator color={colors.accent} />
             </View>
           ) : null}
@@ -163,10 +164,10 @@ function VisualizationCardImpl({
 
   return (
     <>
-      <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.bgLift }]}>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
         <View style={styles.header}>
           <View style={styles.titleWrap}>
-            <Text variant="xs" dim style={styles.eyebrow}>VISUALIZATION</Text>
+            <Text variant="xs" dim style={styles.eyebrow}>Visualization</Text>
             <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
               {artifact.title || artifact.name}
             </Text>
@@ -197,16 +198,16 @@ function VisualizationCardImpl({
             accessibilityRole="button"
             accessibilityLabel="Show interactive visualization preview"
             onPress={() => setExpanded(true)}
-            style={[styles.previewPrompt, { borderColor: colors.border }]}
+            style={styles.previewPrompt}
           >
-            <Ionicons name="eye-outline" size={18} color={colors.accent} />
-            <Text variant="sm" style={{ color: colors.accent, fontWeight: '600' }}>
+            <Ionicons name="eye-outline" size={18} color={colors.accentFg} />
+            <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>
               Show interactive preview
             </Text>
           </TouchableOpacity>
         ) : (
           <>
-            <View style={[styles.previewActions, { borderColor: colors.border }]}>
+            <View style={styles.previewActions}>
               <TouchableOpacity
                 onPress={hidePreview}
                 style={styles.textAction}
@@ -214,7 +215,7 @@ function VisualizationCardImpl({
                 accessibilityLabel="Hide visualization preview"
               >
                 <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
-                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>
+                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>
                   Hide
                 </Text>
               </TouchableOpacity>
@@ -225,12 +226,12 @@ function VisualizationCardImpl({
                 accessibilityLabel="Open visualization full screen"
               >
                 <Ionicons name="expand-outline" size={16} color={colors.textDim} />
-                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '600' }}>
+                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>
                   Full screen
                 </Text>
               </TouchableOpacity>
             </View>
-            <View style={[styles.frame, { height: frameHeight, borderColor: colors.border }]}>
+            <View style={[styles.frame, { height: frameHeight, borderColor: colors.hairline }]}>
               <InteractiveWebView
                 uri={uri}
                 colors={colors}
@@ -250,9 +251,9 @@ function VisualizationCardImpl({
         onRequestClose={() => setFullScreen(false)}
       >
         <SafeAreaView style={[styles.fullScreenRoot, { backgroundColor: colors.bg }]}>
-          <View style={[styles.fullScreenHeader, { borderColor: colors.border }]}>
+          <View style={[styles.fullScreenHeader, { borderColor: colors.hairline }]}>
             <View style={styles.fullScreenTitleWrap}>
-              <Text variant="xs" dim style={styles.eyebrow}>VISUALIZATION</Text>
+              <Text variant="xs" dim style={styles.eyebrow}>Visualization</Text>
               <Text numberOfLines={1} style={[styles.fullScreenTitle, { color: colors.text }]}>
                 {artifact.title || artifact.name}
               </Text>
@@ -301,68 +302,65 @@ export const VisualizationCard = React.memo(
 
 const styles = StyleSheet.create({
   card: {
-    marginHorizontal: 16,
-    marginVertical: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
+    marginHorizontal: spacing.base,
+    marginVertical: spacing.sm,
+    borderRadius: radii.panel,
     overflow: 'hidden',
   },
   header: {
     minHeight: 54,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing.sm,
   },
   titleWrap: { flex: 1, minWidth: 0 },
-  eyebrow: { fontWeight: '700', letterSpacing: 0.8, marginBottom: 2 },
-  title: { fontSize: 14, fontWeight: '600' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  eyebrow: { fontWeight: fontWeights.semibold, marginBottom: 2 },
+  title: { fontSize: fontSizes.base, fontWeight: fontWeights.semibold },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   previewPrompt: {
-    minHeight: 52,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
   previewActions: {
-    minHeight: 42,
-    paddingHorizontal: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    minHeight: touchTarget,
+    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 4,
+    gap: spacing.xs,
   },
   textAction: {
-    minHeight: 34,
-    paddingHorizontal: 10,
-    borderRadius: 9,
+    minHeight: touchTarget,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
   },
   frame: {
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
     position: 'relative',
   },
   webviewHost: { flex: 1, position: 'relative' },
-  webview: { flex: 1, backgroundColor: '#ffffff' },
+  webview: { flex: 1 },
   loading: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
@@ -372,19 +370,19 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.lg,
   },
-  fallbackText: { marginTop: 8, marginBottom: 10 },
+  fallbackText: { marginTop: spacing.sm, marginBottom: spacing.sm },
   fullScreenRoot: { flex: 1 },
   fullScreenHeader: {
-    minHeight: 60,
-    paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 64,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
   fullScreenTitleWrap: { flex: 1, minWidth: 0 },
-  fullScreenTitle: { fontSize: 15, fontWeight: '700' },
+  fullScreenTitle: { fontSize: fontSizes.base, fontWeight: fontWeights.semibold },
   fullScreenFrame: { flex: 1 },
 });

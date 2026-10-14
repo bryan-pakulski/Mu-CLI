@@ -22,6 +22,20 @@ from .runner import attach_session_folder, detach_session_folder, mount_folder
 from utils.logger import logger
 
 
+# Provider credentials and per-container wiring never survive into a snapshot image.
+SNAPSHOT_SCRUB_ENV = (
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+    "GOOGLE_API_KEY", "OLLAMA_API_KEY", "OLLAMA_HOST",
+    "MUCLI_WORKER_TOKEN", "MUCLI_SUPERVISOR_URL",
+    "MUCLI_WORKER_PORT",
+    "MUCLI_CONTAINER_NAME", "MUCLI_EGRESS_ALLOW",
+    "MUCLI_EGRESS_DENY", "MUCLI_WORKSPACES",
+    "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+    "MUCLI_PROXY_URL", "TIKTOKEN_CACHE_DIR",
+    "NO_PROXY", "no_proxy",
+)
+
+
 class ContainerSupervisor:
     def __init__(
         self,
@@ -1011,23 +1025,16 @@ class ContainerSupervisor:
         slug = container_slug(template_name)
         previous = self.template_registry.get(slug)
         image = f"mucli/template-{slug}:{int(time.time())}"
+        # The /root home is filtered like a job snapshot's (secrets, mucli state and shell
+        # history stay out; toolchains such as rustup stay in), and a /root volume is captured.
+        from mu.jobs.sandbox.environments import Docker, build_home_snapshot
+        root_volume = ref.root_volume if str(ref.container_volume or "").rstrip("/") == "/root" else ""
         docker = self.runner.require("docker")
-        scrub_keys = (
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
-            "GOOGLE_API_KEY", "OLLAMA_API_KEY", "OLLAMA_HOST",
-            "MUCLI_WORKER_TOKEN", "MUCLI_SUPERVISOR_URL",
-            "MUCLI_WORKER_PORT",
-            "MUCLI_CONTAINER_NAME", "MUCLI_EGRESS_ALLOW",
-            "MUCLI_EGRESS_DENY", "MUCLI_WORKSPACES",
-            "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
-            "MUCLI_PROXY_URL", "TIKTOKEN_CACHE_DIR",
-            "NO_PROXY", "no_proxy",
+        build_home_snapshot(
+            Docker(self.runner, keep_ledger=True), ref.name, f"mucli/template-{slug}-commit:{int(time.time())}", image,
+            {"io.mucli.template": slug, "io.mucli.source": ref.name}, root_volume=root_volume,
+            strict=False, scrub=SNAPSHOT_SCRUB_ENV, probe=False,
         )
-        commit_command = [docker, "commit"]
-        for key in scrub_keys:
-            commit_command.extend(["--change", f"ENV {key}="])
-        commit_command.extend([ref.name, image])
-        self.runner.run(commit_command)
         if previous is not None and previous.image != image:
             self.runner.run([docker, "image", "rm", previous.image], check=False)
         template = ContainerTemplate(

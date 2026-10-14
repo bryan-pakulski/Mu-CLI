@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -20,6 +21,7 @@ import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { SafeAreaModal } from './SafeAreaModal';
+import { elevation, fontSizes, fontWeights, fonts, radii, spacing, touchTarget, tracking, typography } from '../theme/tokens';
 
 // ---------- helpers ------------------------------------------------------
 
@@ -85,7 +87,7 @@ function quizOptionValue(o: unknown): string {
 // ---------- main component ----------------------------------------------
 
 export function PromptHost() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const isConnected = useConnectionStore(state => state.isConnected);
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const yolo = useConnectionStore(state => state.yolo);
@@ -219,17 +221,17 @@ export function PromptHost() {
         accessibilityLabel="Review pending agent input"
         activeOpacity={0.86}
         onPress={() => setReviewOpen(true)}
-        style={[styles.pendingBanner, { backgroundColor: colors.glassStrong, borderColor: colors.accent }]}
+        style={[elevation(1, colors, isDark), styles.pendingBanner, { backgroundColor: colors.raised, borderColor: colors.border, borderLeftColor: colors.warn }]}
       >
-        <View style={[styles.pendingIcon, { backgroundColor: colors.accentSoft }]}>
-          <Ionicons name="help-circle-outline" size={20} color={colors.accent} />
+        <View style={[styles.pendingIcon, { backgroundColor: colors.warningSubtle }]}>
+          <Text variant="base" importantForAccessibility="no" style={{ color: colors.warn, fontWeight: fontWeights.semibold }}>◆</Text>
         </View>
         <View style={styles.pendingCopy}>
-          <Text variant="sm" style={{ color: colors.text, fontWeight: '700' }}>Input required</Text>
+          <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>Input required</Text>
           <Text variant="xs" dim numberOfLines={1}>Agent is waiting · tap to review</Text>
         </View>
         {queue.length > 1 ? (
-          <Text variant="xs" dim>{queue.length} pending</Text>
+          <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{queue.length} pending</Text>
         ) : null}
         <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
       </TouchableOpacity>
@@ -243,16 +245,16 @@ export function PromptHost() {
       animationType="fade"
       onRequestClose={() => setReviewOpen(false)}
     >
-      <View style={styles.backdrop}>
-        <View style={[styles.dialog, { backgroundColor: colors.bg, borderColor: colors.border }]}>
-          <TouchableOpacity
+      <View style={[styles.backdrop, { backgroundColor: colors.scrim }]}>
+        <View style={[styles.dialog, elevation(2, colors, isDark)]}>
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="Minimize pending input"
             onPress={() => setReviewOpen(false)}
-            style={[styles.minimizeButton, { backgroundColor: colors.bgHover }]}
+            style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.bgActive : colors.bgHover }]}
           >
             <Ionicons name="remove-outline" size={20} color={colors.textDim} />
-          </TouchableOpacity>
+          </Pressable>
           <PromptBody
             prompt={activePrompt}
             submitting={submitting}
@@ -312,20 +314,20 @@ function PromptHeader({
   const { colors } = useTheme();
   return (
     <View style={styles.headingRow}>
-      <View style={[styles.icon, { backgroundColor: colors.accentSoft }]}>
-        <Ionicons name={icon} size={23} color={colors.accent} />
+      <View style={[styles.icon, { backgroundColor: colors.bgHover }]}>
+        <Ionicons name={icon} size={24} color={colors.textSoft} />
       </View>
       <View style={styles.headingCopy}>
-        <Text variant="xs" style={{ color: colors.textDim, fontWeight: '700', letterSpacing: 0.7 }}>
+        <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>
           {label.toUpperCase()}
         </Text>
-        <Text variant="lg" style={{ color: colors.text, fontWeight: '700' }} numberOfLines={2}>
+        <Text variant="lg" style={{ color: colors.text, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }} numberOfLines={2}>
           {title}
         </Text>
       </View>
       {queueDepth > 1 && (
         <View style={[styles.queueBadge, { backgroundColor: colors.bgHover }]}>
-          <Text variant="xs" style={{ color: colors.textDim }}>1 of {queueDepth}</Text>
+          <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>1 of {queueDepth}</Text>
         </View>
       )}
     </View>
@@ -336,7 +338,7 @@ function CancelButton({ onPress }: { onPress: () => void }) {
   const { colors } = useTheme();
   return (
     <TouchableOpacity accessibilityRole="button" onPress={onPress} style={styles.denyAction}>
-      <Text variant="sm" style={{ color: colors.error, fontWeight: '600' }}>Cancel</Text>
+      <Text variant="sm" style={{ color: colors.error, fontWeight: fontWeights.semibold }}>Cancel</Text>
     </TouchableOpacity>
   );
 }
@@ -387,20 +389,20 @@ function ToolApprovalBody({
         {description}
       </Text>
       {!!risk && (
-        <View style={[styles.riskRow, { backgroundColor: colors.bgLift }]}>
-          <Ionicons name="warning-outline" size={17} color={colors.warning} />
+        <View style={[styles.riskRow, { backgroundColor: colors.warningSubtle, borderColor: colors.warn }]}>
+          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.warn }}>◆</Text>
           <Text variant="xs" style={{ color: colors.textSoft, flex: 1 }}>
             Risk: {risk}
           </Text>
         </View>
       )}
       {!!argsText && (
-        <View style={[styles.argsPanel, { backgroundColor: colors.bgLift, borderColor: colors.border }]}>
-          <Text variant="xs" style={{ color: colors.textDim, fontWeight: '700', marginBottom: 7 }}>
-            ARGUMENTS
+        <View style={[styles.argsPanel, { backgroundColor: colors.codeBg, borderColor: colors.border }]}>
+          <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
+            Arguments
           </Text>
           <ScrollView style={styles.argsScroll} nestedScrollEnabled>
-            <Text variant="xs" style={{ color: colors.text, fontFamily: 'monospace' }} selectable>
+            <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }} selectable>
               {argsText}
             </Text>
           </ScrollView>
@@ -411,8 +413,8 @@ function ToolApprovalBody({
         onPress={() => setRemember(v => !v)}
         style={styles.checkboxRow}
       >
-        <Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={colors.accent} />
-        <Text variant="sm" style={{ color: colors.textSoft, marginLeft: 9 }}>
+        <Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={remember ? colors.accent : colors.textDim} />
+        <Text variant="sm" style={{ color: colors.textSoft, marginLeft: spacing.sm }}>
           Always allow this tool
         </Text>
       </TouchableOpacity>
@@ -511,7 +513,7 @@ function ChoiceBody({
               style={[
                 styles.optionRow,
                 {
-                  backgroundColor: isSelected ? colors.accentSoft : colors.bgLift,
+                  backgroundColor: isSelected ? colors.accentSubtle : colors.raised,
                   borderColor: isSelected ? colors.accent : colors.border,
                 },
               ]}
@@ -523,7 +525,7 @@ function ChoiceBody({
                 size={22}
                 color={isSelected ? colors.accent : colors.textDim}
               />
-              <Text variant="sm" style={{ color: colors.text, flex: 1, marginLeft: 11 }}>
+              <Text variant="sm" style={{ color: colors.text, flex: 1, marginLeft: spacing.md }}>
                 {label}
               </Text>
             </TouchableOpacity>
@@ -536,7 +538,7 @@ function ChoiceBody({
             style={[
               styles.optionRow,
               {
-                backgroundColor: useOther ? colors.accentSoft : colors.bgLift,
+                backgroundColor: useOther ? colors.accentSubtle : colors.raised,
                 borderColor: useOther ? colors.accent : colors.border,
               },
             ]}
@@ -546,7 +548,7 @@ function ChoiceBody({
               size={22}
               color={useOther ? colors.accent : colors.textDim}
             />
-            <Text variant="sm" style={{ color: colors.text, marginLeft: 11 }}>Other…</Text>
+            <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.md }}>Other…</Text>
           </TouchableOpacity>
         )}
         {allowOther && useOther && (
@@ -557,7 +559,7 @@ function ChoiceBody({
             placeholderTextColor={colors.textDim}
             style={[
               styles.textInput,
-              { backgroundColor: colors.bgLift, borderColor: colors.border, color: colors.text },
+              { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
             ]}
             autoFocus
           />
@@ -619,7 +621,7 @@ function QuizBody({
       <ScrollView style={styles.choiceScroll} nestedScrollEnabled>
         {questions.map((q, qi) => (
           <View key={q.qid || `q-${qi}`} style={styles.quizQuestionBlock}>
-            <Text variant="sm" style={{ color: colors.text, fontWeight: '600', marginBottom: 8 }}>
+            <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
               {qi + 1}. {q.prompt}
             </Text>
             {q.kind === 'fill_blank' ? (
@@ -630,7 +632,7 @@ function QuizBody({
                 placeholderTextColor={colors.textDim}
                 style={[
                   styles.textInput,
-                  { backgroundColor: colors.bgLift, borderColor: colors.border, color: colors.text },
+                  { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
                 ]}
               />
             ) : (
@@ -646,7 +648,7 @@ function QuizBody({
                     style={[
                       styles.optionRow,
                       {
-                        backgroundColor: isSelected ? colors.accentSoft : colors.bgLift,
+                        backgroundColor: isSelected ? colors.accentSubtle : colors.raised,
                         borderColor: isSelected ? colors.accent : colors.border,
                       },
                     ]}
@@ -656,7 +658,7 @@ function QuizBody({
                       size={22}
                       color={isSelected ? colors.accent : colors.textDim}
                     />
-                    <Text variant="sm" style={{ color: colors.text, flex: 1, marginLeft: 11 }}>
+                    <Text variant="sm" style={{ color: colors.text, flex: 1, marginLeft: spacing.md }}>
                       {optLbl}
                     </Text>
                   </TouchableOpacity>
@@ -756,7 +758,7 @@ function InputBody({
         placeholderTextColor={colors.textDim}
         style={[
           styles.textInput,
-          { backgroundColor: colors.bgLift, borderColor: colors.border, color: colors.text },
+          { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
         ]}
         autoFocus
         multiline
@@ -788,73 +790,69 @@ const styles = StyleSheet.create({
     minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 20,
-    paddingHorizontal: 14,
+    borderRadius: radii.panel,
+    paddingHorizontal: spacing.base,
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.24,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 9 },
+    borderLeftWidth: 3,
   },
-  pendingIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  pendingCopy: { flex: 1, marginHorizontal: 11 },
+  pendingIcon: { width: 40, height: 40, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  pendingCopy: { flex: 1, marginHorizontal: spacing.md },
   minimizeButton: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: spacing.md,
+    right: spacing.md,
     zIndex: 2,
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   backdrop: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.56)',
+    paddingHorizontal: spacing.lg,
   },
   dialog: {
     width: '100%',
     maxWidth: 520,
     maxHeight: '88%',
     alignSelf: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 24,
-    padding: 20,
+    borderRadius: radii.panel,
+    padding: spacing.lg,
   },
   headingRow: { flexDirection: 'row', alignItems: 'center' },
-  icon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  headingCopy: { flex: 1, marginLeft: 13 },
-  queueBadge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
-  description: { marginTop: 18, lineHeight: 21 },
-  riskRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 13, padding: 11, marginTop: 14 },
-  argsPanel: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 15, padding: 12, marginTop: 14 },
+  icon: { width: 48, height: 48, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  headingCopy: { flex: 1, marginLeft: spacing.md },
+  queueBadge: { borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  description: { marginTop: spacing.base, lineHeight: typography.sm.lineHeight },
+  riskRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.control, borderWidth: 1, borderLeftWidth: 3, padding: spacing.md, marginTop: spacing.md },
+  argsPanel: { borderRadius: radii.control, borderWidth: 1, padding: spacing.md, marginTop: spacing.md },
   argsScroll: { maxHeight: 190 },
-  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
-  choiceScroll: { maxHeight: 320, marginTop: 14 },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, minHeight: touchTarget },
+  choiceScroll: { maxHeight: 320, marginTop: spacing.md },
   optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 13,
-    padding: 13,
-    marginBottom: 8,
+    minHeight: touchTarget,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
   },
   textInput: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 13,
-    padding: 13,
-    marginTop: 8,
-    fontSize: 16,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    fontSize: fontSizes.md,
     minHeight: 48,
     textAlignVertical: 'top',
   },
-  quizQuestionBlock: { marginBottom: 16 },
-  actions: { marginTop: 19, gap: 9 },
-  primaryAction: { minHeight: 50, borderRadius: 15 },
-  secondaryAction: { minHeight: 48, borderRadius: 15 },
-  denyAction: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  loadingRow: { minHeight: 74, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  quizQuestionBlock: { marginBottom: spacing.base },
+  actions: { marginTop: spacing.base, gap: spacing.sm },
+  primaryAction: { minHeight: 48, borderRadius: radii.sm },
+  secondaryAction: { minHeight: 48, borderRadius: radii.sm },
+  denyAction: { minHeight: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  loadingRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
 });

@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { teacherApi, TeacherState, TeacherModule, TeacherLesson } from '../api/teacher';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, fonts } from '../theme/tokens';
 
 export function TeacherScreen() {
   const { colors } = useTheme();
@@ -84,24 +84,24 @@ export function TeacherScreen() {
           <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
           {course ? (
             <Card style={{ marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>{course.subject}</Text>
-              <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{course.subject}</Text>
+              <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
                 {course.target_level} · {course.lessons_completed_count}/{course.lesson_total} lessons
               </Text>
-              <View style={{ flexDirection: 'row', gap: 6, marginTop: spacing.sm }}>
+              <View style={{ flexDirection: 'row', gap: spacing.xs, marginTop: spacing.sm }}>
                 <Badge label={course.status} variant={course.status === 'in_progress' ? 'accent' : 'neutral'} />
               </View>
             </Card>
           ) : (
             <Card style={{ marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>No active course</Text>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>No active course</Text>
               {state.courses.length > 0 && (
                 <>
-                  <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.sm, marginBottom: 4 }}>
+                  <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.sm, marginBottom: spacing.xs }}>
                     Available courses ({state.courses.length}):
                   </Text>
                   {state.courses.map(c => (
-                    <Text key={c.course_id} variant="sm" style={{ color: colors.text, paddingVertical: 4 }}>
+                    <Text key={c.course_id} variant="sm" style={{ color: colors.text, paddingVertical: spacing.xs }}>
                       {c.subject} · {c.status}
                     </Text>
                   ))}
@@ -119,11 +119,11 @@ export function TeacherScreen() {
                 {assignments.map((assignment, index) => {
                   const grade = assignment.grade as Record<string, any> | undefined;
                   return <Card key={String(assignment.assignment_id || index)} style={{ marginBottom: spacing.sm }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Badge label={String(assignment.kind || assignment.status || 'assignment')} variant="neutral" />{grade && <Badge label={`${grade.score_pct ?? '—'}%`} variant={grade.passed ? 'success' : 'warning'} />}</View>
-                    <Text variant="sm" style={{ color: colors.text, fontWeight: '600', marginTop: spacing.sm }}>{String(assignment.assignment_id || 'Assignment')}</Text>
-                    {!!assignment.prompt && <Text variant="xs" style={{ color: colors.textSoft, marginTop: 5, lineHeight: 18 }}>{String(assignment.prompt)}</Text>}
-                    {!!grade?.feedback && <Text variant="xs" style={{ color: colors.textDim, marginTop: 6 }}>Evidence: {String(grade.feedback)}</Text>}
-                    {!grade && <Text variant="xs" style={{ color: colors.warning, marginTop: 6 }}>Mastery not assessed yet.</Text>}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(assignment.kind || assignment.status || 'assignment')} variant="neutral" />{grade && <Badge label={`${grade.score_pct ?? '—'}%`} variant={grade.passed ? 'success' : 'warning'} />}</View>
+                    <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{String(assignment.assignment_id || 'Assignment')}</Text>
+                    {!!assignment.prompt && <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{String(assignment.prompt)}</Text>}
+                    {!!grade?.feedback && <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs }}>Evidence: {String(grade.feedback)}</Text>}
+                    {!grade && <Text variant="xs" style={{ color: colors.warning, marginTop: spacing.xs }}>Mastery not assessed yet.</Text>}
                   </Card>;
                 })}
                 {!assignments.length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No mastery checks recorded.</Text>}
@@ -132,7 +132,7 @@ export function TeacherScreen() {
             {workspaceView.shows('reviews') && (
               <View>
                 <SectionLabel title="Retention schedule" count={reviews.length} />
-                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Badge label={String(review.status || 'scheduled')} variant={review.status === 'done' ? 'success' : 'neutral'} /><Text variant="xs" style={{ color: colors.textDim, fontFamily: 'monospace' }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.success, marginTop: 5 }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.textDim, marginTop: 5 }}>{String(review.notes)}</Text>}</Card>)}
+                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(review.status || 'scheduled')} variant={review.status === 'done' ? 'success' : 'neutral'} /><Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.success, marginTop: spacing.xs }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs }}>{String(review.notes)}</Text>}</Card>)}
                 {!reviews.length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No spaced reviews scheduled.</Text>}
               </View>
             )}
@@ -153,7 +153,7 @@ export function TeacherScreen() {
 
 function SectionLabel({ title, count }: { title: string; count: number }) {
   const { colors } = useTheme();
-  return <View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: '700', letterSpacing: .8, textTransform: 'uppercase' }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: 'monospace' }}>{count}</Text></View>;
+  return <View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>;
 }
 
 function ModuleCard({ module, expanded, onToggle, colors }: {
@@ -164,8 +164,8 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
       <TouchableOpacity onPress={onToggle} activeOpacity={0.7} style={{ minHeight: 44 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1 }}>
-            <Text variant="base" style={{ fontWeight: '500' }}>{module.title}</Text>
-            <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
+            <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{module.title}</Text>
+            <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
               {module.lessons.filter(l => l.status === 'completed').length}/{module.lessons.length} lessons
             </Text>
           </View>
@@ -174,7 +174,7 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
         </View>
       </TouchableOpacity>
       {expanded && (
-        <View style={{ marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 0.5, borderTopColor: colors.border }}>
+        <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
           {module.lessons.map(lesson => (
             <LessonRow key={lesson.lesson_id} lesson={lesson} colors={colors} />
           ))}
@@ -186,9 +186,9 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
 
 function LessonRow({ lesson, colors }: { lesson: TeacherLesson; colors: any }) {
   return (
-    <View style={{ paddingVertical: 8, minHeight: 44, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
+    <View style={{ paddingVertical: spacing.sm, minHeight: 44 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="sm" style={{ flex: 1, fontWeight: '500' }}>{lesson.title}</Text>
+        <Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.medium }}>{lesson.title}</Text>
         <Badge label={lesson.status} variant={
           lesson.status === 'completed' ? 'success' :
           lesson.status === 'presenting' || lesson.status === 'in_progress' ? 'accent' :

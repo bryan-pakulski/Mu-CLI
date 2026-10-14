@@ -5,7 +5,6 @@ import subprocess
 
 from mu.jobs import JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.review import JobReviewService, build_job_diff
-from mu.jobs.review_branch import materialize_review_branch
 from mu.jobs.worktree import JobWorktreeManager
 
 
@@ -45,11 +44,11 @@ def test_review_changes_recreate_temporary_worktree_on_same_branch(tmp_path):
     service.transition(job.id, JobStatus.PREPARING)
     service.transition(job.id, JobStatus.RUNNING)
     service.transition(job.id, JobStatus.VERIFYING)
-    materialized = materialize_review_branch(service, job.id)
+    # The execution worktree is retired; the branch is the review artifact.
+    manager.remove(service.get(job.id))
+    service.store.update_runtime_fields(job.id, worktree="")
     ready = service.transition(job.id, JobStatus.READY_FOR_REVIEW)
 
-    assert materialized.branch == branch
-    assert materialized.head_sha == first_head
     assert ready.worktree == ""
     assert not os.path.exists(worktree)
     assert git(repo, "rev-parse", f"refs/heads/{branch}^{{commit}}") == first_head

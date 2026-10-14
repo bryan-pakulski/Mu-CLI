@@ -21,6 +21,14 @@ import { WorkspaceCategoryScreen } from '../screens/WorkspaceCategoryScreen';
 import { WorkScreen } from '../screens/WorkScreen';
 import { JobDetailScreen } from '../screens/JobDetailScreen';
 import { JobAnalysisScreen } from '../screens/JobAnalysisScreen';
+import { JobsListScreen } from '../screens/JobsListScreen';
+import { JobActivityScreen } from '../screens/JobActivityScreen';
+import { JobBoardsScreen } from '../screens/JobBoardsScreen';
+import { JobHistoryScreen } from '../screens/JobHistoryScreen';
+import { JobSettingsScreen } from '../screens/JobSettingsScreen';
+import { JobSetupScreen } from '../screens/JobSetupScreen';
+import { JobDoctorScreen } from '../screens/JobDoctorScreen';
+import { ToastHost } from '../components/planos';
 import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
@@ -41,12 +49,22 @@ import { HistoryScreen } from '../screens/HistoryScreen';
 import { ThreadsScreen } from '../screens/ThreadsScreen';
 import { ShellScreen } from '../screens/ShellScreen';
 import { ArtifactsScreen } from '../screens/ArtifactsScreen';
+import { fontSizes, fontWeights } from '../theme/tokens';
+import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
 
 export type RootStackParamList = {
   Chat: undefined;
   Work: undefined;
-  JobDetail: { jobId: string };
+  JobDetail: { jobId: string; tab?: string; action?: string };
   JobAnalysis: { jobId: string };
+  JobsList: undefined;
+  JobActivity: undefined;
+  JobBoards: undefined;
+  JobHistory: undefined;
+  JobSettings: undefined;
+  /** Setup with its two tabs: the checklist (default) and Doctor. */
+  JobSetup: { tab?: 'checklist' | 'doctor' } | undefined;
+  JobDoctor: undefined;
   Workspace: undefined;
   WorkspaceCategory: { categoryId: WorkspaceCategoryId; title: string };
   Teacher: undefined;
@@ -71,11 +89,22 @@ export type RootStackParamList = {
   Artifacts: undefined;
 };
 
+type JobsPageRoute = 'JobsList' | 'JobActivity' | 'JobBoards' | 'JobHistory' | 'JobSettings';
+
+/** planos jobs pages (CONTRACT §6: full screens, not dialogs). */
+const JOBS_PAGE_SCREENS: { name: JobsPageRoute; title: string; component: React.ComponentType<any> }[] = [
+  { name: 'JobsList', title: 'Jobs', component: JobsListScreen },
+  { name: 'JobActivity', title: 'Activity', component: JobActivityScreen },
+  { name: 'JobBoards', title: 'Tickets', component: JobBoardsScreen },
+  { name: 'JobHistory', title: 'Job history', component: JobHistoryScreen },
+  { name: 'JobSettings', title: 'Job settings', component: JobSettingsScreen },
+];
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
 const PANEL_SCREENS: {
-  name: Exclude<keyof RootStackParamList, 'Chat' | 'Work' | 'JobDetail' | 'JobAnalysis' | 'Workspace' | 'WorkspaceCategory'>;
+  name: Exclude<keyof RootStackParamList, 'Chat' | 'Work' | 'JobDetail' | 'JobAnalysis' | 'JobSetup' | 'JobDoctor' | 'Workspace' | 'WorkspaceCategory' | JobsPageRoute>;
   title: string;
   component: React.ComponentType;
 }[] = [
@@ -197,33 +226,41 @@ export function AppNavigator() {
   };
 
   return (
+    <ToastHost>
+    <NeedsYouNotifier />
     <NavigationContainer ref={navRef} theme={navTheme}>
       <Stack.Navigator
         screenOptions={{
           animation: 'slide_from_right',
           contentStyle: { backgroundColor: colors.bg },
-          headerStyle: { backgroundColor: colors.glassStrong },
+          headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.text,
           headerShadowVisible: false,
           headerBackTitle: '',
-          headerTitleStyle: { fontSize: 16, fontWeight: '600' },
+          headerTitleStyle: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
         }}
       >
         <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />
-        <Stack.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work' }} />
+        <Stack.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work', animation: 'fade' }} />
         <Stack.Screen
           name="JobDetail"
           component={JobDetailScreen}
           options={({ navigation, route }) => ({
             title: 'Job review',
             headerRight: () => (
-              <Pressable onPress={() => navigation.navigate('JobAnalysis', { jobId: route.params.jobId })} hitSlop={10}>
-                <Text style={{ color: colors.textSoft, fontSize: 12, fontWeight: '600' }}>Analyze</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="Analyze job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId: route.params.jobId })} hitSlop={14} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, minHeight: 44, justifyContent: 'center' })}>
+                <Text style={{ color: colors.accent, fontSize: fontSizes.xs, fontWeight: fontWeights.semibold }}>Analyze</Text>
               </Pressable>
             ),
           })}
         />
         <Stack.Screen name="JobAnalysis" component={JobAnalysisScreen} options={{ title: 'Job performance' }} />
+        <Stack.Screen name="JobSetup" component={JobSetupScreen} options={{ title: 'Jobs setup' }} />
+        <Stack.Screen name="JobDoctor" component={JobDoctorScreen} options={{ title: 'Jobs doctor' }} />
+        {JOBS_PAGE_SCREENS.map(({ name, title, component }) => (
+          // Jobs-mode tabs: switched in place (switchJobsPage) with a fade, not a history slide.
+          <Stack.Screen key={name} name={name} component={component} options={{ title, animation: 'fade' }} />
+        ))}
         <Stack.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace' }} />
         <Stack.Screen
           name="WorkspaceCategory"
@@ -235,5 +272,6 @@ export function AppNavigator() {
         ))}
       </Stack.Navigator>
     </NavigationContainer>
+    </ToastHost>
   );
 }

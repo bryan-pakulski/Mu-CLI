@@ -9,6 +9,7 @@ import type {
 } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontSizes, fontWeights, radii, spacing, touchTarget, fonts } from '../theme/tokens';
 
 interface Props {
   capabilities?: ContainerHardwareCapabilities | null;
@@ -78,10 +79,10 @@ export function ContainerHardwareSection({
     <View style={styles.section}>
       <View style={styles.heading}>
         <View style={styles.headingCopy}>
-          <Text variant="sm" style={{ fontWeight: '700' }}>Hardware</Text>
+          <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Hardware</Text>
           <Text variant="xs" dim>GPU acceleration and explicit host device passthrough.</Text>
         </View>
-        <Ionicons name="hardware-chip-outline" size={21} color={colors.accent} />
+        <Ionicons name="hardware-chip-outline" size={20} color={colors.textSoft} />
       </View>
 
       <Text variant="xs" style={styles.label}>GPU access</Text>
@@ -90,7 +91,7 @@ export function ContainerHardwareSection({
         <Choice label="All" selected={gpuMode === 'all'} disabled={!gpu?.supported} onPress={() => setMode('all')} />
         <Choice label="Selected" selected={gpuMode === 'selected'} disabled={!gpu?.supported || !(gpu?.devices?.length)} onPress={() => setMode('selected')} />
       </View>
-      <Text variant="xs" style={{ color: gpu?.supported ? colors.success : colors.textDim, marginBottom: 8 }}>
+      <Text variant="xs" style={{ color: gpu?.supported ? colors.success : colors.textDim, marginBottom: spacing.sm }}>
         {gpu?.reason || 'Hardware capability has not been loaded.'}
       </Text>
 
@@ -103,12 +104,14 @@ export function ContainerHardwareSection({
               <TouchableOpacity
                 key={item.uuid || id}
                 onPress={() => toggleGpu(id)}
-                style={[styles.detectedRow, { borderColor: active ? colors.accent : colors.border, backgroundColor: colors.bgLift }]}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: active }}
+                style={[styles.detectedRow, { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border }]}
               >
-                <Ionicons name={active ? 'checkbox' : 'square-outline'} size={18} color={active ? colors.accent : colors.textDim} />
+                <Ionicons name={active ? 'checkbox' : 'square-outline'} size={18} color={active ? colors.accentFg : colors.textDim} />
                 <View style={styles.copy}>
-                  <Text variant="xs" style={{ fontWeight: '700' }}>{item.name || `GPU ${id}`}</Text>
-                  <Text variant="xs" dim>{item.uuid || `index ${id}`}</Text>
+                  <Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{item.name || `GPU ${id}`}</Text>
+                  <Text variant="xs" dim style={styles.mono}>{item.uuid || `index ${id}`}</Text>
                 </View>
               </TouchableOpacity>
             );
@@ -116,15 +119,15 @@ export function ContainerHardwareSection({
         </View>
       ) : null}
 
-      <Text variant="xs" style={[styles.label, { marginTop: 12 }]}>Attached devices</Text>
+      <Text variant="xs" style={[styles.label, { marginTop: spacing.md }]}>Attached devices</Text>
       {devices.map((device, index) => (
-        <View key={`${device.host_path}-${index}`} style={[styles.deviceRow, { backgroundColor: colors.bgLift }]}>
+        <View key={`${device.host_path}-${index}`} style={[styles.deviceRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
           <Ionicons name="hardware-chip-outline" size={17} color={colors.textDim} />
           <View style={styles.copy}>
-            <Text variant="xs" style={{ fontWeight: '700' }} numberOfLines={1}>{device.container_path}</Text>
+            <Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{device.container_path}</Text>
             <Text variant="xs" dim numberOfLines={1}>{device.host_path} · {device.permissions}</Text>
           </View>
-          <TouchableOpacity onPress={() => onDevicesChange(devices.filter((_, itemIndex) => itemIndex !== index))}>
+          <TouchableOpacity onPress={() => onDevicesChange(devices.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
             <Ionicons name="close" size={18} color={colors.error} />
           </TouchableOpacity>
         </View>
@@ -155,7 +158,7 @@ export function ContainerHardwareSection({
         autoCorrect={false}
         placeholder="/dev/video0"
         placeholderTextColor={colors.textDim}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]}
+        style={[styles.input, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
       />
       <TextInput
         value={deviceTarget}
@@ -164,7 +167,7 @@ export function ContainerHardwareSection({
         autoCorrect={false}
         placeholder="Container path, e.g. /dev/video0"
         placeholderTextColor={colors.textDim}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]}
+        style={[styles.input, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
       />
       <View style={styles.deviceActions}>
         <View style={styles.permissionChoices}>
@@ -175,16 +178,16 @@ export function ContainerHardwareSection({
         <TouchableOpacity
           onPress={() => addDevice(deviceHost, deviceTarget)}
           disabled={!deviceHost.trim()}
-          style={[styles.addButton, { backgroundColor: deviceHost.trim() ? colors.accent : colors.bgHover }]}
+          style={[styles.addButton, { borderColor: colors.border, opacity: deviceHost.trim() ? 1 : 0.42 }]}
         >
-          <Ionicons name="add" size={17} color={deviceHost.trim() ? colors.accentText : colors.textDim} />
-          <Text variant="xs" style={{ color: deviceHost.trim() ? colors.accentText : colors.textDim, fontWeight: '700' }}>Add device</Text>
+          <Ionicons name="add" size={18} color={colors.text} />
+          <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.medium }}>Add device</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.warning, { backgroundColor: colors.bgHover }]}>
-        <Ionicons name="warning-outline" size={17} color={colors.warning} />
-        <Text variant="xs" dim style={styles.warningText}>
+      <View style={[styles.warning, { backgroundColor: colors.warningSubtle }]}>
+        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.warn }}>◆</Text>
+        <Text variant="xs" style={[styles.warningText, { color: colors.textSoft }]}>
           {capabilities?.warning || 'Device passthrough grants direct access to selected host hardware.'}
         </Text>
       </View>
@@ -212,32 +215,36 @@ function Choice({
       disabled={disabled}
       style={[
         compact ? styles.choiceCompact : styles.choice,
-        { backgroundColor: selected ? colors.text : colors.bgLift, opacity: disabled ? 0.42 : 1 },
+        { backgroundColor: selected ? colors.accentSubtle : 'transparent', borderColor: selected ? colors.accentSubtle : colors.border, opacity: disabled ? 0.42 : 1 },
       ]}
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled }}
     >
-      <Text variant="xs" style={{ color: selected ? colors.bg : colors.textDim, fontWeight: '700' }}>{label}</Text>
+      <Text variant="sm" style={{ color: selected ? colors.accentFg : colors.textSoft, fontWeight: selected ? fontWeights.semibold : fontWeights.medium }}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { marginTop: 18 },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  section: { marginTop: spacing.base },
+  heading: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
   headingCopy: { flex: 1 },
-  label: { fontWeight: '700', marginBottom: 7 },
-  segment: { flexDirection: 'row', gap: 5, marginBottom: 7 },
-  choice: { flex: 1, minHeight: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  choiceCompact: { minWidth: 44, minHeight: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  detectedList: { gap: 6 },
-  detectedRow: { minHeight: 56, borderWidth: StyleSheet.hairlineWidth, borderRadius: 13, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  label: { fontWeight: fontWeights.semibold, marginBottom: spacing.sm },
+  segment: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.sm },
+  choice: { flex: 1, minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  choiceCompact: { minWidth: touchTarget, minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  detectedList: { gap: spacing.xs },
+  detectedRow: { minHeight: 56, borderRadius: radii.sm, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   copy: { flex: 1, minWidth: 0 },
-  deviceRow: { minHeight: 56, borderRadius: 13, paddingHorizontal: 11, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  presets: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 9 },
-  preset: { maxWidth: '48%', minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, paddingHorizontal: 10, paddingVertical: 6 },
-  input: { minHeight: 46, borderRadius: 13, paddingHorizontal: 12, fontSize: 14, marginBottom: 7 },
-  deviceActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  permissionChoices: { flexDirection: 'row', gap: 4 },
-  addButton: { minHeight: 38, borderRadius: 11, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  warning: { minHeight: 56, borderRadius: 13, padding: 11, marginTop: 11, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  warningText: { flex: 1, lineHeight: 17 },
+  deviceRow: { minHeight: 56, borderRadius: radii.sm, paddingHorizontal: spacing.md, marginBottom: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  presets: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
+  preset: { maxWidth: '48%', minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  input: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, fontSize: fontSizes.base, marginBottom: spacing.sm },
+  deviceActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  permissionChoices: { flexDirection: 'row', gap: spacing.xs },
+  addButton: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  warning: { minHeight: 56, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.md, flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  warningText: { flex: 1 },
+  mono: { fontFamily: fonts.mono },
+  removeButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
 });

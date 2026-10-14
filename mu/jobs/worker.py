@@ -1,83 +1,46 @@
-"""Subprocess entry point for one durable engineering-job attempt.
+"""The one worker entry point for durable engineering jobs.
 
-Each worker owns its process CWD, Session runtime, lease heartbeat and managed
-Git worktree. The background controller can therefore run several jobs in
-parallel without sharing Session process-global state.
+The controller launches ``python -m mu.jobs.worker --phase <phase>`` for each
+leased job; ``run_phase`` dispatches to the phase body (implementation here,
+checks in ``verify_worker``, review in ``review_worker``, publish in
+``publish``). Every phase runs inside ``lease.run_leased``: ownership check,
+heartbeat, lease-fenced status writes, release on exit. Each worker owns its
+process CWD and managed Git worktree, so several jobs run in parallel without
+sharing process-global state.
 """
 
 from __future__ import annotations
 
-import logging
-
 import argparse
+import logging
 import os
-import threading
-from types import SimpleNamespace
+import sys
 from typing import Optional
 
+from mu.ui.exceptions import InteractionRequired
+
+from .core.states import PHASES
+from .lease import run_leased
 from .models import AttentionReason, JobStatus
-from .receipt import JobReceiptBuilder
-from .runner import JobRunOutcome, SessionJobRunner
+from .receipt import refresh_receipt as _refresh_receipt
+from .runner import JobRunOutcome, session_name
 from .service import JobService, JobStateError, get_default_job_service
 from .worktree import JobWorktreeManager, WorktreeError
 
 
-DEFAULT_JOB_SYSTEM = (
-    "You are an autonomous software engineering agent working on a durable MuCLI job. "
-    "Make focused, production-quality changes inside the attached job workspace. "
-    "Use tools to inspect and validate the repository. Never claim merge readiness; "
-    "the controller owns verification and review state."
-)
-
-
-def _base_args(job):
-    execution = dict(job.execution or {})
-    from .models import resolve_stage_model
-
-    implement = resolve_stage_model(execution, "implement")
-    return SimpleNamespace(
-        session=SessionJobRunner.session_name(job),
-        provider=str(implement.get("provider") or ""),
-        model=str(implement.get("model") or ""),
-        provider_prevalidated=True,
-        session_type=str(execution.get("session_type") or "workspace"),
-        workspace=[job.worktree] if job.worktree else [],
-        yolo=bool(execution.get("auto_approve_writes", False)),
-        gui=False,
-        trace=False,
-        debug=bool(execution.get("debug", False)),
-        system=str(execution.get("system_instruction") or DEFAULT_JOB_SYSTEM),
-        system_file=None,
-        mode_prompt=None,
-    )
-
-
-def _heartbeat(
-    service: JobService,
-    job_id: str,
-    worker_id: str,
-    ttl: int,
-    stop: threading.Event,
-    lease_lost: Optional[threading.Event] = None,
-) -> None:
-    interval = max(3.0, float(ttl) / 3.0)
-    while not stop.wait(interval):
-        try:
-            if not service.heartbeat(job_id, worker_id, ttl_seconds=ttl):
-                # Lease gone (expired and taken over / released / job
-                # transitioned): signal the main worker to stop.
-                if lease_lost is not None:
-                    lease_lost.set()
-                return
-        except Exception:
-            if lease_lost is not None:
-                lease_lost.set()
-            return
-
-
 def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, label: str) -> str | None:
     try:
-        return manager.checkpoint(service.get(job_id), label=label)
+        current = service.get(job_id)
+        if current.worktree:
+            from .sandbox.runner import _guard
+            from .sandbox.policy import SandboxPolicy
+            _guard(current, SandboxPolicy.for_stage("implement"))
+        checkpoint = manager.checkpoint(current, label=label)
+        if checkpoint and current.base_sha:
+            from .core.artifacts import artifacts_for
+            patch = manager._run(current.worktree, "diff", "--no-ext-diff", f"{current.base_sha}..{checkpoint}")
+            artifacts_for(current).ensure().write_text("diff.patch", patch.stdout or "")
+        return checkpoint
     except Exception as exc:
         payload = {"label": label}
         if isinstance(exc, WorktreeError):
@@ -89,24 +52,6 @@ def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, l
             payload=payload,
         )
         return None
-
-
-def _refresh_receipt(service: JobService, job_id: str) -> None:
-    try:
-        JobReceiptBuilder(service).write(job_id)
-    except Exception as exc:
-        service.store.append_event(
-            job_id,
-            "work_receipt_failed",
-            reason=str(exc),
-        )
-
-
-def _add_cost(service: JobService, job_id: str, amount: float) -> float:
-    current = service.get(job_id)
-    total = float(current.cost_usd or 0.0) + max(0.0, float(amount or 0.0))
-    service.store.update_runtime_fields(job_id, cost_usd=total)
-    return total
 
 
 def _apply_outcome(
@@ -187,6 +132,12 @@ def _apply_outcome(
 
     if outcome.kind == "completed":
         checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-implementation")
+        if not checkpoint:
+            owned = service.store.finish_attempt_owned(
+                attempt_id, worker_id=worker_id, status="failed", error="host checkpoint or path guard failed",
+                cost_usd=outcome.cost_usd, cost_add=outcome.cost_usd, target_status=JobStatus.FAILED,
+                transition_reason="host checkpoint or path guard failed")
+            return 1 if owned else 5
         owned = service.store.finish_attempt_owned(
             attempt_id,
             worker_id=worker_id,
@@ -220,13 +171,19 @@ def _apply_outcome(
     # max_retries (same budget the verifier uses). Non-transient failures
     # and exhausted budgets stay terminal FAILED so a human sees the truth.
     retry_budget = int(getattr(current, "max_retries", 0) or 0)
+    # Only earlier automatic transient retries consume the budget: fix
+    # attempts (verification/review rework) and human retries also create
+    # attempt rows, so the raw attempt number would starve a job that
+    # needed a couple of fix rounds of its transient-retry budget.
+    retries_used = _transient_retries_used(service, job_id, attempt_id)
+    error_class = str(getattr(outcome, "error_class", "") or "")
     retryable = (
         target == JobStatus.FAILED
         and bool(getattr(outcome, "transient", False))
-        and int(attempt_number) <= retry_budget
+        and retries_used < retry_budget
     )
     if retryable:
-        delay = _retry_backoff_seconds(int(attempt_number))
+        delay = _retry_backoff_seconds(retries_used + 1)
         next_run_at = float(service.store._clock()) + delay
         owned = service.store.finish_attempt_owned(
             attempt_id,
@@ -240,7 +197,9 @@ def _apply_outcome(
                 "checkpoint": checkpoint,
                 "transient": True,
                 "retry_scheduled": True,
+                "retry_number": retries_used + 1,
                 "next_run_at": next_run_at,
+                **({"error_class": error_class} if error_class else {}),
             },
             target_status=JobStatus.QUEUED,
             transition_reason="transient provider failure; requeued with backoff",
@@ -249,8 +208,10 @@ def _apply_outcome(
                 "agent_status": outcome.status,
                 "checkpoint": checkpoint,
                 "attempt": int(attempt_number),
+                "retry_number": retries_used + 1,
                 "max_retries": retry_budget,
                 "backoff_seconds": delay,
+                **({"error_class": error_class} if error_class else {}),
                 "next_run_at": next_run_at,
             },
         )
@@ -272,6 +233,7 @@ def _apply_outcome(
             "checkpoint": checkpoint,
             "transient": bool(getattr(outcome, "transient", False)),
             "retry_budget_exhausted": bool(getattr(outcome, "transient", False)),
+            **({"error_class": error_class} if error_class else {}),
         },
         target_status=target,
         transition_reason=(
@@ -293,6 +255,16 @@ def _apply_outcome(
     return 1
 
 
+def _transient_retries_used(service, job_id: str, current_attempt_id: str) -> int:
+    """Automatic transient-failure requeues already spent by this job."""
+    try:
+        attempts = service.store.list_attempts(job_id)
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for a in attempts
+               if a.id != current_attempt_id and (a.metadata or {}).get("retry_scheduled"))
+
+
 # Backoff schedule for automatic transient-failure requeues: 30s, 60s,
 # 120s, ... capped at 10 minutes. Attempt numbers start at 1.
 RETRY_BACKOFF_BASE_SECONDS = 30.0
@@ -300,8 +272,11 @@ RETRY_BACKOFF_MAX_SECONDS = 600.0
 
 
 def _retry_backoff_seconds(attempt_number: int) -> float:
+    from .job_settings import rule_or
+    base = float(rule_or("retry.backoff_base_s", RETRY_BACKOFF_BASE_SECONDS))
+    cap = float(rule_or("retry.backoff_max_s", RETRY_BACKOFF_MAX_SECONDS))
     exponent = max(0, int(attempt_number) - 1)
-    return float(min(RETRY_BACKOFF_MAX_SECONDS, RETRY_BACKOFF_BASE_SECONDS * (2 ** exponent)))
+    return float(min(cap, base * (2 ** exponent)))
 
 
 def _schedule_next_run(service, job_id: str, next_run_at: float) -> None:
@@ -309,10 +284,7 @@ def _schedule_next_run(service, job_id: str, next_run_at: float) -> None:
     Stored in job metadata (no schema migration); the controller's tick
     skips QUEUED jobs whose ``next_run_at`` is still in the future."""
     try:
-        job = service.get(job_id)
-        metadata = dict(job.metadata or {})
-        metadata["next_run_at"] = float(next_run_at)
-        service.store.update_runtime_fields(job_id, metadata_json=metadata)
+        service.store.patch_metadata(job_id, {"next_run_at": float(next_run_at)})
     except Exception:  # noqa: BLE001 — scheduling hint is best-effort
         logging.getLogger("mucli").debug("next_run_at update failed", exc_info=True)
 
@@ -320,8 +292,7 @@ def _schedule_next_run(service, job_id: str, next_run_at: float) -> None:
 def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
     """Durable job v2: PREPARING -> PLANNING -> (caller moves to RUNNING).
 
-    Runs once per job (a stored ``metadata.plan`` is reused on review rework
-    rounds). Returns an exit code when the job was parked, else None.
+    Runs once per job; the versioned plan artifact is reused on rework. Returns an exit code when the job was parked, else None.
     """
     from . import stages
     from .job_settings import missing_stages, plan_approval_required
@@ -341,7 +312,8 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             payload={"missing_stages": missing},
         )
         return 27
-    if not stages.is_staged(job) or (job.metadata or {}).get("plan"):
+    from .core.plan_ops import plan_store
+    if not stages.is_staged(job) or (plan_store(job).latest_version() and job.status != JobStatus.PLANNING):
         return None
     service.transition(job_id, JobStatus.PLANNING, reason="planning stage started")
     try:
@@ -349,6 +321,21 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             service, job_id, generate_fn=generate_fn or stages.default_generate(service)
         )
     except Exception as exc:  # noqa: BLE001 - planner failure parks on a human
+        from .sandbox.runner import SandboxUnavailable
+        from .sandbox.environments import EnvironmentBlocked
+        if isinstance(exc, SandboxUnavailable):
+            service.transition(job_id, JobStatus.FAILED, reason=str(exc),
+                               payload={"stage": "provisioning", "exception_type": "SandboxUnavailable"})
+            return 3
+        if isinstance(exc, EnvironmentBlocked):
+            service.require_human(job_id, AttentionReason.ENVIRONMENT_FAILURE, str(exc)[:2000], payload={"stage": "plan"})
+            return 26
+        from .sandbox.runner import StageLimitReached
+        if isinstance(exc, StageLimitReached):
+            # A reached cap pauses the planner resumably; the human approves more or cancels.
+            service.require_human(job_id, AttentionReason.LIMIT_REACHED, str(exc)[:2000],
+                                  payload={"stage": "plan", "limit": exc.detail})
+            return 26
         service.require_human(
             job_id,
             AttentionReason.PROVIDER_ERROR,
@@ -360,7 +347,8 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
     if current.status != JobStatus.PLANNING:
         return 0  # parked by the plan contract (e.g. NO_VALIDATION)
     if plan_approval_required(current.execution):
-        plan = dict((current.metadata or {}).get("plan") or {})
+        doc = plan_store(current).load()
+        plan = doc.to_dict() if doc else {}
         service.require_human(
             job_id,
             AttentionReason.PLAN_REVIEW,
@@ -374,40 +362,66 @@ def _maybe_run_plan_stage(service, job_id: str, generate_fn=None):
             },
         )
         return 0
+    from .core.plan_ops import plan_store
+    from .stages import merge_metadata
+    version = plan_store(current).latest_version()
+    if version:
+        merge_metadata(service, job_id, plan_approved_version=version)
+        service.store.append_event(job_id, "plan_version_approved", reason="automatic approval configured",
+                                   payload={"version": version, "automatic": True})
     return None
 
 
+def _require_approved_plan(service, job) -> Optional[int]:
+    """A staged job implements only an approved plan version.
+
+    Lease recovery used to route a job that died in PLANNING through
+    RECOVERING straight into implementation with no plan at all. Whatever
+    path reaches this point, a staged job without ``plan_approved_version``
+    parks on a human instead of implementing. Returns an exit code when the
+    job was parked, else None."""
+    from . import stages
+
+    if not stages.is_staged(job) or (job.metadata or {}).get("plan_approved_version"):
+        return None
+    try:
+        from .core.plan_ops import plan_store
+        latest = plan_store(job).latest_version()
+    except Exception:  # noqa: BLE001 - unreadable artifacts count as no plan
+        latest = None
+    if latest:
+        reason = AttentionReason.PLAN_REVIEW
+        detail = (f"Implementation needs an approved plan, but plan v{latest} has not been approved. "
+                  "Review and approve the plan (or request a re-plan) to continue.")
+    else:
+        reason = AttentionReason.WORKER_LOST
+        detail = ("Implementation needs an approved plan, but this job has no plan. "
+                  "Resume or retry the job to run the planning stage again.")
+    service.require_human(job.id, reason, detail,
+                          payload={"stage": "implement", "missing": "plan_approved_version", "plan_version": latest or 0})
+    return 28
+
+
 def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
-    service = get_default_job_service()
-    manager = JobWorktreeManager(service)
-    heartbeat_stop = threading.Event()
-    lease_lost = threading.Event()
-    heartbeat_thread = threading.Thread(
-        target=_heartbeat,
-        args=(service, job_id, worker_id, lease_ttl_seconds, heartbeat_stop, lease_lost),
-        name=f"mucli-job-worker-heartbeat-{job_id[:8]}",
-        daemon=True,
+    """Implementation phase: prepare the worktree, plan if needed, run one implement attempt."""
+    return run_leased(
+        get_default_job_service(), job_id, worker_id, phase="implementation",
+        lease_ttl_seconds=lease_ttl_seconds, body=_implementation,
+        statuses=(JobStatus.QUEUED, JobStatus.RECOVERING, JobStatus.PLANNING),
+        reject_event="worker_rejected", release_reason="isolated worker exited",
     )
+
+
+def _implementation(service: JobService, job, lease) -> int:
+    job_id, worker_id = job.id, lease.worker_id
+    manager = JobWorktreeManager(service)
     attempt = None
     try:
-        job = service.get(job_id)
-        if job.worker_id != worker_id:
-            service.store.append_event(
-                job_id,
-                "worker_rejected",
-                reason="worker does not own job lease",
-                payload={"expected": job.worker_id, "received": worker_id},
-            )
-            return 2
-        heartbeat_thread.start()
-
         if job.status == JobStatus.QUEUED:
             # Consume any automatic-retry backoff hint: this attempt IS the
             # scheduled retry, so a stale next_run_at must not linger.
             service._clear_retry_backoff(job_id)
             job = service.transition(job_id, JobStatus.PREPARING, reason="worker preparing isolated workspace")
-        elif job.status != JobStatus.RECOVERING:
-            return 0
 
         execution = dict(job.execution or {})
         if str(execution.get("session_type") or "workspace") == "workspace" and not str(job.repository or "").strip():
@@ -444,17 +458,22 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
                 return 3
             job = service.get(job_id)
 
-        if job.status == JobStatus.PREPARING:
+        if job.status in (JobStatus.PREPARING, JobStatus.PLANNING):
             plan_rc = _maybe_run_plan_stage(service, job_id)
             if plan_rc is not None:
                 _refresh_receipt(service, job_id)
                 return plan_rc
             job = service.get(job_id)
 
+        blocked = _require_approved_plan(service, job)
+        if blocked is not None:
+            _refresh_receipt(service, job_id)
+            return blocked
+
         attempt = service.start_attempt(
             job_id,
             worker_id=worker_id,
-            session_name=SessionJobRunner.session_name(job),
+            session_name=session_name(job),
             metadata={
                 "process_id": os.getpid(),
                 "branch": job.branch,
@@ -464,15 +483,11 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
         )
         job = service.transition(job_id, JobStatus.RUNNING, reason="isolated worker attempt started")
 
-        import mucli as mucli_entry
+        from .sandbox.runner import SandboxJobRunner
 
-        runner = SessionJobRunner(
-            service,
-            build_session_fn=mucli_entry.build_session,
-            base_args=_base_args(job),
-        )
+        runner = SandboxJobRunner(service)
         outcome = runner.run(job, attempt)
-        if lease_lost.is_set():
+        if lease.lost.is_set():
             # Heartbeat failed mid-run: a replacement worker may own the
             # job. Do NOT checkpoint/finish/transition — that would race
             # the replacement and corrupt its state.
@@ -502,7 +517,7 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
         )
 
     except JobStateError:
-        return 0
+        raise
     except BaseException as exc:
         # Round-36 F3: the crash path is fenced exactly like the success
         # path — a worker that has lost its lease (heartbeat reported loss,
@@ -519,17 +534,17 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
         # Round-40 F2: the ONLY attempt write is the atomic
         # finish_attempt_owned(target_status=FAILED) below. The previous
         # duplicate unconditioned finish already committed 'failed' before
-        # the atomic call — a later TIMED_OUT transition could no longer
+        # the atomic call — a later status change could no longer
         # roll it back, defeating the guarantee, and every ordinary crash
         # emitted a duplicate attempt_finished event.
         if attempt is not None and still_owned:
             try:
                 # Round-39/40 F2: finish the attempt AND transition to
-                # FAILED in the same lease-conditioned transaction. A
-                # runtime deadline may already have flipped the job to
-                # TIMED_OUT (TIMED_OUT→FAILED is rejected) — the
-                # JobStateError rolls the whole transaction back, so a
-                # timed-out job never gets a misleading 'failed' attempt.
+                # FAILED in the same lease-conditioned transaction. If the
+                # job already left RUNNING (e.g. cancelled), the
+                # JobStateError rolls the whole transaction back, so it
+                # never gets a misleading 'failed' attempt. (Reached caps
+                # never land here: they pause with ``limit_reached``.)
                 service.store.finish_attempt_owned(
                     attempt.id,
                     worker_id=worker_id,
@@ -550,16 +565,20 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
             # this branch nothing was recorded and the job sat in PLANNING
             # forever after the worker exited.
             try:
-                service.require_human(
-                    job_id,
-                    AttentionReason.PROVIDER_ERROR,
-                    f"Worker stopped before implementation: {type(exc).__name__}: {str(exc)[:400]}",
-                    payload={
-                        "stage": "pre_attempt",
-                        "exception_type": type(exc).__name__,
-                        "process_id": os.getpid(),
-                    },
-                )
+                if not isinstance(exc, InteractionRequired):
+                    service.transition(job_id, JobStatus.FAILED, reason="worker crashed before an attempt started",
+                                       payload={"error": str(exc)[:500], "exception_type": type(exc).__name__})
+                else:
+                    service.require_human(
+                        job_id,
+                        AttentionReason.PROVIDER_ERROR,
+                        f"Worker stopped before implementation: {type(exc).__name__}: {str(exc)[:400]}",
+                        payload={
+                            "stage": "pre_attempt",
+                            "exception_type": type(exc).__name__,
+                            "process_id": os.getpid(),
+                        },
+                    )
             except Exception:
                 try:
                     service.store.append_event(
@@ -588,23 +607,32 @@ def run_job(job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
         except Exception:
             pass
         return 4
-    finally:
-        heartbeat_stop.set()
-        if heartbeat_thread.is_alive():
-            heartbeat_thread.join(timeout=1.0)
-        try:
-            service.release(job_id, worker_id, reason="isolated worker exited")
-        except Exception:
-            pass
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Run one MuCLI durable engineering job")
+WORKER_PHASES = {
+    "implementation": "mu.jobs.worker:run_job",
+    "verification": "mu.jobs.verify_worker:run_verification",
+    "review": "mu.jobs.review_worker:run_review",
+    "publish": "mu.jobs.publish:run_publish",
+}
+
+
+def run_phase(phase: str, job_id: str, worker_id: str, *, lease_ttl_seconds: int = 45) -> int:
+    """The single worker entry point: run one leased phase of one job."""
+    import importlib
+
+    module, _, name = WORKER_PHASES[phase].partition(":")
+    return getattr(importlib.import_module(module), name)(job_id, worker_id, lease_ttl_seconds=lease_ttl_seconds)
+
+
+def main(argv: Optional[list] = None, *, phase: Optional[str] = None) -> int:
+    parser = argparse.ArgumentParser(description="Run one phase of a MuCLI durable engineering job")
+    parser.add_argument("--phase", choices=PHASES, default=phase or "implementation")
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--worker-id", required=True)
     parser.add_argument("--lease-ttl", type=int, default=45)
-    args = parser.parse_args()
-    return run_job(args.job_id, args.worker_id, lease_ttl_seconds=args.lease_ttl)
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    return run_phase(args.phase, args.job_id, args.worker_id, lease_ttl_seconds=args.lease_ttl)
 
 
 if __name__ == "__main__":

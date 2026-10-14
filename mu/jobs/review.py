@@ -184,6 +184,14 @@ class JobReviewService:
                 if bad:
                     raise JobReviewError("Validation command not allowed: " + "; ".join(bad[:3]))
             metadata["plan_approved"] = {"by": "human", "detail": response["detail"]}
+            try:
+                from .core.plan_ops import legacy_approval_version
+
+                approved_version = legacy_approval_version(job, value)
+                if approved_version:
+                    metadata["plan_approved_version"] = approved_version
+            except (OSError, ValueError):
+                pass
             self.service.store.update_runtime_fields(job.id, metadata_json=metadata, **fields)
             self.service.store.append_event(
                 job.id, "plan_approved", reason="human approved plan",
@@ -300,13 +308,36 @@ class JobReviewService:
         if job.status != JobStatus.CONFLICTED:
             raise JobReviewError("Only a conflicted job can be resolved this way.")
         drift = dict((job.metadata or {}).get("base_drift") or {})
+        # The sandbox has no gitdir, so the host does the merge: a clean merge
+        # becomes a checkpoint; a conflicted one is committed WITH markers as a
+        # checkpoint and the agent is told exactly which files to resolve.
+        merge = merge_base_into_branch(self.service, job, drift)
         files = ", ".join(drift.get("conflicted_files") or []) or "unknown files"
-        text = str(detail or "").strip() or (
-            f"The base branch {drift.get('base_ref') or job.base_branch} moved and the job branch no "
-            f"longer merges cleanly (conflicts: {files}). Merge or rebase onto the current base tip "
-            f"{str(drift.get('current_base_sha') or '')[:12]}, resolve conflicts, keep the ticket's "
-            "behaviour, and re-run the validation commands."
-        )
+        base_label = merge.get("base_ref") or drift.get("base_ref") or job.base_branch
+        tip = str(merge.get("base_sha") or drift.get("current_base_sha") or "")[:12]
+        if merge.get("status") == "clean":
+            guidance = (
+                f"The host merged the current base {base_label} ({tip}) into the job branch cleanly "
+                f"(checkpoint {str(merge.get('head_sha') or '')[:12]}). Re-run the validation commands and "
+                "fix anything the new base broke, keeping the ticket's behaviour."
+            )
+        elif merge.get("status") == "conflicted":
+            conflicted = ", ".join(merge.get("conflicted_files") or []) or files
+            guidance = (
+                f"The host merged the current base {base_label} ({tip}) into the job branch and the merge "
+                f"conflicted in: {conflicted}. The conflict markers are committed as checkpoint "
+                f"{str(merge.get('head_sha') or '')[:12]}. Resolve every <<<<<<< / ======= / >>>>>>> marker "
+                "in those files, keeping both the base's changes and the ticket's behaviour (do not rebase; "
+                "the merge is already recorded), then re-run the validation commands."
+            )
+        else:
+            guidance = (
+                f"The base branch {base_label} moved and the job branch no "
+                f"longer merges cleanly (conflicts: {files}). Merge or rebase onto the current base tip "
+                f"{tip}, resolve conflicts, keep the ticket's behaviour, and re-run the validation commands."
+            )
+        text = str(detail or "").strip()
+        text = f"{text}\n\n{guidance}" if text and merge.get("status") in {"clean", "conflicted"} else (text or guidance)
         self.service.store.append_event(
             job_id, "human_response", payload={"detail": text, "source": "conflict_resolution"},
         )
@@ -316,7 +347,7 @@ class JobReviewService:
         return self.service.transition(
             job_id, JobStatus.QUEUED,
             reason="conflict resolution requested; requeued",
-            payload={"feedback": text, "branch": job.branch, "base_drift": drift},
+            payload={"feedback": text, "branch": job.branch, "base_drift": drift, "base_merge": merge},
         )
 
     def discard(self, job_id: str, reason: str = ""):
@@ -324,3 +355,100 @@ class JobReviewService:
         if job.status == JobStatus.MERGED:
             raise JobReviewError("A merged job cannot be discarded.")
         return self.service.cancel(job_id, reason=str(reason or "discarded from review"))
+
+
+def merge_base_into_branch(service: JobService, job, drift: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Merge the current base tip into the job branch on the host (W3 #4).
+
+    Uses the job's live worktree when it exists (it must be clean), otherwise
+    a temporary worktree on the job branch. Returns ``status``: ``clean``
+    (merge commit made), ``conflicted`` (merge committed with markers; see
+    ``conflicted_files``), ``up_to_date`` or ``unavailable`` (with ``error``).
+    On a recorded merge the job's ``base_sha`` moves to the merged base tip so
+    review diffs and baseline triage stay scoped to the job's own changes."""
+    import shutil
+    import tempfile
+
+    from .base_drift import _base_ref, _repository_root, comparison_ref
+    from .repository import git_timeout_seconds
+    from .worktree import git_identity_env
+
+    drift = dict(drift or {})
+    result: Dict[str, Any] = {"status": "unavailable"}
+    if not job.branch:
+        return {**result, "error": "job has no branch"}
+    try:
+        repo = _repository_root(service, job)
+        base_ref = comparison_ref(repo, str(drift.get("base_ref") or "").strip() or _base_ref(job))
+    except Exception as exc:  # noqa: BLE001
+        return {**result, "error": str(exc)[:300]}
+    result["base_ref"] = base_ref
+    timeout = git_timeout_seconds()
+
+    def git(cwd: str, *args: str, env=None) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-C", cwd, *args], text=True,
+                              capture_output=True, timeout=timeout, env=env, check=False)
+
+    temp_dir = ""
+    path = ""
+    try:
+        tip = git(repo, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
+        if tip.returncode != 0:
+            return {**result, "error": f"base ref {base_ref!r} does not resolve"}
+        tip_sha = tip.stdout.strip()
+        result["base_sha"] = tip_sha
+        if git(repo, "merge-base", "--is-ancestor", tip_sha, f"refs/heads/{job.branch}").returncode == 0:
+            return {**result, "status": "up_to_date"}
+        live = str(job.worktree or "")
+        if live and os.path.isdir(live):
+            path = live
+            if git(path, "status", "--porcelain").stdout.strip():
+                return {**result, "error": "job worktree has uncommitted changes"}
+            if git(path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip() != job.branch:
+                return {**result, "error": "job worktree is not on the job branch"}
+        else:
+            temp_dir = tempfile.mkdtemp(prefix="mucli-merge-")
+            path = os.path.join(temp_dir, "worktree")
+            added = git(repo, "worktree", "add", path, job.branch)
+            if added.returncode != 0:
+                return {**result, "error": (added.stderr or "worktree add failed").strip()[:300]}
+        env = git_identity_env(path)
+        message = f"mu checkpoint: merge {base_ref} ({tip_sha[:12]}) into {job.branch}"
+        merged = git(path, "-c", "commit.gpgsign=false", "merge", "--no-ff", "--no-edit", "-m", message, tip_sha, env=env)
+        if merged.returncode != 0:
+            unmerged = git(path, "diff", "--name-only", "--diff-filter=U")
+            conflicted = [line.strip() for line in unmerged.stdout.splitlines() if line.strip()]
+            if not conflicted:
+                git(path, "merge", "--abort")
+                return {**result, "error": (merged.stderr or merged.stdout or "merge failed").strip()[:300]}
+            git(path, "add", "-A")
+            committed = git(path, "commit", "--no-verify", "--no-gpg-sign", "-m",
+                            f"{message} (conflict markers in {len(conflicted)} file(s))", env=env)
+            if committed.returncode != 0:
+                git(path, "merge", "--abort")
+                return {**result, "error": (committed.stderr or "conflict checkpoint failed").strip()[:300]}
+            result.update(status="conflicted", conflicted_files=conflicted)
+        else:
+            result["status"] = "clean"
+        result["head_sha"] = git(path, "rev-parse", "HEAD").stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {**result, "status": "unavailable", "error": str(exc)[:300]}
+    finally:
+        if temp_dir:
+            if path and os.path.isdir(path):
+                try:
+                    git(repo, "worktree", "remove", "--force", path)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            try:
+                git(repo, "worktree", "prune")
+            except (OSError, subprocess.SubprocessError):
+                pass
+    try:
+        service.store.update_runtime_fields(job.id, base_sha=result["base_sha"])
+    except Exception:  # noqa: BLE001
+        pass
+    service.store.append_event(job.id, "base_merged", reason=f"host merged {base_ref} ({result['status']})",
+                               payload=result)
+    return result

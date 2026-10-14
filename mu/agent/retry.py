@@ -68,6 +68,17 @@ _TRANSIENT_MARKERS = (
 )
 
 
+# Errors that look transient (429) but are not: retrying burns the whole retry budget.
+_PERMANENT_MARKERS = (
+    "insufficient_quota",
+    "credit_balance",
+    "no credits remaining",
+    "billing",
+    "quota exceeded for this month",
+    "exceeded your current quota",
+)
+
+
 _RETRYABLE_HTTP_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 
@@ -182,6 +193,9 @@ def is_transient_provider_error(error: Exception) -> bool:
     known transient markers, then fall back to extracting an HTTP status
     code from the message."""
     message = str(error or "").lower()
+    # Billing/quota exhaustion arrives as a 429 but will not clear by waiting.
+    if any(marker in message for marker in _PERMANENT_MARKERS):
+        return False
     if any(marker in message for marker in _TRANSIENT_MARKERS):
         return True
     status = extract_http_status_code(message)
@@ -341,6 +355,8 @@ def provider_generate_with_retry(
                 system_prompt=system_prompt,
                 thinking=thinking,
                 tools=tools,
+                **_stream_cache_kwargs(session.provider, messages, session),
+                **_effort_kwargs(session),
             )
             response = renderer.consume(session.provider, events)
             post_ctx = HookContext(
@@ -381,9 +397,23 @@ def provider_generate_with_retry(
             # Exponential backoff with jitter, capped at max_delay.
             delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
             delay += random.uniform(0, min(1.0, delay * 0.25))
+            # A provider-supplied Retry-After (cloud rate limits) is the floor.
+            try:
+                delay = max(delay, float(getattr(exc, "retry_after", 0) or 0))
+            except (TypeError, ValueError):
+                pass
             # Don't oversleep past the remaining budget.
             remaining = max(0.0, total_budget_s - elapsed)
             delay = max(0.05, min(delay, remaining))
+            try:
+                from mu.trace.emitter import get_emitter
+                emitter = get_emitter(session)
+                if emitter is not None:
+                    emitter.emit({"type": "retry", "run_id": emitter.run_id, "attempt": attempt,
+                                  "delay_s": round(delay, 2), "elapsed_s": round(elapsed, 2),
+                                  "error": str(exc)[:300], "error_type": type(exc).__name__})
+            except Exception:  # noqa: BLE001 - telemetry never breaks a retry
+                pass
             if session.ui:
                 session.ui.show_info(
                     f"Transient provider error; retry {attempt} "
@@ -400,3 +430,55 @@ __all__ = [
     "extract_http_status_code",
     "provider_generate_with_retry",
 ]
+
+
+def _accepts(provider, name: str) -> bool:
+    import inspect
+    try:
+        params = inspect.signature(provider.stream).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is p.VAR_KEYWORD for p in params.values())
+
+
+def _accepts_cache_hint(provider) -> bool:
+    return _accepts(provider, "cache_hint")
+
+
+# Provider-neutral effort levels; each provider maps them to what its API accepts
+# (Anthropic output_config.effort, OpenAI reasoning_effort, Ollama think).
+EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _effort_kwargs(session) -> dict:
+    """``reasoning_effort`` from the session variable (``/effort``), when set and supported."""
+    effort = str((getattr(session, "variables", None) or {}).get("reasoning_effort") or "").strip().lower()
+    if effort not in EFFORT_LEVELS or not _accepts(session.provider, "reasoning_effort"):
+        return {}
+    return {"reasoning_effort": effort}
+
+
+def _stream_cache_kwargs(provider, messages, session=None) -> dict:
+    """``cache_hint`` telling the provider the request ends with the request-only
+    RUNTIME STATE part, so the history cache breakpoint goes before it (otherwise the
+    cached prefix always includes a block the next request never repeats)."""
+    try:
+        if not _accepts_cache_hint(provider):
+            return {}
+        from mu.session.runtime_state import is_runtime_state_message
+        from providers.base import CacheHint
+        tail = 1 if messages and is_runtime_state_message(messages[-1]) else 0
+        key = _cache_key(session) if session is not None else ""
+        if not tail and not key:
+            return {}
+        return {"cache_hint": CacheHint(volatile_tail_parts=tail, cache_key=key)}
+    except Exception:  # noqa: BLE001 - caching is an optimisation, never a failure
+        return {}
+
+
+def _cache_key(session) -> str:
+    """Stable per-session prompt-cache key (hash of the session name, or the run id)."""
+    import hashlib
+    sm = getattr(session, "session_manager", None)
+    name = str(getattr(sm, "current_session_name", "") or getattr(session, "_trace_run_id", "") or "")
+    return "mucli-" + hashlib.sha1(name.encode()).hexdigest()[:24] if name else ""

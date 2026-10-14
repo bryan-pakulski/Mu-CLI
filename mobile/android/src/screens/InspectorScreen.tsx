@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button } from '../components';
 import { inspectorApi, InspectorStats, InspectorMemoryResponse } from '../api/inspector';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights } from '../theme/tokens';
 
 export function InspectorScreen() {
   const { colors } = useTheme();
@@ -72,7 +72,7 @@ export function InspectorScreen() {
       >
         {stats && (
           <Card style={{ marginBottom: spacing.sm }}>
-            <Text variant="base" style={{ fontWeight: '600', marginBottom: spacing.sm }}>Session Stats</Text>
+            <Text variant="base" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Session Stats</Text>
             {stats.name && <StatRow label="Session" value={stats.name} colors={colors} />}
             {stats.provider && <StatRow label="Provider" value={`${stats.provider} · ${stats.model || ''}`} colors={colors} />}
             {stats.agent_mode && <StatRow label="Mode" value={stats.agent_mode} colors={colors} />}
@@ -82,7 +82,7 @@ export function InspectorScreen() {
             )}
             {stats.tokens && (
               <View style={{ marginTop: spacing.xs }}>
-                <Text variant="xs" style={{ color: colors.textDim, marginBottom: 4 }}>Tokens</Text>
+                <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs }}>Tokens</Text>
                 {Object.entries(stats.tokens).map(([k, v]) => (
                   <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text variant="xs" style={{ color: colors.textDim }}>{k}</Text>
@@ -96,7 +96,7 @@ export function InspectorScreen() {
 
         {stats?.memory_status_counts && Object.keys(stats.memory_status_counts).length > 0 && (
           <Card style={{ marginBottom: spacing.sm }}>
-            <Text variant="base" style={{ fontWeight: '600', marginBottom: spacing.sm }}>Memory Status</Text>
+            <Text variant="base" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Memory Status</Text>
             {Object.entries(stats.memory_status_counts).map(([k, v]) => (
               <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between', minHeight: 28 }}>
                 <Text variant="sm" style={{ color: colors.textDim }}>{k}</Text>
@@ -108,7 +108,7 @@ export function InspectorScreen() {
 
         {memory && (
           <Card style={{ marginBottom: spacing.sm }}>
-            <Text variant="base" style={{ fontWeight: '600', marginBottom: spacing.sm }}>
+            <Text variant="base" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
               Task Memory ({memory.task_memory.length})
             </Text>
             <View style={{ maxHeight: 300, overflow: 'hidden' }}>
@@ -125,7 +125,7 @@ export function InspectorScreen() {
 
         {memory && (
           <Card style={{ marginBottom: spacing.sm }}>
-            <Text variant="base" style={{ fontWeight: '600', marginBottom: spacing.sm }}>
+            <Text variant="base" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
               Scratchpad ({memory.scratchpad.length})
             </Text>
             <View style={{ maxHeight: 250, overflow: 'hidden' }}>
@@ -155,8 +155,8 @@ function StatRow({ label, value, colors }: { label: string; value: string; color
 
 function MemoryEntry({ entry, colors }: { entry: { id: number; content: string; kind: string; status: string; tags: string[] }; colors: any }) {
   return (
-    <View style={{ paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+    <View style={{ paddingVertical: spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: 2 }}>
         <Badge label={entry.kind} variant="neutral" />
         <Badge label={entry.status} variant={entry.status === 'active' ? 'success' : 'neutral'} />
       </View>

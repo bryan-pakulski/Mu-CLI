@@ -144,10 +144,11 @@ def test_ollama_effective_context_uses_num_ctx_override_when_set():
     assert provider.effective_context_window("llama3") == 16384
 
 
-def test_ollama_effective_context_returns_none_when_unreachable(monkeypatch):
-    """A daemon probe failure must not crash compaction — return None
-    so the caller falls back to the user-set context_token_limit."""
-    from providers.ollama import OllamaProvider
+def test_ollama_effective_context_when_unreachable(monkeypatch):
+    """A daemon probe failure must not crash compaction. A local model is always sent
+    the ≥64k num_ctx (provider_latency_ollama_openai.md §4), so that is its window; a
+    cloud model whose window can't be read returns None (caller falls back)."""
+    from providers.ollama import LOCAL_MIN_NUM_CTX, OllamaProvider
     import urllib.error
 
     provider = OllamaProvider("nonexistent-model", host="http://localhost:1")
@@ -157,7 +158,10 @@ def test_ollama_effective_context_returns_none_when_unreachable(monkeypatch):
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr("urllib.request.urlopen", _fail)
-    assert provider.effective_context_window("nonexistent-model") is None
+    assert provider.effective_context_window("nonexistent-model") == LOCAL_MIN_NUM_CTX
+    cloud = OllamaProvider("glm-5.3", host="https://ollama.com")
+    cloud.bind_session_variables({"ollama_num_ctx": 0})
+    assert cloud.effective_context_window("glm-5.3") is None
 
 
 def test_ollama_effective_context_parses_model_info_context_length(monkeypatch):
@@ -216,13 +220,16 @@ def test_safety_factor_one_is_a_noop():
 
 
 def test_ollama_safety_factor_default_and_override():
-    """Ollama defaults to 2.5 (observed cl100k→real drift for qwen-class),
-    and is tunable via the ollama_token_safety_factor session variable."""
+    """Ollama's seed is 1.3 (measured cl100k→real drift for glm/qwen-class is
+    ~1.0–1.1; the learned drift takes over), tunable via the
+    ollama_token_safety_factor session variable."""
     from providers.ollama import OllamaProvider
+    from utils.config import VARIABLE_SCHEMA
 
     provider = OllamaProvider("qwen3", host="http://localhost:11434")
     provider.bind_session_variables({})
-    assert provider.compaction_safety_factor() == 2.5
+    assert provider.compaction_safety_factor() == 1.3
+    assert VARIABLE_SCHEMA["ollama_token_safety_factor"]["default"] == 1.3
 
     provider.bind_session_variables({"ollama_token_safety_factor": 1.0})
     assert provider.compaction_safety_factor() == 1.0
@@ -268,9 +275,10 @@ def test_ollama_effective_context_caches_per_model(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", _spy)
     provider.effective_context_window("llama3")
+    first = call_count["n"]  # /api/show (+ one /api/tags route probe for a local daemon)
     provider.effective_context_window("llama3")
     provider.effective_context_window("llama3")
-    assert call_count["n"] == 1
+    assert first <= 2 and call_count["n"] == first
 
 
 def test_provider_reserve_overrides_session_variable(monkeypatch):
@@ -369,7 +377,8 @@ def test_ollama_reserve_returns_none_when_window_unknown(monkeypatch):
     from providers.ollama import OllamaProvider
     import urllib.error
 
-    provider = OllamaProvider("unknown", host="http://localhost:1")
+    # A cloud model (local models always know their window: the num_ctx sent).
+    provider = OllamaProvider("unknown", host="https://ollama.com")
     provider.bind_session_variables({"ollama_num_predict": 0, "ollama_num_ctx": 0})
     monkeypatch.setattr(
         "urllib.request.urlopen",

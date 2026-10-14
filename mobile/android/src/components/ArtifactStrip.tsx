@@ -5,6 +5,7 @@ import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontWeights, radii, spacing } from '../theme/tokens';
 
 export function ArtifactStrip({
   sessionName,
@@ -68,9 +69,9 @@ export function ArtifactStrip({
                 <TouchableOpacity
                   key={artifact.artifact_id}
                   onPress={() => openExternalUrl(artifactsApi.viewUrl(sessionName, artifact.artifact_id))}
-                  style={[styles.chip, { backgroundColor: colors.bgHover, borderColor: colors.border }]}
+                  style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
                 >
-                  <Ionicons name="stats-chart-outline" size={16} color={colors.accent} />
+                  <Ionicons name="stats-chart-outline" size={16} color={colors.textSoft} />
                   <View style={styles.copy}>
                     <Text variant="xs" style={styles.name} numberOfLines={1}>
                       {artifact.title || artifact.name}
@@ -96,9 +97,9 @@ export function ArtifactStrip({
               <TouchableOpacity
                 key={artifact.artifact_id}
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, artifact.artifact_id))}
-                style={[styles.chip, { backgroundColor: colors.bgHover, borderColor: colors.border }]}
+                style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
               >
-                <Ionicons name="document-attach-outline" size={16} color={colors.accent} />
+                <Ionicons name="document-attach-outline" size={16} color={colors.textSoft} />
                 <View style={styles.copy}>
                   <Text variant="xs" style={styles.name} numberOfLines={1}>{artifact.name}</Text>
                   <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
@@ -120,12 +121,12 @@ function formatBytes(value: number): string {
 }
 
 const styles = StyleSheet.create({
-  wrap: { paddingTop: 8, paddingBottom: 4 },
-  section: { paddingBottom: 4 },
-  heading: { paddingHorizontal: 16, marginBottom: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  label: { fontWeight: '700', letterSpacing: 0.8 },
-  row: { paddingHorizontal: 16, gap: 8 },
-  chip: { width: 210, minHeight: 54, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  wrap: { paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  section: { paddingBottom: spacing.xs },
+  heading: { paddingHorizontal: spacing.base, marginBottom: spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  label: { fontWeight: fontWeights.medium },
+  row: { paddingHorizontal: spacing.base, gap: spacing.sm },
+  chip: { width: 210, minHeight: 56, borderRadius: radii.sm, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   copy: { flex: 1 },
-  name: { fontWeight: '600' },
+  name: { fontWeight: fontWeights.semibold },
 });

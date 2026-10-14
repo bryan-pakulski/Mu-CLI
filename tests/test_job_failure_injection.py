@@ -22,7 +22,6 @@ import pytest
 from mu.jobs import AttentionReason, JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.base_drift import apply_base_drift
 from mu.jobs.controller import JobController
-from mu.jobs.review_branch import materialize_review_branch
 from mu.jobs.runner import JobRunOutcome
 from mu.jobs.ui import JobUI
 from mu.jobs.worker import _apply_outcome
@@ -277,7 +276,6 @@ def _to_ready(w, job_id):
         w.service, w.manager, job_id, attempt.id, attempt.number,
         JobRunOutcome(kind="completed", status="completed", cost_usd=0.2), worker_id=worker_id,
     )
-    materialize_review_branch(w.service, job_id)
     w.service.transition(job_id, JobStatus.READY_FOR_REVIEW)
     w.service.store.release_lease(job_id, worker_id)
 
@@ -325,7 +323,10 @@ def test_human_answer_after_thousands_of_events_is_consumed(world):
 # ------------------------------------------------------------------ scenario 7: runtime deadline
 
 
-def test_runtime_deadline_times_out_and_escalates_kill(world, monkeypatch):
+def test_runtime_deadline_pauses_and_asks_instead_of_killing(world, monkeypatch):
+    """A reached job runtime limit never times the job out or kills its worker: the stage
+    container is capped at the remaining runtime and pauses itself; past a grace window the
+    controller only asks the stage to pause gracefully (work is kept)."""
     w = world
     job = submit(w, max_runtime_seconds=60)
     w.ctl.tick()
@@ -335,11 +336,16 @@ def test_runtime_deadline_times_out_and_escalates_kill(world, monkeypatch):
     monkeypatch.setattr("mu.jobs.controller.time.time", lambda: wall[0])
     w.ctl.tick()
     current = w.service.get(job.id)
-    assert current.status == JobStatus.TIMED_OUT
-    assert "TERM" in proc.signals
-    assert any(e.event_type == "worker_runtime_deadline_exceeded" for e in w.service.events(job.id))
-    # Still retryable by a human, never silently dropped.
-    assert w.service.retry(job.id).status == JobStatus.QUEUED
+    assert current.status not in (JobStatus.TIMED_OUT, JobStatus.FAILED, JobStatus.CANCELLED)
+    assert proc.signals == []
+    types = [e.event_type for e in w.service.events(job.id)]
+    assert "worker_runtime_limit_reached" in types and "stage_pause_requested" not in types
+    wall[0] += 200  # well past the limit: one graceful pause request, still no signal
+    w.ctl.tick()
+    w.ctl.tick()
+    assert [e.event_type for e in w.service.events(job.id)].count("stage_pause_requested") == 1
+    assert proc.signals == []
+    assert w.service.get(job.id).status not in (JobStatus.TIMED_OUT, JobStatus.FAILED, JobStatus.CANCELLED)
 
 
 # ------------------------------------------------------------------ invariant sweep

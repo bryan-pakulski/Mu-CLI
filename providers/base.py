@@ -15,6 +15,7 @@
 #                                       Providers that override `stream()` can
 #                                       have `generate()` collapse to a single
 #                                       call to `drain_stream()`.
+import json
 from abc import ABC, abstractmethod
 from typing import (
     Any,
@@ -84,6 +85,12 @@ class Message:
     parts: List[MessagePart] = field(default_factory=list)
 
 
+def tool_result_json(payload: Any) -> str:
+    """Wire form of a structured tool result: compact single-line JSON (no indentation —
+    whitespace the model never needs, re-sent on every request)."""
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+
+
 @dataclass
 class CacheHint:
     """Optional hint to the provider about which prompt content should be cached.
@@ -101,6 +108,13 @@ class CacheHint:
     cache_tools: bool = True
     cache_history_until_index: Optional[int] = None
     keep_alive_seconds: int = 600
+    # Trailing parts of the last message that change on every request (mucli's
+    # RUNTIME STATE block). Anthropic places its history cache breakpoint before
+    # them, so the conversation prefix is written where the next request can read it.
+    volatile_tail_parts: int = 0
+    # Stable per-session key for providers that route prompt caches by key (OpenAI
+    # prompt_cache_key). Empty = none.
+    cache_key: str = ""
 
 
 @dataclass
@@ -136,6 +150,9 @@ class StreamEvent:
     # cache_creation_input_tokens). 0 when the provider has no such split.
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Provider-reported timings in seconds (Ollama: load, prompt_eval, eval). Empty when
+    # the provider reports none.
+    timings: Dict[str, float] = field(default_factory=dict)
 
 
 def prompt_tokens_total(
@@ -168,6 +185,7 @@ class ProviderResponse:
     reasoning_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    timings: Dict[str, float] = field(default_factory=dict)
 
     @property
     def prompt_tokens_total(self) -> int:
@@ -352,6 +370,7 @@ class LLMProvider(ABC):
         partial_calls: Dict[str, Dict[str, Any]] = {}
         in_tok = out_tok = tot_tok = cached_tok = reasoning_tok = 0
         cache_read_tok = cache_create_tok = 0
+        timings: Dict[str, float] = {}
 
         for ev in events:
             if ev.kind == "text_delta" and ev.text:
@@ -415,6 +434,7 @@ class LLMProvider(ABC):
                 cache_create_tok = (
                     (getattr(ev, "cache_creation_tokens", 0) or 0) or cache_create_tok
                 )
+                timings = dict(getattr(ev, "timings", None) or {}) or timings
             # 'error' and 'done' are signalling-only here. Callers wanting
             # to react to them should consume the stream directly.
 
@@ -453,6 +473,7 @@ class LLMProvider(ABC):
             reasoning_tokens=reasoning_tok,
             cache_read_tokens=cache_read_tok,
             cache_creation_tokens=cache_create_tok,
+            timings=timings,
         )
 
     @abstractmethod

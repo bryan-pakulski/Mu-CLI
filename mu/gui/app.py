@@ -35,6 +35,7 @@ from .routers import (
     files as files_router,
     inspector,
     jobs as jobs_router,
+    jobs_v2 as jobs_v2_router,
     loop as loop_router,
     memory as memory_router,
     memories as memories_router,
@@ -158,9 +159,10 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         app.state.job_service,
         max_workers=5,
         notify=_job_attention_notify,
-        # Retention: purge artifacts of ARCHIVED historic jobs older than N
-        # days (0 disables). Env-tunable so the daemon needs no session var.
-        retention_days=_env_float("MUCLI_JOBS_RETENTION_DAYS", 30.0),
+        # Concurrency, drift interval and retention come from Settings → Scheduling &
+        # retention (re-read live). MUCLI_JOBS_RETENTION_DAYS, when set, still wins.
+        retention_days=(_env_float("MUCLI_JOBS_RETENTION_DAYS", 30.0) if os.environ.get("MUCLI_JOBS_RETENTION_DAYS") else None),
+        settings_backed=True,
     )
 
     app.state.session_by_name = lambda name=None: session_by_name(app, name)
@@ -188,6 +190,8 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(prompts_router.router, prefix="/api/prompts", tags=["prompts"])
     app.include_router(system_prompts_router.router, prefix="/api/system-prompts", tags=["system-prompts"])
     app.include_router(inspector.router, prefix="/api", tags=["inspector"])
+    # v2 first: legacy GET /{job_id} would otherwise capture /events, /cmd.
+    app.include_router(jobs_v2_router.router, prefix="/api/jobs", tags=["jobs"])
     app.include_router(jobs_router.router, prefix="/api/jobs", tags=["jobs"])
     app.include_router(teacher_router.router, prefix="/api/teacher", tags=["teacher"])
     app.include_router(feature_router.router, prefix="/api/feature", tags=["feature"])

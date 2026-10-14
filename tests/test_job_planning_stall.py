@@ -23,6 +23,8 @@ def _service(tmp_path):
 
 def test_stage_sessions_cannot_use_bash():
     assert "bash" not in stages.STAGE_TOOL_ALLOWLIST
+    for forbidden in ("write_file", "apply_diff", "search_and_replace_file", "spawn_agent", "bash_background"):
+        assert forbidden not in stages.STAGE_TOOL_ALLOWLIST
     assert "read_file" in stages.STAGE_TOOL_ALLOWLIST or "search_for_string" in stages.STAGE_TOOL_ALLOWLIST
 
 
@@ -94,7 +96,7 @@ def test_jira_import_requires_workspace_and_uses_top_level_session(tmp_path, mon
     ws.mkdir()
     created = []
 
-    def _import(svc, client, *, keys=(), jql="", defaults=None, max_results=20):
+    def _import(svc, client, *, keys=(), jql="", defaults=None, max_results=20, force=False):
         created.append(dict(defaults or {}))
         return {"created": [], "skipped": []}
 
@@ -121,9 +123,9 @@ def test_jira_import_requires_workspace_and_uses_top_level_session(tmp_path, mon
         assert "workspace" in missing.json()["detail"].lower()
 
 
-@pytest.mark.parametrize("needle", ["userIsInspectingDetail", "detailSignature", "markDetailStale"])
+@pytest.mark.parametrize("needle", ["editor?.isDirty()", "signatures.get(part) === signature", "refreshParts(change.parts)"])
 def test_work_page_background_refresh_preserves_drilldown(needle):
     from pathlib import Path
 
-    js = (Path(__file__).resolve().parents[1] / "mu/gui/static/js/work.js").read_text(encoding="utf-8")
+    js = (Path(__file__).resolve().parents[1] / "mu/gui/static/js/work/view.js").read_text(encoding="utf-8")
     assert needle in js

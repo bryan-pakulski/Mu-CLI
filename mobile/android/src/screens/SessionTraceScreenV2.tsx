@@ -12,7 +12,7 @@ import { tracesApi, TraceRun, TraceSummary } from '../api/traces';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { Card, EmptyState, ErrorState, Skeleton, Text } from '../components';
-import { spacing } from '../theme/tokens';
+import { spacing, fontSizes, fontWeights, radii, tracking, typography, touchTarget } from '../theme/tokens';
 
 type NumericPoint = Record<string, unknown>;
 
@@ -160,9 +160,9 @@ export function SessionTraceScreenV2() {
               {selectedRunId || activeSessionName || summary.session} · {summary.provider} / {summary.model}
             </Text>
           </View>
-          <View style={[styles.statusPill, { backgroundColor: summary.status === 'completed' ? colors.accentSoft : colors.bgHover }]}>
+          <View style={[styles.statusPill, { backgroundColor: summary.status === 'completed' ? colors.successSubtle : colors.warningSubtle }]}>
             <View style={[styles.statusDot, { backgroundColor: summary.status === 'completed' ? colors.success : colors.warning }]} />
-            <Text variant="xs">{summary.status}</Text>
+            <Text variant="xs" style={{ color: summary.status === 'completed' ? colors.success : colors.warning }}>{summary.status}</Text>
           </View>
         </View>
 
@@ -206,8 +206,8 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'total_est', label: 'Estimated', color: colors.textDim },
-              { key: 'real', label: 'Provider / corrected', color: colors.accent },
+              { key: 'total_est', label: 'Estimated', color: colors.viz[7] },
+              { key: 'real', label: 'Provider / corrected', color: colors.viz[0] },
             ]}
           />
         </ChartCard>
@@ -219,12 +219,12 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'system', label: 'System', color: colors.textDim },
-              { key: 'user', label: 'User', color: colors.info },
-              { key: 'assistant', label: 'Assistant', color: colors.accent },
-              { key: 'tool_calls', label: 'Tool calls', color: colors.warning },
-              { key: 'tool_results', label: 'Tool results', color: colors.error },
-              { key: 'tool_schemas', label: 'Schemas', color: colors.success },
+              { key: 'system', label: 'System', color: colors.viz[7] },
+              { key: 'user', label: 'User', color: colors.viz[4] },
+              { key: 'assistant', label: 'Assistant', color: colors.viz[0] },
+              { key: 'tool_calls', label: 'Tool calls', color: colors.viz[2] },
+              { key: 'tool_results', label: 'Tool results', color: colors.viz[3] },
+              { key: 'tool_schemas', label: 'Schemas', color: colors.viz[1] },
             ]}
           />
         </ChartCard>
@@ -236,10 +236,10 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'in', label: 'Input', color: colors.accent },
-              { key: 'out', label: 'Output', color: colors.info },
-              { key: 'cached', label: 'Cached', color: colors.success },
-              { key: 'reasoning', label: 'Reasoning', color: colors.warning },
+              { key: 'in', label: 'Input', color: colors.viz[0] },
+              { key: 'out', label: 'Output', color: colors.viz[4] },
+              { key: 'cached', label: 'Cached', color: colors.viz[1] },
+              { key: 'reasoning', label: 'Reasoning', color: colors.viz[2] },
             ]}
           />
         </ChartCard>
@@ -251,7 +251,7 @@ export function SessionTraceScreenV2() {
             mode="single"
             yAxisLabel="latency"
             valueFormatter={formatDuration}
-            series={[{ key: 'wall_ms', label: 'Wall time', color: colors.accent }]}
+            series={[{ key: 'wall_ms', label: 'Wall time', color: colors.viz[0] }]}
           />
         </ChartCard>
 
@@ -262,8 +262,8 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'raw_tokens', label: 'Raw', color: colors.textDim },
-              { key: 'injected_tokens', label: 'Injected', color: colors.success },
+              { key: 'raw_tokens', label: 'Raw', color: colors.viz[7] },
+              { key: 'injected_tokens', label: 'Injected', color: colors.viz[1] },
             ]}
           />
         </ChartCard>
@@ -279,8 +279,8 @@ export function SessionTraceScreenV2() {
 
         <ChartCard title="Compactions and nudges" subtitle="Context recovery events across the session">
           <EventTimeline groups={[
-            { label: 'Compaction', items: compactions, color: colors.warning, kindKey: 'kind' },
-            { label: 'Nudge', items: nudges, color: colors.info, kindKey: 'kind' },
+            { label: 'Compaction', items: compactions, color: colors.viz[2], kindKey: 'kind' },
+            { label: 'Nudge', items: nudges, color: colors.viz[4], kindKey: 'kind' },
           ]} />
         </ChartCard>
 
@@ -292,10 +292,10 @@ export function SessionTraceScreenV2() {
             valueFormatter={formatInteger}
             axisMinStep={1}
             series={[
-              { key: 'task_memory_count', label: 'Task memory', color: colors.accent },
-              { key: 'scratchpad_count', label: 'Scratchpad', color: colors.info },
-              { key: 'active', label: 'Subagents', color: colors.success },
-              { key: 'stuck', label: 'Stuck', color: colors.error },
+              { key: 'task_memory_count', label: 'Task memory', color: colors.viz[0] },
+              { key: 'scratchpad_count', label: 'Scratchpad', color: colors.viz[4] },
+              { key: 'active', label: 'Subagents', color: colors.viz[1] },
+              { key: 'stuck', label: 'Stuck', color: colors.viz[3] },
             ]}
           />
         </ChartCard>
@@ -334,12 +334,14 @@ function ScopeChip({ label, active, onPress }: { label: string; active: boolean;
   return (
     <TouchableOpacity
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={[
         styles.scopeChip,
-        { backgroundColor: active ? colors.text : colors.bgLift, borderColor: active ? colors.text : colors.border },
+        { backgroundColor: active ? colors.accentSubtle : 'transparent', borderColor: active ? colors.accentSubtle : colors.border },
       ]}
     >
-      <Text variant="xs" style={{ color: active ? colors.bg : colors.text }}>{label}</Text>
+      <Text variant="xs" style={{ color: active ? colors.accentFg : colors.textSoft, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -352,7 +354,7 @@ function MetricGrid({ metrics }: { metrics: Array<{ label: string; value: string
         <Card key={metric.label} style={styles.metricCard}>
           <Text variant="xs" dim>{metric.label}</Text>
           <Text style={[styles.metricValue, { color: colors.text }]}>{metric.value}</Text>
-          <Text variant="xs" dim>{metric.detail}</Text>
+          <Text variant="xs" dim style={styles.num}>{metric.detail}</Text>
         </Card>
       ))}
     </View>
@@ -452,10 +454,10 @@ function FixedBarChart({
                   styles.gridLine,
                   {
                     top: Math.min(
-                      PLOT_HEIGHT - StyleSheet.hairlineWidth,
+                      PLOT_HEIGHT - 1,
                       Math.max(0, (1 - value / scale.max) * PLOT_HEIGHT),
                     ),
-                    borderTopColor: colors.border,
+                    borderTopColor: colors.hairline,
                   },
                 ]}
               />
@@ -466,7 +468,7 @@ function FixedBarChart({
             const showLabel = index % labelEvery === 0 || index === visible.length - 1;
             return (
               <View key={`${String(point.iter)}-${index}`} style={[styles.chartColumn, { width: columnWidth }]}>
-                <View style={[styles.plotLane, { borderBottomColor: colors.borderStrong }]}>
+                <View style={[styles.plotLane, { borderBottomColor: colors.hairline }]}>
                   {mode === 'stacked' ? (
                     <View style={styles.stackedBar}>
                       {series.map(item => {
@@ -537,7 +539,7 @@ function HorizontalBars({
             <Text variant="xs" dim>{formatInteger(numberValue(item[valueKey]))}</Text>
           </View>
           <View style={[styles.horizontalTrack, { backgroundColor: colors.bgHover }]}>
-            <View style={[styles.horizontalFill, { backgroundColor: colors.accent, width: `${Math.max(3, (numberValue(item[valueKey]) / max) * 100)}%` }]} />
+            <View style={[styles.horizontalFill, { backgroundColor: colors.viz[0], width: `${Math.max(3, (numberValue(item[valueKey]) / max) * 100)}%` }]} />
           </View>
           <Text variant="xs" dim>{detail(item)}</Text>
         </View>
@@ -563,7 +565,7 @@ function EventTimeline({ groups }: { groups: Array<{ label: string; items: Numer
             {group.items.slice(-MAX_EVENT_PILLS).map((item, index) => (
               <View key={`${group.label}-${index}`} style={[styles.eventPill, { backgroundColor: colors.bgHover }]}>
                 <View style={[styles.eventDot, { backgroundColor: group.color }]} />
-                <Text variant="xs">{String(item[group.kindKey] || group.label)} · {formatInteger(numberValue(item.iter))}</Text>
+                <Text variant="xs" style={styles.num}>{String(item[group.kindKey] || group.label)} · {formatInteger(numberValue(item.iter))}</Text>
               </View>
             ))}
           </ScrollView>
@@ -589,12 +591,12 @@ function RankedList({
   return (
     <View>
       {items.map((item, index) => (
-        <View key={`${title(item)}-${index}`} style={[styles.rankRow, index > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+        <View key={`${title(item)}-${index}`} style={styles.rankRow}>
           <View style={styles.rankCopy}>
             <Text variant="sm" style={styles.rankTitle} numberOfLines={1}>{title(item)}</Text>
             <Text variant="xs" dim numberOfLines={2}>{detail(item)}</Text>
           </View>
-          <Text variant="xs" style={{ color: colors.accent, fontVariant: ['tabular-nums'] }}>{value(item)}</Text>
+          <Text variant="xs" style={{ color: colors.textSoft, fontVariant: ['tabular-nums'] }}>{value(item)}</Text>
         </View>
       ))}
     </View>
@@ -674,57 +676,58 @@ function formatPercent(value: number): string {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: spacing.base, paddingBottom: 48 },
+  content: { padding: spacing.base, paddingBottom: spacing['2xl'] },
   loadingWrap: { padding: spacing.base },
   loadingBlock: { marginBottom: spacing.sm },
-  pageHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
-  pageHeaderCopy: { flex: 1, paddingRight: 12 },
-  pageTitle: { fontWeight: '700', letterSpacing: -0.5 },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  scopeRow: { gap: 8, paddingBottom: 16 },
-  scopeChip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 4 },
+  pageHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.base },
+  pageHeaderCopy: { flex: 1, paddingRight: spacing.md },
+  pageTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  statusPill: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  statusDot: { width: 8, height: 8, borderRadius: radii.pill },
+  num: { fontVariant: ['tabular-nums'] },
+  scopeRow: { gap: spacing.sm, paddingBottom: spacing.base },
+  scopeChip: { borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: touchTarget, justifyContent: 'center' },
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.xs },
   metricCard: { width: '48%', minHeight: 104 },
-  metricValue: { fontSize: 22, lineHeight: 30, fontWeight: '700', letterSpacing: -0.5, marginTop: 5, marginBottom: 2, fontVariant: ['tabular-nums'] },
-  chartCard: { marginTop: 12, paddingVertical: 18 },
-  chartTitle: { fontWeight: '700' },
-  chartSubtitle: { marginTop: 2, marginBottom: 14 },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 10 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  legendDot: { width: 7, height: 7, borderRadius: 4 },
+  metricValue: { fontSize: fontSizes.lg, lineHeight: typography.lg.lineHeight, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight, marginTop: spacing.xs, marginBottom: 2, fontVariant: ['tabular-nums'] },
+  chartCard: { marginTop: spacing.md, paddingVertical: spacing.base },
+  chartTitle: { fontWeight: fontWeights.semibold },
+  chartSubtitle: { marginTop: 2, marginBottom: spacing.md },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginBottom: spacing.sm },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  legendDot: { width: 8, height: 8, borderRadius: radii.pill },
   chartFrame: { width: '100%', flexDirection: 'row', alignItems: 'flex-start' },
-  yAxis: { height: PLOT_HEIGHT + AXIS_HEIGHT, paddingRight: 7 },
+  yAxis: { height: PLOT_HEIGHT + AXIS_HEIGHT, paddingRight: spacing.sm },
   yAxisTicks: { height: PLOT_HEIGHT, justifyContent: 'space-between', alignItems: 'flex-end' },
-  yAxisTick: { maxWidth: Y_AXIS_WIDTH - 7, fontSize: 9, lineHeight: 11, fontVariant: ['tabular-nums'], textAlign: 'right' },
-  yAxisUnitLane: { height: AXIS_HEIGHT, alignItems: 'flex-end', justifyContent: 'flex-start', paddingTop: 3 },
-  yAxisUnit: { fontSize: 8, lineHeight: 11, letterSpacing: 0.5, textTransform: 'uppercase' },
+  yAxisTick: { maxWidth: Y_AXIS_WIDTH - 7, fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight, fontVariant: ['tabular-nums'], textAlign: 'right' },
+  yAxisUnitLane: { height: AXIS_HEIGHT, alignItems: 'flex-end', justifyContent: 'flex-start', paddingTop: spacing.xs },
+  yAxisUnit: { fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight },
   chartViewport: { flex: 1 },
-  chartScroll: { minWidth: '100%', alignItems: 'flex-start', gap: 4, position: 'relative' },
+  chartScroll: { minWidth: '100%', alignItems: 'flex-start', gap: spacing.xs, position: 'relative' },
   gridOverlay: { position: 'absolute', left: 0, right: 0, top: 0, height: PLOT_HEIGHT },
-  gridLine: { position: 'absolute', left: 0, right: 0, borderTopWidth: StyleSheet.hairlineWidth },
+  gridLine: { position: 'absolute', left: 0, right: 0, borderTopWidth: 1 },
   chartColumn: { height: PLOT_HEIGHT + AXIS_HEIGHT },
-  plotLane: { height: PLOT_HEIGHT, justifyContent: 'flex-end', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
-  axisLane: { height: AXIS_HEIGHT, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 3 },
-  axisLabel: { fontSize: 9, lineHeight: 12, fontVariant: ['tabular-nums'] },
+  plotLane: { height: PLOT_HEIGHT, justifyContent: 'flex-end', alignItems: 'center', borderBottomWidth: 1 },
+  axisLane: { height: AXIS_HEIGHT, alignItems: 'center', justifyContent: 'flex-start', paddingTop: spacing.xs },
+  axisLabel: { fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight, fontVariant: ['tabular-nums'] },
   groupedBars: { height: PLOT_HEIGHT, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 2 },
-  verticalBar: { borderTopLeftRadius: 2, borderTopRightRadius: 2 },
-  stackedBar: { height: PLOT_HEIGHT, width: 9, justifyContent: 'flex-end', overflow: 'hidden', borderTopLeftRadius: 2, borderTopRightRadius: 2 },
-  latestValue: { marginBottom: 5, fontVariant: ['tabular-nums'] },
-  horizontalList: { gap: 13 },
+  verticalBar: {},
+  stackedBar: { height: PLOT_HEIGHT, width: 9, justifyContent: 'flex-end', overflow: 'hidden' },
+  latestValue: { marginBottom: spacing.xs, fontVariant: ['tabular-nums'] },
+  horizontalList: { gap: spacing.md },
   horizontalItem: { minHeight: 48 },
-  horizontalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
-  horizontalLabel: { flex: 1, fontWeight: '600', marginRight: 12 },
-  horizontalTrack: { height: 7, borderRadius: 4, overflow: 'hidden', marginBottom: 4 },
-  horizontalFill: { height: 7, borderRadius: 4 },
-  timeline: { gap: 12 },
-  timelineGroup: { gap: 6 },
-  timelineLabel: { fontWeight: '600' },
-  timelineItems: { gap: 7 },
-  eventPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  eventDot: { width: 7, height: 7, borderRadius: 4 },
-  rankRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', paddingVertical: 9 },
-  rankCopy: { flex: 1, paddingRight: 12 },
-  rankTitle: { fontWeight: '600' },
-  emptyChart: { paddingVertical: 18, textAlign: 'center' },
+  horizontalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
+  horizontalLabel: { flex: 1, fontWeight: fontWeights.semibold, marginRight: spacing.md },
+  horizontalTrack: { height: 8, borderRadius: radii.pill, overflow: 'hidden', marginBottom: spacing.xs },
+  horizontalFill: { height: 8, borderRadius: radii.pill },
+  timeline: { gap: spacing.md },
+  timelineGroup: { gap: spacing.xs },
+  timelineLabel: { fontWeight: fontWeights.semibold },
+  timelineItems: { gap: spacing.sm },
+  eventPill: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  eventDot: { width: 8, height: 8, borderRadius: radii.pill },
+  rankRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
+  rankCopy: { flex: 1, paddingRight: spacing.md },
+  rankTitle: { fontWeight: fontWeights.semibold },
+  emptyChart: { paddingVertical: spacing.base, textAlign: 'center' },
 });

@@ -31,7 +31,7 @@ import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { useCommandCompletion, type CompletionItem } from '../hooks/useCommandCompletion';
 import { CommandSuggestionBar } from '../components/CommandSuggestionBar';
 import { ConflictBanner } from '../components/ConflictBanner';
-import { spacing } from '../theme/tokens';
+import { spacing, fontSizes, fontWeights, fonts, radii, touchTarget, typography } from '../theme/tokens';
 
 // Completed messages keep their parsed Markdown while new tokens arrive in
 // another row. Streaming messages still use the lightweight Text path.
@@ -377,7 +377,7 @@ export function ChatScreen() {
       },
       code_inline: (node) => {
         return (
-          <Text key={node.key} style={{ color: colors.syntax.keyword, fontFamily: 'monospace', fontSize: 13, backgroundColor: colors.bgHover, borderRadius: 4, paddingHorizontal: 4 }}>
+          <Text key={node.key} style={{ color: colors.syntax.keyword, fontFamily: fonts.mono, fontSize: fontSizes.sm, backgroundColor: colors.codeBg, borderRadius: radii.sm, paddingHorizontal: spacing.xs }}>
             {node.content}
           </Text>
         );
@@ -408,24 +408,21 @@ export function ChatScreen() {
       const count = item.collapseCount || (item.childTurns?.length || 0);
       return (
         <View
-          // MUCLI_INTERIM_VISUAL_STYLE_V1: interim output uses an accent-tinted surface.
-          style={[
-            styles.interimGroup,
-            { backgroundColor: colors.accentSoft, borderColor: colors.border },
-          ]}
+          // MUCLI_INTERIM_VISUAL_STYLE_V1: interim output is a flat, quiet disclosure.
+          style={styles.interimGroup}
         >
           <TouchableOpacity
             onPress={() => setMessages(current => current.map(m =>
               m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m,
             ))}
-            style={[styles.collapseHeader, { backgroundColor: colors.bgLift, borderColor: colors.border }]}
+            style={[styles.collapseHeader, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
             activeOpacity={0.7}
           >
-            <View style={[styles.interimAccent, { backgroundColor: colors.accent }]} />
-            <Text style={{ fontSize: 12, color: colors.textDim }}>
+            <View style={[styles.interimAccent, { backgroundColor: colors.border }]} />
+            <Text style={{ fontSize: fontSizes.xs, color: colors.textDim }}>
               {item.collapseOpen ? '▾' : '▸'}
             </Text>
-            <Text style={{ fontSize: 13, color: colors.textSoft, fontFamily: 'monospace' }}>
+            <Text style={{ fontSize: fontSizes.sm, color: colors.textSoft, fontVariant: ['tabular-nums'] }}>
               {count} interim update{count !== 1 ? 's' : ''}
               {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
               {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
@@ -441,11 +438,11 @@ export function ChatScreen() {
                       style={[
                         styles.msgBubble,
                         styles.interimMessage,
-                        { backgroundColor: colors.bgLift, borderColor: colors.border, maxWidth: '100%' },
+                        { backgroundColor: 'transparent', maxWidth: '100%' },
                       ]}
                     >
                       {child.streaming ? (
-                        <Text style={{ color: colors.text, fontSize: 15, lineHeight: 23 }}>
+                        <Text style={{ color: colors.text, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight }}>
                           {child.text}
                         </Text>
                       ) : (
@@ -456,7 +453,7 @@ export function ChatScreen() {
                       {child.text.length > 0 ? (
                         <TouchableOpacity
                           onPress={() => copyMessage(child.text)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
                           style={styles.copyButton}
                         >
                           <Ionicons name="copy-outline" size={14} color={colors.textDim} />
@@ -487,15 +484,17 @@ export function ChatScreen() {
         <View
           style={[
             styles.msgBubble,
+            // planos transcript: user = accent tint on the right; assistant =
+            // raised + border with a squared top-left corner.
             isUser
-              ? { backgroundColor: colors.bgHover, maxWidth: '84%' }
-              : { backgroundColor: 'transparent', maxWidth: '100%', paddingHorizontal: 0 },
+              ? { backgroundColor: colors.accentSubtle, borderColor: colors.accent, borderWidth: 1, borderRadius: radii.panel, borderTopRightRadius: 2, maxWidth: '84%' }
+              : { backgroundColor: colors.raised, borderColor: colors.border, borderWidth: 1, borderRadius: radii.panel, borderTopLeftRadius: 2, maxWidth: '100%' },
           ]}
         >
           {isUser ? (
             <Text style={{ color: colors.text }}>{displayText}</Text>
           ) : item.streaming ? (
-            <Text style={{ color: colors.text, fontSize: 15, lineHeight: 23 }}>
+            <Text style={{ color: colors.text, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight }}>
               {displayText}
             </Text>
           ) : (
@@ -510,7 +509,7 @@ export function ChatScreen() {
           {isUser && item.attachments && item.attachments.length > 0 ? (
             <View style={styles.messageAttachments}>
               {item.attachments.map(attachment => (
-                <View key={attachment.attachment_id} style={[styles.messageAttachment, { backgroundColor: colors.bgLift }]}>
+                <View key={attachment.attachment_id} style={[styles.messageAttachment, { backgroundColor: colors.bgHover }]}>
                   <Ionicons name="document-outline" size={14} color={colors.textDim} />
                   <Text variant="xs" numberOfLines={1} style={{ color: colors.textSoft, maxWidth: 210 }}>{attachment.name}</Text>
                 </View>
@@ -520,7 +519,7 @@ export function ChatScreen() {
           {isAssistant && item.text.length > 0 && (
             <TouchableOpacity
               onPress={() => copyMessage(item.text)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
               style={styles.copyButton}
             >
               <Ionicons name="copy-outline" size={14} color={colors.textDim} />
@@ -575,11 +574,11 @@ export function ChatScreen() {
                 </View>
               ) : null}
               {error && messages.length > 0 ? (
-                <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>
-                  <Ionicons name="warning-outline" size={15} color={colors.error} />
+                <View style={[styles.inlineError, { backgroundColor: colors.errorSubtle }]}>
+                  <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
                   <Text variant="xs" style={{ color: colors.textSoft, flex: 1 }}>{error}</Text>
-                  <TouchableOpacity onPress={retry} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Text variant="xs" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
+                  <TouchableOpacity onPress={retry} hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}>
+                    <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>Retry</Text>
                   </TouchableOpacity>
                 </View>
               ) : null}
@@ -588,8 +587,8 @@ export function ChatScreen() {
           ListEmptyComponent={
             historyLoading ? (
               <View style={styles.historyLoading}>
-                <Skeleton height={18} style={{ marginBottom: 10, width: '72%' }} />
-                <Skeleton height={18} style={{ marginBottom: 10, width: '88%' }} />
+                <Skeleton height={18} style={{ marginBottom: spacing.sm, width: '72%' }} />
+                <Skeleton height={18} style={{ marginBottom: spacing.sm, width: '88%' }} />
                 <Skeleton height={18} style={{ width: '56%' }} />
               </View>
             ) : error ? (
@@ -699,22 +698,22 @@ function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, 
       style={[
         styles.composer,
         {
-          backgroundColor: colors.bgLift,
+          backgroundColor: colors.bgRaised,
           borderColor: colors.border,
-          marginBottom: Math.max(insets.bottom, 8),
+          marginBottom: Math.max(insets.bottom, spacing.sm),
         },
       ]}
     >
       <TouchableOpacity
         onPress={onAttachmentsPress}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        style={[styles.composerIconButton, { backgroundColor: selectedAttachments.length ? colors.accentSoft : colors.bgHover }]}
+        hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
+        style={[styles.composerIconButton, { backgroundColor: selectedAttachments.length ? colors.accentSubtle : colors.bgHover }]}
       >
         <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent : colors.textDim} />
       </TouchableOpacity>
       <TouchableOpacity
         onPress={onModePress}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         style={[styles.composerIconButton, { backgroundColor: colors.bgHover }]}
       >
         <Ionicons name="options-outline" size={18} color={colors.textDim} />
@@ -733,7 +732,7 @@ function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, 
         <TouchableOpacity
           onPress={onStop}
           style={[styles.sendBtn, { backgroundColor: colors.bgHover }]}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
           <Ionicons name="stop" size={17} color={colors.error} />
         </TouchableOpacity>
@@ -742,9 +741,9 @@ function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, 
           onPress={onSend}
           disabled={!input.trim() && selectedAttachments.length === 0}
           style={[styles.sendBtn, { backgroundColor: (input.trim() || selectedAttachments.length) ? colors.accent : colors.bgHover }]}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
-          <Ionicons name="arrow-up" size={19} color={(input.trim() || selectedAttachments.length) ? colors.accentText : colors.textDim} />
+          <Ionicons name="arrow-up" size={19} color={(input.trim() || selectedAttachments.length) ? colors.accentOn : colors.textDim} />
         </TouchableOpacity>
       )}
       </View>
@@ -771,11 +770,11 @@ function ModeBottomSheet({ visible, onClose, modes, activeMode, onSelect, colors
             key={m.name}
             onPress={() => onSelect(m.name)}
             disabled={m.disabled}
-            style={{ minHeight: 44, paddingVertical: 12 }}
+            style={{ minHeight: touchTarget, paddingVertical: spacing.md }}
           >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View style={{ flex: 1 }}>
-                <Text variant="base" style={{ fontWeight: '500', color: m.disabled ? colors.textDim : colors.text }}>
+                <Text variant="base" style={{ fontWeight: fontWeights.medium, color: m.disabled ? colors.textDim : colors.text }}>
                   {m.display_name}
                 </Text>
                 {m.description && (
@@ -793,86 +792,81 @@ function ModeBottomSheet({ visible, onClose, modes, activeMode, onSelect, colors
 
 function markdownStyles(colors: any) {
   return {
-    body: { color: colors.text, fontSize: 15, lineHeight: 23 },
-    paragraph: { marginTop: 0, marginBottom: 9 },
-    heading1: { fontSize: 21, fontWeight: '700' as const, marginTop: 12, marginBottom: 8 },
-    heading2: { fontSize: 19, fontWeight: '700' as const, marginTop: 10, marginBottom: 6 },
-    heading3: { fontSize: 17, fontWeight: '600' as const, marginTop: 8, marginBottom: 4 },
-    code_inline: { backgroundColor: colors.bgHover, borderRadius: 4, paddingHorizontal: 4 },
-    fence: { backgroundColor: colors.bgHover, borderRadius: 10, padding: 12, marginTop: 8, marginBottom: 8 },
-    code_block: { backgroundColor: colors.bgHover, borderRadius: 10, padding: 12, marginTop: 8, marginBottom: 8 },
-    link: { color: colors.accent, textDecorationLine: 'underline' as const },
-    blockquote: { borderLeftWidth: 2, borderLeftColor: colors.borderStrong, paddingLeft: 12, marginLeft: 0, marginTop: 8, marginBottom: 8 },
-    list_item: { marginTop: 3, marginBottom: 3 },
+    body: { color: colors.text, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight },
+    paragraph: { marginTop: 0, marginBottom: spacing.sm },
+    heading1: { fontSize: fontSizes.lg, fontWeight: fontWeights.semibold, marginTop: spacing.md, marginBottom: spacing.sm },
+    heading2: { fontSize: fontSizes.lg, fontWeight: fontWeights.semibold, marginTop: spacing.sm, marginBottom: spacing.xs },
+    heading3: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, marginTop: spacing.sm, marginBottom: spacing.xs },
+    code_inline: { backgroundColor: colors.codeBg, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
+    fence: { backgroundColor: colors.codeBg, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm },
+    code_block: { backgroundColor: colors.codeBg, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm },
+    link: { color: colors.accentFg, textDecorationLine: 'underline' as const },
+    blockquote: { borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: spacing.md, marginLeft: 0, marginTop: spacing.sm, marginBottom: spacing.sm },
+    list_item: { marginTop: spacing.xs, marginBottom: spacing.xs },
   };
 }
 
 const styles = StyleSheet.create({
-  messageList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
+  messageList: { paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.base },
   messageListEmpty: { flexGrow: 1 },
   listFooter: { minHeight: 10, paddingTop: 2 },
   listEndMarker: { height: 8 },
-  msgRow: { flexDirection: 'row', marginBottom: 14 },
-  msgBubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  msgRow: { flexDirection: 'row', marginBottom: spacing.md },
+  msgBubble: { borderRadius: radii.sm, paddingHorizontal: spacing.base, paddingVertical: spacing.md },
   interimGroup: {
-    marginVertical: 7,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 13,
-    padding: 4,
+    marginVertical: spacing.sm,
     overflow: 'hidden',
   },
-  interimAccent: { width: 3, height: 22, borderRadius: 2 },
-  interimBody: { paddingHorizontal: 5, paddingTop: 5 },
+  interimAccent: { width: 2, height: 20, borderRadius: radii.pill },
+  interimBody: { paddingHorizontal: spacing.xs, paddingTop: spacing.xs },
   interimMessage: {
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 11,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   collapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: touchTarget,
+    borderRadius: radii.sm,
     marginVertical: 0,
   },
   copyButton: { alignSelf: 'flex-start', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
-  messageAttachment: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
-  selectedAttachments: { paddingHorizontal: 12, paddingTop: 6, gap: 6 },
-  selectedAttachment: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
-  codeBlock: { borderRadius: 10, padding: 12, marginVertical: 5 },
-  codeBlockHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 3 },
-  inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 14 },
-  historyLoading: { paddingTop: 22, paddingHorizontal: 4 },
-  loadingOlderIndicator: { paddingVertical: 10, alignItems: 'center' },
+  messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
+  messageAttachment: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  selectedAttachments: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.xs },
+  selectedAttachment: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  codeBlock: { borderRadius: radii.sm, padding: spacing.md, marginVertical: spacing.xs },
+  codeBlockHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: spacing.xs },
+  inlineError: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.md },
+  historyLoading: { paddingTop: spacing.lg, paddingHorizontal: spacing.xs },
+  loadingOlderIndicator: { paddingVertical: spacing.md, alignItems: 'center' },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 5,
-    marginHorizontal: 10,
-    marginTop: 6,
-    padding: 5,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 24,
+    gap: spacing.xs,
+    marginHorizontal: spacing.sm,
+    marginTop: spacing.xs,
+    padding: spacing.xs,
+    borderWidth: 1,
+    borderRadius: radii.sm,
   },
   composerIconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
   },
-  input: { flex: 1, borderWidth: 0, paddingHorizontal: 8, paddingVertical: 9, maxHeight: 120, minHeight: 40 },
-  sendBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
-  settingsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, minHeight: 44 },
-  settingsSection: { marginTop: 12, marginBottom: 4 },
-  settingsLabel: { fontSize: 12, color: '#94a3b8', marginBottom: 4 },
-  varValue: { fontSize: 12, color: '#94a3b8' },
+  input: { flex: 1, borderWidth: 0, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, maxHeight: 120, minHeight: 40 },
+  sendBtn: { width: 40, height: 40, borderRadius: radii.sm, justifyContent: 'center', alignItems: 'center' },
+  settingsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm, minHeight: touchTarget },
+  settingsSection: { marginTop: spacing.md, marginBottom: spacing.xs },
+  settingsLabel: { fontSize: fontSizes.xs, marginBottom: spacing.xs },
+  varValue: { fontSize: fontSizes.xs },
 });
 
 // Session settings BottomSheet — provider/model info + variables
@@ -890,7 +884,7 @@ function SettingsBottomSheet({ visible, onClose, varGroups, varsLoading, connect
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Session Settings">
       <View style={styles.settingsSection}>
-        <Text variant="sm" style={{ fontWeight: '600', marginBottom: 8 }}>Current Session</Text>
+        <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Current Session</Text>
         <View style={styles.settingsRow}>
           <Text variant="xs" style={{ color: colors.textDim }}>Provider</Text>
           <Text variant="sm">{connection.activeProvider || '—'}</Text>
@@ -906,22 +900,22 @@ function SettingsBottomSheet({ visible, onClose, varGroups, varsLoading, connect
       </View>
 
       <View style={styles.settingsSection}>
-        <Text variant="sm" style={{ fontWeight: '600', marginBottom: 8 }}>Variables</Text>
+        <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Variables</Text>
         {varsLoading ? (
           <Text variant="xs" style={{ color: colors.textDim }}>Loading…</Text>
         ) : varGroups.length === 0 ? (
           <Text variant="xs" style={{ color: colors.textDim }}>No variables configured</Text>
         ) : (
           varGroups.map(group => (
-            <View key={group.name} style={{ marginBottom: 12 }}>
-              <Text variant="xs" style={{ fontWeight: '500', marginBottom: 4 }}>{group.name}</Text>
+            <View key={group.name} style={{ marginBottom: spacing.md }}>
+              <Text variant="xs" style={{ fontWeight: fontWeights.medium, marginBottom: spacing.xs }}>{group.name}</Text>
               {group.variables.map(v => (
                 <View key={v.key} style={styles.settingsRow}>
                   <View style={{ flex: 1 }}>
                     <Text variant="xs" style={{ color: colors.text }}>{v.key}</Text>
-                    <Text variant="xs" style={styles.varValue}>{v.help}</Text>
+                    <Text variant="xs" style={[styles.varValue, { color: colors.textDim }]}>{v.help}</Text>
                   </View>
-                  <Text variant="xs" style={{ color: v.is_default ? colors.textDim : colors.accent }}>
+                  <Text variant="xs" style={{ color: v.is_default ? colors.textDim : colors.text, fontWeight: v.is_default ? fontWeights.regular : fontWeights.medium }}>
                     {String(v.value)}
                   </Text>
                 </View>

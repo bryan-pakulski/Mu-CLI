@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import { View, ScrollView, RefreshControl, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { filesApi, FileEntry } from '../api/files';
-import { spacing } from '../theme/tokens';
+import { spacing, fonts } from '../theme/tokens';
 
 export function FilesScreen() {
   const { colors } = useTheme();
@@ -60,7 +60,7 @@ export function FilesScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
         <View style={{ padding: spacing.base }}>
-          {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} height={44} style={{ marginBottom: 4 }} />)}
+          {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} height={44} style={{ marginBottom: spacing.xs }} />)}
         </View>
       </SafeAreaView>
     );
@@ -85,16 +85,16 @@ export function FilesScreen() {
   if (fileContent) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
-          <TouchableOpacity onPress={() => setFileContent(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="arrow-back" size={24} color={colors.accent} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
+          <TouchableOpacity onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
+          <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
             {fileContent.path}
           </Text>
         </View>
         <ScrollView contentContainerStyle={{ padding: spacing.base }}>
-          <Text variant="xs" style={{ color: colors.text, fontFamily: 'monospace' }}>
+          <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }}>
             {fileContent.content}
           </Text>
         </ScrollView>
@@ -104,10 +104,10 @@ export function FilesScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {currentPath && (
-          <TouchableOpacity onPress={goUp} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="arrow-back" size={24} color={colors.accent} />
+          <TouchableOpacity onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         )}
         <Text variant="sm" style={{ color: colors.textDim, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
@@ -120,12 +120,12 @@ export function FilesScreen() {
       >
         {entries.map(entry => (
           <TouchableOpacity key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
-            <Card style={{ marginBottom: 4, minHeight: 44 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Card style={{ marginBottom: spacing.xs, minHeight: 44 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
                 <Ionicons
                   name={entry.is_dir ? 'folder-outline' : 'document-outline'}
                   size={20}
-                  color={entry.is_dir ? colors.accent : colors.textDim}
+                  color={entry.is_dir ? colors.textSoft : colors.textDim}
                 />
                 <Text variant="sm" style={{ flex: 1 }} numberOfLines={1}>{entry.name}</Text>
                 {!entry.is_dir && entry.size !== null && (

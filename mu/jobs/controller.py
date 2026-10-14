@@ -17,6 +17,7 @@ from typing import IO, Any, Callable, Dict, Optional
 
 from utils.config import HISTORY_DIR
 
+from .core import states as _states
 from .models import JobStatus
 from .service import JobService
 
@@ -71,24 +72,36 @@ class JobController:
         retention_days: Optional[float] = None,
         retention_interval_seconds: float = 3600.0,
         drift_check_interval_seconds: float = 300.0,
+        settings_backed: bool = False,
+        environment_sweep_interval_seconds: float = 300.0,
     ):
         self.service = service
+        # Settings-backed controllers (the GUI's) re-read Settings → Scheduling & retention
+        # (concurrent jobs, drift interval, retention days) so edits apply without a restart.
+        self.settings_backed = bool(settings_backed)
+        self._rule_cache: Dict[str, Any] = {}
+        self._rule_cache_at = 0.0
         # Attention push: called (from the controller thread) with a
         # session-agnostic event dict whenever a job enters or leaves a
         # human-attention state. The GUI wires this to the SSE bus.
         self.notify = notify
         # Retention sweeper: purge evidence/logs/worktrees of ARCHIVED
         # historic jobs older than `retention_days` (None/0 disables).
-        self.retention_days = retention_days
+        self._retention_days = retention_days
         self.retention_interval_seconds = max(60.0, float(retention_interval_seconds or 3600.0))
         self._last_retention_sweep = 0.0
+        # Build-environment sweeper: removes images/engines of gone, terminal, archived, pushed
+        # or idle-past-retention jobs (job_build_environments.md §6). 0 disables it.
+        self.environment_sweep_interval_seconds = max(0.0, float(environment_sweep_interval_seconds or 0.0))
+        self._last_environment_sweep = 0.0
+        self._environment_sweep_thread: Optional[threading.Thread] = None
         # Base-drift watch: re-assess READY_FOR_REVIEW jobs periodically so
         # a base branch that moves while the job waits for review flips it
         # to CONFLICTED (and pushes attention) instead of staying "ready".
-        self.drift_check_interval_seconds = max(0.0, float(drift_check_interval_seconds or 0.0))
+        self._drift_check_interval_seconds = max(0.0, float(drift_check_interval_seconds or 0.0))
         self._last_drift_check = 0.0
         self._last_status_fp: Optional[Dict[str, tuple]] = None
-        self.max_workers = max(1, int(max_workers))
+        self._max_workers = max(1, int(max_workers))
         self.poll_interval = max(0.1, float(poll_interval))
         self.lease_ttl_seconds = max(15, int(lease_ttl_seconds))
         self.python_executable = python_executable or sys.executable or "python3"
@@ -103,6 +116,9 @@ class JobController:
         self._thread: Optional[threading.Thread] = None
         self._active: Dict[str, WorkerHandle] = {}
         self._lock = threading.Lock()
+        # job id -> how far the runtime-limit sweep went for the active worker
+        # ("noted" = limit logged, "pause_requested" = graceful pause asked once).
+        self._timeout_failures: Dict[str, str] = {}
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -180,13 +196,7 @@ class JobController:
 
     @staticmethod
     def _phase_for_status(status: JobStatus) -> str:
-        if status == JobStatus.VERIFYING:
-            return "verification"
-        if status == JobStatus.REVIEWING:
-            return "review"
-        if status == JobStatus.PUBLISHING:
-            return "publish"
-        return "implementation"
+        return _states.phase_for_status(status)
 
     def tick(self) -> int:
         """One deterministic scheduler pass; returns processes started."""
@@ -197,18 +207,24 @@ class JobController:
         self._maybe_check_base_drift()
         self._watch_attention()
         self._maybe_sweep_retention()
+        self._maybe_sweep_environments()
+        self._maybe_poll_trackers()
+        self._maybe_poll_merges()
         with self._lock:
             capacity = self.max_workers - len(self._active)
         if capacity <= 0:
             return 0
 
-        candidates = self.service.list(
-            statuses=[JobStatus.QUEUED, JobStatus.RECOVERING, JobStatus.VERIFYING, JobStatus.REVIEWING, JobStatus.PUBLISHING],
+        now = float(self.service.store._clock())
+        # FIFO by created_at; leased (running) jobs and QUEUED jobs still in
+        # retry backoff are filtered in SQL so they never crowd the window.
+        candidates = self.service.store.schedulable_jobs(
+            [JobStatus(v) for v in _states.SCHEDULABLE_STATUSES],
+            now=now,
             limit=max(capacity * 5, 25),
         )
         started = 0
-        now = float(self.service.store._clock())
-        for job in reversed(candidates):
+        for job in candidates:
             if started >= capacity:
                 break
             with self._lock:
@@ -225,7 +241,7 @@ class JobController:
 
     # ------------------------------------------------------------ attention push
 
-    _ATTENTION_STATUSES = frozenset({JobStatus.NEEDS_HUMAN.value, JobStatus.CONFLICTED.value})
+    _ATTENTION_STATUSES = _states.ATTENTION_STATUSES
 
     def _watch_attention(self) -> None:
         """Detect jobs entering/leaving a human-attention state between
@@ -283,6 +299,48 @@ class JobController:
         except Exception:
             logger.debug("attention notify failed", exc_info=True)
 
+    # ------------------------------------------------------------ settings-backed limits
+
+    def _rule(self, path: str, fallback: Any) -> Any:
+        now = time.monotonic()
+        if now - self._rule_cache_at > 5.0:
+            self._rule_cache, self._rule_cache_at = {}, now
+        if path not in self._rule_cache:
+            from .job_settings import rule_or
+            self._rule_cache[path] = rule_or(path, fallback)
+        return self._rule_cache[path]
+
+    @property
+    def max_workers(self) -> int:
+        if self.settings_backed:
+            return max(1, int(self._rule("jobs.max_concurrent", self._max_workers)))
+        return self._max_workers
+
+    @max_workers.setter
+    def max_workers(self, value: int) -> None:
+        self._max_workers = max(1, int(value))
+
+    @property
+    def drift_check_interval_seconds(self) -> float:
+        if self.settings_backed:
+            return max(0.0, float(self._rule("jobs.drift_check_interval_s", self._drift_check_interval_seconds)))
+        return self._drift_check_interval_seconds
+
+    @drift_check_interval_seconds.setter
+    def drift_check_interval_seconds(self, value: float) -> None:
+        self._drift_check_interval_seconds = max(0.0, float(value or 0.0))
+
+    @property
+    def retention_days(self) -> Optional[float]:
+        # An explicit value (e.g. MUCLI_JOBS_RETENTION_DAYS) wins over Settings.
+        if self.settings_backed and self._retention_days is None:
+            return float(self._rule("jobs.retention_days", 30.0))
+        return self._retention_days
+
+    @retention_days.setter
+    def retention_days(self, value: Optional[float]) -> None:
+        self._retention_days = value
+
     # ------------------------------------------------------------ base drift
 
     def _maybe_check_base_drift(self) -> None:
@@ -299,9 +357,11 @@ class JobController:
             return
         if not ready:
             return
-        from .base_drift import apply_base_drift
+        from .base_drift import apply_base_drift, has_open_pr
 
         for job in ready:
+            if has_open_pr(job):
+                continue  # the PR host reports conflicts; the merge poll handles merges
             try:
                 report = apply_base_drift(self.service, job.id, source="controller")
                 if report.mergeable is False:
@@ -335,6 +395,109 @@ class JobController:
         except Exception:
             logger.exception("job retention sweep failed")
 
+    def _maybe_poll_trackers(self) -> None:
+        """Saved tracker watch queries import new tickets (off by default).
+
+        ``poll_watches`` applies each query's own interval; this only bounds
+        how often the settings are read and keeps network calls off the
+        scheduler thread.
+        """
+        now = time.monotonic()
+        last = getattr(self, "_last_tracker_poll", 0.0)
+        if last and now - last < 60:
+            return
+        thread = getattr(self, "_tracker_poll_thread", None)
+        if thread is not None and thread.is_alive():
+            return
+        self._last_tracker_poll = now
+        try:
+            from mu.integrations.jira_settings import watch_settings
+            if not watch_settings().get("enabled"):
+                return
+        except Exception:
+            logger.debug("tracker watch settings unreadable", exc_info=True)
+            return
+
+        def run() -> None:
+            from .tracker_sync import poll_watches
+            result = poll_watches(self.service)
+            created = sum(len(item.get("created") or []) for item in result.get("ran") or [])
+            if created:
+                logger.info("Tracker watch: imported %d ticket(s)", created)
+
+        self._tracker_poll_thread = threading.Thread(target=run, name="mucli-tracker-watch", daemon=True)
+        self._tracker_poll_thread.start()
+
+    # Seconds between PR merge polls; None = Settings → publish.merge_poll_seconds.
+    merge_poll_interval_seconds: Optional[float] = None
+    merge_poll_batch = 10
+
+    def _merge_poll_interval(self) -> float:
+        if self.merge_poll_interval_seconds is not None:
+            return max(0.0, float(self.merge_poll_interval_seconds))
+        try:
+            return max(0.0, float(self._rule("publish.merge_poll_seconds", 300)))
+        except Exception:  # noqa: BLE001
+            return 300.0
+
+    def _maybe_poll_merges(self) -> None:
+        """Pushed jobs whose PR merged on the host move to DONE (closed → flagged for a human).
+
+        Network calls (``gh``/provider APIs) run off the scheduler thread, a bounded
+        batch per pass; failures are logged by ``poll_merged_prs``, never raised."""
+        interval = self._merge_poll_interval()
+        if interval <= 0:
+            return
+        now = time.monotonic()
+        last = getattr(self, "_last_merge_poll", 0.0)
+        if not last:
+            # First pass is deferred (at most 30s): no network burst at controller
+            # start, yet a host merge is noticed soon after a restart.
+            self._last_merge_poll = now - max(0.0, interval - 30.0)
+            return
+        if now - last < interval:
+            return
+        thread = getattr(self, "_merge_poll_thread", None)
+        if thread is not None and thread.is_alive():
+            return
+        self._last_merge_poll = now
+
+        def run() -> None:
+            try:
+                from .publish import poll_merged_prs
+                result = poll_merged_prs(self.service, limit=self.merge_poll_batch)
+                if result.get("merged") or result.get("closed"):
+                    logger.info("PR merge poll: %d merged, %d closed", len(result.get("merged") or []),
+                                len(result.get("closed") or []))
+            except Exception:
+                logger.debug("PR merge poll failed", exc_info=True)
+
+        self._merge_poll_thread = threading.Thread(target=run, name="mucli-merge-poll", daemon=True)
+        self._merge_poll_thread.start()
+
+    def _maybe_sweep_environments(self) -> None:
+        """Docker calls can be slow, so the sweep runs off the scheduler thread."""
+        if not self.environment_sweep_interval_seconds:
+            return
+        now = time.monotonic()
+        if self._last_environment_sweep and now - self._last_environment_sweep < self.environment_sweep_interval_seconds:
+            return
+        if self._environment_sweep_thread is not None and self._environment_sweep_thread.is_alive():
+            return
+        self._last_environment_sweep = now
+
+        def run() -> None:
+            try:
+                from .sandbox.environments import sweep
+                result = sweep(self.service)
+                if result.get("cleaned"):
+                    logger.info("Build environment sweep: cleaned %d job(s)", len(result["cleaned"]))
+            except Exception:
+                logger.debug("build environment sweep failed", exc_info=True)
+
+        self._environment_sweep_thread = threading.Thread(target=run, name="mucli-env-sweep", daemon=True)
+        self._environment_sweep_thread.start()
+
     def _worker_id(self, job_id: str, phase: str) -> str:
         return f"{self.controller_id}:{phase}:{job_id[:10]}:{uuid.uuid4().hex[:6]}"
 
@@ -347,11 +510,6 @@ class JobController:
         ):
             return False
 
-        module = {
-            "verification": "mu.jobs.verify_worker",
-            "review": "mu.jobs.review_worker",
-            "publish": "mu.jobs.publish",
-        }.get(phase, "mu.jobs.worker")
         log_path = os.path.join(self.log_root, f"{job_id}.{phase}.log")
         # Round-41 F7a: bound the log before re-opening it in append mode —
         # retries append forever to the same phase log, and a noisy worker
@@ -368,10 +526,13 @@ class JobController:
         log_handle: Optional[IO[bytes]] = None
         try:
             log_handle = open(log_path, "ab", buffering=0)
+            # One worker entry point for every phase (mu/jobs/worker.py).
             command = [
                 self.python_executable,
                 "-m",
-                module,
+                "mu.jobs.worker",
+                "--phase",
+                phase,
                 "--job-id",
                 job_id,
                 "--worker-id",
@@ -432,6 +593,7 @@ class JobController:
                     finished.append((job_id, handle, int(code)))
                     self._active.pop(job_id, None)
         for job_id, handle, code in finished:
+            self._timeout_failures.pop(job_id, None)  # the next worker gets its own runtime sweep
             if handle.log_handle is not None:
                 try:
                     handle.log_handle.close()
@@ -460,13 +622,26 @@ class JobController:
             except Exception:
                 pass
 
+    # Past the runtime limit by this much, a stage that has not paused on its own (its container
+    # time limit is capped at the job's remaining runtime) is asked to pause gracefully.
+    _RUNTIME_PAUSE_GRACE_S = 120.0
+    # Statuses whose worker runs an agent stage container (which honours a pause request).
+    _AGENT_STAGE_STATUSES = frozenset({JobStatus.PLANNING, JobStatus.RUNNING, JobStatus.REVIEWING})
+
     def _enforce_runtime_deadlines(self) -> None:
-        """Round-36 F4 (round-38 F3/F4): enforce Job.max_runtime_seconds.
-        The deadline covers the WHOLE job (all attempts, implementation +
-        verification phases), measured from started_at. A job past its
-        deadline is transitioned to TIMED_OUT ONCE and handed to the same
-        SIGTERM→grace→SIGKILL group escalation cancellations use
-        (_terminate_cancelled handles both CANCELLED and TIMED_OUT)."""
+        """Job.max_runtime_seconds pauses and asks; it never kills or times a job out.
+
+        The limit covers the WHOLE job (all attempts and stages) but only
+        worker-active time from the status history, not time parked at human
+        gates. Each agent stage's container time limit is capped at the job's
+        remaining runtime, so the stage pauses resumably right at the limit
+        and the job waits on a human with attention ``limit_reached``
+        (approve more time, or cancel). This sweep only backs that up: an
+        agent stage still running ``_RUNTIME_PAUSE_GRACE_S`` past the limit
+        gets one graceful ``stage_pause_requested`` (the same stop-and-save
+        path as the stage time limit — no work is discarded). Non-agent
+        phases (checks, push) finish; the next agent stage then pauses before
+        it starts."""
         now = time.time()
         with self._lock:
             handles = list(self._active.values())
@@ -478,71 +653,45 @@ class JobController:
             limit = job.max_runtime_seconds
             if not limit or job.started_at is None:
                 continue
-            if now - float(job.started_at) < float(limit):
-                continue
             if job.status in {JobStatus.CANCELLED, JobStatus.MERGED}:
                 continue
-            if job.status == JobStatus.TIMED_OUT or handle.terminate_started is not None:
-                # Already timed out and escalating — no repeat transition
-                # (TIMED_OUT→TIMED_OUT would be a no-op write) and no
-                # second SIGTERM; escalation continues in
-                # _terminate_cancelled.
+            # Only worker-active time counts: a job parked for a day at a
+            # human gate (plan review, review done) and then re-prompted
+            # must not hit its limit the moment its next stage starts.
+            runtime = self.service.store.active_runtime_seconds(job.id, now=now)
+            if runtime is None:
+                runtime = now - float(job.started_at)
+            if runtime < float(limit):
                 continue
+            noted = self._timeout_failures.get(handle.job_id)
+            if noted is None:
+                self._timeout_failures[handle.job_id] = "noted"
+                self.service.store.append_event(
+                    handle.job_id,
+                    "worker_runtime_limit_reached",
+                    reason=f"reached max_runtime_seconds={limit}; the job pauses for approval",
+                    payload={"pid": getattr(handle.process, "pid", None), "phase": handle.phase,
+                             "runtime_seconds": round(runtime, 1), "limit_seconds": int(limit)},
+                )
+            if (noted == "pause_requested" or job.status not in self._AGENT_STAGE_STATUSES
+                    or runtime < float(limit) + self._RUNTIME_PAUSE_GRACE_S):
+                continue
+            self._timeout_failures[handle.job_id] = "pause_requested"
             self.service.store.append_event(
                 handle.job_id,
-                "worker_runtime_deadline_exceeded",
-                reason=f"exceeded max_runtime_seconds={limit}",
-                payload={
-                    "pid": getattr(handle.process, "pid", None),
-                    "phase": handle.phase,
-                    "runtime_seconds": round(now - float(job.started_at), 1),
-                },
+                "stage_pause_requested",
+                reason="job runtime limit reached",
+                payload={"reason": "job_runtime", "runtime_seconds": round(runtime, 1), "limit_seconds": int(limit)},
             )
-            try:
-                self.service.transition(
-                    handle.job_id,
-                    JobStatus.TIMED_OUT,
-                    reason=f"max_runtime_seconds={limit} exceeded",
-                )
-            except Exception as exc:
-                self.service.store.append_event(
-                    handle.job_id,
-                    "worker_timeout_transition_failed",
-                    reason=str(exc),
-                    payload={"pid": getattr(handle.process, "pid", None)},
-                )
-                continue
-            # Kick off the shared escalation: mark the start time, send the
-            # first SIGTERM. _terminate_cancelled performs the SIGKILL
-            # escalation after the grace window.
-            handle.terminate_started = time.monotonic()
-            try:
-                handle.process.terminate()
-                self.service.store.append_event(
-                    handle.job_id,
-                    "worker_process_terminated",
-                    reason="runtime deadline exceeded",
-                    payload={
-                        "pid": getattr(handle.process, "pid", None),
-                        "phase": handle.phase,
-                    },
-                )
-            except Exception as exc:
-                self.service.store.append_event(
-                    handle.job_id,
-                    "worker_termination_failed",
-                    reason=str(exc),
-                    payload={"pid": getattr(handle.process, "pid", None)},
-                )
 
     def _terminate_cancelled(self) -> None:
         """Round-35 F6 (round-38 F4): SIGTERM first, SIGKILL the process
         GROUP after the grace window. Workers started with
         start_new_session() lead their own process group, so kill()
-        targets the group (descendants die too). Handles both CANCELLED
-        and TIMED_OUT jobs (runtime-deadline enforcement marks the job
-        TIMED_OUT and starts the same escalation). A worker that ignores
-        SIGTERM no longer holds its controller slot forever."""
+        targets the group (descendants die too). Only CANCELLED jobs are
+        terminated (old rows may still read TIMED_OUT; a reached runtime
+        limit now pauses instead). A worker that ignores SIGTERM no longer
+        holds its controller slot forever."""
         with self._lock:
             handles = list(self._active.values())
         for handle in handles:

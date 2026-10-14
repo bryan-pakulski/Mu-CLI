@@ -983,6 +983,7 @@ async def active_session(request: Request, session_name: Optional[str] = None):
         "revision": int(getattr(sm, "revision", 0) or 0),
         "tokens": dict(sm.token_counts),
         "agent_mode": session.variables.get("agent_mode", "default"),
+        "plan_mode": bool(session.variables.get("plan_mode", False)),
         "session_type": normalize_session_type(
             session.variables.get("session_type", "workspace")
         ),

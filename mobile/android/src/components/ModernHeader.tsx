@@ -6,8 +6,11 @@ import { useTheme } from '../theme/ThemeContext';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
 import { inspectorApi } from '../api/inspector';
 import { AdvancedSettingsSheet } from './AdvancedSettingsSheet';
+import { EffortControl } from './EffortControl';
 import { ModernBottomSheet } from './ModernBottomSheet';
+import { PlanModeBadge, usePlanMode } from './PlanModeIndicator';
 import { Text } from './Text';
+import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
 
 export type ModernHeaderProps = {
   onOpenSessions: () => void;
@@ -49,6 +52,7 @@ export function ModernHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [yoloSyncing, setYoloSyncing] = useState(false);
+  const plan = usePlanMode();
 
   const refreshYolo = useCallback(async () => {
     if (!isConnected || !activeSessionName) return;
@@ -122,9 +126,9 @@ export function ModernHeader({
         style={[
           styles.container,
           {
-            backgroundColor: colors.glass,
-            borderBottomColor: colors.hairline,
-            paddingTop: insets.top + 3,
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+            paddingTop: insets.top + spacing.xs,
           },
         ]}
       >
@@ -134,7 +138,7 @@ export function ModernHeader({
           onPress={onOpenSessions}
           style={styles.iconButton}
         >
-          <Text style={[styles.brandMark, { color: colors.textSoft }]}>μ</Text>
+          <Text style={[styles.brandMark, { color: colors.accent }]}>μ</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -149,9 +153,10 @@ export function ModernHeader({
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
               {sessionTitle}
             </Text>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.textDim : colors.error }]} />
+            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.ok : colors.danger }]} />
+            <PlanModeBadge />
           </View>
-          <Text style={[styles.subtitle, { color: isConnected ? colors.textDim : colors.error }]} numberOfLines={1}>
+          <Text style={[styles.subtitle, { color: isConnected ? colors.muted : colors.danger }]} numberOfLines={1}>
             {sessionMeta}{queueBadge}
           </Text>
         </TouchableOpacity>
@@ -164,7 +169,7 @@ export function ModernHeader({
             onPress={onOpenWork}
             style={[styles.iconButton, !isConnected && styles.disabledAction]}
           >
-            <Ionicons name="briefcase-outline" size={19} color={colors.textDim} />
+            <Ionicons name="briefcase-outline" size={19} color={colors.muted} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="button"
@@ -173,7 +178,7 @@ export function ModernHeader({
             onPress={onOpenTraces}
             style={[styles.iconButton, !activeSessionName && styles.disabledAction]}
           >
-            <Ionicons name="analytics-outline" size={19} color={colors.textDim} />
+            <Ionicons name="analytics-outline" size={19} color={colors.muted} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="button"
@@ -181,7 +186,7 @@ export function ModernHeader({
             onPress={() => setMenuOpen(true)}
             style={styles.iconButton}
           >
-            <Ionicons name="settings-outline" size={20} color={colors.textDim} />
+            <Ionicons name="settings-outline" size={20} color={colors.muted} />
           </TouchableOpacity>
         </View>
       </View>
@@ -190,14 +195,14 @@ export function ModernHeader({
         {!isConnected && (
           <TouchableOpacity
             onPress={() => openFromMenu(onOpenConnection)}
-            style={[styles.connectionBanner, { borderBottomColor: colors.hairline }]}
+            style={styles.connectionBanner}
           >
-            <Ionicons name="wifi-outline" size={20} color={colors.accent} />
+            <Ionicons name="wifi-outline" size={20} color={colors.muted} />
             <View style={styles.menuCopy}>
-              <Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>Connect to MuCLI</Text>
+              <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>Connect to MuCLI</Text>
               <Text variant="xs" style={{ color: colors.textDim }}>Configure a reachable GUI server</Text>
             </View>
-            <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
+            <Ionicons name="chevron-forward" size={17} color={colors.muted} />
           </TouchableOpacity>
         )}
 
@@ -210,6 +215,7 @@ export function ModernHeader({
             onPress={() => openFromMenu(onOpenThreads)}
           />
           <MenuRow icon="server-outline" label="Provider and model" detail={[activeProvider, activeModel].filter(Boolean).join(' · ') || 'Not selected'} onPress={() => openFromMenu(onOpenProviders)} />
+          <EffortControl variant="row" />
           <MenuRow icon="wifi-outline" label="Connection" detail={isConnected ? 'Connected to MuCLI' : 'Not connected'} onPress={() => openFromMenu(onOpenConnection)} />
           <MenuRow
             icon="document-attach-outline"
@@ -233,6 +239,14 @@ export function ModernHeader({
             value={yolo}
             onValueChange={updateYolo}
             disabled={!isConnected || !activeSessionName || yoloSyncing}
+          />
+          <ToggleRow
+            icon="lock-closed-outline"
+            label="Plan mode (read-only)"
+            detail={plan.busy ? 'Updating session…' : 'Block file edits, shell writes and other write tools'}
+            value={plan.planMode}
+            onValueChange={next => { void plan.setPlanMode(next); }}
+            disabled={!plan.canToggle}
           />
           <MenuRow icon="grid-outline" label="Workspace tools" detail="Context, workflows, and runtime controls" onPress={() => openFromMenu(onOpenWorkspace)} />
           <MenuRow
@@ -271,8 +285,8 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   const { colors } = useTheme();
   return (
     <View style={styles.section}>
-      <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>{title}</Text>
-      <View style={[styles.sectionBody, { borderTopColor: colors.hairline }]}>{children}</View>
+      <Text variant="xs" accessibilityRole="header" style={[styles.sectionTitle, { color: colors.muted }]}>{title}</Text>
+      <View style={[styles.sectionBody, { borderColor: colors.border, backgroundColor: colors.surface }]}>{children}</View>
     </View>
   );
 }
@@ -290,16 +304,16 @@ function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.68}
-      style={[styles.menuRow, { borderBottomColor: colors.hairline }]}
+      style={styles.menuRow}
     >
       <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={19} color={colors.textDim} />
+        <Ionicons name={icon} size={19} color={colors.muted} />
       </View>
       <View style={styles.menuCopy}>
-        <Text variant="sm" style={{ color: colors.text, fontWeight: '600' }}>{label}</Text>
+        <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{label}</Text>
         <Text variant="xs" dim numberOfLines={2}>{detail}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
+      <Ionicons name="chevron-forward" size={17} color={colors.muted} />
     </TouchableOpacity>
   );
 }
@@ -313,20 +327,20 @@ type ToggleRowProps = Omit<MenuRowProps, 'onPress'> & {
 function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false }: ToggleRowProps) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.menuRow, { borderBottomColor: colors.hairline }]}>
+    <View style={styles.menuRow}>
       <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={19} color={colors.textDim} />
+        <Ionicons name={icon} size={19} color={colors.muted} />
       </View>
       <View style={styles.menuCopy}>
-        <Text variant="sm" style={{ color: colors.text, fontWeight: '600' }}>{label}</Text>
+        <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{label}</Text>
         <Text variant="xs" dim>{detail}</Text>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
         disabled={disabled}
-        trackColor={{ false: colors.borderStrong, true: colors.accent }}
-        thumbColor={colors.glassStrong}
+        trackColor={{ false: colors.border, true: colors.accent }}
+        thumbColor={value ? colors.accentOn : colors.raised}
       />
     </View>
   );
@@ -334,49 +348,47 @@ function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false
 
 const styles = StyleSheet.create({
   container: {
-    minHeight: 68,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingBottom: 9,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
   },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 1 },
-  iconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  iconButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
   disabledAction: { opacity: 0.32 },
   brandMark: {
-    fontFamily: 'serif',
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: '400',
+    fontSize: fontSizes['2xl'],
+    lineHeight: typography['2xl'].lineHeight,
+    fontWeight: fontWeights.bold,
     textAlign: 'center',
     includeFontPadding: false,
   },
-  titleBlock: { flex: 1, alignItems: 'flex-start', paddingHorizontal: 8 },
-  titleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 7 },
-  title: { maxWidth: '92%', fontSize: 14.5, lineHeight: 19, fontWeight: '600', letterSpacing: -0.15 },
-  subtitle: { maxWidth: '100%', marginTop: 1, fontSize: 10.5, lineHeight: 14 },
-  statusDot: { width: 5, height: 5, borderRadius: 3 },
+  titleBlock: { flex: 1, alignItems: 'flex-start', paddingHorizontal: spacing.sm },
+  titleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  title: { flexShrink: 1, maxWidth: '92%', fontSize: fontSizes.base, lineHeight: typography.base.lineHeight, fontWeight: fontWeights.semibold },
+  subtitle: { maxWidth: '100%', marginTop: 1, fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight, fontVariant: ['tabular-nums'] },
+  statusDot: { width: 6, height: 6, borderRadius: radii.pill },
   connectionBanner: {
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    marginBottom: 18,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    marginBottom: spacing.base,
   },
-  section: { marginBottom: 21 },
-  sectionTitle: { fontWeight: '600', marginBottom: 7, marginLeft: 2 },
-  sectionBody: { borderTopWidth: StyleSheet.hairlineWidth },
+  section: { marginBottom: spacing.lg },
+  sectionTitle: { fontWeight: fontWeights.semibold, marginBottom: spacing.sm, marginLeft: 2 },
+  sectionBody: { borderWidth: 1, borderRadius: radii.panel, overflow: 'hidden', paddingHorizontal: spacing.md },
   menuRow: {
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: spacing.sm,
     paddingHorizontal: 2,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: spacing.xs,
   },
-  menuIcon: { width: 28, alignItems: 'flex-start', justifyContent: 'center' },
-  menuCopy: { flex: 1, marginHorizontal: 8 },
+  menuIcon: { width: 24, alignItems: 'flex-start', justifyContent: 'center' },
+  menuCopy: { flex: 1, marginHorizontal: spacing.sm },
 });

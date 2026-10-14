@@ -24,7 +24,7 @@ import {
 } from '../api/feature';
 import { useTheme } from '../theme/ThemeContext';
 import { Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, fonts, radii, tracking, touchTarget, typography } from '../theme/tokens';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
 
@@ -236,12 +236,13 @@ export function FeatureExplorerScreen() {
               <TouchableOpacity
                 key={item.key}
                 onPress={() => setFilter(item.key)}
+                hitSlop={{ top: spacing.xs, bottom: spacing.xs }}
                 style={[
                   styles.filterChip,
-                  { backgroundColor: active ? colors.text : colors.bgLift, borderColor: colors.border },
+                  { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border },
                 ]}
               >
-                <Text variant="xs" style={{ color: active ? colors.bg : colors.text }}>
+                <Text variant="xs" style={{ color: active ? colors.accentFg : colors.textSoft, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
                   {item.label} · {count}
                 </Text>
               </TouchableOpacity>
@@ -269,8 +270,8 @@ export function FeatureExplorerScreen() {
         ))}
 
         {error ? (
-          <View style={[styles.errorBox, { backgroundColor: colors.bgLift }]}>
-            <Ionicons name="alert-circle-outline" size={18} color={colors.error} />
+          <View style={[styles.errorBox, { backgroundColor: colors.errorSubtle }]}>
+            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
             <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
           </View>
         ) : null}
@@ -352,7 +353,7 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
       activeOpacity={0.72}
       style={[
         styles.featureRow,
-        { backgroundColor: selected ? colors.bgHover : colors.bgLift, borderColor: selected ? colors.borderStrong : colors.border },
+        { backgroundColor: selected ? colors.accentSubtle : 'transparent' },
       ]}
     >
       <View style={[styles.featureStatusDot, { backgroundColor: statusColor(item.status, item.archived, colors) }]} />
@@ -361,8 +362,8 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
         <Text variant="xs" dim>{item.archived ? 'Archived' : formatStatus(item.status)}</Text>
       </View>
       {item.is_active ? (
-        <View style={[styles.activeBadge, { backgroundColor: colors.accentSoft }]}>
-          <Text variant="xs" style={{ color: colors.accent }}>Loaded</Text>
+        <View style={[styles.activeBadge, { backgroundColor: colors.accentSubtle }]}>
+          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Loaded</Text>
         </View>
       ) : null}
       <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
@@ -408,7 +409,7 @@ function FeatureOverview({
       </View>
 
       {plan.directory ? (
-        <View style={[styles.pathBox, { backgroundColor: colors.bgHover }]}>
+        <View style={styles.pathBox}>
           <Ionicons name="folder-outline" size={16} color={colors.textDim} />
           <Text variant="xs" style={styles.pathText} numberOfLines={2}>{plan.directory}</Text>
         </View>
@@ -421,7 +422,7 @@ function FeatureOverview({
         ) : item?.archived ? (
           <ActionButton label="Restore" icon="archive-outline" onPress={onUnarchive} primary />
         ) : (
-          <ActionButton label="Load" icon="play-circle-outline" onPress={onLoad} primary />
+          <ActionButton label="Load" icon="play-circle-outline" onPress={onLoad} primary={plan.approved} />
         )}
         {!item?.is_active && !item?.archived ? <ActionButton label="Archive" icon="archive-outline" onPress={onArchive} /> : null}
       </View>
@@ -453,14 +454,14 @@ function PhaseDetail({
       <TouchableOpacity onPress={onToggle} style={styles.phaseHeader} activeOpacity={0.72}>
         <View style={styles.phaseCopy}>
           <Text variant="base" style={styles.phaseTitle}>{phase.title}</Text>
-          <Text variant="xs" dim>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
+          <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
         </View>
         <StatusPill label={phase.status || 'pending'} />
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
       </TouchableOpacity>
 
       {expanded ? (
-        <View style={[styles.taskList, { borderTopColor: colors.border }]}>
+        <View style={styles.taskList}>
           {phase.tasks.map(task => {
             const taskKey = `${phase.id}:${task.id}`;
             return (
@@ -489,12 +490,12 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
 }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.task, { borderBottomColor: colors.border }]}>
+    <View style={styles.task}>
       <TouchableOpacity onPress={onToggle} style={styles.taskHeader} activeOpacity={0.72}>
-        <View style={styles.taskIndex}><Text variant="xs" dim>{task.id}</Text></View>
+        <View style={styles.taskIndex}><Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.id}</Text></View>
         <View style={styles.taskCopy}>
           <Text variant="sm" style={styles.taskTitle}>{task.title}</Text>
-          <Text variant="xs" dim>{task.verified_exit_criteria?.length || 0}/{task.exit_criteria?.length || 0} criteria verified</Text>
+          <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.verified_exit_criteria?.length || 0}/{task.exit_criteria?.length || 0} criteria verified</Text>
         </View>
         <StatusPill label={task.status} />
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={colors.textDim} />
@@ -506,7 +507,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           <StringList title="Action points" values={task.action_points || []} />
           {(task.exit_criteria || []).length > 0 ? (
             <View style={styles.detailBlock}>
-              <Text variant="xs" dim style={styles.detailLabel}>EXIT CRITERIA</Text>
+              <Text variant="xs" dim style={styles.detailLabel}>Exit criteria</Text>
               {task.exit_criteria.map((criterion, index) => {
                 const verified = task.verified_exit_criteria?.includes(criterion);
                 return (
@@ -521,9 +522,9 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           {task.notes ? <TextBlock title="Notes" value={task.notes} /> : null}
           {task.blocked_reason ? <TextBlock title="Blocked reason" value={task.blocked_reason} error /> : null}
           {activeFeature && normalizeStatus(task.status) === 'in_progress' ? (
-            <TouchableOpacity onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.text }]}>
-              <Ionicons name="checkmark" size={17} color={colors.bg} />
-              <Text variant="xs" style={{ color: colors.bg, fontWeight: '700' }}>Mark completed</Text>
+            <TouchableOpacity onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent }]}>
+              <Ionicons name="checkmark" size={16} color={colors.accentOn} />
+              <Text variant="xs" style={{ color: colors.accentOn, fontWeight: fontWeights.medium }}>Mark completed</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -641,11 +642,11 @@ function ExpandableRecord({ title, subtitle, expanded, onToggle, children }: {
       <TouchableOpacity onPress={onToggle} activeOpacity={0.72} style={styles.recordHeader}>
         <View style={styles.recordCopy}>
           <Text variant="sm" style={styles.recordTitle}>{title}</Text>
-          <Text variant="xs" dim numberOfLines={2}>{subtitle}</Text>
+          <Text variant="xs" dim numberOfLines={2} style={{ fontVariant: ['tabular-nums'] }}>{subtitle}</Text>
         </View>
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
       </TouchableOpacity>
-      {expanded ? <View style={[styles.recordBody, { borderTopColor: colors.border }]}>{children}</View> : null}
+      {expanded ? <View style={styles.recordBody}>{children}</View> : null}
     </Card>
   );
 }
@@ -667,10 +668,17 @@ function StatusPill({ label }: { label: string }) {
     : normalized === 'blocked'
       ? colors.error
       : normalized === 'in_progress'
-        ? colors.accent
-        : colors.textDim;
+        ? colors.info
+        : colors.textSoft;
+  const background = normalized === 'completed'
+    ? colors.successSubtle
+    : normalized === 'blocked'
+      ? colors.errorSubtle
+      : normalized === 'in_progress'
+        ? colors.infoSubtle
+        : colors.bgHover;
   return (
-    <View style={[styles.statusPill, { backgroundColor: colors.bgHover }]}>
+    <View style={[styles.statusPill, { backgroundColor: background }]}>
       <View style={[styles.statusMiniDot, { backgroundColor: foreground }]} />
       <Text variant="xs" style={{ color: foreground }}>{formatStatus(label)}</Text>
     </View>
@@ -688,10 +696,12 @@ function ActionButton({ label, icon, onPress, primary = false }: {
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.72}
-      style={[styles.actionButton, { backgroundColor: primary ? colors.text : colors.bgHover }]}
+      style={[styles.actionButton, primary
+        ? { backgroundColor: colors.accent, borderColor: colors.accent }
+        : { backgroundColor: 'transparent', borderColor: colors.border }]}
     >
-      <Ionicons name={icon} size={17} color={primary ? colors.bg : colors.text} />
-      <Text variant="xs" style={{ color: primary ? colors.bg : colors.text, fontWeight: '700' }}>{label}</Text>
+      <Ionicons name={icon} size={16} color={primary ? colors.accentOn : colors.text} />
+      <Text variant="xs" style={{ color: primary ? colors.accentOn : colors.text, fontWeight: fontWeights.medium }}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -731,7 +741,7 @@ function JsonBlock({ title, value, raw = false }: { title: string; value: unknow
   return (
     <View style={styles.detailBlock}>
       <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
-      <View style={[styles.jsonBox, { backgroundColor: colors.bgHover }]}>
+      <View style={[styles.jsonBox, { backgroundColor: colors.bg }]}>
         <Text variant="xs" style={styles.jsonText} selectable>{text}</Text>
       </View>
     </View>
@@ -763,8 +773,8 @@ function statusColor(status: string, archived: boolean, colors: any): string {
   const normalized = normalizeStatus(status);
   if (normalized === 'completed') return colors.success;
   if (normalized === 'blocked') return colors.error;
-  if (normalized === 'in_progress') return colors.warning;
-  return colors.accent;
+  if (normalized === 'in_progress') return colors.info;
+  return colors.textDim;
 }
 
 function formatDate(timestamp?: number | null): string {
@@ -790,65 +800,65 @@ function stringValue(value: unknown): string {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: spacing.base, paddingBottom: 56 },
+  content: { padding: spacing.base, paddingBottom: spacing['3xl'] },
   loadingWrap: { padding: spacing.base },
   loadingBlock: { marginBottom: spacing.sm },
-  pageHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
-  pageHeaderCopy: { flex: 1, paddingRight: 12 },
-  pageTitle: { fontWeight: '700', letterSpacing: -0.5 },
-  filterRow: { gap: 8, paddingBottom: 14 },
-  filterChip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  featureList: { gap: 7 },
-  featureRow: { minHeight: 62, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
-  featureStatusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 11 },
+  pageHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.base },
+  pageHeaderCopy: { flex: 1, paddingRight: spacing.md },
+  pageTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  filterRow: { gap: spacing.sm, paddingBottom: spacing.base },
+  filterChip: { minHeight: touchTarget - spacing.sm, justifyContent: 'center', borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  featureList: { gap: spacing.xs },
+  featureRow: { minHeight: 56, borderRadius: radii.sm, flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md },
+  featureStatusDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },
   featureCopy: { flex: 1 },
-  featureName: { fontWeight: '600' },
-  activeBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginRight: 8 },
-  emptyFilterCard: { alignItems: 'center', paddingVertical: 28 },
-  errorBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 14, padding: 12, marginTop: 12 },
-  detailSection: { marginTop: 20 },
-  overviewCard: { paddingVertical: 18 },
+  featureName: { fontWeight: fontWeights.semibold },
+  activeBadge: { borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: 2, marginRight: spacing.sm },
+  emptyFilterCard: { alignItems: 'center', paddingVertical: spacing.xl },
+  errorBox: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.md },
+  detailSection: { marginTop: spacing.base },
+  overviewCard: { paddingVertical: spacing.base },
   overviewTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  overviewCopy: { flex: 1, paddingRight: 12 },
-  overviewTitle: { fontWeight: '700', letterSpacing: -0.3 },
-  featureId: { fontFamily: 'monospace', marginTop: 2 },
-  requestText: { marginTop: 14, lineHeight: 21 },
-  metadataGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 16, rowGap: 12 },
-  metadataItem: { width: '50%', paddingRight: 10 },
-  metadataWide: { width: '100%', marginBottom: 10 },
-  metadataValue: { fontWeight: '600', marginTop: 1 },
-  pathBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 12, padding: 10, marginTop: 14 },
-  pathText: { flex: 1, fontFamily: 'monospace' },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
-  actionButton: { minHeight: 40, borderRadius: 13, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12 },
-  sectionHeader: { marginTop: 24, marginBottom: 9 },
-  sectionTitle: { fontWeight: '700' },
-  phaseCard: { marginBottom: 9, paddingVertical: 6 },
-  phaseHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  overviewCopy: { flex: 1, paddingRight: spacing.md },
+  overviewTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  featureId: { fontFamily: fonts.mono, marginTop: 2 },
+  requestText: { marginTop: spacing.md, lineHeight: typography.sm.lineHeight },
+  metadataGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.base, rowGap: spacing.md },
+  metadataItem: { width: '50%', paddingRight: spacing.md },
+  metadataWide: { width: '100%', marginBottom: spacing.sm },
+  metadataValue: { fontWeight: fontWeights.medium, marginTop: 1, fontVariant: ['tabular-nums'] },
+  pathBox: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: spacing.md },
+  pathText: { flex: 1, fontFamily: fonts.mono },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.base },
+  actionButton: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md },
+  sectionHeader: { marginTop: spacing.lg, marginBottom: spacing.sm },
+  sectionTitle: { fontWeight: fontWeights.semibold },
+  phaseCard: { marginBottom: spacing.sm, paddingVertical: spacing.sm },
+  phaseHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   phaseCopy: { flex: 1 },
-  phaseTitle: { fontWeight: '600' },
-  taskList: { borderTopWidth: StyleSheet.hairlineWidth },
-  task: { borderBottomWidth: StyleSheet.hairlineWidth },
-  taskHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7 },
-  taskIndex: { width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  phaseTitle: { fontWeight: fontWeights.semibold },
+  taskList: { paddingTop: spacing.xs },
+  task: { paddingBottom: spacing.xs },
+  taskHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  taskIndex: { width: 26, height: 26, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
   taskCopy: { flex: 1 },
-  taskTitle: { fontWeight: '600' },
-  taskBody: { paddingLeft: 34, paddingBottom: 14 },
-  detailBlock: { marginTop: 12 },
-  detailLabel: { fontWeight: '700', letterSpacing: 0.6, marginBottom: 5 },
-  bulletLine: { marginBottom: 3, lineHeight: 18 },
-  criteriaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginBottom: 6 },
-  completeButton: { alignSelf: 'flex-start', minHeight: 38, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, marginTop: 12 },
-  statusPill: { minHeight: 28, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8 },
-  statusMiniDot: { width: 6, height: 6, borderRadius: 3 },
-  executionLine: { marginTop: 5 },
-  recordList: { gap: 8 },
-  recordCard: { paddingVertical: 6 },
+  taskTitle: { fontWeight: fontWeights.semibold },
+  taskBody: { paddingLeft: spacing.xl, paddingBottom: spacing.base },
+  detailBlock: { marginTop: spacing.md },
+  detailLabel: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
+  bulletLine: { marginBottom: spacing.xs, lineHeight: typography.xs.lineHeight },
+  criteriaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.xs },
+  completeButton: { alignSelf: 'flex-start', minHeight: touchTarget, borderRadius: radii.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  statusPill: { minHeight: 24, borderRadius: radii.pill, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm },
+  statusMiniDot: { width: 6, height: 6, borderRadius: radii.pill },
+  executionLine: { marginTop: spacing.xs },
+  recordList: { gap: spacing.sm },
+  recordCard: { paddingVertical: spacing.sm },
   recordHeader: { minHeight: 54, flexDirection: 'row', alignItems: 'center' },
-  recordCopy: { flex: 1, paddingRight: 10 },
-  recordTitle: { fontWeight: '600' },
-  recordBody: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12, paddingBottom: 8 },
-  jsonBox: { borderRadius: 12, padding: 10 },
-  jsonText: { fontFamily: 'monospace', lineHeight: 17 },
-  emptyDataCard: { alignItems: 'center', paddingVertical: 22 },
+  recordCopy: { flex: 1, paddingRight: spacing.md },
+  recordTitle: { fontWeight: fontWeights.semibold },
+  recordBody: { paddingTop: spacing.xs, paddingBottom: spacing.sm },
+  jsonBox: { borderRadius: radii.sm, padding: spacing.md },
+  jsonText: { fontFamily: fonts.mono, lineHeight: typography.xs.lineHeight },
+  emptyDataCard: { alignItems: 'center', paddingVertical: spacing.lg },
 });

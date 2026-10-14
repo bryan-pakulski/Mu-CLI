@@ -54,20 +54,34 @@ def observation_eligible(tool_name: str) -> bool:
     return tool_name not in NEVER_OBSERVE_TOOLS
 
 
-def resolve_inline_budget(tool_name: str, is_error: bool, variables: Any) -> int:
-    """Per-tool inline token budget (spec #10). Failures get a larger budget."""
+def resolve_inline_budget(tool_name: str, is_error: bool, variables: Any,
+                          context_window: Optional[int] = None) -> int:
+    """Per-tool inline token budget (spec #10). Failures get a larger budget.
+
+    With ``context_window`` the budget is capped at ``tool_result_inline_share`` of the
+    model's real window: big-context models get results inline, small ones stay protected."""
+    budget = None
     try:
         budgets = variables.get("tool_inline_budgets", {}) or {}
         if tool_name in budgets:
-            return max(32, int(budgets[tool_name]))
+            budget = max(32, int(budgets[tool_name]))
     except Exception:  # noqa: BLE001
         pass
-    try:
-        if is_error:
-            return max(32, int(variables.get("tool_result_failure_budget", 1024) or 1024))
-        return max(32, int(variables.get("tool_result_inline_budget", 256) or 256))
-    except Exception:  # noqa: BLE001
-        return 256
+    if budget is None:
+        try:
+            if is_error:
+                budget = max(32, int(variables.get("tool_result_failure_budget", 1024) or 1024))
+            else:
+                budget = max(32, int(variables.get("tool_result_inline_budget", 4000) or 4000))
+        except Exception:  # noqa: BLE001
+            budget = 4000
+    if context_window:
+        try:
+            share = float(variables.get("tool_result_inline_share", 0.05) or 0.05)
+            budget = min(budget, max(256, int(context_window * share)))
+        except Exception:  # noqa: BLE001
+            pass
+    return budget
 
 
 def _excerpt(raw_text: str, budget_tokens: int) -> str:

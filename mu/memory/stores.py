@@ -86,6 +86,9 @@ class MemoryEntry:
         )
 
 
+_MAX_QUERY_TERMS = 256
+
+
 class BaseNoteStore:
     title = "Notes"
 
@@ -370,7 +373,14 @@ class BaseNoteStore:
         toward the current turn's topic without the `hits += 1` /
         `updated_at = now` side effects that `search` applies (R6, FM-7).
         """
-        terms = [term for term in str(query or "").lower().split() if term]
+        # Distinct terms. The query is often the user's whole message (a review prompt can
+        # carry a 100k-character patch) and this runs every iteration, so a huge query keeps
+        # its first terms plus any later term that is a whole word somewhere in memory.
+        terms = list(dict.fromkeys(term for term in str(query or "").lower().split() if term))
+        if len(terms) > _MAX_QUERY_TERMS:
+            words = {w for entry in self.entries
+                     for w in " ".join([entry.content, " ".join(entry.tags), str(entry.source or "")]).lower().split()}
+            terms = terms[:_MAX_QUERY_TERMS] + [t for t in terms[_MAX_QUERY_TERMS:] if t in words]
         ranked = []
         for entry in self.entries:
             # Status filtering
@@ -383,14 +393,13 @@ class BaseNoteStore:
             if exclude_tags and any(tag in exclude_tags for tag in entry.tags):
                 continue
 
-            haystack = " ".join(
-                [entry.content, " ".join(entry.tags), entry.source]
-            ).lower()
+            content = entry.content.lower()
+            haystack = " ".join([content, " ".join(entry.tags).lower(), str(entry.source or "").lower()])
             score = 0
             for term in terms:
                 if term in haystack:
                     score += 2
-                if term in entry.content.lower():
+                if term in content:
                     score += 1
             if not terms:
                 score = 1

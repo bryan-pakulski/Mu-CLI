@@ -1,8 +1,12 @@
 """Persistent Jira link settings: ``$MUCLI_HOME/integrations/jira.json``.
 
 The file holds the link (base URL, email, API token or PAT) plus non-secret
-browsing preferences (preferred boards, default JQL). It is written
-atomically with mode 0600 inside a 0700 directory.
+browsing preferences (preferred boards, default JQL), the deployment
+(auto/cloud/dc), the acceptance-criteria custom field, tracker writeback
+(comments + status transitions per job event) and the ticket watcher
+(``trackers.watch``). It is written atomically with mode 0600 inside a 0700
+directory. GitHub tokens are never stored here (``GITHUB_TOKEN``/``GH_TOKEN``
+or the ``gh`` CLI login are used).
 
 Precedence per field: environment variable > settings file. Secrets are
 never returned by :func:`public_settings`; callers only see ``*_set`` flags.
@@ -16,7 +20,7 @@ import tempfile
 import threading
 from typing import Any, Dict, List, Optional
 
-from .jira import JiraConfig, JiraError
+from .jira import JiraConfig, JiraError, env_writeback, normalize_deployment, normalize_field_id
 
 _LOCK = threading.Lock()
 SECRET_FIELDS = ("api_token", "pat")
@@ -28,6 +32,10 @@ _ENV = {
     "pat": "JIRA_PAT",
 }
 _MAX_BOARDS = 50
+EVENTS = ("created", "plan_ready", "pushed", "done", "failed", "needs_human")
+_MAX_WATCHES = 20
+_MIN_WATCH_INTERVAL = 60
+_DEFAULT_WATCH_INTERVAL = 900
 
 
 def settings_path() -> str:
@@ -130,8 +138,88 @@ def save_settings(update: Dict[str, Any]) -> Dict[str, Any]:
             if "assigned_to_me" in incoming:
                 prefs["assigned_to_me"] = bool(incoming.get("assigned_to_me"))
         data["preferences"] = prefs
+        if "deployment" in update:
+            data["deployment"] = normalize_deployment(update.get("deployment"))
+        if "acceptance_field" in update:
+            raw = str(update.get("acceptance_field") or "").strip()
+            field = normalize_field_id(raw)
+            if raw and not field:
+                raise ValueError("acceptance_field must look like customfield_12345")
+            data["acceptance_field"] = field
+        if isinstance(update.get("writeback"), dict):
+            data["writeback"] = _clean_writeback({**dict(data.get("writeback") or {}), **update["writeback"]})
+        trackers = update.get("trackers")
+        if isinstance(trackers, dict) and isinstance(trackers.get("watch"), dict):
+            stored = dict(data.get("trackers") or {})
+            stored["watch"] = _clean_watch({**dict(stored.get("watch") or {}), **trackers["watch"]})
+            data["trackers"] = stored
         _write(data)
     return public_settings()
+
+
+def _clean_writeback(value: Any) -> Dict[str, Any]:
+    value = dict(value or {})
+    raw_events = dict(value.get("events") or {})
+    events: Dict[str, Dict[str, Any]] = {}
+    for name in EVENTS:
+        item = dict(raw_events.get(name) or {}) if isinstance(raw_events.get(name), dict) else {}
+        events[name] = {
+            "comment": bool(item.get("comment", True)),
+            "jira_status": str(item.get("jira_status") or "").strip()[:100],
+            "github": str(item.get("github") or "").strip()[:200],
+        }
+    return {"enabled": bool(value.get("enabled", False)), "link_pr": bool(value.get("link_pr", True)),
+            "events": events}
+
+
+def _clean_watch(value: Any) -> Dict[str, Any]:
+    value = dict(value or {})
+    try:
+        interval = int(value.get("interval_seconds") or _DEFAULT_WATCH_INTERVAL)
+    except (TypeError, ValueError):
+        interval = _DEFAULT_WATCH_INTERVAL
+    queries = []
+    for item in list(value.get("queries") or [])[:_MAX_WATCHES]:
+        if not isinstance(item, dict):
+            continue
+        tracker = str(item.get("tracker") or "jira").strip().lower()
+        query = str(item.get("query") or "").strip()[:2000]
+        if tracker not in {"jira", "github"} or not query:
+            continue
+        try:
+            max_results = max(1, min(int(item.get("max_results") or 10), 50))
+        except (TypeError, ValueError):
+            max_results = 10
+        queries.append({
+            "tracker": tracker,
+            "query": query,
+            "workspace_root": str(item.get("workspace_root") or "").strip()[:4000],
+            "session_name": str(item.get("session_name") or "").strip()[:200],
+            "max_results": max_results,
+        })
+    return {"enabled": bool(value.get("enabled", False)),
+            "interval_seconds": max(_MIN_WATCH_INTERVAL, interval), "queries": queries}
+
+
+def _stored() -> Dict[str, Any]:
+    try:
+        return load_settings()
+    except JiraError:
+        return {}
+
+
+def writeback_settings(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Effective writeback settings; ``JIRA_WRITEBACK`` overrides ``enabled`` when set."""
+    data = _clean_writeback(_stored().get("writeback"))
+    override = env_writeback(env)
+    if override is not None:
+        data["enabled"] = override
+    data["source"] = "env" if override is not None else "file"
+    return data
+
+
+def watch_settings() -> Dict[str, Any]:
+    return _clean_watch(dict(_stored().get("trackers") or {}).get("watch"))
 
 
 def clear_settings(*, keep_preferences: bool = True) -> Dict[str, Any]:
@@ -158,7 +246,9 @@ def resolve_config(env: Optional[Dict[str, str]] = None) -> JiraConfig:
         email=env_cfg.email or str(stored.get("email") or "").strip(),
         api_token=env_cfg.api_token or str(stored.get("api_token") or "").strip(),
         pat=env_cfg.pat or str(stored.get("pat") or "").strip(),
-        writeback=env_cfg.writeback,
+        writeback=bool(writeback_settings(e)["enabled"]),
+        deployment=env_cfg.deployment or normalize_deployment(stored.get("deployment")),
+        acceptance_field=env_cfg.acceptance_field or normalize_field_id(stored.get("acceptance_field")),
     )
 
 
@@ -188,6 +278,14 @@ def public_settings(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         "api_token_set": bool(cfg.api_token),
         "pat_set": bool(cfg.pat),
         "writeback": cfg.writeback,
+        "writeback_settings": writeback_settings(e),
+        "deployment": normalize_deployment(stored.get("deployment")) or "auto",
+        "acceptance_field": normalize_field_id(stored.get("acceptance_field")),
+        "trackers": {
+            "github": _github_public(e),
+            "watch": _clean_watch(dict(stored.get("trackers") or {}).get("watch")),
+        },
+        "events": list(EVENTS),
         "sources": sources,
         "settings_path": settings_path(),
         "preferences": {
@@ -197,3 +295,14 @@ def public_settings(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         },
         "error": error,
     }
+
+
+def _github_public(env: Dict[str, str]) -> Dict[str, Any]:
+    import shutil
+
+    from .tracker import github_token
+
+    token = bool(github_token(env))
+    gh = bool(shutil.which("gh"))
+    return {"token_set": token, "gh_cli": gh, "configured": token or gh,
+            "mode": "token" if token else ("gh" if gh else "")}

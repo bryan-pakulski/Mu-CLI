@@ -13,14 +13,14 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from typing import Sequence, Any, Dict, Iterable, Iterator, List, Optional
+from typing import Sequence, Any, Callable, Dict, Iterable, Iterator, List, Optional
 
 from utils.config import HISTORY_DIR
 
 from .models import AttentionReason, Job, JobAttempt, JobEvent, JobSpec, JobStatus, coerce_status
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def default_db_path() -> str:
@@ -60,6 +60,21 @@ class JobStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
+
+    @contextmanager
+    def command_lock(self, job_id: str):
+        """Serialize compound UI commands across GUI and TUI processes."""
+        import fcntl
+        from .verification import ensure_safe_job_id
+        ensure_safe_job_id(job_id)
+        directory = os.path.join(os.path.dirname(self.path), ".command-locks")
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, job_id + ".lock"), "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -167,6 +182,16 @@ class JobStore:
                     conn.execute(
                         "ALTER TABLE jobs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'"
                     )
+                # planos migration Phase 0: additive core-state columns.
+                for name, ddl in (
+                    ("state", "TEXT NOT NULL DEFAULT ''"),
+                    ("paused_from", "TEXT NOT NULL DEFAULT ''"),
+                    ("failed_from", "TEXT NOT NULL DEFAULT ''"),
+                    ("fix_attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ):
+                    if name not in columns:
+                        conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {ddl}")
+                self._backfill_core_state(conn)
                 conn.execute(
                     "INSERT OR REPLACE INTO job_meta(key, value) VALUES('schema_version', ?)",
                     (str(SCHEMA_VERSION),),
@@ -225,6 +250,8 @@ class JobStore:
                 {"title": normalized.title, "execution": normalized.execution},
                 now,
             )
+            from .core.states import initial_core
+            conn.execute("UPDATE jobs SET state = ? WHERE id = ?", (initial_core().state.value, identifier))
         return self.get_job(identifier)
 
     def get_job(self, job_id: str) -> Job:
@@ -351,6 +378,8 @@ class JobStore:
         attention_reason: AttentionReason | str = AttentionReason.NONE,
         attention_detail: str = "",
         expected_version: Optional[int] = None,
+        core_target=None,
+        lease_owner: Optional[str] = None,
     ) -> Job:
         target_status = coerce_status(target)
         now = float(self._clock())
@@ -364,13 +393,22 @@ class JobStore:
                 raise RuntimeError(
                     f"job {job_id} version changed: expected {expected_version}, found {version}"
                 )
+            if lease_owner is not None:
+                # Lease-fenced write: only the worker that still holds an
+                # unexpired lease may move the job (a superseded worker must
+                # not overwrite its replacement's state).
+                expires = row["lease_expires_at"]
+                if str(row["worker_id"] or "") != str(lease_owner) or expires is None or float(expires) < now:
+                    from .service import LeaseLostError
+
+                    raise LeaseLostError(f"worker {lease_owner} no longer holds the lease on job {job_id}")
             # Validate the transition against the row actually observed
             # inside this write transaction — not a snapshot read earlier —
             # so a concurrent cancellation/recovery cannot be overwritten by
             # a transition that is illegal from the true current state.
-            from .models import can_transition
+            from .core.states import can_transition_status
 
-            if current != target_status and not can_transition(current, target_status):
+            if core_target is None and current != target_status and not can_transition_status(current, target_status):
                 from .service import JobStateError
 
                 raise JobStateError(
@@ -408,17 +446,57 @@ class JobStore:
                     job_id,
                 ),
             )
+            prior_state = str(row["state"] or "")
+            core = self._advance_core(conn, job_id, row, target_status.value, attention.value,
+                                      payload or {}, core_target=core_target)
             self._insert_event(
                 conn, job_id, "status_changed", current, target_status,
-                reason, payload or {}, now,
+                reason, {**(payload or {}), "attention_reason": attention.value, "core_state": core.to_dict()}, now,
             )
-        return self.get_job(job_id)
+        job = self.get_job(job_id)
+        if core.state.value != prior_state:
+            # After commit: ticket writeback (no-op unless the job is linked
+            # to a tracker and writeback is enabled).
+            from .tracker_sync import on_state_change
+
+            on_state_change(self, job, prior_state, core.state.value, reason=reason)
+        return job
+
+    def _advance_core(self, conn, job_id, row, status, attention, payload, *, core_target=None):
+        """Write the core state that follows this status write (core/states.py table)."""
+        from .core.states import CoreState, advance, coerce_state, transition
+        if row["state"]:
+            prior = CoreState(coerce_state(row["state"]), coerce_state(row["paused_from"] or None),
+                              coerce_state(row["failed_from"] or None), int(row["fix_attempts"] or 0))
+        else:  # a pre-v3 row the startup migration has not reached yet
+            prior = self._legacy_core(conn, job_id, row["status"], row["attention_reason"],
+                                      int(row["fix_attempts"] or 0))
+        if core_target is not None:
+            core = transition(prior, core_target) if prior.state != core_target else prior
+        else:
+            # A stage that could not even get its sandbox fails in provisioning.
+            sandbox_missing = (payload or {}).get("exception_type") == "SandboxUnavailable"
+            core = advance(prior, status, attention, stage="provisioning" if sandbox_missing else "")
+        conn.execute("UPDATE jobs SET state=?, paused_from=?, failed_from=?, fix_attempts=? WHERE id=?",
+                     (core.state.value, core.paused_from.value if core.paused_from else "",
+                      core.failed_from.value if core.failed_from else "", core.fix_attempts, job_id))
+        return core
+
+    def transition_core(self, job_id, target, *, reason="", payload=None, queued=False, attention_detail=""):
+        from .core.states import CoreState, JobState, coerce_state, to_legacy_status
+        target = coerce_state(target)
+        status = "queued" if queued and target == JobState.IMPLEMENTING else to_legacy_status(CoreState(target))
+        attention = {JobState.PLAN_REVIEW: "plan_review", JobState.REVIEW_DONE: "review_done"}.get(target, "")
+        return self.transition(job_id, status, reason=reason, payload=payload, core_target=target,
+                               attention_reason=attention, attention_detail=attention_detail)
 
     def update_runtime_fields(self, job_id: str, **fields: Any) -> Job:
         allowed = {
             "base_sha", "cost_usd", "branch", "worktree", "environment_json",
             "execution_json", "metadata_json", "session_name",
             "acceptance_json", "validation_json",
+            # Raised by an approved "Approve more" on a job cap (mu/jobs/limits.py).
+            "max_cost_usd", "max_runtime_seconds",
         }
         updates: Dict[str, Any] = {}
         for key, value in fields.items():
@@ -439,6 +517,42 @@ class JobStore:
             conn.execute(
                 f"UPDATE jobs SET {assignments}, version = version + 1 WHERE id = ?",
                 [*updates.values(), job_id],
+            )
+        return self.get_job(job_id)
+
+    def patch_metadata(
+        self,
+        job_id: str,
+        updates: Optional[Dict[str, Any]] = None,
+        *,
+        remove: Iterable[str] = (),
+        mutate: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Job:
+        """Atomically merge ``updates`` into ``metadata`` and drop ``remove`` keys.
+
+        The read-modify-write happens inside one ``BEGIN IMMEDIATE``
+        transaction, so concurrent writers (worker, merge-poll thread, GUI
+        commands, drift watch) can no longer lose each other's keys the way a
+        ``get`` -> edit -> ``update_runtime_fields`` round trip did.
+        ``mutate`` (optional) edits the merged dict in place for nested
+        changes, still under the same lock.
+        """
+        now = float(self._clock())
+        with self._transaction() as conn:
+            row = conn.execute("SELECT metadata_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            metadata = _loads(row["metadata_json"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata.update(dict(updates or {}))
+            for key in remove:
+                metadata.pop(key, None)
+            if mutate is not None:
+                mutate(metadata)
+            conn.execute(
+                "UPDATE jobs SET metadata_json = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+                (_json(metadata), now, job_id),
             )
         return self.get_job(job_id)
 
@@ -510,6 +624,31 @@ class JobStore:
         if row is None:
             raise KeyError(event_id)
         return self._event_from_row(row)
+
+    def event_cursor(self) -> int:
+        conn = self._connect()
+        try:
+            return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM job_events").fetchone()[0])
+        finally:
+            conn.close()
+
+    def events_since(self, after_id: int, *, limit: int = 1000) -> List[JobEvent]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM job_events WHERE id > ? ORDER BY id LIMIT ?",
+                                (after_id, max(1, min(limit, 5000)))).fetchall()
+        finally:
+            conn.close()
+        return [self._event_from_row(row) for row in rows]
+
+    def recent_events(self, job_id: str, *, limit: int = 500) -> List[JobEvent]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM job_events WHERE job_id = ? ORDER BY id DESC LIMIT ?",
+                                (job_id, max(1, min(limit, 5000)))).fetchall()
+        finally:
+            conn.close()
+        return [self._event_from_row(row) for row in reversed(rows)]
 
     def list_events(self, job_id: str, *, after_id: int = 0, limit: int = 500) -> List[JobEvent]:
         conn = self._connect()
@@ -639,7 +778,7 @@ class JobStore:
         transaction, revalidating can_transition against the row observed
         under the lock (a cancelled/merged job is left untouched and False
         is returned only if the lease itself was lost)."""
-        from .models import JobStatus as _JS, can_transition
+        from .core.states import can_transition_status
         from .service import JobStateError
 
         now = float(self._clock())
@@ -651,7 +790,7 @@ class JobStore:
                 return False
             job_id = attempt_row["job_id"]
             row = conn.execute(
-                "SELECT worker_id, lease_expires_at FROM jobs WHERE id = ?",
+                "SELECT * FROM jobs WHERE id = ?",
                 (job_id,),
             ).fetchone()
             if row is None:
@@ -690,41 +829,70 @@ class JobStore:
                 conn, job_id, "attempt_finished", None, None, str(status),
                 {"attempt_id": attempt_id, "cost_usd": float(cost_usd), "error": str(error or "")}, now,
             )
+            refused = ""
+            synced = None
             if target_status is not None:
                 target = coerce_status(target_status)
                 current = JobStatus(conn.execute(
                     "SELECT status FROM jobs WHERE id = ?", (job_id,)
                 ).fetchone()["status"])
-                if current != target and not can_transition(current, target):
-                    raise JobStateError(
-                        f"cannot transition job {job_id} from {current.value} to {target.value}"
-                    )
-                attention_value = (
-                    attention_reason.value
-                    if isinstance(attention_reason, AttentionReason)
-                    else (str(attention_reason) if attention_reason else None)
-                )
-                if attention_value is not None:
-                    conn.execute(
-                        """
-                        UPDATE jobs SET status = ?, attention_reason = ?,
-                            attention_detail = ?, updated_at = ?, version = version + 1
-                        WHERE id = ?
-                        """,
-                        (target.value, attention_value, str(attention_detail or ""), now, job_id),
-                    )
+                if current != target and not can_transition_status(current, target):
+                    # A cancel/human move landed first. The attempt close and
+                    # its cost above still commit (the spend happened); only
+                    # the status move is refused, raised after commit.
+                    refused = f"cannot transition job {job_id} from {current.value} to {target.value}"
                 else:
-                    conn.execute(
-                        """
-                        UPDATE jobs SET status = ?, updated_at = ?, version = version + 1
-                        WHERE id = ?
-                        """,
-                        (target.value, now, job_id),
+                    attention_value = (
+                        attention_reason.value
+                        if isinstance(attention_reason, AttentionReason)
+                        else (str(attention_reason) if attention_reason else None)
                     )
-                self._insert_event(
-                    conn, job_id, "status_changed", current, target,
-                    transition_reason, transition_payload or {}, now,
-                )
+                    # Same started/completed bookkeeping as transition().
+                    started_at = row["started_at"]
+                    completed_at = row["completed_at"]
+                    if target == JobStatus.RUNNING and started_at is None:
+                        started_at = now
+                    if target in {JobStatus.MERGED, JobStatus.CANCELLED}:
+                        completed_at = now
+                    elif target not in {JobStatus.READY_FOR_REVIEW}:
+                        completed_at = None
+                    if attention_value is not None:
+                        conn.execute(
+                            """
+                            UPDATE jobs SET status = ?, attention_reason = ?,
+                                attention_detail = ?, updated_at = ?, started_at = ?,
+                                completed_at = ?, version = version + 1
+                            WHERE id = ?
+                            """,
+                            (target.value, attention_value, str(attention_detail or ""), now,
+                             started_at, completed_at, job_id),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            UPDATE jobs SET status = ?, updated_at = ?, started_at = ?,
+                                completed_at = ?, version = version + 1
+                            WHERE id = ?
+                            """,
+                            (target.value, now, started_at, completed_at, job_id),
+                        )
+                    prior_state = str(row["state"] or "")
+                    core = self._advance_core(conn, job_id, row, target.value,
+                                              attention_value or "", transition_payload or {})
+                    self._insert_event(
+                        conn, job_id, "status_changed", current, target,
+                        transition_reason, {**(transition_payload or {}), "attention_reason": attention_value or "",
+                                            "core_state": core.to_dict()}, now,
+                    )
+                    if core.state.value != prior_state:
+                        synced = (prior_state, core.state.value)
+        if refused:
+            raise JobStateError(refused)
+        if synced is not None:
+            # After commit, exactly like transition(): ticket writeback.
+            from .tracker_sync import on_state_change
+
+            on_state_change(self, self.get_job(job_id), synced[0], synced[1], reason=transition_reason)
         return True
 
     def release_lease(self, job_id: str, worker_id: str, *, reason: str = "") -> bool:
@@ -796,6 +964,100 @@ class JobStore:
         finally:
             conn.close()
         return [self._job_from_row(row) for row in rows]
+
+    def schedulable_jobs(
+        self,
+        statuses: Iterable[JobStatus | str],
+        *,
+        now: Optional[float] = None,
+        limit: int = 25,
+    ) -> List[Job]:
+        """Scheduler candidates, FIFO by ``created_at``.
+
+        Jobs whose lease is still live are excluded in SQL: a running job's
+        heartbeat bumps ``updated_at`` every few seconds, so the old
+        ``updated_at DESC`` window filled up with jobs that already had a
+        worker and starved queued ones. QUEUED jobs still backing off
+        (``metadata.next_run_at`` in the future) are excluded too, so they
+        never occupy a window slot.
+        """
+        timestamp = float(self._clock() if now is None else now)
+        values = [coerce_status(status).value for status in statuses]
+        if not values:
+            return []
+        placeholders = ",".join("?" for _ in values)
+        base = (
+            f"SELECT * FROM jobs WHERE status IN ({placeholders})"
+            " AND (worker_id = '' OR lease_expires_at IS NULL OR lease_expires_at < ?)"
+        )
+        backoff = (
+            " AND (status != ? OR COALESCE(CAST(json_extract(metadata_json, '$.next_run_at') AS REAL), 0) <= ?)"
+        )
+        order = " ORDER BY created_at ASC, id ASC LIMIT ?"
+        bounded = max(1, min(int(limit), 1000))
+        conn = self._connect()
+        try:
+            try:
+                rows = conn.execute(
+                    base + backoff + order,
+                    [*values, timestamp, JobStatus.QUEUED.value, timestamp, bounded],
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # SQLite without JSON1 (or a malformed metadata row): the
+                # controller still applies the backoff gate in Python.
+                rows = conn.execute(base + order, [*values, timestamp, bounded]).fetchall()
+        finally:
+            conn.close()
+        return [self._job_from_row(row) for row in rows]
+
+    # Statuses in which a worker is actively spending runtime on the job.
+    # Human gates (NEEDS_HUMAN, READY_FOR_REVIEW, CONFLICTED), QUEUED backoff
+    # and terminal states do not count against max_runtime_seconds.
+    ACTIVE_RUNTIME_STATUSES = frozenset({
+        JobStatus.PREPARING.value, JobStatus.PLANNING.value, JobStatus.RUNNING.value,
+        JobStatus.RECOVERING.value, JobStatus.VERIFYING.value, JobStatus.REVIEWING.value,
+        JobStatus.PUBLISHING.value,
+    })
+
+    def active_runtime_seconds(self, job_id: str, *, now: Optional[float] = None) -> Optional[float]:
+        """Seconds the job spent in worker-active statuses, from status history.
+
+        Sums every interval that began with a ``status_changed`` event into an
+        active status and ended at the next status change (or ``now`` for the
+        open interval). The sum restarts at the last human retry out of a
+        failure status (failed/timed_out/budget_exceeded/environment_error):
+        a retried TIMED_OUT job gets a fresh runtime budget instead of timing
+        out again immediately. Returns None when the job has no status history
+        (the caller falls back to wall time since ``started_at``).
+        """
+        from .core.states import FAILURE_STATUSES
+
+        timestamp = float(self._clock() if now is None else now)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT from_status, to_status, created_at FROM job_events WHERE job_id = ?"
+                " AND event_type = 'status_changed' AND to_status IS NOT NULL ORDER BY id ASC",
+                (job_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return None
+        total = 0.0
+        active_since: Optional[float] = None
+        for row in rows:
+            at = float(row["created_at"] or 0.0)
+            if active_since is not None:
+                total += max(0.0, at - active_since)
+                active_since = None
+            if str(row["from_status"] or "") in FAILURE_STATUSES and str(row["to_status"]) not in FAILURE_STATUSES:
+                total = 0.0  # human retry: the deadline restarts here
+            if str(row["to_status"]) in self.ACTIVE_RUNTIME_STATUSES:
+                active_since = at
+        if active_since is not None:
+            total += max(0.0, timestamp - active_since)
+        return total
 
     def start_attempt(
         self,
@@ -904,6 +1166,106 @@ class JobStore:
             ),
         )
         return int(cursor.lastrowid)
+
+    # ------------------------------------------------ pre-v3 migration only
+    @staticmethod
+    def _legacy_history(conn: sqlite3.Connection, job_id: str, limit: int = 20) -> List[str]:
+        """Newest-first legacy statuses a pre-v3 row passed through (its only
+        record of paused_from / failed_from)."""
+        rows = conn.execute(
+            "SELECT from_status FROM job_events WHERE job_id = ? AND event_type = 'status_changed'"
+            " AND from_status IS NOT NULL ORDER BY id DESC LIMIT ?",
+            (job_id, int(limit)),
+        ).fetchall()
+        return [str(r[0]) for r in rows if r[0]]
+
+    @classmethod
+    def _legacy_core(cls, conn: sqlite3.Connection, job_id: str, status: str,
+                     attention: str, fix_attempts: int = 0):
+        from .core.states import from_legacy
+
+        return from_legacy(status, attention, history=cls._legacy_history(conn, job_id),
+                           fix_attempts=fix_attempts)
+
+    def _backfill_core_state(self, conn: sqlite3.Connection) -> None:
+        """Populate pre-v3 rows and repair early v3 worker completion writes.
+
+        Modern status events include the core snapshot. Never remap those:
+        e.g. a queued implementation intentionally remains IMPLEMENTING.
+        """
+        rows = conn.execute(
+            "SELECT id, status, attention_reason, fix_attempts, state FROM jobs"
+        ).fetchall()
+        for row in rows:
+            event = conn.execute(
+                "SELECT id, payload_json FROM job_events WHERE job_id=? AND event_type='status_changed'"
+                " ORDER BY id DESC LIMIT 1", (row["id"],),
+            ).fetchone()
+            payload = _loads(event["payload_json"], {}) if event else {}
+            if row["state"] and (not event or payload.get("core_state")):
+                continue
+            try:
+                attention = row["attention_reason"]
+                if row["status"] == "needs_human" and payload.get("tool_name"):
+                    attention = "question"  # a tool-approval pause, not the old plan gate
+                core = self._legacy_core(conn, row["id"], row["status"], attention,
+                                         int(row["fix_attempts"] or 0))
+            except ValueError:
+                continue
+            conn.execute(
+                "UPDATE jobs SET state = ?, paused_from = ?, failed_from = ? WHERE id = ? AND state = ?"
+                " AND status = ? AND attention_reason = ? AND COALESCE((SELECT MAX(id) FROM job_events"
+                " WHERE job_id=jobs.id AND event_type='status_changed'), 0) = ?",
+                (core.state.value, core.paused_from.value if core.paused_from else "",
+                 core.failed_from.value if core.failed_from else "", row["id"], row["state"],
+                 row["status"], row["attention_reason"], event["id"] if event else 0),
+            )
+
+    def _sync_core_state(self, conn: sqlite3.Connection, job_id: str) -> None:
+        """Fill the core columns of one pre-v3 row from its legacy status."""
+        row = conn.execute(
+            "SELECT status, attention_reason, fix_attempts FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return
+        try:
+            core = self._legacy_core(conn, job_id, row["status"], row["attention_reason"],
+                                     int(row["fix_attempts"] or 0))
+        except ValueError:
+            return
+        conn.execute(
+            "UPDATE jobs SET state = ?, paused_from = ?, failed_from = ? WHERE id = ?",
+            (core.state.value, core.paused_from.value if core.paused_from else "",
+             core.failed_from.value if core.failed_from else "", job_id),
+        )
+
+    def core_state(self, job_id: str):
+        """Authoritative ``CoreState`` for a job (read from the v3 columns)."""
+        from .core.states import CoreState, JobState, coerce_state
+
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT state, paused_from, failed_from, fix_attempts FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if not row["state"]:
+                self._sync_core_state(conn, job_id)
+                row = conn.execute(
+                    "SELECT state, paused_from, failed_from, fix_attempts FROM jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+        return CoreState(
+            coerce_state(row["state"]) or JobState.PROVISIONING,
+            paused_from=coerce_state(row["paused_from"] or None),
+            failed_from=coerce_state(row["failed_from"] or None),
+            fix_attempts=int(row["fix_attempts"] or 0),
+        )
+
+    def set_fix_attempts(self, job_id: str, value: int) -> None:
+        with self._transaction() as conn:
+            conn.execute("UPDATE jobs SET fix_attempts = ? WHERE id = ?", (int(value), job_id))
 
     @staticmethod
     def _job_from_row(row: sqlite3.Row) -> Job:

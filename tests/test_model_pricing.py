@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from mu.jobs import JobService, JobSpec, JobStore
-from mu.jobs.runner import SessionJobRunner
 from utils.model_pricing import (
     PRICING_VERSION,
     estimate_model_cost,
@@ -32,11 +29,11 @@ def test_openai_cached_tokens_are_not_double_charged():
     )
     assert estimate["pricing_key"] == "gpt-5.6-terra"
     assert estimate["long_context_tier"] is False
-    assert estimate["api_cost_usd"] == pytest.approx(0.71)
+    assert estimate["api_cost_usd"] == pytest.approx(0.568)
     assert estimate["usage"]["uncached_input"] == 160_000
     assert estimate["usage"]["cached_input"] == 40_000
-    assert estimate["cost_components"]["input_usd"] == pytest.approx(0.41)
-    assert estimate["cost_components"]["output_usd"] == pytest.approx(0.30)
+    assert estimate["cost_components"]["input_usd"] == pytest.approx(0.328)
+    assert estimate["cost_components"]["output_usd"] == pytest.approx(0.24)
 
 
 def test_openai_long_context_tier_and_specific_alias_win():
@@ -48,9 +45,9 @@ def test_openai_long_context_tier_and_specific_alias_win():
         output_tokens=50_000,
     )
     assert long["long_context_tier"] is True
-    assert long["rates"]["input_per_million"] == 10.0
-    assert long["rates"]["output_per_million"] == 45.0
-    assert long["api_cost_usd"] == pytest.approx(4.35)
+    assert long["rates"]["input_per_million"] == 8.0
+    assert long["rates"]["output_per_million"] == 30.0
+    assert long["api_cost_usd"] == pytest.approx(3.18)
 
     mini = resolve_token_pricing("openai", "gpt-5.4-mini")
     assert mini is not None
@@ -286,68 +283,22 @@ def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     assert "pricing: () => api.get<ModelPricingCatalog>('/api/providers/pricing')" in mobile
 
 
-class _Manager:
-    def __init__(self):
-        self.token_counts = {
-            "input": 10,
-            "output": 20,
-            "total": 30,
-            "cached": 0,
-            "reasoning": 0,
-            "total_cost": 99.0,
-        }
-
-
-class _Session:
-    def __init__(self):
-        self.session_manager = _Manager()
-        self.variables = {}
-        self.provider = SimpleNamespace(
-            name="openai",
-            model_name="gpt-5.4-mini",
-            BASE_URL="https://api.openai.com/v1",
-        )
-
-
-def test_durable_job_usage_result_persists_tokens_and_pricing_provenance(tmp_path):
-    service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
-    job = service.create(JobSpec(
-        title="Costed job",
-        execution={
-            "provider": "openai",
-            "model": "gpt-5.4-mini",
-            "agent_mode": "default",
-            "session_type": "workspace",
-        },
-    ))
-    session = _Session()
-    runner = SessionJobRunner(service, build_session_fn=lambda *a, **k: session, base_args=SimpleNamespace())
-    before = runner._token_snapshot(session)
-    session.session_manager.token_counts.update({
-        "input": 1_000_010,
-        "output": 100_020,
-        "total": 1_100_030,
-        "cached": 200_000,
-        "reasoning": 25_000,
-        "total_cost": 1234.0,
-    })
-
-    cost, result = runner._usage_result(job, session, before, {"status": "completed"})
-
-    assert cost == pytest.approx(1.065)
-    assert result["tokens"] == {
-        "input": 1_000_000,
-        "output": 100_000,
-        "total": 1_100_000,
-        "cached": 200_000,
-        "reasoning": 25_000,
-    }
-    record = result["cost"]
-    assert record["pricing_version"] == PRICING_VERSION
-    assert record["pricing_key"] == "gpt-5.4-mini"
-    assert record["source"] == "pricing_map"
-    assert record["api_cost_usd"] == pytest.approx(1.065)
-    assert record["cost_components"]["input_usd"] == pytest.approx(0.615)
-    assert record["cost_components"]["output_usd"] == pytest.approx(0.45)
-    assert record["legacy_loop_cost_usd"] == pytest.approx(1135.0)
-    assert session.session_manager.token_counts["total_cost"] == pytest.approx(100.065)
+@pytest.mark.parametrize("model, short, long", [
+    # (input, cached input, output) per 1M tokens; long = input over 272K tokens.
+    ("gpt-6-astra", (10.0, 1.0, 50.0), (20.0, 2.0, 75.0)),
+    ("gpt-6.1-sol", (2.0, 0.1, 10.0), (4.0, 0.2, 15.0)),
+    ("gpt-6-sol", (2.0, 0.2, 10.0), (4.0, 0.4, 15.0)),
+    ("gpt-6-luna", (0.1, 0.01, 0.5), (0.2, 0.02, 0.75)),
+    ("gpt-5.6-sol", (4.0, 0.4, 20.0), (8.0, 0.8, 30.0)),
+    ("gpt-5.6-terra", (2.0, 0.2, 12.0), (4.0, 0.4, 18.0)),
+    ("gpt-5.6-luna", (0.2, 0.02, 1.2), (0.4, 0.04, 1.8)),
+])
+def test_astra_sol_terra_luna_use_official_rates(model, short, long):
+    keys = ("input_per_million", "cached_input_per_million", "output_per_million")
+    small = estimate_model_cost(provider="openai", model_name=model, input_tokens=100_000, output_tokens=1_000)
+    assert small["pricing_key"] == model and not small["long_context_tier"]
+    assert tuple(small["rates"][k] for k in keys) == short
+    big = estimate_model_cost(provider="openai", model_name=model, input_tokens=300_000, cached_tokens=100_000,
+                              output_tokens=10_000)
+    assert big["long_context_tier"] and tuple(big["rates"][k] for k in keys) == long
+    assert big["api_cost_usd"] == pytest.approx((200_000 * long[0] + 100_000 * long[1] + 10_000 * long[2]) / 1e6)

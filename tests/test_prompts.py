@@ -156,7 +156,7 @@ def test_init_templates_writes_refined_base_and_default(tmp_prompts_dir):
     # The bundled templates are the refined versions.
     base_resolved = get_resolved("base")
     assert base_resolved.source == "file"
-    assert base_resolved.version == 3
+    assert base_resolved.version == 4
 
 
 def test_init_templates_seeds_other_modes_from_hardcoded(tmp_prompts_dir):

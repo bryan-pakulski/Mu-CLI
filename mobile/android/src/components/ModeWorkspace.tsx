@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ModeWorkspaceContract, ModeWorkspaceTone } from '../api/modeWorkspace';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { fontWeights, fonts, spacing, touchTarget, tracking, typography } from '../theme/tokens';
 
 const VIEW_STORAGE_PREFIX = 'mucli.mode-workspace.view.v1.';
 
@@ -37,12 +38,9 @@ export function useModeWorkspaceView(workspace: ModeWorkspaceContract | null | u
   return { selectedView, selectView, shows };
 }
 
-function workspaceAccent(mode: string, colors: ReturnType<typeof useTheme>['colors']) {
-  if (mode === 'research') return colors.info;
-  if (mode === 'security') return colors.error;
-  if (mode === 'debug') return colors.warning;
-  if (mode === 'loop') return colors.success;
-  if (mode === 'teacher') return colors.accentStrong;
+// Mode identity is neutral: the active mode is carried by its label, and the
+// single accent marks only selection. `mode` is kept for call compatibility.
+function workspaceAccent(_mode: string, colors: ReturnType<typeof useTheme>['colors']) {
   return colors.accent;
 }
 
@@ -72,20 +70,20 @@ export function ModeWorkspaceHeader({
       style={{
         marginBottom: spacing.xl,
         paddingBottom: spacing.lg,
-        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomWidth: 1,
         borderBottomColor: colors.hairline,
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-        <Text variant="xs" style={{ color: modeAccent, fontWeight: '700', letterSpacing: 1.4 }}>MODE</Text>
+        <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>MODE</Text>
         <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
         <Text variant="xs" style={{ color: toneColor(workspace.status.tone, colors, modeAccent) }}>{workspace.status.label}</Text>
       </View>
 
-      <Text variant="lg" style={{ marginTop: spacing.lg, color: colors.text, fontWeight: '600', letterSpacing: -0.35 }}>
+      <Text variant="lg" style={{ marginTop: spacing.lg, color: colors.text, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }}>
         {workspace.title}
       </Text>
-      <Text variant="xs" style={{ marginTop: 5, color: colors.textSoft, lineHeight: 18 }}>
+      <Text variant="xs" style={{ marginTop: spacing.xs, color: colors.textSoft, lineHeight: typography.xs.lineHeight }}>
         {workspace.objective}
       </Text>
 
@@ -98,14 +96,12 @@ export function ModeWorkspaceHeader({
               flexGrow: 1,
               paddingTop: spacing.sm,
               paddingBottom: spacing.md,
-              borderTopWidth: StyleSheet.hairlineWidth,
-              borderTopColor: colors.hairline,
             }}
           >
-            <Text variant="base" style={{ color: toneColor(metric.tone, colors, modeAccent), fontFamily: 'monospace', fontWeight: '600' }}>
+            <Text variant="base" style={{ color: toneColor(metric.tone, colors, modeAccent), fontFamily: fonts.mono, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>
               {String(metric.value)}
             </Text>
-            <Text variant="xs" numberOfLines={1} style={{ marginTop: 1, color: colors.textDim, letterSpacing: .45, textTransform: 'uppercase' }}>
+            <Text variant="xs" numberOfLines={1} style={{ marginTop: 1, color: colors.textDim }}>
               {metric.label}
             </Text>
           </View>
@@ -121,19 +117,20 @@ export function ModeWorkspaceHeader({
               onPress={() => onSelectView(view.id)}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
-              style={{
-                minHeight: 36,
+              style={({ pressed }) => ({
+                minHeight: touchTarget,
                 flexDirection: 'row',
                 alignItems: 'center',
-                gap: 5,
+                gap: spacing.xs,
                 paddingHorizontal: 1,
-                paddingBottom: 5,
-                borderBottomWidth: 1,
-                borderBottomColor: active ? modeAccent : 'transparent',
-              }}
+                paddingBottom: spacing.xs,
+                borderBottomWidth: 2,
+                borderBottomColor: active ? colors.accent : 'transparent',
+                opacity: pressed ? 0.7 : 1,
+              })}
             >
-              <Text variant="xs" style={{ color: active ? colors.text : colors.textDim, fontWeight: active ? '600' : '400' }}>{view.label}</Text>
-              {view.count !== undefined && <Text variant="xs" style={{ color: modeAccent, fontFamily: 'monospace' }}>· {view.count}</Text>}
+              <Text variant="xs" style={{ color: active ? colors.text : colors.textDim, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{view.label}</Text>
+              {view.count !== undefined && <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>· {view.count}</Text>}
             </Pressable>
           );
         })}
@@ -143,7 +140,7 @@ export function ModeWorkspaceHeader({
         onPress={() => setQualityOpen(value => !value)}
         accessibilityRole="button"
         accessibilityState={{ expanded: qualityOpen }}
-        style={{ minHeight: 42, marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+        style={({ pressed }) => ({ minHeight: touchTarget, marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.hairline, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', opacity: pressed ? 0.7 : 1 })}
       >
         <Text variant="xs" style={{ color: colors.textDim }}>How accuracy, relevance, and evidence are assessed</Text>
         <Ionicons name={qualityOpen ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textDim} />
@@ -151,18 +148,18 @@ export function ModeWorkspaceHeader({
       {qualityOpen && (
         <View style={{ paddingTop: spacing.sm }}>
           {workspace.quality.map(item => (
-            <View key={item.id} style={{ paddingVertical: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline }}>
+            <View key={item.id} style={{ paddingVertical: spacing.sm }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.text, fontWeight: '600' }}>{item.label}</Text>
-                <Text variant="xs" style={{ color: modeAccent, textTransform: 'uppercase', letterSpacing: .5 }}>{item.state.replace(/-/g, ' ')}</Text>
+                <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{item.label}</Text>
+                <Text variant="xs" style={{ color: colors.textSoft }}>{item.state.replace(/-/g, ' ')}</Text>
               </View>
-              <Text variant="xs" style={{ color: colors.textDim, marginTop: 5, lineHeight: 17 }}>{item.detail}</Text>
+              <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs, lineHeight: typography.xs.lineHeight }}>{item.detail}</Text>
             </View>
           ))}
         </View>
       )}
 
-      <Text variant="xs" numberOfLines={1} style={{ marginTop: spacing.md, color: colors.textDim, fontFamily: 'monospace' }}>
+      <Text variant="xs" numberOfLines={1} style={{ marginTop: spacing.md, color: colors.textDim, fontFamily: fonts.mono }}>
         Source · {workspace.provenance}
       </Text>
     </View>

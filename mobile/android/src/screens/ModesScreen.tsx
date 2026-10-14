@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Skeleton, ErrorState, EmptyState } from '../components';
 import { modesApi, ModeInfo } from '../api/modes';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, radii, tracking } from '../theme/tokens';
 
 const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: string }> = {
   default: { title: 'General workspace', lenses: ['plan', 'tools', 'verification'], purpose: 'Flexible coding and codebase assistance.' },
@@ -105,7 +105,7 @@ export function ModesScreen() {
         ListHeaderComponent={
           <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <View style={styles.eyebrowRow}>
-              <Text variant="xs" style={{ color: colors.accent, fontWeight: '700', letterSpacing: 1.3 }}>MODES</Text>
+              <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>Modes</Text>
               <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
               <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.success : colors.warning }}>
                 {sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
@@ -128,17 +128,17 @@ export function ModesScreen() {
               activeOpacity={0.7}
               style={[
                 styles.modeRow,
-                { borderBottomColor: colors.hairline, opacity: item.disabled ? 0.42 : 1 },
+                { opacity: item.disabled ? 0.42 : 1 },
               ]}
             >
               <View style={[styles.modeRail, { backgroundColor: isActive ? accent : 'transparent' }]} />
               <View style={styles.modeCopy}>
                 <View style={styles.modeTitleRow}>
-                  <Text variant="base" style={{ color: colors.text, fontWeight: '600' }}>{surface.title}</Text>
-                  {isActive && <Text variant="xs" style={{ color: accent }}>Current</Text>}
+                  <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{surface.title}</Text>
+                  {isActive && <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Current</Text>}
                   {item.disabled && <Text variant="xs" style={{ color: colors.warning }}>Workspace required</Text>}
                 </View>
-                <Text variant="xs" style={{ color: colors.textSoft, marginTop: 4, lineHeight: 18 }}>{surface.purpose}</Text>
+                <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{surface.purpose}</Text>
                 <Text variant="xs" style={[styles.lenses, { color: colors.textDim }]}>{surface.lenses.join('  ·  ')}</Text>
               </View>
               {isActive && <Ionicons name="checkmark" size={18} color={accent} />}
@@ -152,22 +152,19 @@ export function ModesScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth },
+  header: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.xs, borderBottomWidth: 1 },
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  headerTitle: { fontWeight: '600', marginTop: spacing.lg, letterSpacing: -0.3 },
-  headerCopy: { marginTop: 5, lineHeight: 18, maxWidth: 430 },
-  modeRow: { minHeight: 108, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base, borderBottomWidth: StyleSheet.hairlineWidth },
-  modeRail: { alignSelf: 'stretch', width: 1, marginRight: spacing.md },
+  headerTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.lg, letterSpacing: tracking.tight },
+  headerCopy: { marginTop: spacing.xs, maxWidth: 430 },
+  modeRow: { minHeight: 96, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base },
+  modeRail: { alignSelf: 'stretch', width: 2, borderRadius: radii.pill, marginRight: spacing.md },
   modeCopy: { flex: 1 },
   modeTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' },
-  lenses: { marginTop: spacing.sm, fontFamily: 'monospace', letterSpacing: 0.15 },
+  lenses: { marginTop: spacing.sm },
 });
 
-function modeAccent(mode: string, colors: ReturnType<typeof useTheme>['colors']) {
-  if (mode === 'research') return colors.info;
-  if (mode === 'security') return colors.error;
-  if (mode === 'debug') return colors.warning;
-  if (mode === 'loop') return colors.success;
-  if (mode === 'teacher') return colors.accentStrong;
+// Mode identity is neutral: the active mode is carried by its label plus the
+// single accent (selection), never by a per-mode colour.
+function modeAccent(_mode: string, colors: ReturnType<typeof useTheme>['colors']) {
   return colors.accent;
 }

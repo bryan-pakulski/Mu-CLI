@@ -162,7 +162,8 @@ def test_injected_count_measures_provider_projection():
     )
     from utils.token_estimator import estimate_tokens
 
-    projected = json.dumps(_lean_tool_result(res), indent=2, sort_keys=True, default=str)
+    from providers.base import tool_result_json
+    projected = tool_result_json(_lean_tool_result(res))
     assert res["telemetry"]["injected_token_count"] == int(estimate_tokens(projected))
     assert res["telemetry"]["injected_token_count"] < res["telemetry"]["raw_token_count"]
 

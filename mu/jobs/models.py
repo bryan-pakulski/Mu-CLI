@@ -7,8 +7,17 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional
 
+from .core import states as _states
+
 
 class JobStatus(str, Enum):
+    """The stored ``status`` column. The pipeline state is ``core.states.JobState``,
+    derived from status writes by ``core.states.advance``. Every value stays:
+    the DB, REST/SSE API, web UI, terminal and mobile client read them, and old
+    rows carry them. No code path writes ``TIMED_OUT`` or ``BUDGET_EXCEEDED``
+    any more (a reached cap pauses with attention ``limit_reached``); both
+    remain readable for old rows."""
+
     QUEUED = "queued"
     PREPARING = "preparing"
     RUNNING = "running"
@@ -41,89 +50,26 @@ class AttentionReason(str, Enum):
     TEST_FAILURE = "test_failure"
     UNSAFE_ACTION = "unsafe_action"
     WORKER_LOST = "worker_lost"
-    REVIEW_STALLED = "review_stalled"
+    REVIEW_STALLED = "review_stalled"  # old saved jobs only
+    REVIEW_DONE = "review_done"
     NO_VALIDATION = "no_validation"
     PUBLISH_FAILED = "publish_failed"
     PROVIDER_ERROR = "provider_error"
     MODELS_UNSET = "models_unset"
     PLAN_REVIEW = "plan_review"
+    PR_CLOSED = "pr_closed"  # host PR closed without merging (pushed job waits on a human)
+    # A cost, token, time or iteration cap was reached: the stage paused resumably and the
+    # human approves more (raiseLimit) or cancels. Detail in metadata.limit_reached.
+    LIMIT_REACHED = "limit_reached"
 
 
-TERMINAL_STATUSES = frozenset({JobStatus.CANCELLED, JobStatus.MERGED})
+# The legal status moves live in mu/jobs/core/states.py (the one transition
+# model); these enum-typed views are kept for existing importers.
+TERMINAL_STATUSES = frozenset(JobStatus(v) for v in _states.TERMINAL_STATUSES)
 
 ALLOWED_TRANSITIONS = {
-    JobStatus.QUEUED: {JobStatus.PREPARING, JobStatus.CANCELLED},
-    # Round-38 F3: every worker-active state can hit the whole-job runtime
-    # deadline — a hung provider call is equally possible while preparing
-    # the worktree or verifying as while the agent runs.
-    JobStatus.PREPARING: {
-        JobStatus.PLANNING,
-        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
-        JobStatus.ENVIRONMENT_ERROR, JobStatus.FAILED, JobStatus.CANCELLED,
-        JobStatus.TIMED_OUT,
-    },
-    # RUNNING -> QUEUED is the unattended retry path: a transient provider
-    # failure (rate limit / 5xx / timeout) requeues the implementation with
-    # backoff under max_retries instead of parking the job on a human.
-    JobStatus.RUNNING: {
-        JobStatus.NEEDS_HUMAN, JobStatus.VERIFYING, JobStatus.RECOVERING,
-        JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED,
-        JobStatus.ENVIRONMENT_ERROR, JobStatus.CANCELLED, JobStatus.QUEUED,
-    },
-    JobStatus.NEEDS_HUMAN: {
-        JobStatus.PLANNING, JobStatus.REVIEWING,
-        JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
-    },
-    JobStatus.VERIFYING: {
-        JobStatus.REVIEWING,
-        JobStatus.READY_FOR_REVIEW, JobStatus.QUEUED, JobStatus.RUNNING,
-        JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.CONFLICTED,
-        JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
-    },
-    # Reviewer feedback is a first-class loop. READY_FOR_REVIEW keeps the same
-    # durable job + branch, but its execution worktree has already been retired.
-    # Requeueing creates a fresh temporary worktree on that branch if more agent
-    # work is required.
-    JobStatus.READY_FOR_REVIEW: {
-        JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CONFLICTED,
-        JobStatus.MERGED, JobStatus.CANCELLED,
-    },
-    JobStatus.RECOVERING: {
-        JobStatus.PLANNING, JobStatus.REVIEWING, JobStatus.PUBLISHING,
-        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED, JobStatus.CANCELLED,
-        JobStatus.TIMED_OUT,
-    },
-    JobStatus.CONFLICTED: {
-        JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.FAILED,
-        JobStatus.CANCELLED,
-    },
-    # Durable job v2 staged pipeline:
-    # PREPARING -> PLANNING -> RUNNING -> VERIFYING -> REVIEWING
-    #   REVIEWING -> RUNNING          reviewer request_changes (full re-verify)
-    #   REVIEWING -> PUBLISHING       approved, git workspace
-    #   REVIEWING -> READY_FOR_REVIEW approved, non-git / publish disabled
-    #   PUBLISHING -> READY_FOR_REVIEW (human gate kept)
-    JobStatus.PLANNING: {
-        JobStatus.RUNNING, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
-        JobStatus.QUEUED, JobStatus.FAILED, JobStatus.CANCELLED,
-        JobStatus.TIMED_OUT, JobStatus.BUDGET_EXCEEDED, JobStatus.ENVIRONMENT_ERROR,
-    },
-    JobStatus.REVIEWING: {
-        JobStatus.RUNNING, JobStatus.PUBLISHING, JobStatus.READY_FOR_REVIEW,
-        JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING, JobStatus.QUEUED,
-        JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
-        JobStatus.BUDGET_EXCEEDED,
-    },
-    JobStatus.PUBLISHING: {
-        JobStatus.READY_FOR_REVIEW, JobStatus.NEEDS_HUMAN, JobStatus.RECOVERING,
-        JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT,
-    },
-    JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.TIMED_OUT: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.BUDGET_EXCEEDED: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.ENVIRONMENT_ERROR: {JobStatus.QUEUED, JobStatus.CANCELLED},
-    JobStatus.CANCELLED: set(),
-    JobStatus.MERGED: set(),
+    JobStatus(current): {JobStatus(t) for t in targets}
+    for current, targets in _states.STATUS_TRANSITIONS.items()
 }
 
 
@@ -132,7 +78,7 @@ def coerce_status(value: JobStatus | str) -> JobStatus:
 
 
 def can_transition(current: JobStatus | str, target: JobStatus | str) -> bool:
-    return coerce_status(target) in ALLOWED_TRANSITIONS[coerce_status(current)]
+    return _states.can_transition_status(coerce_status(current), coerce_status(target))
 
 
 def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -151,12 +97,28 @@ def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
         if key not in execution:
             execution[str(key)] = item
     execution["stages"] = normalize_stages(raw.get("stages"))
-    execution["max_review_rounds"] = normalize_max_review_rounds(raw.get("max_review_rounds"))
+    execution.pop("max_review_rounds", None)  # retired automatic review-loop setting
     return execution
 
 
 STAGES = ("plan", "implement", "review")
-DEFAULT_MAX_REVIEW_ROUNDS = 3
+DEFAULT_JOB_MAX_ITERATIONS = 1000
+
+
+def stage_iteration_limit(job: "Job", stage: str) -> int:
+    """Job stages get a generous default independent of interactive sessions."""
+    limit = job.max_iterations
+    if stage in ("plan", "review"):
+        limit = (job.execution or {}).get("stage_max_iterations") or limit
+    if not limit:
+        # Job settings: per-stage limit, then the shared default (both editable in Settings).
+        try:
+            from .job_settings import load_settings, rule
+            settings = load_settings()
+            limit = rule(f"limits.stage_max_iterations.{stage}", settings) or rule("limits.max_iterations", settings)
+        except (KeyError, OSError, ValueError):
+            limit = None
+    return int(limit or DEFAULT_JOB_MAX_ITERATIONS)
 
 
 def normalize_stages(value: Any) -> Dict[str, Dict[str, str]]:
@@ -185,15 +147,6 @@ def normalize_stages(value: Any) -> Dict[str, Dict[str, str]]:
         if entry["provider"] or entry["model"]:
             stages[key] = entry
     return stages
-
-
-def normalize_max_review_rounds(value: Any) -> int:
-    if value in (None, ""):
-        return DEFAULT_MAX_REVIEW_ROUNDS
-    rounds = int(value)
-    if rounds < 1 or rounds > 20:
-        raise ValueError("max_review_rounds must be between 1 and 20")
-    return rounds
 
 
 def resolve_stage_model(

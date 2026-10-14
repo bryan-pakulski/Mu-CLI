@@ -6,7 +6,8 @@ import { useTheme } from '../theme/ThemeContext';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
 import { Text, Card, Button, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { providersApi, ProviderInfo } from '../api/providers';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, fonts } from '../theme/tokens';
+import { Panel, StatusIcon } from '../components/planos';
 
 export function ProvidersScreen() {
   const { colors } = useTheme();
@@ -114,7 +115,7 @@ export function ProvidersScreen() {
       <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1 }}>
-            <Text variant="base" style={{ fontWeight: '500' }}>
+            <Text variant="base" style={{ fontWeight: fontWeights.medium }}>
               {item.name}
             </Text>
             {item.requires && (
@@ -123,8 +124,8 @@ export function ProvidersScreen() {
               </Text>
             )}
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {item.configured && <Badge label="Ready" />}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            {item.configured && <Badge label="✓ Ready" variant="success" />}
             {isSelected && <Badge label="Selected" variant="accent" />}
             <Button
               title={isSelected ? 'Selected' : 'Select'}
@@ -135,20 +136,23 @@ export function ProvidersScreen() {
           </View>
         </View>
         {isSelected && (
-          <View style={{ marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border }}>
-            <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs }}>
+          <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
+            <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs, fontVariant: ['tabular-nums'] }}>
               {loadingModels ? 'Loading models…' : `Models (${models.length})`}
             </Text>
             {models.map(m => (
               <TouchableOpacity
                 key={m}
                 onPress={() => selectModel(m)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: selectedModel === m }}
                 style={{
                   flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  paddingVertical: 10, minHeight: 44,
+                  paddingVertical: spacing.md, minHeight: 44,
+                  borderTopWidth: 1, borderTopColor: colors.border,
                 }}
               >
-                <Text variant="sm" style={{ color: selectedModel === m ? colors.accent : colors.text }}>
+                <Text variant="sm" style={{ color: selectedModel === m ? colors.accentFg : colors.text, fontWeight: selectedModel === m ? fontWeights.medium : fontWeights.regular }}>
                   {m}
                 </Text>
                 {selectedModel === m && <Badge label="Active" variant="accent" />}
@@ -167,12 +171,11 @@ export function ProvidersScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       {activeProvider && activeModel && (
         <View style={{ padding: spacing.base, paddingBottom: 0 }}>
-          <Card>
-            <Text variant="xs" style={{ color: colors.textDim, marginBottom: 2 }}>Current</Text>
-            <Text variant="base" style={{ fontWeight: '600' }}>
+          <Panel title="Current" right={<StatusIcon status="done" label="Active" showLabel size="xs" />}>
+            <Text variant="base" style={{ fontWeight: fontWeights.semibold, fontFamily: fonts.mono }}>
               {activeProvider} · {activeModel}
             </Text>
-          </Card>
+          </Panel>
         </View>
       )}
       <FlatList

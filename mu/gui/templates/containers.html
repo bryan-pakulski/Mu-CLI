@@ -4,30 +4,50 @@
 <link rel="stylesheet" href="/static/css/containers.css">
 <link rel="stylesheet" href="/static/css/route-product.css">
 <link rel="stylesheet" href="/static/css/containers-crystal.css">
+<div class="route-shell containers-shell">
+<header class="route-top containers-top">
+    <a href="/" class="route-logo" aria-label="mucli chat">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg>
+        <span>mucli</span>
+    </a>
+    <nav aria-label="Breadcrumb" class="route-crumbs"><ol><li><span aria-current="page">Environments</span></li></ol></nav>
+    <span class="route-spacer"></span>
+    <ul class="route-chips" aria-label="Status">
+        <li><span class="chip tone-muted" id="container-count-chip" title="Managed environments"><span aria-hidden="true" data-chip-glyph>○</span> <span data-chip-text>0 environments</span></span></li>
+        <li><span class="chip tone-muted" id="template-count-chip" title="Templates"><span data-chip-text>0 templates</span></span></li>
+    </ul>
+    <div class="route-tools">
+        <a class="btn ghost icon route-tool-optional" href="/" title="Back to chat" aria-label="Back to chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </a>
+        <a class="btn ghost icon route-tool-optional" href="/work" title="Jobs" aria-label="Jobs">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg>
+        </a>
+        <button type="button" class="btn ghost icon" data-route-theme title="Toggle appearance" aria-label="Toggle appearance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-theme-icon="dark"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-theme-icon="light"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+    </div>
+</header>
 <div class="container-manager" id="container-manager">
     <header class="container-manager-header">
         <div>
-            <a href="/" class="container-back">← MuCLI</a>
-            <p class="manager-kicker">Environments</p>
             <h1>Container environments</h1>
             <p>Create and manage isolated workspaces for MuCLI. Inspect live resource use, attach sessions, open a terminal, and turn a configured environment into a reusable template.</p>
         </div>
-        <button class="manager-header-action" id="create-environment-button" title="Create environment"><span aria-hidden="true">＋</span><span>New environment</span></button>
+        <button class="manager-header-action btn primary" id="create-environment-button" title="Create environment"><span aria-hidden="true">＋</span><span>New environment</span></button>
     </header>
 
-    <section class="manager-section">
-        <div class="manager-section-head"><div><h2>Environments</h2><span class="muted">Available independently until a session is attached</span></div><button class="manager-icon-action" id="refresh-containers" aria-label="Refresh environments" title="Refresh">↻</button></div>
+    <section class="manager-section" aria-labelledby="environments-title">
+        <div class="manager-section-head"><div><h2 id="environments-title">Environments</h2><span class="muted">Available independently until a session is attached</span></div><button class="manager-icon-action btn ghost icon sm" id="refresh-containers" aria-label="Refresh environments" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M19 11a7.5 7.5 0 1 0 .3 4.3"/></svg></button></div>
         <div id="container-empty" class="manager-empty">No managed environments yet.</div>
         <div id="container-list" class="manager-grid"></div>
     </section>
 
-    <section class="manager-section">
-        <div class="manager-section-head"><div><h2>Templates</h2><span class="muted">Reusable snapshots for new environments</span></div></div>
+    <section class="manager-section" aria-labelledby="templates-title">
+        <div class="manager-section-head"><div><h2 id="templates-title">Templates</h2><span class="muted">Reusable snapshots for new environments</span></div></div>
         <div id="template-empty" class="manager-empty">No templates yet.</div>
         <div id="template-list" class="manager-grid manager-grid-templates"></div>
     </section>
 
-    <div class="manager-modal" id="create-modal" hidden>
+    <div class="manager-modal" id="create-modal" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title" hidden>
         <div class="manager-modal-card manager-modal-wide">
             <header><div><p class="manager-kicker" id="environment-kicker">New environment</p><h2 id="environment-modal-title">Create environment</h2><p id="environment-modal-description">Build a standalone environment and attach sessions when you need it.</p></div><button data-close="create-modal" aria-label="Close">×</button></header>
             <div class="manager-form">
@@ -38,7 +58,7 @@
                     <button id="edit-dockerfile" class="manager-expand-card"><span><strong>Dockerfile</strong><small id="dockerfile-summary">Editable worker image</small></span><span>Edit ↗</span></button>
                 </div>
                 <div class="manager-mounts">
-                    <div class="manager-mounts-head"><div><strong>Folder mounts</strong><small>Choose host folders with the MuCLI browser.</small></div><button type="button" id="add-environment-mount">Add folder</button></div>
+                    <div class="manager-mounts-head"><div><strong>Folder mounts</strong><small>Choose host folders with the MuCLI browser.</small></div><button type="button" class="btn sm" id="add-environment-mount">Add folder</button></div>
                     <div id="environment-mount-list" class="manager-mount-list"></div>
                 </div>
                 <section class="manager-hardware" aria-labelledby="hardware-title">
@@ -56,7 +76,7 @@
                         <input id="environment-device-host" placeholder="/dev/video0">
                         <input id="environment-device-target" placeholder="Container path">
                         <select id="environment-device-permissions"><option value="r">r</option><option value="rw">rw</option><option value="rwm" selected>rwm</option></select>
-                        <button type="button" id="add-environment-device">Add device</button>
+                        <button type="button" class="btn" id="add-environment-device">Add device</button>
                     </div>
                     <p class="manager-hardware-warning">Device passthrough grants this environment direct access to the selected host hardware.</p>
                 </section>
@@ -64,11 +84,11 @@
                 <label class="manager-check"><input type="checkbox" id="environment-start" checked> Start after creation</label>
                 <div id="environment-error" class="manager-error"></div>
             </div>
-            <footer><button data-close="create-modal">Cancel</button><button class="primary" id="submit-environment">Create</button></footer>
+            <footer><button class="btn" data-close="create-modal">Cancel</button><button class="btn primary" id="submit-environment">Create</button></footer>
         </div>
     </div>
 
-    <div class="manager-modal" id="editor-modal" hidden>
+    <div class="manager-modal" id="editor-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title" hidden>
         <div class="manager-modal-card manager-editor-modal">
             <header><h2 id="editor-title">Editor</h2><button data-close="editor-modal" aria-label="Close">×</button></header>
             <div id="dockerfile-editor-panel"><textarea id="environment-dockerfile" spellcheck="false"></textarea></div>
@@ -77,32 +97,32 @@
                 <label>Blocked domains<textarea id="environment-deny" rows="10" placeholder="One domain per line"></textarea></label>
                 <p class="muted">Blocklist entries override the allowlist.</p>
             </div>
-            <footer><button class="primary" data-close="editor-modal">Done</button></footer>
+            <footer><button class="btn primary" data-close="editor-modal">Done</button></footer>
         </div>
     </div>
 
-    <div class="manager-modal" id="progress-modal" hidden>
+    <div class="manager-modal" id="progress-modal" role="dialog" aria-modal="true" aria-labelledby="progress-title" hidden>
         <div class="manager-modal-card">
             <header><div><h2 id="progress-title">Creating environment</h2><p id="progress-message">Queued…</p></div></header>
             <div class="manager-progress"><span class="container-creation-spinner"></span><span id="progress-stage">queued</span></div>
             <details id="progress-output"><summary>Build output</summary><pre id="progress-log"></pre></details>
-            <footer><button id="close-progress" hidden>Close</button></footer>
+            <footer><button class="btn" id="close-progress" hidden>Close</button></footer>
         </div>
     </div>
 
-    <div class="manager-modal" id="snapshot-modal" hidden>
+    <div class="manager-modal" id="snapshot-modal" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" hidden>
         <div class="manager-modal-card">
-            <header><h2>Create template</h2><button data-close="snapshot-modal" aria-label="Close">×</button></header>
+            <header><h2 id="snapshot-title">Create template</h2><button data-close="snapshot-modal" aria-label="Close">×</button></header>
             <label>Template name<input id="snapshot-name" placeholder="python-data-science"></label>
             <label>Description<input id="snapshot-description" placeholder="Configured Python and analysis tools"></label>
             <p class="muted">Templates capture the writable image filesystem. Mounted session, home, workspace, and bind volumes are excluded. Provider secrets and worker tokens are cleared.</p>
             <input type="hidden" id="snapshot-container">
             <div class="manager-error" id="snapshot-error"></div>
-            <footer><button data-close="snapshot-modal">Cancel</button><button class="primary" id="submit-snapshot">Create template</button></footer>
+            <footer><button class="btn" data-close="snapshot-modal">Cancel</button><button class="btn primary" id="submit-snapshot">Create template</button></footer>
         </div>
     </div>
 
-    <div class="manager-modal" id="shell-modal" hidden>
+    <div class="manager-modal" id="shell-modal" role="dialog" aria-modal="true" aria-labelledby="shell-title" hidden>
         <div class="manager-modal-card manager-shell-modal">
             <header><div><h2 id="shell-title">Terminal</h2><p>Commands run inside the selected environment. Tab completes; ↑/↓ cycles history.</p></div><button id="close-shell" aria-label="Close">×</button></header>
             <pre id="shell-output" class="manager-shell-output"></pre>
@@ -110,6 +130,8 @@
         </div>
     </div>
 </div>
+</div>
 {% include "fragments/file_browser.html" %}
 <script src="/static/js/containers.js"></script>
+<script src="/static/js/route_theme.js"></script>
 {% endblock %}

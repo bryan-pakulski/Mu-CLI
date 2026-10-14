@@ -1,6 +1,7 @@
 import React from 'react';
-import { TextInput, StyleSheet, TextStyle } from 'react-native';
+import { TextInput, TextStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { touchTarget } from '../theme/tokens';
 
 export type InputProps = {
   value: string;
@@ -34,7 +35,7 @@ export function Input({
       value={value}
       onChangeText={onChangeText}
       placeholder={placeholder}
-      placeholderTextColor={colors.textDim}
+      placeholderTextColor={colors.muted}
       multiline={multiline}
       numberOfLines={numberOfLines}
       secureTextEntry={secureTextEntry}
@@ -46,13 +47,13 @@ export function Input({
           color: colors.text,
           fontSize: fontSpec.fontSize,
           lineHeight: fontSpec.lineHeight,
-          backgroundColor: colors.glass,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.hairline,
+          backgroundColor: colors.bg,
+          borderWidth: 1,
+          borderColor: colors.border,
           borderRadius: radii.sm,
-          paddingHorizontal: spacing.base,
+          paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm,
-          minHeight: 44,
+          minHeight: touchTarget,
           textAlignVertical: multiline ? 'top' : 'center',
         },
         style,

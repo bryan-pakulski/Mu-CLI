@@ -16,7 +16,7 @@ import logging
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -147,6 +147,7 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "agent_mode",
             "session_goal",
             "yolo",
+            "plan_mode",
             "strict_mode",
             "verbose",
             "show_thinking",
@@ -185,6 +186,19 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "speed & effort",
+        (
+            "reasoning_effort",
+            "turn_roll_deferred",
+            "small_window_profile",
+            "small_window_threshold",
+            "tool_result_inline_budget",
+            "tool_result_inline_share",
+            "collation_batch_share",
+            "collation_batch_cap_tokens",
+        ),
+    ),
+    (
         "provider retry",
         (
             "provider_max_retries",
@@ -201,6 +215,10 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ollama_api_key",
             "ollama_token_safety_factor",
             "ollama_num_ctx",
+            "ollama_num_ctx_default",
+            "ollama_keep_alive",
+            "ollama_request_timeout",
+            "ollama_side_model",
             "ollama_num_predict",
             "ollama_temperature",
             "ollama_top_p",
@@ -208,6 +226,14 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ollama_repeat_penalty",
             "ollama_seed",
             "ollama_mirostat",
+        ),
+    ),
+    (
+        "openai",
+        (
+            "openai_api",
+            "openai_prompt_cache_retention",
+            "openai_xhigh_models",
         ),
     ),
     (
@@ -484,6 +510,7 @@ async def get_stats(request: Request) -> Dict[str, Any]:
         "scratchpad_size": len(sm.turn_scratchpad.entries),
         "memory_status_counts": sm.task_memory.status_counts(),
         "agent_mode": session.variables.get("agent_mode", "default"),
+        "plan_mode": bool(session.variables.get("plan_mode", False)),
     }
 
 
@@ -502,12 +529,24 @@ def _schema_meta(key: str) -> Dict[str, Any]:
         type_name = "float"
     elif target_type is str:
         type_name = "str"
+    elif target_type is list:
+        type_name = "list"
     else:
         type_name = "any"
     return {
         "type": type_name,
         "default": info.get("default"),
     }
+
+
+# Variables with a fixed set of values: the GUI and mobile render a picker, and the
+# setter rejects anything else.
+VARIABLE_OPTIONS: Dict[str, list] = {
+    "reasoning_effort": ["", "none", "minimal", "low", "medium", "high", "xhigh", "max"],
+    "small_window_profile": ["auto", "on", "off"],
+    "openai_api": ["auto", "chat", "responses"],
+    "ollama_mode": ["auto", "local", "cloud"],
+}
 
 
 def _build_variable_entry(key: str, value: Any) -> Dict[str, Any]:
@@ -519,6 +558,8 @@ def _build_variable_entry(key: str, value: Any) -> Dict[str, Any]:
         "is_default": value == meta["default"],
         "help": _VARIABLE_HELP.get(key, ""),
     }
+    if key in VARIABLE_OPTIONS:
+        entry["options"] = list(VARIABLE_OPTIONS[key])
     if _is_secret_var(key):
         # Never echo a secret back over the API. The GUI shows a password
         # field + an "is_set" indicator instead of the raw value.
@@ -560,15 +601,30 @@ def _sync_provider_if_needed(session: Any, key: str) -> None:
             pass
 
 
+def _assign_variable(session: Any, key: str, value: Any) -> None:
+    """Store a variable and run its side effects. ``plan_mode`` goes through
+    the same setter as ``/plan`` (UI refresh + ``plan_mode_changed`` event);
+    the route persists separately under the session lock."""
+    if key == "plan_mode":
+        from mu.agent.plan_mode import set_plan_mode
+
+        set_plan_mode(session, bool(value), persist=False)
+        return
+    session.variables[key] = value
+    _sync_provider_if_needed(session, key)
+
+
 @router.get("/variables")
-async def list_variables(request: Request) -> Dict[str, Any]:
+async def list_variables(
+    request: Request, session_name: Optional[str] = None
+) -> Dict[str, Any]:
     """Return session variables grouped by category, in display order.
 
     Anything in VARIABLE_SCHEMA but not in the curated grouping falls
     into a trailing "other" group, so a new schema key is never silently
     dropped from the UI.
     """
-    session = request.app.state.session_by_name()
+    session = request.app.state.session_by_name(session_name)
     variables: Dict[str, Any] = (
         dict(session.variables) if session is not None else dict(DEFAULT_VARIABLES)
     )
@@ -613,14 +669,16 @@ async def set_variable(
         casted = validate_and_cast(key, payload["value"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if key in VARIABLE_OPTIONS and casted not in VARIABLE_OPTIONS[key]:
+        raise HTTPException(status_code=400,
+                            detail=f"{key} must be one of: {', '.join(repr(o) for o in VARIABLE_OPTIONS[key])}")
 
     # Variable assignment is GIL-atomic for simple values, so it's safe
     # without the lock.  Run save_history in a thread so we never block
     # the event loop on the session lock (which the agent thread holds
     # for the duration of a turn — blocking here would deadlock the
     # entire server, freezing SSE and prompt-answer routes).
-    session.variables[key] = casted
-    _sync_provider_if_needed(session, key)
+    _assign_variable(session, key, casted)
 
     lock = request.app.state.session_lock_for()
 
@@ -647,8 +705,7 @@ async def unset_variable(
     if key not in VARIABLE_SCHEMA:
         raise HTTPException(status_code=404, detail=f"unknown variable: {key}")
     default = VARIABLE_SCHEMA[key].get("default")
-    session.variables[key] = default
-    _sync_provider_if_needed(session, key)
+    _assign_variable(session, key, default)
 
     lock = request.app.state.session_lock_for()
 

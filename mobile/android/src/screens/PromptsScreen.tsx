@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
 import { promptsApi, type PendingPrompt } from '../api/prompts';
-import { spacing } from '../theme/tokens';
+import { elevation, fonts, spacing, radii } from '../theme/tokens';
 import { SafeAreaModal } from '../components/SafeAreaModal';
 
 function promptText(prompt: PendingPrompt | null | undefined): string {
@@ -14,7 +14,7 @@ function promptText(prompt: PendingPrompt | null | undefined): string {
 }
 
 export function PromptsScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,9 +99,9 @@ export function PromptsScreen() {
         contentContainerStyle={{ padding: spacing.base }}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-            <Text variant="sm" style={{ color: colors.textDim, marginBottom: 4 }}>{item.id}</Text>
+            <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.xs, fontFamily: fonts.mono }}>{item.id}</Text>
             <Text variant="base" style={{ marginBottom: spacing.sm }}>{promptText(item)}</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <Button title="Answer" onPress={() => { setAnswering(item); setAnswerText(''); }} />
               <Button title="Cancel" variant="ghost" onPress={() => cancelPrompt(item.id)} />
             </View>
@@ -109,8 +109,8 @@ export function PromptsScreen() {
         )}
       />
       <SafeAreaModal visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setAnswering(null)} activeOpacity={1}>
-          <View style={{ margin: spacing.base, marginTop: 80, backgroundColor: colors.bgLift, borderRadius: 12, padding: spacing.base }}>
+        <TouchableOpacity style={{ flex: 1, backgroundColor: colors.scrim }} onPress={() => setAnswering(null)} activeOpacity={1}>
+          <View style={[elevation(2, colors, isDark), { margin: spacing.base, marginTop: spacing['3xl'], borderRadius: radii.lg, padding: spacing.base }]}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>Answer prompt</Text>
             <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.sm }}>{promptText(answering)}</Text>
             <TextInput
@@ -119,9 +119,9 @@ export function PromptsScreen() {
               placeholder="Your answer…"
               placeholderTextColor={colors.textDim}
               multiline
-              style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: 6, padding: 12, minHeight: 100, marginBottom: spacing.base }}
+              style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.base }}
             />
-            <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }}>
               <Button title="Cancel" variant="ghost" onPress={() => setAnswering(null)} />
               <Button title="Send" onPress={() => void submitAnswer()} disabled={!answerText.trim()} />
             </View>

@@ -2,6 +2,11 @@ import React from 'react';
 import { View, Animated, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useMotionPreference } from '../hooks/useMotionPreference';
+import { easings, radii } from '../theme/tokens';
+
+// Functional loading indicator: a slow opacity breath. 800ms per half-cycle is
+// deliberate (a 120-300ms loop would flicker); it stops under reduced motion.
+const SKELETON_HALF_CYCLE_MS = 800;
 
 export type SkeletonProps = {
   width?: number;
@@ -10,7 +15,7 @@ export type SkeletonProps = {
   style?: ViewStyle;
 };
 
-export function Skeleton({ width, height = 20, radius = 6, style }: SkeletonProps) {
+export function Skeleton({ width, height = 20, radius = radii.sm, style }: SkeletonProps) {
   const { colors } = useTheme();
   const { animate } = useMotionPreference();
   const opacity = React.useRef(new Animated.Value(0.3)).current;
@@ -21,8 +26,8 @@ export function Skeleton({ width, height = 20, radius = 6, style }: SkeletonProp
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.6, duration: 800, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(opacity, { toValue: 0.6, duration: SKELETON_HALF_CYCLE_MS, easing: easings.standard, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(opacity, { toValue: 0.3, duration: SKELETON_HALF_CYCLE_MS, easing: easings.standard, useNativeDriver: true, isInteraction: false }),
       ])
     );
     loop.start();
@@ -35,7 +40,7 @@ export function Skeleton({ width, height = 20, radius = 6, style }: SkeletonProp
           width: width ?? '100%',
           height,
           borderRadius: radius,
-          backgroundColor: colors.bgHover,
+          backgroundColor: colors.hover,
           opacity,
         },
         style,

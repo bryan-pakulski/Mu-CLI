@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { featureApi, FeatureState, FeaturePhase, FeatureTask } from '../api/feature';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights } from '../theme/tokens';
 
 export function FeatureScreen() {
   const { colors } = useTheme();
@@ -81,16 +81,16 @@ export function FeatureScreen() {
           <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
           {plan ? (
             <Card style={{ marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>{plan.feature_name}</Text>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{plan.feature_name}</Text>
               <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, marginBottom: spacing.sm }} numberOfLines={3}>
                 {plan.feature_request}
               </Text>
-              <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+              <View style={{ flexDirection: 'row', gap: spacing.xs, flexWrap: 'wrap' }}>
                 <Badge label={plan.overall_status} variant={plan.overall_status === 'in_progress' ? 'accent' : 'neutral'} />
                 <Badge label={plan.review_status} variant={plan.review_status === 'completed' ? 'success' : 'neutral'} />
                 {plan.approved && <Badge label="Approved" variant="success" />}
               </View>
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: spacing.sm }}>
+              <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
                 {!plan.approved && (
                   <Button title="Approve" onPress={() => {
                     Alert.alert('Approve feature?', 'Approve this feature plan?', [
@@ -107,15 +107,15 @@ export function FeatureScreen() {
             </Card>
           ) : (
             <Card style={{ marginBottom: spacing.sm }}>
-              <Text variant="base" style={{ fontWeight: '600' }}>No active feature</Text>
+              <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>No active feature</Text>
               {state.features.filter(f => !f.archived).length > 0 && (
                 <>
-                  <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.sm, marginBottom: 4 }}>
+                  <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.sm, marginBottom: spacing.xs }}>
                     Available features:
                   </Text>
                   {state.features.filter(f => !f.archived).map(f => (
-                    <TouchableOpacity key={f.feature_id} onPress={async () => { await featureApi.load(f.feature_id); load(); }} style={{ minHeight: 44, paddingVertical: 8 }}>
-                      <Text variant="sm" style={{ color: colors.accent }}>{f.feature_name} · {f.status}</Text>
+                    <TouchableOpacity key={f.feature_id} onPress={async () => { await featureApi.load(f.feature_id); load(); }} style={{ minHeight: 44, paddingVertical: spacing.sm }}>
+                      <Text variant="sm" style={{ color: colors.accentFg }}>{f.feature_name} · {f.status}</Text>
                     </TouchableOpacity>
                   ))}
                 </>
@@ -126,12 +126,12 @@ export function FeatureScreen() {
         }
         ListFooterComponent={workspaceView.shows('reviews') && plan ? (
           <View style={{ marginTop: spacing.sm }}>
-            <Text variant="xs" style={{ color: colors.textSoft, fontWeight: '700', letterSpacing: .8, textTransform: 'uppercase', marginBottom: spacing.sm }}>Review evidence</Text>
+            <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Review evidence</Text>
             {(plan.review_records || []).map(review => (
               <Card key={review.id} style={{ marginBottom: spacing.sm }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Badge label={`task ${review.task_id}`} variant="neutral" /><Text variant="xs" style={{ color: colors.textDim }}>{review.created_at ? new Date(review.created_at * 1000).toLocaleString() : ''}</Text></View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={`task ${review.task_id}`} variant="neutral" /><Text variant="xs" style={{ color: colors.textDim }}>{review.created_at ? new Date(review.created_at * 1000).toLocaleString() : ''}</Text></View>
                 <Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm }}>{review.summary}</Text>
-                {!!review.limitations.length && <Text variant="xs" style={{ color: colors.warning, marginTop: 6 }}>Limitations: {review.limitations.join(' · ')}</Text>}
+                {!!review.limitations.length && <Text variant="xs" style={{ color: colors.warning, marginTop: spacing.xs }}>Limitations: {review.limitations.join(' · ')}</Text>}
               </Card>
             ))}
             {!(plan.review_records || []).length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No review evidence recorded yet.</Text>}
@@ -166,8 +166,8 @@ function PhaseCard({ phase, expanded, onToggle, onAdvance, showVerification, col
       <TouchableOpacity onPress={onToggle} activeOpacity={0.7} style={{ minHeight: 44 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1 }}>
-            <Text variant="base" style={{ fontWeight: '500' }}>{phase.title}</Text>
-            <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
+            <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{phase.title}</Text>
+            <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
               {completed}/{phase.tasks.length} tasks
             </Text>
           </View>
@@ -176,7 +176,7 @@ function PhaseCard({ phase, expanded, onToggle, onAdvance, showVerification, col
         </View>
       </TouchableOpacity>
       {expanded && (
-        <View style={{ marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 0.5, borderTopColor: colors.border }}>
+        <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
           {phase.tasks.map(task => <TaskRow key={task.id} task={task} onAdvance={onAdvance} showVerification={showVerification} colors={colors} />)}
         </View>
       )}
@@ -188,9 +188,9 @@ function TaskRow({ task, onAdvance, showVerification, colors }: {
   task: FeatureTask; onAdvance: (id: number) => void; showVerification: boolean; colors: any;
 }) {
   return (
-    <View style={{ paddingVertical: 8, minHeight: 44, borderBottomWidth: 0.5, borderBottomColor: colors.border }}>
+    <View style={{ paddingVertical: spacing.sm, minHeight: 44 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="sm" style={{ flex: 1, fontWeight: '500' }}>{task.title}</Text>
+        <Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.medium }}>{task.title}</Text>
         <Badge label={task.status} variant={
           task.status === 'completed' ? 'success' :
           task.status === 'in_progress' ? 'accent' :
@@ -203,16 +203,16 @@ function TaskRow({ task, onAdvance, showVerification, colors }: {
         </Text>
       )}
       {showVerification && task.exit_criteria.length > 0 && (
-        <View style={{ marginTop: spacing.sm, gap: 5 }}>
+        <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
           {task.exit_criteria.map((criterion, index) => {
             const verified = task.verified_exit_criteria.includes(criterion);
-            return <View key={`${task.id}-${index}`} style={{ flexDirection: 'row', gap: 7 }}><Text variant="xs" style={{ color: verified ? colors.success : colors.textDim }}>{verified ? '✓' : '○'}</Text><Text variant="xs" style={{ flex: 1, color: verified ? colors.textSoft : colors.textDim }}>{criterion}</Text></View>;
+            return <View key={`${task.id}-${index}`} style={{ flexDirection: 'row', gap: spacing.sm }}><Text variant="xs" style={{ color: verified ? colors.success : colors.textDim }}>{verified ? '✓' : '○'}</Text><Text variant="xs" style={{ flex: 1, color: verified ? colors.textSoft : colors.textDim }}>{criterion}</Text></View>;
           })}
         </View>
       )}
       {task.status === 'in_progress' && (
-        <TouchableOpacity onPress={() => onAdvance(task.id)} style={{ marginTop: 4 }}>
-          <Text variant="xs" style={{ color: colors.accent }}>Advance →</Text>
+        <TouchableOpacity onPress={() => onAdvance(task.id)} style={{ marginTop: spacing.xs, minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' }}>
+          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Advance →</Text>
         </TouchableOpacity>
       )}
     </View>

@@ -8,6 +8,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { BottomSheet } from './BottomSheet';
 import { Button } from './Button';
 import { Text } from './Text';
+import { fontWeights, radii, spacing } from '../theme/tokens';
 
 interface Props {
   visible: boolean;
@@ -99,8 +100,8 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Attachments">
       <View style={styles.header}>
-        <Text variant="lg" style={{ fontWeight: '700' }}>Attachments</Text>
-        <TouchableOpacity onPress={onClose} accessibilityLabel="Close attachments">
+        <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Attachments</Text>
+        <TouchableOpacity onPress={onClose} accessibilityLabel="Close attachments" hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
           <Ionicons name="close" size={22} color={colors.textDim} />
         </TouchableOpacity>
       </View>
@@ -108,7 +109,7 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
         <Button title={uploading ? 'Uploading…' : 'Upload documents'} onPress={pick} disabled={uploading} />
         {uploading ? <ActivityIndicator color={colors.accent} /> : null}
       </View>
-      <Text variant="xs" style={{ color: colors.textDim, marginBottom: 10 }}>
+      <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.sm }}>
         Uploaded files are stored with this session. Select files to attach them to the next message.
       </Text>
       {loading ? <ActivityIndicator color={colors.accent} /> : (
@@ -120,14 +121,14 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
               <TouchableOpacity
                 key={item.attachment_id}
                 onPress={() => toggle(item)}
-                style={[styles.row, { borderColor: active ? colors.accent : colors.border, backgroundColor: active ? colors.accentSoft : colors.bgLift }]}
+                style={[styles.row, { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border }]}
               >
-                <Ionicons name={active ? 'checkbox' : 'document-outline'} size={20} color={active ? colors.accent : colors.textDim} />
+                <Ionicons name={active ? 'checkbox' : 'document-outline'} size={20} color={active ? colors.accentFg : colors.textDim} />
                 <View style={styles.copy}>
-                  <Text variant="sm" numberOfLines={1} style={{ fontWeight: '600' }}>{item.name}</Text>
+                  <Text variant="sm" numberOfLines={1} style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text>
                   <Text variant="xs" dim>{formatSize(item.size)} · {item.mime_type}</Text>
                 </View>
-                <TouchableOpacity onPress={() => remove(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <TouchableOpacity onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
                   <Ionicons name="trash-outline" size={18} color={colors.textDim} />
                 </TouchableOpacity>
               </TouchableOpacity>
@@ -140,9 +141,9 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  toolbar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
   list: { maxHeight: 420 },
-  row: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 12, marginBottom: 8 },
+  row: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: radii.sm, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   copy: { flex: 1, minWidth: 0 },
 });

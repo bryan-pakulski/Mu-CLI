@@ -4,7 +4,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   TouchableWithoutFeedback,
   useWindowDimensions,
   View,
@@ -15,6 +15,7 @@ import { Text } from './Text';
 import { SafeAreaModal } from './SafeAreaModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMotionPreference } from '../hooks/useMotionPreference';
+import { elevation, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
 
 export type ModernBottomSheetProps = {
   visible: boolean;
@@ -24,7 +25,7 @@ export type ModernBottomSheetProps = {
 };
 
 export function ModernBottomSheet({ visible, onClose, children, title }: ModernBottomSheetProps) {
-  const { colors, spacing, radii } = useTheme();
+  const { colors, spacing, radii, isDark } = useTheme();
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { reducedMotion } = useMotionPreference();
@@ -36,34 +37,36 @@ export function ModernBottomSheet({ visible, onClose, children, title }: ModernB
     <SafeAreaModal visible={visible} transparent animationType={reducedMotion ? 'none' : 'fade'} onRequestClose={onClose} statusBarTranslucent edges={['top', 'bottom', 'left', 'right']}>
       <View style={styles.root}>
         <TouchableWithoutFeedback onPress={onClose} accessible={false}>
-          <View style={[StyleSheet.absoluteFillObject, styles.backdrop]} />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.scrim }]} />
         </TouchableWithoutFeedback>
         <KeyboardAvoidingView pointerEvents="box-none" style={styles.keyboardArea} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View
             style={[
               styles.sheet,
+              elevation(2, colors, isDark),
               {
-                backgroundColor: colors.glassStrong,
-                borderColor: colors.hairline,
-                borderTopLeftRadius: radii.lg + 3,
-                borderTopRightRadius: radii.lg + 3,
+                backgroundColor: colors.raised,
+                borderColor: colors.border,
+                borderTopLeftRadius: radii.panel,
+                borderTopRightRadius: radii.panel,
+                borderBottomWidth: 0,
                 paddingHorizontal: spacing.base,
                 paddingBottom: spacing.base,
                 maxHeight,
               },
             ]}
           >
-            <View style={[styles.handle, { backgroundColor: colors.borderStrong }]} />
-            <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
-                <Text variant="lg" accessibilityRole={title ? 'header' : undefined} numberOfLines={2} style={styles.title}>{title || ''}</Text>
-                <TouchableOpacity
+            <View style={[styles.handle, { backgroundColor: colors.border }]} />
+            <View style={[styles.header, { borderBottomColor: colors.border }]}>
+                <Text variant="md" accessibilityRole={title ? 'header' : undefined} numberOfLines={2} style={styles.title}>{title || ''}</Text>
+                <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Close"
                   onPress={onClose}
-                  style={styles.closeButton}
+                  style={({ pressed }) => [styles.closeButton, { borderRadius: radii.sm }, pressed && { backgroundColor: colors.hover }]}
                 >
-                  <Ionicons name="close" size={20} color={colors.textDim} />
-                </TouchableOpacity>
+                  <Ionicons name="close" size={20} color={colors.muted} />
+                </Pressable>
             </View>
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
               {children}
@@ -78,19 +81,18 @@ export function ModernBottomSheet({ visible, onClose, children, title }: ModernB
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   keyboardArea: { flex: 1, justifyContent: 'flex-end', minHeight: 0 },
-  backdrop: { backgroundColor: 'rgba(5,10,16,0.50)' },
-  sheet: { flexShrink: 1, minHeight: 0, width: '100%', maxWidth: 640, alignSelf: 'center', paddingTop: 9, borderTopWidth: StyleSheet.hairlineWidth },
+  sheet: { flexShrink: 1, minHeight: 0, width: '100%', maxWidth: 640, alignSelf: 'center', paddingTop: spacing.sm, borderTopWidth: 1 },
   scroll: { flexShrink: 1, minHeight: 0 },
-  scrollContent: { paddingBottom: 4 },
-  handle: { width: 34, height: 3, borderRadius: 2, alignSelf: 'center', marginBottom: 9, opacity: 0.7 },
+  scrollContent: { paddingBottom: spacing.xs },
+  handle: { width: 32, height: 4, borderRadius: radii.pill, alignSelf: 'center', marginBottom: spacing.sm },
   header: {
     minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: spacing.sm,
+    borderBottomWidth: 1,
   },
-  title: { flex: 1, flexShrink: 1, paddingRight: 12, paddingVertical: 8, fontWeight: '600', letterSpacing: -0.2 },
-  closeButton: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1, flexShrink: 1, paddingRight: spacing.md, paddingVertical: spacing.sm, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
+  closeButton: { width: touchTarget, height: touchTarget, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
 });

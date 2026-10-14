@@ -45,14 +45,15 @@ def test_gui_exposes_first_class_engineering_work_surface():
     assert ".work-action-panel" in css
     assert "clip-path" not in css
 
-    assert "'/api/jobs/board'" in script
-    assert "/receipt" in script
-    assert "/diff" in script
-    assert "/respond" in script
-    assert "/request-changes" in script
-    assert "/continue" in script
-    assert "/discard" in script
-    assert "READY TO REVIEW" not in script  # readiness comes from job state/evidence, not UI invention
+    view = (WORK_JS.parent / "work/view.js").read_text()
+    assert "'/api/jobs/vm/home'" in view
+    assert "/api/jobs/vm/job/" in view
+    assert "'/api/jobs/cmd'" in view
+    assert "'/api/jobs/events'" in view
+    for tab in ("plan", "session", "diff", "review", "checks", "costs"):
+        assert tab in view
+    assert "job.actions" in view
+    assert "READY TO REVIEW" not in script
 
 
 def test_shared_job_api_exposes_board_evidence_and_review_actions():
@@ -92,11 +93,15 @@ def test_durable_human_responses_are_consumed_once_by_workers():
     assert '"interaction_response"' in review
 
 
-def test_tui_covers_board_receipt_diff_attention_and_review_loop():
+def test_tui_covers_core_views_receipt_diff_and_human_actions():
     tui = TUI_JOB.read_text(encoding="utf-8")
 
-    assert "build_job_board" in tui
-    assert "BOARD_ORDER" in tui
+    assert "vm.home_vm" in tui
+    assert "vm.job_vm" in tui
+    assert "commands.dispatch" in tui
+    assert '("needs_you", "Needs you")' in tui
+    assert '("running", "Running now")' in tui
+    assert '("jobs", "Jobs")' in tui
     assert "_show_receipt" in tui
     assert "_show_diff" in tui
     assert "_respond_job" in tui
@@ -113,7 +118,10 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     detail = MOBILE_DETAIL.read_text(encoding="utf-8")
 
     assert "Work: undefined" in nav
-    assert "JobDetail: { jobId: string }" in nav
+    # JobDetail keeps the jobId param; optional tab/action params open a tab or start a Needs-you action.
+    assert "JobDetail: { jobId: string" in nav
+    for page in ("JobsList", "JobActivity", "JobBoards", "JobHistory", "JobSettings"):
+        assert f"{page}: undefined" in nav
     assert 'name="Work"' in nav
     assert 'name="JobDetail"' in nav
     assert "onOpenWork" in nav
@@ -123,19 +131,25 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     assert 'name="briefcase-outline"' in header
     assert 'label="Engineering work"' in header
 
-    assert "jobsApi.board()" in work
+    assert "jobCoreApi.home()" in work
     assert "jobsApi.create(input)" in work
     assert "session_name" in work
     assert "BOARD_ORDER" in work
 
-    for action in ("jobsApi.receipt", "jobsApi.diff", "jobsApi.respond", "jobsApi.requestChanges", "jobsApi.continue", "jobsApi.discard"):
-        assert action in detail
-    assert "verification_required" in detail
-    assert "Ready for review" in detail
-
-    for method in ("board:", "receipt:", "diff:", "respond:", "requestChanges:", "continue:", "discard:"):
-        assert method in api
-    assert "verification_required" in api
+    assert "jobCoreApi.command" in detail
+    assert "job.actions" in detail
+    assert "subscribeToJobChanges" in detail
+    # planos tabs (2px accent underline) replace the swipe pager.
+    assert "<Tabs items={tabItems}" in detail
+    # The Plan tab (components/JobTabs.tsx) hosts the plan editor; the job page renders it.
+    assert "<PlanTab" in detail
+    tabs = (MOBILE_DETAIL.parent.parent / "components" / "JobTabs.tsx").read_text(encoding="utf-8")
+    assert "<JobPlanEditor" in tabs
+    plan_editor = (MOBILE_DETAIL.parent.parent / "components" / "JobPlanEditor.tsx").read_text(encoding="utf-8")
+    assert 'accessibilityLabel="Plan Markdown"' in plan_editor
+    assert "Acceptance criteria" in plan_editor and "Checks" in plan_editor
+    for tab in ("Plan", "Session", "Diff", "Review", "Checks"):
+        assert tab in detail
 
 
 def test_mobile_work_screens_only_use_published_theme_tokens():

@@ -2,7 +2,8 @@
  *
  * Stores defaults via PUT /api/jobs/settings ($MUCLI_HOME/jobs/settings.json).
  * Provider list: GET /api/providers; models: GET /api/providers/{name}/models.
- * If any stage has no model, a banner on the Work page asks the user to set them.
+ * Stages without a default use the job's session model; the dashboard's single setup
+ * call-to-action (work/setup.js) mentions them via the `mu:stage-models` event.
  */
 (function () {
     'use strict';
@@ -20,7 +21,7 @@
     const STAGE_HINTS = {
         plan: 'Bigger model: reads the ticket, writes plan + acceptance criteria',
         implement: 'Smaller/faster model: makes the code changes',
-        review: 'Bigger model: reviews the diff, can send it back',
+        review: 'Bigger model: reviews the diff and reports findings (report-only; you decide what follows)',
     };
 
     let settings = null;
@@ -103,33 +104,18 @@
     function renderWarning() {
         const missing = (settings && settings.missing) || [];
         if (missing.length) {
-            say(warning, `No model set for: ${missing.map(s => STAGE_LABELS[s] || s).join(', ')}. ` +
-                'Jobs will stop and ask until each stage has a model.', 'error');
+            say(warning, `No default model for: ${missing.map(s => STAGE_LABELS[s] || s).join(', ')}. ` +
+                'Jobs use their session’s model for those stages.', 'error');
         } else {
             say(warning, '');
         }
         renderBanner();
     }
 
+    // One dashboard call-to-action: work/setup.js folds missing stage models into the setup banner.
     function renderBanner() {
-        let banner = $('work-stage-models-banner');
-        const missing = (settings && settings.missing) || [];
-        if (!missing.length) {
-            if (banner) banner.remove();
-            return;
-        }
-        if (!banner) {
-            banner = document.createElement('div');
-            banner.id = 'work-stage-models-banner';
-            banner.className = 'work-attention-banner work-stage-models-banner';
-            banner.setAttribute('role', 'alert');
-            const host = document.querySelector('.work-layout') || document.body;
-            host.parentNode.insertBefore(banner, host);
-        }
-        banner.innerHTML = `<strong>Set job models</strong> No model is set for the ` +
-            `${esc(missing.map(s => STAGE_LABELS[s] || s).join(', '))} stage(s). ` +
-            `<button type="button" class="work-primary" id="work-stage-models-banner-open">Choose models</button>`;
-        $('work-stage-models-banner-open').addEventListener('click', () => openStageModels());
+        const missing = ((settings && settings.missing) || []).map(s => STAGE_LABELS[s] || s);
+        window.dispatchEvent(new CustomEvent('mu:stage-models', { detail: { missing } }));
     }
 
     async function render() {
@@ -177,20 +163,26 @@
         }
     });
 
-    async function openStageModels() {
-        if (settingsBtn) settingsBtn.click();
+    // Settings is a page (#/settings): entering it loads the stage rows. Opening it from a job
+    // ("Job settings" / "Choose models") navigates there and focuses the first stage picker.
+    let focusOnLoad = false;
+    async function enterSettings() {
+        say(message, '');
         try { await load(); await render(); } catch (err) { say(message, err.message, 'error'); }
-        const first = rowsEl.querySelector('select');
-        if (first) first.focus();
+        if (focusOnLoad) {
+            focusOnLoad = false;
+            const first = rowsEl.querySelector('select');
+            if (first) { first.scrollIntoView({ block: 'center' }); first.focus(); }
+        }
+    }
+    function openStageModels() {
+        focusOnLoad = true;
+        if (location.hash.split('?')[0] === '#/settings') { void enterSettings(); return; }
+        if (window.MuWork?.go) window.MuWork.go('#/settings');
+        else if (settingsBtn) settingsBtn.click();
     }
     window.muOpenStageModels = openStageModels;
-
-    if (settingsBtn) {
-        settingsBtn.addEventListener('click', async () => {
-            say(message, '');
-            try { await load(); await render(); } catch (err) { say(message, err.message, 'error'); }
-        });
-    }
+    window.addEventListener('mu:work-route', event => { if (event.detail?.name === 'settings') void enterSettings(); });
 
     load().then(renderWarning).catch(() => {});
 })();

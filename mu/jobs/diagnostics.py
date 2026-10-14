@@ -37,6 +37,7 @@ DIAGNOSTIC_EVENT_TYPES = frozenset(
         "review_branch_materialization_failed",
         "checkpoint_failed",
         "runtime_error",
+        "model_relay_error",
         "verification_worker_error",
         "verification_lease_expired",
     }
@@ -93,6 +94,7 @@ def _event_failure(event: JobEvent) -> bool:
             "review_branch_materialization_failed",
             "worker_spawn_failed",
             "runtime_error",
+            "model_relay_error",
             "verification_worker_error",
             "checkpoint_failed",
         }

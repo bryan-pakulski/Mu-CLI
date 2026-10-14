@@ -36,8 +36,8 @@ def _pressure_clear(ctx: HookContext, variables: dict) -> Optional[dict]:
     drift-corrected fill of the assembled request reaches
     ``context_pressure_nudge_pct`` (the same threshold that wakes the
     model), clear completed, non-recent, non-protected tool results into
-    the durable store — oldest first — until the projected fill drops
-    ~10 points below the threshold or nothing clearable remains. Ledger
+    the durable store — oldest first — until the projected fill drops by half
+    of the history headroom (≥ 10 points) or nothing clearable remains. Ledger
     kind ``pressure_clear``. Returns the ``edit_tool_results`` summary when
     anything was cleared, else ``None``.
     """
@@ -70,7 +70,14 @@ def _pressure_clear(ctx: HookContext, variables: dict) -> Optional[dict]:
         fill = fill_now()
         if fill < threshold:
             return None
-        target = max(0.0, threshold - 10.0)
+        # Clear half of the history headroom in one go (at least 10 points), not a fixed
+        # 10 points: each clear rewrites mid-history results, which invalidates a local
+        # model's KV cache (and any prompt cache) from that point, so clears should be rare.
+        # On a small window with a large fixed prompt, 10 points freed only 1-3k tokens and
+        # clears fired almost every iteration.
+        fixed_pct = float(effective_fill(session, fixed, limit=limit)["fill_pct"])
+        headroom = max(0.0, threshold - fixed_pct)
+        target = max(0.0, threshold - max(10.0, headroom * 0.5))
         selected = [
             item["result_id"]
             for item in sorted(candidates(session), key=lambda it: it["history_index"])

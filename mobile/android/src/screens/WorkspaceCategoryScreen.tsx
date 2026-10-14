@@ -8,6 +8,7 @@ import { Text } from '../components';
 import { useTheme } from '../theme/ThemeContext';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { getWorkspaceCategory } from '../navigation/workspace';
+import { fontWeights, spacing } from '../theme/tokens';
 
 export type WorkspaceCategoryScreenProps = NativeStackScreenProps<RootStackParamList, 'WorkspaceCategory'>;
 
@@ -18,14 +19,14 @@ export function WorkspaceCategoryScreen({ navigation, route }: WorkspaceCategory
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
-        <Text variant="xs" style={[styles.kicker, { color: colors.accent }]}>TOOLS</Text>
-        <Text variant="sm" dim style={styles.intro}>{category.description}</Text>
+        <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Tools</Text>
+        <Text variant="sm" dim style={[styles.intro, { borderBottomColor: colors.hairline }]}>{category.description}</Text>
         {category.items.map(item => (
           <TouchableOpacity
             key={item.screen}
             activeOpacity={0.68}
             onPress={() => navigation.dispatch(StackActions.push(item.screen))}
-            style={[styles.row, { borderBottomColor: colors.hairline }]}
+            style={styles.row}
           >
             <Ionicons name={item.icon} size={19} color={colors.textDim} />
             <View style={styles.copy}>
@@ -42,10 +43,10 @@ export function WorkspaceCategoryScreen({ navigation, route }: WorkspaceCategory
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { paddingBottom: 40 },
-  kicker: { fontWeight: '700', letterSpacing: 1.25, marginBottom: 7 },
-  intro: { marginBottom: 22, maxWidth: 340 },
-  row: { flexDirection: 'row', alignItems: 'center', minHeight: 82, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
-  copy: { flex: 1, marginHorizontal: 14 },
-  title: { fontWeight: '600', marginBottom: 2 },
+  content: { paddingBottom: spacing['2xl'] },
+  kicker: { fontWeight: fontWeights.semibold, marginBottom: spacing.sm },
+  intro: { marginBottom: spacing.sm, paddingBottom: spacing.base, borderBottomWidth: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 72, paddingVertical: spacing.base },
+  copy: { flex: 1, marginHorizontal: spacing.md },
+  title: { fontWeight: fontWeights.semibold, marginBottom: 2 },
 });

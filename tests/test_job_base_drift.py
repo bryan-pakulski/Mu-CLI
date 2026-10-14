@@ -10,7 +10,6 @@ from mu.jobs import AttentionReason, JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.base_drift import BaseDriftError, apply_base_drift, assess_base_drift
 from mu.jobs.controller import JobController
 from mu.jobs.review import JobReviewService
-from mu.jobs.review_branch import materialize_review_branch
 from mu.jobs.worktree import JobWorktreeManager
 
 
@@ -42,7 +41,6 @@ def _ready_job(tmp_path, *, edit="app.txt", content="job change\n"):
     service.transition(job.id, JobStatus.PREPARING)
     service.transition(job.id, JobStatus.RUNNING)
     service.transition(job.id, JobStatus.VERIFYING)
-    materialize_review_branch(service, job.id)
     service.transition(job.id, JobStatus.READY_FOR_REVIEW)
     return repo, service, service.get(job.id)
 

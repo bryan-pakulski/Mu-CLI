@@ -1,295 +1,273 @@
-# Durable Engineering Jobs — Friday Five
+# Durable engineering jobs
 
-## North star
+A job takes a task (free text or a Jira ticket) and a workspace, then plans,
+implements, checks and reviews the change in disposable containers. A person
+approves the plan and decides when to push. New to jobs? Start with the
+[quickstart](jobs_quickstart.md). The original milestone notes and the
+first-generation lifecycle are in
+[archive/durable_jobs_history.md](archive/durable_jobs_history.md).
 
-> Friday at 4pm: give MuCLI five real engineering tickets. Close every control
-> plane. Come back later and understand in under two minutes what every agent
-> did, what succeeded, what failed, what needs a human, what it cost, and what
-> is safe to merge.
+Jobs are core runtime state, not GUI state. The terminal (`/job`, `/jobs`), the
+web Jobs page and the Android app read the same view models and send the same
+commands. No surface keeps its own lifecycle.
 
-## Architectural rule
-
-Jobs are core runtime state, **not GUI state**.
-
-```
-                    durable job core
-                          |
-             +------------+------------+
-             |            |            |
-            GUI          TUI         Mobile
-             |            |            |
-             +----- same service/API --+
-```
-
-The three control planes may render and control jobs differently, but they must
-never maintain independent lifecycle truth.
-
-### Git artifact rule
-
-A Git worktree is an **execution primitive only**. It must not be the durable
-artifact a reviewer is expected to work with after implementation finishes.
-
-Each workspace job owns a normal `mu/job-*` branch for its lifetime. While the
-job is running, MuCLI may attach that branch to a managed worktree so several
-jobs can execute safely in parallel. Once deterministic verification passes,
-MuCLI must:
-
-1. confirm the worktree is clean and its HEAD matches the job branch;
-2. preserve the branch and verified HEAD as the authoritative review artifact;
-3. retire the managed worktree;
-4. clear the active worktree from the durable job record;
-5. enter `READY_FOR_REVIEW` only after that branch handoff succeeds.
-
-Review, diff, merge and eventual PR operations therefore use the normal branch,
-not the managed worktree path. If a reviewer requests changes, MuCLI re-creates
-a temporary worktree from the same branch and continues the same durable job.
-
-In short:
+## Pipeline
 
 ```
-execution:  branch + temporary worktree
-                 |
-                 v
-verification passes
-                 |
-                 v
-review:     normal branch only
-                 |
-        request changes?
-          /           \
-        yes            no
-         |              |
-recreate worktree     merge/PR
-on same branch
+PROVISIONING → PLANNING → PLAN_REVIEW → IMPLEMENTING → CHECKING → REVIEWING
+       → REVIEW_DONE (human decision) → PUSHING → PUSHED → DONE
 ```
 
-## Lifecycle
+| State | What happens | Who acts |
+|---|---|---|
+| `PROVISIONING` | Worktree on a `mu/job-*` branch, build environment snapshots | controller |
+| `PLANNING` | Read-only planner writes a versioned `plan.md` | agent |
+| `PLAN_REVIEW` | Plan waits for approval. You can edit it, approve it or ask for a new plan | **you** |
+| `IMPLEMENTING` | Agent edits the worktree inside the sandbox | agent |
+| `CHECKING` | Host runs the approved checks without an agent and repairs new failures | controller |
+| `REVIEWING` | Read-only reviewer writes `review.json` (findings + plan coverage) | agent |
+| `REVIEW_DONE` | Report is ready. You can push, re-prompt with findings, recheck or discard | **you** |
+| `PUSHING` | Squash, secret scan, push the branch and open a draft PR | controller |
+| `PUSHED` | The PR is open. Merges are detected automatically; a closed PR needs you | controller / **you** |
+| `DONE` | Finished; build environment images are released | — |
 
-```
-QUEUED -> PREPARING -> RUNNING -> VERIFYING -> READY_FOR_REVIEW -> MERGED
-                         |            |
-                         v            v
-                    NEEDS_HUMAN    CONFLICTED
-                         |
-                         +----------> RUNNING
+`NEEDS_INPUT` pauses any active stage on a question, a tool approval, a reached
+limit or a stall. `FAILED` keeps the stage that failed so `retry` can restart it, and
+`CANCELLED` is terminal. No limit ever fails, cancels or times out a job (see
+[Limits pause and ask](#limits-pause-and-ask)); the old `timed_out` and
+`budget_exceeded` statuses are no longer written and stay readable (and
+retryable) on old rows. The stored `status` column still holds legacy values
+for compatibility (`publishing` = `PUSHING`, `ready_for_review` = `PUSHED`,
+`merged` = `DONE`). The job's state comes from the core state model in
+`mu/jobs/core/states.py`.
 
-Active execution may enter RECOVERING when its worker lease expires.
-Failure states are retryable through QUEUED; CANCELLED and MERGED are terminal.
-```
+### Workspace
 
-State changes and human/worker events are append-only records in the job event
-log. Jobs use optimistic versions for concurrent control-plane updates.
+Every job runs in a workspace (`workspace_root`). By default this is the first
+folder of the session that creates it. In the terminal, `--in PATH` picks the
+workspace directly, and no chat session is needed. The job is filed under a
+hidden per-workspace session that is kept out of chat session lists. A
+payload may name `repository` instead (see below). Non-git workspaces are
+allowed; they run with `execution.git_enabled = false`, without a base commit,
+review branch or PR. Jobs stored before v2 that have `repository` set still load.
 
-`READY_FOR_REVIEW` means both verification and Git finalization have completed:
-the verified changes are available on the durable review branch and the managed
-execution worktree has been retired.
+### Jobs on any repository
 
-## Milestone 1 — Durable Jobs
+`repository` (alias `repo`) is an alternative to `workspace_root`:
 
-**Goal:** closing a browser must not affect execution; job state survives process
-and client restarts.
+- A **local path** is used as the workspace.
+- A **URL** is cloned: `https://host/org/repo(.git)`, `ssh://git@host/org/repo`,
+  `git@host:org/repo.git` or `file:///path/repo.git`, optionally suffixed with
+  `@branch` or `#branch`. The clone lives in
+  `$MUCLI_HOME/repos/<host>/<org>/<name>-<sha8(url)>` (`--filter=blob:none`) and
+  is refreshed with `git fetch --prune` on later jobs. A directory at that path
+  that is not a clone of the same URL is never touched. Authentication uses the
+  host's git credential helpers and SSH agent, never a prompt
+  (`GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`). URLs with an embedded password or
+  token are refused so credentials never reach job records. Submodules are
+  initialised (`jobs.clone.submodules`, default on). With `jobs.clone.lfs = auto`,
+  LFS files are pulled when `git-lfs` is installed; otherwise the job gets a
+  `repository_warning` event. Clone and fetch time out after ten times
+  `jobs.git_timeout_seconds`.
 
-### Done
-- [x] `Job`, `JobSpec`, `JobEvent`, `JobAttempt` domain types.
-- [x] Explicit lifecycle state machine and structured human-attention reasons.
-- [x] SQLite persistence under `$MUCLI_HOME/jobs/jobs.sqlite3`.
-- [x] WAL mode, foreign keys, busy timeout, indexed state/event/lease tables.
-- [x] Atomic job creation + event creation.
-- [x] Atomic/versioned state transitions.
-- [x] Append-only event timeline.
-- [x] Execution-attempt records.
-- [x] Worker lease, heartbeat, release and expired-lease detection.
-- [x] Recovery transition for expired active worker ownership.
-- [x] GUI HTTP contract (`/api/jobs`).
-- [x] TUI `/job` + `/jobs` create/list/show/cancel/resume/retry controls.
-- [x] Mobile typed `jobsApi` client against the same HTTP contract.
-- [x] Core regression tests written.
+A cloned job starts from the fetched tip of the branch (`base_branch`/`base_sha`
+default to the `@branch` or the remote default) and records
+`metadata.repository_url` (credential-free), `metadata.repository_clone` and,
+when relevant, `metadata.repository_warnings`.
 
-### Left
-- [x] Background controller/scheduler that leases queued jobs (`mu/jobs/controller.py`).
-- [x] Existing MuCLI agent-runtime adapter for one job attempt (`mu/jobs/runner.py`).
-- [x] Durable provider/model/execution policy captured on the job (`execution_json`).
-- [x] Human-gate bridge from an executing job back into durable NEEDS_HUMAN state (`JobUI` + `InteractionRequired`).
-- [x] Controller lifecycle independent of browser/mobile connection (detached daemon, `mu/jobs/host.py`).
-- [x] Run the new regression tests in CI/local checkout (`tests/test_job_*.py`).
+API: `POST /api/jobs` with `{"title": ..., "repository": "<URL|path>", ...}`.
+`workspace_root` may be omitted. If both are given they must name the same
+location. Session defaults (model, mode) are looked up for the clone path. A
+clone failure returns `400` with
+`{"detail": "<actionable message>", "error": {"kind": K, "host": H}}`, where `K`
+is one of `invalid_url`, `credentials_in_url`, `auth_failed`, `not_found`,
+`timeout`, `path_conflict`, `branch_not_found` or `clone_failed`. Other
+validation errors keep the usual `400 {"detail": "..."}`. In the terminal,
+`/job <KEY|title> --in <URL|PATH>` and `/job create <title> --repo <URL|PATH>`
+do the same. Each clone gets its own hidden session.
 
-**Completion gate:** submit a job, close the browser, and observe the job continue
-to an execution terminal/gate state from TUI/mobile later.
+Job worktrees initialise submodules after `git worktree add`. When the network
+is unavailable this fails without stopping the job and is recorded as a
+`worktree_submodules_skipped` event.
 
-## Milestone 2 — Isolated Engineering Work
+### Plan
 
-- [x] Repository registry / canonical repository identity.
-- [x] Base branch + base SHA capture.
-- [x] Per-job Git branch.
-- [x] Per-job Git worktree for active execution.
-- [x] Branch-first finalization after successful verification.
-- [x] Worktree recreation on review changes.
-- [x] Environment association.
-- [x] Checkpoints.
-- [x] Concurrent scheduler with collision-safe workspaces.
+The planner writes `plan.md` (versions in `plans/plan.v<N>.md`) with acceptance criteria, likely files
+and the checks it proposes. Approval records an exact version. Approving a stale
+version returns a conflict, and `/job approve <id>` without a version approves
+the latest one. Plan approval is on by default (`plan_approval` in job
+settings). Drafts autosave on web and Android. Saving a draft creates a new
+numbered version.
 
-**Completion gate:** five jobs can safely work against the same repository at once,
-and finished jobs can be reviewed from ordinary branches without keeping their
-execution worktrees alive.
+### Acceptance criteria and checks
 
-## Milestone 3 — Verification
+The planner's criteria and validation commands are merged into the job contract
+(`mu/jobs/dynamic_checks.py`):
 
-- [x] Acceptance criteria contract.
-- [x] Validation command plan.
-- [x] Deterministic verifier runner.
-- [x] Structured verification evidence.
-- [x] Optional independent verifier-agent pass (`mu/jobs/acceptance.py`): opt-in via
-      `execution.acceptance_review=true` or `MUCLI_JOBS_ACCEPTANCE_REVIEW=1`; read-only
-      reviewer session grades each acceptance criterion pass/fail/unknown from the
-      verified diff; `fail` gates READY behind a human; verdict stored as evidence
-      (`acceptance-review.json`, receipt `acceptance_review`,
-      `acceptance_criteria_machine_verified` is now truthful).
-- [x] Work receipt/result manifest.
+- **Validation commands are proposed by the planner.** Creating a job does not
+  require any. User-supplied criteria and commands (`--accept`, `--check`) are
+  never dropped and always come first.
+- Planner commands must start with an allow-listed executable (pytest, npm,
+  make, cargo, go, tsc, …). Shell operators (`; && || | > < ` $( &`) are
+  rejected. Rejected commands are recorded in `plans/contract.json`.
+  `execution.validation_allowlist` extends the allow-list for one job. At most
+  8 planner commands are accepted.
+- If no commands remain, you can add checks in the plan editor before you
+  approve. When plan approval is off, a job with no checks parks with
+  `no_validation`.
 
-**Completion gate:** `READY_FOR_REVIEW` always has evidence and never means merely
-"the builder said it was done". It also means the verified implementation has
-been handed off to its normal Git review branch.
+Configured suites also run: `[[checks.suites]]` in the repository's
+`.mucli/jobs.toml` (`name`, `command`, optional workspace-relative `junit`), or
+`checks.suites` in job settings. Commands are validated again at execution and
+run without a shell. Pytest suites produce JUnit evidence automatically.
 
-## Milestone 4 — Review + Attention UI
+A failed suite runs again on the job's base commit in a disposable worktree.
+Failures that also happen there are reported as preexisting. Only new failures
+start the repair loop, which is capped by `checks.max_fix_attempts` (default 2).
+Summaries, JUnit and logs live under `checks/run-<n>/`.
 
-- [x] Shared query model: Needs You / Running / Ready / Failed.
-- [x] GUI work queue and job detail.
-- [x] TUI work queue/detail/attention workflow.
-- [x] Mobile work queue/detail/attention workflow.
-- [x] Diff review surface.
-- [x] Evidence/Trace/cost summary.
-- [x] Continue / request-changes / discard controls.
+### Review (report-only)
 
-**Completion gate:** understand five jobs without opening five chat transcripts.
+The reviewer writes `review.json` with anchored findings and plan coverage. The
+host computes merge readiness from open findings and the actual check evidence.
+**Every completed review stops at `REVIEW_DONE`**, and nothing is sent back
+automatically. You decide what happens next:
 
-TUI: `/job summary [N|all]` renders one five-line block per job (headline, time/cost/
-attempts/changes, verify + drift + acceptance verdict, branch@head, next action),
-attention first.
+- update finding dispositions (`mark-findings`);
+- re-prompt the implementer with selected findings and guidance
+  (`/job reprompt <id> F-1,F-2 guidance`);
+- recheck after manual edits (`recheck`);
+- push (`push`), or discard (`discard`).
 
-## Milestone 5 — Git / PR Completion
+A blocking review (`do_not_merge`) needs an explicit, audited override reason to
+push. Passing checks are required either way. The pipeline never merges.
 
-- [x] Verified implementation materialized as a normal review branch.
-- [x] Execution worktree retired before `READY_FOR_REVIEW`.
-- [ ] Final commit policy / commit cleanup.
-- [ ] PR creation.
-- [x] Base-drift detection (`mu/jobs/base_drift.py`, `git merge-tree --write-tree`):
-      assessed after verification, on a 5-minute controller sweep of READY jobs, and via
-      `GET /api/jobs/{id}/drift[?apply=true]`; receipt `base_drift`.
-- [x] Merge-conflict state: READY_FOR_REVIEW + not mergeable -> CONFLICTED
-      (attention `merge_conflict`, pushed to surfaces); `continue` requeues with a
-      rebase instruction (CONFLICTED -> QUEUED).
-- [ ] CI/check state.
-- [x] Mergeability state (`base_drift.mergeable`, surfaced in receipt/`/job show`/`/job summary`).
-- [ ] Merge action.
+### Push and PR
 
-**Completion gate:** ticket -> autonomous implementation -> branch review -> merge.
+Push requires a passing check run for the current commit and a clean worktree.
+A review override cannot bypass this gate. When you push, the job enters
+`PUSHING`. That stage squashes the job's checkpoint commits onto the PR base as
+one commit. The commit carries the ticket key and a `Mucli-Job: <id>` trailer
+and honours `commit.gpgsign`. The stage checks that the commit's tree is the
+verified tree and secret-scans the diff. It then pushes the branch and opens a
+**draft** PR (or updates the job's existing PR on a re-push):
 
-## Milestone 6 — Unattended Reliability
+| `publish.mode` | Behaviour |
+|---|---|
+| `auto` (git default) | `gh` if installed and origin is GitHub; otherwise REST chosen by origin host |
+| `gh` | `gh pr create --draft` |
+| `github` | GitHub REST (`GITHUB_TOKEN` / `GH_TOKEN`) |
+| `gitlab` | GitLab merge request titled `Draft: …` (`GITLAB_TOKEN`) |
+| `bitbucket` | Bitbucket Cloud pull request (`BITBUCKET_TOKEN`) |
+| `gitea` | Gitea/Forgejo pull request (`GITEA_TOKEN`) |
+| `none` (non-git default) | Stage skipped |
 
-- [x] Process/worker crash recovery (lease CAS + idempotent replay).
-- [x] Provider retry policy: headless sessions run `provider_recovery_policy=auto`
-      (transient errors retry in-loop with backoff, never a human question);
-      a transient implementation failure requeues with 30s→10min backoff
-      (`next_run_at`) while attempts ≤ `max_retries`, then terminal FAILED.
-- [x] Stuck/loop watchdogs (agent-loop watchdog + job runtime deadline).
-- [x] Runtime/cost/iteration/subagent budgets (enforced by controller tick).
-- [x] Artifact retention: `MUCLI_JOBS_RETENTION_DAYS` (default 30, 0 = off)
-      purges evidence/logs/worktrees of ARCHIVED historic jobs on an hourly
-      controller sweep; review branches are preserved.
-- [x] Durable human gates across controller restart (event-backed responses; loader filters by type).
-- [x] State-driven notifications: controller pushes `job_attention` (SSE) on
-      enter/leave of NEEDS_HUMAN/CONFLICTED; `GET /api/jobs/attention`; web
-      badge + toast; TUI startup banner and `/jobs` header.
-- [x] Failure injection suite: `tests/test_job_failure_injection.py` (disconnect, worker
-      kill, controller restart, transient/hard provider failure, base movement, late
-      human answer on a chatty job, runtime deadline, five-ticket invariant sweep).
-- [ ] Friday Five benchmark.
+On success the PR details go into `metadata.pr` and the job moves to
+**`PUSHED`**. Every `publish.merge_poll_seconds` (default 300 s; `0` = off) the
+controller asks the PR host for the PR's state. A merged PR moves the job to
+`DONE`. A PR closed without merging puts the job in front of a human: **Re-push**
+opens the PR again from the job branch, and **Mark done** closes the job out
+without a merge. `/job mark-merged <id>` (the **Mark merged** action) is the
+manual override when polling is off or the host cannot be queried. The web and
+Android job header shows the PR number and state as a link. If the
+push or PR call fails, the job pauses for you with `publish_failed`. Tokens come
+from the environment only and are redacted from error text.
 
-**Completion gate:** five jobs can be trusted overnight through deliberate failure
-injection and still produce truthful, actionable outcomes.
+### Models, agents and limits
 
-## Friday Five release benchmark
-
-Every release of this subsystem should eventually exercise five real tickets:
-
-1. straightforward feature;
-2. investigation-heavy bug;
-3. refactor;
-4. dependency upgrade;
-5. ambiguous requirement requiring human input.
-
-Inject browser/mobile disconnect, controller restart, provider failure and base
-branch movement. Targets: zero workspace collisions, zero false-ready jobs,
-100% cost attribution, 100% surfaced blockers, and <2 minutes to understand all
-five outcomes.
-
-## Durable job v2 — staged pipeline, Jira intake, PR publish
-
-### Workspace-anchored jobs
-
-Jobs no longer take a `repository`. Creating a job resolves its workspace from
-the session that creates it (`workspace_root`, filled in by the GUI, mobile and
-TUI from the active session's folder context). Payloads that send
-`repository`/`repo` are rejected. Non-git workspaces are allowed; they run with
-`execution.git_enabled = false`, without a base commit, review branch or PR.
-Jobs stored before v2 that have `repository` set still load unchanged.
-
-### Stages and per-stage models
-
-New jobs default to `execution.pipeline = "staged"`:
-
-```
-QUEUED → PREPARING → PLANNING → RUNNING → VERIFYING → REVIEWING
-       → PUBLISHING (git + publish enabled) → READY_FOR_REVIEW
-REVIEWING --request_changes--> QUEUED (full re-implement + re-verify)
-```
-
-Each stage can use its own model. Lookup order is stage, then job execution,
-then session:
+Each stage can use its own model. The lookup order is stage, then job
+execution, then Settings → stage models, then the creating session:
 
 ```json
 {"execution": {
-  "provider": "anthropic", "model": "sonnet",
   "stages": {
     "plan":      {"provider": "anthropic", "model": "opus"},
     "implement": {"model": "haiku"},
     "review":    {"model": "opus"}
-  },
-  "max_review_rounds": 3
+  }
 }}
 ```
 
-- **Plan** runs once per job and stores `metadata.plan` (summary, steps,
-  acceptance criteria, validation commands). If the planner fails, the job goes
-  to `needs_human` with `provider_error`.
-- **Implement** is the existing worker. Its prompt includes the plan and the
-  latest reviewer feedback.
-- **Review** is a read-only model session over the diff. It returns
-  `approve` or `request_changes`. A response that can't be parsed counts as
-  `request_changes`. Each round is appended to `metadata.review_rounds`.
-  After `max_review_rounds` (default 3, range 1–20) the job goes to
-  `needs_human` with `review_stalled`.
+Each stage can also run on mucli, Claude Code or Codex
+(`--agent plan=claude,implement=codex`; see `/job agents`). The default job cost
+cap is `defaults.max_cost_usd` = $100. A job created without a cost uses it; an
+explicit `max_cost_usd: 0` (enter `0` in the New job sheet) means no cap. Stage budgets,
+timeouts and iteration limits are listed in
+[configuration.md](configuration.md#job-settings).
 
-The human `READY_FOR_REVIEW` gate stays in place: the pipeline never merges.
+### Limits pause and ask
 
-### Dynamic acceptance and validation
+Every cost, token, time and iteration limit works the same way: reaching it
+**pauses** the running stage and asks you whether to continue. The job is never
+failed, cancelled or timed out by a limit.
 
-The planner's acceptance criteria and validation commands are merged into the
-job contract (`mu/jobs/dynamic_checks.py`):
+| Limit | Where it is set | Scope |
+|---|---|---|
+| Job cost | `max_cost_usd` on the job (New job sheet; default `defaults.max_cost_usd`) | whole job |
+| Job runtime | `max_runtime_seconds` on the job (default `defaults.max_runtime_seconds`) | whole job, worker-active time |
+| Stage cost / token budget | `sandbox.max_cost_usd`, `sandbox.max_tokens` | one stage, across all its runs in the job |
+| Stage time limit | `sandbox.stage_timeout_s.<stage>` | one run of a stage |
+| Iterations | job `max_iterations`, `limits.stage_max_iterations.*`, `limits.max_iterations` | one run of a stage |
 
-- User-supplied criteria and commands are never dropped and always come first.
-- Planner commands must start with an allow-listed executable (pytest, npm,
-  make, cargo, go, tsc, …). Shell operators (`; && || | > < ` $( &`) are
-  rejected. Rejected commands are recorded in `metadata.plan_contract`.
-  `execution.validation_allowlist` extends the allow-list for a single job.
-- At most 8 planner commands are accepted.
-- Creating a job no longer requires validation commands. If no commands
-  remain after planning, the job goes to `needs_human` with `no_validation`.
+When a stage reaches one, the stage stops the same graceful way as before a
+resume (its conversation, transcript and Claude Code / Codex session are kept),
+its cost is recorded, and the job moves to `NEEDS_INPUT` (`needs_human`) with
+attention `limit_reached`. `metadata.limit_reached`, the `limit_reached` event
+and the pause's `status_changed` payload (`limit`) carry
+`{kind: cost|tokens|time|iterations, scope: job|stage, stage, used, limit, unit}`
+plus a message such as "Job reached its $100.00 cost limit during implement
+($100.03 used). Approve more to continue, or cancel." Ticket writeback and the
+Android "needs you" notification use that message.
 
-### Jira intake
+You then choose:
 
-Credentials are read from the server environment only. They are never taken
-from API payloads and never stored on a job.
+- **Approve more & continue** — the `raiseLimit` command,
+  `{kind, scope, stage, amount}`. The amount is prefilled (the limit again; half
+  of it for time) and accepts `25`, `25usd`, `30m`, `2h` (a bare number is
+  minutes), `5M`, `500k`. Job limits raise the job's own `max_cost_usd` /
+  `max_runtime_seconds`; stage limits add a per-job allowance in
+  `metadata.limit_grants` (global Settings never change). A `limit_raised` event
+  records the old and new limit. The paused stage then continues its own
+  conversation.
+- **Cancel job** — the existing discard.
+
+`raiseLimit` also works ahead of time on a queued or running job (terminal
+`/job raise-limit <id> <cost|tokens|time|iterations> <amount> [--stage S]
+[--scope job|stage]`; cost and time default to the job limits, tokens and
+iterations to the current stage).
+
+The job runtime limit pauses gracefully: each agent stage's container time
+limit is capped at the job's remaining runtime, so the stage pauses right at
+the limit, and a stage that would start after the limit pauses before it
+starts. The controller never kills a worker for it; an agent stage still
+running two minutes past the limit is asked once to pause
+(`stage_pause_requested`). Checks and push finish on their own. A job with no
+cost cap never pauses for that cap. Per-request model and tool-command timeouts
+are not limits on the job and still apply as before.
+
+Implementation writes need your approval unless the job runs unattended. That
+is the explicit per-job `--auto-approve` flag, or the Settings default
+`defaults.run_unattended` (off). A pending write shows separate Approve tool /
+Deny tool actions (`/job approve-tool <id>`, `/job deny-tool <id> [reason]`).
+Each approval is consumed once, for the exact tool name and arguments.
+
+Repo-declared images, environments and network access need approval too. A
+repository can ask for its own build image, devcontainer or Dockerfile and for
+extra egress. Nothing it declares is used until a human approves it, per
+repository and fingerprint. A job that hits an unapproved request pauses with
+**Approve environment** / **Reject environment** actions
+(`/job approve-environment <id>`, `/job reject-environment <id> [reason]`).
+The New job sheet offers the same approval up front, through
+`POST /api/jobs/environments/approve` with
+`{"repository": PATH, "fingerprint": "...", "session": ""}`. Only a fingerprint
+the repository currently requests is accepted (409 otherwise).
+
+## Jira intake
+
+Link Jira from **Settings → Jira** on the web (or the JIRA step of
+`/job setup`). The base URL, email and API token (Cloud) or PAT (Data Center)
+are stored in `$MUCLI_HOME/integrations/jira.json` (mode 0600). Environment
+variables override the file field by field:
 
 | Variable | Purpose |
 |---|---|
@@ -298,30 +276,190 @@ from API payloads and never stored on a job.
 | `JIRA_PAT` | Data Center personal access token (bearer, REST v2) |
 | `JIRA_WRITEBACK` | `1` to post a "job created" comment (off by default) |
 
-- TUI: `/job jira pull PROJ-1 PROJ-2` or `/job jira pull --jql "project = PROJ AND assignee = currentUser()"`
-- API: `POST /api/jobs/jira/import` `{"keys": [...]}` or `{"jql": "..."}`.
-  Bodies that contain credential fields get a 400. Jira errors return 502.
+Credentials are never taken from API payloads and never stored on a job.
 
-Each issue becomes one job: the title is `KEY: summary`, the description is the
-issue text with ADF converted to plain text, and acceptance criteria come from an
-"Acceptance criteria" heading. `metadata.jira` holds the key, URL, status and
-type. An issue that already has a live (non-terminal) job is skipped.
+- Terminal: `/job PROJ-1 [--in PATH|URL]`, `/job jira pull PROJ-1 PROJ-2`, or
+  `/job jira pull --jql "project = PROJ AND assignee = currentUser()"`.
+  Add `--force` to start a new job for a ticket whose latest job is done.
+- Web and Android: the Tickets page lists boards and JQL results. Select
+  tickets, choose **Create jobs**, then pick the workspace or paste a git URL
+  (the session is optional; a saved session on that workspace supplies model,
+  mode and environment). **Run again** re-imports tickets whose latest job is
+  done. A ticket key typed in the New job sheet imports that ticket into the
+  sheet's workspace or repository.
+- API: `POST /api/jobs/jira/import` with `{"keys": [...]}` or `{"jql": "..."}`,
+  plus optional `defaults` (`workspace_root`, or `repository` = git URL or path,
+  which is cloned like `POST /api/jobs`), `session_name` and `force`. Bodies
+  that contain credential fields get a 400. Clone failures return 400 with
+  `{"detail", "error": {"kind", "host"}}`. A body with no workspace, repository
+  or session workspace gets a 400. Jira errors return 502.
 
-### PR publish
+Each issue becomes one job. The title is `KEY: summary`. The description is the
+issue text with ADF converted to plain text, and acceptance criteria come from
+an "Acceptance criteria" heading. `metadata.jira` holds the key, URL, status
+and type. An issue that already has a live job is skipped, and so is one whose
+latest job is done unless `force` is set. Ticket text is wrapped in
+UNTRUSTED TICKET CONTENT markers for the agent. Receipts, History search and
+exports strip the markers.
 
-For git workspaces the default is `execution.publish_mode = "auto"`. For
-non-git workspaces it is `"none"`. Once the reviewer approves, the job moves to
-`PUBLISHING`. That stage pushes the review branch to `origin` and opens a
-**draft** PR:
+### GitHub issues
 
-| Mode | Behaviour |
-|---|---|
-| `auto` | `gh` if it is installed and origin is GitHub; otherwise REST chosen by origin host |
-| `gh` | `gh pr create --draft` |
-| `github` | GitHub REST `draft: true` (`GITHUB_TOKEN` / `GH_TOKEN`) |
-| `gitlab` | GitLab merge request titled `Draft: …` (`GITLAB_TOKEN`) |
-| `none` | Stage skipped |
+`POST /api/jobs/tracker/import` with `{"tracker": "github", "keys":
+["owner/repo#7", "https://github.com/owner/repo/issues/8"]}` (or `"query"`, a
+GitHub issue search) imports GitHub issues the same way, with the same
+`defaults`, `session_name`, `force` and error handling as the Jira import.
+`{"tracker": "jira"}` is the Jira import. GitHub access uses `GITHUB_TOKEN` /
+`GH_TOKEN`, or the logged-in `gh` CLI when no token is set. Credential fields in
+the body get a 400.
 
-On success the PR details go into `metadata.pr` and the job moves to
-`READY_FOR_REVIEW`. If the push or PR call fails, the job goes to
-`needs_human` with `publish_failed`. Tokens are redacted from error text.
+### Ticket watcher
+
+The watcher imports new tickets from saved queries. It is off by default.
+Configure it under `trackers.watch` in `$MUCLI_HOME/integrations/jira.json`:
+
+```json
+{"trackers": {"watch": {"enabled": true, "interval_seconds": 900, "queries": [
+  {"tracker": "jira", "query": "labels = mucli", "workspace_root": "/src/app"},
+  {"tracker": "github", "query": "repo:acme/api label:mucli", "workspace_root": "/src/api"}
+]}}}
+```
+
+The job controller runs each query at most once per `interval_seconds`
+(default 900, minimum 60). Each query needs a `workspace_root`; `session_name`
+and `max_results` (default 10, at most 50) are optional. Imports use the normal
+duplicate protection. `POST /api/jobs/tracker/watch/poll` runs the queries that
+are due now.
+
+## Sandbox
+
+Plan, implementation and review run in disposable containers from
+`mucli-job-runtime:latest`. Build it with `/job setup runtime build` or
+`python3 -m mu.jobs.sandbox.build`. The build context holds only runtime source
+and the public pricing registry. Host sessions, credentials, `.git` and
+reference archives are left out. With no Docker or no image, jobs fail with an
+actionable error. There is no host agent fallback.
+
+The container runs as the host UID/GID with dropped capabilities, a read-only
+root filesystem and `--network none`. A stage-scoped, authenticated model relay
+is exposed through a Unix socket, so provider credentials stay on the host. Plan
+and review mount the workspace read-only. Implementation may edit the worktree,
+and the host validates paths and creates the commits. Plan mode and tool
+approvals remain enforced.
+
+Git metadata is visible but read-only, so VCS-aware tools work (`go build`
+with `GOFLAGS=-buildvcs=auto`, setuptools-scm, `git status`/`log`/`describe`).
+The worktree's private gitdir is mounted at `/mucli-git/common/worktrees/job`,
+and the common dir's `objects`, `refs`, `packed-refs`, `info` and `shallow` sit
+beside it. The container gets a rewritten `/workspace/.git` pointer, a generated
+`commondir` and a sanitized `config` that holds only core/format keys and
+`core.hooksPath=/dev/null`, so no remotes, tokens or credential helpers. Hooks
+are never mounted. `GIT_OPTIONAL_LOCKS=0` is set.
+
+Plan, implementation and review each default to 1,000 agent iterations per
+run. `max_iterations` on a job applies to all three.
+`limits.stage_max_iterations.*` overrides each stage. Reaching it pauses the
+stage and asks you for more iterations.
+
+Package registry access goes through the domain/IP-checking egress proxy on a
+second Unix socket (`sandbox.egress_extra`, implementation and checks only).
+`sandbox.cpu`, `memory`, `stage_timeout_s.*`, `max_tokens` and `max_cost_usd`
+bound each stage; reaching a budget or time limit pauses the job and asks you
+(see [Limits pause and ask](#limits-pause-and-ask)). Usage is recorded in the
+job's `costs.jsonl` (with the tokens charged to the stage budget). A request
+that was already sent can still be charged when its stream is cut off at a
+budget limit.
+
+## Build environments
+
+A project's toolchain comes from a *build environment*: a container-mode
+environment, a container-mode template or any local image. The design is in
+`documentation/plans/job_build_environments.md`.
+
+**Choosing the set.** The set is resolved once, before the first sandboxed
+stage, from the first source that yields bindings. Sources are never merged.
+
+1. the job override: `execution.environments` from the New job sheet,
+   `/job create --env name[:paths][:docker]` (repeatable) or `setEnvironments`;
+2. the repository's `.mucli/jobs.toml`:
+   ```toml
+   [[environments]]
+   name = "rust-build"          # an environment, template:<name> or image:<ref>
+   paths = ["resq-backend", "stream-processor-rs"]
+   primary = true               # optional: agent stages run here
+
+   [[environments]]
+   name = "compose-it"
+   paths = ["."]
+   docker = true                # private per-job Docker engine (needs Sysbox)
+   gpus = "all"                 # "all" | "0,1" | "" ; default: the environment's own request
+   preload_images = ["postgres:16"]
+   ```
+3. the job's container session (`environments.use_session_environment`);
+4. Settings → Environments → Toolchains rows (`sandbox.toolchains`:
+   repository → base image, `template:<name>` or `environment:<name>`, plus
+   optional paths, Docker and GPUs);
+5. otherwise the shared `mucli-job-runtime` image.
+
+**Per-job snapshots.** Each binding is snapshotted for that job alone with
+`docker commit --pause=true` and the secret-env scrub. `/root` is filtered:
+secrets, mucli state, shell history and caches are removed, and a `/root`
+volume is captured as a filtered tar. The login shell's PATH and toolchain
+homes are probed and baked in, and mucli's job layer is added. A secret scan
+of `/root`, `/home` and `/etc` follows. A scan hit parks the job and names the
+paths (allow paths with `environments.secret_scan_allow`). Images carry
+`io.mucli.job=<id>` and are removed when the job is done, cancelled, pushed,
+archived or deleted. Failed and waiting jobs keep them for
+`jobs.environment_retention_h` (72 h) unless the job is kept
+(`keepEnvironments`). `refreshEnvironments` takes the snapshots again.
+
+**Several environments.** Agent stages run in the primary binding: the one
+marked primary, or else the one that owns most of the plan's likely files. Each
+check suite runs in the binding that owns it. That is its explicit `env`, else
+its `cwd`, else a path its command names, else the primary. With several
+bindings the implementer gets `run_in_environment(env, command, cwd)`, run in a
+sibling container with the same isolation (approval rules as `bash`).
+
+**Egress and GPUs.** Implement and checks may reach `sandbox.egress_extra` plus
+the environment's egress allowlist (`environments.inherit_egress`).
+Model-provider hosts are always dropped. GPU bindings get `--gpus`
+(`sandbox.gpus_enabled` turns this off for all jobs). A host without a usable
+NVIDIA runtime parks the job.
+
+**Docker-in-Docker.** `docker = true` gives the job a private engine
+(`sandbox.docker_engine_image`, default `docker:dind`), under the Sysbox runtime
+only. There is no privileged fallback. The engine sits on an internal network
+and mounts the worktree at `/workspace`. Stages reach it only through a
+per-stage policy proxy at `/var/run/docker.sock`. The proxy labels every object
+and allows bind mounts only from `/workspace` and `/cache`. It refuses host
+devices, host namespaces and other jobs' containers, and enforces
+`sandbox.docker_storage_gb`. It audits `docker_api` events. Pulls are allowed
+only from registries on the job's egress allowlist. Services that tests start
+themselves (testcontainers, compose) need DinD. Running such checks inside the
+job engine is not supported yet.
+
+## Surfaces
+
+The terminal, web and Android show the same six-step pipeline and the same
+server-provided actions. Job detail has the same tabs everywhere: **Session,
+Plan, Diff, Review, Checks, Diagnostics, Cost & audit**. Setup includes Doctor as a
+tab (web Jobs → Setup, Android Job settings → Setup, terminal `g u` and `g d`).
+
+- Terminal: `/jobs` opens the keyboard dashboard. The `/job` subcommands are
+  listed in `/help` and [commands.md](commands.md). Action names use
+  lowercase hyphens (`approve-plan`, `save-plan-draft`, `restart-stage`,
+  `mark-merged`). The camelCase ids are still accepted.
+- Shared HTTP: `GET /api/jobs/vm/home`, `/vm/jobs`, `/vm/job/{id}` (optional
+  `parts`); `POST /api/jobs/cmd` with `{type, job_id, args}`;
+  `GET /api/jobs/events` (coalesced over 150 ms, naming the parts that changed).
+  Disabled commands return 409 with their reason. Malformed commands return 400.
+
+## Storage
+
+Each job's folder is `$MUCLI_HOME/jobs/<id>/`. It holds the worktree,
+`ticket.json`, versioned plans, `diff.patch`, `review.json`, check evidence,
+stage transcripts and `costs.jsonl`. The job database is
+`$MUCLI_HOME/jobs/jobs.sqlite3`, and job settings are
+`$MUCLI_HOME/jobs/settings.json`. Older job paths are still supported. When an
+old job is opened, its embedded plan and review data is backed up to
+`legacy-handoffs.json`. Compatibility endpoints pass lifecycle commands to the
+core. Raw status and attention mutation endpoints return 410.

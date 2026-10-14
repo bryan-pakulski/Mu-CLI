@@ -1,7 +1,8 @@
 import React from 'react';
-import { TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { Pressable, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
+import { radii, touchTarget } from '../theme/tokens';
 
 export type IconButtonProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -15,23 +16,25 @@ export type IconButtonProps = {
 export function IconButton({ icon, onPress, size = 22, color, disabled, style }: IconButtonProps) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       onPress={onPress}
       disabled={disabled}
-      style={[
+      style={({ pressed }) => [
         {
-          minWidth: 44,
-          minHeight: 44,
+          minWidth: touchTarget,
+          minHeight: touchTarget,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: 999,
+          borderRadius: radii.control,
           opacity: disabled ? 0.4 : 1,
+          backgroundColor: pressed ? colors.hover : 'transparent',
         },
         style,
       ]}
-      activeOpacity={0.6}
     >
       <Ionicons name={icon} size={size} color={color ?? colors.text} />
-    </TouchableOpacity>
+    </Pressable>
   );
 }

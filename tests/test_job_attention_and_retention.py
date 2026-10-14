@@ -215,7 +215,8 @@ def test_surfaces_wire_attention_endpoint_badge_and_tui_banner():
 
     assert '@router.get("/attention")' in router
     assert 'case "job_attention"' in app_js and "/api/jobs/attention" in app_js
-    assert "job_attention" in work_js
+    view = (ROOT / "mu/gui/static/js/work/view.js").read_text()
+    assert "home.needs_you" in view and "refreshHome()" in view
     assert "product-attention-badge" in index and "jobAttentionCount" in index
     assert "notify=_job_attention_notify" in gui_app
     assert "MUCLI_JOBS_RETENTION_DAYS" in gui_app

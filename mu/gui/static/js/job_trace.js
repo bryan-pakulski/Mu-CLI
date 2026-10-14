@@ -17,15 +17,31 @@
     };
 
     const state = { jobs: [], analysis: null, comparison: null, resizeTimer: null };
-    const PHASE_COLORS = {
-        queued: '#8299ad', preparing: '#8ba9c6', running: '#6f9eb7', needs_human: '#b59a7f', verifying: '#789f8d',
-        ready_for_review: '#88a996', recovering: '#a8a0b7', conflicted: '#b88c8f', failed: '#bf747a', timed_out: '#ae8b74',
-        budget_exceeded: '#b6907a', environment_error: '#bd7f88', cancelled: '#7f8994', merged: '#7fa48e',
+    // Phase colours are design tokens (tokens.css): canvas resolves them at draw
+    // time via phaseColor(); HTML swatches reference the custom property directly.
+    const PHASE_TOKENS = {
+        queued: '--viz-8', preparing: '--viz-5', running: '--viz-1', needs_human: '--viz-3', verifying: '--viz-7',
+        ready_for_review: '--viz-2', recovering: '--viz-6', conflicted: '--viz-4', failed: '--error', timed_out: '--warning',
+        budget_exceeded: '--warning', environment_error: '--error', cancelled: '--viz-8', merged: '--viz-2',
     };
+    const PHASE_FALLBACK = '--viz-8';
     const STOPPED = new Set(['failed', 'environment_error', 'timed_out', 'budget_exceeded', 'conflicted']);
     const WAITING = new Set(['queued', 'needs_human']);
 
     function esc(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
+    // Shared status vocabulary: done ✓ ok · active ● running · waiting ◆ warn ·
+    // failed ✗ danger · skipped – muted · pending ○ muted. Glyph + label, never colour alone.
+    const STATUS_KIND = { merged: 'done', ready_for_review: 'done', queued: 'pending', needs_human: 'waiting', conflicted: 'waiting', cancelled: 'skipped', failed: 'failed', timed_out: 'failed', budget_exceeded: 'failed', environment_error: 'failed' };
+    const KIND_GLYPH = { done: ['✓', 'tone-ok'], active: ['●', 'tone-running'], waiting: ['◆', 'tone-warn'], failed: ['✗', 'tone-danger'], skipped: ['–', 'tone-muted'], pending: ['○', 'tone-muted'] };
+    function applyStatusChip(node, status, archived) {
+        if (!node) return;
+        const [glyph, tone] = KIND_GLYPH[STATUS_KIND[String(status || '')] || (status ? 'active' : 'pending')];
+        node.className = `chip ${tone} jt-status-chip`;
+        node.replaceChildren();
+        const g = document.createElement('span'); g.setAttribute('aria-hidden', 'true'); g.textContent = glyph;
+        const label = document.createElement('span'); label.textContent = `${statusLabel(status)}${archived ? ' · archived' : ''}`;
+        node.append(g, label);
+    }
     function statusLabel(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase()); }
     function fmtNum(value, digits = 0) { const n = Number(value || 0); return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: digits }) : '—'; }
     function fmtMoney(value) { return `$${Number(value || 0).toFixed(2)}`; }
@@ -39,7 +55,10 @@
     function fmtSignedDuration(value) { const n = Number(value || 0); return `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmtDuration(Math.abs(n))}`; }
     function fmtWhen(epoch) { if (!epoch) return '—'; try { return new Date(Number(epoch) * 1000).toLocaleString(); } catch (_) { return '—'; } }
     function tokenCompact(tokens) { const entries = Object.entries(tokens || {}).filter(([, v]) => Number.isFinite(Number(v)) && Number(v) !== 0); return entries.length ? entries.slice(0, 4).map(([k, v]) => `${k}:${fmtNum(v)}`).join(' · ') : '—'; }
-    function css(name, fallback) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; }
+    function css(name, fallback = '') { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; }
+    function phaseToken(status) { return PHASE_TOKENS[status] || PHASE_FALLBACK; }
+    function phaseColor(status) { return css(phaseToken(status)); }
+    function canvasFont(size, family) { return `${size}px ${css(family === 'mono' ? '--font-mono' : '--font-sans')}`; }
     async function api(url) { const response = await fetch(url); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`); return data; }
     function phaseClass(status) {
         if (['preparing', 'running', 'recovering'].includes(status)) return 'active';
@@ -122,17 +141,17 @@
     function renderPhaseChart(a) {
         const { ctx, width, height } = setupCanvas(els.phaseCanvas, 210); ctx.clearRect(0, 0, width, height);
         const intervals = (a.phase_intervals || []).filter(x => Number(x.duration_seconds || 0) >= 0); const total = Math.max(0.001, Number(a.summary?.elapsed_seconds || intervals.reduce((s, x) => s + Number(x.duration_seconds || 0), 0)));
-        const left = 32, right = 22, top = 56, barH = 44, plotW = width - left - right; ctx.font = '11px system-ui'; ctx.fillStyle = css('--text-dim', '#86919c'); ctx.fillText('job lifetime', left, 28);
+        const left = 32, right = 22, top = 56, barH = 44, plotW = width - left - right; ctx.font = canvasFont(11); ctx.fillStyle = css('--text-tertiary'); ctx.fillText('job lifetime', left, 28);
         let cursor = left;
         for (const interval of intervals) {
-            const w = Math.max(interval.duration_seconds > 0 ? 1 : 0, plotW * Number(interval.duration_seconds || 0) / total); ctx.fillStyle = PHASE_COLORS[interval.status] || '#87919a';
+            const w = Math.max(interval.duration_seconds > 0 ? 1 : 0, plotW * Number(interval.duration_seconds || 0) / total); ctx.fillStyle = phaseColor(interval.status);
             ctx.globalAlpha = interval.passive_residence ? .42 : .78; ctx.fillRect(cursor, top, w, barH); ctx.globalAlpha = 1;
-            if (w > 64) { ctx.save(); ctx.beginPath(); ctx.rect(cursor + 3, top, w - 6, barH); ctx.clip(); ctx.fillStyle = css('--text', '#eef2f6'); ctx.font = '10px ui-monospace, monospace'; ctx.fillText(statusLabel(interval.status), cursor + 7, top + 18); ctx.fillText(`${fmtDuration(interval.duration_seconds)} · ${interval.classification || phaseClass(interval.status)}`, cursor + 7, top + 33); ctx.restore(); }
+            if (w > 64) { ctx.save(); ctx.beginPath(); ctx.rect(cursor + 3, top, w - 6, barH); ctx.clip(); ctx.fillStyle = css('--text-primary'); ctx.font = canvasFont(10, 'mono'); ctx.fillText(statusLabel(interval.status), cursor + 7, top + 18); ctx.fillText(`${fmtDuration(interval.duration_seconds)} · ${interval.classification || phaseClass(interval.status)}`, cursor + 7, top + 33); ctx.restore(); }
             cursor += w;
         }
-        ctx.strokeStyle = css('--hairline', 'rgba(150,160,170,.22)'); ctx.beginPath(); ctx.moveTo(left, top + barH + 24); ctx.lineTo(width - right, top + barH + 24); ctx.stroke();
-        for (let i = 0; i <= 4; i++) { const x = left + plotW * i / 4; ctx.fillStyle = css('--text-dimmer', '#6f7880'); ctx.font = '9px ui-monospace, monospace'; ctx.fillText(fmtDuration(total * i / 4), x - (i ? 10 : 0), top + barH + 42); }
-        const unique = [...new Set(intervals.map(x => x.status))]; els.phaseLegend.innerHTML = unique.map(status => `<span class="jt-legend-item"><span class="jt-legend-swatch" style="background:${PHASE_COLORS[status] || '#87919a'}"></span>${esc(statusLabel(status))}</span>`).join('');
+        ctx.strokeStyle = css('--hairline-color'); ctx.beginPath(); ctx.moveTo(left, top + barH + 24); ctx.lineTo(width - right, top + barH + 24); ctx.stroke();
+        for (let i = 0; i <= 4; i++) { const x = left + plotW * i / 4; ctx.fillStyle = css('--text-tertiary'); ctx.font = canvasFont(9, 'mono'); ctx.fillText(fmtDuration(total * i / 4), x - (i ? 10 : 0), top + barH + 42); }
+        const unique = [...new Set(intervals.map(x => x.status))]; els.phaseLegend.innerHTML = unique.map(status => `<span class="jt-legend-item"><span class="jt-legend-swatch" style="background:var(${phaseToken(status)})"></span>${esc(statusLabel(status))}</span>`).join('');
         els.phaseTable.innerHTML = (a.phase_breakdown || []).map(row => `<tr><td>${esc(statusLabel(row.status))}</td><td>${esc(phaseClass(row.status))}</td><td>${esc(fmtDuration(row.seconds))}</td><td>${Number(row.percent || 0).toFixed(1)}%</td><td>${fmtNum(row.occurrences)}</td></tr>`).join('');
         renderIntervals(a);
     }
@@ -159,11 +178,11 @@
 
     function renderAttemptChart(a) {
         const { ctx, width, height } = setupCanvas(els.attemptCanvas, 240); ctx.clearRect(0, 0, width, height); const attempts = a.attempts || [];
-        if (!attempts.length) { ctx.fillStyle = css('--text-dim', '#87919a'); ctx.font = '12px system-ui'; ctx.fillText('No implementation attempts recorded.', 28, 42); els.attemptTable.innerHTML = ''; return; }
+        if (!attempts.length) { ctx.fillStyle = css('--text-tertiary'); ctx.font = canvasFont(12); ctx.fillText('No implementation attempts recorded.', 28, 42); els.attemptTable.innerHTML = ''; return; }
         const left = 48, right = 42, top = 28, bottom = 42, plotW = width - left - right, plotH = height - top - bottom; const maxDur = Math.max(1, ...attempts.map(x => Number(x.duration_seconds || 0))); const maxCost = Math.max(.01, ...attempts.map(x => Number(x.cost_usd || 0))); const slot = plotW / attempts.length; const barW = Math.min(50, slot * .52);
-        ctx.strokeStyle = css('--hairline', 'rgba(150,160,170,.22)'); ctx.beginPath(); ctx.moveTo(left, top + plotH); ctx.lineTo(width - right, top + plotH); ctx.stroke(); const points = [];
-        attempts.forEach((attempt, index) => { const cx = left + slot * (index + .5); const bh = plotH * Number(attempt.duration_seconds || 0) / maxDur; ctx.fillStyle = attempt.status === 'completed' ? '#789f8d' : attempt.status === 'needs_human' ? '#b59a7f' : '#bd7f88'; ctx.globalAlpha = .66; ctx.fillRect(cx - barW / 2, top + plotH - bh, barW, bh); ctx.globalAlpha = 1; const py = top + plotH - plotH * Number(attempt.cost_usd || 0) / maxCost; points.push([cx, py]); ctx.fillStyle = css('--text-dimmer', '#717b84'); ctx.font = '9px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillText(`#${attempt.number}`, cx, height - 16); });
-        ctx.strokeStyle = '#9aaabb'; ctx.lineWidth = 1.7; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); points.forEach(([x, y]) => { ctx.beginPath(); ctx.fillStyle = '#9aaabb'; ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); }); ctx.textAlign = 'left';
+        ctx.strokeStyle = css('--hairline-color'); ctx.beginPath(); ctx.moveTo(left, top + plotH); ctx.lineTo(width - right, top + plotH); ctx.stroke(); const points = [];
+        attempts.forEach((attempt, index) => { const cx = left + slot * (index + .5); const bh = plotH * Number(attempt.duration_seconds || 0) / maxDur; ctx.fillStyle = css(attempt.status === 'completed' ? '--success' : attempt.status === 'needs_human' ? '--warning' : '--error'); ctx.globalAlpha = .66; ctx.fillRect(cx - barW / 2, top + plotH - bh, barW, bh); ctx.globalAlpha = 1; const py = top + plotH - plotH * Number(attempt.cost_usd || 0) / maxCost; points.push([cx, py]); ctx.fillStyle = css('--text-tertiary'); ctx.font = canvasFont(9, 'mono'); ctx.textAlign = 'center'; ctx.fillText(`#${attempt.number}`, cx, height - 16); });
+        ctx.strokeStyle = css('--text-secondary'); ctx.lineWidth = 1.7; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); points.forEach(([x, y]) => { ctx.beginPath(); ctx.fillStyle = css('--text-secondary'); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); }); ctx.textAlign = 'left';
         els.attemptTable.innerHTML = attempts.map(row => `<tr><td>#${row.number}</td><td>${esc(statusLabel(row.status))}</td><td>${esc(fmtDuration(row.duration_seconds))}</td><td>${esc(fmtMoney(row.cost_usd))}</td><td>${fmtNum(row.tool_calls)}</td><td>${fmtNum(row.agent_messages)}</td><td>${fmtNum(row.runtime_errors)}</td><td title="${esc(JSON.stringify(row.tokens || {}))}">${esc(tokenCompact(row.tokens))}</td></tr>`).join('');
     }
 
@@ -187,7 +206,7 @@
     async function loadComparison() { const compareId = els.compareSelect.value; if (!compareId || !state.analysis || compareId === state.analysis.job.id) { state.comparison = null; els.compareSection.hidden = true; return; } try { const data = await api(`/api/jobs/analysis/compare?job_id=${encodeURIComponent(state.analysis.job.id)}&compare_id=${encodeURIComponent(compareId)}`); state.comparison = data; renderComparison(data); } catch (error) { els.compareSection.hidden = true; showError(error.message); } }
 
     function renderAll(a) {
-        state.analysis = a; els.title.textContent = a.job.title; els.status.textContent = `· ${statusLabel(a.job.status)}${a.job.archived ? ' · archived' : ''}`; els.debugExport.href = `/api/jobs/${encodeURIComponent(a.job.id)}/debug-export`;
+        state.analysis = a; els.title.textContent = a.job.title; applyStatusChip(els.status, a.job.status, a.job.archived); els.debugExport.href = `/api/jobs/${encodeURIComponent(a.job.id)}/debug-export`;
         renderOverview(a); renderRuntimeTrace(a); renderPhaseChart(a); renderAttemptChart(a); renderTools(a); renderVerifications(a); renderIncidents(a); renderEvents(); els.main.hidden = false; els.empty.hidden = true; els.loading.hidden = true; els.error.hidden = true;
     }
     function showError(message) { els.error.textContent = String(message || 'Unknown error'); els.error.hidden = false; els.loading.hidden = true; }

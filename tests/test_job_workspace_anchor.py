@@ -15,11 +15,14 @@ EXECUTION = {"provider": "ollama", "model": "m", "session_type": "workspace"}
 
 
 @pytest.mark.parametrize("key", ["repository", "repo"])
-def test_legacy_repository_keys_rejected(tmp_path, key):
-    with pytest.raises(ValueError, match="no longer accepted|current workspace"):
-        _service(tmp_path).create_from_payload({
-            "title": "T", key: str(tmp_path), "execution": dict(EXECUTION),
-        })
+def test_repository_keys_accept_a_local_path(tmp_path, key):
+    # W8: ``repository`` is accepted again (URL or path); a path is the workspace.
+    ws = tmp_path / "plain"
+    ws.mkdir()
+    job = _service(tmp_path).create_from_payload({
+        "title": "T", key: str(ws), "execution": dict(EXECUTION),
+    })
+    assert job.repository == str(ws)
 
 
 def test_non_git_workspace_allowed_with_git_disabled(tmp_path):
@@ -47,11 +50,11 @@ def test_legacy_persisted_repository_job_still_loads(tmp_path):
     assert loaded.repository == "/legacy/repo"
 
 
-def test_tui_create_rejects_repo_flag_and_uses_session_workspace(tmp_path):
+def test_tui_create_repo_flag_and_session_workspace(tmp_path):
     from mu.commands import job as job_cmd
 
-    with pytest.raises(ValueError, match="--repo is no longer supported"):
-        job_cmd._parse_create("Title --repo /x", {"execution": {}})
+    # W8: a direct --repo passes the URL/path through for the service to resolve.
+    assert job_cmd._parse_create("Title --repo /x", {"execution": {}})["repository"] == "/x"
     payload = job_cmd._parse_create("Fix bug", {"workspace_root": str(tmp_path), "execution": {}})
     assert payload["workspace_root"] == str(tmp_path)
     assert payload["title"] == "Fix bug"

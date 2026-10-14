@@ -23,6 +23,9 @@ export interface ConnectionState {
   activeModel: string | null;
   isConnected: boolean;
   yolo: boolean;
+  /** Session plan mode (read-only; write tools blocked). Server-owned:
+   * refreshed from GET /api/variables, never persisted locally. */
+  planMode: boolean;
   /** F11: last-known server-side session revision (If-Match for queued
    * offline mutations). Refreshed from GET /api/sessions/active.
    * Round-32b F4: number|string token — never Number()-converted. */
@@ -65,6 +68,7 @@ export interface ConnectionState {
   setActiveProviderModel: (provider: string | null, model: string | null) => void;
   setConnected: (connected: boolean) => void;
   setYolo: (yolo: boolean) => void;
+  setPlanMode: (planMode: boolean) => void;
   loadFromStorage: () => Promise<void>;
   saveToStorage: () => Promise<void>;
   /** G5: replay the offline queue (FIFO, If-Match CAS on each item). */
@@ -142,6 +146,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   activeModel: null,
   isConnected: false,
   yolo: false,
+  planMode: false,
   sessionRevision: null,
   pendingMutations: 0,
   lastReplay: null,
@@ -187,6 +192,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     set({
       activeSessionName: name,
       sessionRevision: null,
+      // Plan mode is per session; the chat screen re-reads it for the new one.
+      planMode: name === current.activeSessionName ? current.planMode : false,
       conflictIds: restored ? [...restored] : globalIds,
       globalConflictIds: globalIds,
       conflictIdsBySession: parkedMap,
@@ -207,6 +214,10 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setYolo: (yolo: boolean) => {
     set({ yolo });
     get().saveToStorage();
+  },
+
+  setPlanMode: (planMode: boolean) => {
+    set({ planMode: Boolean(planMode) });
   },
 
   loadFromStorage: async () => {

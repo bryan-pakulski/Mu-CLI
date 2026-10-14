@@ -162,6 +162,7 @@ VARIABLE_SCHEMA = {
         "default": 0,
     },
     "yolo": {"type": bool, "default": False},  # YOLO mode (no approvals)
+    "plan_mode": {"type": bool, "default": False},  # Plan mode. Read-only: write tools are blocked (/plan on|off)
     "verbose": {
         "type": bool,
         "default": False,
@@ -195,7 +196,11 @@ VARIABLE_SCHEMA = {
         "default": True,
     },  # Render assistant text token-by-token instead of one final panel
     # Ollama provider knobs — set via `/set ollama_<key> <value>`.
-    "ollama_num_ctx": {"type": int, "default": 0},  # 0 = use server default
+    "ollama_num_ctx": {"type": int, "default": 0},  # 0 = automatic: local models get ollama_num_ctx_default (≥64k, capped by the trained window), always sent so the daemon never reloads; cloud routes ignore num_ctx
+    "ollama_num_ctx_default": {"type": int, "default": 65536},  # local models only; values below 65536 are raised to 65536
+    "ollama_keep_alive": {"type": str, "default": ""},  # empty = omit (the daemon's OLLAMA_KEEP_ALIVE applies); e.g. "30m", "-1"
+    "ollama_request_timeout": {"type": float, "default": 0.0},  # 0 = 900 s local (prompt processing streams nothing), 300 s cloud
+    "ollama_side_model": {"type": str, "default": ""},  # optional model for summaries/chunking so they never evict the main local KV cache
     "ollama_num_predict": {"type": int, "default": 0},
     "ollama_temperature": {"type": float, "default": 0.0},
     "ollama_top_p": {"type": float, "default": 0.0},
@@ -213,11 +218,23 @@ VARIABLE_SCHEMA = {
     },  # Per-session Ollama cloud bearer token. Empty falls back to env OLLAMA_API_KEY. Ignored by a local daemon.
     "ollama_token_safety_factor": {
         "type": float,
-        "default": 2.5,
-    },  # Divides the compaction context limit so the compactor triggers before the real (larger) prompt overflows the model window. cl100k_base under-counts Ollama's tokenizer ~2.2x; 2.5 gives ~20% headroom. 1.0 disables. Read by OllamaProvider.compaction_safety_factor.
+        "default": 1.3,
+    },  # Seed divisor for the compaction limit before the learned cl100k→real drift takes over. Measured drift for glm/qwen-class models is ~1.0–1.1; 1.3 leaves headroom. 1.0 disables. Read by OllamaProvider.compaction_safety_factor.
     "collation_enabled": {
         "type": bool,
         "default": True,
+    },
+    # Batched read results are delivered inline in the same turn unless the batch's
+    # combined size exceeds this share of the model's real context window (capped at
+    # collation_batch_cap_tokens). Large-context models effectively never collate, so a
+    # batch of reads costs one model turn instead of a follow-up `flush` turn.
+    "collation_batch_share": {
+        "type": float,
+        "default": 0.10,
+    },
+    "collation_batch_cap_tokens": {
+        "type": int,
+        "default": 24000,
     },
     "memory_enabled": {
         "type": bool,
@@ -334,6 +351,42 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },
+    "small_window_profile": {
+        # auto: compact tools/schemas, no skills index and capped context files when the
+        # model's real window is ≤ small_window_threshold; on/off force it.
+        "type": str,
+        "default": "auto",
+    },
+    "small_window_threshold": {"type": int, "default": 32768},
+    "openai_api": {
+        # auto: the Responses API for reasoning models on api.openai.com (encrypted reasoning
+        # is replayed between tool-loop turns); chat / responses force one API.
+        "type": str,
+        "default": "auto",
+    },
+    "openai_prompt_cache_retention": {
+        # e.g. "24h" for models that support extended prompt-cache retention; empty = API default.
+        "type": str,
+        "default": "",
+    },
+    "openai_xhigh_models": {
+        # OpenAI models that accept reasoning_effort "xhigh" (prefix match). /effort max|xhigh
+        # sends "high" to every other reasoning model.
+        "type": list,
+        "default": [],
+    },
+    "reasoning_effort": {
+        # Effort for agent turns: none | minimal | low | medium | high | xhigh | max (empty = provider default).
+        # Lower = less thinking, faster turns. Anthropic effort, OpenAI reasoning_effort, Ollama think.
+        "type": str,
+        "default": "",
+    },
+    "turn_roll_deferred": {
+        # Summarize a finished turn on a background thread and merge it at the next
+        # turn start, instead of blocking the end of the turn on a model call.
+        "type": bool,
+        "default": True,
+    },
     "turn_keep_budget_tokens": {
         # Projected-token budget a finished turn may keep verbatim in L5
         # before turn_roll folds it into L2.
@@ -389,9 +442,15 @@ VARIABLE_SCHEMA = {
         # Spec #10: tokens of raw tool output kept inline in the model
         # context at delivery. Results at or below this stay verbatim; larger
         # results are replaced by a compact observation + stored_ref + an
-        # explicit omission note. Small results cost nothing extra.
+        # explicit omission note. Small results cost nothing extra. The effective
+        # budget is also capped at tool_result_inline_share of the model's real
+        # context window, so small local models stay protected.
         "type": int,
-        "default": 256,
+        "default": 4000,
+    },
+    "tool_result_inline_share": {
+        "type": float,
+        "default": 0.05,
     },
     "tool_result_failure_budget": {
         # Spec #10: failures may use more space than routine success. Budget
@@ -405,7 +464,7 @@ VARIABLE_SCHEMA = {
         # Subagent reports and memory-search hits are model-facing prose the
         # parent must act on, so they get a roomier default than raw logs.
         "type": dict,
-        "default": {"await_subagent": 2048, "search_memory": 1024},
+        "default": {"read_file": 8000, "get_chunk": 8000, "await_subagent": 4000, "search_memory": 4000},
     },
     "read_dedup_enabled": {
         # Spec #7: content-hash freshness + range memo so re-reading an
@@ -710,6 +769,20 @@ def validate_and_cast(key, value):
         except (ValueError, TypeError):
             raise ValueError(f"Invalid float value for {key}: {value}")
 
+    if target_type == list:
+        # GUI/mobile/`/set` send text: a JSON list or comma-separated items.
+        if isinstance(value, (list, tuple)):
+            return [str(v).strip() for v in value if str(v).strip()]
+        text = str(value or "").strip()
+        if text.startswith("["):
+            import json as _json
+            try:
+                parsed = _json.loads(text)
+            except ValueError:
+                raise ValueError(f"Invalid list value for {key}: {value}")
+            return [str(v).strip() for v in parsed if str(v).strip()]
+        return [item.strip() for item in text.split(",") if item.strip()]
+
     return str(value)
 
 
@@ -745,7 +818,7 @@ TOOL SURFACE:
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
 - Context self-management: `context_status` reports projected request usage, result_ids and clearing restrictions. Use `clear_tool_results(result_ids, action='keep')` for evidence that must remain verbatim, and action='clear' to remove selected completed payloads with zero summarizer calls. Originals stay recallable. action='restore' releases a prior decision. Save a structured checkpoint (progress, decisions, resume, exceptions, next_action, constraints) as part of clearing or `compact`. Only use `compact(focus, through_index, preserve_result_ids, checkpoint)` when completed history itself needs summarizing; through_index bounds eligible history and later work stays active. The harness is a provider-window fallback, not a substitute for your task-aware decisions.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
-- Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
+- Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer when a result was parked there, `raise_blocker` to pause for user input.
 - Visual output: `publish_visualization(name, html|file_path, title?, height?)` publishes a persistent interactive HTML view into web/mobile chat and a browser link in TUI. Use it proactively when a visual explains data or structure better than prose; do not wait for the user to nudge a tool call.
 - Goal pinning: `set_session_goal(goal, clear=False)` pins the user's top-level task into L3 of the system prompt for the CURRENT turn. Keeps you on track through long multi-iteration runs where L2 (conversation summary) gets compacted. **Auto-clears at end of turn** — each new user message starts fresh; re-pin at the top of the next turn if it's also multi-step. Don't carry stale goals into unrelated requests. The user can also `/goal <text>` manually. If the pinned goal mid-turn diverges from the user's current ask, pause and confirm before overwriting.
 - **Clarification** — `ask_user_choice(question, options, multi_select=False, allow_other=False, description="")` — multiple-choice picker. 2-8 options. `multi_select=true` for select-all. `allow_other=true` for free-form fallback. Result: `{selected, other_text, cancelled}`.
@@ -774,9 +847,8 @@ GENERAL RULES:
    - For multiple matches, use `expected_count` or provide more context.
    - Use `dry_run=True` to preview changes before applying.
 5. Multiple tool calls in a single turn execute concurrently. Issue them together when the calls are independent reads (e.g. read 3 files at once). Use `batch_job` only when you need an atomic bundle with shared approval.
-6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, etc.) results are stored in a collation buffer.
-   You receive a status update when you call them; call `flush` when the gathered results answer the next decision. Do not repeatedly ask for information already in active context.
-7. YOU OWN YOUR CONTEXT. At completed task or batch boundaries, use `context_status` to inspect projected usage and result_ids. Keep relevant evidence with `clear_tool_results(action='keep')`; clear only selected completed results with action='clear' before paying for a summary. Preserve goal/filter rules, exact resume cursor, confirmed counts and side effects, unresolved exceptions, constraints and next action in its checkpoint. `compact` accepts that checkpoint, preserve_result_ids and a through_index boundary when older conversation also needs summarizing. Large relevant context may remain active. The harness clears eligible old results and then summarizes only as a fallback near the effective provider budget. Retrieve archived results; never repeat writes merely because their old output is out of context.
+6. Read-only tool results come back in the same turn. Only a very large batch is parked in the collation buffer; when a result says so, call `flush` for what you need. Do not repeatedly ask for information already in active context.
+7. YOU OWN YOUR CONTEXT. When the context grows large (long tasks, big gathers), use `context_status` to inspect projected usage and result_ids. Keep relevant evidence with `clear_tool_results(action='keep')`; clear only selected completed results with action='clear' before paying for a summary. Preserve goal/filter rules, exact resume cursor, confirmed counts and side effects, unresolved exceptions, constraints and next action in its checkpoint. `compact` accepts that checkpoint, preserve_result_ids and a through_index boundary when older conversation also needs summarizing. Large relevant context may remain active. The harness clears eligible old results and then summarizes only as a fallback near the effective provider budget. Retrieve archived results; never repeat writes merely because their old output is out of context.
 
 SELF-MANAGEMENT:
 - **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.
@@ -787,7 +859,7 @@ SELF-MANAGEMENT:
 - **Watch your own context fill.** Call `context_status` before big gathers and when a turn feels long. It returns per-layer token fill plus `l2_stale_vs_l5`, `uncheckpointed_entries`, `stale_memory_count`, `stale_todos`, and `memory_pressure_pct`. If L2 is stale relative to L5 progress, call `checkpoint_progress` to fold recent work into the summary yourself — don't wait for the budget to force it.
 - **Recognize your own stall.** If you've re-read the same files two iterations running without a concrete change (no write/bash/spawn between), STOP gathering: reconcile the ledger, decide the next concrete action, and act. Re-reading is not progress.
 - **You write the handoffs.** When you near the iteration cap or the user ends the turn mid-work, leave a consolidation in memory (`kind=consolidation` via `save_memory`, or just `save_memory` with the what's-done / what-remains / blocker): the next turn starts from your handoff, not from re-derivation.
-8. YOU MUST use scratchpad for temporary observations and short-term plans; refer often to it to confirm you are on track. YOU MUST use task memory for durable facts, decisions, and verified findings — keep memories concise and high-value. Retrieve memory (`search_memory`) before conducting significant actions or repeating tool work.
+8. Use the scratchpad for observations and short-term plans on long tasks, and task memory for durable facts, decisions and verified findings — concise and high-value. Call `search_memory` when the task may repeat earlier work; skip it for self-contained requests.
 9. For long-horizon work, maintain `todo_*` as a visible progress ledger so the user can see what you're doing — and prune it (rule 7) so it reflects current reality, not history.
 10. For focused side-quests that would consume large parent context (deep research, multi-file refactors), call `spawn_agent` with a tight `tools` whitelist. The child returns a clean summary; parent stays uncluttered.
 11. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs.
@@ -795,21 +867,21 @@ SELF-MANAGEMENT:
 """
 
 AGENTIC_MODES = {
-    "default": """WORKFLOW (Collation-Aware Default):
+    "default": """WORKFLOW (Default):
 
 0a. **Clarify when ambiguous.** If the request leaves real choices unresolved (which file? which language? scope? destructive ok?), use `ask_user_choice` BEFORE acting. One picker > one chat round-trip. Skip this only when intent is unambiguous.
 
-0b. **Recall before research.** Call `search_memory` for the topic / file paths / error patterns in the request. If you've seen this before, start from that grounding instead of re-deriving.
+0b. **Recall when it pays.** If the request may repeat earlier work (a known bug, a recurring area), `search_memory` for it first; skip this for self-contained requests.
 
-1. **Orient with semantic retrieval first.** For any non-trivial request, call `retrieve_relevant_context` with a natural-language query BEFORE manually reading files. It ranks by lexical overlap + symbol matches + recency + git-diff weighting and is far faster than blind `read_file` chains. Use `search_for_string` / `search_references` for exact-text follow-ups.
+1. **Orient efficiently.** When you don't know where to look, call `retrieve_relevant_context` with a natural-language query; when you do, read or search directly. It ranks by lexical overlap + symbol matches + recency + git-diff weighting and is far faster than blind `read_file` chains. Use `search_for_string` / `search_references` for exact-text follow-ups.
 
 2. **Plan when scope is non-trivial.** If the request needs 3+ tool calls or touches multiple files, publish a `todo_write` plan up front so the user can see your roadmap. Mark one task `in_progress` at a time via `todo_set_status`.
 
-3. **Context Collection (parallel).** Issue independent reads — `read_file`, `list_dir`, `search_*`, `retrieve_relevant_context` — in a single turn. They execute concurrently. Results buffer to the collation queue; call `flush` when you have enough to decide.
+3. **Context Collection (parallel).** Issue independent reads — `read_file`, `list_dir`, `search_*`, `retrieve_relevant_context` — in a single turn. They execute concurrently. Results come back together in the same turn.
 
 4. **Act.** Make the change with `apply_diff` (preferred for surgical edits with anchored hunks) or `search_and_replace_file` (preferred for unique-string substitutions). Use `write_file` only for new files or full rewrites.
 
-5. **Verify with evidence.** Don't claim done from inspection — run something. Tests via `bash` (`pytest`, `npm test`, `cargo test`), a linter, or a smoke command. Re-read the modified file to confirm the change landed as intended.
+5. **Verify with evidence.** Don't claim done from inspection — run something. Tests via `bash` (`pytest`, `npm test`, `cargo test`), a linter, or a smoke command. The edit tools return the result, so no re-read is needed.
 
 6. **Save what's reusable.** Persist non-obvious findings (root causes, architectural invariants, "X actually lives in Y not the obvious Z") with `save_memory` — future sessions benefit.
 
@@ -825,7 +897,7 @@ SCRATCHPAD TAGGING — the GUI debug panel reads scratchpad tags to populate its
 - General notes (repro steps, bisect state): `save_scratchpad` with descriptive tags (e.g. ["repro"], ["bisect"]).
 - Durable findings: `save_memory` with tags=["debug", "root-cause"] plus the file path / module.
 
-0. **Recall.** Call `search_memory` with the error string / file path / suspect symbol. If this bug or a sibling has been seen before, start from that fix — do not re-derive.
+0. **Recall when it pays.** If this looks like a known or recurring failure, `search_memory` with the error string / file path / suspect symbol. If this bug or a sibling has been seen before, start from that fix — do not re-derive.
 
 1. **Reproduce, deterministically.** Get the failing command via `bash` and capture full stderr. If the user gave a vague repro, narrow it: minimum command, minimum input, single failing test (`pytest path::test_x -xvs`, `cargo test -- name --nocapture`, `node --inspect-brk`). Write the repro to `save_scratchpad` (tags=["repro"]) so it survives across iterations.
 
@@ -853,7 +925,7 @@ Hard rules:
 - **CRITICAL: Do NOT call `create_feature`, `create_feature_task`, `create_phases`, or `create_task` until the user has explicitly approved the plan.** Present the entire plan as TEXT in chat first — feature name, phases, tasks, objectives, and exit criteria. Only after the user says "approved", "go ahead", or equivalent confirmation should you call the tool calls to create the feature. This prevents duplicate features from premature tool calls.
 - Do not begin implementation until the user has approved the plan and approval is recorded in session-managed metadata.
 - Work on exactly one `in_progress` task at a time, as returned by `get_current_task`.
-- Memory + scratchpad usage is mandatory: durable findings → `save_memory`; turn-local hypotheses / plans → `save_scratchpad`.
+- Record durable findings with `save_memory` and turn-local hypotheses / plans with `save_scratchpad` when they will matter on later tasks.
 - Blocked on user input / external decision / missing requirement → call `raise_blocker` immediately; do not loop blindly.
 - Finish only by passing the review pass and setting `review_status=completed` via `approve_feature_task`. If review fails, move failing tasks back to `in_progress` and continue implementation.
 
@@ -871,7 +943,7 @@ PHASE 2 — Per-task implementation loop (repeat until all tasks complete):
 
 a. **Re-orient.** `get_current_task` to know what's next. `search_memory` for the topic — prior decisions / pitfalls discovered in earlier tasks apply.
 
-b. **Gather context in parallel.** Issue independent reads (`read_file`, `retrieve_relevant_context`, `search_for_string`, `search_references`) in a SINGLE turn — they execute concurrently. Call `flush` once buffered.
+b. **Gather context in parallel.** Issue independent reads (`read_file`, `retrieve_relevant_context`, `search_for_string`, `search_references`) in a SINGLE turn — they execute concurrently and return together.
 
 c. **Delegate research-heavy sub-quests.** If a task needs sustained external research or a multi-file exploratory read pass that would clutter your planning context, fire `spawn_agent` with a read-only tools whitelist. The child returns a focused summary.
 
@@ -957,7 +1029,7 @@ You are in LOOP mode for multi-hour / multi-day autonomous execution. Operate as
 
 3) Per-Increment Cycle: Re-orient → Gather → Act → Verify → Reflect
    a. **Re-orient.** Restate the mission. `search_memory` for relevant prior findings. `todo_list` to see backlog state.
-   b. **Gather context in parallel.** `retrieve_relevant_context` for semantic grounding + `read_file` on top hits + `search_for_string` for specifics — all in ONE turn. `flush` when ready.
+   b. **Gather context in parallel.** `retrieve_relevant_context` for semantic grounding + `read_file` on top hits + `search_for_string` for specifics — all in ONE turn; results return together.
    c. **Act in small, testable increments.** Prefer surgical edits (`apply_diff`, `search_and_replace_file`) over rewrites. Risky multi-file changes go through `spawn_agent` for isolation.
    d. **Verify with evidence.** Run tests / linters / metrics / a smoke script via `bash`. No claim of progress without a concrete observation attached.
    e. **Reflect.** If verification failed, add a remediation subtask via `todo_write` and continue. If it passed, mark the todo `completed`.

@@ -283,7 +283,10 @@ def _bash_tool(args: Dict[str, Any], context) -> str:
         args.get("command", ""),
         context.folder_context,
         cwd=args.get("cwd"),
-        timeout_seconds=args.get("timeout_seconds", 120),
+        # Durable-job stages set a longer default (Settings → Tool command timeout).
+        timeout_seconds=args.get("timeout_seconds")
+        or (getattr(context, "variables", None) or getattr(getattr(context, "session", None), "variables", None)
+            or {}).get("bash_default_timeout_s") or 120,
         max_output_chars=args.get("max_output_chars", 12000),
         session_type=session_type_from_context(context),
         session=getattr(context, "session", None),

@@ -1,193 +1,343 @@
 {% extends "base.html" %}
 {% block title %}MuCLI — Engineering Work{% endblock %}
 {% block body %}
-<link rel="stylesheet" href="/static/css/product.css">
-<link rel="stylesheet" href="/static/css/crystal.css">
-<link rel="stylesheet" href="/static/css/clarity.css">
-<link rel="stylesheet" href="/static/css/refinement.css">
 <link rel="stylesheet" href="/static/css/work.css">
 <link rel="stylesheet" href="/static/css/work_management.css">
 <link rel="stylesheet" href="/static/css/work_polish.css">
 <link rel="stylesheet" href="/static/css/work_jira.css">
 
 <div class="work-app work-product-app" id="work-app" data-session="{{ session_name or '' }}">
+    <a href="#work-main" class="skip-link">Skip to content</a>
     <header class="work-header product-header">
         <div class="header-primary">
-            <a class="product-icon-button" href="/" title="Back to MuCLI" aria-label="Back to MuCLI">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"></path><path d="m12 19-7-7 7-7"></path></svg>
+            <a href="#/" class="work-logo" aria-label="Jobs dashboard">
+                <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg>
+                <span>jobs</span>
             </a>
-            <div class="session-identity">
-                <div class="session-title-wrap">
-                    <span class="session-title">Engineering work</span>
-                    <span class="session-subtitle"><span>MuCLI</span><span>·</span><span>Durable engineering jobs</span></span>
-                </div>
-            </div>
+            <nav aria-label="Breadcrumb" class="work-crumbs"><ol id="work-crumbs"><li><span aria-current="page">Dashboard</span></li></ol></nav>
         </div>
-        <div class="work-header-actions header-actions work-product-actions">
-            <span class="work-session-context" id="work-session-context"></span>
-            <a class="product-icon-button work-header-icon" href="/static/job_trace.html" title="Analyze jobs" aria-label="Analyze jobs">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9"></path><path d="M10 19V5"></path><path d="M16 19v-7"></path><path d="M22 19V3"></path><path d="M2 19h22"></path></svg>
-            </a>
-            <a class="product-icon-button work-header-icon" href="/static/model_costs.html" title="Model pricing" aria-label="Model pricing">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path></svg>
-            </a>
-            <button class="product-icon-button work-header-icon" id="work-jira-open" type="button" title="Jira tickets" aria-label="Browse Jira tickets">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg>
-            </button>
-            <button class="product-icon-button work-header-icon" id="work-jira-settings-open" type="button" title="Job settings" aria-label="Job settings">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path></svg>
-            </button>
-            <button class="product-icon-button work-header-icon" id="work-manage" title="Manage jobs" aria-label="Manage jobs">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path><circle cx="18" cy="18" r="2.5"></circle></svg>
-            </button>
-            <button class="product-icon-button work-header-icon" type="button" data-route-theme title="Toggle appearance" aria-label="Toggle appearance">
-                <svg data-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 15.2A8.3 8.3 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"></path></svg>
-                <svg data-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
-            </button>
-            <button class="product-header-chip work-new-product" id="work-new" type="button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-                <span>New job</span>
-            </button>
+        <span class="spacer"></span>
+        <ul class="work-chips" id="work-chips" aria-label="Status">
+            <li><a href="#/activity" class="work-chip tone-muted" data-chip="agents" title="Running agents"><span aria-hidden="true">●</span> <span data-chip-text>0 agents</span></a></li>
+            <li><a href="#/activity" class="work-chip tone-muted" data-chip="checks" title="Running builds and tests"><span aria-hidden="true">●</span> <span data-chip-text>0 checks</span></a></li>
+            <li><a href="#/" class="work-chip tone-muted" data-chip="needs" title="Jobs waiting for you"><span aria-hidden="true">◆</span> <span data-chip-text>0 need you</span></a></li>
+            <li data-chip-slot="engine" hidden><a href="#/activity" class="work-chip tone-muted" data-chip="engine" title="Container engine"><span aria-hidden="true">⬢</span> <span data-chip-text>docker</span></a></li>
+            <li><span class="work-chip tone-warn" data-chip="live" title="Reconnecting…"><span aria-hidden="true" data-chip-glyph>○</span> <span data-chip-text>offline</span></span></li>
+            <li><span class="work-chip tone-muted work-session-context" id="work-session-context" title="Session context"></span></li>
+        </ul>
+        <div class="work-tools work-header-actions header-actions">
+            <button type="button" class="btn ghost icon work-header-icon" id="work-palette-open" aria-label="Command palette (ctrl+k)" title="Command palette (ctrl+k)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></button>
+            <button type="button" class="btn ghost icon work-header-icon work-tool-optional" id="work-notify" aria-pressed="false" aria-label="Turn desktop notifications on" title="Desktop notifications when a job needs you"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-notify-icon="off"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7M10.3 21a1.94 1.94 0 0 0 3.4 0M2 2l20 20"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-notify-icon="on" hidden><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
+            <button type="button" class="btn ghost icon work-header-icon work-tool-optional" id="work-density" aria-label="Density: comfortable" title="Density: comfortable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-density-icon="comfortable"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-density-icon="compact" hidden><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M21 9H3M21 15H3"/></svg></button>
+            <button type="button" class="btn ghost icon product-icon-button work-header-icon" data-route-theme title="Toggle appearance" aria-label="Toggle appearance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-theme-icon="dark"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-theme-icon="light"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+            <button type="button" class="btn ghost icon work-header-icon" id="work-help-open" aria-label="Keyboard shortcuts (?)" title="Keyboard shortcuts (?)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg></button>
         </div>
     </header>
 
-    <main class="work-layout">
-        <aside class="work-board-pane">
-            <div class="work-pane-head">
-                <div>
-                    <span class="work-eyebrow">Friday Five</span>
-                    <h1>Engineering work</h1>
-                    <p>Autonomous jobs, human gates, verification and review.</p>
-                </div>
-                <div class="work-pane-head-controls">
-                    <button class="product-icon-button work-board-refresh" id="work-refresh" title="Refresh work queue" aria-label="Refresh work queue">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6v5h-5"></path><path d="M19 11a7.5 7.5 0 1 0 .3 4.3"></path></svg>
-                    </button>
-                    <div class="work-total" id="work-total">0</div>
-                </div>
-            </div>
-            <div class="work-board" id="work-board">
-                <div class="work-loading">Loading jobs…</div>
-            </div>
-        </aside>
+    <div class="work-body">
+        <nav class="work-side" aria-label="Main">
+            <ul>
+                <li><a href="#/" class="work-navlink" data-nav="dashboard" title="Dashboard (g h)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span>Dashboard</span></a></li>
+                <li><a href="#/jobs" class="work-navlink" data-nav="jobs" title="Jobs (g t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/></svg><span>Jobs</span><span class="badge tone-muted" id="work-total">0</span></a></li>
+                <li><a href="#/activity" class="work-navlink" data-nav="activity" title="Activity (g a)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>Activity</span></a></li>
+                <li><a href="#/boards" id="work-jira-open" class="work-navlink" data-nav="boards" aria-label="Browse Jira tickets" title="Tickets (g b)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 5v11M12 5v6M18 5v14"/></svg><span>Tickets</span></a></li>
+                <li><a href="#/history" id="work-manage" class="work-navlink" data-nav="history" title="Manage jobs" aria-label="Manage jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg><span>History</span></a></li>
+                <li><a href="#/settings" id="work-jira-settings-open" class="work-navlink" data-nav="settings" aria-label="Job settings" title="Job settings (g s)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>Settings</span></a></li>
+                <li><a href="#/setup" class="work-navlink" data-nav="setup" aria-label="Jobs setup and doctor" title="Setup and doctor (g u)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Setup</span><span class="badge tone-warn" id="work-setup-badge" hidden>!</span></a></li>
+            </ul>
+            <ul>
+                <li><a class="work-navlink product-icon-button work-header-icon" href="/static/job_trace.html" title="Analyze jobs" aria-label="Analyze jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg><span>Analysis</span></a></li>
+                <li><a class="work-navlink" href="/{% if session_name %}?session={{ session_name | urlencode }}{% endif %}" title="Back to chat" aria-label="Back to chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Chat</span></a></li>
+            </ul>
+        </nav>
 
-        <section class="work-detail-pane" id="work-detail" aria-live="polite">
-            <div class="work-empty-detail">
-                <div class="work-empty-mark">μ</div>
-                <h2>Select a job</h2>
-                <p>Review implementation evidence, verification output, Git changes and anything that needs your input.</p>
-            </div>
-        </section>
-    </main>
-
-    <div class="work-management-backdrop" id="work-management-backdrop" hidden>
-        <section class="work-management-pane" role="dialog" aria-modal="true" aria-labelledby="work-management-title">
-            <header class="work-management-head">
-                <div>
-                    <span class="work-eyebrow">History & telemetry</span>
-                    <h2 id="work-management-title">Job management</h2>
-                    <p>Query historic work, review aggregate outcomes, archive records and export debugging evidence.</p>
+        <main class="work-main work-layout" id="work-main" tabindex="-1">
+            <section class="work-route page stack" data-route="dashboard">
+                <div class="page-head">
+                    <h1>Dashboard</h1>
+                    <span class="spacer"></span>
+                    <div class="work-pane-head-controls">
+                        <button type="button" class="btn ghost icon work-board-refresh" id="work-refresh" title="Refresh" aria-label="Refresh jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
+                        <button type="button" class="btn primary" id="work-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg>New job <kbd aria-hidden="true">n</kbd></button>
+                    </div>
                 </div>
-                <div class="work-management-head-actions">
-                    <button class="work-icon-button" id="work-management-close" aria-label="Close job management">×</button>
+                <div class="work-setup-cta" id="work-setup-cta" role="status" hidden>
+                    <span class="status-icon tone-warn" aria-hidden="true">!</span>
+                    <span data-cta-text>Jobs aren’t fully set up yet. The setup checklist checks Docker, the runtime image, agents and the sandbox.</span>
+                    <span class="spacer"></span>
+                    <a href="#/setup" class="btn">Open setup</a>
+                    <button type="button" class="btn ghost icon" data-cta-dismiss aria-label="Dismiss setup reminder" title="Dismiss">×</button>
                 </div>
-            </header>
+                <div class="work-board stack" id="work-board"><div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>Loading…</div></div>
+            </section>
+            <section class="work-route page" data-route="jobs" hidden><div id="work-jobs"></div></section>
+            <section class="work-route page stack work-detail-pane" data-route="job" id="work-detail" aria-live="polite" hidden></section>
 
-            <div class="work-management-query">
-                <input id="work-management-query-text" type="search" placeholder="Search title, ID, description, branch…" aria-label="Search jobs">
-                <select id="work-management-status" aria-label="Filter by status">
-                    <option value="all">All statuses</option>
-                    <option value="failed">Failed</option>
-                    <option value="environment_error">Environment error</option>
-                    <option value="timed_out">Timed out</option>
-                    <option value="budget_exceeded">Budget exceeded</option>
-                    <option value="cancelled">Cancelled</option>
-                    <option value="merged">Merged</option>
-                    <option value="ready_for_review">Ready for review</option>
-                    <option value="needs_human">Needs human</option>
-                    <option value="running">Running</option>
-                    <option value="queued">Queued</option>
-                </select>
-                <select id="work-management-archive" aria-label="Archive state">
-                    <option value="all">Archived + current</option>
-                    <option value="current">Current only</option>
-                    <option value="archived">Archived only</option>
-                </select>
-                <select id="work-management-scope" aria-label="Job scope">
-                    <option value="history">Historic jobs</option>
-                    <option value="all">All jobs</option>
-                    <option value="active">Active only</option>
-                </select>
-                <input id="work-management-repository" type="search" placeholder="Repository contains…" aria-label="Filter repository">
-                <div style="display:flex;gap:7px;">
-                    <select id="work-management-age" aria-label="Created within">
-                        <option value="0">Any time</option>
-                        <option value="1">Last 24h</option>
-                        <option value="7">Last 7 days</option>
-                        <option value="30">Last 30 days</option>
-                        <option value="90">Last 90 days</option>
-                    </select>
-                    <button class="work-secondary" id="work-management-apply" type="button">Apply</button>
-                    <button class="work-secondary" id="work-management-reset" type="button">Reset</button>
+            <section class="work-route page stack" data-route="activity" id="work-activity" aria-labelledby="work-activity-title" hidden>
+                <div class="page-head">
+                    <h1 id="work-activity-title">Activity</h1>
+                    <span data-activity-engine></span>
+                    <span class="spacer"></span>
+                    <span class="muted small" data-activity-updated role="status"></span>
+                    <button type="button" class="btn ghost icon" id="work-activity-refresh" title="Refresh" aria-label="Refresh activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
                 </div>
-            </div>
+                <div class="stack" data-activity-body><div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>Loading activity…</div></div>
+            </section>
 
-            <section class="work-management-report" id="work-management-report-data" aria-label="Job report">
-                <div class="work-report-metrics">
-                    <div class="work-report-metric"><span>Jobs</span><strong>—</strong></div>
-                    <div class="work-report-metric"><span>Archived</span><strong>—</strong></div>
-                    <div class="work-report-metric"><span>Attempts</span><strong>—</strong></div>
-                    <div class="work-report-metric"><span>Cost</span><strong>—</strong></div>
-                    <div class="work-report-metric"><span>Avg runtime</span><strong>—</strong></div>
-                    <div class="work-report-metric"><span>Failure rate</span><strong>—</strong></div>
+            <section class="work-route page stack" data-route="boards" aria-labelledby="work-jira-title" hidden>
+                <div class="page-head">
+                    <h1 id="work-jira-title">Tickets</h1>
+                    <span class="muted small">Pick up Jira tickets as jobs</span>
+                    <span class="spacer"></span>
+                    <a href="#/settings" class="btn">Jira link settings</a>
+                </div>
+                <div class="work-jira-page stack" id="work-jira-backdrop">
+                    <section class="panel" id="work-jira-unlinked" hidden>
+                        <div class="panel-body col">
+                            <p>Jira isn't linked yet. Add your Jira URL and token in Settings.</p>
+                            <div><button type="button" class="btn primary" id="work-jira-browse-settings">Open settings</button></div>
+                        </div>
+                    </section>
+                    <div id="work-jira-browser" class="stack" hidden>
+                        <section class="panel" aria-label="Ticket filters">
+                            <div class="panel-body col">
+                                <div class="work-jira-row work-jira-filters">
+                                    <select id="jira-browse-board" aria-label="Board"></select>
+                                    <select id="jira-browse-sprint" aria-label="Sprint"></select>
+                                    <input id="jira-browse-jql" type="search" placeholder="JQL filter (optional)" aria-label="JQL filter">
+                                    <label class="check small work-jira-inline"><input id="jira-browse-mine" type="checkbox"> Mine</label>
+                                    <label class="check small work-jira-inline"><input id="jira-browse-done" type="checkbox"> Show done</label>
+                                    <button type="button" class="btn" id="jira-browse-load">Load</button>
+                                </div>
+                                <div class="work-jira-chips work-jira-status-chips" id="jira-browse-statuses" role="group" aria-label="Filter by status"></div>
+                                <p class="work-jira-message" id="jira-browse-message" role="status" hidden></p>
+                            </div>
+                        </section>
+                        <section class="panel" aria-labelledby="work-jira-tickets-h">
+                            <header><h2 id="work-jira-tickets-h">Tickets</h2><span class="spacer"></span><button type="button" class="btn primary sm" id="jira-import-selected" disabled>Create jobs from selected</button></header>
+                            <div class="panel-body flush table-wrap work-jira-table-wrap">
+                                <table class="table work-jira-table">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col"><input type="checkbox" id="jira-ticket-select-all" aria-label="Select all importable tickets"></th>
+                                            <th scope="col">Ticket</th>
+                                            <th scope="col">Summary</th>
+                                            <th scope="col">Jira status</th>
+                                            <th scope="col">Assignee</th>
+                                            <th scope="col">Linked job</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="jira-ticket-rows"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </section>
 
-            <div class="work-management-results-wrap">
-                <div class="work-management-toolbar">
-                    <div class="work-management-toolbar-left">
-                        <span class="work-management-selection" id="work-management-selection">0 selected</span>
-                        <button type="button" id="work-management-archive-selected" disabled>Archive</button>
-                        <button type="button" id="work-management-restore-selected" disabled>Restore</button>
-                        <button type="button" class="is-danger" id="work-management-delete-selected" disabled>Delete</button>
-                    </div>
-                    <div class="work-management-toolbar-right">
-                        <a id="work-management-export-json" href="#">Export report JSON</a>
-                        <a id="work-management-export-csv" href="#">Export CSV</a>
-                    </div>
+            <section class="work-route page stack" data-route="history" aria-labelledby="work-management-title" hidden>
+                <div class="page-head">
+                    <h1 id="work-management-title">History</h1>
+                    <span class="muted small">Query historic work, review aggregate outcomes, archive records and export debugging evidence.</span>
                 </div>
-                <div class="work-management-table-scroll">
-                    <table class="work-management-table">
-                        <thead>
-                            <tr>
-                                <th><input type="checkbox" id="work-management-select-all" aria-label="Select visible jobs"></th>
-                                <th>Job</th>
-                                <th>Status</th>
-                                <th>Repository</th>
-                                <th>Cost</th>
-                                <th>Attempts</th>
-                                <th>Updated</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="work-management-results">
-                            <tr><td colspan="8"><div class="work-loading">Open management to query history.</div></td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                <div class="work-management-page stack" id="work-management-backdrop">
+                    <section class="panel" aria-label="Query">
+                        <div class="panel-body work-management-query">
+                            <input id="work-management-query-text" type="search" placeholder="Search title, ID, description, branch…" aria-label="Search jobs">
+                            <select id="work-management-status" aria-label="Filter by status">
+                                <option value="all">All statuses</option>
+                                <option value="failed">Failed</option>
+                                <option value="environment_error">Environment error</option>
+                                <option value="timed_out">Timed out</option>
+                                <option value="budget_exceeded">Budget exceeded</option>
+                                <option value="cancelled">Cancelled</option>
+                                <option value="merged">Merged</option>
+                                <option value="ready_for_review">Ready for review</option>
+                                <option value="needs_human">Needs human</option>
+                                <option value="running">Running</option>
+                                <option value="queued">Queued</option>
+                            </select>
+                            <select id="work-management-archive" aria-label="Archive state">
+                                <option value="all">Archived + current</option>
+                                <option value="current">Current only</option>
+                                <option value="archived">Archived only</option>
+                            </select>
+                            <select id="work-management-scope" aria-label="Job scope">
+                                <option value="history">Historic jobs</option>
+                                <option value="all">All jobs</option>
+                                <option value="active">Active only</option>
+                            </select>
+                            <input id="work-management-repository" type="search" placeholder="Repository contains…" aria-label="Filter repository">
+                            <select id="work-management-age" aria-label="Created within">
+                                <option value="0">Any time</option>
+                                <option value="1">Last 24h</option>
+                                <option value="7">Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="90">Last 90 days</option>
+                            </select>
+                            <div class="row">
+                                <button class="btn" id="work-management-apply" type="button">Apply</button>
+                                <button class="btn ghost" id="work-management-reset" type="button">Reset</button>
+                            </div>
+                        </div>
+                    </section>
 
-            <footer class="work-management-footer">
-                <span id="work-management-range">0–0 of 0</span>
-                <div class="work-management-pager">
-                    <button type="button" id="work-management-previous">Previous</button>
-                    <button type="button" id="work-management-next">Next</button>
+                    <section class="work-management-report" id="work-management-report-data" aria-label="Job report">
+                        <ul class="plain work-stats work-report-metrics">
+                            <li class="work-stat work-report-metric"><span class="work-stat-value">—</span><span class="work-stat-label">jobs</span></li>
+                        </ul>
+                    </section>
+
+                    <section class="panel work-management-results-wrap" aria-labelledby="work-management-results-h">
+                        <header class="work-management-toolbar">
+                            <h2 id="work-management-results-h">Jobs</h2>
+                            <span class="badge work-management-selection" id="work-management-selection">0 selected</span>
+                            <div class="row wrap work-management-toolbar-left">
+                                <button type="button" class="btn sm" id="work-management-archive-selected" disabled>Archive</button>
+                                <button type="button" class="btn sm" id="work-management-restore-selected" disabled>Restore</button>
+                                <button type="button" class="btn sm tone-danger is-danger" id="work-management-delete-selected" disabled>Delete</button>
+                            </div>
+                            <span class="spacer"></span>
+                            <div class="row wrap work-management-toolbar-right">
+                                <a class="btn sm" id="work-management-export-json" href="#">Export report JSON</a>
+                                <a class="btn sm" id="work-management-export-csv" href="#">Export CSV</a>
+                            </div>
+                        </header>
+                        <div class="panel-body flush table-wrap work-management-table-scroll">
+                            <table class="table work-management-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col"><input type="checkbox" id="work-management-select-all" aria-label="Select visible jobs"></th>
+                                        <th scope="col">Job</th>
+                                        <th scope="col">Status</th>
+                                        <th scope="col">Repository</th>
+                                        <th scope="col" class="num">Cost</th>
+                                        <th scope="col" class="num">Attempts</th>
+                                        <th scope="col" class="num">Updated</th>
+                                        <th scope="col"><span class="sr-only">Actions</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="work-management-results">
+                                    <tr><td colspan="8"><div class="work-loading">Open History to query jobs.</div></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <footer class="work-management-footer">
+                            <span class="muted small" id="work-management-range">0–0 of 0</span>
+                            <span class="spacer"></span>
+                            <div class="row work-management-pager">
+                                <button type="button" class="btn sm" id="work-management-previous">Previous</button>
+                                <button type="button" class="btn sm" id="work-management-next">Next</button>
+                            </div>
+                        </footer>
+                    </section>
                 </div>
-            </footer>
-        </section>
+            </section>
+
+            <section class="work-route page stack" data-route="setup" aria-labelledby="work-setup-title" hidden>
+                <div class="page-head">
+                    <h1 id="work-setup-title">Setup</h1>
+                </div>
+                <div class="work-setup-tabs" role="tablist" aria-label="Setup">
+                    <a href="#/setup" role="tab" id="work-setup-tab-checklist" data-setup-tab="checklist" aria-controls="work-setup-panel-checklist" aria-selected="true">Checklist <span class="badge tone-warn" id="work-setup-tab-badge" hidden>!</span></a>
+                    <a href="#/doctor" role="tab" id="work-setup-tab-doctor" data-setup-tab="doctor" aria-controls="work-setup-panel-doctor" aria-selected="false">Doctor <span class="badge" id="work-doctor-badge"></span></a>
+                </div>
+                <div class="stack" role="tabpanel" id="work-setup-panel-checklist" data-setup-panel="checklist" aria-labelledby="work-setup-tab-checklist">
+                    <div class="row wrap">
+                        <span class="muted small" id="work-setup-summary">Each step checks your machine live; re-run any time</span>
+                        <span class="spacer"></span>
+                        <button type="button" class="btn" id="work-setup-recheck">Check all again</button>
+                        <button type="button" class="btn primary" id="work-setup-finish" disabled>Finish setup</button>
+                    </div>
+                    <div class="work-setup-progress" aria-hidden="true"><span id="work-setup-bar"></span></div>
+                    <div class="work-setup" id="work-setup"><div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>Checking your machine…</div></div>
+                </div>
+                <div class="stack" role="tabpanel" id="work-setup-panel-doctor" data-setup-panel="doctor" aria-labelledby="work-setup-tab-doctor" hidden>
+                    <div class="row wrap">
+                        <span class="muted small">Pass/warn/fail report of everything jobs depend on</span>
+                        <span class="spacer"></span>
+                        <button type="button" class="btn" id="work-doctor-run">Run again</button>
+                        <button type="button" class="btn" id="work-doctor-deep" title="Starts real stage containers for every ready agent; no model calls">Deep check (sandbox self-test)</button>
+                    </div>
+                    <div id="work-doctor"><div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>Running checks…</div></div>
+                </div>
+            </section>
+
+            <section class="work-route page stack" data-route="settings" aria-labelledby="work-jira-settings-title" hidden>
+                <div class="page-head">
+                    <h1 id="work-jira-settings-title">Settings</h1>
+                    <span class="muted small">Job defaults, run rules and the Jira link</span>
+                    <span class="spacer"></span>
+                    <a class="btn" href="/static/model_costs.html" title="Model pricing">Model pricing</a>
+                </div>
+                <div class="work-settings-page stack" id="work-jira-settings-backdrop">
+                    <section class="panel" aria-labelledby="work-stage-models-title">
+                        <header><h2 id="work-stage-models-title">Stage models</h2></header>
+                        <form id="work-stage-models-form" class="panel-body work-form" autocomplete="off" aria-labelledby="work-stage-models-title">
+                            <p class="work-jira-message" id="work-stage-models-warning" role="alert" hidden></p>
+                            <p class="work-jira-muted">Default provider and model for each pipeline stage. A job's own override wins; a blank stage uses the model of the job's session.</p>
+                            <div id="work-stage-model-rows"></div>
+                            <label class="work-jira-inline"><input id="work-plan-approval" type="checkbox" checked> Ask me to approve the plan and acceptance criteria before implementation</label>
+                            <p class="work-jira-message" id="work-stage-models-message" role="status" hidden></p>
+                            <footer class="work-form-actions">
+                                <button type="submit" class="btn primary">Save stage models</button>
+                            </footer>
+                        </form>
+                    </section>
+                    <div class="stack" id="work-run-rules" aria-label="Run rules"><div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>Loading run rules…</div></div>
+                    <section class="panel" aria-labelledby="work-jira-link-title">
+                        <header><h2 id="work-jira-link-title">Jira link</h2><span class="spacer"></span><span class="small muted work-jira-status" id="work-jira-link-status" role="status"></span></header>
+                        <form id="work-jira-settings-form" class="panel-body work-form" autocomplete="off" aria-labelledby="work-jira-link-title">
+                            <label class="work-field work-field-wide">
+                                <span>Jira URL</span>
+                                <input id="jira-base-url" type="url" placeholder="https://acme.atlassian.net">
+                            </label>
+                            <label class="work-field work-field-wide">
+                                <span>Email (Jira Cloud)</span>
+                                <input id="jira-email" type="email" placeholder="you@company.com">
+                            </label>
+                            <label class="work-field work-field-wide">
+                                <span>API token (Jira Cloud)</span>
+                                <input id="jira-api-token" type="password" placeholder="Atlassian API token" autocomplete="new-password">
+                            </label>
+                            <label class="work-jira-inline" hidden><input id="jira-api-token-clear" type="checkbox"> Remove saved API token</label>
+                            <label class="work-field work-field-wide">
+                                <span>Personal access token (Data Center / Server)</span>
+                                <input id="jira-pat" type="password" placeholder="Personal access token" autocomplete="new-password">
+                            </label>
+                            <label class="work-jira-inline" hidden><input id="jira-pat-clear" type="checkbox"> Remove saved PAT</label>
+                            <small class="work-jira-muted">Saved to $MUCLI_HOME/integrations/jira.json (owner-only). Environment variables override saved values. Tokens are never sent back to the browser.</small>
+
+                            <h3 class="work-jira-section">Preferences</h3>
+                            <label class="work-field work-field-wide">
+                                <span>Default JQL</span>
+                                <input id="jira-default-jql" type="text" placeholder="project = ABC AND statusCategory != Done">
+                            </label>
+                            <label class="work-jira-inline"><input id="jira-assigned-to-me" type="checkbox"> Show only tickets assigned to me by default</label>
+                            <div class="work-field work-field-wide">
+                                <span>Preferred boards</span>
+                                <ul class="work-jira-chips" id="jira-preferred-boards" aria-label="Preferred boards"></ul>
+                                <div class="work-jira-row">
+                                    <input id="jira-board-query" type="search" placeholder="Filter boards" aria-label="Filter boards">
+                                    <button type="button" class="btn" id="jira-board-find">Refresh</button>
+                                </div>
+                                <p class="work-jira-muted">Boards load automatically. Suggested ones have open tickets assigned to you. Star a board to make it preferred.</p>
+                                <ul class="work-jira-list" id="jira-board-results" aria-label="Board search results"></ul>
+                            </div>
+                            <p class="work-jira-message" id="jira-settings-message" role="status" hidden></p>
+                            <footer class="work-form-actions">
+                                <button type="button" class="btn tone-danger is-danger" id="jira-unlink">Unlink</button>
+                                <button type="button" class="btn" id="jira-test">Test connection</button>
+                                <button type="submit" class="btn primary">Save</button>
+                            </footer>
+                        </form>
+                    </section>
+                </div>
+            </section>
+        </main>
     </div>
 
-    <div class="work-modal-backdrop" id="work-create-backdrop" hidden>
+    <div class="work-modal-backdrop is-sheet" id="work-create-backdrop" hidden>
         <section class="work-modal" role="dialog" aria-modal="true" aria-labelledby="work-create-title">
             <header class="work-modal-head">
                 <div>
@@ -197,77 +347,75 @@
                 <button class="work-icon-button" id="work-create-close" aria-label="Close">×</button>
             </header>
             <form id="work-create-form" class="work-form">
+                <div class="work-field work-field-wide" id="job-workspace-field">
+                    <label for="job-workspace">Workspace</label>
+                    <input id="job-workspace" required list="job-workspace-recent" autocomplete="off" spellcheck="false" placeholder="/home/me/src/project — or https://github.com/org/repo.git" aria-describedby="job-repository-hint">
+                    <datalist id="job-workspace-recent"></datalist>
+                    <div class="row wrap work-workspace-recent" id="job-workspace-chips" role="group" aria-label="Recent workspaces"></div>
+                    <small id="job-repository-hint">The repository the job works in: a local path or a git URL (https or ssh).</small>
+                    <div class="work-env-approval" id="job-environments-approval" role="region" aria-label="Build environment approval" hidden></div>
+                </div>
                 <label class="work-field work-field-wide">
-                    <span>Title</span>
-                    <input id="job-title" required maxlength="180" placeholder="Fix OAuth callback validation">
+                    <span>Title or ticket key</span>
+                    <input id="job-title" required maxlength="180" placeholder="Fix OAuth callback validation — or PROJ-123" aria-describedby="job-title-hint">
+                    <small id="job-title-hint">A Jira key (PROJ-123) imports that ticket; anything else becomes the job title.</small>
                 </label>
                 <label class="work-field work-field-wide">
                     <span>Description</span>
                     <textarea id="job-description" rows="4" placeholder="What should change, and what constraints matter?"></textarea>
                 </label>
                 <label class="work-field work-field-wide">
-                    <span>Workspace</span>
-                    <small id="job-repository-hint"></small>
-                </label>
-                <label class="work-field work-field-wide">
                     <span>Acceptance criteria</span>
-                    <textarea id="job-acceptance" rows="4" placeholder="One criterion per line"></textarea>
+                    <textarea id="job-acceptance" rows="3" placeholder="One criterion per line (optional: the planner proposes them)"></textarea>
                 </label>
                 <label class="work-field work-field-wide">
                     <span>Validation commands</span>
-                    <textarea id="job-validation" rows="4" placeholder="pytest tests/auth\nnpm run typecheck"></textarea>
-                    <small>Jobs without validation commands will stop at a verification-required human gate.</small>
+                    <textarea id="job-validation" rows="3" placeholder="pytest tests/auth&#10;npm run typecheck"></textarea>
+                    <small>Optional. The planner proposes checks from the repository; commands listed here are added to them.</small>
                 </label>
-                <div class="work-form-grid">
-                    <label class="work-field">
-                        <span>Cost budget (USD)</span>
-                        <input id="job-cost" type="number" min="0.01" step="0.01" placeholder="5.00">
+                <div class="work-field work-field-wide work-unattended-field">
+                    <label class="work-check-field">
+                        <input id="job-auto-approve" type="checkbox" aria-describedby="job-auto-approve-hint">
+                        <span>Run unattended in sandbox</span>
                     </label>
-                    <label class="work-field">
-                        <span>Runtime budget (seconds)</span>
-                        <input id="job-runtime" type="number" min="1" step="1" placeholder="7200">
-                    </label>
-                    <label class="work-field">
-                        <span>Repair retries</span>
-                        <input id="job-retries" type="number" min="0" step="1" value="2">
-                    </label>
+                    <small id="job-auto-approve-hint">On: the implement stage auto-approves its writes inside the job’s disposable container. Off: each write waits for your approval. Default from Settings → New job defaults; never taken from the chat session.</small>
                 </div>
-                <details class="work-advanced" id="work-execution-details">
-                    <summary>Execution profile</summary>
-                    <p id="work-execution-help">Provider, model and mode are inherited from the current session when available.</p>
+                <details class="work-advanced" id="work-advanced-details">
+                    <summary>Advanced</summary>
+                    <div class="work-field work-field-wide" id="job-agents-field">
+                        <span id="job-agents-label">Agent per stage</span>
+                        <div id="job-agents"></div>
+                        <small id="job-agents-hint">Agent and model for each stage. A blank model uses Settings → Stage models, then the session’s model.</small>
+                    </div>
+                    <div class="work-field work-field-wide" id="job-environments-field">
+                        <span id="job-environments-label">Build environments</span>
+                        <div class="row wrap work-env-field" role="group" aria-labelledby="job-environments-label">
+                            <span class="grow mono small" id="job-environments-summary" aria-live="polite">Choose a workspace to see the build environments.</span>
+                            <button type="button" class="btn sm" id="job-environments-change">Change</button>
+                            <button type="button" class="btn ghost sm" id="job-environments-reset" hidden>Use default</button>
+                        </div>
+                        <small id="job-environments-hint">Each job snapshots its environments at start and removes them when it ends.</small>
+                    </div>
                     <div class="work-form-grid">
                         <label class="work-field">
-                            <span>Provider</span>
-                            <input id="job-provider" placeholder="openai">
+                            <span>Cost budget (USD)</span>
+                            <input id="job-cost" type="number" min="0" step="0.01" placeholder="Settings default ($100)" aria-describedby="job-cost-hint">
+                            <small id="job-cost-hint" class="muted">Blank = Settings default · 0 = no cap</small>
                         </label>
                         <label class="work-field">
-                            <span>Model</span>
-                            <input id="job-model" placeholder="model name">
+                            <span>Runtime budget (seconds)</span>
+                            <input id="job-runtime" type="number" min="1" step="1" placeholder="no limit">
+                        </label>
+                        <label class="work-field">
+                            <span>Repair retries</span>
+                            <input id="job-retries" type="number" min="0" step="1" value="2">
                         </label>
                         <label class="work-field">
                             <span>Agent mode</span>
-                            <input id="job-mode" placeholder="default">
+                            <input id="job-mode" placeholder="from the session">
                         </label>
                     </div>
-                    <label class="work-check-field">
-                        <input id="job-auto-approve" type="checkbox">
-                        <span>Auto-approve write tools for this job</span>
-                    </label>
-                </details>
-                <details class="work-advanced" id="work-stage-details">
-                    <summary>Stage models</summary>
-                    <p id="work-stage-help">Optional. Blank stages use the job model above, then the session model.</p>
-                    <div class="work-stage-grid" role="group" aria-labelledby="work-stage-help">
-                        <span class="work-stage-name" id="job-stage-plan-label">Plan</span>
-                        <input id="job-stage-plan-provider" data-stage="plan" data-field="provider" placeholder="provider" aria-label="Plan stage provider">
-                        <input id="job-stage-plan-model" data-stage="plan" data-field="model" placeholder="model" aria-label="Plan stage model">
-                        <span class="work-stage-name" id="job-stage-implement-label">Implement</span>
-                        <input id="job-stage-implement-provider" data-stage="implement" data-field="provider" placeholder="provider" aria-label="Implement stage provider">
-                        <input id="job-stage-implement-model" data-stage="implement" data-field="model" placeholder="model" aria-label="Implement stage model">
-                        <span class="work-stage-name" id="job-stage-review-label">Review</span>
-                        <input id="job-stage-review-provider" data-stage="review" data-field="provider" placeholder="provider" aria-label="Review stage provider">
-                        <input id="job-stage-review-model" data-stage="review" data-field="model" placeholder="model" aria-label="Review stage model">
-                    </div>
+                    <p class="small muted" id="work-execution-help"></p>
                 </details>
                 <div class="work-form-error" id="work-create-error"></div>
                 <footer class="work-modal-actions">
@@ -278,123 +426,16 @@
         </section>
     </div>
 
-    <div class="work-modal-backdrop" id="work-jira-settings-backdrop" hidden>
-        <section class="work-modal work-jira-modal" role="dialog" aria-modal="true" aria-labelledby="work-jira-settings-title">
-            <header class="work-modal-head">
-                <div>
-                    <span class="work-eyebrow">Job settings</span>
-                    <h2 id="work-jira-settings-title">Jira link</h2>
-                </div>
-                <button class="work-icon-button" id="work-jira-settings-close" type="button" aria-label="Close job settings">×</button>
-            </header>
-            <form id="work-stage-models-form" class="work-form" autocomplete="off" aria-labelledby="work-stage-models-title">
-                <h3 class="work-jira-section" id="work-stage-models-title">Stage models</h3>
-                <p class="work-jira-message" id="work-stage-models-warning" role="alert" hidden></p>
-                <p class="work-jira-muted">Default provider and model for each pipeline stage. A job's own settings win; blank stages make jobs stop and ask.</p>
-                <div id="work-stage-model-rows"></div>
-                <label class="work-jira-inline"><input id="work-plan-approval" type="checkbox" checked> Ask me to approve the plan and acceptance criteria before implementation</label>
-                <p class="work-jira-message" id="work-stage-models-message" role="status" hidden></p>
-                <footer class="work-form-actions">
-                    <button type="submit" class="work-primary">Save stage models</button>
-                </footer>
-            </form>
-            <form id="work-jira-settings-form" class="work-form" autocomplete="off">
-                <p class="work-jira-status" id="work-jira-link-status" role="status"></p>
-                <label class="work-field work-field-wide">
-                    <span>Jira URL</span>
-                    <input id="jira-base-url" type="url" placeholder="https://acme.atlassian.net">
-                </label>
-                <label class="work-field work-field-wide">
-                    <span>Email (Jira Cloud)</span>
-                    <input id="jira-email" type="email" placeholder="you@company.com">
-                </label>
-                <label class="work-field work-field-wide">
-                    <span>API token (Jira Cloud)</span>
-                    <input id="jira-api-token" type="password" placeholder="Atlassian API token" autocomplete="new-password">
-                </label>
-                <label class="work-jira-inline" hidden><input id="jira-api-token-clear" type="checkbox"> Remove saved API token</label>
-                <label class="work-field work-field-wide">
-                    <span>Personal access token (Data Center / Server)</span>
-                    <input id="jira-pat" type="password" placeholder="Personal access token" autocomplete="new-password">
-                </label>
-                <label class="work-jira-inline" hidden><input id="jira-pat-clear" type="checkbox"> Remove saved PAT</label>
-                <small class="work-jira-muted">Saved to $MUCLI_HOME/integrations/jira.json (owner-only). Environment variables override saved values. Tokens are never sent back to the browser.</small>
-
-                <h3 class="work-jira-section">Preferences</h3>
-                <label class="work-field work-field-wide">
-                    <span>Default JQL</span>
-                    <input id="jira-default-jql" type="text" placeholder="project = ABC AND statusCategory != Done">
-                </label>
-                <label class="work-jira-inline"><input id="jira-assigned-to-me" type="checkbox"> Show only tickets assigned to me by default</label>
-                <div class="work-field work-field-wide">
-                    <span>Preferred boards</span>
-                    <ul class="work-jira-chips" id="jira-preferred-boards" aria-label="Preferred boards"></ul>
-                    <div class="work-jira-row">
-                        <input id="jira-board-query" type="search" placeholder="Filter boards" aria-label="Filter boards">
-                        <button type="button" class="work-secondary" id="jira-board-find">Refresh</button>
-                    </div>
-                    <p class="work-jira-muted">Boards load automatically. Suggested ones have open tickets assigned to you. Star a board to make it preferred.</p>
-                    <ul class="work-jira-list" id="jira-board-results" aria-label="Board search results"></ul>
-                </div>
-                <p class="work-jira-message" id="jira-settings-message" role="status" hidden></p>
-                <footer class="work-form-actions">
-                    <button type="button" class="work-secondary is-danger" id="jira-unlink">Unlink</button>
-                    <button type="button" class="work-secondary" id="jira-test">Test connection</button>
-                    <button type="submit" class="work-primary">Save</button>
-                </footer>
-            </form>
-        </section>
-    </div>
-
-    <div class="work-modal-backdrop" id="work-jira-backdrop" hidden>
-        <section class="work-modal work-jira-modal work-jira-browser-modal" role="dialog" aria-modal="true" aria-labelledby="work-jira-title">
-            <header class="work-modal-head">
-                <div>
-                    <span class="work-eyebrow">Pick up work</span>
-                    <h2 id="work-jira-title">Jira tickets</h2>
-                </div>
-                <button class="work-icon-button" id="work-jira-close" type="button" aria-label="Close Jira tickets">×</button>
-            </header>
-            <div class="work-form">
-                <div id="work-jira-unlinked" hidden>
-                    <p>Jira isn't linked yet. Add your Jira URL and token in Job settings.</p>
-                    <button type="button" class="work-primary" id="work-jira-browse-settings">Open job settings</button>
-                </div>
-                <div id="work-jira-browser" hidden>
-                    <div class="work-jira-row work-jira-filters">
-                        <select id="jira-browse-board" aria-label="Board"></select>
-                        <select id="jira-browse-sprint" aria-label="Sprint"></select>
-                        <input id="jira-browse-jql" type="search" placeholder="JQL filter (optional)" aria-label="JQL filter">
-                        <label class="work-jira-inline"><input id="jira-browse-mine" type="checkbox"> Mine</label>
-                        <label class="work-jira-inline"><input id="jira-browse-done" type="checkbox"> Show done</label>
-                        <button type="button" class="work-secondary" id="jira-browse-load">Load</button>
-                    </div>
-                    <div class="work-jira-chips work-jira-status-chips" id="jira-browse-statuses" role="group" aria-label="Filter by status"></div>
-                    <p class="work-jira-message" id="jira-browse-message" role="status" hidden></p>
-                    <div class="work-jira-table-wrap">
-                        <table class="work-jira-table">
-                            <thead>
-                                <tr>
-                                    <th><input type="checkbox" id="jira-ticket-select-all" aria-label="Select all importable tickets"></th>
-                                    <th>Ticket</th>
-                                    <th>Jira status</th>
-                                    <th>Linked job</th>
-                                </tr>
-                            </thead>
-                            <tbody id="jira-ticket-rows"></tbody>
-                        </table>
-                    </div>
-                    <footer class="work-form-actions">
-                        <button type="button" class="work-primary" id="jira-import-selected" disabled>Create jobs from selected</button>
-                    </footer>
-                </div>
-            </div>
-        </section>
-    </div>
-
-    <div class="work-toast" id="work-toast" hidden></div>
+    <div class="work-toasts" id="work-toast" role="region" aria-label="Notifications"><div aria-live="polite" aria-relevant="additions" class="work-toast-stack" data-toast-stack></div></div>
 </div>
 <script src="/static/js/route_theme.js"></script>
+<link rel="stylesheet" href="/static/css/theme.css">
+<script src="/static/js/work/ui.js"></script>
+<script src="/static/js/work/plan_editor.js"></script>
+<script src="/static/js/work/environments.js"></script>
+<script src="/static/js/work/agents.js"></script>
+<script src="/static/js/work/view.js"></script>
+<script src="/static/js/work/activity.js"></script>
 <script src="/static/js/work.js"></script>
 <script src="/static/js/work_analysis_link.js"></script>
 <script src="/static/js/work_trace.js"></script>
@@ -402,4 +443,6 @@
 <script src="/static/js/work_management.js"></script>
 <script src="/static/js/work_jira.js"></script>
 <script src="/static/js/work_stage_models.js"></script>
+<script src="/static/js/work/rules.js"></script>
+<script src="/static/js/work/setup.js"></script>
 {% endblock %}

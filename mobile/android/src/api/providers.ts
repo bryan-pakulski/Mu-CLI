@@ -11,6 +11,10 @@ export interface CurrentProvider {
   provider: string | null;
   model: string | null;
   ollama_api_key_set: boolean;
+  /** Session effort for agent turns; "" = provider default. */
+  effort?: string;
+  /** Provider-neutral levels the server accepts (mapped per provider). */
+  effort_levels?: string[];
 }
 
 export interface ModelPricingInfo {

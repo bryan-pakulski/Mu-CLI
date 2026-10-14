@@ -192,9 +192,9 @@ def test_mobile_exposes_shared_diagnostics_and_worker_log_tail():
     assert '/diagnostics`' in api
     assert 'type JobDiagnosticsSnapshot' in mobile
     assert 'jobsApi.diagnostics(jobId)' in mobile
-    assert '<DetailSection title="Job diagnostics">' in mobile
-    assert 'diagnostics.worker_log_tail' in mobile
-    assert "const underlying = String(payload.error || '');" in mobile
+    assert 'Job diagnostics</Text>' in mobile
+    assert 'diagnostics?.worker_log_tail' in mobile
+    assert "JSON.stringify(e.payload)" in mobile
 
 
 def test_mobile_job_review_links_to_native_job_performance_analyzer():

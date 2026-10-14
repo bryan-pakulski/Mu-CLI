@@ -8,80 +8,72 @@
 }
 
 /* ---------------------------------------------------------------- RHS selectors
- * The stage is already a glass plane. Selectors sit on it as quiet text
- * controls; whitespace and one baseline replace nested fields. */
+ * Two quiet selects on the flat stage; one hairline marks the bar's edge. */
 .panel-stage { --panel-tabs-h: 64px; }
 .panel-select-nav {
     position: absolute;
     inset: 0 0 auto 0;
-    z-index: 8;
+    z-index: 2;
     height: var(--panel-tabs-h);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 18px;
-    padding: 0 18px 0 24px;
+    gap: var(--space-4);
+    padding: 0 var(--space-4) 0 var(--space-5);
     border-bottom: 1px solid var(--hairline);
-    background: color-mix(in srgb, var(--glass) 54%, transparent);
-    backdrop-filter: blur(24px) saturate(106%);
-    -webkit-backdrop-filter: blur(24px) saturate(106%);
+    background: var(--bg);
 }
 .panel-selectors {
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 30px;
+    gap: var(--space-6);
 }
 .panel-selector {
     min-width: 0;
     display: flex;
     align-items: flex-start;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
 }
 .panel-selector-label {
-    color: var(--text-dimmer);
-    font-family: var(--mono);
-    font-size: 8.5px;
-    font-weight: 600;
-    letter-spacing: .09em;
-    line-height: 1.2;
-    text-transform: uppercase;
+    color: var(--text-tertiary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    letter-spacing: 0;
+    line-height: var(--lh-tight);
+    text-transform: none;
     white-space: nowrap;
 }
 .panel-select-nav .panel-view-select {
+    display: block;
     width: auto;
     min-width: 138px;
     max-width: 190px;
-    height: 28px;
-    padding: 0 24px 1px 0;
-    border: 0;
-    border-bottom: 1px solid var(--hairline);
-    border-radius: 0;
+    height: var(--control-h-sm);
+    padding: 0 var(--space-5) 0 var(--space-2);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-sm);
     background-color: transparent;
-    color: var(--text-soft);
-    font-size: 11.5px;
-    font-weight: 520;
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
     box-shadow: none;
 }
 .panel-select-nav .panel-view-select:hover {
-    border-bottom-color: var(--border-strong);
-    color: var(--text);
-}
-.panel-select-nav .panel-view-select:focus {
-    border-bottom-color: var(--accent);
-    background-color: transparent;
-    box-shadow: none;
+    background-color: var(--bg-hover);
 }
 .panel-stage .mode-panel {
     inset: var(--panel-tabs-h) 0 0 0 !important;
 }
+/* Legacy strip markup is gone; keep the hooks hidden if a cached template renders. */
 .panel-tabs-strip,
 .panel-tab,
-.panel-view-select-wrap { display: none !important; }
-.panel-select-nav .panel-view-select { display: block !important; }
-.panel-select-nav .panel-selector { display: flex !important; }
+.panel-view-select-wrap { display: none; }
+.panel-select-nav .panel-selector { display: flex; }
 .panel-tabs-close {
+    align-self: center;
     flex: 0 0 30px;
     width: 30px;
     height: 30px;
@@ -89,234 +81,213 @@
     display: grid;
     place-items: center;
     border: 0;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-dimmer);
-    font-size: 16px;
+    color: var(--text-tertiary);
+    font-size: var(--fs-md);
 }
-.panel-tabs-close:hover { background: transparent; color: var(--text); }
+.panel-tabs-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-/* ---------------------------------------------------------------- composer */
-/* One input pane only. The older crystal layer drew a second frosted pseudo-
- * surface behind the real form, which made the bottom of chat look stacked. */
-.composer {
-    padding-top: 10px !important;
-}
+/* ---------------------------------------------------------------- composer
+ * One input pane only; no pseudo-surface behind the real form. */
 .composer::before {
     content: none !important;
-    display: none !important;
+    display: none;
 }
 
 /* Mode + session settings are a separate utility line. Keep them in normal
  * flow so textarea growth can never overlap the controls. */
 .composer-toolbar {
     position: static !important;
-    inset: auto !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    left: auto !important;
+    inset: auto;
     width: 100%;
     min-height: 28px;
-    margin: 0 0 16px;
+    margin: 0 0 var(--space-2);
     padding: 0 2px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
-    gap: 7px !important;
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
-}
-.composer-mode-pill,
-.composer-settings-btn {
-    min-height: 28px;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    color: var(--text-dimmer) !important;
-}
-.composer-mode-pill:hover,
-.composer-settings-btn:hover,
-.composer-mode-pill.open,
-.composer-settings-btn.open {
-    color: var(--text-soft) !important;
+    gap: var(--space-2);
+    background: transparent;
+    border: 0;
+    box-shadow: none;
 }
 
 /* The real form is the sole composer surface. */
 .composer form {
-    background: color-mix(in srgb, var(--glass-strong) 72%, transparent) !important;
-    backdrop-filter: blur(30px) saturate(108%);
-    -webkit-backdrop-filter: blur(30px) saturate(108%);
+    background: var(--bg-raised);
 }
 
 /* Status remains available when needed, but never reads as another pane. */
 .composer .hint {
     min-height: 0 !important;
-    margin-top: 7px !important;
-    padding: 0 4px !important;
-    border: 0 !important;
-    border-radius: 0 !important;
+    margin-top: var(--space-2);
+    padding: 0 var(--space-1);
+    border: 0;
+    border-radius: 0;
     background: transparent !important;
-    box-shadow: none !important;
+    box-shadow: none;
 }
 
-/* ---------------------------------------------------------------- settings */
+/* ---------------------------------------------------------------- settings
+ * planos Settings page: a page head, then each group as a panel (header row
+ * + body). Fields put the label above the control, a muted hint below and an
+ * inline error for invalid numbers; booleans are role=switch toggles. */
 .settings-pane {
-    max-width: 780px;
+    max-width: 820px;
 }
 .settings-pane-head {
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 24px;
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--hairline);
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+    padding: 0 var(--space-6) 0 0;
+    border-bottom: 0;
 }
 .settings-pane-title {
     margin: 0;
     color: var(--text);
-    font-size: 17px;
-    font-weight: 650;
-    letter-spacing: -.018em;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    letter-spacing: 0;
 }
 .settings-pane-copy {
-    margin: 5px 0 0;
-    max-width: 500px;
-    color: var(--text-dim);
-    font-size: 11.5px;
-    line-height: 1.55;
+    margin: var(--space-1) 0 0;
+    max-width: 520px;
+    color: var(--muted);
+    font-size: var(--fs-base);
+    line-height: var(--lh-body);
 }
 .settings-skills-button {
     flex: 0 0 auto;
-    min-height: 34px;
-    padding: 0 12px !important;
-    border: 1px solid var(--hairline) !important;
-    border-radius: 6px !important;
-    background: transparent !important;
-    color: var(--text-soft) !important;
-    font-size: 11.5px !important;
-    font-weight: 560 !important;
-    box-shadow: none !important;
+    height: var(--control-h);
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+    color: var(--text);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    box-shadow: none;
 }
 .settings-skills-button:hover {
-    border-color: var(--border-strong) !important;
-    background: var(--bg-hover) !important;
-    color: var(--text) !important;
+    background: var(--hover);
 }
 .settings-filter {
-    margin: 0 0 26px;
+    margin: 0 0 var(--space-4);
 }
 .settings-filter input {
     width: 100%;
-    height: 38px;
-    padding: 0 3px;
-    border: 0;
-    border-bottom: 1px solid var(--hairline);
-    border-radius: 0;
-    background: transparent;
+    height: var(--control-h);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
     color: var(--text);
     box-shadow: none;
 }
-.settings-filter input:focus {
-    border-bottom-color: var(--accent-line);
-    background: transparent;
-    box-shadow: none;
-}
 .settings-pane .var-group {
-    margin: 0;
-    border-bottom: 1px solid var(--hairline);
-}
-.settings-pane .var-group:first-of-type {
-    border-top: 1px solid var(--hairline);
+    margin: 0 0 var(--space-3);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
 }
 .settings-pane .var-group-head {
     width: 100%;
-    min-height: 50px;
-    padding: 0 !important;
+    min-height: 40px;
+    padding: var(--space-2) var(--space-4);
     display: grid;
-    grid-template-columns: 16px minmax(0,1fr) auto;
-    gap: 9px;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    gap: var(--space-2);
     align-items: center;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    color: var(--text-soft);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
     text-align: left;
 }
-.settings-pane .var-group-head:hover { color: var(--text); }
+.settings-pane .var-group-head:hover { color: var(--text); background: var(--hover); }
+.settings-pane .var-group.open .var-group-head { border-bottom: 1px solid var(--border); }
 .settings-pane .var-group-head .caret {
-    color: var(--text-dimmer);
-    transition: transform .16s ease;
+    color: var(--muted);
+    transition: transform var(--dur-small) var(--ease-out);
 }
 .settings-pane .var-group.open .var-group-head .caret { transform: rotate(90deg); }
 .settings-pane .var-group-name {
-    font-size: 12.5px;
-    font-weight: 610;
-    letter-spacing: -.006em;
+    font-size: var(--fs-base);
+    font-weight: var(--fw-semibold);
+    color: inherit;
+    text-transform: capitalize;
 }
 .settings-pane .var-group-count {
-    color: var(--text-dimmer);
-    font-size: 10px;
-    font-weight: 500;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--muted) 18%, transparent);
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: tabular-nums;
 }
 .settings-pane .var-group-body {
-    padding: 0 !important;
+    margin: 0;
+    padding: var(--space-4);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--space-4) var(--space-5);
+    border-left: 0;
 }
 .settings-pane .var-row {
-    min-height: 68px;
-    margin: 0 !important;
-    padding: 14px 0 14px 25px !important;
-    display: grid !important;
-    grid-template-columns: minmax(250px, 1fr) minmax(220px, 320px);
-    gap: 34px;
-    align-items: center;
-    border: 0 !important;
-    border-top: 1px solid color-mix(in srgb, var(--hairline) 68%, transparent) !important;
-    border-radius: 0 !important;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    align-items: stretch;
+    border: 0;
+    border-radius: 0;
     background: transparent !important;
-    box-shadow: none !important;
-    transition: background-color .14s ease;
-}
-.settings-pane .var-row:hover {
-    background: color-mix(in srgb, var(--glass) 18%, transparent) !important;
+    box-shadow: none;
 }
 .settings-pane .var-head {
     min-width: 0;
-    display: grid;
-    grid-template-columns: minmax(0,1fr) auto auto;
-    gap: 8px;
+    margin: 0;
+    display: flex;
+    gap: var(--space-2);
     align-items: center;
 }
 .settings-pane .var-key {
     min-width: 0;
-    color: var(--text-soft);
-    font-family: var(--sans);
-    font-size: 11.75px;
-    font-weight: 560;
-    letter-spacing: -.005em;
+    flex: 0 1 auto;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
     overflow-wrap: anywhere;
 }
 .settings-pane .var-type {
-    color: var(--text-dimmer) !important;
-    font-size: 9.5px;
-    font-weight: 500;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-regular);
 }
-.settings-pane .var-help-glyph {
-    width: 18px;
-    height: 18px;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--hairline);
-    border-radius: 50%;
-    color: var(--text-dimmer) !important;
-    font-size: 9px;
-}
+.settings-pane .var-help-glyph { display: none; }
 .settings-pane .var-head .icon-btn {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
+    min-height: 22px;
+    margin-left: auto;
     padding: 0;
-    color: var(--text-dimmer);
+    color: var(--muted);
 }
 .settings-pane .var-row > input,
 .settings-pane .var-bool {
@@ -324,34 +295,55 @@
     width: 100%;
 }
 .settings-pane .var-row > input {
-    height: 36px;
-    padding: 0 3px;
-    border: 0;
-    border-bottom: 1px solid var(--hairline);
-    border-radius: 0;
-    background: transparent;
+    height: var(--control-h);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
     color: var(--text);
+    font-size: var(--fs-base);
     box-shadow: none;
 }
-.settings-pane .var-row > input:focus {
-    border-bottom-color: var(--accent-line);
-    background: transparent;
-    box-shadow: none;
+.settings-pane .var-row > input[aria-invalid="true"] { border-color: var(--danger); }
+/* Variables with a fixed value set (reasoning_effort, openai_api, …) render as selects. */
+.settings-pane .var-row > select.var-options {
+    justify-self: stretch;
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font-size: var(--fs-base);
+    cursor: pointer;
+}
+.settings-pane .var-group-note {
+    margin: var(--space-2) 0 var(--space-3);
+    font-size: var(--fs-sm);
+    line-height: 1.45;
 }
 .settings-pane .var-bool {
-    min-height: 36px;
+    min-height: var(--control-h);
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 9px;
-    color: var(--text-dim);
-    font-size: 11px;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    color: var(--muted);
+    font-size: var(--fs-xs);
 }
-.settings-pane .var-bool input {
-    width: 16px;
-    height: 16px;
-    margin: 0;
+.settings-pane .var-hint {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
 }
+.settings-pane .var-error { display: none; color: var(--danger); font-size: var(--fs-xs); }
+.settings-pane .var-row > input[aria-invalid="true"] ~ .var-error { display: block; }
+.settings-pane .var-row.is-default .var-key::after { content: none; }
 
 /* ---------------------------------------------------------------- browser-only files */
 .files-browser-panel {
@@ -362,20 +354,19 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 18px;
+    gap: var(--space-4);
 }
 .files-browser-head .panel-title {
-    color: var(--text);
-    font-size: 16px;
-    font-weight: 640;
-    letter-spacing: -.015em;
+    color: var(--text-primary);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
 }
 .files-browser-head .panel-subtitle {
-    margin-top: 5px;
+    margin-top: var(--space-1);
     max-width: 440px;
-    color: var(--text-dim);
-    font-size: 11px;
-    line-height: 1.5;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-body);
 }
 .files-refresh {
     flex: 0 0 30px;
@@ -384,19 +375,21 @@
     padding: 0;
     display: grid;
     place-items: center;
-    border-radius: 6px;
-    color: var(--text-dim);
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
 }
+.files-refresh:hover { background: var(--bg-hover); color: var(--text-primary); }
 .files-browser {
     min-height: 0;
     flex: 1;
     overflow: auto;
 }
-.files-root + .files-root { margin-top: 24px; }
+.files-root + .files-root { margin-top: var(--space-5); }
 .files-root-label {
-    padding: 0 8px 8px;
-    color: var(--text-dimmer);
-    font-size: 9.5px;
+    padding: 0 var(--space-2) var(--space-2);
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -404,117 +397,145 @@
 .files-entry {
     width: 100%;
     min-height: 36px;
-    padding: 0 8px;
+    padding: 0 var(--space-2);
     display: grid;
-    grid-template-columns: 14px 17px minmax(0,1fr);
-    gap: 7px;
+    grid-template-columns: 14px 17px minmax(0, 1fr);
+    gap: var(--space-2);
     align-items: center;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-dim);
+    color: var(--text-secondary);
     text-align: left;
 }
-.files-entry:hover { background: var(--bg-hover); color: var(--text-soft); }
-.files-entry.selected { color: var(--text); background: color-mix(in srgb, var(--glass) 24%, transparent); }
-.files-entry.indent { padding-left: 26px; }
-.files-entry-icon { width: 15px; height: 15px; color: var(--text-dimmer); }
-.files-entry-chevron { width: 14px; color: var(--text-dimmer); text-align: center; }
+.files-entry:hover { background: var(--bg-hover); color: var(--text-primary); }
+.files-entry.selected { color: var(--text-primary); background: var(--accent-subtle); }
+.files-entry.indent { padding-left: var(--space-5); }
+.files-entry-icon { width: 15px; height: 15px; color: var(--text-tertiary); }
+.files-entry-chevron { width: 14px; color: var(--text-tertiary); text-align: center; }
 .files-entry .name {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
 }
-.files-subtree { margin-left: 7px; }
-.files-empty-directory { padding-left: 48px; font-size: 10.5px; }
-.files-empty { padding: 34px 0; }
-.files-empty-title { color: var(--text); font-size: 14px; font-weight: 610; }
-.files-error { margin-bottom: 14px; color: var(--err); font-size: 11px; }
+.files-subtree { margin-left: var(--space-2); }
+.files-empty-directory { padding-left: var(--space-7); font-size: var(--fs-xs); }
+.files-empty { padding: var(--space-6) 0; }
+.files-empty-title { color: var(--text-primary); font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+.files-error { margin-bottom: var(--space-3); color: var(--error); font-size: var(--fs-xs); }
 
-@media (max-width: 760px) {
-    .panel-select-nav { padding: 0 12px 0 16px; gap: 12px; }
-    .panel-selector-label { display: none; }
-    .panel-selectors { flex: 1; gap: 18px; }
-    .panel-selector { flex: 1; }
-    .panel-select-nav .panel-view-select { min-width: 0; max-width: none; width: 100%; }
-    .settings-pane-head { align-items: flex-start; flex-direction: column; }
-    .settings-pane .var-row { grid-template-columns: 1fr; gap: 10px; padding-left: 18px !important; }
-    .settings-pane .var-bool { justify-content: flex-start; }
-    .composer-toolbar { margin-bottom: 12px; }
-}
-
-/* Compact navigation stays reachable without competing with the session title. */
-/* Blur creates a containing block for fixed menus. These already tinted
- * surfaces sit over a soft background and do not need another blur pass. */
-.chat-column, .composer, .composer form {
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-}
+/* ---------------------------------------------------------------- compact navigation */
 .main, .chat-column, .chat-history { min-height: 0; }
-/* The composer participates in layout, so growing input and attachments can
- * never cover the last response or an approval waiting for a decision. */
-.composer { position: relative; flex-shrink: 0; }
-.chat-history { padding-bottom: 24px; scroll-padding-bottom: 24px; }
-.conversation-stage-rail { bottom: calc(var(--composer-height, 142px) + 8px); }
 .sidebar-scrim, .header-mobile-menu { display: none; }
 .header-mobile-menu summary { list-style: none; cursor: pointer; }
 .header-mobile-menu summary::-webkit-details-marker { display: none; }
 .header-mobile-menu nav {
-    position: absolute; top: calc(100% + 8px); right: 0;
-    display: grid; width: 220px; max-width: calc(100vw - 24px);
-    padding: 6px; border: 1px solid var(--hairline); border-radius: 10px;
-    background: var(--glass-strong); box-shadow: var(--shadow-modal);
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    right: 0;
+    display: grid;
+    width: 220px;
+    max-width: calc(100vw - var(--space-5));
+    padding: var(--space-1);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    box-shadow: var(--shadow-1);
+    animation: mu-enter var(--dur-small) var(--ease-out) both;
 }
 .header-mobile-menu nav :is(a, button) {
-    display: flex; align-items: center; min-height: 44px; padding: 8px 12px;
-    text-align: left; color: var(--text-soft); text-decoration: none;
-    background: transparent; border: 0;
+    display: flex;
+    align-items: center;
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    text-align: left;
+    text-decoration: none;
 }
+.header-mobile-menu nav :is(a, button):hover { background: var(--bg-hover); color: var(--text-primary); }
+
 @media (max-width: 760px) {
-    .app, .app.sidebar-hidden { grid-template-columns: 0 minmax(0, 1fr); grid-template-rows: 58px minmax(0, 1fr); }
-    .product-header { padding-inline: 12px; gap: 8px; z-index: 70; }
-    .header-primary { flex: 1; min-width: 0; gap: 8px; }
+    .panel-select-nav { gap: var(--space-2); padding: 0 var(--space-3); }
+    .panel-selector-label { display: none; }
+    .panel-selectors { flex: 1; gap: var(--space-3); }
+    .panel-selector { flex: 1; }
+    .panel-select-nav .panel-view-select { width: 100%; min-width: 0; max-width: 100%; }
+    .settings-pane-head { align-items: flex-start; flex-direction: column; flex-wrap: wrap; gap: var(--space-3); }
+    .settings-pane .var-group-body { grid-template-columns: minmax(0, 1fr); }
+    .composer-toolbar { margin-bottom: var(--space-2); }
+    /* One-line placeholder on phones; the full hint returns on focus-typing. */
+    .composer textarea:placeholder-shown { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .product-header { padding-inline: var(--space-3); gap: var(--space-2); z-index: calc(var(--z-sticky) + 4); }
+    .header-primary { flex: 1; min-width: 0; gap: var(--space-2); }
     .session-identity, .session-title-wrap { min-width: 0; }
     .session-title { max-width: 100%; }
     .header-actions { flex: 0 0 auto; gap: 2px; }
     .header-actions .product-secondary-action { display: none; }
     .header-mobile-menu { display: block; position: relative; }
     .header-mobile-menu summary, .product-icon-button, .product-sidebar-toggle {
-        min-width: 44px; min-height: 44px;
+        min-width: var(--touch-target);
+        min-height: var(--touch-target);
     }
-    .product-sidebar { position: fixed; inset: 58px auto 0 0; transition: transform .2s ease; }
     .sidebar-scrim {
-        display: block; position: fixed; inset: 0; z-index: 55;
-        padding: 0; border: 0; border-radius: 0;
-        background: var(--backdrop);
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: calc(var(--z-sticky) + 2);
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: var(--scrim);
     }
-    .panel-select-nav { gap: 8px; padding: 0 12px; }
-    .panel-selectors { flex: 1; gap: 12px; }
-    .panel-selector { flex: 1; }
-    .panel-select-nav .panel-view-select { width: 100%; min-width: 0; max-width: 100%; }
-    .composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
-    .composer textarea { font-size: 16px; max-height: min(200px, 32dvh); }
-    .inspector-backdrop { padding: 10px; }
+    .inspector-backdrop { padding: var(--space-2); }
     .inspector {
-        width: 100% !important; height: calc(100dvh - 20px);
-        grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr);
+        width: 100%;
+        height: calc(100dvh - var(--space-4));
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
     }
     .inspector-head {
-        min-height: 0; grid-column: 1; grid-row: 1;
-        padding: 8px !important; border-right: 0 !important;
-        border-bottom: 1px solid var(--hairline) !important;
-        flex-direction: row; align-items: center !important; gap: 6px;
+        min-height: 0;
+        grid-column: 1;
+        grid-row: 1;
+        padding: var(--space-2);
+        border-right: 0;
+        border-bottom: 1px solid var(--hairline-color);
+        flex-direction: row;
+        align-items: center;
+        gap: var(--space-1);
     }
     .inspector-tabs {
-        flex: 1; min-width: 0; flex-direction: row !important;
-        overflow-x: auto; padding: 4px; gap: 4px;
+        flex: 1;
+        min-width: 0;
+        flex-direction: row;
+        overflow-x: auto;
+        padding: var(--space-1);
+        gap: var(--space-1);
     }
-    .inspector-tabs button { width: auto; min-height: 44px; flex-shrink: 0; white-space: nowrap; }
-    .inspector-head > .icon-btn { margin-top: 0; align-self: center; flex-shrink: 0; min-width: 44px; min-height: 44px; }
-    .inspector-body { grid-column: 1; grid-row: 2; padding: 22px 16px !important; }
-    .settings-pane-head { flex-wrap: wrap; gap: 12px; }
-    .welcome-modal-backdrop { padding: 10px; }
-    .welcome-wizard { height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); }
+    .inspector-tabs button { width: auto; min-height: var(--touch-target); flex-shrink: 0; white-space: nowrap; }
+    .inspector-head > .icon-btn {
+        position: static;
+        margin-top: 0;
+        align-self: center;
+        flex-shrink: 0;
+        min-width: var(--touch-target);
+        min-height: var(--touch-target);
+    }
+    .inspector-body { grid-column: 1; grid-row: 2; padding: var(--space-5) var(--space-4); }
+    .welcome-modal-backdrop { padding: var(--space-2); }
+    .welcome-wizard { height: calc(100dvh - var(--space-4)); max-height: calc(100dvh - var(--space-4)); }
+}
+
+@media (pointer: coarse) {
+    .composer-mode-pill,
+    .composer-settings-btn,
+    .panel-tabs-close,
+    .files-refresh,
+    .files-entry { min-height: var(--touch-target); }
 }

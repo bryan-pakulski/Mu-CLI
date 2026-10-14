@@ -14,6 +14,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
 import { WorkspacePathField } from './WorkspacePathField';
 import { SafeAreaModal } from './SafeAreaModal';
+import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
 
 export type WorkspaceSettingsSheetProps = {
   visible: boolean;
@@ -96,8 +97,8 @@ export function WorkspaceSettingsSheet({
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.header, { paddingTop: 16 }]}>
-          <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.bgHover }]}>
+        <View style={[styles.header, { paddingTop: spacing.base }]}>
+          <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border }]}>
             <Ionicons name="close" size={20} color={colors.text} />
           </TouchableOpacity>
           <View style={styles.headerCopy}>
@@ -109,26 +110,25 @@ export function WorkspaceSettingsSheet({
 
         <ScrollView
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[styles.content, { paddingBottom: 96 }]}
+          contentContainerStyle={[styles.content, { paddingBottom: spacing['4xl'] }]}
         >
           {loading ? (
             <ActivityIndicator color={colors.accent} style={styles.loader} />
           ) : (
             <>
-              <Text variant="xs" dim style={styles.sectionLabel}>ATTACHED</Text>
+              <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.muted }]}>Attached</Text>
               {workspaces.length === 0 ? (
-                <View style={[styles.empty, { backgroundColor: colors.bgLift }]}>
+                <View style={[styles.empty, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
                   <Ionicons name="folder-open-outline" size={22} color={colors.textDim} />
                   <Text variant="sm" dim>No workspace is attached to this session.</Text>
                 </View>
               ) : (
-                <View style={[styles.list, { backgroundColor: colors.bgLift }]}>
+                <View style={[styles.list, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
                   {workspaces.map((path, index) => (
                     <View
                       key={path}
                       style={[
                         styles.workspaceRow,
-                        index < workspaces.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
                       ]}
                     >
                       <Ionicons name="folder" size={17} color={colors.textDim} />
@@ -143,15 +143,15 @@ export function WorkspaceSettingsSheet({
                 </View>
               )}
 
-              <Text variant="xs" dim style={styles.sectionLabel}>ADD FOLDER</Text>
+              <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.muted }]}>Add folder</Text>
               <WorkspacePathField value={candidate} onChangeText={setCandidate} />
               <TouchableOpacity
                 onPress={addWorkspace}
                 disabled={!canAdd}
-                style={[styles.addButton, { backgroundColor: canAdd ? colors.bgHover : colors.bgLift }]}
+                style={[styles.addButton, { backgroundColor: colors.raised, borderColor: colors.border, opacity: canAdd ? 1 : 0.5 }]}
               >
                 <Ionicons name="add" size={18} color={canAdd ? colors.text : colors.textDim} />
-                <Text variant="sm" style={{ color: canAdd ? colors.text : colors.textDim, fontWeight: '600' }}>
+                <Text variant="sm" style={{ color: canAdd ? colors.text : colors.textDim, fontWeight: fontWeights.semibold }}>
                   Attach folder
                 </Text>
               </TouchableOpacity>
@@ -159,23 +159,23 @@ export function WorkspaceSettingsSheet({
           )}
 
           {error ? (
-            <View style={[styles.errorBox, { backgroundColor: colors.bgLift }]}>
-              <Ionicons name="alert-circle-outline" size={18} color={colors.error} />
-              <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
+            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: colors.errorSubtle, borderColor: colors.danger }]}>
+              <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
+              <Text variant="xs" style={{ color: colors.text, flex: 1 }}>{error}</Text>
             </View>
           ) : null}
         </ScrollView>
 
-        <View style={[styles.footer, { backgroundColor: colors.bg, paddingBottom: 14 }]}>
+        <View style={[styles.footer, { backgroundColor: colors.bg, borderTopColor: colors.border, paddingBottom: spacing.base }]}>
           <TouchableOpacity
             onPress={save}
             disabled={!canSave}
-            style={[styles.saveButton, { backgroundColor: canSave ? colors.text : colors.bgHover }]}
+            style={[styles.saveButton, { backgroundColor: canSave ? colors.accent : colors.raised, borderColor: canSave ? colors.accent : colors.border }]}
           >
             {saving ? (
-              <ActivityIndicator color={colors.bg} />
+              <ActivityIndicator color={colors.accentOn} />
             ) : (
-              <Text style={{ color: canSave ? colors.bg : colors.textDim, fontWeight: '700' }}>Save workspace</Text>
+              <Text style={{ color: canSave ? colors.accentOn : colors.textDim, fontWeight: fontWeights.semibold }}>Save workspace</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -186,21 +186,21 @@ export function WorkspaceSettingsSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingBottom: spacing.base },
   headerCopy: { flex: 1, alignItems: 'center' },
-  title: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
-  iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  iconSpacer: { width: 40 },
-  content: { paddingHorizontal: 18, paddingTop: 8 },
-  loader: { marginTop: 40 },
-  sectionLabel: { marginTop: 22, marginBottom: 10, letterSpacing: 0.7, fontWeight: '700' },
-  empty: { minHeight: 92, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 18 },
-  list: { borderRadius: 16, overflow: 'hidden' },
-  workspaceRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 13 },
-  pathText: { flex: 1, lineHeight: 17 },
-  removeButton: { width: 46, minHeight: 52, alignItems: 'center', justifyContent: 'center' },
-  addButton: { minHeight: 44, borderRadius: 14, marginTop: 9, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  errorBox: { flexDirection: 'row', gap: 9, borderRadius: 14, padding: 12, marginTop: 16 },
-  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12 },
-  saveButton: { minHeight: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
+  iconButton: { width: touchTarget, height: touchTarget, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  iconSpacer: { width: touchTarget },
+  content: { paddingHorizontal: spacing.base, paddingTop: spacing.sm },
+  loader: { marginTop: spacing.xl },
+  sectionLabel: { marginTop: spacing.lg, marginBottom: spacing.sm, fontWeight: fontWeights.semibold },
+  empty: { minHeight: 92, borderRadius: radii.panel, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.base },
+  list: { borderRadius: radii.panel, overflow: 'hidden' },
+  workspaceRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingLeft: spacing.md },
+  pathText: { flex: 1, lineHeight: typography.xs.lineHeight },
+  removeButton: { width: touchTarget, minHeight: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  addButton: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.control, marginTop: spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  errorBox: { flexDirection: 'row', gap: spacing.sm, borderWidth: 1, borderLeftWidth: 3, borderRadius: radii.control, padding: spacing.md, marginTop: spacing.base },
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.base, paddingTop: spacing.md, borderTopWidth: 1 },
+  saveButton: { minHeight: 48, borderWidth: 1, borderRadius: radii.control, alignItems: 'center', justifyContent: 'center' },
 });

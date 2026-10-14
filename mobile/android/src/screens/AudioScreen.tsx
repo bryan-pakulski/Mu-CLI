@@ -5,7 +5,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Button, EmptyState, ErrorState } from '../components';
 import { useConnectionStore } from '../store/connection';
 import { audioApi } from '../api/audio';
-import { spacing } from '../theme/tokens';
+import { spacing, fontWeights, radii } from '../theme/tokens';
 
 export function AudioScreen() {
   const { colors } = useTheme();
@@ -31,23 +31,23 @@ export function AudioScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ padding: spacing.base }}>
-        <Text variant="lg" style={{ fontWeight: '600', marginBottom: spacing.sm }}>Audio</Text>
+        <Text variant="lg" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Audio</Text>
 
         <Card style={{ marginBottom: spacing.sm }}>
-          <Text variant="base" style={{ fontWeight: '500', marginBottom: spacing.sm }}>Text-to-Speech</Text>
+          <Text variant="base" style={{ fontWeight: fontWeights.medium, marginBottom: spacing.sm }}>Text-to-Speech</Text>
           <TextInput
             value={text}
             onChangeText={setText}
             placeholder="Enter text to synthesize…"
             placeholderTextColor={colors.textDim}
             multiline
-            style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: 6, padding: 12, minHeight: 100, marginBottom: spacing.sm }}
+            style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.sm }}
           />
           <Button title={loading ? 'Generating…' : 'Generate TTS'} onPress={tts} disabled={loading || !text.trim()} />
         </Card>
 
         <Card style={{ marginBottom: spacing.sm }}>
-          <Text variant="base" style={{ fontWeight: '500', marginBottom: spacing.sm }}>Speech-to-Text</Text>
+          <Text variant="base" style={{ fontWeight: fontWeights.medium, marginBottom: spacing.sm }}>Speech-to-Text</Text>
           <Text variant="xs" style={{ color: colors.textDim }}>
             STT requires recording audio. Connect a microphone and use the record button below.
           </Text>

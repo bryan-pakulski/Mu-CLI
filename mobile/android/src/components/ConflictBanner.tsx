@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { Text, Button } from './';
@@ -71,10 +70,12 @@ export function ConflictBanner({ style }: { style?: ViewStyle }) {
       style={[
         styles.banner,
         {
-          backgroundColor: colors.errorBg,
-          borderColor: colors.error,
-          borderRadius: radii.lg,
-          padding: spacing.base,
+          backgroundColor: colors.errorSubtle,
+          borderWidth: 1,
+          borderLeftWidth: 3,
+          borderColor: colors.danger,
+          borderRadius: radii.control,
+          padding: spacing.md,
           gap: spacing.sm,
         },
         style,
@@ -83,7 +84,7 @@ export function ConflictBanner({ style }: { style?: ViewStyle }) {
       accessibilityLabel={`${count} offline ${count === 1 ? 'change' : 'changes'} in conflict`}
     >
       <View style={styles.row}>
-        <Ionicons name="warning-outline" size={16} color={colors.error} />
+        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger, marginRight: spacing.sm }}>✗</Text>
         <Text variant="sm" style={{ color: colors.text, flex: 1 }}>
           {count === 1
             ? '1 offline change conflicts with the current session.'
@@ -115,9 +116,7 @@ export function ConflictBanner({ style }: { style?: ViewStyle }) {
 }
 
 const styles = StyleSheet.create({
-  banner: {
-    borderWidth: StyleSheet.hairlineWidth,
-  },
+  banner: {},
   row: {
     flexDirection: 'row',
     alignItems: 'center',

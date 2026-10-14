@@ -24,6 +24,11 @@
     }
 
     function selectedJobId() {
+        // Only poll while the Diagnostics tab is showing.
+        const host = detail.querySelector('.work-detail');
+        if (!host || host.closest('[hidden]')) return '';
+        const current = document.getElementById('work-detail')?.dataset.jobId;
+        if (current) return current;
         const selected = document.querySelector('.work-job-card.is-selected[data-job-id]');
         return selected ? String(selected.dataset.jobId || '') : '';
     }
@@ -53,7 +58,13 @@
         const events = Array.isArray(snapshot.diagnostics) ? snapshot.diagnostics : [];
         const failure = snapshot.latest_failure || null;
         const hasLog = Boolean(snapshot.worker_log_exists && snapshot.worker_log_tail);
-        if (!events.length && !hasLog) return;
+        if (!events.length && !hasLog && !failure) {
+            const empty = document.createElement('section');
+            empty.className = 'work-section work-diagnostics-section';
+            empty.innerHTML = '<p class="empty">✓ No diagnostics recorded for this job.</p>';
+            host.appendChild(empty);
+            return;
+        }
 
         const section = document.createElement('section');
         section.className = 'work-section work-diagnostics-section';
@@ -63,7 +74,7 @@
                     <h3>Job diagnostics</h3>
                     <p class="work-muted">Execution, worker and Git-preflight telemetry. Filter the trace, then expand only the event you need.</p>
                 </div>
-                <a class="work-secondary work-export-link" href="/api/jobs/${encodeURIComponent(snapshot.job_id)}/debug-export">Export debug bundle</a>
+                <a class="btn sm work-export-link" href="/api/jobs/${encodeURIComponent(snapshot.job_id)}/debug-export">Export debug bundle</a>
             </div>
 
             <div class="work-diagnostic-facts">
@@ -156,6 +167,7 @@
         if (selectedJobId()) schedule();
     });
     observer.observe(detail, { childList: true, subtree: true });
+    window.addEventListener('mu:job-diagnostics', () => { lastSignature = ''; schedule(); });
     setInterval(schedule, 3000);
     schedule();
 })();

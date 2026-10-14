@@ -106,7 +106,7 @@
                     </div>
                     <div class="collapse-body"
                          x-show="t.open"
-                         x-transition.opacity.duration.180ms>
+                         x-transition.opacity.duration.200ms>
                         <template x-for="ct in t.childTurns" :key="ct.id">
                             <div class="turn-wrap"
                                  :data-turn-id="ct.id"
@@ -130,9 +130,9 @@
                                             <span class="label">trace</span>
                                             <span class="summary" x-text="summarizeTrace(ct, $store.chat.clock)"></span>
                                         </div>
-                                        <div class="trace-events" x-show="ct.open" x-transition.opacity.duration.180ms>
+                                        <div class="trace-events" x-show="ct.open" x-transition.opacity.duration.200ms>
                                             <template x-for="ev in ct.events" :key="ev.id">
-                                                <div :class="'trace-event te-' + ev.kind"
+                                                <div :class="'trace-event te-' + ev.kind + (ev.planBlocked ? ' te-plan-blocked' : '')"
                                                      @click="ev.kind === 'tool_result' && ev.cacheKey ? $store.chat.openCachePopup(ev.cacheKey, ev.name) : null"
                                                      :style="ev.kind === 'tool_result' && ev.cacheKey ? 'cursor: pointer;' : ''">
                                                     <div class="te-line">
@@ -210,9 +210,9 @@
                     </div>
                     <div class="trace-events"
                          x-show="t.open"
-                         x-transition.opacity.duration.180ms>
+                         x-transition.opacity.duration.200ms>
                         <template x-for="ev in t.events" :key="ev.id">
-                            <div :class="'trace-event te-' + ev.kind"
+                            <div :class="'trace-event te-' + ev.kind + (ev.planBlocked ? ' te-plan-blocked' : '')"
                                  @click="ev.kind === 'tool_result' && ev.cacheKey ? $store.chat.openCachePopup(ev.cacheKey, ev.name) : null"
                                  :style="ev.kind === 'tool_result' && ev.cacheKey ? 'cursor: pointer;' : ''">
                                 <div class="te-line">
@@ -251,7 +251,7 @@
                     </div>
                     <div class="sap-rows"
                          x-show="t.open"
-                         x-transition.opacity.duration.180ms>
+                         x-transition.opacity.duration.200ms>
                         <template x-for="a in t.agents" :key="a.task_id">
                             <div class="sap-row" :class="'is-' + a.status">
                                 <div class="sap-row-head">
@@ -297,7 +297,7 @@
                                     <span x-text="a.details_open ? 'Hide activity' : 'View activity'"></span>
                                     <b x-text="(a.actions || []).length"></b>
                                 </button>
-                                <div class="sap-activity" x-show="a.details_open" x-transition.opacity.duration.140ms>
+                                <div class="sap-activity" x-show="a.details_open" x-transition.opacity.duration.120ms>
                                     <div class="sap-activity-head">
                                         <span>Action timeline</span>
                                         <span>oldest → newest</span>
@@ -397,8 +397,10 @@
         <div class="msg prompt"
              x-data="promptModal()"
              x-effect="sync(item)"
+             :class="{ 'prompt-approval': ['tool_approval', 'diff'].includes(shape) }"
+             role="group" aria-label="Awaiting your input"
              @keydown.escape.window="cancel()">
-            <div class="role">awaiting input</div>
+            <div class="role"><span class="status-glyph" aria-hidden="true">◆</span> awaiting input</div>
             <div class="prompt-body">
                 <h4 class="title markdown" x-html="titleHtml()"></h4>
                 <div class="desc markdown"
@@ -423,7 +425,7 @@
                                @change="setChoice('__other__', $event.target.checked)">
                         <input type="text" placeholder="other…"
                                x-model="otherText"
-                               style="margin-left:8px;flex:1;width:auto;">
+                               style="margin-left:var(--space-2);flex:1;width:auto;">
                     </label>
                 </div>
 
@@ -469,13 +471,12 @@
                     <div class="desc">
                         tool:
                         <strong x-text="prompt.tool_name || '(unknown tool)'"></strong>
-                        <span x-show="prompt.risk"
-                              style="margin-left:8px;color:var(--err);font-family:var(--mono);font-size:11.5px;letter-spacing:1px;text-transform:uppercase;"
+                        <span x-show="prompt.risk" class="pill tone-danger prompt-risk"
                               x-text="prompt.risk"></span>
                     </div>
                     <pre class="diff-pane" x-text="formatArgs(prompt.tool_args)"></pre>
-                    <label style="display:flex;gap:8px;margin-top:8px;color:var(--text-soft);font-size:13px;cursor:pointer;">
-                        <input type="checkbox" x-model="remember" style="width:auto;accent-color:var(--accent);">
+                    <label style="display:flex;gap:var(--space-2);margin-top:var(--space-2);color:var(--text-secondary);font-size:var(--fs-sm);cursor:pointer;">
+                        <input type="checkbox" x-model="remember" style="width:auto;accent-color:var(--accent-solid);">
                         <span>remember for this session</span>
                     </label>
                 </div>
@@ -486,8 +487,12 @@
                 </div>
 
                 <div class="actions">
-                    <button @click="cancel()">cancel</button>
-                    <button class="primary"
+                    <button class="btn"
+                            :class="{ 'tone-danger': ['tool_approval', 'diff'].includes(shape) }"
+                            @click="cancel()"
+                            x-text="['tool_approval', 'diff'].includes(shape) ? 'Deny' : 'Cancel'">cancel</button>
+                    <button class="btn primary"
+                            :class="{ 'solid tone-ok': ['tool_approval', 'diff'].includes(shape) }"
                             @click="submit()"
                             x-text="okLabel()"></button>
                 </div>
@@ -552,7 +557,7 @@
                 <span class="caret">▾</span>
             </button>
             <div class="composer-mode-popout" x-show="modeOpen"
-                 x-transition.opacity.duration.150ms
+                 x-transition.opacity.duration.120ms
                  role="listbox">
                 <template x-for="m in $store.mode.modes" :key="m.name">
                     <button class="mode-option"
@@ -580,7 +585,7 @@
                 <span class="dots">···</span>
             </button>
             <div class="composer-settings-popout settings-side-modal" x-show="settingsOpen"
-                 x-transition.opacity.duration.150ms
+                 x-transition.opacity.duration.120ms
                  x-init="$store.inspector.loadVariables()">
                 <div class="settings-header">
                     <span>session settings</span>
@@ -661,13 +666,27 @@
                                 @click="$store.inspector.toggleGroup(g.name)"
                                 :aria-expanded="$store.inspector.isGroupOpen(g.name)">
                             <span class="caret" x-text="$store.inspector.isGroupOpen(g.name) ? '▾' : '▸'"></span>
-                            <span x-text="g.name"></span>
+                            <span x-text="$store.inspector.groupLabel(g.name)"></span>
                         </button>
                         <div class="settings-vars" x-show="$store.inspector.isGroupOpen(g.name)">
+                            <p class="settings-group-note" x-show="$store.inspector.groupNote(g.name)"
+                               x-text="$store.inspector.groupNote(g.name)"></p>
                             <template x-for="v in g.variables" :key="v.key">
-                                <label class="settings-var" :title="v.description || v.key">
+                                <label class="settings-var" :title="v.help || v.description || v.key">
                                     <span class="settings-var-key mono" x-text="v.key"></span>
-                                    <input class="settings-var-input"
+                                    <template x-if="v.options && v.options.length">
+                                        <select class="settings-var-select settings-var-options"
+                                                :value="v.value ?? ''"
+                                                @change="$event.target.value === ''
+                                                    ? $store.inspector.resetVariable(v.key)
+                                                    : $store.inspector.setVariable(v.key, $event.target.value)">
+                                            <template x-for="opt in v.options" :key="opt">
+                                                <option :value="opt" :selected="(v.value ?? '') === opt"
+                                                        x-text="opt === '' ? 'default' : opt"></option>
+                                            </template>
+                                        </select>
+                                    </template>
+                                    <input x-show="!(v.options && v.options.length)" class="settings-var-input"
                                            :type="v.type === 'bool' ? 'checkbox' : 'text'"
                                            :checked="v.type === 'bool' ? v.value === true || v.value === 'true' : false"
                                            :value="v.type === 'bool' ? '' : (v.value ?? '')"
@@ -683,6 +702,17 @@
         </div>
     </div>
 
+    <!-- Plan mode strip: persistent read-only notice while plan_mode is on. -->
+    <div class="plan-mode-strip" data-testid="plan-mode-strip"
+         x-show="$store.planMode.active" x-cloak
+         role="status" aria-live="polite"
+         :title="$store.planMode.tooltip">
+        <span class="plan-mode-strip-icon" aria-hidden="true">🔒</span>
+        <span class="plan-mode-strip-text"><strong>Plan mode</strong> — read-only. Writing is blocked.</span>
+        <button type="button" class="plan-mode-strip-off"
+                :disabled="$store.planMode.busy"
+                @click="$store.planMode.turnOff()">Turn off</button>
+    </div>
     <!-- MUCLI_UNIFIED_REGISTRIES_V1: selection chips remain in the composer; registry lives in the Artifacts panel. -->
     <div class="attachment-selection" x-show="$store.attachments.selectedItems().length">
         <template x-for="item in $store.attachments.selectedItems()" :key="item.attachment_id">
@@ -695,7 +725,7 @@
     <form @submit.prevent="if ($store.chat.canSend($refs.input.value)) { $store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'; cc.close() }">
         <div class="composer-input-wrap">
             <!-- command completion popup -->
-            <div class="cmd-complete" x-show="cc.visible && cc.items.length" x-transition.opacity.duration.100ms>
+            <div class="cmd-complete" x-show="cc.visible && cc.items.length" x-transition.opacity.duration.120ms>
                 <template x-for="(item, i) in cc.items" :key="item.value + i">
                     <div class="cmd-complete-row"
                          :class="{ selected: i === cc.selectedIdx }"
@@ -708,6 +738,9 @@
             <textarea
                 x-ref="input"
                 placeholder="Ask anything. / for commands. Enter to send, Shift+Enter for newline."
+                :placeholder="$store.planMode.active
+                    ? 'Plan mode (read-only): ask for analysis or a plan — writing is blocked. /plan off to allow edits.'
+                    : 'Ask anything. / for commands. Enter to send, Shift+Enter for newline.'"
                 @input="autoSize($el); (() => {
                     const v = $el.value;
                     if (v.startsWith('/') && !v.includes('\n')) {
@@ -753,24 +786,24 @@
         </button>
         <button type="submit" class="primary send-btn"
                 :disabled="$store.chat.busy && !$store.chat.isSlashCommand($refs.input.value)"
-                :title="$store.chat.busy && !$store.chat.isSlashCommand($refs.input.value) ? 'Model is working — enter a /command to send now' : 'Send'">send</button>
+                :title="$store.chat.busy && !$store.chat.isSlashCommand($refs.input.value) ? 'Model is working — enter a /command to send now' : 'Send'">Send</button>
     </form>
     <div class="hint">
         <span x-show="$store.chat.busy && $store.prompts.queue.length === 0" class="busy">
             <span class="thinking-dots inline" aria-hidden="true">
                 <span></span><span></span><span></span>
             </span>
-            <span style="margin-left:6px;">generating</span>
+            <span style="margin-left:var(--space-2);">generating</span>
             <button class="interrupt-btn"
                     @click="$store.chat.interrupt()"
                     title="Interrupt — pause execution (like Ctrl-C in TUI). Use /continue to resume.">stop</button>
         </span>
-        <span x-show="$store.prompts.queue.length > 0" class="busy" style="color:var(--accent);">
+        <span x-show="$store.prompts.queue.length > 0" class="busy" style="color:var(--accent-fg);">
             ↑ awaiting your input above
         </span>
         <span x-show="$store.chat.connected === false" class="down">
             reconnecting…
-            <button style="margin-left:8px;font-size:11px;padding:2px 8px;"
+            <button style="margin-left:var(--space-2);font-size:var(--fs-xs);padding:2px var(--space-2);"
                     @click="location.reload()">reload</button>
         </span>
         <span x-show="$store.chat.externalActive" class="shared">↻ shared with another mucli process</span>

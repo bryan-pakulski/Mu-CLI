@@ -862,6 +862,9 @@ class Session:
             budget = 8000
         if budget == 0:
             return ""
+        from mu.session.budgets import small_window
+        if small_window(self):
+            budget = min(budget, 4000)  # small-window profile: ~1k tokens of workspace files
 
         candidate_names = ["AGENTS.md", "CLAUDE.md", "MUCLI.md", ".mu/CONTEXT.md"]
         seen_hashes: set[str] = set()
@@ -942,6 +945,9 @@ class Session:
             budget = 6144
         if budget == 0:
             return ""
+        from mu.session.budgets import small_window
+        if small_window(self):
+            return ""  # small-window profile: the skills index doesn't fit
         folders = (
             list(self.folder_context.folders)
             if self.folder_context and self.folder_context.folders

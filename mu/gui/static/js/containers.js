@@ -30,7 +30,27 @@
     startStatsPolling();
   }
 
+  // Top-bar status chips (planos shell): count + glyph + label.
+  function renderChips() {
+    const envChip = document.getElementById('container-count-chip');
+    if (envChip) {
+      const running = state.containers.filter(ref => ref.status === 'running').length;
+      const total = state.containers.length;
+      envChip.className = `chip ${running ? 'tone-running' : 'tone-muted'}`;
+      envChip.querySelector('[data-chip-glyph]').textContent = running ? '●' : '○';
+      envChip.querySelector('[data-chip-text]').textContent = running
+        ? `${running} of ${total} running`
+        : `${total} environment${total === 1 ? '' : 's'}`;
+    }
+    const tplChip = document.getElementById('template-count-chip');
+    if (tplChip) {
+      const count = state.templates.length;
+      tplChip.querySelector('[data-chip-text]').textContent = `${count} template${count === 1 ? '' : 's'}`;
+    }
+  }
+
   function render() {
+    renderChips();
     $('container-empty').hidden = state.containers.length > 0;
     $('container-list').innerHTML = state.containers.map(ref => {
       const sessions = (ref.attached_sessions || []).map(name =>
@@ -43,6 +63,7 @@
           <div><span class="manager-card-kicker">environment</span><h3>${esc(ref.name)}</h3></div>
           <div class="manager-card-tools">
             <span class="manager-status ${esc(ref.status)}">${esc(ref.status)}</span>
+            ${ref.jobs_using ? `<span class="manager-jobs-badge" title="Non-finished jobs whose build environments snapshot this environment">Used by ${Number(ref.jobs_using)} job${ref.jobs_using === 1 ? '' : 's'}</span>` : ''}
             <button class="manager-icon-action" data-action="${primary}" data-name="${esc(ref.name)}" title="${primary} environment" aria-label="${primary} ${esc(ref.name)}">${primaryGlyph}</button>
             <details class="manager-overflow">
               <summary class="manager-icon-action" title="More actions" aria-label="More actions for ${esc(ref.name)}">•••</summary>
@@ -57,6 +78,7 @@
             </details>
           </div>
         </div>
+        ${(ref.job_scan_blocks || []).map(block => `<div class="manager-scan-warning" role="note"><strong>⚠ Secret scan blocked job <a href="/work#/job/${esc(block.job_id)}">#${esc(String(block.job_id).slice(0, 8))}</a></strong> (build environment ${esc(block.binding)}): remove these from the environment or allow them in Jobs → Settings → Build environments.<ul>${(block.paths || []).map(path => `<li><code>${esc(path)}</code></li>`).join('')}</ul></div>`).join('')}
         <dl class="manager-meta"><dt>image</dt><dd>${esc(ref.image)}</dd><dt>template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>sessions</dt><dd>${sessions}</dd><dt>network</dt><dd>${esc(ref.network_name || '—')}</dd><dt>worker</dt><dd>${esc(ref.worker_port || '—')}</dd></dl>
         <section class="manager-monitor" data-stats-name="${esc(ref.name)}" aria-label="Live resource monitor for ${esc(ref.name)}">
           <div class="manager-monitor-loading">Waiting for resource sample…</div>
@@ -489,6 +511,17 @@
       if (templateButton.dataset.templateAction === 'use') return openCreate(name);
       if (window.confirm(`Delete template ${name}?`)) { await api(`/api/container-templates/${encodeURIComponent(name)}`, {method:'DELETE'}); await load(); }
     }
+  });
+
+  // Esc closes the topmost open dialog through its own close control.
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    const open = Array.from(document.querySelectorAll('.manager-modal:not([hidden])')).pop();
+    if (!open) return;
+    const close = open.querySelector('[data-close], #close-shell, #close-progress:not([hidden])');
+    if (!close) return;
+    event.preventDefault();
+    close.click();
   });
 
   $('container-manager').addEventListener('keydown', async event => {

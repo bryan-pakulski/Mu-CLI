@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import os
+import functools
 import re
 import time
 from dataclasses import dataclass, field
@@ -101,11 +102,19 @@ def _compile_trigger(trigger: Optional[str], source: str) -> Optional["re.Patter
 
 
 def match_trigger(skill: Skill, user_text: Optional[str]) -> bool:
-    """Return True if `skill`'s compiled trigger regex matches `user_text`."""
+    """Return True if `skill`'s compiled trigger regex matches `user_text`.
+
+    Memoized: the loop re-checks every skill against the same user message on each
+    iteration, and a large message (a review prompt with a patch) makes that costly."""
     if skill.trigger_regex is None or not user_text:
         return False
+    return _trigger_search(skill.trigger_regex, user_text)
+
+
+@functools.lru_cache(maxsize=1024)
+def _trigger_search(pattern: "re.Pattern", text: str) -> bool:
     try:
-        return bool(skill.trigger_regex.search(user_text))
+        return bool(pattern.search(text))
     except Exception:  # pragma: no cover — defensive against runtime regex bugs
         return False
 

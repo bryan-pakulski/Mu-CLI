@@ -113,7 +113,9 @@ def make_provider(
                 num_predict=(
                     128 if completion else 640 if purpose == "explain" else 2048
                 ),
-                num_ctx=num_ctx or (16384 if completion else 32768),
+                # Only an explicit value: otherwise the provider's resolved per-model num_ctx
+                # applies, so the editor and the agent never make a shared local model reload.
+                num_ctx=num_ctx or None,
             ),
         )
     else:

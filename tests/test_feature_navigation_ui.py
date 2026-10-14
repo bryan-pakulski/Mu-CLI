@@ -57,7 +57,7 @@ def test_feature_library_surface_uses_real_light_dark_theme_tokens():
 
     assert "--bg-elevated" not in panel
     assert ".feature-browser" in styles
-    assert "var(--bg-lift)" in styles
+    assert "var(--bg-subtle)" in styles
     assert "var(--mode-feature)" in styles
     assert "color-mix(in srgb" in styles
 

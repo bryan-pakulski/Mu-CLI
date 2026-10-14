@@ -24,6 +24,7 @@ import { NewThreadSheet } from '../components/NewThreadSheet';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
+import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
 
 export type ThreadsScreenProps = NativeStackScreenProps<RootStackParamList, 'Threads'>;
 
@@ -207,32 +208,32 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
       >
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderCopy}>
-            <Text variant="xs" style={[styles.kicker, { color: colors.accent }]}>AGENT CONVERSATIONS</Text>
+            <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Agent conversations</Text>
             <Text variant="sm" dim numberOfLines={1}>{groupId || activeSessionName}</Text>
           </View>
           <TouchableOpacity
             testID="create-thread"
             onPress={() => setCreateOpen(true)}
             activeOpacity={0.72}
-            style={[styles.createButton, { backgroundColor: colors.accentSoft }]}
+            style={[styles.createButton, { backgroundColor: colors.accent }]}
             accessibilityLabel="Create thread"
           >
-            <Ionicons name="add" size={18} color={colors.accent} />
-            <Text variant="sm" style={{ color: colors.accent, fontWeight: '700' }}>Thread</Text>
+            <Ionicons name="add" size={18} color={colors.accentOn} />
+            <Text variant="sm" style={{ color: colors.accentOn, fontWeight: fontWeights.medium }}>Thread</Text>
           </TouchableOpacity>
         </View>
 
         {error ? (
-          <TouchableOpacity onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.errorBg }] }>
-            <Ionicons name="warning-outline" size={17} color={colors.error} />
+          <TouchableOpacity onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.errorSubtle }]}>
+            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
             <Text variant="xs" style={[styles.errorCopy, { color: colors.error }]}>{error}</Text>
-            <Text variant="xs" style={{ color: colors.error, fontWeight: '700' }}>Retry</Text>
+            <Text variant="xs" style={{ color: colors.error, fontWeight: fontWeights.semibold }}>Retry</Text>
           </TouchableOpacity>
         ) : null}
 
         <View style={styles.sectionHeader}>
-          <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>THREAD GROUP</Text>
-          <Text variant="xs" dim>{threads.length}</Text>
+          <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>Thread group</Text>
+          <Text variant="xs" dim style={styles.num}>{threads.length}</Text>
         </View>
         {loading && threads.length === 0 ? (
           <View style={styles.loadingBlock}>
@@ -248,8 +249,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             activeOpacity={0.7}
             style={[
               styles.threadRow,
-              { borderBottomColor: colors.hairline },
-              thread.thread_id === currentThreadId && { backgroundColor: colors.bgHover },
+              thread.thread_id === currentThreadId && { backgroundColor: colors.accentSubtle },
             ]}
           >
             <View style={[styles.statusDot, { backgroundColor: statusColor(thread.status) }]} />
@@ -270,12 +270,12 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
               ) : null}
             </View>
             {thread.unread_count > 0 ? (
-              <View style={[styles.unreadBadge, { backgroundColor: colors.accentSoft }] }>
-                <Text variant="xs" style={{ color: colors.accent, fontWeight: '700' }}>{thread.unread_count}</Text>
+              <View style={[styles.unreadBadge, { backgroundColor: colors.accentSubtle }]}>
+                <Text variant="xs" style={[styles.num, { color: colors.accentFg, fontWeight: fontWeights.semibold }]}>{thread.unread_count}</Text>
               </View>
             ) : null}
             {thread.thread_id === currentThreadId ? (
-              <Ionicons name="checkmark" size={17} color={colors.accent} />
+              <Ionicons name="checkmark" size={18} color={colors.accentFg} />
             ) : !ACTIVE_STATUSES.includes(thread.status) ? (
               <TouchableOpacity
                 onPress={() => deleteThread(thread)}
@@ -291,8 +291,8 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
         ))}
 
         <View style={[styles.sectionHeader, styles.activityHeader]}>
-          <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>COORDINATION ACTIVITY</Text>
-          <Text variant="xs" dim>{activity.length}</Text>
+          <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>Coordination activity</Text>
+          <Text variant="xs" dim style={styles.num}>{activity.length}</Text>
         </View>
         {!loading && activity.length === 0 ? (
           <View style={styles.activityEmpty}>
@@ -311,15 +311,14 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
               key={event.event_id}
               style={[
                 styles.eventRow,
-                { borderBottomColor: colors.hairline },
-                conflict && { borderLeftColor: colors.error, borderLeftWidth: 2, paddingLeft: 10 },
+                conflict && { borderLeftColor: colors.error, borderLeftWidth: 2, paddingLeft: spacing.md },
               ]}
             >
               <View style={styles.eventMeta}>
                 <Text variant="xs" dim numberOfLines={1} style={styles.eventActors}>
                   {actor}{target ? ` → ${target}` : ''}
                 </Text>
-                <Text variant="xs" dim>{formatTime(event.created_at)}</Text>
+                <Text variant="xs" dim style={styles.num}>{formatTime(event.created_at)}</Text>
               </View>
               <Text variant="sm" style={styles.eventTitle}>{eventTitle(event.kind)}</Text>
               {detail ? <Text variant="xs" dim style={styles.eventDetail}>{detail}</Text> : null}
@@ -339,67 +338,68 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { paddingBottom: 42 },
-  pageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 22 },
+  content: { paddingBottom: spacing['2xl'] },
+  pageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
   pageHeaderCopy: { flex: 1, minWidth: 0 },
-  kicker: { fontWeight: '700', letterSpacing: 1.2, marginBottom: 3 },
+  kicker: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
   createButton: {
-    minHeight: 42,
-    paddingHorizontal: 13,
-    borderRadius: 10,
+    minHeight: touchTarget,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: spacing.xs,
   },
   errorBanner: {
-    minHeight: 46,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
+    minHeight: touchTarget,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
+    gap: spacing.sm,
+    marginBottom: spacing.base,
   },
   errorCopy: { flex: 1 },
   sectionHeader: {
-    minHeight: 30,
+    minHeight: 32,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionTitle: { fontFamily: 'monospace', fontWeight: '700', letterSpacing: 1 },
-  loadingBlock: { gap: 7 },
+  sectionTitle: { fontWeight: fontWeights.semibold },
+  num: { fontVariant: ['tabular-nums'] },
+  loadingBlock: { gap: spacing.sm },
   skeleton: { width: '100%' },
   threadRow: {
     minHeight: 66,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 13 },
+  statusDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },
   threadCopy: { flex: 1, minWidth: 0 },
-  threadTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
-  threadTitle: { flex: 1, fontWeight: '600' },
-  claims: { marginTop: 3, fontFamily: 'monospace' },
+  threadTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
+  threadTitle: { flex: 1, fontWeight: fontWeights.semibold },
+  claims: { marginTop: spacing.xs, fontFamily: fonts.mono },
   unreadBadge: {
-    minWidth: 23,
-    height: 23,
-    paddingHorizontal: 6,
-    marginHorizontal: 8,
-    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: spacing.sm,
+    marginHorizontal: spacing.sm,
+    borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deleteButton: { width: 40, height: 42, alignItems: 'center', justifyContent: 'center' },
-  activityHeader: { marginTop: 30 },
-  activityEmpty: { paddingVertical: 30, paddingHorizontal: 24, alignItems: 'center' },
-  activityEmptyText: { marginTop: 8, textAlign: 'center', maxWidth: 300 },
-  eventRow: { paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth },
-  eventMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  eventActors: { flex: 1, fontFamily: 'monospace' },
-  eventTitle: { fontWeight: '600', marginTop: 5 },
-  eventDetail: { lineHeight: 18, marginTop: 4 },
+  deleteButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
+  activityHeader: { marginTop: spacing.xl },
+  activityEmpty: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg, alignItems: 'center' },
+  activityEmptyText: { marginTop: spacing.sm, textAlign: 'center', maxWidth: 300 },
+  eventRow: { paddingVertical: spacing.md },
+  eventMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  eventActors: { flex: 1 },
+  eventTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.xs },
+  eventDetail: { marginTop: spacing.xs },
 });

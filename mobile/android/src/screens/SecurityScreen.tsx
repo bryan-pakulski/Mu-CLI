@@ -5,10 +5,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { securityApi, SecurityFinding, SecurityState } from '../api/security';
-import { spacing } from '../theme/tokens';
+import { elevation, radii, spacing, fontWeights, fonts } from '../theme/tokens';
 
 export function SecurityScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [state, setState] = useState<SecurityState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,8 +105,8 @@ export function SecurityScreen() {
             <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
             {state.report && (
               <Card style={{ marginBottom: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.textDim, textTransform: 'uppercase', letterSpacing: .7 }}>Scan brief</Text>
-                <Text variant="sm" style={{ color: colors.textSoft, marginTop: 5, lineHeight: 20 }}>{state.report.summary || 'No report summary recorded.'}</Text>
+                <Text variant="xs" style={{ color: colors.textDim }}>Scan brief</Text>
+                <Text variant="sm" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{state.report.summary || 'No report summary recorded.'}</Text>
               </Card>
             )}
           </>
@@ -114,13 +114,13 @@ export function SecurityScreen() {
         ListEmptyComponent={<Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No records match this evidence lens.</Text>}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs }}>
               <Badge label={item.severity} variant={sevVariant(item.severity)} />
               <Badge label={item.status} variant={item.status === 'approved' ? 'success' : 'neutral'} />
             </View>
-            <Text variant="sm" style={{ fontWeight: '500' }}>{item.title}</Text>
+            <Text variant="sm" style={{ fontWeight: fontWeights.medium }}>{item.title}</Text>
             <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }} numberOfLines={3}>{item.summary}</Text>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
               <Text variant="xs" style={{ color: item.has_proof ? colors.success : colors.textDim }}>
                 PoC: {item.proof_verified ? 'Verified' : item.has_proof ? 'Pending' : 'None'}
               </Text>
@@ -128,7 +128,7 @@ export function SecurityScreen() {
                 Fix: {item.remediation_verified ? 'Verified' : item.has_remediation ? 'Pending' : 'None'}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
               <Button title="Details" variant="ghost" onPress={() => setSelected(item)} />
               {item.status !== 'approved' && <Button title="Approve" onPress={() => approve(item.finding_id)} />}
               {item.status !== 'refuted' && <Button title="Refute" variant="ghost" onPress={() => refute(item.finding_id)} />}
@@ -137,13 +137,13 @@ export function SecurityScreen() {
         )}
       />
       {selected && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim }}>
           <View style={{ flex: 1, justifyContent: 'center', padding: spacing.base }}>
-            <Card style={{ maxHeight: '80%' }}>
+            <View style={[elevation(2, colors, isDark), { maxHeight: '80%', borderRadius: radii.lg, padding: spacing.base }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
-                <Text variant="base" style={{ fontWeight: '600' }}>{selected.title}</Text>
-                <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text variant="sm" style={{ color: colors.accent }}>Close</Text>
+                <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selected.title}</Text>
+                <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
                 </TouchableOpacity>
               </View>
               <FlatList
@@ -157,13 +157,13 @@ export function SecurityScreen() {
                 ]}
                 keyExtractor={item => item.k}
                 renderItem={({ item }) => (
-                  <View style={{ paddingVertical: 4, minHeight: 28 }}>
+                  <View style={{ paddingVertical: spacing.xs, minHeight: 28 }}>
                     <Text variant="xs" style={{ color: colors.textDim }}>{item.k}</Text>
-                    <Text variant="sm" style={{ color: colors.text, fontFamily: 'monospace' }}>{item.v}</Text>
+                    <Text variant="sm" style={{ color: colors.text, fontFamily: fonts.mono }}>{item.v}</Text>
                   </View>
                 )}
               />
-            </Card>
+            </View>
           </View>
         </View>
       )}

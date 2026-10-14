@@ -164,6 +164,57 @@ def _mode_tool_phase_policy(mode: str) -> tuple[set[str], set[str]]:
     return all_mode_phases, active_mode_phases
 
 
+# Small-window profile (provider_latency_ollama_openai.md §6): the core tools a coding agent
+# needs; mode-owned tools of the active mode are added on top.
+SMALL_WINDOW_TOOLS = frozenset({
+    "read_file", "get_chunk", "list_dir", "search_for_string", "search_references", "retrieve_relevant_context",
+    "write_file", "apply_diff", "search_and_replace_file", "bash", "bash_background", "bash_status", "bash_logs",
+    "todo_write", "todo_set_status", "todo_list", "save_memory", "search_memory", "save_scratchpad",
+    "spawn_agent", "await_subagent", "flush", "discard_deferred_context", "context_status", "compact",
+    "checkpoint_progress", "ask_user_choice", "raise_blocker", "recall", "result_range", "result_search",
+})
+
+
+def _first_sentence(text: str, limit: int = 160) -> str:
+    text = " ".join(str(text or "").split())
+    for stop in (". ", "\n"):
+        if stop in text:
+            text = text.split(stop, 1)[0] + "."
+            break
+    return text[:limit]
+
+
+def _trim_schema(schema):
+    if isinstance(schema, dict):
+        out = {}
+        for key, value in schema.items():
+            if key == "description" and isinstance(value, str):
+                out[key] = _first_sentence(value, 100)
+            elif key == "examples":
+                continue
+            else:
+                out[key] = _trim_schema(value)
+        return out
+    if isinstance(schema, list):
+        return [_trim_schema(item) for item in schema]
+    return schema
+
+
+def small_window_tools(tools, mode: str) -> list:
+    """Compact tool set with first-sentence descriptions and trimmed parameter docs."""
+    _mode_phases, active_mode_phases = _mode_tool_phase_policy(mode)
+    out = []
+    for tool_definition in tools:
+        descriptor = TOOL_DESCRIPTORS.get(tool_definition.name)
+        phase = descriptor.phase if descriptor is not None else "core"
+        if tool_definition.name not in SMALL_WINDOW_TOOLS and phase not in active_mode_phases:
+            continue
+        out.append(ToolDefinition(name=tool_definition.name, description=_first_sentence(tool_definition.description),
+                                  parameters=_trim_schema(tool_definition.parameters),
+                                  requires_approval=tool_definition.requires_approval))
+    return out
+
+
 def filter_tools_for_mode(tools, mode: str) -> list:
     """Hide every mode-owned tool except those owned by the active mode.
 

@@ -12,29 +12,33 @@ CSS = (ROOT / "mu/gui/static/css/work.css").read_text(encoding="utf-8")
 STAGES = ("plan", "implement", "review")
 
 
-def test_create_form_has_collapsible_stage_section():
-    assert 'id="work-stage-details"' in HTML
-    assert "<summary>Stage models</summary>" in HTML
+AGENTS = (ROOT / "mu/gui/static/js/work/agents.js").read_text(encoding="utf-8")
+
+
+def test_create_form_has_one_per_stage_picker_under_advanced():
+    # One agent+model override picker per stage, inside the sheet's Advanced section.
+    assert 'id="work-advanced-details"' in HTML and "<summary>Advanced</summary>" in HTML
+    assert HTML.index('id="job-agents"') > HTML.index('id="work-advanced-details"')
+    assert 'id="work-stage-details"' not in HTML and 'id="work-execution-details"' not in HTML
 
 
 def test_every_stage_has_labelled_provider_and_model_inputs():
-    for stage in STAGES:
-        for field in ("provider", "model"):
-            element_id = f'id="job-stage-{stage}-{field}"'
-            assert element_id in HTML, element_id
-        assert f'aria-label="{stage.capitalize()} stage provider"' in HTML
-        assert f'aria-label="{stage.capitalize()} stage model"' in HTML
+    for field in ("provider", "model"):
+        assert f'aria-label="${{STAGE_LABEL[stage]}} stage {field}"' in AGENTS
+    assert 'id="job-stage-${stage}-provider"' in AGENTS and 'data-agent-model="${stage}"' in AGENTS
 
 
 def test_submit_sends_only_filled_stages():
-    assert "function collectStageModels()" in JS
-    assert "if (Object.keys(entry).length) stages[stage] = entry;" in JS
+    assert "function collectModels()" in AGENTS
+    assert "if (m) stages[stage] = { ...(p ? { provider: p } : {}), model: m };" in AGENTS
+    assert "const stages = agentPicker?.collectModels() || {};" in JS
     assert "if (Object.keys(stages).length) execution.stages = stages;" in JS
 
 
 def test_job_detail_renders_stage_rows():
-    assert "function stageRows(execution)" in JS
-    assert "${stageRows(execution)}" in JS
+    view = (ROOT / "mu/gui/static/js/work/view.js").read_text()
+    assert "job.stage_models" in view
+    assert "muOpenStageModels" in view
 
 
 def test_stage_inputs_have_focus_ring_and_narrow_layout():

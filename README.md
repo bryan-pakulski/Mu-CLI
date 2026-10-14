@@ -87,6 +87,23 @@ mucli --trace-analyze ~/.mucli/trace/X.jsonl  # headless trace summary
 - Runtime stats with token + cache + reasoning + cost accounting.
 - Run tracing + Trace Analyzer dashboard — a per-run JSONL trace of every iteration (context layers, real vs estimated tokens, compactions, nudges, tools, subagents, memory) visualized at `/trace` (or `mucli --trace`) with context-growth curves, tokenizer drift, compaction/nudge/tool timelines, redundant-read heatmaps, and more. The data for harness-performance decisions. See [documentation/tracing.md](documentation/tracing.md).
 
+## Jobs
+
+Jobs hand a task to an autonomous pipeline. The pipeline plans, implements,
+checks and reviews the change in disposable containers, then opens a draft PR.
+You approve the plan and decide when to push.
+
+```
+/job setup                                   # one-time checklist (Docker, runtime image, models)
+/job Fix flaky login redirect --in ~/src/app # or: /job PROJ-123 --in ~/src/app
+/jobs                                        # dashboard: approve plan, watch, review, push
+```
+
+The terminal, web (Jobs page) and Android app control the same jobs. Start
+with [documentation/jobs_quickstart.md](documentation/jobs_quickstart.md). The
+reference is
+[documentation/durable_engineering_jobs.md](documentation/durable_engineering_jobs.md).
+
 ## Common slash commands
 
 The most common day-to-day commands — see [documentation/commands.md](documentation/commands.md) for the full reference.
@@ -155,7 +172,9 @@ utils/            Config, runtime metrics, token estimator, citation
 ## Documentation
 See `documentation/`:
 - [`commands.md`](documentation/commands.md) — every slash command and its arguments
-- [`configuration.md`](documentation/configuration.md) — env vars, session variables, config files
+- [`configuration.md`](documentation/configuration.md) — env vars, session variables, config files, job settings
+- [`jobs_quickstart.md`](documentation/jobs_quickstart.md) — jobs golden path: setup, new job, approve plan, review, push
+- [`durable_engineering_jobs.md`](documentation/durable_engineering_jobs.md) — job pipeline, checks, review, push, Jira, sandbox
 - [`skills.md`](documentation/skills.md) — declarative agent extensions
 - [`hooks.md`](documentation/hooks.md) — lifecycle hooks (Python decorator + `.mu/hooks.json`)
 - [`security.md`](documentation/security.md) — full security model: workspace sandbox, secret filtering, approval flow, plan mode, sub-agent isolation, limitations

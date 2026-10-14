@@ -5,8 +5,7 @@ import subprocess
 
 from mu.jobs import JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.receipt import JobReceiptBuilder
-from mu.jobs.verification import DeterministicVerifier, VerificationStore
-from mu.jobs.verify_worker import apply_verification_result
+from mu.jobs.verification import VerificationRun, VerificationStore, changed_files
 from mu.jobs.worktree import JobWorktreeManager
 
 
@@ -65,9 +64,17 @@ def make_ready_job(tmp_path):
     service.store.append_event(job.id, "tool_call_ui", payload={"tool_name": "write_file"})
     service.store.append_event(job.id, "agent_message", payload={"role": "assistant", "text": "done"})
     service.transition(job.id, JobStatus.VERIFYING)
-    verification_store = VerificationStore(service.store, evidence_root=str(tmp_path / "evidence"))
-    run = DeterministicVerifier(service, store=verification_store).verify(service.get(job.id))
-    apply_verification_result(service, job.id, run)
+    # Persist a passing check run the way the checks stage does, then follow
+    # the live path to a pushed job: review -> human push -> publish.
+    verifying = service.get(job.id)
+    changed, additions, deletions = changed_files(execution_worktree, verifying.base_sha, checkpoint)
+    run = VerificationStore(service.store, evidence_root=str(tmp_path / "evidence")).save(VerificationRun(
+        id="run-1", job_id=job.id, status="passed", passed=True, started_at=1.0, finished_at=2.0,
+        duration_ms=1000, base_sha=verifying.base_sha, head_sha=checkpoint, branch=verifying.branch,
+        worktree=execution_worktree, changed_files=changed, additions=additions, deletions=deletions,
+    ))
+    for status in (JobStatus.REVIEWING, JobStatus.PUBLISHING, JobStatus.READY_FOR_REVIEW):
+        service.transition(job.id, status)
     return service, service.get(job.id), run, execution_worktree
 
 
@@ -92,9 +99,9 @@ def test_receipt_answers_outcome_cost_git_verification_and_activity(tmp_path):
     assert receipt["git"]["review_artifact"] == "branch"
     assert receipt["git"]["review_branch"] == job.branch
     assert receipt["git"]["review_head_sha"] == verification.head_sha
-    assert receipt["git"]["worktree"] == ""
-    assert receipt["git"]["execution_worktree"] == ""
-    assert receipt["git"]["retired_worktree"] == execution_worktree
+    assert receipt["git"]["worktree"] == execution_worktree
+    assert receipt["git"]["execution_worktree"] == execution_worktree
+    assert receipt["git"]["retired_worktree"] == ""
     assert receipt["git"]["base_sha"] == job.base_sha
     assert receipt["git"]["head_sha"] == verification.head_sha
     assert receipt["git"]["changed_files"][0]["path"] == "feature.txt"
@@ -108,7 +115,7 @@ def test_receipt_answers_outcome_cost_git_verification_and_activity(tmp_path):
 
 
 def test_receipt_can_be_written_as_stable_job_evidence(tmp_path):
-    service, job, verification, _ = make_ready_job(tmp_path)
+    service, job, verification, execution_worktree = make_ready_job(tmp_path)
     builder = JobReceiptBuilder(service, root=str(tmp_path / "evidence"))
     path = builder.write(job.id)
 
@@ -119,5 +126,5 @@ def test_receipt_can_be_written_as_stable_job_evidence(tmp_path):
     assert saved["outcome"]["ready_for_review"] is True
     assert saved["outcome"]["review_artifact"] == "branch"
     assert saved["git"]["review_branch"] == job.branch
-    assert saved["git"]["worktree"] == ""
+    assert saved["git"]["worktree"] == execution_worktree
     assert any(event.event_type == "work_receipt_updated" for event in service.events(job.id))

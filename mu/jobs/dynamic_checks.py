@@ -23,6 +23,9 @@ DEFAULT_ALLOWED_EXECUTABLES = frozenset({
     "npm", "npx", "yarn", "pnpm", "node", "tsc", "jest", "eslint", "vitest",
     "make", "go", "cargo", "gradle", "./gradlew", "mvn", "dotnet", "bundle", "rake",
     "rspec", "php", "composer", "mix", "swift", "ctest", "cmake",
+    # Modern toolchains (W9): Python project managers, JS runtimes, task runners, JVM/Bazel.
+    "uv", "uvx", "poetry", "pdm", "hatch", "pyright", "bun", "bunx", "deno", "just", "task",
+    "./mvnw", "sbt", "bazel", "bazelisk", "meson", "ninja", "elixir", "gotestsum", "golangci-lint",
 })
 
 SHELL_OPERATORS = (";", "&&", "||", "|", ">", "<", "`", "$(", "\n", "&")
@@ -40,10 +43,40 @@ def _dedupe(items: Iterable[str]) -> List[str]:
 
 
 def allowed_executables(job: Job) -> frozenset:
+    """Built-ins + the job's ``validation_allowlist`` + the base commit's ``.mucli/jobs.toml``
+    ``[sandbox] validation_allowlist``. Entries are executables or command prefixes
+    (``bash scripts/ci.sh``); see :func:`check_command`."""
     extra = (job.execution or {}).get("validation_allowlist") or []
     if isinstance(extra, str):
         extra = [extra]
-    return DEFAULT_ALLOWED_EXECUTABLES | {str(e).strip() for e in extra if str(e).strip()}
+    allowed = {" ".join(str(e).split()) for e in extra if str(e).strip()}
+    allowed |= set(repository_allowlist(job))
+    return DEFAULT_ALLOWED_EXECUTABLES | allowed
+
+
+def repository_allowlist(job: Job) -> tuple:
+    """``[sandbox] validation_allowlist`` from the job's base commit (never its worktree)."""
+    if not str(getattr(job, "base_sha", "") or ""):
+        return ()
+    try:
+        from .sandbox.repo_config import repository_sandbox
+        return tuple(repository_sandbox(job)["validation_allowlist"])
+    except Exception:  # noqa: BLE001 - an unreadable config adds nothing
+        return ()
+
+
+def _prefix_allowed(argv: List[str], allowed: frozenset) -> bool:
+    """A multi-word entry allows commands whose leading words are exactly that entry."""
+    for entry in allowed:
+        if " " not in entry:
+            continue
+        try:
+            words = shlex.split(entry)
+        except ValueError:
+            continue
+        if words and argv[:len(words)] == words:
+            return True
+    return False
 
 
 def check_command(command: str, allowed: frozenset) -> Tuple[bool, str]:
@@ -60,7 +93,7 @@ def check_command(command: str, allowed: frozenset) -> Tuple[bool, str]:
     if not argv:
         return False, "empty"
     exe = argv[0]
-    if exe not in allowed and exe.rsplit("/", 1)[-1] not in allowed:
+    if exe not in allowed and exe.rsplit("/", 1)[-1] not in allowed and not _prefix_allowed(argv, allowed):
         return False, f"executable {exe!r} not in allow-list"
     return True, ""
 
@@ -101,12 +134,15 @@ def apply_plan_contract(service, job_id: str, plan: Dict[str, Any]) -> Job:
         acceptance_json=contract["acceptance_criteria"],
         validation_json=contract["validation_commands"],
     )
-    job = merge_metadata(service, job_id, plan_contract=contract)
+    from .core.artifacts import artifacts_for
+    artifacts_for(job).ensure().write_json("plans/contract.json", contract)
+    job = service.get(job_id)
     service.store.append_event(job_id, "plan_contract_applied", reason="dynamic checks merged", payload=contract)
+    from .job_settings import plan_approval_required
     if not contract["validation_commands"] and job.status == JobStatus.PLANNING:
         service.require_human(
             job_id,
-            AttentionReason.NO_VALIDATION,
+            AttentionReason.PLAN_REVIEW if plan_approval_required(job.execution) else AttentionReason.NO_VALIDATION,
             "The planner produced no allow-listed validation commands and none were supplied; "
             "add a validation command so MuCLI can verify the change.",
             payload=contract,

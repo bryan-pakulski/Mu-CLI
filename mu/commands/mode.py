@@ -41,41 +41,11 @@ def plan_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             message=f"Unknown /plan argument: {args!r}. Use 'on', 'off', or 'toggle'.",
         )
 
-    session.variables["plan_mode"] = new_value
+    from mu.agent.plan_mode import set_plan_mode
 
-    if hasattr(session, "session_manager") and hasattr(session, "folder_context"):
-        try:
-            session.session_manager.save_history(session.folder_context)
-        except Exception:
-            pass
-
-    # Mirror the variable change onto the input handler so the prompt prefix
-    # picks it up immediately on the next prompt (the input handler holds a
-    # reference to session.variables, but some UIs cache state separately).
-    ui = getattr(session, "ui", None)
-    if ui is not None and hasattr(ui, "set_variables"):
-        try:
-            ui.set_variables(session.variables)
-        except Exception:
-            pass
-
-    # Emit a visible banner so toggling is unmissable. The persistent
-    # indicators (prompt prefix + status-line "🔒 PLAN") remain visible
-    # across every subsequent turn.
-    if ui is not None and hasattr(ui, "show_info"):
-        try:
-            if new_value:
-                ui.show_info(
-                    "[bold black on cyan] 🔒 PLAN MODE ENABLED [/bold black on cyan] "
-                    "Write-side tools are blocked. /plan off to disable."
-                )
-            else:
-                ui.show_info(
-                    "[bold black on green] ✓ PLAN MODE DISABLED [/bold black on green] "
-                    "Write-side tools are unblocked."
-                )
-        except Exception:
-            pass
+    # Persists, refreshes the prompt badge, publishes a GUI/mobile event and
+    # shows the terminal banner — identical to POST /api/variables/plan_mode.
+    set_plan_mode(session, new_value)
 
     label = "ON" if new_value else "OFF"
     msg = f"Plan mode: {label}"

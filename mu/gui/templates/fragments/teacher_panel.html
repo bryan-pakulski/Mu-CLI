@@ -71,7 +71,7 @@
                             : ''"></span>
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.profile"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-if="$store.teacher.course && $store.teacher.course.learner_profile && Object.keys($store.teacher.course.learner_profile).length">
                 <div class="learner-grid">
                     <!-- array fields → chip rows -->
@@ -129,7 +129,7 @@
                   x-text="($store.teacher.course && $store.teacher.course.lessons || []).length + ' lessons'"></span>
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.curriculum"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-if="$store.teacher.course && ($store.teacher.course.modules || []).length">
                 <div class="curriculum-tree">
                     <template x-for="m in $store.teacher.filteredModules()"
@@ -191,7 +191,7 @@
                   x-text="$store.teacher.currentLesson() && $store.teacher.currentLesson().lesson_id"></span>
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.current"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-if="$store.teacher.currentLesson()">
                 <div class="current-lesson">
                     <div class="lesson-title" x-text="$store.teacher.currentLesson().title"></div>
@@ -249,7 +249,7 @@
                   x-text="$store.teacher.allAssignments().length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.assignments"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="a in $store.teacher.allAssignments()" :key="a.assignment_id">
                 <div class="grade-row"
                      :class="{ passed: a.grade && a.grade.passed,
@@ -325,7 +325,7 @@
                   x-text="$store.teacher.scheduledReviews().length"></span>
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.reviews"
-             x-transition.opacity.duration.150ms>
+             x-transition.opacity.duration.120ms>
             <template x-for="(r, i) in $store.teacher.scheduledReviews()" :key="r.review_id || i">
                 <div class="review-row">
                     <span class="status-glyph"

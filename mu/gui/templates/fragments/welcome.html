@@ -17,7 +17,7 @@
     <div class="welcome-entry-grid w-welcome__choices" role="list" aria-label="Start options">
         <button type="button" class="welcome-entry w-welcome__choice" role="listitem" @click="openSessions()">
             <span class="welcome-entry-icon w-welcome__icon" data-tone="accent" aria-hidden="true">{{ w.icon("arrow-up-right") }}</span>
-            <span class="welcome-entry-copy">
+            <span class="welcome-entry-copy w-choice__copy">
                 <strong class="w-welcome__title">Continue</strong>
                 <small class="w-welcome__meta" x-text="sessions.length
                     ? `${sortedSessions()[0].name} · ${sessions.length} saved session${sessions.length === 1 ? '' : 's'}`
@@ -27,7 +27,7 @@
         </button>
         <button type="button" class="welcome-entry w-welcome__choice" role="listitem" @click="openCreate()">
             <span class="welcome-entry-icon w-welcome__icon" data-tone="attention" aria-hidden="true">{{ w.icon("plus") }}</span>
-            <span class="welcome-entry-copy">
+            <span class="welcome-entry-copy w-choice__copy">
                 <strong class="w-welcome__title">Start new</strong>
                 <small class="w-welcome__meta">Chat, workspace or isolated container</small>
             </span>
@@ -35,7 +35,7 @@
         </button>
         <a class="welcome-entry w-welcome__choice" role="listitem" href="/containers">
             <span class="welcome-entry-icon w-welcome__icon session-type-icon" data-tone="ok" x-html="sessionIcon('container')" aria-hidden="true"></span>
-            <span class="welcome-entry-copy">
+            <span class="welcome-entry-copy w-choice__copy">
                 <strong class="w-welcome__title">Environments</strong>
                 <small class="w-welcome__meta" x-text="`${containers.length} environment${containers.length === 1 ? '' : 's'} · ${templates.length} template${templates.length === 1 ? '' : 's'}`">Isolated Docker workspaces</small>
             </span>

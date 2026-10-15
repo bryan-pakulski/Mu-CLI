@@ -1052,3 +1052,40 @@ body[data-ambient]::before {
     }
     body[data-ambient]::before { background: var(--wash-canvas); }
 }
+
+/* ------------------------------------------------------------ page transitions (G§5)
+   Cross-document View Transitions: same-origin navigations (/, /work, /containers,
+   /trace, …) cross-fade instead of flashing white. The shell's top bar and sidebar are
+   named so they hold still; only the stage content fades and rises. The ambient wash
+   cross-fades with the root (pages use different washes). Browsers without support
+   navigate normally and get a short stage fade-in instead. */
+@view-transition { navigation: auto; }
+
+.w-topbar { view-transition-name: w-topbar; }
+.w-sidebar { view-transition-name: w-sidebar; }
+.w-stage { view-transition-name: w-stage; }
+
+::view-transition-group(root),
+::view-transition-group(w-topbar),
+::view-transition-group(w-sidebar) { animation-duration: var(--wash-motion-medium); animation-timing-function: var(--wash-ease-medium); }
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: var(--wash-motion-medium); animation-timing-function: var(--wash-ease-medium); }
+::view-transition-old(w-stage) { animation: w-stage-out var(--wash-motion-small) var(--wash-ease-micro) both; }
+::view-transition-new(w-stage) { animation: w-stage-in var(--wash-motion-medium) var(--wash-ease-medium) both; }
+/* Same-page route changes (/work hash routes) reuse the stage animation. */
+::view-transition-group(w-stage) { animation-duration: var(--wash-motion-medium); }
+
+@keyframes w-stage-out { to { opacity: 0; } }
+@keyframes w-stage-in { from { opacity: 0; transform: translateY(6px); } }
+
+@supports not (view-transition-name: none) {
+    .w-stage { animation: w-stage-in var(--wash-motion-medium) var(--wash-ease-medium) both; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    @view-transition { navigation: none; }
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) { animation: none; }
+    .w-stage { animation: none; }
+}

@@ -47,6 +47,17 @@
     <script src="/static/js/route_theme.js" defer></script>
     <script src="/static/js/wash_shell.js" defer></script>
     {% block head_scripts %}{% endblock %}
+    {#- Prefetch same-origin pages on hover or touch so navigating between them is instant;
+        paired with the cross-document view transition in base.css. Prefetch only (no
+        prerender): page scripts open SSE streams and load sessions, so they must not run
+        speculatively. -#}
+    <script type="speculationrules">
+    {"prefetch": [{"source": "document", "eagerness": "moderate",
+      "where": {"and": [{"href_matches": "/*"},
+                        {"not": {"href_matches": "/api/*"}},
+                        {"not": {"href_matches": "/static/*"}},
+                        {"not": {"selector_matches": "[data-no-prefetch], [download], [target=_blank]"}}]}}]}
+    </script>
 </head>
 <body class="{% block body_class %}{% endblock %}" data-ambient="{% block ambient %}dawn{% endblock %}"{% block body_attrs %}{% endblock %}>
 {% block page %}

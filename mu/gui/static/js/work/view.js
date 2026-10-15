@@ -413,6 +413,27 @@
                 </footer>
             </article></li>`;
         }
+        /* The launcher's three live choice cards (components/launcher.css), shared layout with the
+         * chat welcome: Needs you, Running now, Done this week. */
+        function renderChoices(counts, needs, now) {
+            const el = document.getElementById('work-choices');
+            if (!el) return;
+            const spend = home.running.reduce((sum, j) => sum + (Number(j.cost_usd) || 0), 0);
+            const oldest = needs[0];
+            const card = (href, glyph, tone, title, count, meta) => `<a class="w-choice" role="listitem" href="${href}">
+                <span class="w-choice__icon" data-tone="${tone}" aria-hidden="true">${icon(glyph, '')}</span>
+                <span class="w-choice__copy"><strong class="w-choice__title">${esc(title)}<span class="w-count"${count && tone !== 'ok' ? ` data-tone="${tone}"` : ''}>${count}</span></strong>
+                    <small class="w-choice__meta">${esc(meta)}</small></span>
+                <span class="w-choice__arrow" aria-hidden="true">›</span></a>`;
+            el.innerHTML = [
+                card('#needs-you', 'alert-circle', counts.needs ? 'attention' : 'ok', 'Needs you', counts.needs,
+                    oldest ? `${jobKey(oldest)} · waiting ${age(now - (oldest.updated_at || oldest.created_at))}${counts.ready ? ` · ${counts.ready} ready to push` : ''}` : 'You’re all caught up'),
+                card('#running-now', 'activity', 'running', 'Running now', counts.running,
+                    counts.running ? `${counts.checking} checking · ${money(spend)} so far` : 'Nothing is running'),
+                card('#/history', 'history', 'ok', 'Done this week', counts.done,
+                    counts.done ? 'See results and pushed PRs' : 'Finished jobs appear here'),
+            ].join('');
+        }
         function renderHome() {
             if (!home) return;
             totalEl.textContent = home.jobs.length;
@@ -428,19 +449,12 @@
                 ready: home.jobs.filter(j => j.state === 'review_done').length,
                 done: home.jobs.filter(j => ['done', 'pushed'].includes(j.state) && Number(j.updated_at) >= week).length,
             };
-            const stat = (value, label, href, tone = '') => `<a class="w-stat work-stat" href="${href}"${tone ? ` data-tone="${tone}"` : ''}><span class="w-stat__label work-stat-label">${esc(label)}</span><span class="w-stat__value work-stat-value">${value}</span></a>`;
             const recent = home.jobs.filter(j => ['done', 'pushed', 'failed', 'cancelled'].includes(j.state)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 6);
             const needs = home.needs_you.slice().sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0));
             const section = (id, eyebrow, title, count, body, extra = '') => `<section class="work-section" aria-labelledby="${id}">
                 <header class="work-section__head"><span class="w-eyebrow">${esc(eyebrow)}</span><h2 class="work-section__title" id="${id}">${esc(title)}</h2>${count !== null ? `<span class="w-count"${count && id === 'needs-you' ? ' data-tone="attention"' : ''}>${count}</span>` : ''}<span class="work-spacer"></span>${extra}</header>${body}</section>`;
+            renderChoices(counts, needs, now);
             boardEl.innerHTML = `
-                <nav class="w-stats work-stats" aria-label="Summary">
-                    ${stat(counts.needs, 'Needs you', '#needs-you', counts.needs ? 'attention' : '')}
-                    ${stat(counts.running, counts.running === 1 ? 'Job running' : 'Jobs running', '#running-now')}
-                    ${stat(counts.checking, counts.checking === 1 ? 'Check running' : 'Checks running', '#running-now')}
-                    ${stat(counts.ready, 'Ready to push', '#needs-you')}
-                    ${stat(counts.done, 'Done this week', '#/jobs')}
-                </nav>
                 ${section('needs-you', 'Attention', 'Needs you', home.needs_you.length, needs.length
                     ? `<ul class="work-cards w-card-grid">${needs.map(r => needsCard(r, now)).join('')}</ul>`
                     : `<div class="w-empty work-empty" data-tone="ok" data-size="sm"><div class="w-empty__art" aria-hidden="true">${icon('circle-check', '')}</div><h3 class="w-empty__title">You’re all caught up</h3><p class="w-empty__body">Nothing needs you right now.</p></div>`)}
@@ -1141,12 +1155,18 @@
             await refreshHome();
             const initial = home.needs_you[0] || home.running[0] || home.jobs[0];
             if (autoSelect && initial) await select(initial.id);
-            source = new EventSource('/api/jobs/events');
-            source.onmessage = async event => { try { const change = JSON.parse(event.data); if (change.scope === 'home') await refreshHome(); if (change.scope === 'job' && change.id === selectedId) await refreshParts(change.parts); } catch (e) { notify(e.message, 'danger'); } };
-            source.addEventListener('hello', () => { onConnection?.(true); refreshHome().catch(() => {}); if (selectedId) refreshParts().catch(() => {}); });
-            source.onerror = () => onConnection?.(false);
-            source.onopen = () => onConnection?.(true);
-            window.addEventListener('beforeunload', () => source.close());
+            const connect = () => {
+                source = new EventSource('/api/jobs/events');
+                source.onmessage = async event => { try { const change = JSON.parse(event.data); if (change.scope === 'home') await refreshHome(); if (change.scope === 'job' && change.id === selectedId) await refreshParts(change.parts); } catch (e) { notify(e.message, 'danger'); } };
+                source.addEventListener('hello', () => { onConnection?.(true); refreshHome().catch(() => {}); if (selectedId) refreshParts().catch(() => {}); });
+                source.onerror = () => onConnection?.(false);
+                source.onopen = () => onConnection?.(true);
+            };
+            connect();
+            // pagehide/pageshow (not beforeunload) keep the page eligible for the back/forward
+            // cache, so Back to /work is instant; the stream reconnects when the page returns.
+            window.addEventListener('pagehide', () => source?.close());
+            window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
             setInterval(() => { if (home && document.visibilityState === 'visible') renderHome(); }, 30000);
             setInterval(() => { void refreshLiveDiff(); }, LIVE_DIFF_MS);
         }

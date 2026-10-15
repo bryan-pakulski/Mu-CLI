@@ -354,6 +354,14 @@ Signature motions:
 - **Press.** Buttons scale to 0.98 and darken one step. Mobile adds light
   haptic feedback on primary and approval actions.
 
+- **Page transitions.** Navigating between web pages never flashes. Cross-document
+  View Transitions cross-fade the pages; the top bar and sidebar hold still, and
+  the stage content fades out and rises in (`motion-small` out, `motion-medium`
+  in). `/work`'s in-page sections use the same animation. Same-origin links are
+  prefetched on hover (speculation rules, prefetch only). Pages close their live
+  streams on `pagehide` rather than `beforeunload`, so Back and Forward restore
+  from the back/forward cache instantly.
+
 `prefers-reduced-motion` (and the Android reduce-motion setting) turns all of
 this into instant state changes. The ink drop becomes a static `●` with a
 "working" label.
@@ -901,6 +909,11 @@ There is one diff component (web, mobile and TUI), used in approvals, chat
     Start new, and Environments.
   - A footer line reads "Your models, workspace and environments stay under
     your control."
+- **Launcher layout** (`components/launcher.css`): every landing page uses the
+  welcome screen's shape: tall centred hero, three choice cards, a centred
+  960px column for anything below, and a footnote. The Work dashboard uses it
+  with the Lagoon hero, "What should we ship next?", and live cards for Needs
+  you, Running now and Done this week, replacing the stat strip.
 - **Mobile connect screen:** the Dawn wash with the wordmark, a server URL
   field, a "Connect" primary button, and a QR-scan alternative if present.
 

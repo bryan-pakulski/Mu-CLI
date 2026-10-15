@@ -192,8 +192,16 @@
     async function applyRoute() {
         const next = parseHash();
         if (!next) return;
+        const changed = !route || route.name !== next.name;
         route = next;
-        root.querySelectorAll('[data-route]').forEach(s => { s.hidden = s.dataset.route !== route.name; });
+        const swap = () => { root.querySelectorAll('[data-route]').forEach(s => { s.hidden = s.dataset.route !== route.name; }); };
+        // Fade between sections like a page navigation (base.css names the stage w-stage);
+        // tab and job changes within a section swap in place.
+        if (changed && document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            document.startViewTransition(swap);
+        } else {
+            swap();
+        }
         root.querySelectorAll('[data-nav]').forEach(a => {
             const on = a.dataset.nav === route.name || (route.name === 'job' && a.dataset.nav === 'jobs');
             if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');

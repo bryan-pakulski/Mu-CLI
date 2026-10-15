@@ -825,9 +825,12 @@
   $('environment-allow').addEventListener('input', updateSummaries);
   $('environment-deny').addEventListener('input', updateSummaries);
 
-  window.addEventListener('beforeunload', () => {
+  // pagehide (not beforeunload) keeps the page eligible for the back/forward cache.
+  window.addEventListener('pagehide', () => {
     if (state.statsTimer) clearTimeout(state.statsTimer);
+    state.statsTimer = null;
   });
+  window.addEventListener('pageshow', event => { if (event.persisted) startStatsPolling(); });
   load().catch(error => {
     const empty = $('container-empty');
     empty.hidden = false;

@@ -236,17 +236,11 @@
         .work-side + .w-sidebar__heading { margin-top: var(--wash-space-3); }
     }
 
-    /* ------------------------------------------------------------ dashboard hero (Lagoon) */
-    .work-hero {
-        min-height: 240px;
-        padding-bottom: var(--wash-space-7);
-    }
-    .work-hero > .w-page__lede,
-    .work-hero > .w-hero__lede { max-width: 56ch; }
-    .work-hero .w-btn-row { margin-top: var(--wash-space-3); }
-    .work-hero,
+    /* ------------------------------------------------------------ dashboard (launcher layout)
+       The hero, choice cards and centred column come from components/launcher.css, the same
+       layout as the chat welcome. Only compact density and the board spacing live here. */
     .work-page { width: 100%; max-width: var(--wash-size-content); margin-inline: auto; }
-    .work-app[data-density="compact"] .work-hero { min-height: 0; padding-top: var(--wash-space-6); }
+    .work-app[data-density="compact"] .work-hero { min-height: 0; margin-bottom: var(--wash-space-5); padding-top: var(--wash-space-6); }
     .work-app[data-density="compact"] .work-hero::before { background: none; }
     .work-app[data-density="compact"] .w-hero__lede { display: none; }
 
@@ -257,10 +251,7 @@
         .work-setup-cta .w-btn { margin-left: 28px; }
     }
 
-    /* stat strip (G§9.3): five big numbers, hairline dividers, no tiles */
-    .work-stats { margin-bottom: var(--wash-space-7); }
-    .work-stats .w-stat { text-decoration: none; }
-    .work-stats .w-stat:focus-visible { outline-offset: 4px; border-radius: var(--wash-radius-xs); }
+
 
     /* needs-you state cards */
     .work-cards { margin: 0; padding: 0; list-style: none; }

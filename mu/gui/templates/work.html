@@ -56,17 +56,31 @@
 
 {% block content %}
 <div class="work-main work-layout" id="work-main">
-    <section class="work-route" data-route="dashboard">
-        <header class="w-hero work-hero" data-art="work">
-            <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Work</span>
-            <h1 class="w-hero__title">Dashboard</h1>
+    {#- Dashboard: the launcher layout shared with the chat welcome (components/launcher.css):
+        Lagoon hero, three live choice cards (filled by work/view.js), then the sections. -#}
+    <section class="work-route w-launcher work-launcher" data-route="dashboard">
+        <header class="w-hero work-hero" data-art="work" data-size="lg">
+            <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Engineering work</span>
+            <h1 class="w-hero__title">What should we ship next?</h1>
             <p class="w-hero__lede">Delegate engineering jobs, then step in only when one needs you.</p>
-            <div class="w-btn-row work-pane-head-controls">
-                <button type="button" class="w-btn" data-variant="primary" id="work-new" aria-keyshortcuts="n">{{ w.icon("plus") }}<span>New job</span><kbd class="w-keycap" aria-hidden="true">n</kbd></button>
+            <div class="w-btn-row w-launcher__actions work-pane-head-controls">
+                <button type="button" class="w-btn" data-variant="primary" data-size="lg" id="work-new" aria-keyshortcuts="n">{{ w.icon("plus") }}<span>New job</span><kbd class="w-keycap" aria-hidden="true">n</kbd></button>
+                <a class="w-btn" data-variant="secondary" data-size="lg" href="#/boards">Browse tickets <span class="w-btn__chevron" aria-hidden="true">›</span></a>
                 <button type="button" class="w-btn work-board-refresh" data-variant="icon" id="work-refresh" title="Refresh" aria-label="Refresh jobs">{{ w.icon("refresh-cw") }}</button>
             </div>
         </header>
-        <div class="w-page work-page">
+        <div class="w-choice-grid work-choices" id="work-choices" role="list" aria-label="Work overview">
+            <a class="w-choice" role="listitem" href="#needs-you"><span class="w-choice__icon" data-tone="attention" aria-hidden="true">{{ w.icon("alert-circle") }}</span>
+                <span class="w-choice__copy"><strong class="w-choice__title">Needs you</strong><small class="w-choice__meta">Loading…</small></span>
+                <span class="w-choice__arrow" aria-hidden="true">›</span></a>
+            <a class="w-choice" role="listitem" href="#running-now"><span class="w-choice__icon" data-tone="running" aria-hidden="true">{{ w.icon("activity") }}</span>
+                <span class="w-choice__copy"><strong class="w-choice__title">Running now</strong><small class="w-choice__meta">Loading…</small></span>
+                <span class="w-choice__arrow" aria-hidden="true">›</span></a>
+            <a class="w-choice" role="listitem" href="#/history"><span class="w-choice__icon" data-tone="ok" aria-hidden="true">{{ w.icon("history") }}</span>
+                <span class="w-choice__copy"><strong class="w-choice__title">Done this week</strong><small class="w-choice__meta">Loading…</small></span>
+                <span class="w-choice__arrow" aria-hidden="true">›</span></a>
+        </div>
+        <div class="w-launcher__body work-dashboard-body">
             <div class="w-banner work-setup-cta" data-tone="caution" id="work-setup-cta" role="status" hidden>
                 <span class="w-banner__glyph" aria-hidden="true">◆</span>
                 <p class="w-banner__msg" data-cta-text>Jobs aren’t fully set up yet. The setup checklist checks Docker, the runtime image, agents and the sandbox.</p>
@@ -75,6 +89,7 @@
             </div>
             <div class="work-board" id="work-board"><div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading…</div></div>
         </div>
+        <footer class="w-launcher__foot">Jobs run in isolated sandboxes. Your models, repositories and credentials stay on this host.</footer>
     </section>
 
     <section class="work-route w-page" data-route="jobs" hidden><div id="work-jobs"></div></section>

@@ -1,0 +1,125 @@
+/* Launcher (G§9.18): the welcome screen's layout, shared by every landing page.
+ *
+ *   <section class="w-launcher">
+ *     <header class="w-hero" data-art="…" data-size="lg">eyebrow · title · lede · .w-launcher__actions</header>
+ *     <div class="w-choice-grid" role="list">
+ *       <a class="w-choice" role="listitem"><span class="w-choice__icon" data-tone="…"></span>
+ *         <span class="w-choice__copy"><strong class="w-choice__title">…</strong><small class="w-choice__meta">…</small></span>
+ *         <span class="w-choice__arrow">›</span></a>
+ *     </div>
+ *     <div class="w-launcher__body">…sections…</div>
+ *     <footer class="w-launcher__foot">…</footer>
+ *   </section>
+ *
+ * The chat welcome keeps its original class names (.w-welcome, .w-welcome__choice …);
+ * each rule here covers both so the two pages cannot drift apart.
+ */
+
+:is(.w-launcher, .w-welcome) {
+    width: 100%;
+    max-width: none;
+    min-height: 100%;
+    margin: 0;
+    padding: 0 0 var(--wash-space-8);
+    background: transparent;
+}
+
+/* Hero: centred, tall, dissolving into the canvas. */
+:is(.w-launcher, .w-welcome) > .w-hero[data-size="lg"] {
+    min-height: 460px;
+    justify-content: flex-end;
+    margin-bottom: var(--wash-space-8);
+    padding: var(--wash-space-9) var(--wash-space-6) var(--wash-space-7);
+    border: 0;
+    background: none;
+}
+:is(.w-launcher, .w-welcome) > .w-hero > * { position: relative; }
+:is(.w-launcher, .w-welcome) > .w-hero .w-hero__title { margin: 0; }
+:is(.w-launcher, .w-welcome) > .w-hero > .w-eyebrow { margin: 0 0 var(--wash-space-2); }
+:is(.w-launcher, .w-welcome) > .w-hero .w-hero__lede {
+    max-width: 560px;
+    margin: var(--wash-space-3) auto 0;
+    font-size: var(--wash-type-title-3-size);
+    line-height: 28px;
+    font-weight: 400;
+}
+:is(.w-launcher__actions, .w-welcome__actions) { justify-content: center; margin-top: var(--wash-space-6); }
+
+/* Choice cards. */
+:is(.w-choice-grid, .w-welcome__choices) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--wash-space-4);
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 var(--wash-space-6);
+    border: 0;
+    background: none;
+    box-shadow: none;
+}
+:is(.w-choice, .w-welcome__choice) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--wash-space-3);
+    min-height: 0;
+    padding: var(--wash-space-5);
+    border: 1px solid var(--wash-hairline);
+    border-radius: var(--wash-radius-lg);
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color var(--wash-motion-micro) var(--wash-ease-micro), transform var(--wash-motion-micro) var(--wash-ease-micro);
+}
+:is(.w-choice, .w-welcome__choice):hover { border-color: var(--wash-hairline-strong); text-decoration: none; }
+:is(.w-choice, .w-welcome__choice):active { transform: scale(0.99); }
+:is(.w-choice__icon, .w-welcome__icon) {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--wash-radius-sm);
+    background: var(--w-tone-wash, var(--wash-accent-wash));
+    color: var(--w-tone-ink, var(--wash-accent-ink));
+}
+:is(.w-choice__icon, .w-welcome__icon) svg { width: 18px; height: 18px; }
+.w-choice__copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+:is(.w-choice__title, .w-welcome__title) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+}
+:is(.w-choice__meta, .w-welcome__meta) { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); overflow-wrap: anywhere; }
+:is(.w-choice__arrow, .w-welcome__arrow) { position: absolute; top: var(--wash-space-5); right: var(--wash-space-5); color: var(--wash-ink-3); font-size: var(--wash-type-title-3-size); }
+
+/* Content below the cards, in the same centred column. */
+.w-launcher__body { max-width: 960px; margin: var(--wash-space-7) auto 0; padding: 0 var(--wash-space-6); }
+
+:is(.w-launcher__foot, .w-welcome__foot) {
+    display: flex;
+    justify-content: center;
+    max-width: 960px;
+    margin: var(--wash-space-6) auto 0;
+    padding: 0 var(--wash-space-6);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    text-align: center;
+}
+
+@media (width < 840px) {
+    :is(.w-launcher, .w-welcome) > .w-hero[data-size="lg"] { min-height: 360px; padding: var(--wash-space-8) var(--wash-space-4) var(--wash-space-6); }
+    :is(.w-choice-grid, .w-welcome__choices) { grid-template-columns: minmax(0, 1fr); padding: 0 var(--wash-space-4); }
+    .w-launcher__body { padding: 0 var(--wash-space-4); }
+}
+@media (width < 600px) {
+    :is(.w-launcher__actions, .w-welcome__actions) { flex-direction: column; align-items: stretch; width: 100%; }
+}

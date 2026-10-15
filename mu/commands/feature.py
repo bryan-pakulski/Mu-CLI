@@ -57,8 +57,9 @@ def _print_markdown(session: Any, markdown: str, allow_prompt: bool) -> None:
         return
     try:
         from rich.markdown import Markdown
+        from mu.ui.theme.pygments import syntax_theme
 
-        console.print(Markdown(markdown))
+        console.print(Markdown(markdown, code_theme=syntax_theme()))
     except Exception:
         try:
             console.print(markdown, markup=False)
@@ -155,12 +156,12 @@ def _list(session: Any, allow_prompt: bool) -> CommandResult:
                 from rich import box
                 from rich.table import Table
 
-                table = Table(title="Session Features", box=box.ROUNDED)
-                table.add_column("ID", style="cyan", no_wrap=True)
-                table.add_column("Current", style="yellow", justify="center")
-                table.add_column("Status", style="green")
-                table.add_column("Name", style="white")
-                table.add_column("Directory", style="magenta")
+                table = Table(title="Session Features", box=box.SIMPLE_HEAD)
+                table.add_column("ID", style="wash.accent", no_wrap=True)
+                table.add_column("Current", style="wash.caution", justify="center")
+                table.add_column("Status", style="wash.ok")
+                table.add_column("Name", style="wash.ink")
+                table.add_column("Directory", style="wash.plum")
                 if features:
                     for f in features:
                         table.add_row(
@@ -314,7 +315,7 @@ def _help(session: Any, allow_prompt: bool) -> CommandResult:
             try:
                 from rich.panel import Panel
 
-                console.print(Panel(_HELP_TEXT, title="Feature Command Help", border_style="cyan"))
+                console.print(Panel(_HELP_TEXT, title="Feature Command Help", border_style="wash.border"))
             except Exception:
                 pass
     return CommandResult(ok=True, message="Rendered feature help.", data={"usage": _HELP_TEXT})
@@ -607,7 +608,7 @@ def _monitor(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
                     try:
                         from utils.helpers import safe_markup as _esc
 
-                        console.print(f"[cyan]{_esc(line)}[/cyan]")
+                        console.print(f"[wash.accent]{_esc(line)}[/wash.accent]")
                     except Exception:
                         pass
                     last_line = line
@@ -617,7 +618,7 @@ def _monitor(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
     except KeyboardInterrupt:
         if allow_prompt and console is not None:
             try:
-                console.print("[yellow]Monitor stopped by user.[/yellow]")
+                console.print("[wash.caution]Monitor stopped by user.[/wash.caution]")
             except Exception:
                 pass
 

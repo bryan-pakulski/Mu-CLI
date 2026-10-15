@@ -24,7 +24,7 @@ def _extract_partial_summary(child_sm) -> str:
             kind = part.get("type")
             if kind == "text" and part.get("text"):
                 text = str(part["text"]).strip()
-                if text and not text.startswith(("🔨 Running tool:", "Tokens:", "Final session tokens:")):
+                if text and not text.startswith(("● Running tool:", "🔨 Running tool:", "Tokens:", "Final session tokens:")):
                     out.append(text)
             elif kind == "tool_result" and part.get("tool_result"):
                 raw = part["tool_result"]

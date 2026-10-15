@@ -9,6 +9,11 @@ Two rules keep markup safe across the terminal, web, and mobile UIs:
   :func:`show_markup`, never ``ui.show_info``. ``show_info`` always prints
   its argument literally. UIs that can render markup implement
   ``show_info_markup``; every other UI receives the plain text.
+
+Mode banners and toggles go through :func:`show_notice` (``kind`` in
+``info|ok|attention|caution|danger|plan``): ``glyph message`` in the
+semantic colour on the terminal, an additive ``notice`` field on web/mobile
+events, and ``glyph message`` plain text everywhere else.
 """
 
 from __future__ import annotations
@@ -21,7 +26,12 @@ from rich.errors import MarkupError
 from rich.markup import escape as esc
 from rich.text import Text
 
-__all__ = ["esc", "to_plain", "render_plain", "show_markup", "show_renderable"]
+from mu.ui.theme.glyphs import NOTICE, NOTICE_KINDS
+
+__all__ = [
+    "NOTICE_KINDS", "esc", "notice_plain", "to_plain", "render_plain", "show_markup",
+    "show_notice", "show_renderable",
+]
 
 
 def to_plain(message: Any) -> str:
@@ -81,3 +91,26 @@ def show_renderable(ui: Any, renderable: Any) -> None:
     show_info = getattr(ui, "show_info", None)
     if show_info is not None:
         show_info(render_plain(renderable))
+
+
+def notice_plain(kind: str, message: Any) -> str:
+    """Plain-text form of a notice: ``glyph message``."""
+    glyph, _ = NOTICE.get(kind, NOTICE["info"])
+    return f"{glyph} {message}"
+
+
+def show_notice(ui: Any, kind: str, message: Any) -> None:
+    """Show a mode banner / toggle notice. ``message`` is printed literally."""
+    if ui is None:
+        return
+    if kind not in NOTICE:
+        kind = "info"
+    method = _class_method(ui, "show_notice")
+    if method is not None:
+        method(ui, kind, str(message))
+        return
+    target = getattr(ui, "show_error" if kind == "danger" else "show_info", None)
+    if target is None:
+        target = getattr(ui, "show_info", None)
+    if target is not None:
+        target(notice_plain(kind, message))

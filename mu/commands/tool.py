@@ -16,26 +16,26 @@ def _list_tools(session: Any, allow_prompt: bool) -> CommandResult:
                 from rich import box
                 from rich.table import Table
 
-                table = Table(title="Available Tools", box=box.ROUNDED, show_lines=True)
-                table.add_column("Tool", style="cyan", no_wrap=True)
-                table.add_column("Description", style="white", width=40)
-                table.add_column("Parameters", style="magenta")
-                table.add_column("Approval", style="yellow", justify="center")
-                table.add_column("Status", style="green", justify="center")
+                table = Table(title="Available Tools", box=box.SIMPLE_HEAD, show_lines=True)
+                table.add_column("Tool", style="wash.accent", no_wrap=True)
+                table.add_column("Description", style="wash.ink", width=40)
+                table.add_column("Parameters", style="wash.plum")
+                table.add_column("Approval", style="wash.caution", justify="center")
+                table.add_column("Status", style="wash.ok", justify="center")
                 for tool in TOOLS:
                     status = (
-                        "[red]OFF[/red]"
+                        "[wash.danger]OFF[/wash.danger]"
                         if tool.name in session.disabled_tools
-                        else "[green]ON[/green]"
+                        else "[wash.ok]ON[/wash.ok]"
                     )
                     approval = "Yes" if tool.requires_approval else "No"
                     params = []
                     props = tool.parameters.get("properties", {})
                     required = tool.parameters.get("required", [])
                     for pname, pinfo in props.items():
-                        star = "[red]*[/red]" if pname in required else ""
+                        star = "[wash.danger]*[/wash.danger]" if pname in required else ""
                         ptype = pinfo.get("type", "any")
-                        params.append(f"{pname}{star} [dim]({ptype})[/dim]")
+                        params.append(f"{pname}{star} [wash.muted]({ptype})[/wash.muted]")
                     table.add_row(
                         tool.name,
                         tool.description,
@@ -44,7 +44,7 @@ def _list_tools(session: Any, allow_prompt: bool) -> CommandResult:
                         status,
                     )
                 console.print(table)
-                console.print("[dim] [red]*[/red] indicates required parameter[/dim]")
+                console.print("[wash.muted] [wash.danger]*[/wash.danger] indicates required parameter[/wash.muted]")
             except Exception:
                 pass
 

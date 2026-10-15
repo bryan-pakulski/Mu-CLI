@@ -12,7 +12,7 @@ import os
 import re
 import time
 
-from rich.console import Console
+from mu.ui.theme import get_console
 from rich.prompt import IntPrompt, Prompt
 from rich.text import Text
 from rich.table import Table
@@ -29,7 +29,7 @@ from mu.tools._dispatcher import execute_tool
 from utils.helpers import safe_markup
 from utils.logger import logger
 
-console = Console()
+console = get_console()
 
 
 def _slugify_feature_id(value):
@@ -282,7 +282,7 @@ def _feature_three_option_prompt(question, options, *, allow_prompt):
         raise ValueError("feature prompt requires exactly three options")
     if not allow_prompt:
         return choices[0][0]
-    console.print(f"[bold cyan]{safe_markup(question)}[/bold cyan]")
+    console.print(f"[wash.accent.bold]{safe_markup(question)}[/wash.accent.bold]")
     for idx, (_, label) in enumerate(choices, start=1):
         console.print(f"  {idx}. {label}", markup=False)
     selected = IntPrompt.ask("Select option", choices=[1, 2, 3], default=1)

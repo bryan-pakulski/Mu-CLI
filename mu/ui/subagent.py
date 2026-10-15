@@ -28,7 +28,7 @@ def _extract_tool_name(text: str) -> Optional[str]:
     """Parse the tool name out of the 'Running tool: X(args)' UI format.
 
     The Session loop emits:
-        f"🔨 Running tool: {tool_name}({shortened_args})"
+        f"● Running tool: {tool_name}({shortened_args})"
     We pull out `tool_name` so the progress tracker can show it.
     Returns None if the line doesn't match the expected shape.
     """
@@ -83,7 +83,7 @@ class SubagentUI:
         self._parent = parent_ui
         self._depth = max(1, int(depth))
         self._prefix = f"[subagent d={self._depth}]"
-        # If a `SubagentProgressTracker` is attached, "🔨 Running tool: X"
+        # If a `SubagentProgressTracker` is attached, "Running tool: X"
         # messages get routed to the live panel instead of flooding the
         # parent's terminal with one line per child tool call. All other
         # messages still bubble up (errors, completion banners, etc.).
@@ -103,7 +103,7 @@ class SubagentUI:
         """Forward a styled info/error/status message to the root UI.
 
         Builds a pre-styled ``Text`` with explicit style spans so that:
-          * The ``[dim cyan]`` prefix renders as a Rich style, not literal text.
+          * The muted ``wash.muted`` prefix renders as a Rich style, not literal text.
           * Literal square brackets in the message (e.g. ``[Collated: get_chunk]``
             or ``[subagent d=1]``) are preserved verbatim — ``Text`` bypasses
             markup parsing, unlike ``Text.from_markup()``.
@@ -114,7 +114,7 @@ class SubagentUI:
         if root is None:
             return
         styled = Text()
-        styled.append(self._prefix, style="dim cyan")
+        styled.append(self._prefix, style="wash.muted")
         styled.append(f"   {message}")
         if kind == "error" and hasattr(root, "show_error"):
             root.show_error(styled)

@@ -10,7 +10,7 @@ import time
 from utils.threads import NamedThread
 from rich import box
 from rich.align import Align
-from rich.console import Console, Group
+from rich.console import Group
 from rich.errors import MarkupError
 from rich.protocol import is_renderable as _is_rich_renderable
 from rich.live import Live
@@ -23,6 +23,8 @@ from rich.text import Text
 
 from .input import InputHandler
 from .render import render_response
+from .theme import components, get_console, glyphs
+from .theme.pygments import syntax_theme
 from utils.config import AGENT_MODE_METADATA
 from utils.helpers import safe_markup
 from utils.runtime_metrics import build_live_status_line, collect_runtime_metrics
@@ -30,7 +32,7 @@ from utils.runtime_metrics import build_live_status_line, collect_runtime_metric
 
 class RichUI:
     def __init__(self):
-        self.console = Console()
+        self.console = get_console()
         self.input_handler = InputHandler()
         # Per-turn streaming state. `_gen_live` is set when an active
         # `_GenerationLive` context manager is open — streaming-text and
@@ -41,6 +43,12 @@ class RichUI:
         self._gen_live = None
         self._streamed_any_text = False
         self._variables = None  # set via set_variables()
+        # Tool markers printed after a generation (``● kind target``) that
+        # are waiting for their result, oldest first. Each entry is a dict
+        # with name, target, started and the console print count after the
+        # marker was printed (for in-place rewriting).
+        self._pending_tools: list = []
+        self._tool_clock = None
 
     # -------------------------------------------------- live streaming surface
 
@@ -73,7 +81,7 @@ class RichUI:
 
     def stream_thinking_delta(self, text: str):
         """Append a reasoning chunk to the active generation Live, styled
-        in dim italic so it visually separates from user-facing text.
+        ``wash.thinking`` (muted italic) so it separates from user-facing text.
 
         Gated on `show_thinking` (default True), with one mode-aware
         wrinkle: teacher mode hides thinking by default unless the user
@@ -89,7 +97,7 @@ class RichUI:
             self._gen_live.append_thinking(text)
             return
         self.console.print(
-            Text(text, style="dim italic"), end="", soft_wrap=True, highlight=False
+            Text(text, style="wash.thinking"), end="", soft_wrap=True, highlight=False
         )
 
     def _show_thinking_effective(self) -> bool:
@@ -121,10 +129,7 @@ class RichUI:
         if self._gen_live is not None:
             self._gen_live.note_tool_call(tool_name)
             return
-        self.console.print(
-            Text.assemble(("\n→ ", "cyan"), (str(tool_name), "cyan")),
-            highlight=False,
-        )
+        self.console.print(components.tool_marker(str(tool_name)), highlight=False)
 
     def stream_assistant_end(self):
         """End-of-stream notification. The Live keeps its rendered text in
@@ -140,15 +145,11 @@ class RichUI:
         local_now = datetime.now().astimezone()
         ts = local_now.strftime(f"%H:%M:%S {local_now.tzname() or 'local'}")
         if role == "user":
-            self.console.print(
-                Panel(
-                    Text(str(content)),
-                    title="User",
-                    style="blue",
-                    box=box.ROUNDED,
-                    title_align="right",
-                )
-            )
+            # G§9.7 T: a `›` gutter mark in accent, then the plain text.
+            body = Text()
+            body.append(f"{glyphs.USER_GUTTER} ", style="wash.accent.bold")
+            body.append(str(content), style="wash.ink")
+            self.console.print(body)
             return
         # Assistant path. If the text already streamed token-by-token, the
         # user has seen it — `_GenerationLive.__exit__` already re-emitted
@@ -158,10 +159,12 @@ class RichUI:
         # callers never set the flag, so they always render normally.
         if self._streamed_any_text:
             return
+        header = Text()
+        header.append("\nAssistant", style="wash.ink2.bold")
         if model_name:
-            self.console.print(f"\nAssistant ({model_name}) [{ts}]:")
-        else:
-            self.console.print(f"\nAssistant [{ts}]:")
+            header.append(f" ({model_name})", style="wash.muted")
+        header.append(f" [{ts}]:", style="wash.muted")
+        self.console.print(header)
         render_response(content)
 
     def render_visualization(self, artifact, *, local_path=None):
@@ -176,20 +179,14 @@ class RichUI:
                 pass
 
         body = Text()
-        body.append("Interactive visualization ready.\n", style="dim")
+        body.append("Interactive visualization ready.\n", style="wash.muted")
         if url:
-            body.append("Open visualization", style=f"bold underline link {url}")
-            body.append(f"\n{url}", style="dim")
+            body.append("Open visualization", style="wash.link")
+            body.stylize(f"link {url}", len(body) - len("Open visualization"))
+            body.append(f"\n{url}", style="wash.muted")
         else:
-            body.append("Open it from the web or mobile Artifacts view.", style="dim")
-        self.console.print(
-            Panel(
-                body,
-                title=title,
-                border_style="cyan",
-                box=box.ROUNDED,
-            )
-        )
+            body.append("Open it from the web or mobile Artifacts view.", style="wash.muted")
+        self.console.print(components.panel(body, title=Text(title, style="wash.heading")))
 
     def get_input(
         self,
@@ -239,11 +236,18 @@ class RichUI:
         choices,
         default,
     ):
-        self.console.print(prompt_text)
-        if approval_policy != "always_human":
-            self.console.print(
-                "[dim]Tip: press Shift+Tab here to toggle YOLO for this and subsequent approvals in the current loop.[/dim]"
+        self.console.print(
+            self.build_approval_panel(
+                tool_name=tool_name,
+                display_args=display_args if display_args is not None else tool_args,
+                count_info=count_info,
+                can_approve=can_approve,
+                preview_error=preview_error,
+                prompt_text=prompt_text,
+                choices=choices,
+                approval_policy=approval_policy,
             )
+        )
         choice = self.input_handler.prompt_choice(
             "Approval choice",
             choices=choices,
@@ -254,11 +258,77 @@ class RichUI:
             reason = self.prompt("Provide an explanation to the model")
         return choice, reason
 
+    _APPROVAL_KEY_LABELS = {
+        "y": "approve",
+        "a": "always",
+        "n": "deny",
+        "e": "explain",
+    }
+
+    def build_approval_panel(
+        self,
+        *,
+        tool_name=None,
+        display_args=None,
+        count_info="",
+        can_approve=True,
+        preview_error=None,
+        prompt_text="",
+        choices=("y", "n", "e"),
+        approval_policy="default",
+    ):
+        """The approval card (G§9.9 T): attention border, ``◆ Needs you``
+        title, escaped args, and a key-hint row. All model-supplied text is
+        added as plain ``Text`` so it can never be parsed as markup."""
+        name = str(tool_name or "").strip()
+        if not name and prompt_text:
+            # Callers that only pass the legacy prompt text still get a card.
+            from mu.ui.markup import to_plain
+
+            body = Text(to_plain(prompt_text).strip(), style="wash.ink")
+        else:
+            body = Text()
+            body.append("Tool  ", style="wash.muted")
+            body.append(name or "tool", style="wash.ink.bold")
+            if count_info:
+                body.append(f"  {count_info}".rstrip(), style="wash.muted")
+            if display_args:
+                body.append("\nArgs  ", style="wash.muted")
+                body.append(str(display_args), style="wash.ink2")
+            if preview_error:
+                body.append("\n")
+                body.append(f"{glyphs.FAILED} {preview_error}", style="wash.danger")
+        hints = components.key_hints(
+            (key, self._APPROVAL_KEY_LABELS.get(key, key)) for key in choices
+        )
+        parts = [body, Text(""), hints]
+        if approval_policy != "always_human":
+            parts.append(
+                Text(
+                    "Shift+Tab toggles YOLO for this and later approvals in the current loop.",
+                    style="wash.hint",
+                )
+            )
+        if can_approve:
+            # Panel titles must not carry a base style: Rich lets it override spans.
+            title = Text()
+            title.append(f"{glyphs.WAITING} Needs you", style="wash.attention.bold")
+            title.append(" · ", style="wash.muted")
+            title.append(f"Permission to run {name or 'tool'}", style="wash.ink.bold")
+            tone = "attention"
+        else:
+            title = Text()
+            title.append(f"{glyphs.FAILED} Diff failed", style="wash.danger.bold")
+            title.append(" · ", style="wash.muted")
+            title.append(f"{name or 'tool'} can't be previewed", style="wash.ink.bold")
+            tone = "danger"
+        return components.panel(Group(*parts), title=title, tone=tone, padding=(0, 1))
+
     def show_error(self, message):
         if isinstance(message, Text):
-            self.console.print(message, style="red")
+            self.console.print(message, style="wash.danger")
         else:
-            self.console.print(Text(str(message), style="red"))
+            self.console.print(Text(str(message), style="wash.danger"))
 
     def show_info(self, message):
         if not isinstance(message, (str, Text)) and _is_rich_renderable(message):
@@ -268,12 +338,14 @@ class RichUI:
             text = message.plain
         else:
             text = str(message)
+        if "Running tool:" in text.lstrip()[:20]:
+            self._note_running_tool(text)
         if self._is_silenced_in_compact_mode(text):
             return
         if isinstance(message, Text):
-            self.console.print(message, style="blue")
+            self.console.print(message, style="wash.ink2")
         else:
-            self.console.print(Text(text, style="blue"))
+            self.console.print(Text(text, style="wash.ink2"))
 
     def show_info_markup(self, message):
         """Print a message whose Rich markup was written by our own code.
@@ -293,6 +365,12 @@ class RichUI:
         """Print a Rich renderable (Table, Panel, ...) as-is."""
         self.console.print(renderable)
 
+    def show_notice(self, kind, message):
+        """Mode banner / toggle: ``glyph message`` in the semantic colour.
+
+        ``message`` is printed literally (never parsed as markup)."""
+        self.console.print(components.notice_text(kind, str(message)))
+
     def _is_silenced_in_compact_mode(self, text: str) -> bool:
         """Filter noisy diagnostic messages when verbose rendering is off.
 
@@ -306,7 +384,7 @@ class RichUI:
         if variables.get("verbose", False):
             return False
         stripped = text.lstrip()
-        if stripped.startswith("🔨 Running tool:"):
+        if "Running tool:" in stripped[:20]:
             return True
         if stripped.startswith("Tokens:"):
             return True
@@ -324,93 +402,73 @@ class RichUI:
         current,
         maximum,
         *,
-        color="cyan",
+        color="wash.meter.fill",
         width=16,
-        warning_threshold=0.75,
-        danger_threshold=0.9,
+        warning_threshold=components.CAUTION_AT,
+        danger_threshold=components.DANGER_AT,
     ):
-        maximum = max(1, int(maximum or 1))
-        current = max(0, int(current or 0))
-        ratio = min(current / maximum, 1.0)
-        filled = min(width, int(round(width * ratio)))
-
-        bar = Text()
-        active_color = color
-        if ratio >= danger_threshold:
-            active_color = "red"
-        elif ratio >= warning_threshold:
-            active_color = "yellow"
-
-        bar.append("█" * filled, style=f"bold {active_color}")
-        bar.append("░" * (width - filled), style="grey30")
-
-        line = Text()
-        line.append(f"{label:<8}", style="bold white")
-        line.append(" ")
-        line.append(bar)
-        line.append(f" {current}/{maximum}", style="dim white")
-        return line
+        """``LABEL ██████░░░░ 12/40``: ink-2 fill, caution at ≥0.65, danger at ≥0.85."""
+        return components.meter(
+            label,
+            current,
+            maximum,
+            width=width,
+            fill_style=color,
+            caution_at=warning_threshold,
+            danger_at=danger_threshold,
+        )
 
     def build_memory_monitor(self, session):
+        from mu.design import load_tokens
+
         metrics = collect_runtime_metrics(session)
 
         meters = [
+            self.build_meter("CTX", metrics["ctx"]["current"], metrics["ctx"]["maximum"]),
+            self.build_meter("MEM", metrics["mem"]["current"], metrics["mem"]["maximum"]),
             self.build_meter(
-                "CTX",
-                metrics["ctx"]["current"],
-                metrics["ctx"]["maximum"],
-                color="cyan",
+                "SCRATCH", metrics["scratch"]["current"], metrics["scratch"]["maximum"]
             ),
-            self.build_meter(
-                "MEM",
-                metrics["mem"]["current"],
-                metrics["mem"]["maximum"],
-                color="magenta",
-            ),
-            self.build_meter(
-                "SCRATCH",
-                metrics["scratch"]["current"],
-                metrics["scratch"]["maximum"],
-                color="green",
-            ),
-            self.build_meter(
-                "QUEUE",
-                metrics["queue"]["current"],
-                metrics["queue"]["maximum"],
-                color="yellow",
-            ),
+            self.build_meter("QUEUE", metrics["queue"]["current"], metrics["queue"]["maximum"]),
         ]
 
         current_mode = metrics["mode"]["name"]
         mode_description = AGENT_MODE_METADATA.get(current_mode, {}).get(
             "description", ""
         )
-
-        meta = Text()
-        meta.append("tokens ", style="dim white")
-        meta.append(str(metrics["tokens"]["total"]), style="bold cyan")
-        meta.append("  |  queue ", style="dim white")
-        meta.append(str(metrics["queue_items"]), style="bold yellow")
-        meta.append(" item", style="dim white")
-        if metrics["queue_items"] != 1:
-            meta.append("s", style="dim white")
-        meta.append("  |  mode ", style="dim white")
-        meta.append(current_mode, style="bold magenta")
-
-        token_line = Text()
-        token_line.append("in ", style="dim white")
-        token_line.append(str(metrics["tokens"]["input"]), style="bold cyan")
-        token_line.append("  out ", style="dim white")
-        token_line.append(str(metrics["tokens"]["output"]), style="bold green")
-        token_line.append("  cost ", style="dim white")
-        token_line.append(
-            f"${metrics['tokens']['total_cost']:.5f}",
-            style="bold yellow",
+        mode_style = (
+            f"wash.mode.{current_mode}"
+            if current_mode in load_tokens()["mode"]
+            else "wash.ink.bold"
         )
 
+        def sep(text):
+            text.append("  ·  ", style="wash.muted")
+
+        meta = Text()
+        meta.append("tokens ", style="wash.muted")
+        meta.append(str(metrics["tokens"]["total"]), style="wash.ink.bold")
+        sep(meta)
+        meta.append("queue ", style="wash.muted")
+        meta.append(str(metrics["queue_items"]), style="wash.ink.bold")
+        meta.append(" item", style="wash.muted")
+        if metrics["queue_items"] != 1:
+            meta.append("s", style="wash.muted")
+        sep(meta)
+        meta.append("mode ", style="wash.muted")
+        meta.append(current_mode, style=mode_style)
+
+        token_line = Text()
+        token_line.append("in ", style="wash.muted")
+        token_line.append(str(metrics["tokens"]["input"]), style="wash.ink.bold")
+        token_line.append("  out ", style="wash.muted")
+        token_line.append(str(metrics["tokens"]["output"]), style="wash.ink.bold")
+        token_line.append("  cost ", style="wash.muted")
+        token_line.append(f"${metrics['tokens']['total_cost']:.5f}", style="wash.ink.bold")
+
         mode_line = Text()
-        mode_line.append("mode info ", style="dim white")
-        mode_line.append(mode_description or "No description available.", style="white")
+        mode_line.append("mode info ", style="wash.muted")
+        mode_line.append(mode_description or "No description available.", style="wash.ink2")
 
         feature_group = []
         feature_metrics = metrics.get("feature")
@@ -424,18 +482,18 @@ class RichUI:
             feature_group.append(Text(""))
 
             feature_header = Text()
-            feature_header.append("feature ", style="dim white")
-            feature_header.append(str(feature_name), style="bold cyan")
+            feature_header.append("feature ", style="wash.muted")
+            feature_header.append(str(feature_name), style="wash.ink.bold")
             feature_group.append(feature_header)
 
             feature_meta = Text()
-            feature_meta.append("loop ", style="dim white")
-            feature_meta.append(str(feature_status), style="bold yellow")
+            feature_meta.append("loop ", style="wash.muted")
+            feature_meta.append(str(feature_status), style="wash.running")
             if feature_plan:
-                feature_meta.append("  |  review ", style="dim white")
+                sep(feature_meta)
+                feature_meta.append("review ", style="wash.muted")
                 feature_meta.append(
-                    str(feature_plan.get("review_status", "unknown")),
-                    style="bold magenta",
+                    str(feature_plan.get("review_status", "unknown")), style="wash.ink2"
                 )
             feature_group.append(feature_meta)
 
@@ -450,7 +508,9 @@ class RichUI:
                     "PHASES",
                     completed_phases,
                     phase_count,
-                    color="blue",
+                    # Progress meters fill up on purpose: no pressure colours.
+                    warning_threshold=2.0,
+                    danger_threshold=2.0,
                 )
             )
 
@@ -459,10 +519,9 @@ class RichUI:
                 total_tasks = max(1, sum(int(value or 0) for value in counts.values()))
                 completed_tasks = int(counts.get("completed", 0) or 0)
                 phase_color = {
-                    "completed": "green",
-                    "in_progress": "yellow",
-                    "not_started": "blue",
-                }.get(phase.get("status"), "cyan")
+                    "completed": "wash.ok",
+                    "in_progress": "wash.running",
+                }.get(phase.get("status"), "wash.meter.fill")
                 feature_group.append(
                     self.build_meter(
                         f"P{phase.get('number', '?')}",
@@ -470,6 +529,8 @@ class RichUI:
                         total_tasks,
                         color=phase_color,
                         width=12,
+                        warning_threshold=2.0,
+                        danger_threshold=2.0,
                     )
                 )
 
@@ -480,20 +541,21 @@ class RichUI:
                 elapsed = self._format_elapsed(elapsed_seconds)
                 token_delta = int(progress.get("token_delta", 0) or 0)
                 activity = Text()
-                activity.append(f"Implementing {active_label}… ", style="white")
+                activity.append(f"{glyphs.ACTIVE} ", style="wash.running")
+                activity.append(f"Implementing {active_label}… ", style="wash.ink")
                 activity.append(
                     f"({elapsed} · ↓ {self._format_token_delta(token_delta)} tokens)",
-                    style="dim white",
+                    style="wash.muted",
                 )
                 feature_group.append(activity)
 
                 completed = int(progress.get("completed_tasks", 0) or 0)
                 remaining = max(0, int(progress.get("total_tasks", 0) or 0) - completed)
                 summary_line = Text()
-                summary_line.append("✔ ", style="green")
-                summary_line.append(f"{completed} completed", style="white")
-                summary_line.append("  ◻ ", style="cyan")
-                summary_line.append(f"{remaining} remaining", style="white")
+                summary_line.append(f"{glyphs.DONE} ", style="wash.ok")
+                summary_line.append(f"{completed} completed", style="wash.ink")
+                summary_line.append(f"  {glyphs.PENDING} ", style="wash.muted")
+                summary_line.append(f"{remaining} remaining", style="wash.ink")
                 feature_group.append(summary_line)
 
             max_visible_tasks = 10
@@ -503,45 +565,38 @@ class RichUI:
                 1 for task in hidden_tasks if task.get("status") == "completed"
             )
             for phase in visible_tasks:
-                icon = {
-                    "completed": "✔",
-                    "in_progress": "◼",
-                    "not_started": "◻",
-                }.get(phase.get("status"), "◻")
-                icon_style = {
-                    "completed": "green",
-                    "in_progress": "yellow",
-                    "not_started": "grey70",
-                }.get(phase.get("status"), "grey70")
+                status = {
+                    "completed": "done",
+                    "in_progress": "active",
+                    "not_started": "pending",
+                }.get(phase.get("status"), "pending")
                 task_line = Text()
-                task_line.append(f"{icon} ", style=icon_style)
-                task_line.append(
-                    str(phase.get("title", "")),
-                    style="white",
-                )
+                task_line.append(f"{glyphs.status_glyph(status)} ", style=f"wash.status.{status}")
+                task_line.append(str(phase.get("title", "")), style="wash.ink")
                 feature_group.append(task_line)
             if hidden_completed > 0:
                 hidden_line = Text()
-                hidden_line.append("… ", style="dim white")
-                hidden_line.append(f"+{hidden_completed} completed", style="dim green")
+                hidden_line.append("… ", style="wash.muted")
+                hidden_line.append(f"+{hidden_completed} completed", style="wash.muted")
                 feature_group.append(hidden_line)
 
             next_phase = feature_plan.get("next_phase")
             if next_phase:
                 next_phase_line = Text()
-                next_phase_line.append("next ", style="dim white")
+                next_phase_line.append("next ", style="wash.muted")
                 next_phase_line.append(
                     f"P{next_phase.get('number')}: {next_phase.get('title', '')}",
-                    style="white",
+                    style="wash.ink",
                 )
                 feature_group.append(next_phase_line)
 
-        legend = Text.from_markup(
-            "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
+        legend = Text(
+            "CTX context · MEM memory · SCRATCH scratchpad · QUEUE collation",
+            style="wash.muted",
         )
 
         return Align.center(
-            Panel(
+            components.panel(
                 Group(
                     *meters,
                     Text(""),
@@ -551,9 +606,7 @@ class RichUI:
                     *feature_group,
                     legend,
                 ),
-                title="[bold white]/stats[/bold white]",
-                border_style="bright_black",
-                box=box.ROUNDED,
+                title=Text("/stats", style="wash.heading"),
                 width=76,
             )
         )
@@ -577,128 +630,137 @@ class RichUI:
             return f"{tokens / 1000:.1f}k"
         return str(tokens)
 
-    def show_diff(self, filename, original_content, new_content):
-        """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""
+    #: side-by-side diff only on wide terminals (spec §6.3)
+    SIDE_BY_SIDE_MIN_WIDTH = 160
+
+    def show_diff(self, filename, original_content, new_content, *, side_by_side=None):
+        """Show a proposed change: unified by default, side-by-side above 160 columns.
+
+        Added/removed lines use ok/danger foregrounds; a background tint from
+        the detected theme's washes is added only in truecolor (the
+        ``wash.diff.*.line`` styles resolve that per colour mode).
+        """
+        self.console.print(
+            self.build_diff(filename, original_content, new_content, side_by_side=side_by_side)
+        )
+
+    def build_diff(self, filename, original_content, new_content, *, side_by_side=None):
         import difflib
         import os
 
-        ext = os.path.splitext(filename)[1][1:] or "txt"
-
-        orig_lines = original_content.splitlines()
-        new_lines = new_content.splitlines()
-
+        ext = os.path.splitext(str(filename))[1][1:] or "txt"
+        orig_lines = str(original_content or "").splitlines()
+        new_lines = str(new_content or "").splitlines()
         sm = difflib.SequenceMatcher(None, orig_lines, new_lines)
-        grouped_opcodes = sm.get_grouped_opcodes(n=3)
+        grouped_opcodes = list(sm.get_grouped_opcodes(n=3))
 
-        table = Table(
-            title=f"PROPOSED CHANGES: {filename}",
-            box=box.ROUNDED,
-            show_header=True,
-            header_style="bold magenta",
-            expand=True,
-            pad_edge=False,
-            collapse_padding=True,
+        if side_by_side is None:
+            try:
+                width = int(self.console.width)
+            except (TypeError, ValueError, AttributeError):
+                width = 0
+            side_by_side = width >= self.SIDE_BY_SIDE_MIN_WIDTH
+
+        additions = sum(
+            (j2 - j1) for group in grouped_opcodes for tag, _i1, _i2, j1, j2 in group
+            if tag in ("insert", "replace")
         )
+        deletions = sum(
+            (i2 - i1) for group in grouped_opcodes for tag, i1, i2, _j1, _j2 in group
+            if tag in ("delete", "replace")
+        )
+        title = Text()
+        title.append("Proposed changes ", style="wash.heading")
+        title.append(str(filename), style="wash.path")
+        title.append(f"  +{additions}", style="wash.diff.add")
+        title.append(f" -{deletions}", style="wash.diff.del")
 
-        # We'll use 4 columns: Line L, Content L, Line R, Content R
-        table.add_column("L#", justify="right", style="dim", width=5)
-        table.add_column("CURRENT STATE", ratio=1)
-        table.add_column("R#", justify="right", style="dim", width=5)
-        table.add_column("PROPOSED STATE", ratio=1)
+        if side_by_side:
+            body = self._side_by_side_diff(grouped_opcodes, orig_lines, new_lines, ext)
+        else:
+            body = self._unified_diff(grouped_opcodes, orig_lines, new_lines, ext)
+        return components.panel(body, title=title, padding=(0, 1))
 
+    def _code(self, line, ext):
+        return Syntax(line, ext, theme=syntax_theme(), background_color="default", word_wrap=True)
+
+    def _unified_diff(self, grouped_opcodes, orig_lines, new_lines, ext):
+        table = Table(
+            box=None, show_header=False, expand=True, pad_edge=False, padding=(0, 1)
+        )
+        table.add_column("old", justify="right", style="wash.muted", width=5, no_wrap=True)
+        table.add_column("new", justify="right", style="wash.muted", width=5, no_wrap=True)
+        table.add_column("line", ratio=1)
         for group in grouped_opcodes:
-            # Hunk separator
+            first = group[0]
             table.add_row(
-                Text("...", style="cyan"),
-                Text(
-                    f"@@ hunk starting at L{group[0][1]+1} R{group[0][3]+1} @@",
-                    style="cyan dim",
-                ),
-                Text("...", style="cyan"),
-                Text("", style="cyan dim"),
+                "", "",
+                Text(f"@@ -{first[1] + 1} +{first[3] + 1} @@", style="wash.diff.hunk"),
             )
-
             for tag, i1, i2, j1, j2 in group:
                 if tag == "equal":
                     for k in range(i2 - i1):
                         table.add_row(
-                            str(i1 + k + 1),
-                            Syntax(
-                                orig_lines[i1 + k],
-                                ext,
-                                theme="monokai",
-                                background_color="default",
-                            ),
-                            str(j1 + k + 1),
-                            Syntax(
-                                new_lines[j1 + k],
-                                ext,
-                                theme="monokai",
-                                background_color="default",
-                            ),
+                            str(i1 + k + 1), str(j1 + k + 1),
+                            self._code("  " + orig_lines[i1 + k], ext),
                         )
-                elif tag == "delete":
+                    continue
+                if tag in ("delete", "replace"):
                     for k in range(i2 - i1):
                         table.add_row(
-                            Text(str(i1 + k + 1), style="red"),
-                            Text("- " + orig_lines[i1 + k], style="red on #3a0000"),
-                            "",
-                            "",
-                            style="on #2a0000",
+                            Text(str(i1 + k + 1), style="wash.diff.del"), "",
+                            Text("- " + orig_lines[i1 + k], style="wash.diff.del.line"),
                         )
-                elif tag == "insert":
+                if tag in ("insert", "replace"):
                     for k in range(j2 - j1):
                         table.add_row(
-                            "",
-                            "",
-                            Text(str(j1 + k + 1), style="green"),
-                            Text("+ " + new_lines[j1 + k], style="green on #002b00"),
-                            style="on #001b00",
+                            "", Text(str(j1 + k + 1), style="wash.diff.add"),
+                            Text("+ " + new_lines[j1 + k], style="wash.diff.add.line"),
                         )
-                elif tag == "replace":
-                    # For replace, we show deletions then insertions to keep L/R aligned if possible,
-                    # but side-by-side replace is tricky in 4 columns if we want to align corresponding lines.
-                    # Simplest is to show L on left and R on right in the same row.
-                    max_range = max(i2 - i1, j2 - j1)
-                    for k in range(max_range):
-                        l_idx = i1 + k
-                        r_idx = j1 + k
+        return table
 
-                        l_num = str(l_idx + 1) if l_idx < i2 else ""
-                        l_text = orig_lines[l_idx] if l_idx < i2 else ""
-
-                        r_num = str(r_idx + 1) if r_idx < j2 else ""
-                        r_text = new_lines[r_idx] if r_idx < j2 else ""
-
+    def _side_by_side_diff(self, grouped_opcodes, orig_lines, new_lines, ext):
+        table = Table(
+            box=box.SIMPLE_HEAD,
+            show_header=True,
+            header_style="wash.table.header",
+            border_style="wash.border",
+            expand=True,
+            show_edge=False,
+            pad_edge=False,
+            collapse_padding=True,
+        )
+        table.add_column("L#", justify="right", style="wash.muted", width=5)
+        table.add_column("Current", ratio=1)
+        table.add_column("R#", justify="right", style="wash.muted", width=5)
+        table.add_column("Proposed", ratio=1)
+        for group in grouped_opcodes:
+            table.add_row(
+                Text("…", style="wash.diff.hunk"),
+                Text(f"@@ -{group[0][1] + 1} +{group[0][3] + 1} @@", style="wash.diff.hunk"),
+                Text("…", style="wash.diff.hunk"),
+                Text(""),
+            )
+            for tag, i1, i2, j1, j2 in group:
+                if tag == "equal":
+                    for k in range(i2 - i1):
                         table.add_row(
-                            Text(l_num, style="red" if l_num else ""),
-                            Text(
-                                "- " + l_text, style="red on #3a0000" if l_text else ""
-                            ),
-                            Text(r_num, style="green" if r_num else ""),
-                            Text(
-                                "+ " + r_text,
-                                style="green on #002b00" if r_text else "",
-                            ),
-                            style="on #1a1a1a",  # Neutral dark background for mixed rows
+                            str(i1 + k + 1), self._code(orig_lines[i1 + k], ext),
+                            str(j1 + k + 1), self._code(new_lines[j1 + k], ext),
                         )
-
-        # Summary calculation
-        diff_list = list(difflib.unified_diff(orig_lines, new_lines))
-        additions = len(
-            [l for l in diff_list if l.startswith("+") and not l.startswith("+++")]
-        )
-        deletions = len(
-            [l for l in diff_list if l.startswith("-") and not l.startswith("---")]
-        )
-        summary = f"[bold green]+{additions} lines[/bold green]  [bold red]-{deletions} lines[/bold red]"
-
-        self.console.print("\n")
-        self.console.print(table)
-        self.console.print(
-            Panel(summary, title="Change Summary", expand=False, border_style="dim")
-        )
-        self.console.print("\n")
+                    continue
+                span = max(i2 - i1, j2 - j1)
+                for k in range(span):
+                    l_idx, r_idx = i1 + k, j1 + k
+                    has_l = tag in ("delete", "replace") and l_idx < i2
+                    has_r = tag in ("insert", "replace") and r_idx < j2
+                    table.add_row(
+                        Text(str(l_idx + 1), style="wash.diff.del") if has_l else "",
+                        Text("- " + orig_lines[l_idx], style="wash.diff.del.line") if has_l else "",
+                        Text(str(r_idx + 1), style="wash.diff.add") if has_r else "",
+                        Text("+ " + new_lines[r_idx], style="wash.diff.add.line") if has_r else "",
+                    )
+        return table
 
     def show_status(self, message):
         """Open a unified streaming + status `_GenerationLive`.
@@ -724,19 +786,20 @@ class RichUI:
         status = Text()
         status.append(f"Generating ({model_name}) it {iteration}/{max_iterations} | ")
         if metrics["yolo"]["enabled"]:
-            status.append("✦", style="bold yellow blink")
-            status.append(" YOLO | ", style="bold yellow")
+            # YOLO is caution (sun), bold, never blinking.
+            status.append("YOLO:on", style="wash.caution.bold")
+            status.append(" | ", style="wash.muted")
         else:
-            status.append("YOLO:off | ", style="dim")
-        status.append(build_live_status_line(session), style="white")
+            status.append("YOLO:off | ", style="wash.muted")
+        status.append(build_live_status_line(session), style="wash.ink2")
         return status
 
     @staticmethod
     def _status_with_yolo(base_message, enabled):
-        suffix = "✦ YOLO" if enabled else "YOLO:off"
+        suffix = "YOLO:on" if enabled else "YOLO:off"
         raw = base_message.plain if isinstance(base_message, Text) else str(base_message)
         raw = raw.replace("YOLO:off", suffix)
-        raw = raw.replace("✦ YOLO", suffix)
+        raw = raw.replace("YOLO:on", suffix)
         return raw
 
     def _start_yolo_status_watcher(self, *, status, base_message, stop_event):
@@ -784,24 +847,135 @@ class RichUI:
         watcher.start()
         return watcher
 
+    # ------------------------------------------------------ tool markers
+
+    def _now(self):
+        return (self._tool_clock or time.monotonic)()
+
+    def _note_running_tool(self, text):
+        """Attach a target (path, command, query) to the oldest pending marker
+        for this tool, from the ``Running tool: name(args)`` notice."""
+        import re
+
+        match = re.search(r"Running tool:\s*([\w.\-]+)\s*(?:\((.*)\))?\s*$", str(text), re.S)
+        if not match:
+            return
+        name, args = match.group(1), match.group(2) or ""
+        target = ""
+        found = re.search(
+            r"""['"](?:filename|file_path|path|command|cmd|query|pattern|url|directory|dir)['"]\s*:\s*['"]([^'"]*)""",
+            args,
+        )
+        if found:
+            target = found.group(1)
+        entry = next(
+            (e for e in self._pending_tools if e["name"] == name and not e.get("noted")),
+            None,
+        )
+        if entry is None:
+            # No marker was printed (e.g. a non-streaming provider): track it
+            # so the result still prints a completed marker.
+            entry = {"name": name, "target": "", "printed_at": None}
+            self._pending_tools.append(entry)
+        entry["noted"] = True
+        if target:
+            entry["target"] = target[:80]
+        entry["started"] = self._now()
+
+    def _emit_tool_markers(self, names):
+        """Print ``● kind  name`` for each tool the model just called."""
+        for name in names:
+            name = str(name or "")
+            if not name:
+                continue
+            self.console.print(components.tool_marker(name), highlight=False)
+            printed_at = getattr(self.console, "print_count", None)
+            entry = next(
+                (
+                    e
+                    for e in self._pending_tools
+                    if e["name"] == name and e.get("printed_at") is None
+                ),
+                None,
+            )
+            if entry is not None:
+                entry["printed_at"] = printed_at
+                continue
+            self._pending_tools.append(
+                {
+                    "name": name,
+                    "target": "",
+                    "started": self._now(),
+                    "printed_at": printed_at,
+                }
+            )
+
+    def _complete_tool_marker(self, ok):
+        """Rewrite the oldest pending ``●`` marker as ``✓ kind target 0.4s``.
+
+        The line is rewritten in place only when the console is a terminal
+        and nothing else has been printed since the markers; otherwise the
+        completed marker is printed as a new line.
+        """
+        if not self._pending_tools:
+            return
+        entry = self._pending_tools.pop(0)
+        now = self._now()
+        elapsed = max(0.0, now - float(entry.get("started") or now))
+        line = components.tool_marker(
+            entry["name"],
+            entry.get("target") or "",
+            state="done" if ok else "failed",
+            elapsed=elapsed,
+        )
+        # The next tool of a sequential batch is timed from here.
+        if self._pending_tools and not self._pending_tools[0].get("noted"):
+            self._pending_tools[0]["started"] = now
+        console = self.console
+        count = getattr(console, "print_count", None)
+        printed_at = entry.get("printed_at")
+        later = [e for e in self._pending_tools if e.get("printed_at") is not None]
+        last_marker = max([printed_at or 0] + [e["printed_at"] for e in later])
+        in_place = (
+            isinstance(count, int)
+            and printed_at is not None
+            and count == last_marker
+            and getattr(console, "is_terminal", False) is True
+        )
+        if in_place:
+            up = 1 + len(later)
+            try:
+                console.file.write(f"\x1b[{up}F\x1b[2K")
+                console.print(line, highlight=False, end="")
+                console.file.write(f"\x1b[{up}E")
+                console.file.flush()
+                # Rewriting does not move the logical output position.
+                console.print_count = count
+                return
+            except Exception:
+                pass
+        console.print(line, highlight=False)
+
     def show_tool_result(self, result_str):
-        """Displays the tool result preview with green for success and red for Error:."""
+        """Complete the tool marker; verbose mode adds a dimmed result preview."""
+        preview = str(result_str).replace("\n", " ")[:60]
+        failed = "Error" in preview or "User denied" in preview
         variables = self._variables or {}
-        if not variables.get("verbose", False):
-            # Compact mode: tool results are silent — the `→ tool_name`
-            # streaming indicator already showed the call. Errors still
+        verbose = bool(variables.get("verbose", False))
+        if not self._pending_tools and not verbose:
+            # Nothing to complete and compact mode: stay silent. Errors still
             # surface because `show_error` is a separate channel.
             return
-        res_preview = str(result_str).replace("\n", " ")[:60]
+        self._complete_tool_marker(not failed)
+        if not verbose:
+            return
         char_count = len(str(result_str))
-        color = (
-            "red"
-            if "Error" in str(res_preview) or "User denied" in str(res_preview)
-            else "green"
+        line = Text("    ↳ ", style="wash.muted")
+        line.append(
+            f"{preview}... ({char_count} chars)",
+            style="wash.danger" if failed else "wash.muted",
         )
-        self.console.print(
-            f"[{color}]  ↳ Result: {safe_markup(res_preview)}... ({char_count} chars)[/{color}]"
-        )
+        self.console.print(line, highlight=False)
 
     def run_quiz(self, questions):
         """Launch the live quiz UI. On any failure (no TTY, prompt-toolkit
@@ -850,20 +1024,20 @@ class RichUI:
         try:
             self.console.print(f"\n[bold]{safe_markup(question)}[/bold]")
             if description:
-                self.console.print(f"[dim]{safe_markup(description)}[/dim]")
+                self.console.print(f"[wash.muted]{safe_markup(description)}[/wash.muted]")
             for i, option in enumerate(options, start=1):
                 self.console.print(f"  {i}. {safe_markup(option)}")
             if other_index is not None:
                 self.console.print(
-                    f"  {other_index}. [italic dim]Other (type your own)…[/italic dim]"
+                    f"  {other_index:d}. [wash.muted]Other (type your own)…[/wash.muted]"
                 )
             if multi_select:
                 self.console.print(
-                    "[dim]Enter comma-separated numbers (e.g. 1,3) or blank to cancel:[/dim]"
+                    "[wash.muted]Enter comma-separated numbers (e.g. 1,3) or blank to cancel:[/wash.muted]"
                 )
             else:
                 self.console.print(
-                    "[dim]Enter a number, or blank to cancel:[/dim]"
+                    "[wash.muted]Enter a number, or blank to cancel:[/wash.muted]"
                 )
             raw = input("> ").strip()
         except Exception:
@@ -905,8 +1079,8 @@ class _GenerationLive:
 
     Layout (top → bottom):
       * accumulating assistant text (streamed)
-      * accumulating thinking text (dim italic) — usually empty
-      * tool-call markers as they fire ("→ tool_name" lines)
+      * accumulating thinking text (wash.thinking) — usually empty
+      * tool-call markers as they fire ("● kind  tool_name" lines)
       * status footer (spinner + the status message)
 
     Why one Live instead of `console.status` + bare `console.print` for
@@ -930,7 +1104,7 @@ class _GenerationLive:
         self._lock = threading.Lock()
         self._watcher_stop = threading.Event()
         self._watcher = None
-        self._spinner = Spinner("dots")
+        self._spinner = Spinner("wash", style="wash.running")
 
     # ---------------------------------------------------------- lifecycle
 
@@ -940,6 +1114,8 @@ class _GenerationLive:
         # Start of a new stream — clear the persistent flag so a previous
         # iteration's panel-suppression hint doesn't bleed forward.
         self.ui._streamed_any_text = False
+        # Markers from an earlier iteration that never got a result are stale.
+        self.ui._pending_tools = []
         # `transient=True` so the live streaming region clears on exit;
         # we then re-print the accumulated content as properly-rendered
         # rich Markdown (otherwise `**bold**` / headers / code fences
@@ -985,17 +1161,15 @@ class _GenerationLive:
             tool_calls = list(self._tool_call_log)
         try:
             if thinking:
-                # Reasoning content: keep dim italic, no Markdown — partial
+                # Reasoning content: wash.thinking, no Markdown — partial
                 # markup is common and would render erratically.
-                self.ui.console.print(Text(thinking, style="dim italic"))
-            for name in tool_calls:
-                self.ui.console.print(
-                    Text.assemble(("→ ", "cyan"), (str(name), "cyan")),
-                    highlight=False,
-                )
+                self.ui.console.print(Text(thinking, style="wash.thinking"))
             if text:
                 from .render import render_response
                 render_response(text)
+            # Tool markers come last so each `● kind name` line can be
+            # rewritten in place as `✓ kind target 0.4s` when it completes.
+            self.ui._emit_tool_markers(tool_calls)
         except Exception:
             # Never let a render bug eat the turn — fall back to raw print.
             if text:
@@ -1034,17 +1208,17 @@ class _GenerationLive:
             tool_calls = list(self._tool_call_log)
         parts = []
         if thinking:
-            parts.append(Text(thinking, style="dim italic"))
+            parts.append(Text(thinking, style="wash.thinking"))
         if text:
             parts.append(Text(text))
         for name in tool_calls:
-            parts.append(Text(f"→ {name}", style="cyan"))
+            parts.append(components.tool_marker(name))
         # Bottom-anchored status footer — ONLY while the Live is active.
         # On the final render (Live exiting) we deliberately drop the
         # status: `transient=False` means the final render persists to
         # scrollback, so including the footer here leaks a duplicate
         # "Generating ... it N/1000 | ..." stub on every turn.
         if not final and self._status_message:
-            self._spinner.text = Text(f" {self._status_message}", style="dim")
+            self._spinner.text = Text(f" {self._status_message}", style="wash.muted")
             parts.append(self._spinner)
         return Group(*parts) if parts else Text("")

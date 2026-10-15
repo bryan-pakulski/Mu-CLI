@@ -1,0 +1,3 @@
+# Justified exceptions for tests/test_wash_markup_lint.py, one per line:
+#   path::expression
+# Keep this file empty.

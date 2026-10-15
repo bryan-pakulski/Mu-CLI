@@ -1,7 +1,10 @@
 # Rich console output and markdown rendering
 import re
 import mimetypes
-from rich.console import Console
+from rich import box
+
+from mu.ui.theme import get_console
+from mu.ui.theme.pygments import syntax_theme
 from rich.errors import MarkupError
 from rich.markdown import Markdown
 from rich.syntax import Syntax
@@ -9,7 +12,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 
-console = Console()
+console = get_console()
 
 # --- LaTeX → Unicode (TUI) -------------------------------------------------
 # pylatexenc converts LaTeX math fragments to readable Unicode/plain text so
@@ -91,17 +94,18 @@ def render_response(text):
         syntax = Syntax(
             content,
             lang,
-            theme="monokai",
-            background_color=None,
+            theme=syntax_theme(),
+            background_color="default",
             word_wrap=True,
             padding=0,
         )
         console.print(
             Panel(
                 syntax,
-                title=Text(title or lang),
+                title=Text(title or lang, style="wash.muted"),
                 title_align="left",
-                border_style="dim cyan",
+                border_style="wash.border",
+                box=box.ROUNDED,
                 padding=(0, 1),
             )
         )
@@ -134,7 +138,7 @@ def render_response(text):
             body = part.strip()
             body = latex_to_unicode(body)
             try:
-                console.print(Markdown(body))
+                console.print(Markdown(body, code_theme=syntax_theme()))
             except MarkupError:
                 console.print(body, markup=False)
             console.print("")

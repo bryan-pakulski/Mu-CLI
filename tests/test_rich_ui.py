@@ -102,7 +102,9 @@ def test_build_live_status_shows_yolo_indicator_when_enabled():
 
     status = ui.build_live_status(session, "dummy-model", 2, 5)
 
-    assert status.plain.startswith("Generating (dummy-model) it 2/5 | ✦ YOLO | ")
+    assert status.plain.startswith("Generating (dummy-model) it 2/5 | YOLO:on | ")
+    assert any(span.style == "wash.caution.bold" for span in status.spans)  # caution, no blink
+    assert "blink" not in str([span.style for span in status.spans])
     assert "yolo:on" in status.plain
 
 
@@ -243,4 +245,4 @@ def test_status_with_yolo_updates_message_text():
     on = ui._status_with_yolo("Generating | YOLO:off | ctx:50%", enabled=True)
 
     assert "YOLO:off" in off
-    assert "✦ YOLO" in on
+    assert "YOLO:on" in on and "YOLO:off" not in on

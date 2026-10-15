@@ -47,7 +47,7 @@ def _emit_ok(session: Any, body: str, allow_prompt: bool) -> None:
     if ui is None or not allow_prompt:
         return
     try:
-        show_markup(ui, f"[bold green]{esc(body)}[/bold green]")
+        show_markup(ui, f"[wash.ok.bold]{esc(body)}[/wash.ok.bold]")
     except Exception:
         pass
 
@@ -178,11 +178,11 @@ def _validate(session: Any, args: str, allow_prompt: bool) -> CommandResult:
         text = runtime if (isinstance(runtime, str) and runtime.strip()) else get_resolved(name).text
         missing = validate(name, text)
         if not missing:
-            lines.append(f"  [green]{name}[/green]: OK")
+            lines.append(f"  [wash.ok]{name}[/wash.ok]: OK")
         else:
             any_missing = True
             lines.append(
-                f"  [red]{name}[/red]: missing critical anchors — "
+                f"  [wash.danger]{name}[/wash.danger]: missing critical anchors — "
                 + ", ".join(missing)
             )
     body = "\n".join(lines)

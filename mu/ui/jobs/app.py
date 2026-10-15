@@ -1513,7 +1513,7 @@ def last_activity(events: Sequence[Dict[str, Any]]) -> str:
         if kind == "runtime_status" and inner.get("text"):
             return str(inner["text"])[:200]
         if kind == "tool_call_ui" and inner.get("tool_name"):
-            return f"⏺ {inner['tool_name']}"
+            return f"● {inner['tool_name']}"
         if kind == "agent_message" and inner.get("text"):
             return str(inner["text"]).strip().split("\n")[0][:200]
     return ""

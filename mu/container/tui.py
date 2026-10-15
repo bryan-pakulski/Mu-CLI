@@ -13,7 +13,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rich.console import Console
+from mu.container.progress_line import print_progress
+from mu.ui.theme import get_console
+from mu.ui.theme.components import notice_text
 from rich.markup import escape as esc
 from rich.prompt import Prompt
 
@@ -25,7 +27,7 @@ from .load_errors import describe_container_load_error, format_container_load_er
 from .network import DEFAULT_EGRESS_ALLOW
 from .supervisor import ContainerSupervisor
 
-console = Console()
+console = get_console()
 
 
 def _domain_list(value: Any, fallback: list[str] | None = None) -> list[str]:
@@ -65,7 +67,7 @@ def _edit_dockerfile(initial: str) -> str:
             result = subprocess.run(command, check=False)
             if result.returncode != 0:
                 console.print(
-                    f"[yellow]editor exited with status {result.returncode}; keeping the previous template[/yellow]"
+                    f"[wash.caution]editor exited with status {esc(str(result.returncode))}; keeping the previous template[/wash.caution]"
                 )
                 return initial
             return Path(path).read_text(encoding="utf-8")
@@ -76,14 +78,14 @@ def _edit_dockerfile(initial: str) -> str:
                 pass
 
     console.print(
-        "[dim]Set $EDITOR or $VISUAL to edit inline. You can also load a Dockerfile from disk.[/dim]"
+        "[wash.muted]Set $EDITOR or $VISUAL to edit inline. You can also load a Dockerfile from disk.[/wash.muted]"
     )
     source = Prompt.ask("Dockerfile path (blank keeps template)", default="").strip()
     if not source:
         return initial
     path = Path(source).expanduser().resolve()
     if not path.is_file():
-        console.print(f"[yellow]not a file: {esc(str(path))}; keeping the template[/yellow]")
+        console.print(f"[wash.caution]not a file: {esc(str(path))}; keeping the template[/wash.caution]")
         return initial
     return path.read_text(encoding="utf-8")
 
@@ -105,7 +107,7 @@ def _browse_host_folder(label: str = "Host folder") -> str:
         return ""
     path = str(Path(value).expanduser().resolve())
     if not Path(path).is_dir():
-        console.print(f"[yellow]not a directory: {esc(str(path))}[/yellow]")
+        console.print(f"[wash.caution]not a directory: {esc(str(path))}[/wash.caution]")
         return ""
     return path
 
@@ -113,7 +115,7 @@ def _browse_host_folder(label: str = "Host folder") -> str:
 def _prompt_mounts(current: list[dict[str, str]]) -> list[dict[str, str]]:
     mounts = [dict(item) for item in current]
     if mounts:
-        console.print("[dim]Current bind mounts:[/dim]")
+        console.print("[wash.muted]Current bind mounts:[/wash.muted]")
         for item in mounts:
             console.print(
                 f"  {item.get('host_path')} → {item.get('container_path')} ({item.get('mode', 'rw')})",
@@ -173,8 +175,8 @@ def _prompt_hardware(
     capability = supervisor.hardware_capabilities()
     gpu = dict(capability.get("gpu") or {})
     existing_gpu = str(current.get("gpu_request") or "")
-    console.print("\n[bold cyan]Hardware[/bold cyan]")
-    console.print(f"[dim]GPU → {esc(str(gpu.get('reason') or 'not detected'))}[/dim]")
+    console.print("\n[wash.title]Hardware[/wash.title]")
+    console.print(f"[wash.muted]GPU → {esc(str(gpu.get('reason') or 'not detected'))}[/wash.muted]")
 
     gpu_options = [("none", "No GPU", "Do not attach host GPUs")]
     if gpu.get("supported"):
@@ -203,7 +205,7 @@ def _prompt_hardware(
 
     devices = [dict(item) for item in (current.get("devices") or [])]
     if devices:
-        console.print("[dim]Current device mappings:[/dim]")
+        console.print("[wash.muted]Current device mappings:[/wash.muted]")
         for item in devices:
             console.print(
                 f"  {item.get('host_path')} → {item.get('container_path')} "
@@ -276,7 +278,7 @@ def _select_existing_container(supervisor: ContainerSupervisor):
     refs = supervisor.registry.list_containers()
     if not refs:
         return None
-    console.print("\n[bold cyan]Managed containers:[/bold cyan]")
+    console.print("\n[wash.title]Managed containers:[/wash.title]")
     for index, ref in enumerate(refs, 1):
         sessions = ", ".join(ref.attached_sessions) or "none"
         console.print(
@@ -309,7 +311,7 @@ def configure_tui_container(
     refs = supervisor.registry.list_containers()
     template_registry = getattr(supervisor, "template_registry", None)
     templates = template_registry.list_templates() if template_registry else []
-    console.print("\n[bold cyan]Container setup[/bold cyan]")
+    console.print("\n[wash.title]Container setup[/wash.title]")
     choices = ["new"]
     if refs:
         choices.append("existing")
@@ -357,7 +359,7 @@ def configure_tui_container(
                 "egress_allow": list(ref.egress_allow),
                 "egress_deny": list(ref.egress_deny),
             }
-            console.print(f"[dim]selected → {esc(ref.name)}[/dim]")
+            console.print(f"[wash.muted]selected → {esc(ref.name)}[/wash.muted]")
 
     if source == "new":
         default_name = str(config.get("container_name") or f"mucli-{name}").strip()
@@ -372,13 +374,13 @@ def configure_tui_container(
         config["gpu_request"], config["devices"] = _prompt_hardware(supervisor, config)
 
         allow = _domain_list(config.get("egress_allow"), DEFAULT_EGRESS_ALLOW)
-        console.print(f"[dim]egress allowlist → {esc(', '.join(allow) or 'empty')}[/dim]")
+        console.print(f"[wash.muted]egress allowlist → {esc(', '.join(allow) or 'empty')}[/wash.muted]")
         if prompt_confirm("Edit the egress allowlist?", default=False):
             allow = _prompt_domain_list("Allowed domains (comma-separated)", allow)
         config["egress_allow"] = allow
 
         deny = _domain_list(config.get("egress_deny"), [])
-        console.print(f"[dim]egress blocklist → {esc(', '.join(deny) or 'empty')}[/dim]")
+        console.print(f"[wash.muted]egress blocklist → {esc(', '.join(deny) or 'empty')}[/wash.muted]")
         if prompt_confirm("Edit the egress blocklist?", default=False):
             deny = _prompt_domain_list("Blocked domains (comma-separated)", deny)
         config["egress_deny"] = deny
@@ -391,9 +393,9 @@ def configure_tui_container(
 def _show_environment_table(supervisor: ContainerSupervisor):
     refs = supervisor.list_environments()
     if not refs:
-        console.print("[dim]No managed container environments.[/dim]")
+        console.print("[wash.muted]No managed container environments.[/wash.muted]")
         return []
-    console.print("\n[bold cyan]Managed environments[/bold cyan]")
+    console.print("\n[wash.title]Managed environments[/wash.title]")
     for index, ref in enumerate(refs, 1):
         attached = ", ".join(ref.attached_sessions) or "none"
         console.print(
@@ -470,7 +472,7 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
     """Host-level interactive container manager available before loading a session."""
     supervisor = supervisor or ContainerSupervisor()
     while True:
-        console.print("\n[bold cyan]Container management[/bold cyan]")
+        console.print("\n[wash.title]Container management[/wash.title]")
         action = prompt_choice(
             "Container management",
             [
@@ -502,14 +504,14 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
                     start=True,
                     progress=_progress,
                 )
-                console.print(f"[green]Created {esc(str(config['container_name']))}[/green]")
+                console.print(f"[wash.ok]Created {esc(str(config['container_name']))}[/wash.ok]")
             except Exception as exc:
-                console.print(f"[red]{esc(str(exc))}[/red]")
+                console.print(notice_text("danger", str(exc)))
             continue
         if action == "templates":
             templates = supervisor.template_registry.list_templates()
             if not templates:
-                console.print("[dim]No templates.[/dim]")
+                console.print("[wash.muted]No templates.[/wash.muted]")
                 continue
             for index, item in enumerate(templates, 1):
                 console.print(f" {index}. {item.name} — {item.description or item.image}", markup=False)
@@ -538,7 +540,7 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
                 try:
                     supervisor.create_environment(container_name=name, template_name=selected, start=True, progress=_progress)
                 except Exception as exc:
-                    console.print(f"[red]{esc(str(exc))}[/red]")
+                    console.print(notice_text("danger", str(exc)))
             continue
 
         ref = _select_environment(supervisor)
@@ -597,12 +599,11 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
             elif operation == "remove" and prompt_confirm(f"Remove {ref.name} and its volumes?", default=False):
                 supervisor.remove(ref.name, force=True)
         except Exception as exc:
-            console.print(f"[red]{esc(str(exc))}[/red]")
+            console.print(notice_text("danger", str(exc)))
 
 
 def _progress(stage: str, message: str) -> None:
-    label = stage.replace("_", " ")
-    console.print(f"[cyan]container · {esc(str(label))}[/cyan]  {esc(str(message))}")
+    print_progress(console, stage, message)
 
 
 def ensure_tui_container(session: Any) -> Any:
@@ -688,7 +689,7 @@ def send_tui_container_message(
             # narrative is for the plain console path only.
             session.ui.show_error(str(exc))
         else:
-            console.print(f"[red]{esc(str(rendered))}[/red]")
+            console.print(notice_text("danger", str(rendered)))
         return {"status": "error", "error": str(exc), "failure": failure}
     assistant_text = str(response.get("assistant_text") or "")
     if assistant_text and session.ui:

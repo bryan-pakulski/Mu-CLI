@@ -12,7 +12,7 @@ Two layers (same shape as `mu/ui/session_picker.py` and
     Application; the panel never disappears mid-interaction.
 
 When `allow_other=True` the picker appends a synthetic
-"✎ Other (type your own)…" entry. Picking it (single-select) or
+"Other (type your own)…" entry. Picking it (single-select) or
 submitting with Other toggled (multi-select) reveals an inline text
 row inside the SAME panel — the user types their answer right there
 and presses Enter to finalize. Esc backs out of the text row to the
@@ -95,7 +95,7 @@ class ChoicePromptState:
         self.submitted = True
 
 
-_OTHER_LABEL = "✎ Other (type your own)…"
+_OTHER_LABEL = "Other (type your own)…"
 
 
 def run_interactive_choice_prompt(
@@ -132,7 +132,7 @@ def run_interactive_choice_prompt(
         Window,
     )
     from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.styles import Style
+    from mu.ui.theme.pt_style import picker_style
     from prompt_toolkit.widgets import TextArea
 
     canonical_options = list(options)
@@ -162,7 +162,7 @@ def run_interactive_choice_prompt(
             is_other = other_idx is not None and i == other_idx
             cursor_marker = "❯ " if is_cursor else "  "
             if state.multi_select:
-                box = "[x]" if is_selected else "[ ]"
+                box = "✓" if is_selected else "○"
                 label = f"  {cursor_marker}{box} {option}\n"
             else:
                 label = f"  {cursor_marker}{option}\n"
@@ -352,15 +352,7 @@ def run_interactive_choice_prompt(
         focused_element=body,
     )
 
-    style = Style.from_dict(
-        {
-            "title": "ansicyan",
-            "current": "ansiyellow",
-            "selected": "ansigreen",
-            "other": "ansiblack bold italic",
-            "hint": "ansiblack bold",
-        }
-    )
+    style = picker_style()
     app: Application = Application(
         layout=layout,
         key_bindings=kb,

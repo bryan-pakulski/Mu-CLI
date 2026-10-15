@@ -81,8 +81,9 @@ def _render_markdown(session: Any, content: str, allow_prompt: bool) -> None:
         return
     try:
         from rich.markdown import Markdown
+        from mu.ui.theme.pygments import syntax_theme
 
-        console.print(Markdown(content))
+        console.print(Markdown(content, code_theme=syntax_theme()))
     except Exception:
         # Fall back to plain text if Markdown rendering fails for any reason.
         console.print(content, markup=False)
@@ -105,7 +106,7 @@ def _list_docs(session: Any, allow_prompt: bool) -> CommandResult:
             f"  • [bold]{esc(stem)}[/bold]" + (f" — {esc(summary)}" if summary else "")
         )
     lines.append("")
-    lines.append("[dim]Show one with[/dim] [bold]/docs <name>[/bold]")
+    lines.append("[wash.muted]Show one with[/wash.muted] [bold]/docs <name>[/bold]")
     body = "\n".join(lines)
     ui = getattr(session, "ui", None)
     if ui is not None and hasattr(ui, "show_info") and allow_prompt:

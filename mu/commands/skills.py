@@ -71,7 +71,7 @@ def _show_skill(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         if skill.name.lower() == name.lower():
             body = (
                 f"[bold]{esc(skill.name)}[/bold] — {esc(skill.description)}\n"
-                f"[dim]source: {esc(str(skill.source))}[/dim]\n\n{esc(skill.body)}"
+                f"[wash.muted]source: {esc(str(skill.source))}[/wash.muted]\n\n{esc(skill.body)}"
             )
             _emit(session, body, allow_prompt, markup=True)
             return CommandResult(

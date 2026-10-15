@@ -6,7 +6,9 @@ import os
 import shlex
 from typing import Any
 
-from rich.console import Console
+from mu.container.progress_line import print_progress
+from mu.ui.theme import get_console
+from rich import box
 from rich.markup import escape as esc
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
@@ -24,7 +26,7 @@ import utils.config as _config
 
 from . import CommandResult, command
 
-console = Console()
+console = get_console()
 
 
 def _supervisor(session: Any) -> ContainerSupervisor:
@@ -37,8 +39,8 @@ def _supervisor(session: Any) -> ContainerSupervisor:
 
 def _show_containers(supervisor: ContainerSupervisor) -> list[dict]:
     refs = supervisor.list_environments()
-    table = Table(title="Managed container environments")
-    table.add_column("Name", style="cyan")
+    table = Table(title="Managed container environments", box=box.SIMPLE_HEAD)
+    table.add_column("Name", style="wash.accent")
     table.add_column("State")
     table.add_column("Template")
     table.add_column("Sessions")
@@ -51,14 +53,14 @@ def _show_containers(supervisor: ContainerSupervisor) -> list[dict]:
     if refs:
         console.print(table)
     else:
-        console.print("[dim]No managed container environments.[/dim]")
+        console.print("[wash.muted]No managed container environments.[/wash.muted]")
     return rows
 
 
 def _show_templates(supervisor: ContainerSupervisor) -> list[dict]:
     values = supervisor.template_registry.list_templates()
-    table = Table(title="Container templates")
-    table.add_column("Name", style="cyan")
+    table = Table(title="Container templates", box=box.SIMPLE_HEAD)
+    table.add_column("Name", style="wash.accent")
     table.add_column("Source")
     table.add_column("Image", overflow="fold")
     table.add_column("Description")
@@ -69,7 +71,7 @@ def _show_templates(supervisor: ContainerSupervisor) -> list[dict]:
     if values:
         console.print(table)
     else:
-        console.print("[dim]No container templates.[/dim]")
+        console.print("[wash.muted]No container templates.[/wash.muted]")
     return rows
 
 
@@ -102,15 +104,15 @@ def _persist_binding(session: Any, session_name: str, config: dict[str, Any] | N
 
 def _output(stream: str, text: str) -> None:
     if stream == "command":
-        console.print(f"[dim]{esc(text)}[/dim]")
+        console.print(f"[wash.muted]{esc(text)}[/wash.muted]")
     elif stream == "stderr":
-        console.print(f"[red]{esc(text)}[/red]")
+        console.print(f"[wash.danger]{esc(text)}[/wash.danger]")
     else:
         console.print(text, markup=False)
 
 
 def _progress(stage: str, message: str) -> None:
-    console.print(f"[cyan]container · {esc(stage.replace('_', ' '))}[/cyan]  {esc(str(message))}")
+    print_progress(console, stage, message)
 
 
 def _create_environment(

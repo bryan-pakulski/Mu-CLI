@@ -252,17 +252,9 @@ def run_interactive_picker(
     footer = Window(FormattedTextControl(_footer), height=3, wrap_lines=True)
     layout = Layout(HSplit([title, body, footer]), focused_element=body)
 
-    from prompt_toolkit.styles import Style
+    from mu.ui.theme.pt_style import picker_style
 
-    style = Style.from_dict(
-        {
-            "title": "ansicyan",
-            "current": "ansigreen",
-            "new": "ansiyellow",
-            "warn": "ansired",
-            "hint": "ansiblack bold",
-        }
-    )
+    style = picker_style()
 
     # full_screen=True opens the alternate-screen buffer (`\x1b[?1049h`)
     # so each frame is redrawn from a clean slate. Without this,

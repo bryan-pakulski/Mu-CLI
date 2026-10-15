@@ -975,3 +975,9 @@ to go. Changes:
 - **Contract tests:** the web CSS and Android styles reject coloured side
   bars, rules and inset stripes. Glass surfaces must use the glass tokens and
   keep a solid fallback.
+- **Web (branch `wash/glass-web`):** `base.css` holds the glass recipe
+  (`--w-glass-fill/-strong/-subtle`, `--w-glass-line`, `--w-glass-filter`,
+  `--w-glass-lift-*`) and the fixed `body[data-ambient]::before` wash; the
+  stage's blurred plane is a `.w-shell::before` grid item (a filtered
+  `.w-stage` would capture its fixed modals and popouts). Panes nested on a
+  plane skip their own blur. Ledger: `ledger/glass-web.md`.

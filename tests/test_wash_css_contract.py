@@ -410,3 +410,186 @@ def test_one_command_palette_on_every_page():
     palette = (js / "wash" / "palette.js").read_text(encoding="utf-8")
     for href in ("'/'", "'/work'", "'/containers'", "'/trace'", "'/jobs/trace'", "'/models/costs'"):
         assert f"href: {href}" in palette, href
+
+
+# ------------------------------------------------------------ glass restructure (spec §13, G§3.3, §3.4, §6.2)
+import sys as _sys
+
+_sys.path.insert(0, str(ROOT / "tests"))
+from wash_css_helpers import decls as _decls, rules as _rules  # noqa: E402
+
+SIDE_PROPS = re.compile(r"^border-(?:left|right|inline-start|inline-end)(?:-color)?$")
+NEUTRAL_SIDE_VARS = re.compile(r"^--wash-(?:hairline|hairline-strong|glass(?:-[\w-]+)?)$")
+SIDE_KEYWORDS = {"transparent", "currentcolor", "none", "0", "solid", "dashed", "dotted", "double",
+                 "revert-layer", "inherit", "initial", "unset"}
+
+
+def _plain(text: str, selector: str) -> dict:
+    """Declarations for `selector` from rules outside any @media / @supports."""
+    want = re.sub(r"\s+", " ", selector.strip())
+    out: dict = {}
+    for selectors, body, media in _rules(text):
+        if want in selectors and not media:
+            out.update(body)
+    return out
+
+
+def _all_rules():
+    for path in _wash_files():
+        for selectors, body, media in _rules(_strip_comments(path.read_text(encoding="utf-8"))):
+            yield path, selectors, body, media
+
+
+def test_no_coloured_side_borders():
+    # G§3.4: surfaces, rows and list items never carry a coloured left/right
+    # bar or rule. Side edges are neutral hairlines, glass edges, transparent
+    # or currentColor (drawn glyphs such as chevrons and checkmarks).
+    offenders = []
+    for path, selectors, body, _ in _all_rules():
+        for prop, value in body.items():
+            if not SIDE_PROPS.match(prop):
+                continue
+            for name in re.findall(r"var\(\s*(--[\w-]+)", value):
+                if not NEUTRAL_SIDE_VARS.match(name):
+                    offenders.append(f"{_rel(path)} {selectors[0]}: {prop}: {value}")
+            rest = re.sub(r"var\([^()]*(?:\([^()]*\)[^()]*)*\)", " ", value)
+            for word in rest.replace(",", " ").split():
+                if word.lower() in SIDE_KEYWORDS or re.fullmatch(r"-?[\d.]+(?:px|em|rem)?", word):
+                    continue
+                offenders.append(f"{_rel(path)} {selectors[0]}: {prop}: {value}")
+    assert not offenders, sorted(set(offenders))
+
+
+def test_no_inset_side_stripes_or_pseudo_element_bars():
+    # G§3.4: no `box-shadow: inset Npx 0 …` stripe (N ≥ 2) anywhere, and no
+    # thin absolutely-positioned ::before/::after bar painted down a side.
+    offenders = []
+    for path in _wash_files():
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        for match in re.finditer(r"\binset\s+(-?\d+(?:\.\d+)?)px\s+0\b", text):
+            if abs(float(match.group(1))) >= 2:
+                offenders.append(f"{_rel(path)}: {match.group(0)}")
+    for path, selectors, body, _ in _all_rules():
+        if not any(re.search(r"::?(?:before|after)\b", s) for s in selectors):
+            continue
+        width = re.fullmatch(r"(\d+(?:\.\d+)?)px", body.get("width", ""))
+        spans = body.get("inset", "").replace(" ", "") in ("0auto00", "000auto") or ("top" in body and "bottom" in body)
+        fill = body.get("background", "")
+        if width and float(width.group(1)) <= 6 and spans and fill and fill not in ("none", "transparent") \
+                and "hairline" not in fill:
+            offenders.append(f"{_rel(path)} {selectors[0]}: width {body['width']} background {fill}")
+    assert not offenders, offenders
+
+
+BASE_CSS = WASH / "base.css"
+GLASS_RECIPE = {
+    "--w-glass-fill": "var(--wash-glass)",
+    "--w-glass-fill-strong": "var(--wash-glass-strong)",
+    "--w-glass-fill-subtle": "var(--wash-glass-subtle)",
+    "--w-glass-line": "var(--wash-glass-border)",
+    "--w-glass-ring": "0 0 0 1px var(--wash-glass-edge)",
+    "--w-glass-filter": "blur(var(--wash-glass-blur)) saturate(var(--wash-glass-saturate))",
+    "--w-glass-filter-strong": "blur(var(--wash-glass-blur-strong)) saturate(var(--wash-glass-saturate))",
+    "--w-glass-lift": "var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-glass-shadow)",
+}
+SOLID = {"--w-glass-fill": "var(--wash-surface)", "--w-glass-fill-strong": "var(--wash-raised)",
+         "--w-glass-fill-subtle": "var(--wash-sunken)", "--w-glass-filter": "none", "--w-glass-filter-strong": "none"}
+# (file, selector, fill recipe, blurs itself) — G§3.3 levels 1, 1s, 2 and 3.
+GLASS_SURFACES = (
+    ("layout.css", ".w-topbar", "var(--w-glass-fill)", True),
+    ("layout.css", ".w-sidebar", "var(--w-glass-fill)", True),
+    ("layout.css", ".w-shell::before", "var(--w-glass-fill)", True),  # the stage plane
+    ("components/card.css", ".w-card", "var(--w-glass-fill)", False),
+    ("components/approval.css", ".w-approval", "var(--w-glass-fill)", False),
+    ("components/composer.css", ".w-composer__form", "var(--w-glass-fill)", False),
+    ("components/table.css", ".w-table-wrap", "var(--w-glass-fill)", False),
+    ("components/panel.css", ".w-panel", "var(--w-glass-fill)", False),
+    ("components/toolcard.css", ".w-toolcard", "var(--w-glass-fill-subtle)", False),
+    ("components/menu.css", ".w-menu", "var(--w-glass-fill-strong)", True),
+    ("components/menu.css", ".w-popover", "var(--w-glass-fill-strong)", True),
+    ("components/toast.css", ".w-toast", "var(--w-glass-fill-strong)", True),
+    ("components/palette.css", ".w-palette__dialog", "var(--w-glass-fill-strong)", True),
+    ("components/modal.css", ".w-modal__dialog", "var(--w-glass-fill-strong)", True),
+    ("components/drawer.css", ".w-drawer__panel", "var(--w-glass-fill-strong)", True),
+    ("components/nav.css", '.w-nav__item[aria-current="page"]', "var(--w-glass-fill-strong)", False),
+    ("components/session-list.css", '.w-session[aria-current="true"]', "var(--w-glass-fill-strong)", False),
+)
+
+
+def test_glass_recipe_is_built_from_the_glass_tokens():
+    base = _strip_comments(BASE_CSS.read_text(encoding="utf-8"))
+    recipe = _plain(base, ":root")
+    for name, value in GLASS_RECIPE.items():
+        assert recipe.get(name) == value, name
+    generated = TOKENS.read_text(encoding="utf-8")
+    for token in ("--wash-glass", "--wash-glass-strong", "--wash-glass-subtle", "--wash-glass-border",
+                  "--wash-glass-edge", "--wash-glass-highlight", "--wash-glass-shadow", "--wash-glass-blur",
+                  "--wash-glass-blur-strong", "--wash-glass-saturate"):
+        assert f"{token}:" in generated, token
+
+
+def test_glass_surfaces_use_the_recipe_with_backdrop_filter():
+    for name, selector, fill, blurs in GLASS_SURFACES:
+        body = _plain(_strip_comments((WASH / name).read_text(encoding="utf-8")), selector)
+        assert body.get("background") == fill, (name, selector, body.get("background"))
+        if blurs:
+            want = "var(--w-glass-filter-strong)" if "strong" in fill else "var(--w-glass-filter)"
+            assert body.get("backdrop-filter") == want, (name, selector)
+            assert body.get("-webkit-backdrop-filter") == want, (name, selector)
+    # Every backdrop-filter in the tree goes through the recipe (so the
+    # fallbacks reach it) and always carries its -webkit- twin.
+    for path, selectors, body, _ in _all_rules():
+        if "backdrop-filter" in body:
+            assert body["backdrop-filter"].startswith("var(--w-glass-filter"), (_rel(path), selectors)
+            assert body.get("-webkit-backdrop-filter") == body["backdrop-filter"], (_rel(path), selectors)
+
+
+def test_glass_has_solid_fallbacks_and_a_flat_ambient():
+    base = _strip_comments(BASE_CSS.read_text(encoding="utf-8"))
+    assert "@supports not (backdrop-filter: blur(1px))" in base
+    for media in ("prefers-reduced-transparency: reduce", "forced-colors: active"):
+        body = _decls(base, ":root", media=media)
+        for name, value in SOLID.items():
+            assert body.get(name) == value, (media, name)
+        assert _decls(base, "body[data-ambient]::before", media=media)["background"] == "var(--wash-canvas)", media
+    supports = base.split("@supports not (backdrop-filter: blur(1px))", 1)[1].split("}\n}", 1)[0]
+    for name, value in SOLID.items():
+        assert f"{name}: {value};" in supports, name
+    reduced = _plain(base, ':root[data-decoration="reduced"]')
+    for name, value in SOLID.items():
+        assert reduced.get(name) == value, name
+    assert _decls(base, ':root[data-decoration="reduced"] body[data-ambient]::before')["background"] == "var(--wash-canvas)"
+
+
+PAGE_AMBIENTS = {
+    "index.html": "dawn", "design/gallery.html": "dawn", "work.html": "lagoon", "trace.html": "lagoon",
+    "job_trace.html": "lagoon", "model_costs.html": "lagoon", "containers.html": "meadow",
+}
+
+
+def test_every_layout_page_declares_an_ambient_wash():
+    templates = ROOT / "mu" / "gui" / "templates"
+    layout = (templates / "_layout.html").read_text(encoding="utf-8")
+    assert 'data-ambient="{% block ambient %}dawn{% endblock %}"' in layout
+    pages = sorted(str(p.relative_to(templates)) for p in templates.rglob("*.html")
+                   if re.search(r'{% extends "(?:_layout|base)\.html" %}', p.read_text(encoding="utf-8"))
+                   and p.name != "base.html")
+    assert sorted(PAGE_AMBIENTS) == pages
+    for page, wash in PAGE_AMBIENTS.items():
+        html = (templates / page).read_text(encoding="utf-8")
+        assert f"{{% block ambient %}}{wash}{{% endblock %}}" in html, page
+    base = _strip_comments(BASE_CSS.read_text(encoding="utf-8"))
+    for wash in ("dawn", "lagoon", "meadow"):
+        body = _plain(base, f'[data-ambient="{wash}"]')
+        assert body["--w-ambient"] == f"var(--wash-art-ambient-{wash})", wash
+        assert body["--w-ambient-sm"] == f"var(--w-ambient-{wash}-sm)", wash
+        for theme in ("paper", "dusk"):
+            assert f'url("/static/wash/art/ambient-{wash}-{theme}-960.webp")' in base, (wash, theme)
+            assert (ROOT / "mu" / "gui" / "static" / "wash" / "art" / f"ambient-{wash}-{theme}-960.webp").is_file()
+    plane = _plain(base, "body[data-ambient]::before")
+    assert plane["position"] == "fixed" and plane["inset"] == "0" and plane["z-index"] == "-1"
+    assert "var(--w-ambient, none)" in plane["background"] and "cover" in plane["background"]
+    assert _decls(base, "body[data-ambient]::before", media="width < 840px")["background-image"] == "var(--w-ambient-sm, none)"
+    # The body and the shell are transparent so the wash shows through the glass.
+    assert _plain(base, "body")["background"] == "transparent"
+    assert _plain(_strip_comments((WASH / "layout.css").read_text(encoding="utf-8")), ".w-shell")["background"] == "transparent"

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wash — Mucli design reference</title>
+<!-- Static visual reference for documentation/design/wash_design_guide.md.
+     Self-contained; token values mirror the guide (G§1–§5). Not product code. -->
+<style>
+:root{
+  --font:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --r-xs:6px;--r-sm:10px;--r-md:14px;--r-lg:20px;--r-xl:28px;--r-pill:999px;
+  --e2:0 1px 2px rgba(45,32,50,.06),0 8px 24px rgba(45,32,50,.08);
+  --e3:0 24px 64px rgba(45,32,50,.16);
+}
+[data-theme=paper]{
+  --canvas:#F8F6F1;--surface:#FFFEFB;--sunken:#F1EEE7;--raised:#FFFFFF;--hairline:#E6E1D8;--hairline-strong:#D6CFC3;
+  --ink:#1E1A17;--ink-2:#4E4844;--ink-3:#6B645F;--plum:#2B1436;--on-ink:#FFFEFB;
+  --lagoon-w:#DCEDEE;--lagoon-p:#5FA3AB;--lagoon-i:#2A6870;
+  --meadow-w:#E3EFD8;--meadow-p:#8DBF6A;--meadow-i:#3D6A2A;
+  --sun-w:#FBEFC8;--sun-p:#F2C94C;--sun-i:#755600;
+  --apricot-w:#FCE3CF;--apricot-p:#F2A36B;--apricot-i:#984812;
+  --rose-w:#F9DCE2;--rose-p:#E58A9E;--rose-i:#A3324B;
+  --lilac-w:#EAE1F4;--lilac-p:#B39DDB;--lilac-i:#5E3F94;
+  --sky-w:#DCE8F7;--sky-p:#84AEE3;--sky-i:#2D5C9C;
+  --plum-p:#9C6B98;
+  --hero:url(wash-dawn-paper.webp);--band:url(wash-lagoon-paper.webp);
+}
+[data-theme=dusk]{
+  --canvas:#16131B;--surface:#1D1923;--sunken:#120F16;--raised:#262030;--hairline:#332C3D;--hairline-strong:#463D52;
+  --ink:#F3EEE8;--ink-2:#D2C9D1;--ink-3:#A89FAD;--plum:#F6E9F2;--on-ink:#16131B;
+  --lagoon-p:#5FA3AB;--lagoon-i:#7CC4CB;--meadow-p:#8DBF6A;--meadow-i:#A5D68A;--sun-p:#F2C94C;--sun-i:#F2D27A;
+  --apricot-p:#F2A36B;--apricot-i:#F5B58A;--rose-p:#E58A9E;--rose-i:#F29AAE;--lilac-p:#B39DDB;--lilac-i:#C7B3EE;
+  --sky-p:#84AEE3;--sky-i:#9CC2F2;--plum-p:#9C6B98;
+  --lagoon-w:color-mix(in srgb,var(--lagoon-p) 16%,var(--surface));--meadow-w:color-mix(in srgb,var(--meadow-p) 16%,var(--surface));
+  --sun-w:color-mix(in srgb,var(--sun-p) 16%,var(--surface));--apricot-w:color-mix(in srgb,var(--apricot-p) 16%,var(--surface));
+  --rose-w:color-mix(in srgb,var(--rose-p) 16%,var(--surface));--lilac-w:color-mix(in srgb,var(--lilac-p) 16%,var(--surface));
+  --sky-w:color-mix(in srgb,var(--sky-p) 16%,var(--surface));
+  --e2:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);--e3:0 24px 64px rgba(0,0,0,.5);
+  --hero:url(wash-dawn-dusk.webp);--band:url(wash-lagoon-dusk.webp);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--canvas);color:var(--ink);font:400 14px/21px var(--font);-webkit-font-smoothing:antialiased}
+h1,h2,h3{color:var(--plum);font-weight:500;margin:0}
+.display{font-size:48px;line-height:52px;letter-spacing:-.03em}
+.t1{font-size:32px;line-height:38px;letter-spacing:-.025em}
+.t2{font-size:24px;line-height:30px;letter-spacing:-.02em}
+.t3{font-size:18px;line-height:24px;letter-spacing:-.01em;font-weight:600}
+.cap{font-size:12px;line-height:16px;color:var(--ink-3)}
+.mono{font-family:var(--mono);font-size:13px}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+section{padding:48px 0;border-top:1px solid var(--hairline)}
+.eyebrow{display:inline-flex;align-items:center;gap:6px;background:var(--sunken);border-radius:var(--r-pill);padding:3px 10px;font-size:12px;font-weight:500;color:var(--ink-2);margin-bottom:12px}
+.eyebrow i{width:6px;height:6px;border-radius:1px;background:var(--meadow-p)}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+/* top bar */
+.top{position:sticky;top:0;z-index:5;height:56px;display:flex;align-items:center;gap:16px;padding:0 24px;background:color-mix(in srgb,var(--canvas) 72%,transparent);backdrop-filter:blur(16px);border-bottom:1px solid var(--hairline)}
+.mark{display:flex;align-items:center;gap:8px;font-size:20px;font-weight:500;letter-spacing:-.03em;color:var(--plum)}
+.drop{width:14px;height:14px;border-radius:50% 50% 50% 10%;transform:rotate(-45deg);background:radial-gradient(circle at 35% 35%,var(--apricot-p),var(--rose-p) 55%,var(--lilac-p));animation:drop 1.6s ease-in-out infinite}
+@keyframes drop{50%{transform:rotate(-45deg) scale(1.18);filter:saturate(1.3)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.crumb{color:var(--ink-3)}.crumb b{color:var(--ink);font-weight:500}
+.spacer{flex:1}
+/* chips & buttons */
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:12px;font-weight:500;white-space:nowrap}
+.chip.meta{background:var(--surface);border:1px solid var(--hairline);color:var(--ink-2)}
+.tone-attention{background:var(--apricot-w);color:var(--apricot-i)}
+.tone-running{background:var(--sky-w);color:var(--sky-i)}
+.tone-ok{background:var(--meadow-w);color:var(--meadow-i)}
+.tone-danger{background:var(--rose-w);color:var(--rose-i)}
+.tone-plan{background:var(--lilac-w);color:var(--lilac-i);outline:1px dashed var(--lilac-i);outline-offset:-1px}
+.tone-caution{background:var(--sun-w);color:var(--sun-i)}
+.tone-neutral{background:var(--sunken);color:var(--ink-3)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border-radius:var(--r-pill);font:500 13px/1 var(--font);border:1px solid transparent;cursor:pointer;transition:transform .12s,background .12s}
+.btn:active{transform:scale(.98)}
+.btn:focus-visible{outline:2px solid var(--lagoon-i);outline-offset:2px}
+.btn.lg{height:44px;padding:0 20px;font-size:14px}
+.btn.primary{background:var(--ink);color:var(--on-ink)}
+.btn.secondary{background:var(--surface);border-color:var(--hairline-strong);color:var(--ink)}
+.btn.ghost{background:transparent;color:var(--ink-2)}.btn.ghost:hover{background:var(--sunken)}
+.btn.tonal{background:var(--apricot-w);color:var(--apricot-i)}
+.btn.danger{background:var(--rose-i);color:var(--on-ink)}
+.kbd{font:400 11px/1 var(--mono);padding:3px 5px;border-radius:var(--r-xs);background:color-mix(in srgb,var(--on-ink) 18%,transparent)}
+/* hero */
+.hero{position:relative;min-height:520px;background:var(--hero) center top/cover no-repeat;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;text-align:center;padding:0 24px 56px}
+.hero::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 60% 38% at 50% 72%,color-mix(in srgb,var(--canvas) 70%,transparent),transparent 70%),linear-gradient(to bottom,transparent 62%,var(--canvas));pointer-events:none}
+.hero>*{position:relative;z-index:1}
+.hero p{max-width:560px;font-size:18px;line-height:28px;color:var(--ink-2);margin:16px 0 28px}
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:960px;margin:0 auto;padding:0 24px 48px}
+.choice{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-lg);padding:20px;text-align:left}
+.choice .ic{width:36px;height:36px;border-radius:var(--r-sm);display:grid;place-items:center;margin-bottom:12px}
+/* palette */
+.sw{display:grid;grid-template-columns:repeat(7,1fr);gap:12px}
+.sw div{border-radius:var(--r-md);overflow:hidden;border:1px solid var(--hairline)}
+.sw b{display:block;height:28px}.sw span{display:block;padding:8px;font-size:12px;color:var(--ink-2)}
+/* app mock */
+.app{display:grid;grid-template-columns:240px 1fr 340px;border:1px solid var(--hairline);border-radius:var(--r-lg);overflow:hidden;background:var(--canvas);min-height:760px}
+.side{background:var(--surface);border-right:1px solid var(--hairline);padding:16px 10px}
+.side h4{font-size:12px;font-weight:500;color:var(--ink-3);margin:16px 10px 6px}
+.nav{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--r-sm);color:var(--ink-2)}
+.nav.on{background:var(--sunken);color:var(--ink);box-shadow:inset 2px 0 var(--lagoon-i)}
+.nav .count{margin-left:auto}
+.chat{padding:28px 32px 20px;display:flex;flex-direction:column;gap:18px;max-width:780px;width:100%;margin:0 auto;position:relative}
+.modeband{position:absolute;inset:0 0 auto 0;height:120px;background:linear-gradient(to bottom,var(--sky-w),transparent);opacity:.8;pointer-events:none}
+.user{align-self:flex-end;max-width:80%;background:var(--lagoon-w);padding:12px 16px;border-radius:20px 20px 6px 20px;font-size:16px;line-height:24px;position:relative}
+.asst{font-size:16px;line-height:24px;position:relative}
+.asst .hdr{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+.asst code{font-family:var(--mono);font-size:13px;background:var(--sunken);padding:1px 5px;border-radius:var(--r-xs)}
+.tool{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;background:var(--sunken);border-radius:var(--r-md);font-size:13px;color:var(--ink-2)}
+.tool .k{font-weight:500;color:var(--ink)}.tool .t{font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool .d{margin-left:auto;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.ink{width:10px;height:10px;border-radius:50%;background:var(--sky-p);animation:pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{transform:scale(1.35);opacity:.6}}
+.approve{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-lg);overflow:hidden;box-shadow:inset 4px 0 var(--apricot-p)}
+.approve .head{background:color-mix(in srgb,var(--apricot-w) 70%,var(--surface));padding:12px 18px 12px 22px;display:flex;align-items:center;gap:10px}
+.approve .body{padding:14px 18px 16px 22px;display:flex;flex-direction:column;gap:12px}
+.diff{font:12.5px/20px var(--mono);border:1px solid var(--hairline);border-radius:var(--r-sm);overflow:hidden}
+.diff div{padding:0 10px;white-space:pre}
+.diff .h{background:var(--sunken);color:var(--ink-3)}
+.diff .a{background:color-mix(in srgb,var(--meadow-w) 80%,var(--surface))}.diff .a::first-letter{color:var(--meadow-i)}
+.diff .r{background:color-mix(in srgb,var(--rose-w) 80%,var(--surface))}.diff .r::first-letter{color:var(--rose-i)}
+.composer{margin-top:auto;background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-lg);padding:14px 14px 10px;box-shadow:0 -3px 0 -1px var(--sky-p) inset,0 0 0 0 transparent}
+.composer .ph{color:var(--ink-3);font-size:16px;padding:2px 4px 14px}
+.send{width:36px;height:36px;border-radius:50%;background:var(--ink);color:var(--on-ink);display:grid;place-items:center;font-weight:600}
+.stage{background:var(--surface);border-left:1px solid var(--hairline);display:flex;flex-direction:column}
+.stage .band{height:110px;background:var(--band) center/cover;display:flex;align-items:flex-end;padding:16px 18px}
+.stage .sec{padding:16px 18px;border-top:1px solid var(--hairline)}
+.layerbar{display:flex;height:14px;border-radius:var(--r-pill);overflow:hidden;margin:10px 0 8px;gap:2px}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12px;color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:6px}
+.ring{width:20px;height:20px;border-radius:50%;background:conic-gradient(var(--ink-2) 0 42%,var(--sunken) 0)}
+.ring.big{width:64px;height:64px;display:grid;place-items:center}
+.ring.big::after{content:"42%";width:48px;height:48px;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+/* jobs */
+.stats{display:flex;gap:0;border-bottom:1px solid var(--hairline);padding-bottom:20px}
+.stats div{flex:1;padding:0 24px;border-left:1px solid var(--hairline)}.stats div:first-child{padding-left:0;border:0}
+.stats b{display:block;font-size:44px;line-height:52px;font-weight:500;letter-spacing:-.03em;color:var(--plum);font-variant-numeric:tabular-nums}
+.step{display:flex;align-items:center;gap:0;margin:18px 0}
+.step span{font-size:12px;font-weight:500;display:flex;align-items:center;gap:6px;color:var(--ink-3);white-space:nowrap}
+.step span.done{color:var(--meadow-i)}.step span.cur{background:var(--sky-w);color:var(--sky-i);padding:4px 10px;border-radius:var(--r-pill)}
+.step i{flex:1;height:1px;background:var(--hairline-strong);margin:0 10px;min-width:20px}.step i.done{background:var(--meadow-p)}
+.jobrow{display:flex;align-items:center;gap:14px;height:56px;padding:0 14px;border-radius:var(--r-md)}
+.jobrow:hover{background:var(--sunken)}
+.toast{display:flex;align-items:center;gap:10px;background:var(--raised);box-shadow:var(--e2);border:1px solid var(--hairline);border-radius:var(--r-md);padding:12px 14px;max-width:360px}
+.banner{display:flex;align-items:center;gap:12px;padding:10px 16px;border-radius:var(--r-md)}
+/* terminal */
+.term{background:#120F16;color:#F3EEE8;border-radius:var(--r-lg);padding:20px 22px;font:13px/21px var(--mono);overflow:auto}
+.term .m{color:#A89FAD}.term .a{color:#7CC4CB}.term .ok{color:#A5D68A}.term .at{color:#F5B58A}.term .p{color:#C7B3EE}.term .pl{color:#F6E9F2;font-weight:700}.term .sky{color:#9CC2F2}.term .y{color:#F2D27A}
+.term .rule{background:linear-gradient(90deg,#F2A36B,#E58A9E,#B39DDB,#5FA3AB);-webkit-background-clip:text;color:transparent}
+.themebar{position:fixed;right:20px;bottom:20px;z-index:9;display:flex;gap:6px;background:var(--raised);box-shadow:var(--e3);padding:6px;border-radius:var(--r-pill)}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="mark"><span class="drop" aria-hidden="true"></span>μcli</div>
+  <div class="crumb">› <b>atlas-api</b> › refactor-auth</div>
+  <div class="spacer"></div>
+  <span class="chip meta"><span class="dot" style="background:var(--sky-p)"></span>Feature ▾</span>
+  <span class="chip meta">claude-opus-5-5 ▾</span>
+  <span class="chip meta"><span class="ring"></span>42%</span>
+  <span class="chip tone-attention">◆ 1 needs you</span>
+  <span class="chip tone-ok">● Live</span>
+</div>
+
+<div class="hero">
+  <span class="eyebrow"><i></i>Your AI workspace</span>
+  <h1 class="display">What are we building today?</h1>
+  <p>Pick up a session, start something new, or spin up an isolated environment. Your models and code stay under your control.</p>
+  <div class="row" style="justify-content:center"><button class="btn primary lg">Start something new</button><button class="btn secondary lg">Continue a session ›</button></div>
+</div>
+<div class="choices">
+  <div class="choice"><div class="ic" style="background:var(--lagoon-w);color:var(--lagoon-i)">↗</div><div class="t3">Continue</div><div class="cap" style="margin-top:4px">atlas-api · 12 min ago</div></div>
+  <div class="choice"><div class="ic" style="background:var(--apricot-w);color:var(--apricot-i)">+</div><div class="t3">Start new</div><div class="cap" style="margin-top:4px">Chat, workspace or environment</div></div>
+  <div class="choice"><div class="ic" style="background:var(--meadow-w);color:var(--meadow-i)">◇</div><div class="t3">Environments</div><div class="cap" style="margin-top:4px">3 running · 2 templates</div></div>
+</div>
+
+<div class="wrap">
+<section>
+  <span class="eyebrow"><i></i>Foundations</span>
+  <h2 class="t1">Paper, ink and seven pigments</h2>
+  <p class="cap" style="font-size:14px;margin:8px 0 24px">Washes for fills, pigments for paint, inks for text. Semantic roles in brackets.</p>
+  <div class="sw">
+    <div><b style="background:var(--lagoon-p)"></b><span>Lagoon (accent)</span></div>
+    <div><b style="background:var(--sky-p)"></b><span>Sky (running)</span></div>
+    <div><b style="background:var(--meadow-p)"></b><span>Meadow (ok)</span></div>
+    <div><b style="background:var(--apricot-p)"></b><span>Apricot (needs you)</span></div>
+    <div><b style="background:var(--sun-p)"></b><span>Sun (caution)</span></div>
+    <div><b style="background:var(--rose-p)"></b><span>Rose (danger)</span></div>
+    <div><b style="background:var(--lilac-p)"></b><span>Lilac (plan)</span></div>
+  </div>
+  <div class="row" style="margin-top:24px">
+    <span class="chip tone-neutral">○ Queued</span><span class="chip tone-running">● Implementing</span><span class="chip tone-attention">◆ Needs you</span>
+    <span class="chip tone-ok">✓ Pushed</span><span class="chip tone-danger">✗ Failed</span><span class="chip tone-neutral">– Cancelled</span>
+    <span class="chip tone-plan">Plan mode</span><span class="chip tone-caution">Auto-approve on</span>
+  </div>
+  <div class="row" style="margin-top:20px">
+    <button class="btn primary">New job <span class="kbd">N</span></button><button class="btn secondary">Open setup</button>
+    <button class="btn ghost">Refresh</button><button class="btn tonal">Review plan ›</button><button class="btn danger">Delete</button>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow"><i></i>Chat</span>
+  <h2 class="t1" style="margin-bottom:24px">The working surface</h2>
+  <div class="app">
+    <div class="side">
+      <div class="nav on">◌ Chat</div><div class="nav">▤ Work <span class="chip tone-attention count">1</span></div>
+      <div class="nav">◇ Environments</div><div class="nav">∿ Trace</div>
+      <h4>Sessions</h4>
+      <div class="nav on">atlas-api <span class="ink count" style="width:8px;height:8px"></span></div>
+      <div class="nav">docs-site</div><div class="nav">mobile-0.4 <span class="dot count" style="background:var(--lagoon-p)"></span></div>
+    </div>
+    <div class="chat">
+      <div class="modeband"></div>
+      <div class="user">Move token refresh into the auth middleware and add tests.</div>
+      <div class="asst"><div class="hdr"><span class="drop" style="width:10px;height:10px;animation:none"></span><span class="cap">claude-opus-5-5 · 38s</span></div>
+        I'll read the current middleware and the refresh helper first, then propose a patch that moves <code>refresh_token()</code> behind <code>AuthMiddleware</code>.</div>
+      <div class="tool"><span style="color:var(--ink-3)">✓</span><span class="k">Read 4 files</span><span class="t">src/auth/middleware.py, refresh.py, …</span><span class="d">0.6s ›</span></div>
+      <div class="tool"><span style="color:var(--ink-3)">✓</span><span class="k">search</span><span class="t">"refresh_token(" in src/</span><span class="d">0.2s ›</span></div>
+      <div class="tool"><span class="ink"></span><span class="k">shell</span><span class="t">pytest tests/auth -q</span><span class="d">4.1s</span></div>
+      <div class="approve" role="group" aria-labelledby="ap-h">
+        <div class="head"><span class="chip tone-attention">◆ Needs you</span><b id="ap-h" style="font-weight:600">Permission to edit 1 file</b><span class="spacer"></span><span class="cap">1 of 1</span></div>
+        <div class="body">
+          <div class="row" style="gap:8px"><span class="mono" style="font-weight:500">write_file</span><span class="mono" style="color:var(--ink-2)">src/auth/middleware.py</span><span class="cap"><b style="color:var(--meadow-i)">+18</b> <b style="color:var(--rose-i)">−4</b></span></div>
+          <div class="diff"><div class="h">@@ -41,7 +41,21 @@ class AuthMiddleware:</div><div class="r">-        token = request.headers.get("Authorization")</div><div class="a">+        token = await self._ensure_fresh(request)</div><div>         if not token:</div><div class="a">+            raise Unauthorized("missing or expired token")</div></div>
+          <div class="row"><span class="cap">Modifies a tracked file</span><span class="spacer"></span><label class="cap" style="display:flex;gap:6px;align-items:center"><input type="checkbox"> Always allow write_file</label></div>
+          <div class="row" style="justify-content:flex-end"><button class="btn ghost">Edit</button><button class="btn secondary">Deny</button><button class="btn primary">✓ Approve <span class="kbd">⏎</span></button></div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="ph">Ask μcli anything…</div>
+        <div class="row" style="gap:8px"><button class="btn ghost" style="width:36px;padding:0;justify-content:center">+</button>
+          <span class="chip meta"><span class="dot" style="background:var(--sky-p)"></span>Feature ▾</span><span class="chip meta">Effort: high ▾</span>
+          <span class="spacer"></span><span class="send">↑</span></div>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="band"><h3 class="t3">Context</h3></div>
+      <div class="sec"><div class="row"><div class="ring big" style="background:conic-gradient(var(--ink-2) 0 42%,var(--sunken) 0)"></div><div><div style="font-weight:600">84k of 200k tokens</div><div class="cap">Real-frame fill · drift ×1.07</div></div></div></div>
+      <div class="sec"><div class="cap">Layers</div>
+        <div class="layerbar"><b style="flex:6;background:var(--plum-p)"></b><b style="flex:9;background:var(--lagoon-p)"></b><b style="flex:4;background:var(--meadow-p)"></b><b style="flex:7;background:var(--lilac-p)"></b><b style="flex:3;background:var(--sun-p)"></b><b style="flex:10;background:var(--sky-p)"></b><b style="flex:4;background:var(--rose-p)"></b><b style="flex:18;background:var(--apricot-p)"></b><b style="flex:39;background:var(--sunken)"></b></div>
+        <div class="legend"><span><i class="dot" style="background:var(--plum-p)"></i>L0 System</span><span><i class="dot" style="background:var(--lagoon-p)"></i>L1A Workspace</span><span><i class="dot" style="background:var(--meadow-p)"></i>L1B Skills</span><span><i class="dot" style="background:var(--lilac-p)"></i>L2 Summary</span><span><i class="dot" style="background:var(--sun-p)"></i>L3 Goals</span><span><i class="dot" style="background:var(--sky-p)"></i>L4 Tools</span><span><i class="dot" style="background:var(--rose-p)"></i>L4B Retrieved</span><span><i class="dot" style="background:var(--apricot-p)"></i>L5 Live</span></div>
+      </div>
+      <div class="sec"><div class="banner tone-plan" style="outline:none">Plan mode — read-only <span class="spacer"></span><button class="btn ghost" style="height:28px;color:inherit">Exit</button></div></div>
+      <div class="sec"><div class="toast"><span style="color:var(--meadow-i)">✓</span> Patch applied to 1 file <span class="spacer"></span><button class="btn ghost" style="height:28px">Undo</button></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow"><i></i>Work</span>
+  <h2 class="t1" style="margin-bottom:24px">Jobs, calmly</h2>
+  <div class="stats"><div><b>1</b><span class="cap">Needs you</span></div><div><b>3</b><span class="cap">Running</span></div><div><b>2</b><span class="cap">Ready to push</span></div><div><b>37</b><span class="cap">Done this week</span></div></div>
+  <div class="step"><span class="done">✓ Preparing</span><i class="done"></i><span class="done">✓ Planning</span><i class="done"></i><span class="done">✓ Plan review</span><i class="done"></i><span class="cur"><span class="ink" style="width:8px;height:8px"></span>Implementing</span><i></i><span>○ Checking</span><i></i><span>○ Reviewing</span><i></i><span>○ Pushing</span></div>
+  <div class="jobrow"><span style="color:var(--apricot-i)">◆</span><b style="font-weight:500">Add rate limiting to /login</b><span class="mono cap">atlas-api · feat/ratelimit</span><span class="chip tone-attention">Plan review</span><span class="spacer"></span><button class="btn tonal">Review plan ›</button><span class="cap">4m</span></div>
+  <div class="jobrow"><span class="ink"></span><b style="font-weight:500">Migrate settings to pydantic v2</b><span class="mono cap">atlas-api · chore/pyd2</span><span class="chip tone-running">Checking</span><span class="spacer"></span><span class="cap">12m</span></div>
+  <div class="jobrow"><span style="color:var(--meadow-i)">✓</span><b style="font-weight:500">Fix flaky websocket test</b><span class="mono cap">relay · fix/ws-flake</span><span class="chip tone-ok">Pushed</span><span class="spacer"></span><span class="cap">1h</span></div>
+</section>
+
+<section>
+  <span class="eyebrow"><i></i>Terminal</span>
+  <h2 class="t1" style="margin-bottom:24px">The same system, in a terminal</h2>
+<pre class="term"><span class="pl">μcli</span>  <span class="rule">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="m">session</span>  atlas-api     <span class="m">model</span>  claude-opus-5-5     <span class="m">workspace</span>  ~/dev/atlas-api
+
+<span class="a">›</span> Move token refresh into the auth middleware and add tests.
+
+<span class="m">✓ read   src/auth/middleware.py  1–120            0.4s</span>
+<span class="m">✓ search "refresh_token(" in src/                 0.2s</span>
+<span class="sky">●</span> sh     pytest tests/auth -q                     <span class="m">4.1s</span>
+
+<span class="at">╭─ ◆ Needs you · Permission to edit 1 file ────────────────────╮</span>
+<span class="at">│</span> write_file  src/auth/middleware.py  <span class="ok">+18</span> <span style="color:#F29AAE">-4</span>                   <span class="at">│</span>
+<span class="at">│</span> <span class="m">@@ -41,7 +41,21 @@</span>                                           <span class="at">│</span>
+<span class="at">│</span> <span style="color:#F29AAE">-  token = request.headers.get("Authorization")</span>              <span class="at">│</span>
+<span class="at">│</span> <span class="ok">+  token = await self._ensure_fresh(request)</span>                 <span class="at">│</span>
+<span class="at">╰──────────────────────────────────────────────────────────────╯</span>
+  <span class="a"><b>[a]</b></span> approve   <span class="a"><b>[A]</b></span> always   <span class="a"><b>[d]</b></span> deny   <span class="a"><b>[e]</b></span> edit
+
+<b>μ</b> atlas-api · <span class="sky">feature</span> <span class="p">[plan]</span> ›  <span class="m">ctx ◔ 42%</span></pre>
+</section>
+</div>
+
+<div class="themebar" role="group" aria-label="Theme">
+  <button class="btn ghost" onclick="document.documentElement.dataset.theme='paper'">Paper</button>
+  <button class="btn ghost" onclick="document.documentElement.dataset.theme='dusk'">Dusk</button>
+</div>
+</body>
+</html>

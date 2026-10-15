@@ -257,8 +257,9 @@ Python surfaces read `tokens.json` and `vocabulary.json` directly through
   is at least 4.5:1 against `canvas`, `surface`, `sunken` and `raised`
 - each semantic `ink` is at least 4.5:1 on its own `wash`
 - `on-ink` is at least 4.5:1 on `ink`
-- `hairline-strong` is at least 3:1 on `surface`; this is the non-text UI
-  boundary used for input borders
+- `control-border` is at least 3:1 on `surface` and `sunken`; this is the
+  non-text UI boundary used for form controls. `hairline` and
+  `hairline-strong` are decorative and exempt.
 
 The script fails with a table of offenders. The values in G§1 already pass.
 They were measured during drafting; the lowest is `ink-3` on Paper `sunken`

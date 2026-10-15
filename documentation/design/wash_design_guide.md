@@ -78,7 +78,8 @@ surface.
 | `sunken` | Inset areas, code, selected rows, inactive tabs | `#F1EEE7` | `#120F16` |
 | `raised` | Popovers, menus, sheets | `#FFFFFF` | `#262030` |
 | `hairline` | Default 1px divider/border | `#E6E1D8` | `#332C3D` |
-| `hairline-strong` | Input borders, focused dividers | `#D6CFC3` | `#463D52` |
+| `hairline-strong` | Strong decorative dividers, secondary-button outlines | `#D6CFC3` | `#463D52` |
+| `control-border` | Form-control boundaries (inputs, checkboxes, switch-off tracks), ≥ 3:1 | `#8F877F` | `#776C81` |
 | `ink` | Primary text, primary button fill | `#1E1A17` | `#F3EEE8` |
 | `ink-2` | Secondary text | `#4E4844` | `#D2C9D1` |
 | `ink-3` | Tertiary/muted text, placeholders, metadata | `#6B645F` | `#A89FAD` |
@@ -561,7 +562,7 @@ on every surface uses only semantic tokens.
 ### 9.5 Inputs and forms
 
 - **Text field:** 40px high (44 on touch), `surface`, `radius-sm`, 1px
-  `hairline-strong`. The label is above (`label` type, `ink-2`), the hint
+  `control-border`. The label is above (`label` type, `ink-2`), the hint
   below (`caption`, `ink-3`). An error turns the border to `danger-ink` and
   shows a `✗` plus message.
 - **Textarea and code input:** same as a text field, using a `mono` face for
@@ -569,7 +570,7 @@ on every surface uses only semantic tokens.
 - **Select:** looks like a text field with a trailing chevron. It opens a
   level-2 menu (custom listbox on web with typeahead; native picker sheet on
   mobile).
-- **Switch:** a 36×20 track. Off is `hairline-strong`, on is `accent`, and the
+- **Switch:** a 36×20 track. Off is `control-border`, on is `accent`, and the
   thumb is `surface`. The label is on the left and the switch on the right of
   the row.
 - **Checkbox and radio:** 18px, `radius-xs` for checkbox, `accent` fill when

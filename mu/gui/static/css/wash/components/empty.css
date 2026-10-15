@@ -52,6 +52,10 @@
     inset: -8px;
     background: var(--w-spot) center / contain no-repeat;
     mix-blend-mode: var(--w-spot-blend);
+    /* Feather the bitmap edge so no square ever shows, even when the art's
+     * paper differs from the canvas by a level or two. */
+    -webkit-mask-image: radial-gradient(closest-side, black 70%, transparent 100%);
+    mask-image: radial-gradient(closest-side, black 70%, transparent 100%);
     animation: w-empty-bleed var(--wash-motion-bleed) var(--wash-ease-bleed) both;
 }
 .w-empty__art > * { position: relative; }

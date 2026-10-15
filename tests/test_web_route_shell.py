@@ -101,11 +101,11 @@ def test_routes_use_the_shared_status_vocabulary():
     for glyph in ("✓", "●", "◆", "✗", "–", "○"):
         assert glyph in job_trace_js
 
-    crystal = _read(GUI / "static" / "css" / "containers-crystal.css")
-    assert '.manager-status.running::before{content:"●"}' in crystal
-    assert '.manager-status.missing::before{content:"✗"}' in crystal.replace(
-        '.manager-status.error::before,', ''
-    )
+    # Wash W4: environment status renders as a .w-chip with glyph + label.
+    containers_js = _read(GUI / "static" / "js" / "containers.js")
+    assert "running: {glyph: '●', tone: 'running', label: 'Running'}" in containers_js
+    assert "missing: {glyph: '✗', tone: 'danger', label: 'Missing'}" in containers_js
+    assert '<span class="w-chip__glyph" aria-hidden="true">${style.glyph}</span>' in containers_js
 
 
 def test_container_dialogs_are_labelled_and_close_on_escape():

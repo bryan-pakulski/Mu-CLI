@@ -1,6 +1,6 @@
 # Plan: a build sandbox that prepares itself
 
-Status: proposal (2026-10-15) · Owner: jobs · Builds on: `job_build_environments.md` (rev 3,
+Status: partly superseded by `job_templates.md` (2026-10-15): its Phase 0 honest gate is kept there; the Prepare stage and environment agent are deferred · Owner: jobs · Builds on: `job_build_environments.md` (rev 3,
 implemented), `durable_engineering_jobs.md`, `container_security.md`.
 
 ## 1. Problem: what actually happened in rsq-cloud

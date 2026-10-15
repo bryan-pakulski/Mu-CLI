@@ -224,7 +224,7 @@ def test_work_scripts_render_without_inline_styles():
     # Spec §4.3: the 18 inline style attributes in work/view.js and 10 in
     # work/rules.js are gone; proportional bars are SVG geometry instead.
     js = ROOT / "mu" / "gui" / "static" / "js"
-    for path in (js / "work" / "view.js", js / "work" / "rules.js", js / "wash" / "work_diff.js"):
+    for path in (js / "work" / "view.js", js / "work" / "rules.js", js / "wash" / "diff.js"):
         text = path.read_text(encoding="utf-8")
         assert "style=" not in text and ".style." not in text, path.name
 
@@ -348,3 +348,29 @@ def test_context_charts_map_every_layer_through_its_wash_pigment():
     assert "return key ? `--wash-layer-${key}` : \"--wash-neutral-pigment\";" in app
     assert 'window.addEventListener("mucli-theme-change", () => this._scheduleRender());' in app
     assert "MU_LAYER_HUE_VIZ" not in app and "_rowHueMap" not in app
+
+
+def test_one_diff_renderer_and_one_diff_stylesheet():
+    # Spec §4.3: one diff module (static/js/wash/diff.js) and one stylesheet
+    # (components/diff.css) for chat, approvals, /design and the /work Diff
+    # tab; the interim /work renderer is gone.
+    js = GUI / "static" / "js"
+    assert (js / "wash" / "diff.js").is_file()
+    assert not (js / "wash" / "work_diff.js").exists()
+    scripts = [p for p in js.rglob("*.js") if "vendor" not in p.parts]
+    definers = [p.name for p in scripts if re.search(r"function (renderDiffHTML|renderFile|parseUnified)\b|window\.MuWorkDiff\s*=", p.read_text(encoding="utf-8"))]
+    assert definers == ["diff.js"], definers
+    api = (js / "wash" / "diff.js").read_text(encoding="utf-8")
+    for name in ("renderFile: renderFile", "renderTree: renderTree", "statusBadge: statusBadge", "STATUS_LABEL: STATUS_LABEL"):
+        assert name in api, name
+    assert "opts.findings" in api and "opts.tree" in api
+    for page, needle in (("index.html", '/static/js/wash/diff.js'), ("work.html", '/static/js/wash/diff.js'),
+                         ("design/gallery.html", '/static/js/wash/diff.js')):
+        assert needle in (GUI / "templates" / page).read_text(encoding="utf-8"), page
+    view = (js / "work" / "view.js").read_text(encoding="utf-8")
+    assert "const DIFF = window.WashDiff;" in view and "DIFF.renderFile(" in view and "DIFF.renderTree(" in view
+    # Diff rows, intra-line marks, findings and the file tree are styled once.
+    stylesheets = [p for p in CSS_ROOT.rglob("*.css") if p.name != "diff.css"]
+    for path in stylesheets:
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        assert not re.search(r"\.(?:w-diff__(?:row|num|sign|code|intra|tree|status|churn|finding)|work-diff-(?:table|intra|finding)|work-st\b|work-cbar)", text), path

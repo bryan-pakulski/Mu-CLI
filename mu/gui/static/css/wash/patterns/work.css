@@ -481,22 +481,6 @@
         background: var(--wash-surface);
     }
     .work-diff-tree-head { display: flex; flex-direction: column; gap: var(--wash-space-2); margin-bottom: var(--wash-space-2); padding-bottom: var(--wash-space-3); border-bottom: 1px solid var(--wash-hairline); }
-    .work-tree-list { gap: 1px; }
-    .work-tree-item { display: flex; align-items: center; gap: var(--wash-space-2); padding: 2px var(--wash-space-1); border-radius: var(--wash-radius-xs); }
-    .work-tree-item:hover { background: var(--wash-sunken); }
-    .work-tree-item.is-viewed .work-tree-link { color: var(--wash-ink-3); }
-    .work-tree-link { display: flex; align-items: center; gap: var(--wash-space-2); flex: 1 1 auto; min-width: 0; padding: 2px 0; border: 0; background: none; color: var(--wash-ink); font-size: var(--wash-type-caption-size); text-align: left; cursor: pointer; }
-    /* file tree status letters: A ok, M accent, D danger (G§9.11) */
-    .work-st { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: var(--wash-radius-xs); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); font-weight: 600; }
-    .work-st.st_A { background: var(--wash-ok-wash); color: var(--wash-ok-ink); }
-    .work-st.st_M { background: var(--wash-accent-wash); color: var(--wash-accent-ink); }
-    .work-st.st_D { background: var(--wash-danger-wash); color: var(--wash-danger-ink); }
-    .work-st.st_R { background: var(--wash-plan-wash); color: var(--wash-plan-ink); }
-    .work-cbar { display: inline-flex; gap: 1px; flex: none; }
-    .work-cbar span { width: 6px; height: 8px; border-radius: 1px; }
-    .work-cbar .c-add { background: var(--wash-ok-pigment); }
-    .work-cbar .c-del { background: var(--wash-danger-pigment); }
-    .work-cbar .c-none { background: var(--wash-hairline-strong); }
     .work-diff-files { display: flex; flex-direction: column; gap: var(--wash-space-4); min-width: 0; }
     .work-diff-file { overflow: hidden; border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-md); background: var(--wash-canvas); }
     .work-diff-file-head {
@@ -513,30 +497,8 @@
     .work-diff-collapse { display: inline-flex; align-items: center; gap: var(--wash-space-2); min-width: 0; padding: 0; border: 0; background: none; color: var(--wash-ink); cursor: pointer; }
     .work-diff-collapse .w-icon { width: 16px; height: 16px; color: var(--wash-ink-3); }
     .work-viewed { font-size: var(--wash-type-caption-size); }
-    .work-diff-body { overflow-x: auto; }
-    .work-diff-table { width: 100%; border-collapse: collapse; font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); line-height: var(--wash-type-mono-sm-line); }
-    .work-diff-table td { padding: 0 var(--wash-space-2); border: 0; vertical-align: top; }
-    .work-diff-table .no { width: 1%; min-width: 44px; color: var(--wash-ink-3); text-align: right; white-space: nowrap; user-select: none; }
-    .work-diff-table .sign { width: 1%; padding: 0 var(--wash-space-1); text-align: center; user-select: none; }
-    .work-diff-table .code { color: var(--wash-ink); white-space: pre; }
-    .work-diff-table.is-split .half { width: 49%; }
-    .work-diff-table .add { background: var(--wash-ok-wash); }
-    .work-diff-table td.add.sign { color: var(--wash-ok-ink); }
-    .work-diff-table .del { background: var(--wash-danger-wash); }
-    .work-diff-table td.del.sign { color: var(--wash-danger-ink); }
-    .work-diff-table .blank { background: var(--wash-sunken); }
-    .work-diff-table .hunk td,
-    .work-diff-table .note td { padding: 2px var(--wash-space-3); background: var(--wash-sunken); color: var(--wash-ink-3); }
-    /* intra-line change: one step stronger in the wash */
-    .work-diff-intra { padding: 0; border-radius: 2px; color: inherit; }
-    .work-diff-table .add .work-diff-intra { background: color-mix(in srgb, var(--wash-ok-pigment) 38%, var(--wash-ok-wash)); }
-    .work-diff-table .del .work-diff-intra { background: color-mix(in srgb, var(--wash-danger-pigment) 38%, var(--wash-danger-wash)); }
-    .work-diff-table .diff-finding-row td { padding: var(--wash-space-2) var(--wash-space-3); background: var(--wash-sunken); font-family: var(--wash-font-sans); font-size: var(--wash-type-body-size); line-height: var(--wash-type-body-line); white-space: normal; }
-    .work-diff-finding { position: relative; }
-    .work-diff-finding::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--w-tone-pigment, var(--wash-attention-pigment)); }
-    .work-diff-finding .w-card__body { padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) calc(var(--wash-space-4) + 4px); }
-    .work-diff-finding + .work-diff-finding { margin-top: var(--wash-space-2); }
-    .work-diff-finding p { margin: 0; white-space: pre-wrap; }
+    /* file bodies, interleaved findings and intra-line marks: the diff
+       component (components/diff.css, static/js/wash/diff.js renderFile) */
     .work-flash { outline: 2px solid var(--wash-attention-ink); outline-offset: -2px; }
     .work-app .hljs { padding: 0; background: transparent; }
     @media (width < 1200px) {

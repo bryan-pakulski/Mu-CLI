@@ -141,16 +141,12 @@
         return `<pre>${esc(text)}</pre>`;
     }
 
-    /* ---------------------------------------------------------------- unified diff (wash/work_diff.js) */
-    const DIFF = window.MuWorkDiff;
-    const parsePatch = patch => DIFF.parse(patch);
-    const LANG = {py:'python', js:'javascript', mjs:'javascript', ts:'typescript', tsx:'typescript', jsx:'javascript', rs:'rust', go:'go', java:'java', c:'c', h:'c', cc:'cpp', cpp:'cpp', hpp:'cpp',
-        cs:'csharp', rb:'ruby', php:'php', sh:'bash', bash:'bash', css:'css', html:'xml', xml:'xml', json:'json', yml:'yaml', yaml:'yaml', md:'markdown', sql:'sql', lua:'lua', kt:'kotlin', swift:'swift', toml:'ini'};
-    function highlight(text, path) {
-        const lang = LANG[String(path).split('.').pop()?.toLowerCase()];
-        if (!lang || !window.hljs?.getLanguage?.(lang)) return esc(text);
-        try { return window.hljs.highlight(text, {language:lang, ignoreIllegals:true}).value; } catch (_) { return esc(text); }
-    }
+    /* ---------------------------------------------------------------- unified diff (wash/diff.js)
+     * The one Wash diff renderer: parse, per-file body (unified/split, intra-
+     * line marks, syntax colours, interleaved review findings), status
+     * letters and the changed-file tree. This page only frames the files. */
+    const DIFF = window.WashDiff;
+    const parsePatch = patch => DIFF.parseUnified(patch);
     /* Inline sprite icon (static/icons/wash.svg). */
     const icon = (name, size = 'sm') => `<svg class="w-icon"${size ? ` data-size="${size}"` : ''} aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-${name}"></use></svg>`;
 
@@ -821,22 +817,17 @@
             const findings = (job.review?.findings || []).filter(f => (f.disposition || 'open') === 'open');
             const fix = job.actions.find(a => a.id === 'reprompt');
             const totalA = files.reduce((n, f) => n + f.added, 0), totalR = files.reduce((n, f) => n + f.removed, 0);
-            const cbar = f => { const total = f.added + f.removed, blocks = 5, a = total ? Math.round((f.added / total) * blocks) : 0, r = total ? Math.min(blocks - a, Math.max(f.removed ? 1 : 0, blocks - a)) : 0;
-                return `<span class="work-cbar" aria-hidden="true">${'<span class="c-add"></span>'.repeat(a)}${'<span class="c-del"></span>'.repeat(r)}${'<span class="c-none"></span>'.repeat(Math.max(0, blocks - a - r))}</span>`; };
-            const comment = f => `<div class="w-card work-diff-finding" data-tone="${severityTone(f.severity)}" role="note" aria-label="Review finding: ${esc(f.severity)}: ${esc(f.title)}"><div class="w-card__body"><div class="work-toolbar">${severityPill(f.severity)}<strong class="work-grow">${esc(f.title)}</strong>
+            const comment = f => `<div class="w-card w-diff__finding" data-tone="${severityTone(f.severity)}" role="note" aria-label="Review finding: ${esc(f.severity)}: ${esc(f.title)}"><div class="w-card__body"><div class="work-toolbar">${severityPill(f.severity)}<strong class="work-grow">${esc(f.title)}</strong>
                 <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-fix-one="${esc(f.id)}" ${fix?.enabled ? '' : 'disabled'} title="${esc(fix?.enabled ? 'Run a targeted implement pass that fixes only this finding' : fix?.reason || 'not available')}">Fix this</button></div>${f.detail ? `<p>${esc(f.detail)}</p>` : ''}${f.suggestion ? `<p><span class="work-meta">Suggestion: </span>${esc(f.suggestion)}</p>` : ''}</div></div>`;
-            const fileBody = f => {
-                if (f.binary) return '<p class="work-empty-line">Binary file.</p>';
-                const at = new Map();
-                findings.filter(x => x.file === f.path).forEach(x => { const k = Number(x.line_start || 0); at.set(k, [...(at.get(k) || []), x]); });
-                return DIFF.renderFile(f, {split:splitDiff, highlight, after:(no, cols) => ((at.get(no) || []).length ? `<tr class="diff-finding-row"><td colspan="${cols}">${at.get(no).map(comment).join('')}</td></tr>` : '')});
-            };
-            const statusLetter = f => `<span class="work-st st_${f.status}" aria-label="${DIFF.STATUS_LABEL[f.status]}">${f.status}</span>`;
+            const fileBody = f => (f.binary ? '<p class="work-empty-line">Binary file.</p>'
+                : DIFF.renderFile(f, {mode: splitDiff ? 'split' : 'unified', lineKeys: true,
+                    findings: findings.map(x => ({file: x.file, line: Number(x.line_start || 0), html: comment(x)}))}));
+            const statusLetter = f => DIFF.statusBadge(f);
             panel.innerHTML = `${liveNote}<div class="work-diff-layout">
                 <nav class="work-diff-tree" aria-label="Changed files"><div class="work-diff-tree-head">
                     <div class="work-toolbar"><strong>${files.length} file${files.length === 1 ? '' : 's'}</strong><span class="work-diffstat"><span class="work-add">+${totalA}</span><span class="work-del">−${totalR}</span></span><span class="work-spacer"></span>${live ? '' : `<span class="work-meta">${files.filter(f => seen.has(f.path)).length}/${files.length} viewed</span>`}</div>
                     <div class="w-segmented work-diff-mode" data-size="sm" role="group" aria-label="Diff layout"><button type="button" class="w-segmented__option" data-diff-mode="unified" aria-pressed="${!splitDiff}">Unified</button><button type="button" class="w-segmented__option" data-diff-mode="split" aria-pressed="${splitDiff}">Split</button></div></div>
-                    <ul class="work-list work-tree-list">${files.map((f, i) => `<li class="work-tree-item ${seen.has(f.path) ? 'is-viewed' : ''}"><button type="button" class="work-tree-link" data-goto-file="${i}" title="${esc(f.path)}">${statusLetter(f)}<span class="work-ellipsis">${esc(f.path.split('/').pop())}</span></button>${cbar(f)}</li>`).join('')}</ul></nav>
+                    ${DIFF.renderTree(files, {viewed: f => seen.has(f.path), attrs: (f, i) => `data-goto-file="${i}"`})}</nav>
                 <div class="work-diff-files">${files.map((f, i) => { const isViewed = seen.has(f.path), isCollapsed = collapsed.has(f.path) || (isViewed && !collapsed.has(`!${f.path}`));
                     return `<section class="work-diff-file" id="diff-file-${i}" data-file="${esc(f.path)}"><header class="work-diff-file-head">
                         <button type="button" class="work-diff-collapse" data-collapse="${esc(f.path)}" aria-expanded="${!isCollapsed}">${icon(isCollapsed ? 'chevron-right' : 'chevron-down')}${statusLetter(f)}<span class="work-mono work-ellipsis">${esc(f.path)}</span></button>

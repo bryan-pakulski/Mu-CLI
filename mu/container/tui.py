@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape as esc
 from rich.prompt import Prompt
 
 from mu.ui.choice_picker import prompt_choice, prompt_confirm
@@ -82,7 +83,7 @@ def _edit_dockerfile(initial: str) -> str:
         return initial
     path = Path(source).expanduser().resolve()
     if not path.is_file():
-        console.print(f"[yellow]not a file: {path}; keeping the template[/yellow]")
+        console.print(f"[yellow]not a file: {esc(str(path))}; keeping the template[/yellow]")
         return initial
     return path.read_text(encoding="utf-8")
 
@@ -104,7 +105,7 @@ def _browse_host_folder(label: str = "Host folder") -> str:
         return ""
     path = str(Path(value).expanduser().resolve())
     if not Path(path).is_dir():
-        console.print(f"[yellow]not a directory: {path}[/yellow]")
+        console.print(f"[yellow]not a directory: {esc(str(path))}[/yellow]")
         return ""
     return path
 
@@ -173,7 +174,7 @@ def _prompt_hardware(
     gpu = dict(capability.get("gpu") or {})
     existing_gpu = str(current.get("gpu_request") or "")
     console.print("\n[bold cyan]Hardware[/bold cyan]")
-    console.print(f"[dim]GPU → {gpu.get('reason') or 'not detected'}[/dim]")
+    console.print(f"[dim]GPU → {esc(str(gpu.get('reason') or 'not detected'))}[/dim]")
 
     gpu_options = [("none", "No GPU", "Do not attach host GPUs")]
     if gpu.get("supported"):
@@ -356,7 +357,7 @@ def configure_tui_container(
                 "egress_allow": list(ref.egress_allow),
                 "egress_deny": list(ref.egress_deny),
             }
-            console.print(f"[dim]selected → {ref.name}[/dim]", markup=False)
+            console.print(f"[dim]selected → {esc(ref.name)}[/dim]")
 
     if source == "new":
         default_name = str(config.get("container_name") or f"mucli-{name}").strip()
@@ -371,13 +372,13 @@ def configure_tui_container(
         config["gpu_request"], config["devices"] = _prompt_hardware(supervisor, config)
 
         allow = _domain_list(config.get("egress_allow"), DEFAULT_EGRESS_ALLOW)
-        console.print(f"[dim]egress allowlist → {', '.join(allow) or 'empty'}[/dim]")
+        console.print(f"[dim]egress allowlist → {esc(', '.join(allow) or 'empty')}[/dim]")
         if prompt_confirm("Edit the egress allowlist?", default=False):
             allow = _prompt_domain_list("Allowed domains (comma-separated)", allow)
         config["egress_allow"] = allow
 
         deny = _domain_list(config.get("egress_deny"), [])
-        console.print(f"[dim]egress blocklist → {', '.join(deny) or 'empty'}[/dim]")
+        console.print(f"[dim]egress blocklist → {esc(', '.join(deny) or 'empty')}[/dim]")
         if prompt_confirm("Edit the egress blocklist?", default=False):
             deny = _prompt_domain_list("Blocked domains (comma-separated)", deny)
         config["egress_deny"] = deny
@@ -501,9 +502,9 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
                     start=True,
                     progress=_progress,
                 )
-                console.print(f"[green]Created {config['container_name']}[/green]")
+                console.print(f"[green]Created {esc(str(config['container_name']))}[/green]")
             except Exception as exc:
-                console.print(f"[red]{exc}[/red]")
+                console.print(f"[red]{esc(str(exc))}[/red]")
             continue
         if action == "templates":
             templates = supervisor.template_registry.list_templates()
@@ -537,7 +538,7 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
                 try:
                     supervisor.create_environment(container_name=name, template_name=selected, start=True, progress=_progress)
                 except Exception as exc:
-                    console.print(f"[red]{exc}[/red]")
+                    console.print(f"[red]{esc(str(exc))}[/red]")
             continue
 
         ref = _select_environment(supervisor)
@@ -596,12 +597,12 @@ def run_container_manager(supervisor: ContainerSupervisor | None = None) -> None
             elif operation == "remove" and prompt_confirm(f"Remove {ref.name} and its volumes?", default=False):
                 supervisor.remove(ref.name, force=True)
         except Exception as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(f"[red]{esc(str(exc))}[/red]")
 
 
 def _progress(stage: str, message: str) -> None:
     label = stage.replace("_", " ")
-    console.print(f"[cyan]container · {label}[/cyan]  {message}")
+    console.print(f"[cyan]container · {esc(str(label))}[/cyan]  {esc(str(message))}")
 
 
 def ensure_tui_container(session: Any) -> Any:
@@ -687,7 +688,7 @@ def send_tui_container_message(
             # narrative is for the plain console path only.
             session.ui.show_error(str(exc))
         else:
-            console.print(f"[red]{rendered}[/red]")
+            console.print(f"[red]{esc(str(rendered))}[/red]")
         return {"status": "error", "error": str(exc), "failure": failure}
     assistant_text = str(response.get("assistant_text") or "")
     if assistant_text and session.ui:

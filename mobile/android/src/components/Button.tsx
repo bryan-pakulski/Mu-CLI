@@ -24,6 +24,7 @@ export type ButtonProps = {
   /** Round-32b F11: expose a11y state (e.g. {disabled: true}) to screen
    * readers while a conflict action is in progress. */
   accessibilityState?: { disabled?: boolean; busy?: boolean; checked?: boolean };
+  testID?: string;
 };
 
 export function Button({
@@ -36,6 +37,7 @@ export function Button({
   textStyle,
   accessibilityState,
   tone,
+  testID,
 }: ButtonProps) {
   const { colors, spacing, radii, typography } = useTheme();
 
@@ -76,6 +78,7 @@ export function Button({
 
   return (
     <Pressable
+      testID={testID}
       accessibilityRole="button"
       accessibilityState={{ ...accessibilityState, disabled: !!(disabled || loading), busy: !!loading }}
       onPress={onPress}

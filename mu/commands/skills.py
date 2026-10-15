@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from mu.ui.markup import esc, show_markup, to_plain
+
 from . import CommandResult, command
 
 
@@ -12,10 +14,13 @@ def _folders(session: Any) -> list[str]:
     return list(getattr(fc, "folders", []) or [])
 
 
-def _emit(session: Any, body: str, allow_prompt: bool) -> None:
+def _emit(session: Any, body: str, allow_prompt: bool, *, markup: bool = False) -> None:
     ui = getattr(session, "ui", None)
     if ui is not None and hasattr(ui, "show_info") and allow_prompt:
-        ui.show_info(body)
+        if markup:
+            show_markup(ui, body)
+        else:
+            ui.show_info(body)
 
 
 def _list_skills(session: Any, allow_prompt: bool) -> CommandResult:
@@ -34,14 +39,16 @@ def _list_skills(session: Any, allow_prompt: bool) -> CommandResult:
 
     lines = ["Installed skills:"]
     for skill in skills:
-        tag = " [disabled]" if skill.name in disabled else ""
-        trig = f"  [trigger: {skill.trigger}]" if skill.trigger else ""
-        lines.append(f"  • [bold]{skill.name}[/bold]{tag} — {skill.description}{trig}")
+        tag = esc(" [disabled]") if skill.name in disabled else ""
+        trig = esc(f"  [trigger: {skill.trigger}]") if skill.trigger else ""
+        lines.append(
+            f"  • [bold]{esc(skill.name)}[/bold]{tag} — {esc(skill.description)}{trig}"
+        )
     body = "\n".join(lines)
-    _emit(session, body, allow_prompt)
+    _emit(session, body, allow_prompt, markup=True)
     return CommandResult(
         ok=True,
-        message=body,
+        message=to_plain(body),
         data={
             "skills": [
                 {
@@ -63,10 +70,10 @@ def _show_skill(session: Any, name: str, allow_prompt: bool) -> CommandResult:
     for skill in skills:
         if skill.name.lower() == name.lower():
             body = (
-                f"[bold]{skill.name}[/bold] — {skill.description}\n"
-                f"[dim]source: {skill.source}[/dim]\n\n{skill.body}"
+                f"[bold]{esc(skill.name)}[/bold] — {esc(skill.description)}\n"
+                f"[dim]source: {esc(str(skill.source))}[/dim]\n\n{esc(skill.body)}"
             )
-            _emit(session, body, allow_prompt)
+            _emit(session, body, allow_prompt, markup=True)
             return CommandResult(
                 ok=True,
                 message=skill.body,

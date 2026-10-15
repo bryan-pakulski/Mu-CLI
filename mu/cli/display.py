@@ -266,13 +266,13 @@ def print_splash(session):
             folder_list += " ..."
 
     info_grid = f"""                                                                   
-    [bold magenta]Session:[/bold magenta]  [bold yellow]{session.session_manager.current_session_name}[/bold yellow]
+    [bold magenta]Session:[/bold magenta]  [bold yellow]{safe_markup(str(session.session_manager.current_session_name))}[/bold yellow]
     [bold magenta]System:[/bold magenta]   {sys_status}                                
-    [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
+    [bold magenta]Model:[/bold magenta]    [bold cyan]{safe_markup(str(session.provider.model_name))}[/bold cyan]       
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
-    [bold magenta]Type:[/bold magenta]     [bold cyan]{session_type_glyph} {session_type}[/bold cyan]
-    [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
-    [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
+    [bold magenta]Type:[/bold magenta]     [bold cyan]{session_type_glyph} {safe_markup(str(session_type))}[/bold cyan]
+    [bold magenta]Mode:[/bold magenta]     [bold cyan]{safe_markup(str(agent_mode))}[/bold cyan] — {safe_markup(str(mode_description))}
+    [bold magenta]Workspace:[/bold magenta][bold green] {safe_markup(str(folder_list))}[/bold green]
 """
     # Total context (sum of all layers) vs. the compactor's effective
     # ceiling (drift_corrected_context_limit), not the raw provider window.

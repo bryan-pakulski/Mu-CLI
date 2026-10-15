@@ -355,7 +355,7 @@ function LoadingRow() {
 
 // ---------- tool_approval -----------------------------------------------
 
-function ToolApprovalBody({
+export function ToolApprovalBody({
   prompt,
   submitting,
   submit,
@@ -410,8 +410,11 @@ function ToolApprovalBody({
       )}
       <TouchableOpacity
         accessibilityRole="checkbox"
+        accessibilityState={{ checked: remember }}
+        accessibilityLabel="Always allow this tool"
         onPress={() => setRemember(v => !v)}
         style={styles.checkboxRow}
+        testID="tool-approval-remember"
       >
         <Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={remember ? colors.accent : colors.textDim} />
         <Text variant="sm" style={{ color: colors.textSoft, marginLeft: spacing.sm }}>
@@ -422,12 +425,13 @@ function ToolApprovalBody({
         <LoadingRow />
       ) : (
         <View style={styles.actions}>
-          <Button title="Allow once" onPress={() => submit({ approved: true, remember: false })} style={styles.primaryAction} />
+          {/* One control, one meaning: the checkbox above decides whether
+              the approval is remembered for this tool. */}
           <Button
-            title="Always allow this tool"
-            variant="secondary"
-            onPress={() => submit({ approved: true, remember: true })}
-            style={styles.secondaryAction}
+            title={remember ? 'Always allow' : 'Allow once'}
+            onPress={() => submit({ approved: true, remember })}
+            style={styles.primaryAction}
+            testID="tool-approval-allow"
           />
           <CancelButton onPress={cancel} />
         </View>

@@ -668,6 +668,9 @@ class InputHandler:
                 "mode-feature": "ansiblue bold",
                 "mode-research": "ansimagenta bold",
                 "mode-security": "ansired bold",
+                # Every MODE_PROMPT_STYLES class must be defined here, or the
+                # mode name renders unstyled.
+                "mode-teacher": "ansibrightyellow bold",
             }
         )
 

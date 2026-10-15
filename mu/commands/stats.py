@@ -10,9 +10,11 @@ def _emit_toggle_banner(session: Any, label: str, state: bool) -> None:
     ui = getattr(session, "ui", None)
     if ui is None or not hasattr(ui, "show_info"):
         return
+    from mu.ui.markup import esc, show_markup
+
     marker = "[bold green]ON[/bold green]" if state else "[bold]OFF[/bold]"
     try:
-        ui.show_info(f"{label}: {marker}")
+        show_markup(ui, f"{esc(label)}: {marker}")
     except Exception:
         pass
 
@@ -315,9 +317,12 @@ def stats_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         session.session_manager.save_history(getattr(session, "folder_context", None))
         ui = getattr(session, "ui", None)
         if ui is not None and hasattr(ui, "show_info") and allow_prompt:
-            ui.show_info(
+            from mu.ui.markup import show_markup
+
+            show_markup(
+                ui,
                 "[bold green]Stats tracker cleared.[/bold green] "
-                "Token counts kept (lifetime accounting)."
+                "Token counts kept (lifetime accounting).",
             )
         return CommandResult(
             ok=True,

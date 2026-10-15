@@ -109,7 +109,9 @@ class HeadlessUI:
         raise EOFError("headless: no interactive input")
 
     def show_info_markup(self, message, *args, **kwargs):
-        return self.show_info(message, *args, **kwargs)
+        from mu.ui.markup import to_plain
+
+        return self.show_info(to_plain(message), *args, **kwargs)
 
     def __getattr__(self, name):  # TUI-only methods degrade to no-ops
         def _noop(*args, **kwargs):

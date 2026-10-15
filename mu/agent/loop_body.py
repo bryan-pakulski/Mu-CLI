@@ -45,6 +45,7 @@ from collections import deque
 from typing import Any
 
 from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
+from mu.ui.markup import esc, show_markup, show_renderable
 from mu.agent.hooks import HookContext
 from mu.agent.retry import is_context_overflow_error, parse_overflow_token_counts
 from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
@@ -1923,8 +1924,9 @@ def run_turn(session, text, *, origin="user"):
                     # headless/API sessions with compact_history=True were
                     # silently skipping it under the old `if session.ui`.
                     if session.ui:
-                        session.ui.show_info(
-                            "[dim]Compacting turn history (removing tool metadata)...[/dim]"
+                        show_markup(
+                            session.ui,
+                            "[dim]Compacting turn history (removing tool metadata)...[/dim]",
                         )
                     _sm_ = session.session_manager
                     _sm_._pending_compaction_iter = iteration
@@ -1988,8 +1990,9 @@ def run_turn(session, text, *, origin="user"):
             # Show bulk diffs if multiple
             if len(approval_plans) > 1:
                 if session.ui:
-                    session.ui.show_info(
-                        f"\n[bold yellow]Turn contains {len(approval_plans)} modifications requiring approval.[/bold yellow]"
+                    show_markup(
+                        session.ui,
+                        f"\n[bold yellow]Turn contains {len(approval_plans)} modifications requiring approval.[/bold yellow]",
                     )
                 for approval_plan in approval_plans.values():
                     for modification in approval_plan.modifications:
@@ -2048,8 +2051,9 @@ def run_turn(session, text, *, origin="user"):
                         and approval_plan.preview_error
                     ):
                         if session.ui:
-                            session.ui.show_info(
-                                f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
+                            show_markup(
+                                session.ui,
+                                f"  [yellow]Auto-retrying malformed patch for {esc(str(part.tool_name))}...[/yellow]",
                             )
                         result = (
                             "Error: Malformed patch detected. Please ensure your diff is correctly "
@@ -2249,7 +2253,7 @@ def run_turn(session, text, *, origin="user"):
                             try:
                                 _tracker = session._subagent_registry.tracker
                                 if _tracker.has_active():
-                                    session.ui.show_info(_tracker.render_panel())
+                                    show_renderable(session.ui, _tracker.render_panel())
                             except Exception:  # noqa: BLE001
                                 pass
 

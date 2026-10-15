@@ -44,7 +44,7 @@ _STATE_STATUS = {
 }
 
 _STATE_LABEL = {
-    "selected": "selected", "provisioning": "provisioning", "planning": "planning",
+    "selected": "selected", "provisioning": "preparing", "planning": "planning",
     "plan_review": "plan to approve", "implementing": "implementing", "checking": "checking",
     "reviewing": "reviewing", "review_done": "review done", "pushing": "pushing",
     "pushed": "pushed", "done": "done", "needs_input": "needs input", "failed": "failed",

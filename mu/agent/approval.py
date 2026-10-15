@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from rich.markup import escape as esc
+
 from mu.tools._envelope import infer_tool_error_code
 from mu.tools.descriptors import (
     get_modifications,
@@ -150,15 +152,20 @@ def build_approval_prompt(
     display_args: dict,
     count_info: str,
 ) -> tuple[str, list[str], str]:
+    # Tool names and args come from the model; escape them so brackets in
+    # args (paths, regexes, JSON) can't be parsed as Rich markup.
+    tool_name = esc(str(approval_plan.tool_name))
+    args_text = esc(str(display_args))
+    count_text = esc(str(count_info))
     if approval_plan.can_approve:
         prompt_text = (
             f"\n[bold yellow]Permission Required[/bold yellow] for tool: "
-            f"[cyan]{approval_plan.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
+            f"[cyan]{tool_name}[/cyan]{count_text}\nArgs: {args_text}\nAllow?"
         )
         return prompt_text, ["y", "n", "e"], "y"
 
     prompt_text = (
         f"\n[bold red]Diff Failed[/bold red] for tool: "
-        f"[cyan]{approval_plan.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+        f"[cyan]{tool_name}[/cyan]{count_text}\nArgs: {args_text}\nReject or Explain?"
     )
     return prompt_text, ["n", "e"], "n"

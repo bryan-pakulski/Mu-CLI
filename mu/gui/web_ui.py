@@ -35,7 +35,10 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from rich.protocol import is_renderable as _is_rich_renderable
+
 from mu.ui.base import BaseUI
+from mu.ui.markup import render_plain, to_plain
 
 from .bus import EventBus
 from .prompts import PromptStore
@@ -171,7 +174,20 @@ class WebUI(BaseUI):
         self._publish({"kind": "error", "text": str(message)})
 
     def show_info(self, message):
+        if not isinstance(message, str) and _is_rich_renderable(message):
+            self.show_renderable(message)
+            return
         self._publish({"kind": "info", "text": str(message)})
+
+    def show_info_markup(self, message):
+        # Browser and mobile clients render plain text; drop terminal markup.
+        self._publish({"kind": "info", "text": to_plain(message)})
+
+    def show_error_markup(self, message):
+        self._publish({"kind": "error", "text": to_plain(message)})
+
+    def show_renderable(self, renderable):
+        self._publish({"kind": "info", "text": render_plain(renderable)})
 
     def show_status(self, message):
         return _NullStatus(self, str(message))

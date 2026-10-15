@@ -7,6 +7,7 @@ import shlex
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape as esc
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
@@ -101,15 +102,15 @@ def _persist_binding(session: Any, session_name: str, config: dict[str, Any] | N
 
 def _output(stream: str, text: str) -> None:
     if stream == "command":
-        console.print(f"[dim]{text}[/dim]")
+        console.print(f"[dim]{esc(text)}[/dim]")
     elif stream == "stderr":
-        console.print(f"[red]{text}[/red]")
+        console.print(f"[red]{esc(text)}[/red]")
     else:
         console.print(text, markup=False)
 
 
 def _progress(stage: str, message: str) -> None:
-    console.print(f"[cyan]container · {stage.replace('_', ' ')}[/cyan]  {message}")
+    console.print(f"[cyan]container · {esc(stage.replace('_', ' '))}[/cyan]  {esc(str(message))}")
 
 
 def _create_environment(

@@ -607,7 +607,7 @@ Interaction rules:
 - `WashBackground` on Connect, Session start and the Work dashboard.
 - Rewrite `ACCESSIBILITY_AUDIT.md` from a real audit (TalkBack, font scale
   200%, contrast from `check_contrast.py`). Update the README palette section.
-- Bump the version to 0.4.0 and build the APK.
+- Bump the version to 0.5.0 (the app is currently 0.4.2) and build the APK.
 - **Acceptance:** an Android emulator walkthrough of every tab in both themes
   and with TalkBack. Jest is green.
 
@@ -746,7 +746,7 @@ P0 Foundations ──► P1 Reskin (W1 ∥ M1 ∥ T1) ──► P2 Web architect
 | **P2** | W2 CSS layers, `_layout.html`, standalone pages onto the shell, sprite, breakpoints, htmx removal | 2 | P1 |
 | **P3** | W3 signature components (about 10 small PRs, gallery-driven) | ~10 | P2 |
 | **P4** | W4 pages; legacy CSS deleted | ~5 | P3 |
-| **P5** | M2 kit unification, then M3 navigation and patterns; APK 0.4.0 | ~4 | P1 |
+| **P5** | M2 kit unification, then M3 navigation and patterns; APK 0.5.0 | ~4 | P1 |
 | **P6** | T2 terminal component migration (§6.3) | ~3 | P1 |
 | **P7** | Remove legacy alias tokens (web `--accent` etc., mobile `legacyColors`, jobs `TOKENS` aliases if unused); rewrite the colour, glass and theme-contract sections of `documentation/visualization_style_guide.md` to use Wash (`paper`/`dusk`, `--wash-*`; keep the `mucli-theme-change` event); update the built-in visualization skill template tokens; update mobile README; add a "Design system" paragraph to AGENTS.md pointing at the guide | 1–2 | all |
 

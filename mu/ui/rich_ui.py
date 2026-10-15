@@ -11,6 +11,8 @@ from utils.threads import NamedThread
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
+from rich.errors import MarkupError
+from rich.protocol import is_renderable as _is_rich_renderable
 from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
@@ -259,6 +261,9 @@ class RichUI:
             self.console.print(Text(str(message), style="red"))
 
     def show_info(self, message):
+        if not isinstance(message, (str, Text)) and _is_rich_renderable(message):
+            self.show_renderable(message)
+            return
         if isinstance(message, Text):
             text = message.plain
         else:
@@ -269,6 +274,24 @@ class RichUI:
             self.console.print(message, style="blue")
         else:
             self.console.print(Text(text, style="blue"))
+
+    def show_info_markup(self, message):
+        """Print a message whose Rich markup was written by our own code.
+
+        Interpolated values must already be escaped with ``mu.ui.markup.esc``.
+        Malformed markup is printed literally instead of raising.
+        """
+        try:
+            text = Text.from_markup(str(message))
+        except MarkupError:
+            text = Text(str(message))
+        if self._is_silenced_in_compact_mode(text.plain):
+            return
+        self.console.print(text)
+
+    def show_renderable(self, renderable):
+        """Print a Rich renderable (Table, Panel, ...) as-is."""
+        self.console.print(renderable)
 
     def _is_silenced_in_compact_mode(self, text: str) -> bool:
         """Filter noisy diagnostic messages when verbose rendering is off.

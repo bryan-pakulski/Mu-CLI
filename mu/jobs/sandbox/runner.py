@@ -88,17 +88,33 @@ def _job_time_detail(service, job, stage):
 
 
 def claim_stage_response(service, job, stage, payload):
-    """Approval is consumed once on the host and must match the exact tool args."""
+    """The relay's ``/interaction``. Jobs run unattended (``mu.jobs.unattended``): a human
+    decision recorded for this exact request (a job parked before that rule) is consumed once;
+    otherwise the automatic response is returned and recorded here as ``auto_permission`` /
+    ``auto_answered`` (``auto``: the stage does not record it again). An approval in a read-only
+    stage is always denied."""
     from ..ui import JobUI
-    ui = JobUI(service, job.id)
+    from ..unattended import answered_event, event_reason, interaction_response, permission_event, read_only
     kind = str(payload.get("kind") or "question")
+    if not (kind == "approval_required" and read_only(stage)):
+        ui = JobUI(service, job.id, stage=stage)
+        if kind == "approval_required":
+            ui._responses = [e for e in ui._responses if
+                (e.payload.get("target") or {}).get("tool_name") == payload.get("tool_name") and
+                (e.payload.get("target") or {}).get("tool_args") == payload.get("tool_args")]
+        human = ui._take_response(kind, tool_name=str(payload.get("tool_name") or ""))
+        if human is not None:
+            return human
+    response = interaction_response(stage, kind, payload)
+    tool_name = str(payload.get("tool_name") or "")
     if kind == "approval_required":
-        if stage != "implement":
-            return None
-        ui._responses = [e for e in ui._responses if
-            (e.payload.get("target") or {}).get("tool_name") == payload.get("tool_name") and
-            (e.payload.get("target") or {}).get("tool_args") == payload.get("tool_args")]
-    return ui._take_response(kind, tool_name=str(payload.get("tool_name") or ""))
+        event_type = "auto_permission"
+        recorded = permission_event(stage, tool_name, allow=response["decision"] == "approve", source="host")
+    else:
+        event_type = "auto_answered"
+        recorded = answered_event(stage, str(payload.get("shape") or kind), str(payload.get("message") or ""))
+    service.store.append_event(job.id, event_type, reason=event_reason(event_type, recorded), payload=recorded)
+    return response
 
 
 def run_stage_in_container(service, job, stage, prompt, **kwargs):
@@ -515,7 +531,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
             if guidance:
                 prompt += "\n\nHuman guidance:\n" + guidance
         (inputs / "request.json").write_text(json.dumps({"model": model, "prompt": prompt, "resume": resume,
-            "auto_approve_writes": bool(job.execution.get("auto_approve_writes", False)),
+            # Jobs run unattended (mu.jobs.unattended); kept for stage images built before that.
+            "auto_approve_writes": True,
             "max_iterations": limits.iteration_limit(job, stage),
             "model_request_timeout_s": _model_request_timeout(),
             "tool_timeout_s": _tool_timeout(),
@@ -550,6 +567,12 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
                     if isinstance(data, dict) and data.get("event"):
                         safe = json.loads(redact_secrets(json.dumps(data))[0])
                         service.store.append_event(job.id, "sandbox_event", payload={"stage": stage, **safe})
+                        if safe.get("event") in ("auto_permission", "auto_answered"):
+                            # Unattended decisions are first-class job events (activity, audit).
+                            from ..unattended import event_reason
+                            decided = {"stage": stage, **(safe.get("payload") if isinstance(safe.get("payload"), dict) else {})}
+                            service.store.append_event(job.id, safe["event"], payload=decided,
+                                                       reason=str(safe.get("reason") or event_reason(safe["event"], decided))[:500])
                 except (ValueError, TypeError):
                     pass
             def execute():

@@ -262,6 +262,11 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
 
         <ApprovalBanner approval={job.session?.approval} actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} />
         <EnvironmentApprovalBanner approval={job.environment_approval} actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} />
+        {job.setup_warning ? (
+          <Banner tone="caution" glyph="?" role="summary" title="Job setup failed; the job continued without it" testID="job-setup-warning">
+            <Text variant="xs" selectable>{job.setup_warning.message || `\`${job.setup_warning.command || ''}\` failed in ${job.setup_warning.binding}.`}</Text>
+          </Banner>
+        ) : null}
 
         <LimitBanner limit={job.limit} actions={job.actions} onInvoke={(a, extra) => cmd.invoke(a, extra)} busy={cmd.busy}
           error={cmd.lastError?.actionId === 'raiseLimit' ? cmd.lastError.message : null} />

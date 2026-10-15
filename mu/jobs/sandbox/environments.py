@@ -19,7 +19,13 @@ Snapshot of a container-mode environment:
 3. The login shell's environment (``bash -lic 'env -0'``) is probed and its PATH and
    toolchain homes are baked in, so ``.bashrc``/``.profile`` PATH edits survive.
 4. mucli's job layer (venv + tools + ``/cache``) is added by ``toolchain.build_image``.
-5. A secret scan of ``/root``, ``/home`` and ``/etc`` blocks the job on any hit.
+5. A secret scan of ``/root``, ``/home`` and ``/etc`` refuses an image with any hit.
+
+Jobs run unattended (``mu.jobs.unattended``): an unapproved repository-declared image,
+devcontainer or ``environments`` list never parks the job, and neither does a secret-scan hit.
+The job falls back to the next source in the precedence (session environment, Toolchains,
+default runtime) and records ``repository_environment_skipped`` (with the approval request, so
+the user can approve it for future jobs) or ``build_environment_skipped`` (secret scan).
 """
 from __future__ import annotations
 
@@ -384,15 +390,13 @@ def environments_fingerprint(bindings: Sequence[Binding]) -> str:
     return ENVIRONMENTS_FP_PREFIX + hashlib.sha1(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:20]
 
 
-def resolve_bindings(job: Any, settings: Optional[Dict[str, Any]] = None) -> Tuple[List[Binding], str]:
-    """First source that yields bindings wins: job override → repo config → session → settings → default."""
-    if settings is None:
-        from ..job_settings import load_settings
-        settings = load_settings()
+def _candidates(job: Any, settings: Dict[str, Any]):
+    """Binding sources in precedence order: job override → repo config → repository image /
+    devcontainer → session → settings (Toolchains) → approved implicit devcontainer."""
     from ..job_settings import rule
     override = (getattr(job, "execution", None) or {}).get("environments")
     if override:
-        return bindings_from_list(override), "job"
+        yield bindings_from_list(override), "job"
     if is_cloned_repository(job):
         # A cloned repository's jobs.toml is remote content: read it from the base commit and
         # require the user's approval of exactly the bindings it resolves to.
@@ -401,27 +405,51 @@ def resolve_bindings(job: Any, settings: Optional[Dict[str, Any]] = None) -> Tup
         if configured:
             bindings = bindings_from_list(configured)
             fp = environments_fingerprint(bindings)
-            return [replace(b, approval=fp) for b in bindings], "repo"
+            yield [replace(b, approval=fp) for b in bindings], "repo"
     else:
         configured = repo_config(_repository(job)).get("environments")
         if configured:
-            return bindings_from_list(configured), "repo"
+            yield bindings_from_list(configured), "repo"
     declared = repository_binding(job)
     if declared is not None:
-        return declared
+        yield declared
     if rule("environments.use_session_environment", settings):
         container = session_environment(str((getattr(job, "metadata", None) or {}).get("origin_session") or ""))
         if container:
-            return [Binding(name=default_name("environment", container), source="environment", ref=container)], "session"
+            yield [Binding(name=default_name("environment", container), source="environment", ref=container)], "session"
     rows = toolchain_bindings(job, settings)
     if rows:
-        return rows, "settings"
+        yield rows, "settings"
     implicit = repository_binding(job, implicit_devcontainer=True)
     if implicit is not None and implicit[0] and implicit[0][0].approval:
         from .devcontainer import is_approved
         from .toolchain import job_repository
         if is_approved(job_repository(job), implicit[0][0].approval):
-            return implicit
+            yield implicit
+
+
+def resolve_bindings(job: Any, settings: Optional[Dict[str, Any]] = None, *,
+                     skipped: Optional[List[Dict[str, Any]]] = None,
+                     exclude: Iterable[str] = ()) -> Tuple[List[Binding], str]:
+    """First source that yields bindings wins: job override → repo config → session → settings → default.
+
+    With ``skipped`` (a list the caller owns; jobs run unattended), a source whose bindings need
+    a repository approval the user has not given (:func:`repository_approval`) is skipped and
+    described in ``skipped`` instead of being returned, and resolution falls back to the next
+    source. ``exclude``: origins not to use (e.g. one refused by the secret scan)."""
+    if settings is None:
+        from ..job_settings import load_settings
+        settings = load_settings()
+    excluded = set(exclude or ())
+    for bindings, origin in _candidates(job, settings):
+        if origin in excluded:
+            continue
+        if skipped is not None:
+            request = repository_approval(job, bindings)
+            if request is not None:
+                skipped.append({"origin": origin, "approval": request})
+                continue
+        return bindings, origin
     return [], "default"
 
 
@@ -1051,12 +1079,23 @@ def _preflight(states: Sequence[Dict[str, Any]], docker: Docker) -> None:
                                      f"usable NVIDIA runtime ({exc}).") from exc
 
 
-def _require_approval(service, job: Any, bindings: Sequence[Binding]) -> None:
-    """Repository-declared images/builds park the job until the user approves them."""
+def repository_approval(job: Any, bindings: Sequence[Binding]) -> Optional[Dict[str, Any]]:
+    """The approval request (``devcontainer.approval_request`` + ``message``) for the first
+    repository-declared binding the user has not approved for this repository, else None.
+
+    A fingerprint this job already skipped (``metadata.environments_skipped``) or the user
+    rejected for it stays skipped for the rest of the job, so its stages keep one environment;
+    approving it applies to future jobs."""
     from .devcontainer import approval_message, approval_request, is_approved, repository_environment
     from .toolchain import job_repository
+    meta = dict(getattr(job, "metadata", None) or {})
+    pinned = set(meta.get("environments_skipped") or [])
+    rejected = str(meta.get("environment_rejected") or "")
     for binding in bindings:
-        if not binding.approval or is_approved(job_repository(job), binding.approval):
+        if not binding.approval:
+            continue
+        if binding.approval not in pinned and binding.approval != rejected \
+                and is_approved(job_repository(job), binding.approval):
             continue
         if binding.approval.startswith(ENVIRONMENTS_FP_PREFIX):
             refs = ", ".join(f"{b.name}={b.source}:{b.ref}" + (" (docker)" if b.docker else "")
@@ -1069,14 +1108,42 @@ def _require_approval(service, job: Any, bindings: Sequence[Binding]) -> None:
         if env.get("fingerprint") != binding.approval:
             env = {"fingerprint": binding.approval, "kind": "build" if binding.build else "image", "ref": binding.ref,
                    "label": f"image {binding.ref}", "origin": "repo-image"}
-        error = EnvironmentBlocked(approval_message(env))
-        error.approval = approval_request(job, env)  # type: ignore[attr-defined]
+        return {**approval_request(job, env), "message": approval_message(env)}
+    return None
+
+
+def _record_skipped(service, job: Any, skipped: Sequence[Dict[str, Any]], used: str) -> None:
+    """``repository_environment_skipped`` (once per fingerprint per job) and pin the skip."""
+    if not skipped:
+        return
+    meta = dict(service.get(job.id).metadata or {})
+    pinned = list(meta.get("environments_skipped") or [])
+    fresh = False
+    for row in skipped:
+        request = dict(row["approval"])
+        fp = str(request.get("fingerprint") or "")
+        if not fp or fp in pinned:
+            continue
+        pinned.append(fp)
+        fresh = True
+        message = request.pop("message", "")
         try:
-            service.store.append_event(job.id, "build_environment_approval_required", reason=str(error)[:500],
-                                       payload=error.approval)  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001
+            service.store.append_event(
+                job.id, "repository_environment_skipped",
+                reason=(f"Not approved for this repository, so this job runs in {_origin_label(used)} instead. "
+                        f"{message} Approving applies to future jobs on this repository.")[:1000],
+                payload={**request, "origin": request.get("origin") or row["origin"], "used": used,
+                         "action": "approveEnvironment"})
+        except Exception:  # noqa: BLE001 - the fallback itself must not fail
             pass
-        raise error
+    if fresh:
+        save_meta(service, job.id, environments_skipped=pinned)
+
+
+def _origin_label(origin: str) -> str:
+    return {"session": "the session's environment", "settings": "the Toolchains environment",
+            "default": "the default job runtime", "job": "the job's chosen environments"}.get(
+        origin, f"the {origin} environment")
 
 
 def ensure_environments(service, job: Any, *, docker: Optional[Docker] = None, force: bool = False,
@@ -1101,11 +1168,13 @@ def _ensure_locked(service, job: Any, *, docker: Optional[Docker], force: bool,
                    settings: Dict[str, Any]) -> List[Dict[str, Any]]:
     job = service.get(job.id)
     meta = dict(job.metadata or {})
+    skipped: List[Dict[str, Any]] = []
+    excluded = list(meta.get("environments_excluded") or [])
     try:
-        bindings, origin = resolve_bindings(job, settings)
+        bindings, origin = resolve_bindings(job, settings, skipped=skipped, exclude=excluded)
     except ValueError as exc:
         raise EnvironmentBlocked(f"Build environments are misconfigured: {exc}") from exc
-    _require_approval(service, job, bindings)
+    _record_skipped(service, job, skipped, origin)
     prepared = job_states(job)
     if not bindings:
         if prepared:
@@ -1193,6 +1262,20 @@ def _ensure_locked(service, job: Any, *, docker: Optional[Docker], force: bool,
                 "binding": state["name"], "source": state["source"], "ref": state["ref"],
                 "job_image": state["job_image"], "image_bytes": state.get("image_bytes", 0),
                 "probed_env": sorted(state.get("probed_env") or {}), "skipped": len(state.get("skipped_paths") or [])})
+    secret = next(((n, e) for n, e in errors.items() if getattr(e, "secret_paths", None)), None)
+    if secret is not None and origin != "default":
+        # The secret scan is a data-leak control: never use the image, but fall back to the next
+        # environment source instead of parking the job (jobs run unattended).
+        name, exc = secret
+        excluded.append(origin)
+        service.store.append_event(job.id, "build_environment_skipped", reason=(
+            f"Build environment `{name}` was not used: {exc} This job falls back to the next environment source.")[:1000],
+            payload={"binding": name, "origin": origin, "reason": "secret_scan",
+                     "secret_paths": list(getattr(exc, "secret_paths", []) or [])[:50]})
+        cleanup_job(job.id, service=None, docker=docker, reason="secret scan", containers=False, engine=False)
+        save_meta(service, job.id, environments_excluded=excluded, build_environments=[],
+                  build_environments_source=None)
+        return _ensure_locked(service, job, docker=docker, force=False, settings=settings)
     if errors:
         name, exc = next(iter(errors.items()))
         if isinstance(exc, EnvironmentBlocked):

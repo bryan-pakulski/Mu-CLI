@@ -20,7 +20,6 @@ export interface JobExecutionProfile {
   model: string;
   agent_mode: string;
   session_type: 'chat' | 'workspace' | 'container';
-  auto_approve_writes: boolean;
   stages?: JobStageModels;
   /** Agent per stage: mucli (default), Claude Code or Codex. */
   stage_agents?: import('./agents').StageAgents;
@@ -589,11 +588,6 @@ export function sessionForWorkspace(sessions: JobSessionOption[], workspace: str
 export function defaultWorkspace(sessions: JobSessionOption[], preferredSession: string | null | undefined): string {
   const entry = sessions.find(s => s.name === preferredSession) || sessions.find(s => s.current);
   return entry?.workspace || recentWorkspaces(sessions)[0] || '';
-}
-
-/** Settings → New job defaults → "Run unattended in sandbox" (off unless explicitly turned on). */
-export function unattendedDefault(rules: JobRules | null | undefined): boolean {
-  return rules?.values?.['defaults.run_unattended'] === true;
 }
 
 /** New-job form prefill from rules.values defaults.* (blank when unset). */

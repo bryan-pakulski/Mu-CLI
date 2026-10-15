@@ -51,19 +51,8 @@ def session_defaults(*, workspace, provider, model, variables):
         **({"stages": stages} if stages else {}),
         "agent_mode": variables.get("agent_mode", "default"),
         "session_type": variables.get("session_type", "workspace"),
-        # Unattended sandbox writes are an explicit choice (Settings default or a per-job
-        # flag), never inherited from the chat session's YOLO.
-        "auto_approve_writes": unattended_default(),
+        # Jobs always run unattended (mu.jobs.unattended); no per-job auto-approve choice.
     }}
-
-
-def unattended_default() -> bool:
-    """Settings → New job defaults → "Run unattended in sandbox" (off unless the user turned it on)."""
-    try:
-        from ..job_settings import effective_rules
-        return bool(effective_rules().get("defaults.run_unattended", False))
-    except Exception:  # noqa: BLE001 - unreadable settings never grant auto-approve
-        return False
 
 
 def job_settings_vm():
@@ -253,6 +242,10 @@ def environment_approval(service, job, core: Optional[CoreState] = None) -> Opti
     * Blocking: the repository image/devcontainer of a job parked on an
       environment failure — latest ``build_environment_approval_required``
       event (payload = ``devcontainer.approval_request``). Approving requeues.
+    * Non-blocking: a repository image/devcontainer/environments list the job
+      skipped because it was not approved (jobs run unattended) — latest
+      ``repository_environment_skipped`` event. The job runs in the next
+      environment source; approving records it for future jobs.
     * Non-blocking: repository-declared egress (``[sandbox] egress``) — latest
       ``repository_egress_approval_required`` event of any non-terminal job.
       Stages keep running without the egress; approving only records it, and
@@ -268,6 +261,9 @@ def environment_approval(service, job, core: Optional[CoreState] = None) -> Opti
         found = _pending_approval(service, job, "build_environment_approval_required")
         if found is not None:
             return {**found, "blocking": True}
+    found = _pending_approval(service, job, "repository_environment_skipped")
+    if found is not None:
+        return {**found, "blocking": False}
     found = _pending_approval(service, job, "repository_egress_approval_required")
     return {**found, "blocking": False} if found is not None else None
 
@@ -434,6 +430,9 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         facts = facts_for(service, job, core)
         out["actions"] = [a.to_dict() for a in available_actions(facts)]
         out["environment_approval"] = facts.environment_approval
+        # Jobs run unattended: a failed template job setup is a warning (the job continued).
+        from ..sandbox.job_setup import setup_warning
+        out["setup_warning"] = setup_warning(job)
         out["budget"] = budget_vm(service, job, now=now)
     if "plan" in wanted:
         try:
@@ -468,7 +467,13 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
                   ("sandbox_event", "stage_message", "sandbox_starting", "sandbox_stopped", "runtime_error",
                    "build_environments_preparing", "build_environment_progress", "build_environment_ready",
                    "build_environment_failed", "build_environments_recreated", "environment_command_started",
-                   "environment_command", "environment_setup", "environment_setup_dirty", "environment_setup_skipped")]
+                   "environment_command", "environment_setup", "environment_setup_dirty", "environment_setup_skipped",
+                   # Jobs run unattended: automatic decisions and non-blocking fallbacks.
+                   "auto_permission", "auto_answered", "environment_setup_failed", "repository_environment_skipped",
+                   "build_environment_skipped", "checks_unverified")
+                  # The stage's own copy of an automatic decision is shown once, as the job event.
+                  and not (e.event_type == "sandbox_event"
+                           and (e.payload or {}).get("event") in ("auto_permission", "auto_answered"))]
         out["session"] = {"session_name": job.session_name, "live": bool(job.worker_id),
                           "stages": stages, "events": events,
                           "approval": facts_for(service, job, core).pending_approval}

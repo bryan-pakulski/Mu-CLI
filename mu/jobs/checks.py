@@ -371,6 +371,23 @@ def unverified_message(unrunnable, *, template=""):
     return " ".join(dict.fromkeys(parts))
 
 
+def unverified_causes(summary) -> str:
+    """Short "tools/causes" text of an unverified run (``checks/summary.json``); '' when verified."""
+    summary = summary if isinstance(summary, dict) else {}
+    parts = [f"`{t}` missing" for t in summary.get("missing_tools") or []]
+    for item in summary.get("unrunnable_suites") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "missing_tool" and item.get("tool") in (summary.get("missing_tools") or []):
+            continue
+        name = item.get("suite") or item.get("command") or "check"
+        cause = str(item.get("cause") or item.get("tool") or "could not run")
+        parts.append(f"`{name}`: {cause}")
+    if not parts and summary.get("verified") is False:
+        parts.append(f"{int(summary.get('unrunnable') or 1)} check(s) could not run")
+    return "; ".join(dict.fromkeys(parts))[:1500]
+
+
 def git(workspace, *args):
     return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-C", workspace, *args],
                           capture_output=True, text=True, timeout=60, check=True).stdout.strip()

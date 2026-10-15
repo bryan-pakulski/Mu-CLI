@@ -443,22 +443,32 @@ def test_setup_runs_commands_in_order_with_stage_isolation(home, tmp_path, monke
     assert len(runner.commands) == 2
 
 
-def test_setup_failure_parks_with_command_and_log_tail_then_skip(home, tmp_path, monkeypatch):
+def test_setup_failure_warns_with_command_and_log_tail_and_continues(home, tmp_path, monkeypatch):
     from mu.jobs.core.actions import action_map
     from mu.jobs.core.commands import dispatch
     from mu.jobs.core.vm import facts_for, job_vm
-    from mu.jobs.models import AttentionReason
+    from mu.jobs.models import AttentionReason, JobStatus
     from mu.jobs.sandbox import job_setup
-    from mu.jobs.sandbox.environments import EnvironmentBlocked
     monkeypatch.setattr("mu.jobs.sandbox.egress.EgressBridge", lambda d, domains: SimpleNamespace(start=lambda: SimpleNamespace(close=lambda: None)))
     service, job, state = _setup_job(tmp_path)
     runner = SetupRunner(codes=[0, 1])
-    with pytest.raises(EnvironmentBlocked) as raised:
-        job_setup.run_job_setup(service, job, [state], runner=runner, settings={})
-    message = str(raised.value)
-    assert "`npm --prefix resq-frontend ci` exited 1" in message and "npm ERR! code E403" in message
-    assert raised.value.setup_failure["index"] == 1
-    # The stage sites park on EnvironmentBlocked with ENVIRONMENT_FAILURE and the message as detail.
+    # Jobs run unattended: a failing setup command never parks the job; it warns and continues.
+    assert job_setup.run_job_setup(service, job, [state], runner=runner, settings={}) == ["rsq"]
+    current = service.get(job.id)
+    assert current.status == JobStatus.RUNNING
+    warning = job_setup.setup_warning(current)
+    message = warning["message"]
+    assert "`npm --prefix resq-frontend ci` exited 1" in message and "npm ERR! code E403" in warning["error"]
+    assert warning["index"] == 1 and warning["binding"] == "rsq"
+    assert job_vm(service, job.id)["setup_warning"]["command"] == "npm --prefix resq-frontend ci"
+    failed = [e for e in service.events(job.id) if e.event_type == "environment_setup_failed"]
+    assert len(failed) == 1 and "resq-frontend ci" in failed[0].reason
+    assert job_setup.setup_records(current)["rsq"]["status"] == "failed"
+    # Not retried at every stage start for the same image (a refreshed image re-runs it).
+    assert not job_setup.needs_setup(current, state)
+    job_setup.run_job_setup(service, current, [state], runner=runner, settings={})
+    assert len(runner.commands) == 2
+    # Legacy: a job that parked on a failed setup before jobs ran unattended can still skip it.
     service.require_human(job.id, AttentionReason.ENVIRONMENT_FAILURE, message[:2000], payload={"stage": "plan"})
     parked = service.get(job.id)
     assert parked.attention_reason.value == "environment_failure" and "resq-frontend ci" in parked.attention_detail
@@ -471,6 +481,7 @@ def test_setup_failure_parks_with_command_and_log_tail_then_skip(home, tmp_path,
     dispatch(service, {"type": "skipSetup", "job_id": job.id})
     assert job_setup.setup_records(service.get(job.id))["rsq"]["status"] == "skipped"
     assert not job_setup.needs_setup(service.get(job.id), state)
+    assert job_setup.setup_warning(service.get(job.id)) is None
 
 
 def test_ensure_environments_runs_setup_and_reruns_after_refresh(home, tmp_path, monkeypatch):
@@ -619,26 +630,37 @@ def test_missing_tool_signatures(home, tmp_path):
                                suite, str(tmp_path)) is None
 
 
-def test_unverified_run_parks_with_message_then_continue_caps_review(home, tmp_path):
+def test_unverified_run_continues_to_review_with_the_message_and_caps_the_verdict(home, tmp_path):
     from mu.jobs.checks import ChecksStage
     from mu.jobs.core.actions import action_map
     from mu.jobs.core.commands import dispatch
     from mu.jobs.core.vm import facts_for
-    from mu.jobs.models import JobStatus
-    from mu.jobs.stages import apply_review_verdict
+    from mu.jobs.models import AttentionReason, JobStatus
+    from mu.jobs.stages import apply_review_verdict, build_stage_review_prompt
     from mu.jobs.verify_worker import apply_checks_result
     service, job = _rsq_job(tmp_path)
     run = ChecksStage(service, run_suite=lambda j, w, s: dict(RSQ_RESULTS[s.command]), settings={}).verify(job)
     service.transition(job.id, JobStatus.VERIFYING, reason="test")
-    assert apply_checks_result(service, job.id, run) == 22
-    parked = service.get(job.id)
-    assert parked.status == JobStatus.NEEDS_HUMAN and parked.attention_reason.value == "verification_required"
+    # Jobs run unattended: unverified checks never park; the job goes on to review.
+    assert apply_checks_result(service, job.id, run) == 0
+    current = service.get(job.id)
+    assert current.status == JobStatus.REVIEWING
+    note = [e for e in service.events(job.id) if e.event_type == "checks_unverified"][-1]
     assert ("`vitest`, `tsc` and `eslint` come from `node_modules`, which isn't installed. Choose a template with job "
-            "setup, or add `npm --prefix resq-management ci` to template `rsq-node-build`'s job setup.") in parked.attention_detail
+            "setup, or add `npm --prefix resq-management ci` to template `rsq-node-build`'s job setup.") in note.reason
+    assert note.payload["verified"] is False
     assert service.store.core_state(job.id).fix_attempts == 0
+    facts = facts_for(service, current)
+    assert facts.checks_unverified and not facts.unverified_pending
+    assert not action_map(facts)["continueUnverified"].enabled  # nothing to continue: it never parked
+    # The review is told plainly that the checks could not run.
+    prompt = build_stage_review_prompt(current, "", "", 1)
+    assert "UNVERIFIED" in prompt and "`vitest`" in prompt and "capped at needs work" in prompt
+    # Legacy: a job parked on unverified checks before this rule can still be continued.
+    service.require_human(job.id, AttentionReason.VERIFICATION_REQUIRED, note.reason, payload={"unverified": True})
     service.release(job.id, "worker", reason="test")
-    facts = facts_for(service, parked)
-    assert facts.checks_unverified and facts.unverified_pending
+    facts = facts_for(service, service.get(job.id))
+    assert facts.unverified_pending
     actions = action_map(facts)
     assert actions["continueUnverified"].enabled and actions["continueUnverified"].tone == "warn"
     assert "capped at needs work" in actions["continueUnverified"].confirm
@@ -658,10 +680,10 @@ def test_review_cap_rules():
     assert compute_verdict([], [], {"new_failures": 1, "unverified": 2}) == "do_not_merge"
 
 
-def test_push_of_unverified_checks_requires_an_override(home, tmp_path):
+def test_push_of_unverified_checks_needs_no_override_and_the_pr_says_so(home, tmp_path):
     from mu.jobs.core.actions import action_map
     from mu.jobs.core.artifacts import artifacts_for
-    from mu.jobs.core.commands import CommandRejected, dispatch
+    from mu.jobs.core.commands import dispatch
     from mu.jobs.core.states import JobState
     from mu.jobs.core.vm import facts_for
     from mu.jobs.models import JobStatus
@@ -684,13 +706,24 @@ def test_push_of_unverified_checks_requires_an_override(home, tmp_path):
     assert service.store.core_state(job.id).state == JobState.REVIEW_DONE
     facts = facts_for(service, service.get(job.id))
     push = action_map(facts)["push"]
-    assert push.enabled and push.args.get("requires_override") is True and push.args.get("unverified") is True
-    with pytest.raises(CommandRejected, match="unverified"):
-        dispatch(service, {"type": "push", "job_id": job.id, "args": {}})
-    dispatch(service, {"type": "push", "job_id": job.id, "args": {"override_reason": "CI runs the suites"}})
+    # Jobs run unattended: unverified checks need no override; the PR body states it instead.
+    assert push.enabled and not push.args.get("requires_override") and push.args.get("unverified") is True
+    from mu.jobs.publish import UNVERIFIED_PREFIX, _publish_text, publish_preview, unverified_note
+    run = VerificationStore(service.store).latest(job.id)
+    note = unverified_note(run)
+    assert note.startswith(UNVERIFIED_PREFIX + ":") and UNVERIFIED_PREFIX.startswith("⚠ Checks could not run (unverified)")
+    preview = publish_preview(service, service.get(job.id))
+    assert preview["body"].startswith(note) and preview["requires_override"] is False
+    dispatch(service, {"type": "push", "job_id": job.id, "args": {}})
+    assert service.store.core_state(job.id).state == JobState.PUSHING
     meta = service.get(job.id).metadata
-    assert meta["unverified_override"]["verification_id"] == "u1"
-    assert any(e.event_type == "push_override" and e.payload.get("unverified") for e in service.store.recent_events(job.id))
+    assert not meta.get("unverified_override")
+    assert not any(e.event_type == "push_override" for e in service.store.recent_events(job.id))
+    title, body, draft = _publish_text(service.get(job.id), unverified=note)
+    assert body.startswith(note) and draft is True
+    # An edited PR body still carries the warning (once).
+    service.store.patch_metadata(job.id, {"publish_override": {"body": "My own text"}})
+    assert _publish_text(service.get(job.id), unverified=note)[1] == f"{note}\n\nMy own text"
 
 
 def test_push_check_reason_blocks_unverified_without_allow(home, tmp_path):

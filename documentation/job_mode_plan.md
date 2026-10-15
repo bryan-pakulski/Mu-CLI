@@ -30,7 +30,7 @@ gates that matter (plan approval, push).
 | Default job cost cap | `$100` per job (`jobs.max_cost_usd`), `0` = unlimited, must be set explicitly |
 | Commit identity | Inherit the user's `git config user.name/email`; fall back to `MuCLI`. Checkpoints stay unsigned; publish squashes into one commit that honours `commit.gpgsign`, carries the ticket key and a `Mucli-Job: <id>` trailer |
 | Push gate after squash | Gate compares the **tree** of the pushed commit with the verified tree |
-| Unattended writes | Explicit per-job "Run unattended in sandbox" flag with a Settings default (off). No longer inherits session YOLO |
+| Unattended writes | Explicit per-job "Run unattended in sandbox" flag with a Settings default (off). No longer inherits session YOLO. *Superseded 2026-10-15: jobs always run unattended; the flag and setting are gone* |
 | State model | One transition table module; stored `status` column kept for compatibility, `JobState` derived by a total explicit mapping (no history heuristics) |
 | Trackers | `Tracker` protocol with Jira and GitHub Issues adapters; Linear documented as a plug-in point |
 | Service-dependent tests (testcontainers, compose) | Documented limitation plus "run checks inside the job engine" option is **deferred**; doctor explains it |
@@ -168,7 +168,7 @@ the Jira step in `mu/jobs/setup.py`.
    stage models, Jira credentials, Android tabs).
 3. Doctor as a tab of Setup; one Setup call-to-action banner; Boards renamed
    "Tickets"; nav trimmed.
-4. "Run unattended in sandbox" toggle (explicit, default from Settings, off).
+4. "Run unattended in sandbox" toggle (explicit, default from Settings, off). *Removed 2026-10-15: jobs always run unattended.*
 
 ### Wave 2 — simplify the core (single agent, after Wave 1 is green)
 

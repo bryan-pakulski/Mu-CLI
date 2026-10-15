@@ -8,7 +8,6 @@ import pytest
 from mu.jobs import AttentionReason, JobService, JobSpec, JobStatus, JobStore
 from mu.jobs.review import JobReviewError, JobReviewService, build_job_diff
 from mu.jobs.ui import JobUI
-from mu.ui.exceptions import InteractionRequired
 
 
 def _git(path, *args, env=None):
@@ -71,11 +70,12 @@ def test_approval_response_is_consumed_exactly_once_by_job_ui(tmp_path):
 
     ui = JobUI(service, job.id)
     assert ui.request_tool_approval(tool_name="write_file") == ("y", None)
-    # InteractionRequired intentionally derives from BaseException so the
-    # agent loop's broad except Exception recovery cannot swallow a durable
-    # human gate. Assert that exact control-flow contract here.
-    with pytest.raises(InteractionRequired):
-        ui.request_tool_approval(tool_name="write_file")
+    # Jobs run unattended: once the recorded human decision is consumed, the
+    # next request is approved automatically (implement stage) and recorded,
+    # never turned into a durable human gate.
+    assert ui.request_tool_approval(tool_name="write_file") == ("y", None)
+    auto = [e for e in service.events(job.id) if e.event_type == "auto_permission"]
+    assert [e.payload["decision"] for e in auto] == ["approve"]
 
     consumed = [e for e in service.events(job.id) if e.event_type == "interaction_response_consumed"]
     assert len(consumed) == 1

@@ -396,9 +396,6 @@ def provider_hosts(agent: str) -> tuple:
     return PROVIDER_HOSTS.get(agent, ())
 
 
-READ_ONLY_NOTE = {
-    "codex": "Codex's own sandbox (bubblewrap) cannot run inside the job container, so Codex implement stages "
-             "without auto-approve route every command through Codex's automatic approval review, which may refuse "
-             "to run project code such as tests. Enable auto-approve writes for Codex implement stages, or use "
-             "Claude Code / mucli for implement.",
-}
+# Per-agent caveats shown in Settings → Agent harnesses. Codex's gated-implement caveat retired
+# 2026-10-15: jobs always run unattended, so Codex never routes commands through its approval review.
+READ_ONLY_NOTE: dict = {}

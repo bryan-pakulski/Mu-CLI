@@ -182,9 +182,11 @@ def build_plan_prompt(job: Job) -> str:
     lines.extend([
         "",
         "Always produce concrete, testable acceptance_criteria derived from the ticket.",
+        "This stage runs unattended: no one answers questions. Where the ticket is unclear, choose with your best "
+        "judgement and list each assumption you made in `assumptions`.",
         "Respond with JSON only:",
         '{"summary": "...", "steps": ["..."], "acceptance_criteria": ["..."], '
-        '"validation_commands": ["exact shell command run from the workspace root"]}',
+        '"validation_commands": ["exact shell command run from the workspace root"], "assumptions": ["..."]}',
         "Validation commands must be deterministic, non-interactive test/lint/build commands",
         "(for example `python3 -m pytest tests/test_x.py -q`). No pipes, redirects or chained commands.",
     ])
@@ -196,12 +198,16 @@ def parse_plan(text: str) -> Dict[str, Any]:
     summary = str(data.get("summary") or "").strip()
     if not data and str(text or "").strip():
         summary = str(text).strip()[:4000]
+    assumptions = _str_list(data.get("assumptions"))
     return {
         "summary": summary[:4000],
         "steps": _str_list(data.get("steps")),
         "acceptance_criteria": _str_list(data.get("acceptance_criteria")),
         "validation_commands": _str_list(data.get("validation_commands"), limit=20),
         "parsed": bool(data),
+        # Jobs run unattended: the planner's assumptions land in the plan's "Risks / out of
+        # scope" section, where the human reviewing the plan sees them.
+        **({"risks": [f"Assumption: {a}" for a in assumptions]} if assumptions else {}),
     }
 
 
@@ -310,9 +316,16 @@ def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) ->
     from .core.plan_ops import approved_plan_text
     art = artifacts_for(job)
     checks = art.read_json("checks/summary.json", {}) or {}
+    unverified = []
+    if checks.get("verified") is False:
+        from .checks import unverified_causes
+        unverified = ["IMPORTANT: some checks could not run, so the change is UNVERIFIED (" + unverified_causes(checks)
+                      + "). Do not treat the checks as passing; mark criteria you cannot confirm as unverifiable. "
+                      "The verdict is capped at needs work."]
     return "\n".join([
         "You are the REVIEW stage. Produce a report; a human decides what happens next.",
         "Inspect the workspace read-only. Check results below may include failures.",
+        *unverified,
         f"Title: {job.title}", job.description or "",
         "Approved plan:", approved_plan_text(job) or art.read_text("plan.md") or "",
         "Acceptance criteria:", *job.acceptance_criteria,

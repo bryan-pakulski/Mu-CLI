@@ -98,6 +98,12 @@ python3 -m pytest tests/ -q
   before putting them in Rich markup.
 - Do not bypass approval gates for mutations. Write-side tools require approval
   unless the user explicitly enables YOLO mode; plan mode remains read-only.
+  Jobs (`mu/jobs`) run unattended by user decision (2026-10-15): stage tool
+  calls are never prompted. Implement/checks auto-approve inside the sandbox;
+  plan/review are read-only and deny writes automatically; agent questions are
+  auto-answered. Container isolation, egress allowlists, the secret scan and the
+  plan/push pipeline gates are the controls. Interactive chat keeps its approval
+  gates.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.
 - Runtime state defaults to `~/.mucli/`; `MUCLI_HOME` overrides that root.
 - Saved sessions are under `~/.mucli/sessions/`.

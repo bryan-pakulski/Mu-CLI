@@ -1,5 +1,5 @@
-"""New job sheet backend contract: workspace-first creation (no session required) and the explicit
-"Run unattended in sandbox" flag (Settings default off, never inherited from session YOLO)."""
+"""New job sheet backend contract: workspace-first creation (no session required). Jobs always run
+unattended (user decision 2026-10-15): there is no per-job auto-approve flag or Settings default."""
 import json
 from pathlib import Path
 
@@ -48,8 +48,8 @@ def test_workspace_only_reuses_the_session_on_that_workspace(home):
     stored = app.state.job_service.get(res.json()["job"]["id"])
     assert stored.metadata["origin_session"] == "rsq"
     assert stored.execution["stages"]["plan"] == {"provider": "anthropic", "model": "claude-x"}
-    # Session YOLO is on but never inherited.
-    assert stored.execution["auto_approve_writes"] is False
+    # Jobs always run unattended inside their sandbox, whatever the session's YOLO.
+    assert stored.execution["auto_approve_writes"] is True
 
 
 def test_workspace_without_any_saved_session_is_not_a_dead_end(home):
@@ -60,26 +60,31 @@ def test_workspace_without_any_saved_session_is_not_a_dead_end(home):
     assert res.status_code == 200, res.text
     stored = app.state.job_service.get(res.json()["job"]["id"])
     assert "origin_session" not in (stored.metadata or {})
-    assert stored.execution["auto_approve_writes"] is False
+    assert stored.execution["auto_approve_writes"] is True
 
 
-def test_run_unattended_follows_the_settings_default_and_the_explicit_flag(home):
-    from mu.jobs.job_settings import FIELD_BY_PATH, save_settings
-    assert FIELD_BY_PATH["defaults.run_unattended"]["default"] is False
+def test_jobs_always_run_unattended_and_ignore_an_auto_approve_false_input(home):
+    from mu.jobs.job_settings import FIELD_BY_PATH
+    assert "defaults.run_unattended" not in FIELD_BY_PATH  # no Settings default to turn it off
     save_session(home, "rsq", home / "ws" / "rsq", yolo=False)
     c, app = client(home)
-    save_settings({"defaults": {"run_unattended": True}})
-    on = c.post("/api/jobs", json={"title": "A", "session_name": "rsq"}).json()["job"]
-    assert app.state.job_service.get(on["id"]).execution["auto_approve_writes"] is True
+    plain = c.post("/api/jobs", json={"title": "A", "session_name": "rsq"}).json()["job"]
+    assert app.state.job_service.get(plain["id"]).execution["auto_approve_writes"] is True
+    # Accepted for compatibility, never stored as false.
     off = c.post("/api/jobs", json={"title": "B", "session_name": "rsq",
                                     "execution": {"auto_approve_writes": False}}).json()["job"]
-    assert app.state.job_service.get(off["id"]).execution["auto_approve_writes"] is False
+    assert app.state.job_service.get(off["id"]).execution["auto_approve_writes"] is True
 
 
 def test_terminal_session_defaults_do_not_inherit_yolo(home):
     from mu.jobs.core.vm import session_defaults
-    out = session_defaults(workspace="/w", provider="p", model="m", variables={"yolo": True})
-    assert out["execution"]["auto_approve_writes"] is False
+    from mu.jobs.models import normalize_execution
+    # No per-job choice is derived from the session (its YOLO or anything else): jobs always
+    # run unattended in their sandbox.
+    for yolo in (True, False):
+        out = session_defaults(workspace="/w", provider="p", model="m", variables={"yolo": yolo})
+        assert "auto_approve_writes" not in out["execution"]
+        assert normalize_execution(out["execution"])["auto_approve_writes"] is True
 
 
 def test_web_sheet_is_workspace_first_with_one_title_or_key_field():
@@ -88,7 +93,8 @@ def test_web_sheet_is_workspace_first_with_one_title_or_key_field():
     sheet = html[html.index('id="work-create-form"'):html.index('</form>', html.index('id="work-create-form"'))]
     assert sheet.index('id="job-workspace"') < sheet.index('id="job-title"')
     assert "Title or ticket key" in sheet and 'id="job-session"' not in sheet
-    assert "Run unattended in sandbox" in sheet and 'id="job-auto-approve"' in sheet
+    # Jobs always run unattended: the sheet offers no auto-approve switch.
+    assert "Run unattended" not in sheet and 'id="job-auto-approve"' not in html
     # Models, retries and budgets sit under one Advanced section with one picker. The build
     # environment is the visible "Run in" picker (job_templates.md §3.2: it replaces the old
     # Build environments summary row; the multi-environment editor is its Advanced… action).
@@ -100,5 +106,5 @@ def test_web_sheet_is_workspace_first_with_one_title_or_key_field():
     for gone in ('id="job-provider"', 'id="job-model"', 'id="work-stage-details"', 'id="work-execution-details"'):
         assert gone not in html, gone
     assert "/^[A-Z][A-Z0-9_]+-\\d+$/" in work and "'/api/jobs/jira/import'" in work
-    assert "'defaults.run_unattended'" in work
+    assert "run_unattended" not in work and "auto_approve_writes" not in work
     assert "verification-required human gate" not in html

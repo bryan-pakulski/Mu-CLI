@@ -100,6 +100,8 @@ export interface JobVM extends JobSummary {
   diff?: { patch: string | null; viewed?: string[]; live?: LiveDiff | null };
   budget?: JobBudget;
   environment_approval?: EnvironmentApproval | null;
+  /** Jobs run unattended: a failed template job setup is a warning (the job continued). */
+  setup_warning?: { binding: string; command?: string; index?: number; exit_code?: number | null; template?: string; message?: string; error?: string } | null;
   checks?: { live?: AuditEvent[]; runs: CheckRun[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]> };
   session?: { session_name?: string; approval?: { tool_name: string; tool_args: Record<string, unknown> | string; reason?: string; detail?: string } | null; live: boolean; events: AuditEvent[]; stages: Record<string, Array<{ role: string; parts: TranscriptPart[] }>> };
   costs?: { total_usd: number; by_stage: Record<string, number>; events: AuditEvent[] };

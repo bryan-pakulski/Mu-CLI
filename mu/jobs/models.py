@@ -89,7 +89,9 @@ def normalize_execution(value: Dict[str, Any] | None) -> Dict[str, Any]:
         "model": str(raw.get("model") or "").strip(),
         "agent_mode": str(raw.get("agent_mode") or "default").strip() or "default",
         "session_type": str(raw.get("session_type") or "workspace").strip().lower() or "workspace",
-        "auto_approve_writes": bool(raw.get("auto_approve_writes", False)),
+        # Jobs always run unattended (user decision 2026-10-15, ``mu.jobs.unattended``): the
+        # field is accepted for compatibility and never stored as false.
+        "auto_approve_writes": True,
     }
     if execution["session_type"] not in {"chat", "workspace", "container"}:
         raise ValueError("execution.session_type must be chat, workspace, or container")

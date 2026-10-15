@@ -3,7 +3,7 @@ import { fireEvent, render, waitFor, within } from '@testing-library/react-nativ
 import { ApiError } from '../src/api/client';
 import {
   jiraApi, jobsApi, costCapPayload, costPlaceholder, defaultJobSession, ticketImportBody, doneSkippedKeys, defaultWorkspace, isTicketKey, newJobDefaults, recentWorkspaces, sessionForWorkspace, sessionModelLabel,
-  unattendedDefault, type JobRules, type JobSessionOption,
+  type JobRules, type JobSessionOption,
 } from '../src/api/jobs';
 import { jobCoreApi, type JobSummary } from '../src/api/jobCore';
 import { NewJobSheet } from '../src/screens/WorkScreen';
@@ -82,8 +82,6 @@ describe('New job sheet (workspace first)', () => {
     expect(defaultWorkspace([], null)).toBe('');
     expect(isTicketKey('SCRUM-50')).toBe(true);
     expect(isTicketKey('Fix SCRUM-50')).toBe(false);
-    expect(unattendedDefault({ ...RULES, values: { 'defaults.run_unattended': true } } as unknown as JobRules)).toBe(true);
-    expect(unattendedDefault(RULES)).toBe(false);
   });
 
   it('preselects the app session workspace, prefills rule defaults and sends the picked workspace', async () => {
@@ -105,8 +103,8 @@ describe('New job sheet (workspace first)', () => {
     expect(jobs.create.mock.calls[0][0]).toMatchObject({
       title: 'Fix it', session_name: 'alpha', workspace_root: '/work/alpha', max_retries: 4, max_cost_usd: 3, max_runtime_seconds: 900,
     });
-    // Unattended writes are always explicit and off by default; no model override is sent.
-    expect(jobs.create.mock.calls[0][0].execution).toEqual({ auto_approve_writes: false });
+    // Jobs always run unattended: no auto-approve flag and no model override is sent.
+    expect(jobs.create.mock.calls[0][0].execution).toEqual({});
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 'new1' }));
   });
 
@@ -124,15 +122,17 @@ describe('New job sheet (workspace first)', () => {
     expect(jobs.create.mock.calls[0][0].session_name).toBeUndefined();
   });
 
-  it('takes the unattended toggle default from Settings and sends the explicit choice', async () => {
-    jobs.getSettings.mockResolvedValue({ stage_models: {}, plan_approval: true, rules: { ...RULES, values: { ...RULES.values, 'defaults.run_unattended': true } } });
+  it('offers no unattended / auto-approve control: jobs always run unattended', async () => {
     const { screen } = open('beta');
-    await waitFor(() => expect(screen.getByTestId('job-unattended').props.value).toBe(true));
-    fireEvent(screen.getByTestId('job-unattended'), 'valueChange', false);
+    await waitFor(() => expect(screen.getByLabelText('Workspace').props.value).toBe('/work/beta'));
+    fireEvent.press(screen.getByTestId('job-advanced-toggle'));
+    expect(screen.queryByTestId('job-unattended')).toBeNull();
+    expect(screen.queryByText(/unattended/i)).toBeNull();
+    expect(screen.queryByText(/auto-approve/i)).toBeNull();
     fireEvent.changeText(screen.getByLabelText('Title or ticket key'), 'Fix it');
     fireEvent.press(screen.getByText('Queue job'));
     await waitFor(() => expect(jobs.create).toHaveBeenCalled());
-    expect(jobs.create.mock.calls[0][0].execution.auto_approve_writes).toBe(false);
+    expect(jobs.create.mock.calls[0][0].execution).not.toHaveProperty('auto_approve_writes');
   });
 
   it('imports a Jira ticket when the title is a ticket key', async () => {
@@ -145,7 +145,8 @@ describe('New job sheet (workspace first)', () => {
     await waitFor(() => expect(jobs.importTicket).toHaveBeenCalled());
     expect(jobs.importTicket.mock.calls[0][0]).toBe('SCRUM-50');
     expect(jobs.importTicket.mock.calls[0][1]).toBe('beta');
-    expect(jobs.importTicket.mock.calls[0][2]).toMatchObject({ workspace_root: '/work/beta', execution: { auto_approve_writes: false } });
+    expect(jobs.importTicket.mock.calls[0][2]).toMatchObject({ workspace_root: '/work/beta' });
+    expect(jobs.importTicket.mock.calls[0][2].execution).not.toHaveProperty('auto_approve_writes');
     expect(jobs.create).not.toHaveBeenCalled();
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 'j50' }));
   });

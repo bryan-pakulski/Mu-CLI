@@ -28,27 +28,30 @@ FAKE_CLAUDE = textwrap.dedent('''\
     with open(os.path.join(store, sid + ".jsonl"), "a") as handle:
         handle.write(json.dumps(frame) + "\\n")
     out({"type": "system", "subtype": "init", "session_id": sid, "model": args[args.index("--model") + 1]})
-    if "--dangerously-skip-permissions" in args:
-        out({"type": "assistant", "message": {"id": "m1", "model": "fake", "content": [{"type": "text",
+    # Jobs run unattended: every stage skips permissions; read-only stages drop the write tools.
+    assert "--dangerously-skip-permissions" in args, args
+    read_only = "--disallowed-tools" in args and "Write" in args[args.index("--disallowed-tools") + 1:]
+    tool_input = {"file_path": "/workspace/widget.txt", "content": "claude wrote this"}
+    out({"type": "assistant", "message": {"id": "m1", "model": "fake", "content": [{"type": "tool_use",
+         "id": "toolu_1", "name": "Write", "input": tool_input}], "usage": {"input_tokens": 10, "output_tokens": 5}}})
+    # A permission request that still reaches the worker is decided automatically, never parked.
+    out({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Write",
+         "input": tool_input, "tool_use_id": "toolu_1"}})
+    reply = json.loads(sys.stdin.readline())["response"]["response"]
+    if read_only:
+        assert reply["behavior"] == "deny", reply
+        out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1",
+             "content": reply["message"], "is_error": True}]}})
+        out({"type": "assistant", "message": {"id": "m2", "model": "fake", "content": [{"type": "text",
              "text": '{"summary": "plan from fake claude", "resumed": %s}' % json.dumps(bool(resume))}],
              "usage": {"input_tokens": 10, "output_tokens": 5}}})
     else:
-        tool_input = {"file_path": "/workspace/widget.txt", "content": "claude wrote this"}
-        out({"type": "assistant", "message": {"id": "m1", "model": "fake", "content": [{"type": "tool_use",
-             "id": "toolu_1", "name": "Write", "input": tool_input}], "usage": {"input_tokens": 10, "output_tokens": 5}}})
-        out({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Write",
-             "input": tool_input, "tool_use_id": "toolu_1"}})
-        reply = json.loads(sys.stdin.readline())["response"]["response"]
-        if reply["behavior"] == "allow":
-            with open(reply["updatedInput"]["file_path"], "w") as handle:
-                handle.write(reply["updatedInput"]["content"])
-            out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}]}})
-            out({"type": "assistant", "message": {"id": "m2", "model": "fake", "content": [{"type": "text",
-                 "text": "Implementation complete."}], "usage": {"input_tokens": 20, "output_tokens": 5}}})
-        else:
-            out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1",
-                 "content": reply["message"], "is_error": True}]}})
-            sys.stdin.readline()  # parked: the worker stops us
+        assert reply["behavior"] == "allow", reply
+        with open(reply["updatedInput"]["file_path"], "w") as handle:
+            handle.write(reply["updatedInput"]["content"])
+        out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}]}})
+        out({"type": "assistant", "message": {"id": "m2", "model": "fake", "content": [{"type": "text",
+             "text": "Implementation complete."}], "usage": {"input_tokens": 20, "output_tokens": 5}}})
     out({"type": "result", "subtype": "success", "is_error": False, "session_id": sid, "num_turns": 1,
          "total_cost_usd": 0.01, "result": "done", "usage": {"input_tokens": 30, "output_tokens": 10}})
     sys.stdin.read()
@@ -115,11 +118,9 @@ def _fake(tmp_path, name, body):
     return path
 
 
-def test_claude_stage_parks_for_approval_and_resumes_its_session(docker, tmp_path, monkeypatch):
+def test_claude_stage_decides_permissions_automatically_and_never_parks(docker, tmp_path, monkeypatch):
     from mu.jobs import job_settings
     from mu.jobs.core.artifacts import artifacts_for
-    from mu.jobs.core.commands import dispatch
-    from mu.jobs.core.vm import job_vm
     service, job = _job(tmp_path, monkeypatch, {"plan": "claude", "implement": "claude"})
     job_settings.save_settings({"harness": {"claude": {"binary": str(_fake(tmp_path, "claude", FAKE_CLAUDE)), "auth": "api_key"}}})
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -130,24 +131,19 @@ def test_claude_stage_parks_for_approval_and_resumes_its_session(docker, tmp_pat
     starting = [e for e in service.events(job.id) if e.event_type == "sandbox_starting"][-1]
     assert starting.payload["agent"] == "claude" and starting.payload["agent_model"] == "claude-opus-5-5"
 
+    assert not (Path(service.get(job.id).worktree) / "widget.txt").exists()  # the plan's write was denied
+
     service.transition(job.id, "preparing")
     service.transition(job.id, "running")
-    paused = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.")
-    assert paused["kind"] == "needs_human" and paused["attention_reason"] == "approval_required", paused
-    assert paused["attention_payload"]["tool_name"] == "Write"
-    assert not (Path(service.get(job.id).worktree) / "widget.txt").exists()
+    finished = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.")
+    assert finished["kind"] == "completed", finished  # no approval park: decided automatically
+    assert (Path(service.get(job.id).worktree) / "widget.txt").read_text() == "claude wrote this"
+    decisions = [e.payload for e in service.events(job.id) if e.event_type == "auto_permission"]
+    assert any(d["stage"] == "implement" and d["decision"] == "approve" and d["tool_name"] == "Write" for d in decisions)
     art = artifacts_for(service.get(job.id))
     session_id = art.read_json("harness/claude/implement.json")["session_id"]
     assert list(Path(art.path("harness", "claude", "state", "claude-projects", "-workspace")).glob(f"{session_id}.jsonl"))
     assert not Path(art.path("harness", "claude", "state", "auth")).exists()  # credentials never persisted
-
-    service.require_human(job.id, paused["attention_reason"], paused["error"], payload=paused["attention_payload"])
-    action = next(a for a in job_vm(service, job.id)["actions"] if a["id"] == "approveTool")
-    dispatch(service, {"type": "approveTool", "job_id": job.id, "args": action["args"]})
-    finished = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.")
-    assert finished["kind"] == "completed", finished
-    assert (Path(service.get(job.id).worktree) / "widget.txt").read_text() == "claude wrote this"
-    assert art.read_json("harness/claude/implement.json")["session_id"] == session_id  # same session resumed
     transcript = art.read_json("logs/implement-transcript.json")
     assert any(p.get("type") == "tool_call" and p.get("harness_tool") == "Write" for m in transcript for p in m["parts"])
 

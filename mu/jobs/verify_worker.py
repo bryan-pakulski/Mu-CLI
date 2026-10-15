@@ -146,20 +146,23 @@ def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
     if missing or unrunnable:
         # Honest gate (job_templates.md §5): checks that could not run prove nothing. The
         # implementer cannot install toolchains or dependencies, so a repair loop would be wasted
-        # spend; the job parks unverified until the environment is fixed or a human continues.
-        service.store.patch_metadata(job_id, {"checks_unverified": True})
+        # spend. Jobs run unattended: the run is recorded unverified and the job continues to
+        # review, whose verdict is capped at needs_work; a published PR says so.
         message = missing_tool_message(run.summary) if missing else ""
         extra = [u for u in unrunnable if u.get("kind") != "missing_tool" or u.get("tool") not in missing]
         if extra:
             from .checks import unverified_message
             message = " ".join(p for p in (message, unverified_message(extra, template=_template_of(current))) if p)
-        service.store.append_event(job_id, "checks_unverified", reason=message[:2000],
-                                   payload={"unrunnable": unrunnable, "missing_tools": missing})
-        service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED, message,
-            payload={**feedback, "missing_tools": missing, "unverified": True, "unrunnable": unrunnable,
-                     "missing_tool_environments": run.summary.get("missing_tool_environments") or {}})
+        service.store.patch_metadata(job_id, {"checks_unverified": True})
+        service.store.append_event(job_id, "checks_unverified",
+                                   reason=("Checks could not run (unverified); the job continues to review with the "
+                                           "verdict capped at needs work. " + message)[:2000],
+                                   payload={"unrunnable": unrunnable, "missing_tools": missing, "verified": False,
+                                            "missing_tool_environments": run.summary.get("missing_tool_environments") or {}})
+        service.transition(job_id, JobStatus.REVIEWING, reason="checks unverified; review next (verdict capped)",
+                           payload={**feedback, "missing_tools": missing, "unverified": True, "unrunnable": unrunnable})
         _refresh_receipt(service, job_id)
-        return 22
+        return 0
     if (current.metadata or {}).get("checks_unverified"):
         service.store.patch_metadata(job_id, remove=("checks_unverified",))
     from .job_settings import load_settings

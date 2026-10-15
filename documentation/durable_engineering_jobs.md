@@ -31,8 +31,9 @@ PROVISIONING → PLANNING → PLAN_REVIEW → IMPLEMENTING → CHECKING → REVI
 | `PUSHED` | The PR is open. Merges are detected automatically; a closed PR needs you | controller / **you** |
 | `DONE` | Finished; build environment images are released | — |
 
-`NEEDS_INPUT` pauses any active stage on a question, a tool approval, a reached
-limit or a stall. `FAILED` keeps the stage that failed so `retry` can restart it, and
+`NEEDS_INPUT` pauses a job on a reached limit, a stall or a genuine failure
+that needs a decision. Stages never pause on a tool approval or a question: jobs
+run unattended (see [Unattended stages](#unattended-stages)). `FAILED` keeps the stage that failed so `retry` can restart it, and
 `CANCELLED` is terminal. No limit ever fails, cancels or times out a job (see
 [Limits pause and ask](#limits-pause-and-ask)); the old `timed_out` and
 `budget_exceeded` statuses are no longer written and stay readable (and
@@ -140,7 +141,10 @@ automatically. You decide what happens next:
 - push (`push`), or discard (`discard`).
 
 A blocking review (`do_not_merge`) needs an explicit, audited override reason to
-push. Passing checks are required either way. The pipeline never merges.
+push. Passing checks are required either way, except that checks which could
+not run (unverified) need no override: the review verdict is capped at needs
+work and the PR body starts with "⚠ Checks could not run (unverified):
+<tools/causes>". The pipeline never merges.
 
 ### Push and PR
 
@@ -245,19 +249,53 @@ running two minutes past the limit is asked once to pause
 cost cap never pauses for that cap. Per-request model and tool-command timeouts
 are not limits on the job and still apply as before.
 
-Implementation writes need your approval unless the job runs unattended. That
-is the explicit per-job `--auto-approve` flag, or the Settings default
-`defaults.run_unattended` (off). A pending write shows separate Approve tool /
-Deny tool actions (`/job approve-tool <id>`, `/job deny-tool <id> [reason]`).
-Each approval is consumed once, for the exact tool name and arguments.
+### Unattended stages
 
-Repo-declared images, environments and network access need approval too. A
-repository can ask for its own build image, devcontainer or Dockerfile and for
-extra egress. Nothing it declares is used until a human approves it, per
-repository and fingerprint. A job that hits an unapproved request pauses with
-**Approve environment** / **Reject environment** actions
-(`/job approve-environment <id>`, `/job reject-environment <id> [reason]`).
-The New job sheet offers the same approval up front, through
+Jobs run unattended (user decision, 2026-10-15). No stage prompts anyone or
+parks on an in-stage prompt, on every agent harness (mucli, Claude Code, Codex):
+
+- **Implement and checks** approve every tool call automatically. The sandbox is
+  the control: container isolation, a read-only root filesystem outside the
+  worktree, the egress allowlist and no credentials.
+- **Plan and review** are read-only. A write or side-effecting tool call is
+  denied automatically ("This is the read-only plan stage; describe the change
+  instead."); read-only tools run without asking. Claude Code and Codex run with
+  their permission prompts off and the write tools removed in these stages; a
+  permission request that still reaches the worker is decided the same way.
+- **Questions** (ask_user, choices, quizzes, confirmations, input) are answered
+  with: "No one is available to answer during an automated job stage. Proceed
+  with your best judgement, state the assumption in your summary, and continue."
+  Claude Code stages do not offer `AskUserQuestion`. The planner lists the
+  assumptions it made under the plan's **Risks / out of scope** section.
+
+Each automatic decision is recorded as an `auto_permission` or `auto_answered`
+event and shown in the job's session view. There is no per-job auto-approve
+choice: `execution.auto_approve_writes` is accepted for compatibility and always
+stored as true, `/job create --auto-approve` / `--no-auto-approve` are accepted
+and ignored, and the `defaults.run_unattended` setting is gone. A job that
+parked on a tool approval before this rule is resolved by the controller on its
+next tick (or by **Resume**): the pending call is approved in implement/checks
+or denied in plan/review, and the stage continues. **Approve tool** / **Deny
+tool** (`/job approve-tool <id>`, `/job deny-tool <id> [reason]`) still work for
+such a job until then.
+
+The human gates are pipeline gates, not in-stage prompts: plan approval
+(`plan_approval` → `PLAN_REVIEW`) and the push after `REVIEW_DONE`. Limits
+(cost, time, tokens, iterations) still pause and ask, and genuine failures
+(provider errors, a lost worker) still need you.
+
+Repo-declared images, environments and network access need approval before
+they are used. A repository can ask for its own build image, devcontainer or
+Dockerfile and for extra egress. Nothing it declares is used until a human
+approves it, per repository and fingerprint, but an unapproved request never
+parks the job: the job falls back to the next environment source (session
+environment, Toolchains, the default runtime) and records a
+`repository_environment_skipped` event. The job page offers **Approve
+environment** / **Reject environment** for it as a non-blocking card
+(`/job approve-environment <id>`, `/job reject-environment <id> [reason]`);
+the approval applies to future jobs on that repository, while the running job
+keeps the environment it started with. Unapproved repository egress is likewise
+left out until approved. The New job sheet offers the same approval up front, through
 `POST /api/jobs/environments/approve` with
 `{"repository": PATH, "fingerprint": "...", "session": ""}`. Only a fingerprint
 the repository currently requests is accepted (409 otherwise).
@@ -343,8 +381,9 @@ The container runs as the host UID/GID with dropped capabilities, a read-only
 root filesystem and `--network none`. A stage-scoped, authenticated model relay
 is exposed through a Unix socket, so provider credentials stay on the host. Plan
 and review mount the workspace read-only. Implementation may edit the worktree,
-and the host validates paths and creates the commits. Plan mode and tool
-approvals remain enforced.
+and the host validates paths and creates the commits. Plan mode stays
+enforced; tool approvals are decided automatically by stage (see
+[Unattended stages](#unattended-stages)).
 
 Git metadata is visible but read-only, so VCS-aware tools work (`go build`
 with `GOFLAGS=-buildvcs=auto`, setuptools-scm, `git status`/`log`/`describe`).
@@ -405,8 +444,10 @@ stage, from the first source that yields bindings. Sources are never merged.
 secrets, mucli state, shell history and caches are removed, and a `/root`
 volume is captured as a filtered tar. The login shell's PATH and toolchain
 homes are probed and baked in, and mucli's job layer is added. A secret scan
-of `/root`, `/home` and `/etc` follows. A scan hit parks the job and names the
-paths (allow paths with `environments.secret_scan_allow`). Images carry
+of `/root`, `/home` and `/etc` follows. A scan hit means the image is never
+used: the job falls back to the next environment source and records a
+`build_environment_skipped` event naming the paths (allow paths with
+`environments.secret_scan_allow`). Images carry
 `io.mucli.job=<id>` and are removed when the job is done, cancelled, pushed,
 archived or deleted. Failed and waiting jobs keep them for
 `jobs.environment_retention_h` (72 h) unless the job is kept

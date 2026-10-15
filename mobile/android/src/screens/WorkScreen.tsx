@@ -12,7 +12,6 @@ import {
   newJobDefaults,
   isRepositoryUrl,
   sessionForWorkspace,
-  unattendedDefault,
   type JobExecutionProfile,
   type JobStageName,
 } from '../api/jobs';
@@ -34,7 +33,7 @@ import { fontWeights, fonts, radii, spacing, touchTarget, tracking } from '../th
 import { STATUS, duration, money, stateLabel, stateStatus } from '../theme/status';
 import { BAR_HIDDEN, actionLabel, actionTone } from '../components/JobActions';
 import { JobRow, JobsNavBar, ResultRow, focusStep, jobKey, stepsOf, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatStrip, StatusIcon, WashBackground, SwitchRow, Text, TextField, useInterval, Icon } from '../ui';
+import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatStrip, StatusIcon, WashBackground, Text, TextField, useInterval, Icon } from '../ui';
 import { useGlass } from '../ui/Glass';
 
 export type WorkScreenProps = NativeStackScreenProps<RootStackParamList, 'Work'>;
@@ -335,11 +334,11 @@ type NewJobSheetProps = {
 /** New job form, workspace first: recent workspaces come from saved sessions (the app's session
  * preselected) and any path can be typed, so there is no dead end without a saved session. One
  * "Title or ticket key" field: a Jira key imports that ticket. Models, environments, budgets and
- * retries sit under Advanced; "Run unattended in sandbox" is an explicit toggle (Settings default). */
+ * retries sit under Advanced. Jobs always run unattended (no per-job approval toggle). */
 export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJobSheetProps) {
   const { colors } = useTheme();
   const sessionsState = useJobSessions(visible);
-  const touched = useRef<{ cost?: boolean; runtime?: boolean; retries?: boolean; unattended?: boolean; workspace?: boolean }>({});
+  const touched = useRef<{ cost?: boolean; runtime?: boolean; retries?: boolean; workspace?: boolean }>({});
   const [workspace, setWorkspace] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -349,7 +348,6 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
   const [costHint, setCostHint] = useState('Settings default ($100)');
   const [runtime, setRuntime] = useState('');
   const [retries, setRetries] = useState('2');
-  const [unattended, setUnattended] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -376,7 +374,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
     if (visible && !touched.current.workspace) setWorkspace(defaultWorkspace(sessionsState.sessions, sessionName));
   }, [visible, sessionsState.sessions, sessionName]);
 
-  // Prefill limits and the unattended toggle from Settings → New job defaults unless the user changed them.
+  // Prefill limits from Settings → New job defaults unless the user changed them.
   useEffect(() => {
     if (!visible) return;
     let alive = true;
@@ -390,7 +388,6 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
       if (!t.cost) setCost(d.cost);
       if (!t.runtime) setRuntime(d.runtime);
       if (!t.retries && d.retries) setRetries(d.retries);
-      if (!t.unattended) setUnattended(unattendedDefault(settings.rules));
     }).catch(() => undefined);
     return () => { alive = false; };
   }, [visible]);
@@ -425,8 +422,8 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
     try {
       const common: Record<string, unknown> & { execution: Partial<JobExecutionProfile> } = {
         max_retries: Math.max(0, Number(retries || 2)),
-        // Unattended sandbox writes are always explicit: the job never inherits session YOLO.
-        execution: { auto_approve_writes: unattended },
+        // Jobs always run unattended in their sandbox: no per-job auto-approve flag is sent.
+        execution: {},
       };
       // A git URL is sent as `repository` (the server clones it); a path stays the workspace.
       if (path) { if (isRepositoryUrl(path)) common.repository = path; else common.workspace_root = path; }
@@ -511,9 +508,6 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
           </Text>
         </>
       ) : null}
-      <SwitchRow label="Run unattended in sandbox" testID="job-unattended" value={unattended}
-        hint="On: the implement stage auto-approves its writes inside the job’s disposable container. Off: each write waits for your approval. Default from Settings; never taken from the chat session."
-        onValueChange={v => { touched.current = { ...touched.current, unattended: true }; setUnattended(v); }} />
       <Pressable
         onPress={() => setShowAdvanced((v) => !v)}
         accessibilityRole="button"

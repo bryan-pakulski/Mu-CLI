@@ -97,8 +97,11 @@ How they run:
   they are trusted like Toolchains rows. They are not read from the repository.
 - **Results:** stdout and stderr stream as `environment_setup` events and show in the job's
   Activity and Session views.
-- **Failure:** the job parks with `ENVIRONMENT_FAILURE` and the log tail. Actions: **Retry**,
-  **Edit template** (opens the template card), **Continue without setup**.
+- **Failure:** *(changed 2026-10-15: jobs run unattended)* the job no longer parks. The failed
+  `environment_setup` events and an `environment_setup_failed` event are recorded, the job carries
+  a `setup_failed` warning in its metadata (shown on every surface), and it continues to planning.
+  Checks that need the missing dependencies report unverified. **Continue without setup** remains
+  only for jobs that parked before this change.
 - **Re-runs** on `refreshEnvironments` and on retry after idle cleanup.
 - **Worktree hygiene:** setup output is expected to be git-ignored (`node_modules`, `.venv`,
   `target`). If `git status --porcelain` shows new untracked or modified files after setup, the
@@ -120,11 +123,14 @@ Kept from `job_build_sandbox.md` §3. A check is **`unrunnable`** when it:
 
 What changes:
 - Unrunnable results are never triaged as pre-existing.
-- Verification becomes **unverified**, and the job parks with a message that names the commands,
-  the cause and the fix. For example: "`vitest`, `tsc` and `eslint` come from `node_modules`,
-  which isn't installed. Choose a template with job setup, or add `npm ci` to this template's
-  setup."
-- **Continue unverified** caps the review verdict at `needs_work`, and pushing needs an override.
+- Verification becomes **unverified**, with a message that names the commands, the cause and the
+  fix. For example: "`vitest`, `tsc` and `eslint` come from `node_modules`, which isn't
+  installed. Choose a template with job setup, or add `npm ci` to this template's setup."
+- *(changed 2026-10-15: jobs run unattended)* The job does not park: it records `verified: false`
+  and continues to review. The review is told the checks could not run and its verdict is capped
+  at `needs_work`. Pushing needs no override; the PR body starts with "⚠ Checks could not run
+  (unverified): <tools/causes>". **Continue unverified** remains only for jobs that parked before
+  this change.
 - The vocabulary gains an `unverified` status: glyph `?`, semantic `caution`.
 - The runtime image drops Debian's `npm` package, which pulled in a global ESLint 6.4, so no
   stray global dev tools can stand in for project ones.

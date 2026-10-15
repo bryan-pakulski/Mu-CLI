@@ -17,7 +17,9 @@ def test_new_job_sheet_asks_for_an_agent_per_stage():
     assert "['mucli', 'mucli'], ['claude', 'Claude Code'], ['codex', 'Codex']" in AGENTS
     assert "data-agent-stage" in AGENTS and "data-agent-model" in AGENTS
     assert "data?.defaults?.[stage]" in AGENTS and "(not set up)" in AGENTS and "info.problems?.[0]" in AGENTS
-    assert "data-codex-warning" in AGENTS and "select('implement').value === 'codex'" in AGENTS
+    # Jobs run unattended: Codex implement is never gated, so the sheet has no gated-Codex warning
+    # and no auto-approve dependency.
+    assert "data-codex-warning" not in AGENTS and "autoApprove" not in AGENTS
     assert "execution.stage_agents = stageAgents" in WORK and "agentPicker?.collect()" in WORK
     # Only sent when an external agent is chosen or the user changed the picker.
     assert "return touched || external ? out : null;" in AGENTS

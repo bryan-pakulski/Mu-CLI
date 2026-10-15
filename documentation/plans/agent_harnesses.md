@@ -17,6 +17,9 @@ Claude Code only), Claude Code 2.1.299 and codex-cli 0.162.1 on this machine.
 3. **Codex approvals.** `codex exec` cannot relay per-tool approvals. Implement runs
    `--dangerously-bypass-approvals-and-sandbox` (the job container is the sandbox) when the job
    auto-approves writes, otherwise `--approve-for-me` (Codex's own automatic approval review).
+   *(Superseded 2026-10-15: jobs always run unattended, so every Codex stage runs
+   `--dangerously-bypass-approvals-and-sandbox` and Claude Code stages skip permissions; see
+   `documentation/durable_engineering_jobs.md` → Unattended stages.)*
    **Verified limitation:** Codex's own sandbox (bubblewrap) cannot create user namespaces inside
    the job container (`--cap-drop ALL`, no-new-privileges, default seccomp), and the Landlock
    fallback (`features.use_legacy_landlock`) still goes through bwrap. So `-s read-only` would make

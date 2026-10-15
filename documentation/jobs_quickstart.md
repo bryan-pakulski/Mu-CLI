@@ -54,12 +54,19 @@ approving it.
 /job summary                # five lines per job
 ```
 
-Writes inside the sandbox ask for approval unless the job runs unattended
-(`--auto-approve`, or Settings → New job defaults). Pending approvals and
-questions show up under **Needs you**. Answer with
-`/job approve-tool <id>`, `/job deny-tool <id> [reason]` or `/job respond <id> <text>`.
-Repo-declared images, environments and network access need approval too:
-`/job approve-environment <id>` or `/job reject-environment <id> [reason]`.
+Jobs run unattended: stages never stop to ask you. Implement and checks
+approve their own tool calls inside the sandbox, plan and review deny writes
+automatically, and an agent's questions are answered with "proceed with your
+best judgement and state the assumption". Each automatic decision appears in the
+job's session as an `auto_permission` / `auto_answered` line. **Needs you** lists
+the pipeline gates (plan approval, push) and paused jobs (limits, failures).
+
+A failed template job setup, checks that could not run, or an unapproved
+repository image do not stop the job either: setup failure shows a warning,
+unverified checks go on to review (verdict capped at needs work, and the PR body
+says the checks could not run), and an unapproved repository environment is
+skipped in favour of the next source. Approve it for future jobs with
+`/job approve-environment <id>` (or `/job reject-environment <id> [reason]`).
 
 Limits never cancel a job. When a job reaches its cost limit (default $100), a
 stage budget, its runtime limit, a stage time limit or an iteration limit, the
@@ -154,14 +161,17 @@ cargo fetch --manifest-path stream-processor-rs/Cargo.toml
 Setup runs in the job image with the template's network allowlist (model hosts
 dropped), the worktree read-write, the shared `/cache`, no credentials and the
 usual stage isolation. Its output appears in the job's Activity. When a command
-fails, the job waits for you: **Retry**, edit the template, or **Continue
-without setup**. Setup runs again after **Refresh environments** and when a job's
-images were cleaned while it sat idle. Edits to a template affect only jobs
-started afterwards.
+fails, the job does not wait for you: it records the failure, shows a **Job
+setup failed** warning and continues to planning (checks that need the missing
+dependencies then report unverified). Fix the template, then **Refresh
+environments** to run setup again. Setup also runs again when a job's images were
+cleaned while it sat idle. Edits to a template affect only jobs started
+afterwards.
 
 **Unverified checks.** A check that could not run (a missing command, a tool
 from `node_modules` that isn't installed, a registry it couldn't reach) is
-**unrunnable** (`?`), never a pre-existing failure. The job stops as
-**unverified** and names the commands, the cause and the fix. **Continue
-unverified** reviews it anyway: the verdict is capped at *needs work* and
-pushing needs an override reason.
+**unrunnable** (`?`), never a pre-existing failure. The run is recorded as
+**unverified**, naming the commands, the cause and the fix, and the job goes on
+to review without stopping. The review is told the checks could not run and its
+verdict is capped at *needs work*. Pushing needs no override; the PR body starts
+with "⚠ Checks could not run (unverified): <tools/causes>".

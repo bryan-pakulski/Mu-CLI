@@ -1,0 +1,191 @@
+/* Analyzer pages (/trace and /jobs/trace) — shared Wash patterns.
+ *
+ * Imported into the `patterns` layer by patterns/trace.css and
+ * patterns/job-trace.css. Each analysis is a `.w-card.trace-section` with an
+ * eyebrow + title header (`.trace-head`); metrics sit in one hairline grid
+ * (not a card per metric), tables are `.w-table`, and charts are plain
+ * canvases on the card surface whose colours trace.js / job_trace.js read
+ * from the Wash tokens at draw time (documentation/visualization_style_guide.md).
+ */
+
+/* ------------------------------------------------------------ page */
+.trace-page-head {
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: var(--wash-space-5);
+}
+.trace-page-head .w-eyebrow { margin-bottom: var(--wash-space-2); }
+.trace-lede {
+    max-width: 64ch;
+    margin: var(--wash-space-1) 0 0;
+    color: var(--wash-ink-2);
+}
+.trace-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-4);
+}
+.trace-empty {
+    max-width: 480px;
+}
+.trace-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--wash-space-2);
+    margin: 0 auto;
+    padding: var(--wash-space-8) var(--wash-space-5);
+    color: var(--wash-ink-3);
+}
+
+/* ------------------------------------------------------------ section cards */
+/* The info popout escapes the card, so the card does not clip. */
+.trace-section.w-card { overflow: visible; }
+.trace-head {
+    position: relative;
+    row-gap: var(--wash-space-1);
+}
+.trace-head .w-eyebrow { flex: 0 0 auto; }
+.trace-head .trace-h2 { flex: 0 1 auto; }
+.trace-sub {
+    flex: 1 1 240px;
+    min-width: 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.trace-muted {
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.trace-section .mono,
+.trace-main .mono { font-family: var(--wash-font-mono); }
+
+/* ------------------------------------------------------------ info popout */
+.trace-info {
+    position: relative;
+    margin-left: auto;
+}
+.trace-info-btn.open { background: var(--wash-sunken); color: var(--wash-ink); }
+.trace-info-popout {
+    position: absolute;
+    top: calc(100% + var(--wash-space-2));
+    right: 0;
+    z-index: var(--wash-z-popover);
+    width: min(400px, calc(100vw - var(--wash-space-7)));
+    padding: var(--wash-space-4);
+    border: 1px solid var(--wash-hairline);
+    border-radius: var(--wash-radius-md);
+    background: var(--wash-raised);
+    box-shadow: var(--wash-elevation-2);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.trace-info-popout .tip-title {
+    margin-bottom: var(--wash-space-2);
+    color: var(--wash-plum);
+    font-weight: var(--wash-type-title-3-weight);
+}
+.trace-info-popout p { margin: var(--wash-space-1) 0; }
+.trace-info-popout b { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
+.trace-info-popout code {
+    padding: 0 var(--wash-space-1);
+    border-radius: var(--wash-radius-xs);
+    background: var(--wash-sunken);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+}
+
+/* ------------------------------------------------------------ metric grid */
+/* One aligned grid of numbers with hairline rules, not a tile per metric. */
+.trace-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+    margin: 0;
+    border-top: 1px solid var(--wash-hairline);
+}
+.trace-card {
+    min-width: 0;
+    padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-3) 0;
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.tc-label {
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.tc-val {
+    margin-top: var(--wash-space-1);
+    overflow: hidden;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-1-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* A flagged metric: glyph + attention ink, never colour alone. */
+.trace-card--warn .tc-label { color: var(--wash-attention-ink); }
+.trace-card--warn .tc-label::before { content: "◆ "; }
+.trace-card--warn .tc-val { color: var(--wash-attention-ink); }
+.trace-card--good .tc-label::before { content: "✓ "; color: var(--wash-ok-ink); }
+.trace-card--good .tc-val { color: var(--wash-ok-ink); }
+
+/* ------------------------------------------------------------ charts */
+.trace-canvas-wrap {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: var(--wash-radius-sm);
+}
+.trace-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.trace-heat-label {
+    margin: var(--wash-space-2) 0 var(--wash-space-1);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+
+/* ------------------------------------------------------------ tables */
+.trace-scroll { max-height: 360px; }
+.trace-table td {
+    height: 36px;
+    padding-top: var(--wash-space-1);
+    padding-bottom: var(--wash-space-1);
+    color: var(--wash-ink-2);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: var(--wash-type-mono-sm-line);
+    font-variant-numeric: tabular-nums;
+}
+.trace-table tbody tr:hover td { color: var(--wash-ink); }
+.trace-table tbody tr:has(.trace-iter-link) { cursor: pointer; }
+.trace-row--mech td { color: var(--wash-attention-ink); }
+.trace-row--mech td:first-child { box-shadow: inset 3px 0 0 var(--wash-attention-pigment); }
+.trace-row--good td { color: var(--wash-ok-ink); }
+.trace-row--good td:first-child { box-shadow: inset 3px 0 0 var(--wash-ok-pigment); }
+.trace-iter-link {
+    padding: 0 var(--wash-space-1);
+    border: 0;
+    border-radius: var(--wash-radius-xs);
+    background: transparent;
+    color: var(--wash-accent-ink);
+    font: inherit;
+    cursor: pointer;
+}
+.trace-iter-link:hover { text-decoration: underline; }
+
+@media (width < 840px) {
+    .trace-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .trace-sub { flex-basis: 100%; order: 3; }
+}
+@media (pointer: coarse) {
+    .trace-iter-link { min-height: var(--wash-size-touch); min-width: var(--wash-size-touch); }
+}

@@ -19,50 +19,50 @@
             <li class="w-optional"><span class="w-chip mc-path-chip" data-variant="meta" id="mc-config-path" title="Configuration file">loading…</span></li>
 {% endblock %}
 {% block topbar_tools %}
-            <input id="mc-search" class="mc-search route-search w-input" type="search" placeholder="Filter provider or model…" aria-label="Filter models">
-            <button type="button" class="w-btn" data-variant="icon" id="mc-add" title="Add model" aria-label="Add model">{{ w.icon("plus") }}</button>
-            <button type="button" class="w-btn" data-variant="icon" id="mc-save" title="Save pricing configuration" aria-label="Save pricing configuration">{{ w.icon("check") }}</button>
+            <input id="mc-search" class="mc-search w-input" type="search" placeholder="Filter provider or model…" aria-label="Filter models">
 {% endblock %}
 {% block content %}
-<div class="mc-shell">
-    <div id="mc-loading" class="mc-empty">Loading pricing registry…</div>
-    <div id="mc-error" class="mc-empty mc-error" hidden></div>
+<div class="mc-shell w-page" data-width="full">
+    <div id="mc-loading" class="trace-loading mc-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading pricing registry…</div>
+    <div id="mc-error" class="w-banner mc-error" data-tone="danger" role="alert" hidden></div>
 
     <div id="mc-main" class="mc-main" role="region" aria-label="Pricing registry" hidden>
-        <header class="mc-page-head">
+        <header class="w-page__head mc-page-head">
             <div>
-                <span class="mc-eyebrow">Cost configuration</span>
-                <h1>Pricing registry</h1>
-                <p>One editable population table drives job cost estimates and native media routing. Inputs describe payloads MuCLI may send directly; unknown models remain text-only.</p>
+                <span class="w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Cost configuration</span>
+                <h1 class="w-page__title">Pricing registry</h1>
+                <p class="mc-lede">One editable population table drives job cost estimates and native media routing. Inputs describe payloads MuCLI may send directly; unknown models remain text-only.</p>
             </div>
             <div class="mc-page-actions">
-                <span class="mc-dirty pill tone-warn" id="mc-dirty" hidden><span aria-hidden="true">◆</span> Unsaved changes</span>
-                <button id="mc-reset" class="mc-text-action btn" type="button">Reset to packaged defaults</button>
+                <span class="w-chip mc-dirty" data-tone="attention" id="mc-dirty" hidden><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Unsaved changes</span></span>
+                <button id="mc-reset" class="w-btn mc-text-action" data-variant="ghost" type="button"><span>Reset to packaged defaults</span></button>
+                <button id="mc-add" class="w-btn" data-variant="secondary" type="button" title="Add model">{{ w.icon("plus") }}<span>Add model</span></button>
+                <button id="mc-save" class="w-btn" data-variant="primary" type="button" title="Save pricing configuration">{{ w.icon("check") }}<span>Save</span></button>
             </div>
         </header>
 
         <section class="mc-table-pane" aria-label="Pricing registry models">
-            <div class="mc-table-scroll">
-                <table class="mc-table">
+            <div class="mc-table-scroll w-table-wrap">
+                <table class="w-table mc-table">
                     <thead>
                         <tr>
-                            <th>Provider</th>
-                            <th>Model</th>
-                            <th>Native inputs</th>
-                            <th>Outputs</th>
-                            <th>Capabilities</th>
-                            <th>Billing</th>
-                            <th>Input / 1M</th>
-                            <th>Cached input / 1M</th>
-                            <th>Output / 1M</th>
-                            <th>Context</th>
-                            <th>Long cutoff</th>
-                            <th>Long input</th>
-                            <th>Long cached</th>
-                            <th>Long output</th>
-                            <th>Aliases</th>
-                            <th>Role / notes</th>
-                            <th></th>
+                            <th scope="col">Provider</th>
+                            <th scope="col">Model</th>
+                            <th scope="col">Native inputs</th>
+                            <th scope="col">Outputs</th>
+                            <th scope="col">Capabilities</th>
+                            <th scope="col">Billing</th>
+                            <th scope="col" data-num>Input / 1M</th>
+                            <th scope="col" data-num>Cached input / 1M</th>
+                            <th scope="col" data-num>Output / 1M</th>
+                            <th scope="col" data-num>Context</th>
+                            <th scope="col" data-num>Long cutoff</th>
+                            <th scope="col" data-num>Long input</th>
+                            <th scope="col" data-num>Long cached</th>
+                            <th scope="col" data-num>Long output</th>
+                            <th scope="col">Aliases</th>
+                            <th scope="col">Role / notes</th>
+                            <th scope="col"><span class="w-sr-only">Actions</span></th>
                         </tr>
                     </thead>
                     <tbody id="mc-models"></tbody>
@@ -72,7 +72,7 @@
 
         <footer class="mc-footer">
             <div><strong id="mc-count">0 models</strong><span> · Rates are telemetry estimates, not invoices. Legacy blended estimates are still accepted in the config file for compatibility.</span></div>
-            <div id="mc-status"></div>
+            <div id="mc-status" role="status" aria-live="polite"></div>
         </footer>
     </div>
 </div>

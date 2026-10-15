@@ -126,7 +126,12 @@ def test_product_css_covers_primary_web_surfaces():
 
 def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
     css = CLARITY_CSS.read_text(encoding="utf-8")
-    route = ROUTE_CSS.read_text(encoding="utf-8")
+    # Wash W4: route-product.css is gone; the standalone analyzer pages style
+    # themselves from their pattern bundles, which must stay flat too.
+    assert not ROUTE_CSS.exists()
+    patterns = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
+    route = "\n".join((patterns / name).read_text(encoding="utf-8") for name in (
+        "trace.css", "trace-common.css", "job-trace.css", "model-costs.css"))
     for token in (
         '--sky-blue', '--glacier-blue', '--sunrise-pink', '--sunrise-peach',
         '--alpine-green', '--snow-glow',
@@ -278,24 +283,33 @@ def test_settings_drawer_is_spacious_clean_and_consistent():
 
 
 def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
-    css = TRACE_CSS.read_text(encoding="utf-8")
-    route = ROUTE_CSS.read_text(encoding="utf-8")
-    assert '@import url("/static/css/route-product.css")' in css
-    assert '.trace-section {' in css
-    assert 'border-radius: 22px' not in css
-    assert 'background: color-mix(in srgb, var(--glass) 82%, transparent)' not in css
-    assert 'backdrop-filter' not in css
+    # Wash W4: the legacy trace.css / route-product.css are gone; the analyzer
+    # styles live in its pattern bundle (+ the shared trace-common.css) with no
+    # legacy imports. Sections are flat Wash cards (no glass), charts sit in a
+    # plain rounded wrap, metrics are one hairline grid, and info popouts stay.
+    assert not TRACE_CSS.exists() and not ROUTE_CSS.exists()
+    patterns = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
+    bundle = (patterns / "trace.css").read_text(encoding="utf-8")
+    css = (patterns / "trace-common.css").read_text(encoding="utf-8")
+    assert '@import url("trace-common.css") layer(patterns);' in bundle
+    assert 'layer(legacy)' not in bundle
+    html = (ROOT / "mu" / "gui" / "templates" / "trace.html").read_text(encoding="utf-8")
+    assert '<section class="w-card trace-section"' in html
+    assert 'class="w-eyebrow"' in html
+    assert '.trace-section.w-card' in css
+    assert 'border-radius: 22px' not in css + bundle
+    assert 'backdrop-filter' not in css + bundle
     assert '.trace-canvas-wrap {' in css
-    assert 'border-radius: var(--radius-sm)' in css
-    assert 'filter: saturate' not in css
+    assert 'border-radius: var(--wash-radius-sm)' in css
+    assert 'filter: saturate' not in css + bundle
     assert 'html[data-theme="light"] .trace-canvas' not in css
     assert '.trace-card {' in css
-    assert 'background: transparent' in css
     assert '.trace-info-popout' in css
-    assert '--accent:' not in route
-    assert '#79c2cb' not in route
-    assert '#e0a040' not in route
-    assert '.trace-mu{color:var(--text-secondary)}' in route
+    assert '--accent:' not in css + bundle
+    # Charts read Wash pigments (series / layer / semantic), not legacy names.
+    js = (ROOT / "mu" / "gui" / "static" / "js" / "trace.js").read_text(encoding="utf-8")
+    assert '"--wash-series-"' in js and '"--wash-layer-"' in js
+    assert '--viz-' not in js
 
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():
@@ -303,7 +317,8 @@ def test_container_management_uses_current_product_surface_without_breaking_ids(
     # Wash W2: /containers links its page bundle importing the route styles.
     bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "containers.css").read_text(encoding="utf-8")
     assert '/static/css/wash/patterns/containers.css' in template
-    assert '@import url("../../route-product.css") layer(legacy);' in bundle
+    # Wash W4: route-product.css is deleted (the analyzer pages no longer use it).
+    assert 'route-product.css' not in bundle
     assert '@import url("../../containers-crystal.css") layer(legacy);' in bundle
     for dom_id in (
         'container-list', 'template-list', 'create-environment-button',

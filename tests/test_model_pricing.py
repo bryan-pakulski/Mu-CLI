@@ -242,7 +242,7 @@ def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     work = (ROOT / "mu/gui/templates/work.html").read_text(encoding="utf-8")
     html = (ROOT / "mu/gui/templates/model_costs.html").read_text(encoding="utf-8")
     script = (ROOT / "mu/gui/static/js/model_costs.js").read_text(encoding="utf-8")
-    css = (ROOT / "mu/gui/static/css/model_costs.css").read_text(encoding="utf-8")
+    css = (ROOT / "mu/gui/static/css/wash/patterns/model-costs.css").read_text(encoding="utf-8")
     work_semantics = (ROOT / "mu/gui/static/js/work_analysis_link.js").read_text(encoding="utf-8")
     commands = (ROOT / "mu/commands/__init__.py").read_text(encoding="utf-8")
     costs = (ROOT / "mu/commands/costs.py").read_text(encoding="utf-8")

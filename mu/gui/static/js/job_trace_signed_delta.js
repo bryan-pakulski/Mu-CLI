@@ -31,6 +31,8 @@
     // Documented contract: a positive delta means primary - reference > 0.
     window.JT_DELTA_SEMANTICS = 'primary - reference';
 
+    // The Wash page head wraps the picker in a labelled field; drop the field too.
+    document.getElementById('jt-compare-select')?.closest('.w-field')?.remove();
     document.getElementById('jt-compare-select')?.remove();
     document.getElementById('jt-compare-section')?.remove();
 

@@ -17,12 +17,15 @@
     };
 
     const state = { jobs: [], analysis: null, comparison: null, resizeTimer: null };
-    // Phase colours are design tokens (tokens.css): canvas resolves them at draw
-    // time via phaseColor(); HTML swatches reference the custom property directly.
+    // Phase colours are Wash tokens (documentation/visualization_style_guide.md):
+    // semantic pigments where the state carries a meaning (needs you, failed,
+    // ready), categorical pigments otherwise. Canvas resolves them at draw time
+    // via phaseColor(); HTML swatches reference the custom property directly.
     const PHASE_TOKENS = {
-        queued: '--wash-neutral-pigment', preparing: '--viz-5', running: '--viz-1', needs_human: '--viz-3', verifying: '--viz-7',
-        ready_for_review: '--viz-2', recovering: '--viz-6', conflicted: '--viz-4', failed: '--error', timed_out: '--warning',
-        budget_exceeded: '--warning', environment_error: '--error', cancelled: '--wash-neutral-pigment', merged: '--viz-2',
+        queued: '--wash-neutral-pigment', preparing: '--wash-running-pigment', running: '--wash-accent-pigment', needs_human: '--wash-attention-pigment',
+        verifying: '--wash-plan-pigment', ready_for_review: '--wash-ok-pigment', recovering: '--wash-caution-pigment', conflicted: '--wash-layer-L0',
+        failed: '--wash-danger-pigment', timed_out: '--wash-caution-pigment', budget_exceeded: '--wash-caution-pigment', environment_error: '--wash-danger-pigment',
+        cancelled: '--wash-neutral-pigment', merged: '--wash-ok-pigment',
     };
     const PHASE_FALLBACK = '--wash-neutral-pigment';
     const STOPPED = new Set(['failed', 'environment_error', 'timed_out', 'budget_exceeded', 'conflicted']);
@@ -60,7 +63,19 @@
     function css(name, fallback = '') { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; }
     function phaseToken(status) { return PHASE_TOKENS[status] || PHASE_FALLBACK; }
     function phaseColor(status) { return css(phaseToken(status)); }
-    function canvasFont(size, family) { return `${size}px ${css(family === 'mono' ? '--font-mono' : '--font-sans')}`; }
+    function canvasFont(size, family) { return `${size}px ${css(family === 'mono' ? '--wash-font-mono' : '--wash-font-sans')}`; }
+    // Labels drawn on a pigment fill use the Paper ink in both themes: pigments are mid-tones.
+    // Label colour for text drawn on a pigment fill composited at `alpha` over the
+    // card surface: Paper ink on light results, Dusk ink on dark ones (WASH.color).
+    function hexRgb(value) { const m = String(value || '').trim().match(/^#([0-9a-f]{6})$/i); return m ? [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)) : null; }
+    function onPigment(fill, alpha) {
+        const W = window.WASH;
+        const dark = (W && W.color('ink', 'paper')) || css('--wash-ink'), light = (W && W.color('ink', 'dusk')) || css('--wash-on-ink');
+        const f = hexRgb(fill), b = hexRgb(css('--wash-surface'));
+        if (!f || !b) return css('--wash-ink');
+        const c = f.map((v, i) => (v * alpha + b[i] * (1 - alpha)) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.18 ? dark : light;
+    }
     async function api(url) { const response = await fetch(url); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`); return data; }
     function phaseClass(status) {
         if (['preparing', 'running', 'recovering'].includes(status)) return 'active';
@@ -104,15 +119,15 @@
 
         const firstPass = s.first_pass_verification;
         const firstPassValue = firstPass == null ? 'not measured' : firstPass ? 'passed' : 'needed another verification pass';
-        const firstTone = firstPass == null ? '' : firstPass ? 'good' : 'warn';
-        const autonomyTone = (s.human_gates || 0) === 0 ? 'good' : (s.human_gates || 0) <= 2 ? 'warn' : 'bad';
-        const failureTone = (s.failures || 0) === 0 ? 'good' : 'bad';
+        const firstTone = firstPass == null ? 'neutral' : firstPass ? 'ok' : 'attention';
+        const autonomyTone = (s.human_gates || 0) === 0 ? 'ok' : (s.human_gates || 0) <= 2 ? 'attention' : 'danger';
+        const failureTone = (s.failures || 0) === 0 ? 'ok' : 'danger';
         const passivePct = s.elapsed_seconds ? (Number(s.passive_seconds || 0) / Number(s.elapsed_seconds) * 100) : 0;
         els.signals.innerHTML = `
             <div class="jt-signal" data-tone="${firstTone}"><div class="jt-signal-label">First verification</div><div class="jt-signal-value">${esc(firstPassValue)}</div><div class="jt-signal-detail">${fmtNum(s.verification_passes)} passed · ${fmtNum(s.verification_failures)} failed verification runs</div></div>
             <div class="jt-signal" data-tone="${autonomyTone}"><div class="jt-signal-label">Autonomy</div><div class="jt-signal-value">${fmtNum(s.human_gates)} human gate${Number(s.human_gates) === 1 ? '' : 's'}</div><div class="jt-signal-detail">${fmtNum(s.human_responses)} recorded human responses</div></div>
             <div class="jt-signal" data-tone="${failureTone}"><div class="jt-signal-label">Execution stability</div><div class="jt-signal-value">${fmtNum(s.failures)} failure signal${Number(s.failures) === 1 ? '' : 's'}</div><div class="jt-signal-detail">${fmtNum(s.recoveries)} recovery transition${Number(s.recoveries) === 1 ? '' : 's'}</div></div>
-            <div class="jt-signal" data-tone="${passivePct > 35 ? 'warn' : 'good'}"><div class="jt-signal-label">Passive share</div><div class="jt-signal-value">${passivePct.toFixed(1)}%</div><div class="jt-signal-detail">queue + human wait + stopped/error + review residence; not active agent work</div></div>`;
+            <div class="jt-signal" data-tone="${passivePct > 35 ? 'attention' : 'ok'}"><div class="jt-signal-label">Passive share</div><div class="jt-signal-value">${passivePct.toFixed(1)}%</div><div class="jt-signal-detail">queue + human wait + stopped/error + review residence; not active agent work</div></div>`;
     }
 
     function renderRuntimeTrace(a) {
@@ -130,7 +145,7 @@
                 <div><span>Context jumps</span><strong>${fmtNum(s.peak_request_delta)}</strong></div><div><span>Compactions</span><strong>${fmtNum(s.compaction_count)}</strong></div>
                 <div><span>Redundant reads</span><strong>${fmtNum(s.redundant_reads)}</strong></div><div><span>Subagent iterations</span><strong>${fmtNum(s.subagent_iters)}</strong></div>
             </div>
-            <div class="jt-runtime-actions"><a class="jt-open-trace" href="${esc(rt.trace_url || '#')}" target="_blank" rel="noopener">Open full session Trace Analyzer →</a><span>${esc(rt.reason || '')}</span></div>
+            <div class="jt-runtime-actions"><a class="w-btn jt-open-trace" data-variant="secondary" data-size="sm" href="${esc(rt.trace_url || '#')}" target="_blank" rel="noopener"><span>Open full session Trace Analyzer</span><span class="w-btn__chevron" aria-hidden="true">›</span></a><span>${esc(rt.reason || '')}</span></div>
             ${(rt.top_context_spikes || []).length ? `<details class="jt-runtime-spikes"><summary>Largest request-context jumps · ${(rt.top_context_spikes || []).length}</summary><pre>${esc(JSON.stringify(rt.top_context_spikes, null, 2))}</pre></details>` : ''}`;
     }
 
@@ -143,18 +158,18 @@
     function renderPhaseChart(a) {
         const { ctx, width, height } = setupCanvas(els.phaseCanvas, 210); ctx.clearRect(0, 0, width, height);
         const intervals = (a.phase_intervals || []).filter(x => Number(x.duration_seconds || 0) >= 0); const total = Math.max(0.001, Number(a.summary?.elapsed_seconds || intervals.reduce((s, x) => s + Number(x.duration_seconds || 0), 0)));
-        const left = 32, right = 22, top = 56, barH = 44, plotW = width - left - right; ctx.font = canvasFont(11); ctx.fillStyle = css('--text-tertiary'); ctx.fillText('job lifetime', left, 28);
+        const left = 32, right = 22, top = 56, barH = 44, plotW = width - left - right; ctx.font = canvasFont(11); ctx.fillStyle = css('--wash-ink-3'); ctx.fillText('job lifetime', left, 28);
         let cursor = left;
         for (const interval of intervals) {
             const w = Math.max(interval.duration_seconds > 0 ? 1 : 0, plotW * Number(interval.duration_seconds || 0) / total); ctx.fillStyle = phaseColor(interval.status);
             ctx.globalAlpha = interval.passive_residence ? .42 : .78; ctx.fillRect(cursor, top, w, barH); ctx.globalAlpha = 1;
-            if (w > 64) { ctx.save(); ctx.beginPath(); ctx.rect(cursor + 3, top, w - 6, barH); ctx.clip(); ctx.fillStyle = css('--text-primary'); ctx.font = canvasFont(10, 'mono'); ctx.fillText(statusLabel(interval.status), cursor + 7, top + 18); ctx.fillText(`${fmtDuration(interval.duration_seconds)} · ${interval.classification || phaseClass(interval.status)}`, cursor + 7, top + 33); ctx.restore(); }
+            if (w > 64) { ctx.save(); ctx.beginPath(); ctx.rect(cursor + 3, top, w - 6, barH); ctx.clip(); ctx.fillStyle = onPigment(phaseColor(interval.status), interval.passive_residence ? .42 : .78); ctx.font = canvasFont(10, 'mono'); ctx.fillText(statusLabel(interval.status), cursor + 7, top + 18); ctx.fillText(`${fmtDuration(interval.duration_seconds)} · ${interval.classification || phaseClass(interval.status)}`, cursor + 7, top + 33); ctx.restore(); }
             cursor += w;
         }
-        ctx.strokeStyle = css('--hairline-color'); ctx.beginPath(); ctx.moveTo(left, top + barH + 24); ctx.lineTo(width - right, top + barH + 24); ctx.stroke();
-        for (let i = 0; i <= 4; i++) { const x = left + plotW * i / 4; ctx.fillStyle = css('--text-tertiary'); ctx.font = canvasFont(9, 'mono'); ctx.fillText(fmtDuration(total * i / 4), x - (i ? 10 : 0), top + barH + 42); }
-        const unique = [...new Set(intervals.map(x => x.status))]; els.phaseLegend.innerHTML = unique.map(status => `<span class="jt-legend-item"><span class="jt-legend-swatch" style="background:var(${phaseToken(status)})"></span>${esc(statusLabel(status))}</span>`).join('');
-        els.phaseTable.innerHTML = (a.phase_breakdown || []).map(row => `<tr><td>${esc(statusLabel(row.status))}</td><td>${esc(phaseClass(row.status))}</td><td>${esc(fmtDuration(row.seconds))}</td><td>${Number(row.percent || 0).toFixed(1)}%</td><td>${fmtNum(row.occurrences)}</td></tr>`).join('');
+        ctx.strokeStyle = css('--wash-hairline'); ctx.beginPath(); ctx.moveTo(left, top + barH + 24); ctx.lineTo(width - right, top + barH + 24); ctx.stroke();
+        for (let i = 0; i <= 4; i++) { const x = left + plotW * i / 4; ctx.fillStyle = css('--wash-ink-3'); ctx.font = canvasFont(9, 'mono'); ctx.fillText(fmtDuration(total * i / 4), x - (i ? 10 : 0), top + barH + 42); }
+        const unique = [...new Set(intervals.map(x => x.status))]; els.phaseLegend.innerHTML = unique.map(status => `<span class="jt-legend-item"><span class="jt-legend-swatch" aria-hidden="true" style="--jt-swatch: var(${phaseToken(status)})"></span>${esc(statusLabel(status))}</span>`).join('');
+        els.phaseTable.innerHTML = (a.phase_breakdown || []).map(row => `<tr><td>${esc(statusLabel(row.status))}</td><td>${esc(phaseClass(row.status))}</td><td data-num>${esc(fmtDuration(row.seconds))}</td><td data-num>${Number(row.percent || 0).toFixed(1)}%</td><td data-num>${fmtNum(row.occurrences)}</td></tr>`).join('');
         renderIntervals(a);
     }
 
@@ -180,16 +195,16 @@
 
     function renderAttemptChart(a) {
         const { ctx, width, height } = setupCanvas(els.attemptCanvas, 240); ctx.clearRect(0, 0, width, height); const attempts = a.attempts || [];
-        if (!attempts.length) { ctx.fillStyle = css('--text-tertiary'); ctx.font = canvasFont(12); ctx.fillText('No implementation attempts recorded.', 28, 42); els.attemptTable.innerHTML = ''; return; }
+        if (!attempts.length) { ctx.fillStyle = css('--wash-ink-3'); ctx.font = canvasFont(12); ctx.fillText('No implementation attempts recorded.', 28, 42); els.attemptTable.innerHTML = ''; return; }
         const left = 48, right = 42, top = 28, bottom = 42, plotW = width - left - right, plotH = height - top - bottom; const maxDur = Math.max(1, ...attempts.map(x => Number(x.duration_seconds || 0))); const maxCost = Math.max(.01, ...attempts.map(x => Number(x.cost_usd || 0))); const slot = plotW / attempts.length; const barW = Math.min(50, slot * .52);
-        ctx.strokeStyle = css('--hairline-color'); ctx.beginPath(); ctx.moveTo(left, top + plotH); ctx.lineTo(width - right, top + plotH); ctx.stroke(); const points = [];
-        attempts.forEach((attempt, index) => { const cx = left + slot * (index + .5); const bh = plotH * Number(attempt.duration_seconds || 0) / maxDur; ctx.fillStyle = css(attempt.status === 'completed' ? '--success' : attempt.status === 'needs_human' ? '--warning' : '--error'); ctx.globalAlpha = .66; ctx.fillRect(cx - barW / 2, top + plotH - bh, barW, bh); ctx.globalAlpha = 1; const py = top + plotH - plotH * Number(attempt.cost_usd || 0) / maxCost; points.push([cx, py]); ctx.fillStyle = css('--text-tertiary'); ctx.font = canvasFont(9, 'mono'); ctx.textAlign = 'center'; ctx.fillText(`#${attempt.number}`, cx, height - 16); });
-        ctx.strokeStyle = css('--text-secondary'); ctx.lineWidth = 1.7; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); points.forEach(([x, y]) => { ctx.beginPath(); ctx.fillStyle = css('--text-secondary'); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); }); ctx.textAlign = 'left';
-        els.attemptTable.innerHTML = attempts.map(row => `<tr><td>#${row.number}</td><td>${esc(statusLabel(row.status))}</td><td>${esc(fmtDuration(row.duration_seconds))}</td><td>${esc(fmtMoney(row.cost_usd))}</td><td>${fmtNum(row.tool_calls)}</td><td>${fmtNum(row.agent_messages)}</td><td>${fmtNum(row.runtime_errors)}</td><td title="${esc(JSON.stringify(row.tokens || {}))}">${esc(tokenCompact(row.tokens))}</td></tr>`).join('');
+        ctx.strokeStyle = css('--wash-hairline'); ctx.beginPath(); ctx.moveTo(left, top + plotH); ctx.lineTo(width - right, top + plotH); ctx.stroke(); const points = [];
+        attempts.forEach((attempt, index) => { const cx = left + slot * (index + .5); const bh = plotH * Number(attempt.duration_seconds || 0) / maxDur; ctx.fillStyle = css(attempt.status === 'completed' ? '--wash-ok-pigment' : attempt.status === 'needs_human' ? '--wash-attention-pigment' : '--wash-danger-pigment'); ctx.globalAlpha = .66; ctx.fillRect(cx - barW / 2, top + plotH - bh, barW, bh); ctx.globalAlpha = 1; const py = top + plotH - plotH * Number(attempt.cost_usd || 0) / maxCost; points.push([cx, py]); ctx.fillStyle = css('--wash-ink-3'); ctx.font = canvasFont(9, 'mono'); ctx.textAlign = 'center'; ctx.fillText(`#${attempt.number}`, cx, height - 16); });
+        ctx.strokeStyle = css('--wash-ink-2'); ctx.lineWidth = 1.7; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); points.forEach(([x, y]) => { ctx.beginPath(); ctx.fillStyle = css('--wash-ink-2'); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); }); ctx.textAlign = 'left';
+        els.attemptTable.innerHTML = attempts.map(row => `<tr><td>#${row.number}</td><td>${esc(statusLabel(row.status))}</td><td data-num>${esc(fmtDuration(row.duration_seconds))}</td><td data-num>${esc(fmtMoney(row.cost_usd))}</td><td data-num>${fmtNum(row.tool_calls)}</td><td data-num>${fmtNum(row.agent_messages)}</td><td data-num>${fmtNum(row.runtime_errors)}</td><td title="${esc(JSON.stringify(row.tokens || {}))}">${esc(tokenCompact(row.tokens))}</td></tr>`).join('');
     }
 
     function renderTools(a) { const tools = a.tools || []; if (!tools.length) { els.tools.innerHTML = '<p class="trace-muted">No tool-call telemetry recorded.</p>'; return; } const max = Math.max(1, ...tools.map(x => Number(x.count || 0))); els.tools.innerHTML = tools.slice(0, 24).map(tool => `<div class="jt-tool-row"><div class="jt-tool-name" title="${esc(tool.name)}">${esc(tool.name)}</div><div class="jt-tool-track"><div class="jt-tool-fill" style="width:${(Number(tool.count || 0) / max * 100).toFixed(1)}%"></div></div><div class="jt-tool-value">${fmtNum(tool.count)}</div></div>`).join(''); }
-    function renderVerifications(a) { const rows = a.verifications || []; if (!rows.length) { els.verifications.innerHTML = '<p class="trace-muted">No deterministic verification runs recorded.</p>'; return; } els.verifications.innerHTML = rows.map((row, index) => `<div class="jt-verification" data-pass="${row.passed}"><div class="jt-verification-mark">${row.passed ? '✓' : '×'}</div><div class="jt-verification-main"><div class="jt-verification-title">Run ${index + 1} · ${esc(statusLabel(row.status))}</div><div class="jt-verification-meta">${fmtNum(row.checks_passed)}/${fmtNum(row.checks)} checks · ${fmtNum(row.changed_files)} files · +${fmtNum(row.additions)} / -${fmtNum(row.deletions)}${row.dirty ? ' · dirty' : ''}</div></div><div class="jt-verification-time">${esc(fmtDuration(row.duration_seconds))}</div></div>`).join(''); }
+    function renderVerifications(a) { const rows = a.verifications || []; if (!rows.length) { els.verifications.innerHTML = '<p class="trace-muted">No deterministic verification runs recorded.</p>'; return; } els.verifications.innerHTML = rows.map((row, index) => `<div class="jt-verification" data-pass="${row.passed}"><div class="jt-verification-mark">${row.passed ? '✓' : '✗'}</div><div class="jt-verification-main"><div class="jt-verification-title">Run ${index + 1} · ${esc(statusLabel(row.status))}</div><div class="jt-verification-meta">${fmtNum(row.checks_passed)}/${fmtNum(row.checks)} checks · ${fmtNum(row.changed_files)} files · +${fmtNum(row.additions)} / -${fmtNum(row.deletions)}${row.dirty ? ' · dirty' : ''}</div></div><div class="jt-verification-time">${esc(fmtDuration(row.duration_seconds))}</div></div>`).join(''); }
     function incidentRows(rows, kind) { if (!rows.length) return '<p class="trace-muted">None recorded.</p>'; return `<div class="jt-incident-list">${rows.slice().reverse().slice(0, 30).map(row => `<div class="jt-incident"><div class="jt-incident-head"><span class="jt-incident-kind">${esc(kind === 'gate' ? (row.reason || 'Human gate') : statusLabel(row.event_type || 'Failure'))}</span><span class="jt-incident-time">${esc(fmtWhen(row.created_at))}</span></div><div class="jt-incident-copy">${esc(kind === 'gate' ? JSON.stringify(row.payload || {}).slice(0, 600) : (row.summary || ''))}</div></div>`).join('')}</div>`; }
     function renderIncidents(a) { els.incidents.innerHTML = `<div class="jt-incident-group"><div class="jt-incident-title">Human gates · ${(a.human_gates || []).length}</div>${incidentRows(a.human_gates || [], 'gate')}</div><div class="jt-incident-group"><div class="jt-incident-title">Failures · ${(a.failures || []).length}</div>${incidentRows(a.failures || [], 'failure')}</div>`; }
 
@@ -197,13 +212,13 @@
         const a = state.analysis; if (!a) return; const q = String(els.eventQuery.value || '').trim().toLowerCase(); const category = els.eventCategory.value; const severity = els.eventSeverity.value;
         const rows = (a.timeline || []).filter(event => { if (category !== 'all' && event.category !== category) return false; if (severity !== 'all' && event.severity !== severity) return false; if (!q) return true; return `${event.title} ${event.summary} ${event.reason} ${event.category} ${JSON.stringify(event.payload || {})}`.toLowerCase().includes(q); }).slice().reverse();
         els.eventCount.textContent = `${rows.length} shown · ${a.timeline_total_events || (a.timeline || []).length} durable events`;
-        els.events.innerHTML = rows.length ? rows.map(event => `<details class="jt-event" data-severity="${esc(event.severity)}"><summary><span class="jt-event-elapsed">+${esc(fmtDuration(event.elapsed_seconds))}</span><span class="jt-event-category">${esc(event.category)}</span><span class="jt-event-title">${esc(event.title)}</span><span class="jt-event-summary">${esc(event.summary || event.reason || '')}</span><span class="jt-event-time">${esc(fmtWhen(event.created_at))}</span></summary><div class="jt-event-detail"><pre class="work-diff">${esc(JSON.stringify(event, null, 2))}</pre></div></details>`).join('') : '<p class="trace-muted">No events match the current filter.</p>';
+        els.events.innerHTML = rows.length ? rows.map(event => `<details class="jt-event" data-severity="${esc(event.severity)}"><summary><span class="jt-event-elapsed">+${esc(fmtDuration(event.elapsed_seconds))}</span><span class="jt-event-category">${esc(event.category)}</span><span class="jt-event-title">${esc(event.title)}</span><span class="jt-event-summary">${esc(event.summary || event.reason || '')}</span><span class="jt-event-time">${esc(fmtWhen(event.created_at))}</span></summary><div class="jt-event-detail"><pre class="jt-event-json">${esc(JSON.stringify(event, null, 2))}</pre></div></details>`).join('') : '<p class="trace-muted">No events match the current filter.</p>';
     }
 
     function formatCompare(value, unit) { if (value == null) return '—'; if (unit === 'seconds') return fmtDuration(value); if (unit === 'usd') return fmtMoney(value); return fmtNum(value, 2); }
     function renderComparison(payload) {
         const comp = payload?.comparison; if (!comp) { els.compareSection.hidden = true; return; } const reference = payload.reference?.job || {}; els.compareCaption.textContent = `current vs ${reference.title || String(comp.comparison_job_id || '').slice(0, 8)}`;
-        els.comparison.innerHTML = (comp.metrics || []).map(metric => { let tone = ''; if (metric.delta != null && metric.delta !== 0 && metric.lower_is_better != null) tone = (metric.lower_is_better ? metric.delta < 0 : metric.delta > 0) ? 'good' : 'bad'; const delta = metric.delta == null ? '—' : metric.unit === 'seconds' ? fmtSignedDuration(metric.delta) : `${metric.delta > 0 ? '+' : ''}${formatCompare(metric.delta, metric.unit)}`; return `<div class="jt-compare-metric"><div class="jt-compare-label">${esc(metric.label)}</div><div class="jt-compare-values"><span class="jt-compare-primary">${esc(formatCompare(metric.primary, metric.unit))}</span><span class="jt-compare-ref">vs ${esc(formatCompare(metric.comparison, metric.unit))}</span></div><div class="jt-compare-delta" data-tone="${tone}">${esc(delta)}</div></div>`; }).join(''); els.compareSection.hidden = false;
+        els.comparison.innerHTML = (comp.metrics || []).map(metric => { let tone = ''; if (metric.delta != null && metric.delta !== 0 && metric.lower_is_better != null) tone = (metric.lower_is_better ? metric.delta < 0 : metric.delta > 0) ? 'ok' : 'danger'; const delta = metric.delta == null ? '—' : metric.unit === 'seconds' ? fmtSignedDuration(metric.delta) : `${metric.delta > 0 ? '+' : ''}${formatCompare(metric.delta, metric.unit)}`; return `<div class="jt-compare-metric"><div class="jt-compare-label">${esc(metric.label)}</div><div class="jt-compare-values"><span class="jt-compare-primary">${esc(formatCompare(metric.primary, metric.unit))}</span><span class="jt-compare-ref">vs ${esc(formatCompare(metric.comparison, metric.unit))}</span></div><div class="jt-compare-delta" data-tone="${tone}">${esc(delta)}</div></div>`; }).join(''); els.compareSection.hidden = false;
     }
     async function loadComparison() { const compareId = els.compareSelect.value; if (!compareId || !state.analysis || compareId === state.analysis.job.id) { state.comparison = null; els.compareSection.hidden = true; return; } try { const data = await api(`/api/jobs/analysis/compare?job_id=${encodeURIComponent(state.analysis.job.id)}&compare_id=${encodeURIComponent(compareId)}`); state.comparison = data; renderComparison(data); } catch (error) { els.compareSection.hidden = true; showError(error.message); } }
 

@@ -1,12 +1,11 @@
-/* Page bundle — Model pricing (/models/costs). No chat CSS: the shared Wash shell
- * replaces the product header it was loaded for.
+/* Page bundle — Model pricing (/models/costs). W4: no legacy imports and no
+ * chat CSS. Linked after wash.css (which declares the layer order);
+ * everything here lives in the `patterns` layer.
  *
- * Linked after wash.css (which declares the layer order), so these imports
- * land in the lowest-priority `legacy` layer. Wash rules for this page go
- * in the `patterns` layer below. */
-@import url("../../model_costs.css") layer(legacy);
-@import url("../../theme.css") layer(legacy);
-
+ * The registry is one wide editable `.w-table`. Rows are a single control
+ * high: role and notes sit side by side, and the notes field is one line
+ * that grows while it has focus (it used to be a two-row textarea under the
+ * role input, which doubled every row). */
 @layer patterns {
     /* The registry filter sits in the shared top bar. */
     .model-cost-body .w-topbar .mc-search {
@@ -14,7 +13,114 @@
         height: var(--wash-size-control);
         border-radius: var(--wash-radius-pill);
     }
+    .mc-path-chip { max-width: 360px; }
+
+    .mc-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--wash-space-2);
+        padding: var(--wash-space-8) var(--wash-space-5);
+        color: var(--wash-ink-3);
+    }
+    .mc-error { max-width: 760px; margin: 0 auto; }
+    .mc-error::before { content: "✗"; flex: none; font-weight: var(--wash-type-title-3-weight); }
+
+    .mc-main { display: flex; flex-direction: column; gap: var(--wash-space-4); min-width: 0; }
+    .mc-page-head { justify-content: space-between; margin-bottom: 0; }
+    .mc-page-head .w-eyebrow { margin-bottom: var(--wash-space-2); }
+    .mc-lede { max-width: 72ch; margin: var(--wash-space-1) 0 0; color: var(--wash-ink-2); }
+    .mc-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2); }
+
+    /* ---------------------------------------------------------- registry table */
+    .mc-table-scroll { max-height: calc(100dvh - 300px); min-height: 240px; }
+    .mc-table { width: max(100%, 2440px); table-layout: fixed; }
+    .mc-table td {
+        height: auto;
+        padding: var(--wash-space-1) var(--wash-space-2);
+        vertical-align: middle;
+    }
+    .mc-table th { padding: 0 var(--wash-space-2); }
+    .mc-table :is(th, td):nth-child(1) { width: 104px; }
+    .mc-table :is(th, td):nth-child(2) { width: 190px; }
+    .mc-table :is(th, td):nth-child(3) { width: 210px; }
+    .mc-table :is(th, td):nth-child(4) { width: 130px; }
+    .mc-table :is(th, td):nth-child(5) { width: 290px; }
+    .mc-table :is(th, td):nth-child(6) { width: 180px; }
+    .mc-table :is(th, td):nth-child(n+7):nth-child(-n+14) { width: 112px; }
+    .mc-table :is(th, td):nth-child(15) { width: 220px; }
+    .mc-table :is(th, td):nth-child(16) { width: 420px; }
+    .mc-table :is(th, td):nth-child(17) { width: 48px; }
+
+    .mc-cell-input {
+        display: block;
+        width: 100%;
+        height: var(--wash-size-control-sm);
+        padding: 0 var(--wash-space-2);
+        border: 1px solid transparent;
+        border-radius: var(--wash-radius-xs);
+        background: transparent;
+        color: var(--wash-ink);
+        font: inherit;
+        font-size: var(--wash-type-label-size);
+    }
+    .mc-table tr:hover .mc-cell-input,
+    .mc-cell-input:hover { border-color: var(--wash-hairline-strong); background: var(--wash-surface); }
+    .mc-cell-input:focus { border-color: var(--wash-control-border); background: var(--wash-surface); }
+    select.mc-cell-input { padding-right: var(--wash-space-1); cursor: pointer; }
+    .mc-cell-input[type="number"] {
+        font-family: var(--wash-font-mono);
+        font-size: var(--wash-type-mono-sm-size);
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+    }
+    .mc-model-cell .mc-cell-input { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); font-weight: var(--wash-type-label-weight); }
+    .mc-notes-cell {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+        gap: var(--wash-space-1);
+    }
+    .mc-notes-cell textarea.mc-cell-input {
+        padding-top: var(--wash-space-1);
+        color: var(--wash-ink-2);
+        line-height: var(--wash-type-body-line);
+        resize: none;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+    .mc-notes-cell textarea.mc-cell-input:focus {
+        position: relative;
+        z-index: var(--wash-z-raised);
+        height: 96px;
+        overflow: auto;
+        white-space: pre-wrap;
+        box-shadow: var(--wash-elevation-2);
+        resize: vertical;
+    }
+    .mc-row-remove:hover { color: var(--wash-danger-ink); }
+    .mc-table .mc-table-empty { padding: var(--wash-space-7); color: var(--wash-ink-3); text-align: center; }
+
+    .mc-footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--wash-space-4);
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
+    }
+    .mc-footer strong { color: var(--wash-ink-2); font-variant-numeric: tabular-nums; }
+    #mc-status { color: var(--wash-ink-2); }
+
+    @media (width < 840px) {
+        .mc-table-scroll { max-height: none; }
+    }
     @media (width < 600px) {
         .model-cost-body .w-topbar .mc-search { width: 34vw; }
+        .mc-page-actions { width: 100%; }
+    }
+    @media (pointer: coarse) {
+        .mc-cell-input { height: var(--wash-size-touch); }
     }
 }

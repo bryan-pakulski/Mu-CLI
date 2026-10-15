@@ -1,7 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { Pressable } from '../ui/Pressable';
+import { Icon } from '../ui/Icon';
 import type { SyntaxColors, WashColors } from '../theme/tokens';
 import { spacing, fontSizes, fonts, radii, typography } from '../theme/tokens';
 
@@ -278,8 +279,11 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
   const needsWindowing = totalLines > VISIBLE_LINES + OVERSCAN * 2;
   const [scrollY, setScrollY] = useState(0);
 
+  const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
-    Clipboard.setStringAsync(code);
+    void Clipboard.setStringAsync(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
   }, [code]);
 
   // Visible window: render only lines within [start, end) + overscan.
@@ -312,9 +316,13 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
             {langLabel}
           </Text>
         ) : null}
-        <TouchableOpacity onPress={copy} accessibilityRole="button" accessibilityLabel="Copy code" hitSlop={{ top: spacing.base, bottom: spacing.base, left: spacing.base, right: spacing.base }}>
-          <Ionicons name="copy-outline" size={15} color={colors.ink3} />
-        </TouchableOpacity>
+        <Pressable onPress={copy} accessibilityLabel={copied ? 'Copied' : 'Copy code'} style={styles.copy}>
+          {copied ? (
+            <Text style={[styles.langLabel, { color: colors.ok.ink, flex: 0 }]}>✓ Copied</Text>
+          ) : (
+            <Icon name="copy" size="sm" color={colors.ink3} />
+          )}
+        </Pressable>
       </View>
       <ScrollView
         style={styles.codeScroll}
@@ -336,6 +344,7 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
                 key={tokIdx}
                 style={{
                   color: colors.syntax[tok.type],
+                  fontStyle: tok.type === 'comment' ? 'italic' : 'normal',
                   fontFamily: fonts.mono,
                   fontSize: fontSizes.xs,
                   lineHeight: LINE_HEIGHT,
@@ -356,12 +365,16 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
 }
 
 const styles = StyleSheet.create({
+  // Wash code block (G§9.12): sunken, radius-sm, mono, 16 padding; header
+  // row with the language caption and a ghost copy button.
   container: {
-    borderRadius: radii.control,
-    borderWidth: 1,
-    padding: spacing.md,
+    borderRadius: radii.sm,
+    borderWidth: 0,
+    padding: spacing.base,
+    paddingTop: spacing.xs,
     marginVertical: spacing.xs,
   },
+  copy: { minWidth: 36, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

@@ -21,7 +21,8 @@ def test_safe_area_modal_owns_a_modal_local_provider():
 def test_mobile_feature_code_uses_safe_area_modal_wrapper():
     raw_modal_files = []
     for path in MOBILE.rglob("*.tsx"):
-        if path.name == "SafeAreaModal.tsx":
+        # The kit's ModalFrame (src/ui/Sheet.tsx) is the one native-modal owner.
+        if path.relative_to(MOBILE).as_posix() in ("ui/Sheet.tsx", "components/SafeAreaModal.tsx"):
             continue
         if "<Modal" in path.read_text(encoding="utf-8"):
             raw_modal_files.append(str(path.relative_to(ROOT)))

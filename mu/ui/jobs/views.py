@@ -368,7 +368,7 @@ def sidebar(app: JobsApp, vm: Dict[str, Any], width: int, height: int, tick: Opt
         st = content.run_status(r)
         n = content.run_counts(r)
         dur = duration((r.get("duration_ms") or 0) / 1000.0) if r.get("duration_ms") else ""
-        body.append([status_icon(st), ("", " " + pad(f"run {r.get('run')} {r.get('trigger') or ''}".strip(), inner - 9)),
+        body.append([content._status_seg(st), ("", " " + pad(f"run {r.get('run')} {r.get('trigger') or ''}".strip(), inner - 9)),
                      ("muted", pad(dur, 7, "right"))])
         body.append([("ok", f"  {n['passed']} ok"), ("muted", " · "), ("danger" if n["failed"] else "muted", f"{n['failed']} ✗")])
     if not body:

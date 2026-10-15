@@ -727,3 +727,16 @@ def test_staleness_digest_tracks_the_dockerfile(tmp_path):
     (source / "mu/jobs/sandbox/Dockerfile").write_text("FROM python:3.12-slim\n")
     assert source_digest(source) != before
 
+
+def test_setup_events_reach_the_session_view(home, tmp_path, monkeypatch):
+    from mu.jobs.core.vm import job_vm
+    from mu.jobs.sandbox import job_setup
+    from mu.ui.jobs.content import session_items
+    monkeypatch.setattr("mu.jobs.sandbox.egress.EgressBridge", lambda d, domains: SimpleNamespace(start=lambda: SimpleNamespace(close=lambda: None)))
+    service, job, state = _setup_job(tmp_path)
+    job_setup.run_job_setup(service, job, [state], runner=SetupRunner(), settings={})
+    session = job_vm(service, job.id, parts=["session"])["session"]
+    kinds = [e["event_type"] for e in session["events"]]
+    assert kinds.count("environment_setup") == 4
+    texts = [i["text"] for i in session_items(session) if i.get("kind") == "chip"]
+    assert "setup [rsq] npm --prefix resq-management ci ✓" in texts

@@ -558,18 +558,68 @@ class JobsApp:
             label = ("Agent per stage: mucli|claude|codex[:model] · " + " · ".join(ready))
 
             def agented(spec: str) -> None:
-                self.create_job(title, spec.strip())
+                self.ask_run_in(title, spec.strip())
             self._prompt(label, agented, optional=True, initial=self.default_agent_spec(agents))
             self.mode["new_job"] = "agents"
         self._prompt("New job title", titled, optional=False)
         self.mode["new_job"] = "title"
 
-    def create_job(self, title: str, spec: str) -> bool:
+    @staticmethod
+    def run_in_value(text: str, choices: List[Dict[str, Any]]) -> str:
+        """Typed "Run in" text -> a choice value: a number from the list, ``default``, a template
+        or environment name (``template:``/``env:`` prefixes accepted). Raises ``ValueError``."""
+        raw = str(text or "").strip()
+        if not raw:
+            return "default"
+        if raw.isdigit():
+            index = int(raw) - 1
+            if 0 <= index < len(choices):
+                return choices[index]["value"]
+            raise ValueError(f"no Run in choice {raw}")
+        low = raw.lower()
+        if low in ("default", "runtime", "default runtime", "none"):
+            return "default"
+        if low.startswith("env:"):
+            raw = "environment:" + raw[4:]
+        for choice in choices:
+            if raw == choice["value"] or raw == choice["label"]:
+                return choice["value"]
+        raise ValueError(f"unknown Run in choice {raw!r}")
+
+    def ask_run_in(self, title: str, spec: str) -> None:
+        """Third new-job prompt: where the job runs (Default runtime / a template / an environment)."""
+        if getattr(self.data, "sources", None) is None:
+            self.create_job(title, spec)
+            return
+        info = self.data.run_in_choices()
+        choices = list(info.get("choices") or [])
+        if len(choices) <= 1:
+            self.create_job(title, spec)
+            return
+        listed = " · ".join(f"{i}) {c['label']}" for i, c in enumerate(choices, 1))
+        label = f"Run in: {listed} (number or name)"
+        preselect = str(info.get("preselect") or "default")
+        initial = next((c["label"] for c in choices if c["value"] == preselect and preselect != "default"), "default")
+
+        def chosen(text: str) -> None:
+            try:
+                value = self.run_in_value(text, choices)
+            except ValueError as exc:
+                return self.flash(f"new job: {exc}", "danger")
+            self.create_job(title, spec, value)
+        self._prompt(label, chosen, optional=True, initial=initial)
+        self.mode["new_job"] = "run_in"
+        self.mode["run_in"] = info
+
+    def create_job(self, title: str, spec: str, run_in: str = "") -> bool:
         try:
             if spec:
                 from mu.jobs.core.vm import parse_agent_spec
                 parse_agent_spec(spec)  # validate before queuing
-            job_id = self.data.create_job(title, spec)
+            if run_in and run_in != "default":
+                job_id = self.data.create_job(title, spec, run_in)
+            else:
+                job_id = self.data.create_job(title, spec)
         except (DispatchError, ValueError) as exc:
             self.flash(f"new job: {exc}", "danger")
             return False

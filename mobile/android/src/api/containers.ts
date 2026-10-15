@@ -138,6 +138,9 @@ export const containersApi = {
       template_name: templateName,
       description,
     }),
+  /** Edit a template's job fields (job setup, network allowlist, description); affects jobs started later. */
+  patchTemplate: (name: string, body: { job_setup?: string[]; egress_allow?: string[]; description?: string }) =>
+    api.patch<ContainerTemplateSummary>(`/api/containers/templates/${encodeURIComponent(name)}`, body),
   removeTemplate: (name: string) =>
     api.delete<void>(`/api/container-templates/${encodeURIComponent(name)}`),
 };

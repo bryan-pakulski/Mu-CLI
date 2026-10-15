@@ -21,7 +21,9 @@ import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
 import { JiraSheet } from '../components/JiraSheet';
 import { WorkspaceField, useJobSessions, workspaceHint } from '../components/JobSessionPicker';
 import { BuildEnvironmentsField, RepositoryEnvironmentApproval } from '../components/JobEnvironments';
-import { bindingsFromDrafts, draftError, type EnvironmentDraft } from '../api/environments';
+import { bindingsFromDrafts, draftError, draftFromSpec, emptyDraft, type EnvironmentDraft } from '../api/environments';
+import { DEFAULT_RUN_IN, runInExecution, saveLastRunIn, specKind, type RunInSpec } from '../api/runIn';
+import { RunInPicker } from '../ui/RunInPicker';
 import { draftsFromDefaults, stageAgentsPayload, stageModelsPayload, type StageAgentDrafts } from '../api/agents';
 import { StageAgentsField, useAgentsStatus, type StageModelDefaults } from '../components/JobAgents';
 import { setupApi } from '../api/setup';
@@ -354,6 +356,9 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
   const [stageDefaults, setStageDefaults] = useState<StageModelDefaults>({});
   // null = the resolved set (repo config / session / Settings); a list = this job's override.
   const [environments, setEnvironments] = useState<EnvironmentDraft[] | null>(null);
+  // "Run in" (default runtime, a template or an environment); Advanced… switches to `environments`.
+  const [runIn, setRunIn] = useState<RunInSpec>(DEFAULT_RUN_IN);
+  const [rememberRunIn, setRememberRunIn] = useState(false);
   // Agent and model per stage (mucli / Claude Code / Codex), agents prefilled from Settings → Agent harnesses.
   const agents = useAgentsStatus(visible);
   const [agentDrafts, setAgentDrafts] = useState<StageAgentDrafts>(() => draftsFromDefaults(null));
@@ -362,6 +367,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
   useEffect(() => {
     if (!visible) return;
     setEnvironments(null);
+    setRememberRunIn(false);
     setError('');
   }, [visible]);
 
@@ -433,6 +439,8 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
       if (Object.keys(stages).length) common.execution.stages = stages;
       const envOverride = environments ? bindingsFromDrafts(environments) : [];
       if (envOverride.length) common.execution.environments = envOverride;
+      // Run in: a template goes by name (`execution.template`), an environment as one binding.
+      else Object.assign(common.execution, runInExecution(runIn, rememberRunIn));
       const stageAgents = stageAgentsPayload(agentDrafts, agents.status?.defaults);
       if (stageAgents) common.execution.stage_agents = stageAgents;
       let jobId = '';
@@ -453,6 +461,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
         const response = await jobsApi.create(input);
         jobId = response.job.id;
       }
+      if (!envOverride.length && path) void saveLastRunIn(path, runIn);
       setTitle('');
       setDescription('');
       setAcceptance('');
@@ -463,6 +472,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
       touched.current = { workspace: touched.current.workspace };
       setShowAdvanced(false);
       setEnvironments(null);
+      setRememberRunIn(false);
       if (jobId) onCreated({ id: jobId });
       else onClose();
     } catch (err) {
@@ -477,6 +487,14 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
       <WorkspaceField sessions={sessionsState.sessions} value={workspace} onChange={pickWorkspace}
         hint={workspaceHint(sessionsState.sessions, workspace, fallbackSession)} error={sessionsState.error} />
       {!remote ? <RepositoryEnvironmentApproval repository={workspace.trim() || undefined} session={sessionForJob || null} /> : null}
+      <RunInPicker active={visible} workspace={workspace} session={sessionForJob || null} sessionEnvironment={matched?.environment || null}
+        value={runIn} onChange={setRunIn} remember={rememberRunIn} onRememberChange={setRememberRunIn}
+        advancedSummary={environments ? `${environments.length} environment${environments.length === 1 ? '' : 's'}` : null}
+        onAdvanced={() => {
+          // The editor starts from the current choice (a template or environment becomes its first row).
+          setEnvironments(specKind(runIn) === 'default' ? [emptyDraft()] : [draftFromSpec(runIn)]);
+          setShowAdvanced(true);
+        }} />
       <View>
         <Field label="Title or ticket key" hint={ticket ? `Imports Jira ticket ${title.trim()}: its summary, description and acceptance criteria become the job.` : 'A Jira key (PROJ-123) imports that ticket; anything else becomes the job title.'}>
           <TextField accessibilityLabel="Title or ticket key" testID="job-title" value={title} onChangeText={setTitle}
@@ -505,14 +523,16 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
         style={styles.stageToggle}
       >
         <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
-          {showAdvanced ? '▴ Hide advanced' : '▾ Advanced: models, environments, budgets, retries'}
+          {showAdvanced ? '▴ Hide advanced' : '▾ Advanced: models, budgets, retries'}
         </Text>
       </Pressable>
       {showAdvanced ? (
         <View style={styles.advanced} testID="job-advanced">
           <StageAgentsField status={agents.status} value={agentDrafts} onChange={setAgentDrafts} stageDefaults={stageDefaults} />
-          <BuildEnvironmentsField active={visible} session={sessionForJob || null} repository={remote ? undefined : workspace.trim() || undefined}
-            value={environments} onChange={setEnvironments} />
+          {environments ? (
+            <BuildEnvironmentsField active={visible} session={sessionForJob || null} repository={remote ? undefined : workspace.trim() || undefined}
+              value={environments} onChange={setEnvironments} />
+          ) : null}
           <View style={styles.sheetGrid}>
             <SheetField label="Cost USD" value={cost} onChangeText={edit('cost', setCost)} placeholder={costHint} keyboardType="decimal-pad" compact />
             <SheetField label="Runtime sec" value={runtime} onChangeText={edit('runtime', setRuntime)} placeholder="no limit" keyboardType="number-pad" compact />

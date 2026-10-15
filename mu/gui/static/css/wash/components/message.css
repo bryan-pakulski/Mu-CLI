@@ -46,7 +46,9 @@
     max-width: 80%;
     padding: var(--wash-space-3) var(--wash-space-4);
     border-radius: var(--wash-radius-lg) var(--wash-radius-lg) 6px var(--wash-radius-lg);
-    background: var(--wash-accent-wash);
+    /* accent-tinted glass: ≥70% wash keeps ink text at contrast (G§9.7) */
+    background: color-mix(in srgb, var(--wash-accent-wash) 78%, var(--w-glass-fill));
+    box-shadow: var(--w-glass-lift-flat);
     color: var(--wash-ink);
     white-space: normal;
 }
@@ -96,32 +98,31 @@
     gap: var(--wash-space-2);
     padding: var(--wash-space-2) var(--wash-space-3);
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
 }
 .w-msg[data-role="error"] {
-    background: var(--wash-danger-wash);
+    background: color-mix(in srgb, var(--wash-danger-wash) 78%, var(--w-glass-fill));
     color: var(--wash-danger-ink);
-    box-shadow: inset 3px 0 var(--wash-danger-pigment);
 }
 .w-msg__glyph { flex: none; font-weight: 600; }
 .w-msg[data-role="info"] .w-msg__glyph { color: var(--wash-info-pigment); font-size: var(--wash-type-caption-size); }
 .w-msg[data-role="command"] {
     padding: var(--wash-space-3) var(--wash-space-4);
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-md);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
 }
 .w-msg--diff { align-self: stretch; }
 .w-msg[data-role="visualization"] {
     padding: var(--wash-space-3);
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-lg);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
 }
 
 /* ------------------------------------------------------------ thinking */
@@ -141,7 +142,7 @@
     font-style: italic;
     cursor: pointer;
 }
-.w-thinking__head:hover { background: var(--wash-sunken); color: var(--wash-ink-2); }
+.w-thinking__head:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink-2); }
 .w-thinking__caret { display: inline-block; transition: transform var(--wash-motion-small) var(--wash-ease-small); font-style: normal; }
 .w-thinking[data-open] .w-thinking__caret { transform: rotate(90deg); }
 .w-thinking__meta { font-style: normal; font-size: var(--wash-type-caption-size); }
@@ -166,7 +167,7 @@
     min-height: 36px;
     padding: 0 var(--wash-space-3);
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
     font-size: var(--wash-type-label-size);
     font-weight: var(--wash-type-label-weight);
@@ -221,11 +222,13 @@
     gap: var(--wash-space-2);
     height: 32px;
     padding: 0 var(--wash-space-4);
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-raised);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
     color: var(--wash-ink);
-    box-shadow: var(--wash-elevation-2);
+    box-shadow: var(--w-glass-lift-2);
     font: inherit;
     font-size: var(--wash-type-label-size);
     font-weight: var(--wash-type-label-weight);

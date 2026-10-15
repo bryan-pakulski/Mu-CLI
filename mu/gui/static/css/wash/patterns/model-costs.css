@@ -65,8 +65,8 @@
         font-size: var(--wash-type-label-size);
     }
     .mc-table tr:hover .mc-cell-input,
-    .mc-cell-input:hover { border-color: var(--wash-hairline-strong); background: var(--wash-surface); }
-    .mc-cell-input:focus { border-color: var(--wash-control-border); background: var(--wash-surface); }
+    .mc-cell-input:hover { border-color: var(--wash-hairline-strong); background: var(--w-glass-fill); }
+    .mc-cell-input:focus { border-color: var(--wash-control-border); background: var(--w-glass-fill); }
     select.mc-cell-input { padding-right: var(--wash-space-1); cursor: pointer; }
     .mc-cell-input[type="number"] {
         font-family: var(--wash-font-mono);

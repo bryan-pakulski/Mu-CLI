@@ -20,31 +20,31 @@
  *     </div>
  *   </section>
  *
- * A state card: 4px rule in the tone pigment, a tone-wash header strip.
+ * A state card on glass: a tone-wash header strip (72% wash mixed into the
+ * glass) carrying the "◆ Needs you" status chip. No side rule (G§3.4, §9.9).
  * attention (apricot) for approvals, danger (rose) for high-risk calls,
  * accent (lagoon) for questions. Approve is never auto-focused; the heading
  * takes focus and shows the focus ring.
  */
 .w-approval {
-    --w-approval-pigment: var(--w-tone-pigment, var(--wash-attention-pigment));
     --w-approval-wash: var(--w-tone-wash, var(--wash-attention-wash));
     align-self: stretch;
     min-width: 0;
     margin: var(--wash-space-2) 0;
     padding: 0;
     overflow: hidden;
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-lg);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink);
-    box-shadow: inset 4px 0 var(--w-approval-pigment);
+    box-shadow: var(--w-glass-lift);
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
     animation: w-approval-in var(--wash-motion-bleed) var(--wash-ease-bleed) both;
 }
 .w-approval:focus { outline: none; }
 .w-approval:focus-visible { outline: 2px solid var(--wash-accent-ink); outline-offset: 2px; }
-.w-approval[data-tone="danger"] { border-color: color-mix(in srgb, var(--wash-danger-pigment) 45%, var(--wash-hairline)); }
+
 @keyframes w-approval-in {
     from { opacity: 0; filter: blur(6px); }
     to { opacity: 1; filter: none; }
@@ -56,7 +56,8 @@
     gap: var(--wash-space-3);
     flex-wrap: wrap;
     padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) var(--wash-space-5);
-    background: color-mix(in srgb, var(--w-approval-wash) 72%, var(--wash-surface));
+    border-bottom: 1px solid var(--wash-hairline);
+    background: color-mix(in srgb, var(--w-approval-wash) 72%, var(--w-glass-fill));
 }
 .w-approval__title {
     flex: 1 1 16rem;
@@ -72,7 +73,7 @@
 .w-approval__title code {
     padding: 1px 5px;
     border-radius: var(--wash-radius-xs);
-    background: color-mix(in srgb, var(--wash-surface) 70%, transparent);
+    background: var(--w-glass-fill-strong);
     font-family: var(--wash-font-mono);
     font-size: 0.9em;
     font-weight: 500;
@@ -114,7 +115,7 @@
     padding: var(--wash-space-3) var(--wash-space-4);
     overflow-x: auto;
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-size);
@@ -143,7 +144,7 @@
     padding: var(--wash-space-3);
     overflow: auto;
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);

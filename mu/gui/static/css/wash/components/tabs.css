@@ -57,7 +57,7 @@
     gap: 2px;
     padding: 3px;
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .w-segmented__option {
     display: inline-flex;
@@ -82,9 +82,9 @@
 }
 .w-segmented__option:hover { color: var(--wash-ink); }
 .w-segmented__option:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
-    background: var(--wash-surface);
+    background: var(--w-glass-fill-strong);
     color: var(--wash-ink);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--wash-plum) 12%, transparent), 0 0 0 1px var(--wash-hairline);
+    box-shadow: var(--wash-glass-highlight), 0 1px 2px color-mix(in srgb, var(--wash-plum) 12%, transparent), 0 0 0 1px var(--wash-glass-edge);
 }
 .w-segmented__option :is(svg, .w-icon) { width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); }
 .w-segmented[data-size="sm"] .w-segmented__option { height: 24px; padding: 0 var(--wash-space-2); font-size: var(--wash-type-caption-size); }

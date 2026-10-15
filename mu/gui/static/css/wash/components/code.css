@@ -17,7 +17,7 @@
     min-width: 0;
     overflow: hidden;
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .w-code__head {
     display: flex;

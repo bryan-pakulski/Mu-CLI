@@ -13,8 +13,10 @@
  *   <dl class="w-stats"><div class="w-stat"><dt class="w-stat__label">Needs you</dt>
  *     <dd class="w-stat__value">1</dd></div>…</dl>
  *
- * State cards: a 4px left rule in the semantic pigment and a wash header
- * strip. Only attention, danger, plan and ok use it.
+ * Cards are level-1 glass (G§3.3): glass fill, light glass edge, top sheen.
+ * State cards: the header strip is tinted with the semantic wash (72% wash
+ * mixed into the glass) and carries the status chip. No side rule (G§3.4).
+ * Only attention, danger, plan and ok use it.
  */
 .w-card {
     --w-card-pad: var(--wash-space-5);
@@ -23,17 +25,19 @@
     flex-direction: column;
     min-width: 0;
     overflow: hidden;
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-lg);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift);
 }
 .w-card[data-variant="sunken"] {
     border-color: transparent;
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
+    box-shadow: none;
 }
 .w-card[data-variant="interactive"] { cursor: pointer; transition: border-color var(--wash-motion-micro) var(--wash-ease-micro); }
-.w-card[data-variant="interactive"]:hover { border-color: var(--wash-hairline-strong); }
+.w-card[data-variant="interactive"]:hover { border-color: var(--wash-hairline-strong); background: var(--w-glass-fill-strong); }
 .w-card__head {
     display: flex;
     align-items: center;
@@ -75,28 +79,19 @@
 }
 .w-card__body + .w-card__foot { border-top: 0; padding-top: 0; }
 
-/* state cards */
-.w-card[data-state]::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: var(--wash-z-raised);
-    width: 4px;
-    background: var(--w-state-pigment);
-    pointer-events: none;
-}
+/* state cards: a tinted header strip, no side rule */
 .w-card[data-state] .w-card__head {
-    padding: var(--wash-space-3) var(--w-card-pad) var(--wash-space-3) calc(var(--w-card-pad) + 4px);
-    background: color-mix(in srgb, var(--w-state-wash) 72%, var(--wash-surface));
+    padding: var(--wash-space-3) var(--w-card-pad);
+    border-bottom: 1px solid var(--wash-hairline);
+    background: color-mix(in srgb, var(--w-state-wash) 72%, var(--w-glass-fill));
 }
-.w-card[data-state] .w-card__body,
-.w-card[data-state] .w-card__foot { padding-left: calc(var(--w-card-pad) + 4px); }
+.w-card[data-state] .w-card__head .w-card__title { color: var(--w-state-ink, var(--wash-plum)); }
 .w-card[data-state] .w-card__body { padding-top: var(--wash-space-4); }
-.w-card[data-state="attention"] { --w-state-pigment: var(--wash-attention-pigment); --w-state-wash: var(--wash-attention-wash); }
-.w-card[data-state="danger"] { --w-state-pigment: var(--wash-danger-pigment); --w-state-wash: var(--wash-danger-wash); }
-.w-card[data-state="ok"] { --w-state-pigment: var(--wash-ok-pigment); --w-state-wash: var(--wash-ok-wash); }
+.w-card[data-state="attention"] { --w-state-ink: var(--wash-attention-ink); --w-state-wash: var(--wash-attention-wash); }
+.w-card[data-state="danger"] { --w-state-ink: var(--wash-danger-ink); --w-state-wash: var(--wash-danger-wash); }
+.w-card[data-state="ok"] { --w-state-ink: var(--wash-ok-ink); --w-state-wash: var(--wash-ok-wash); }
 .w-card[data-state="plan"] {
-    --w-state-pigment: var(--wash-plan-pigment);
+    --w-state-ink: var(--wash-plan-ink);
     --w-state-wash: var(--wash-plan-wash);
     border-style: dashed;
     border-color: var(--wash-plan-ink);

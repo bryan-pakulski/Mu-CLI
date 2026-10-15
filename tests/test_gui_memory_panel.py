@@ -292,7 +292,7 @@ def test_css_has_context_observatory_light_theme_palette():
     from wash_css_helpers import css, decls
     panels = css("patterns/panels.css")
     assert "--context-" not in panels
-    assert decls(panels, ".context-timeline-tooltip").get("background") == "var(--wash-raised)"
+    assert decls(panels, ".context-timeline-tooltip").get("background") == "var(--w-glass-fill-strong)"
     assert '[data-theme="light"] .context-pressure-pill' not in content
     assert decls(panels, ".context-pressure-pill.hot").get("background") == "var(--wash-danger-wash)"
 

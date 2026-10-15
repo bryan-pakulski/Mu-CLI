@@ -21,6 +21,7 @@
     <script src="/static/js/wash/gallery_chat.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
 {% endblock %}
+{% block ambient %}dawn{% endblock %}
 {% block body_class %}gallery-body{% endblock %}
 {% block crumbs %}
     <li class="w-breadcrumb__item"><span aria-current="page">Design gallery</span></li>
@@ -130,18 +131,18 @@
 </dl>
 <div class="g-grid">
     <article class="w-card">
-        <header class="w-card__head"><h3 class="w-card__title">Default card</h3><span class="w-card__meta">surface · hairline</span></header>
+        <header class="w-card__head"><h3 class="w-card__title">Default card</h3><span class="w-card__meta">glass · light edge</span></header>
         <div class="w-card__body">Title, optional eyebrow, body and a footer with actions on the right.</div>
         <footer class="w-card__foot">{{ w.btn("Cancel", size="sm") }}{{ w.btn("Open", variant="primary", size="sm") }}</footer>
     </article>
     <article class="w-card" data-variant="sunken">
         <header class="w-card__head"><span class="w-eyebrow">Onboarding</span></header>
-        <div class="w-card__body"><strong class="g-ink">Sunken card</strong> No border — settings groups and selected explanations.</div>
+        <div class="w-card__body"><strong class="g-ink">Sunken card</strong> Subtle glass, no border — settings groups and selected explanations.</div>
     </article>
     {%- for state, glyph, title in [("attention", "◆", "Needs you · Permission to edit 1 file"), ("danger", "✗", "Checks failed"), ("plan", "◇", "Plan ready for review"), ("ok", "✓", "Pushed to origin")] %}
     <article class="w-card" data-state="{{ state }}">
         <header class="w-card__head">{{ w.chip(state | capitalize, tone=state, glyph=glyph) }}<h3 class="w-card__title">{{ title }}</h3><span class="w-card__meta">1 of 3</span></header>
-        <div class="w-card__body">State card: 4px rule in the semantic pigment and a wash header strip.</div>
+        <div class="w-card__body">State card: a header strip tinted with the semantic wash, plus the status chip. No coloured side rule.</div>
         <footer class="w-card__foot">{{ w.btn("Dismiss", variant="ghost", size="sm") }}{{ w.btn("Review", variant="tonal", tone=state, size="sm", chevron=True) }}</footer>
     </article>
     {%- endfor %}
@@ -368,7 +369,7 @@ RUN pip install -r requirements.txt</textarea>
 <div class="w-hero" data-art="hero">
     <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Design system</span>
     <h1 class="w-hero__title">Wash component gallery</h1>
-    <p class="w-hero__lede">Every base component in every state, Paper and Dusk side by side. Build pages from these <code>.w-*</code> classes and the macros in <code>templates/macros/wash.html</code>.</p>
+    <p class="w-hero__lede">Every base component in every state, Paper and Dusk side by side, as frosted glass over the ambient wash. Build pages from these <code>.w-*</code> classes and the macros in <code>templates/macros/wash.html</code>. Edges are light, never pigment: state shows in tinted header strips, status chips and semantic ink, not coloured side bars.</p>
     <div class="w-btn-row" x-data="{ open: false }">
         <button type="button" class="w-btn" data-variant="primary" @click="open = true" id="g-open-modal">Open a live modal</button>
         <button type="button" class="w-btn" data-variant="secondary" onclick="WashToast.show('Saved — this toast lives in the polite region', 'ok')">Show a toast</button>

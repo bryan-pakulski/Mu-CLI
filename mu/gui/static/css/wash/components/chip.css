@@ -56,22 +56,22 @@ a.w-chip:hover, button.w-chip:hover { text-decoration: none; filter: brightness(
 /* meta: surface pill with a hairline — model, provider, branch */
 .w-chip[data-variant="meta"] {
     border-color: var(--wash-hairline);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink-2);
 }
 a.w-chip[data-variant="meta"]:hover,
-button.w-chip[data-variant="meta"]:hover { background: var(--wash-sunken); filter: none; }
+button.w-chip[data-variant="meta"]:hover { background: var(--w-glass-fill-subtle); filter: none; }
 
 /* filter: meta look; selected = ink fill with a leading ✓ */
 .w-chip[data-variant="filter"] {
     height: 28px;
     padding: 0 12px;
     border-color: var(--wash-hairline-strong);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink-2);
     cursor: pointer;
 }
-.w-chip[data-variant="filter"]:hover { background: var(--wash-sunken); filter: none; }
+.w-chip[data-variant="filter"]:hover { background: var(--w-glass-fill-subtle); filter: none; }
 .w-chip[data-variant="filter"][aria-pressed="true"] {
     border-color: var(--wash-ink);
     background: var(--wash-ink);
@@ -109,7 +109,7 @@ button.w-chip[data-variant="meta"]:hover { background: var(--wash-sunken); filte
     height: 22px;
     padding: 0 10px;
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
     font-size: var(--wash-type-eyebrow-size);
     font-weight: var(--wash-type-eyebrow-weight);

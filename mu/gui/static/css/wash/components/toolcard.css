@@ -19,7 +19,8 @@
  *
  * Collapsed row: sunken, radius-md, 36px. Running: a sky ink drop with a
  * live timer. Done: ✓ in ok ink for 1.2s (data-fresh + --w-age), then the
- * glyph settles to neutral ink-3. Errors get a danger rule.
+ * glyph settles to neutral ink-3. Errors tint the row with the danger wash
+ * and show ✗ in danger ink; blocked rows tint plan. No side rule (G§3.4).
  */
 .w-trace { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; background: none; }
 .w-toollist { display: flex; flex-direction: column; gap: var(--wash-space-1); min-width: 0; }
@@ -28,7 +29,7 @@
 .w-toolgroup {
     min-width: 0;
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
 }
 .w-toolcard__row {
@@ -90,9 +91,10 @@
     animation-delay: calc(var(--w-age, 0ms) * -1);
 }
 @keyframes w-toolcard-settle { to { color: var(--wash-ink-3); } }
-:is(.w-toolcard, .w-toolgroup)[data-state="error"] { box-shadow: inset 3px 0 var(--wash-danger-pigment); }
+:is(.w-toolcard, .w-toolgroup)[data-state="error"] > .w-toolcard__row { border-radius: inherit; background: color-mix(in srgb, var(--wash-danger-wash) 72%, var(--w-glass-fill)); }
+:is(.w-toolcard, .w-toolgroup)[data-state="error"] .w-toolcard__kind { color: var(--wash-danger-ink); }
 :is(.w-toolcard, .w-toolgroup)[data-state="error"] .w-toolcard__glyph { color: var(--wash-danger-ink); }
-.w-toolcard[data-state="blocked"] { box-shadow: inset 3px 0 var(--wash-plan-pigment); }
+.w-toolcard[data-state="blocked"] > .w-toolcard__row { border-radius: inherit; background: color-mix(in srgb, var(--wash-plan-wash) 72%, var(--w-glass-fill)); }
 .w-toolcard[data-state="blocked"] :is(.w-toolcard__glyph, .w-toolcard__kind) { color: var(--wash-plan-ink); }
 
 /* expanded */
@@ -122,7 +124,7 @@
     padding: var(--wash-space-2) var(--wash-space-3);
     overflow: auto;
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);
@@ -140,7 +142,7 @@
     gap: 2px;
     padding: 0 var(--wash-space-1) var(--wash-space-1);
 }
-.w-toolgroup__cards .w-toolcard { background: var(--wash-surface); }
+.w-toolgroup__cards .w-toolcard { background: var(--w-glass-fill-subtle); }
 
 /* notes inside a trace */
 .w-tracenote {
@@ -164,7 +166,7 @@
     border: 0;
     min-width: 0;
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
 }
 

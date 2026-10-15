@@ -5,6 +5,8 @@
       page_css       the page's bundle <link> (static/css/wash/patterns/*.css)
       head_scripts   page / vendor scripts (defer where possible)
       body_class, body_attrs
+      ambient        the fixed ambient wash behind the glass (G§6.2):
+                     dawn (default) | lagoon | meadow
       shell_attrs    extra attributes on .w-shell (e.g. Alpine bindings)
       drop_attrs     extra attributes on the wordmark drop (data-state="working")
       page           the whole body content; defaults to the app shell below.
@@ -46,7 +48,7 @@
     <script src="/static/js/wash_shell.js" defer></script>
     {% block head_scripts %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}"{% block body_attrs %}{% endblock %}>
+<body class="{% block body_class %}{% endblock %}" data-ambient="{% block ambient %}dawn{% endblock %}"{% block body_attrs %}{% endblock %}>
 {% block page %}
 <div class="w-shell" id="w-shell" data-shell{% block shell_attrs %}{% endblock %}>
     <a class="w-skip-link" href="#w-main">Skip to content</a>

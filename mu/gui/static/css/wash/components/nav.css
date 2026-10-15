@@ -10,7 +10,8 @@
  *     <li class="w-breadcrumb__item"><span aria-current="page">Job trace</span></li>
  *   </ol></nav>
  *
- * Active nav item: sunken fill, ink text and a 2px accent bar on the left.
+ * Active nav item: a glass-strong pill with ink text and an accent-ink icon
+ * (G§9.4). No side bar: the pill and aria-current carry the state.
  */
 .w-nav__item {
     display: flex;
@@ -32,15 +33,15 @@
     transition: background-color var(--wash-motion-micro) var(--wash-ease-micro);
 }
 .w-nav__item:hover {
-    background: color-mix(in srgb, var(--wash-sunken) 60%, transparent);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink);
     text-decoration: none;
 }
 .w-nav__item[aria-current="page"],
 .w-nav__item[aria-current="true"] {
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-strong);
     color: var(--wash-ink);
-    box-shadow: inset 2px 0 var(--wash-accent-ink);
+    box-shadow: var(--w-glass-lift-2);
 }
 .w-nav__item :is(svg, .w-icon) {
     flex: none;

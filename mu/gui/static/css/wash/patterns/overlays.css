@@ -44,7 +44,7 @@
     transition: background-color var(--wash-motion-micro) var(--wash-ease-small), color var(--wash-motion-micro) var(--wash-ease-small);
 }
 .fb-entry:hover {
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink);
 }
 .fb-entry.is-dir {
@@ -93,7 +93,7 @@
     font-weight: var(--wash-type-label-weight);
 }
 .modal-phase {
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     border: 0;
     border-radius: var(--wash-radius-sm);
     padding: var(--wash-space-3);
@@ -122,7 +122,7 @@
     margin-top: var(--wash-space-3);
 }
 .modal-task {
-    background: var(--wash-raised);
+    background: var(--w-glass-fill-subtle);
     border: 0;
     border-radius: var(--wash-radius-sm);
     padding: var(--wash-space-2) var(--wash-space-3);

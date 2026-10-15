@@ -101,7 +101,6 @@
 
     .w-env-scan-warning {
         padding: var(--wash-space-3) var(--wash-space-4);
-        border-left: 4px solid var(--wash-danger-pigment);
         border-radius: var(--wash-radius-sm);
         background: var(--wash-danger-wash);
         color: var(--wash-danger-ink);
@@ -128,7 +127,7 @@
     .w-env-monitor {
         padding: var(--wash-space-3) var(--wash-space-4);
         border-radius: var(--wash-radius-md);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
     }
     .w-env-monitor__waiting {
         display: flex;
@@ -240,7 +239,7 @@
         padding: var(--wash-space-3) var(--wash-space-4);
         border: 0;
         border-radius: var(--wash-radius-md);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
         color: var(--wash-ink);
         font: inherit;
         text-align: left;
@@ -286,7 +285,7 @@
         gap: var(--wash-space-3);
         padding: var(--wash-space-2) var(--wash-space-2) var(--wash-space-2) var(--wash-space-3);
         border-radius: var(--wash-radius-md);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
     }
     .w-env-row--mount { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) 84px auto; }
     .w-env-row > .w-icon { color: var(--wash-ink-3); }
@@ -322,7 +321,7 @@
         margin: 0;
         padding: var(--wash-space-4);
         border-radius: var(--wash-radius-md);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
     }
     .w-env-review:empty { display: none; }
     .w-env-review dt { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
@@ -401,9 +400,11 @@
         overflow: hidden;
         border: 0;
         border-radius: var(--wash-radius-xl);
-        background: var(--wash-raised);
+        background: var(--w-glass-fill-strong);
+        backdrop-filter: var(--w-glass-filter-strong);
+        -webkit-backdrop-filter: var(--w-glass-filter-strong);
         color: var(--wash-ink);
-        box-shadow: var(--wash-elevation-3);
+        box-shadow: var(--w-glass-lift-3);
     }
     .containers-body .fb-head {
         display: flex;
@@ -431,13 +432,13 @@
         padding: 0 var(--wash-space-3);
         border: 1px solid var(--wash-hairline-strong);
         border-radius: var(--wash-radius-pill);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
         color: var(--wash-ink);
         font: inherit;
         font-size: var(--wash-type-label-size);
         cursor: pointer;
     }
-    .containers-body :is(.fb-head .icon-btn, .fb-up, .fb-new-folder, .fb-create-confirm, .fb-create-cancel):hover { background: var(--wash-sunken); }
+    .containers-body :is(.fb-head .icon-btn, .fb-up, .fb-new-folder, .fb-create-confirm, .fb-create-cancel):hover { background: var(--w-glass-fill-subtle); }
     .containers-body .fb-path {
         display: flex;
         align-items: center;
@@ -446,7 +447,7 @@
         padding: var(--wash-space-2) var(--wash-space-3);
         border: 0;
         border-radius: var(--wash-radius-sm);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
     }
     .containers-body .fb-current {
         min-width: 0;
@@ -472,7 +473,7 @@
         padding: 0 var(--wash-space-3);
         border: 1px solid var(--wash-control-border);
         border-radius: var(--wash-radius-sm);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
         color: var(--wash-ink);
         font: inherit;
     }
@@ -495,7 +496,7 @@
         color: var(--wash-ink);
         cursor: pointer;
     }
-    .containers-body .fb-entry:hover { background: var(--wash-sunken); }
+    .containers-body .fb-entry:hover { background: var(--w-glass-fill-subtle); }
     /* The fragment renders emoji; draw calm pigment marks instead (G§4: no emoji). */
     .containers-body .fb-icon {
         flex: none;
@@ -529,7 +530,7 @@
         padding: 0 var(--wash-space-4);
         border: 1px solid var(--wash-hairline-strong);
         border-radius: var(--wash-radius-pill);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
         color: var(--wash-ink);
         font: inherit;
         font-size: var(--wash-type-label-size);

@@ -145,7 +145,9 @@ def test_product_css_covers_primary_web_surfaces():
     ):
         assert selector in combined, selector
     page = CHAT_CSS.read_text(encoding="utf-8")
-    assert 'backdrop-filter' not in page
+    # Any blur on the chat page comes from the shared glass recipe only.
+    assert all(v.strip().startswith('var(--w-glass-filter')
+               for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', page))
     assert '@media (width < 840px)' in page
     assert '@media (prefers-reduced-motion: reduce)' in page
     # Body padding: the shared shell owns the page frame; no override needed
@@ -171,7 +173,8 @@ def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
         assert token not in route
     assert 'radial-gradient' not in css
     assert 'radial-gradient' not in route
-    assert 'backdrop-filter' not in css
+    assert all(v.strip().startswith('var(--w-glass-filter')
+               for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', css))
     assert 'clip-path' not in css
     assert 'clip-path' not in route
     assert '--mountain-near' not in css
@@ -216,7 +219,7 @@ def test_composer_is_single_pane_with_controls_outside_typing_surface():
     html = CHAT_HTML.read_text(encoding="utf-8")
     form = css.split('.w-composer__form {', 1)[1].split('}', 1)[0]
     assert 'border-radius: var(--wash-radius-lg)' in form
-    assert 'background: var(--wash-surface)' in form
+    assert 'background: var(--w-glass-fill)' in form
     assert 'flex-direction: column' in form
     assert '.w-composer__bar {' in css
     assert '.w-composer__hint {' in css
@@ -290,7 +293,7 @@ def test_choice_picker_is_flat_not_card_based():
     row = css.split('.w-prompt__option {', 1)[1].split('}', 1)[0]
     assert 'border-radius: var(--wash-radius-md)' in row
     assert 'border:' not in row and 'box-shadow' not in row
-    assert '.w-prompt__option:hover { background: var(--wash-sunken); }' in css
+    assert '.w-prompt__option:hover { background: var(--w-glass-fill-subtle); }' in css
     assert '.w-prompt__option[data-selected] { background: var(--wash-accent-wash); }' in css
     hidden = css.split('.w-prompt__input {', 1)[1].split('}', 1)[0]
     assert 'opacity: 0' in hidden
@@ -346,7 +349,8 @@ def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
     assert 'class="w-eyebrow"' in html
     assert '.trace-section.w-card' in css
     assert 'border-radius: 22px' not in css + bundle
-    assert 'backdrop-filter' not in css + bundle
+    assert all(v.strip().startswith('var(--w-glass-filter')
+               for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', css + bundle))
     assert '.trace-canvas-wrap {' in css
     assert 'border-radius: var(--wash-radius-sm)' in css
     assert 'filter: saturate' not in css + bundle

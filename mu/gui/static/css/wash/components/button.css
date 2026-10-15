@@ -139,7 +139,7 @@
     height: 18px;
     padding: 0 var(--wash-space-1);
     border-radius: var(--wash-radius-xs);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);

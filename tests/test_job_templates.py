@@ -232,7 +232,7 @@ def test_remember_writes_the_toolchains_row_and_drives_preselection(home, tmp_pa
     add_template("rsq")
     repo = node_repo(tmp_path)
     set_rule("sandbox.toolchains", [{"repository": "/elsewhere", "base_image": "rust:1"},
-                                    {"repository": str(repo), "base_image": "node:20", "paths": "web"}])
+                                    {"repository": str(repo), "base_image": "node:20", "paths": ""}])
     service = JobService(JobStore(str(tmp_path / "jobs.sqlite3")))
     job = service.create_from_payload({"title": "t", "workspace_root": str(repo),
                                        "execution": {**EXE, "template": "rsq", "remember_template": True}})
@@ -250,6 +250,20 @@ def test_remember_writes_the_toolchains_row_and_drives_preselection(home, tmp_pa
     later = service.create_from_payload({"title": "t", "workspace_root": str(repo), "execution": dict(EXE)})
     bindings, origin = envs.resolve_bindings(later)
     assert origin == "settings" and [(b.source, b.ref) for b in bindings] == [("template", "rsq")]
+
+
+def test_remember_keeps_per_component_toolchain_rows(home, tmp_path):
+    """Remembering replaces only the whole-repository row; monorepo component rows survive."""
+    from mu.jobs.job_settings import load_settings, rule, set_rule
+    add_template("rsq")
+    repo = node_repo(tmp_path)
+    component = {"repository": str(repo), "base_image": "rust:1", "paths": "engine"}
+    set_rule("sandbox.toolchains", [component, {"repository": str(repo), "base_image": "node:20", "paths": ""}])
+    envs.remember_template(str(repo), "rsq")
+    rows = rule("sandbox.toolchains", load_settings())
+    assert component in rows
+    whole = [r for r in rows if r["repository"] == os.path.realpath(repo) and not r.get("paths")]
+    assert [r["base_image"] for r in whole] == ["template:rsq"]
 
 
 def test_create_endpoint_400_for_unknown_template(home, tmp_path):

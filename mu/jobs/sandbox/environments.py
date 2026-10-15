@@ -1543,15 +1543,17 @@ def remembered_template(repository: str, settings: Optional[Dict[str, Any]] = No
 
 def remember_template(repository: str, template: str) -> Dict[str, Any]:
     """"Remember for this workspace": write or update the repository's Settings → Toolchains
-    row (repository → ``template:<name>``). Rows of other repositories are kept; this
-    repository's rows are replaced by the single whole-repository row."""
+    row (repository → ``template:<name>``). Rows of other repositories are kept. For this
+    repository only the whole-repository row (no ``paths``) is replaced; per-component rows
+    (monorepo paths set in Settings) are kept, so remembering never discards that mapping."""
     repo = str(repository or "").strip()
     if not repo:
         raise ValueError("remember_template needs a workspace or repository")
     validate_ref("template", template)
     from ..job_settings import load_settings, rule, set_rule
     current = [dict(r) for r in (rule("sandbox.toolchains", load_settings()) or []) if isinstance(r, dict)]
-    kept = [r for r in current if not _same_repository(str(r.get("repository") or ""), repo)]
+    kept = [r for r in current
+            if not _same_repository(str(r.get("repository") or ""), repo) or str(r.get("paths") or "").strip()]
     row = {"repository": os.path.realpath(os.path.expanduser(repo)), "base_image": f"template:{template}",
            "paths": "", "docker": "", "gpus": ""}
     set_rule("sandbox.toolchains", [*kept, row])

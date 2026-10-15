@@ -38,6 +38,12 @@
     const runInHost = document.getElementById('job-run-in');
     const runIn = runInHost && window.MuRunInPicker ? window.MuRunInPicker.create(runInHost, { api, ui, toast: (t, k) => toast(t, k),
         idPrefix: 'job-run-in-trigger', onChange: () => { syncRunIn(); } }) : null;
+    // The picker owns Advanced…; the legacy row button stays in the markup only as the
+    // no-picker fallback, so there is one way to open the environments editor.
+    if (runIn) {
+        const legacyChange = document.getElementById('job-environments-change');
+        if (legacyChange) legacyChange.hidden = true;
+    }
     function syncRunIn() {
         const v = runIn?.value();
         envOverride = v?.kind === 'advanced' && v.bindings?.length ? v.bindings : null;

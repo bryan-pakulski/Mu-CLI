@@ -994,13 +994,15 @@
     .work-runin__label { display: flex; align-items: baseline; gap: var(--wash-space-2); }
     .work-runin__warn {
         display: flex;
-        flex-wrap: wrap;
-        align-items: center;
+        align-items: flex-start;
         gap: var(--wash-space-2);
         margin: 0 0 var(--wash-space-1) calc(1.2em + var(--wash-space-4));
         color: var(--wash-attention-ink);
         font-size: var(--wash-type-caption-size);
     }
+    .work-runin__warn-glyph { flex: none; line-height: var(--wash-type-caption-line); }
+    .work-runin__warn-text { flex: 1 1 auto; min-width: 0; line-height: var(--wash-type-caption-line); }
+    .work-runin__warn .w-btn { flex: none; }
     .work-runin__fit { margin: 0; }
 
     /* ------------------------------------------------------------ Jira watcher rows (work_jira.js) */

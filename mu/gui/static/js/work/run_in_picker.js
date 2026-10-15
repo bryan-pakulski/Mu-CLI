@@ -130,7 +130,7 @@
                 ...templates.map(x => {
                     const w = fitWarning(x);
                     return option('template', x.name, GLYPH.template, x.name, templateMeta(x), choice.kind === 'template' && choice.template === x.name,
-                        w ? `<span class="work-runin__warn" data-run-in-fit-row="${esc(x.name)}"><span aria-hidden="true">◆</span> ${esc(w)} <button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-run-in-allow="${esc(x.name)}">Allow</button></span>` : '');
+                        w ? `<span class="work-runin__warn" data-run-in-fit-row="${esc(x.name)}"><span class="work-runin__warn-glyph" aria-hidden="true">◆</span><span class="work-runin__warn-text">${esc(w)}</span><button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-run-in-allow="${esc(x.name)}">Allow</button></span>` : '');
                 }),
                 envs.length ? '<div class="w-menu__heading" role="presentation">Environments (snapshotted at start)</div>' : '',
                 ...envs.map(e => option('environment', e.spec, GLYPH.environment, e.name, `${e.status || ''}${e.gpus ? ` · GPU ${e.gpus}` : ''}`,

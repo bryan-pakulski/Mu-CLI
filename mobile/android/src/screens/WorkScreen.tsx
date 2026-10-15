@@ -33,7 +33,7 @@ import { fontWeights, fonts, radii, spacing, touchTarget, tracking } from '../th
 import { STATUS, duration, money, stateLabel, stateStatus } from '../theme/status';
 import { BAR_HIDDEN, actionLabel, actionTone } from '../components/JobActions';
 import { JobRow, JobsNavBar, ResultRow, focusStep, jobKey, stepsOf, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatTile, StatusIcon, SwitchRow, Text, TextField, useInterval } from '../ui';
+import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatStrip, StatusIcon, WashBackground, SwitchRow, Text, TextField, useInterval } from '../ui';
 
 export type WorkScreenProps = NativeStackScreenProps<RootStackParamList, 'Work'>;
 
@@ -147,7 +147,8 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <WashBackground art="lagoon" height={220} testID="work-wash">
+    <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <JobsNavBar current="Work" onNavigate={go} home={board} />
       <ScrollView
         contentContainerStyle={styles.content}
@@ -201,12 +202,18 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
           <Loading label="Loading jobs…" />
         ) : (
           <>
+            {/* The Lagoon wash band sits above; the strip starts where it has faded to paper. */}
+            <View style={{ height: 96 }} />
+            {/* Wash stat strip (G§9.3): one row of big tabular numbers with
+                captions and hairline dividers, not a card per metric. */}
             <View style={styles.stats} accessibilityLabel="Summary">
-              <StatTile testID="stat-needs" value={counts.needs} label="needs you" tone={counts.needs ? 'warn' : 'muted'} glyph="◆" />
-              <StatTile testID="stat-running" value={counts.running} label={counts.running === 1 ? 'job running' : 'jobs running'} tone={counts.running ? 'running' : 'muted'} glyph="●" onPress={() => go('JobActivity')} />
-              <StatTile testID="stat-checking" value={counts.checking} label={counts.checking === 1 ? 'check running' : 'checks running'} tone={counts.checking ? 'running' : 'muted'} glyph="●" onPress={() => go('JobActivity')} />
-              <StatTile testID="stat-ready" value={counts.ready} label="ready to push" tone={counts.ready ? 'ok' : 'muted'} glyph="✓" />
-              <StatTile testID="stat-jobs" value={counts.jobs} label="jobs" tone="accent" glyph="○" onPress={() => go('JobsList')} />
+              <StatStrip items={[
+                { testID: 'stat-needs', value: counts.needs, label: 'needs you', tone: counts.needs ? 'attention' : 'neutral', glyph: STATUS.waiting.icon },
+                { testID: 'stat-running', value: counts.running, label: counts.running === 1 ? 'job running' : 'jobs running', tone: counts.running ? 'running' : 'neutral', glyph: STATUS.active.icon, onPress: () => go('JobActivity') },
+                { testID: 'stat-checking', value: counts.checking, label: counts.checking === 1 ? 'check running' : 'checks running', tone: counts.checking ? 'running' : 'neutral', glyph: STATUS.active.icon, onPress: () => go('JobActivity') },
+                { testID: 'stat-ready', value: counts.ready, label: 'ready to push', tone: counts.ready ? 'ok' : 'neutral', glyph: STATUS.done.icon },
+                { testID: 'stat-jobs', value: counts.jobs, label: 'jobs', tone: 'neutral', glyph: STATUS.pending.icon, onPress: () => go('JobsList') },
+              ]} />
             </View>
             {total === 0 ? (
               <Panel title="No engineering jobs yet">
@@ -258,6 +265,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
         }}
       />
     </SafeAreaView>
+    </WashBackground>
   );
 }
 

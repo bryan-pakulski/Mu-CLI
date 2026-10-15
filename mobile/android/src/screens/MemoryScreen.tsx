@@ -15,7 +15,7 @@ import {
   memoryApi,
 } from '../api/memory';
 import { spacing, fontSizes, fontWeights, fonts, radii, touchTarget, elevation, typography } from '../theme/tokens';
-import { Button, Card, Chip, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text, TextField } from '../ui';
+import { Button, Card, Chip, ContextRing, EmptyState, ErrorState, LayerBar, ModalFrame, Pressable, Skeleton, Text, TextField, layerTone } from '../ui';
 
 /** Append an alpha channel to a #RRGGBB token (a tint of a viz token). */
 function withAlpha(hex: string, alpha: number): string {
@@ -222,7 +222,7 @@ export function MemoryScreen() {
   // position in the live snapshot so every chart agrees.
   const layerColor = (id: string) => {
     const index = Math.max(0, (snapshot?.layers || []).findIndex(layer => layer.id === id));
-    return colors.series[index % colors.series.length].pigment;
+    return layerTone(colors, id, index).pigment;
   };
   const contextSummary = contextTimeline?.summary || { samples: 0 };
   const activeContextPoint = selectedContextPoint
@@ -413,40 +413,20 @@ export function MemoryScreen() {
 
                 <View style={{ marginTop: spacing.base }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs }}>
-                    <Text variant="xs" style={{ color: colors.ink3 }}>Current composition</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                      <ContextRing fill={snapshot.context_limit ? snapshot.total_tokens / snapshot.context_limit : 0} showLabel={false} />
+                      <Text variant="xs" style={{ color: colors.ink3 }}>Current composition</Text>
+                    </View>
                     <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>
                       {snapshot.total_tokens.toLocaleString()} / {snapshot.context_limit.toLocaleString()} tok
                     </Text>
                   </View>
-                  <View
-                    style={{
-                      height: 12,
-                      flexDirection: 'row',
-                      gap: 2,
-                      padding: 2,
-                      borderRadius: radii.pill,
-                      backgroundColor: colors.sunken,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {snapshot.layers.filter(layer => layer.tokens > 0).map(layer => (
-                      <View
-                        key={layer.id}
-                        style={{
-                          flex: Math.max(1, layer.tokens),
-                          borderRadius: radii.pill,
-                          backgroundColor: layerColor(layer.id),
-                        }}
-                      />
-                    ))}
-                    <View
-                      style={{
-                        flex: Math.max(1, snapshot.free_tokens),
-                        borderRadius: radii.pill,
-                        backgroundColor: colors.sunken,
-                      }}
-                    />
-                  </View>
+                  {/* Wash stacked layer bar (G§9.14): layer pigments, direct labels. */}
+                  <LayerBar
+                    testID="memory-layer-bar"
+                    layers={snapshot.layers.map(layer => ({ id: layer.id, tokens: layer.tokens, name: layer.name }))}
+                    limit={snapshot.context_limit}
+                  />
                 </View>
               </Card>
 

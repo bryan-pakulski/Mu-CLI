@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Alert, StyleSheet, TextInput, View } from 'react-native';
 import {
   promptsApi,
   type PendingPrompt,
@@ -9,8 +8,16 @@ import {
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { elevation, fontSizes, fontWeights, fonts, radii, spacing, touchTarget, tracking, typography } from '../theme/tokens';
-import { Button, ModalFrame, Pressable, Text } from '../ui';
+import { elevation, radii, spacing, touchTarget, typeStyle } from '../theme/tokens';
+import { vocabulary } from '../theme/wash.generated';
+import { ApprovalCard, Button, ChoicePrompt, Icon, InkDrop, Pressable, PromptFrame, Sheet, Text, primaryArg } from '../ui';
+
+// Approvals and questions (G§9.9, G§9.10). A pending prompt shows as the
+// floating "Input required" banner; opening it presents the Wash approval
+// card in a bottom sheet that cannot be swiped, tapped or back-buttoned away:
+// the user either answers, cancels, or explicitly minimizes it. Approve is
+// never auto-focused; a new prompt is announced through AccessibilityInfo.
+// Payloads sent to /api/prompts are unchanged.
 
 // ---------- helpers ------------------------------------------------------
 
@@ -167,6 +174,13 @@ export function PromptHost() {
 
   const activePrompt = queue[0] || null;
 
+  const announcedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activePrompt || announcedRef.current === activePrompt.id) return;
+    announcedRef.current = activePrompt.id;
+    AccessibilityInfo.announceForAccessibility(announcement(activePrompt));
+  }, [activePrompt]);
+
   useEffect(() => {
     setReviewOpen(false);
   }, [activePrompt?.id]);
@@ -208,53 +222,57 @@ export function PromptHost() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Review pending agent input"
-        activeOpacity={0.86}
+        haptic="light"
         onPress={() => setReviewOpen(true)}
-        style={[elevation(1, colors, isDark), styles.pendingBanner, { backgroundColor: colors.raised, borderColor: colors.hairline, borderLeftColor: colors.attention.ink }]}
+        style={[elevation(2, colors, isDark), styles.pendingBanner, { backgroundColor: colors.raised, borderColor: colors.hairline, borderLeftColor: colors.attention.ink }]}
       >
         <View style={[styles.pendingIcon, { backgroundColor: colors.attention.wash }]}>
-          <Text variant="base" importantForAccessibility="no" style={{ color: colors.attention.ink, fontWeight: fontWeights.semibold }}>◆</Text>
+          <Text variant="title3" importantForAccessibility="no" style={{ color: colors.attention.ink }}>{vocabulary.status.waiting.glyph}</Text>
         </View>
         <View style={styles.pendingCopy}>
-          <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>Input required</Text>
-          <Text variant="xs" dim numberOfLines={1}>Agent is waiting · tap to review</Text>
+          <Text variant="body" style={{ fontWeight: '600' }}>Input required</Text>
+          <Text variant="caption" tone="ink3" numberOfLines={1}>Mucli is waiting · tap to review</Text>
         </View>
         {queue.length > 1 ? (
-          <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{queue.length} pending</Text>
+          <Text variant="caption" tone="ink3" numeric>{queue.length} pending</Text>
         ) : null}
-        <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
+        <Icon name="chevron-right" color={colors.ink3} />
       </Pressable>
     );
   }
 
   return (
-    <ModalFrame statusBarTranslucent={false}
+    <Sheet
       visible
-      transparent
-      animationType="fade"
-      onRequestClose={() => setReviewOpen(false)}
+      dismissable={false}
+      onClose={() => setReviewOpen(false)}
+      title={activePrompt.shape === 'tool_approval' ? 'Approval needed' : 'Mucli has a question'}
+      headerRight={(
+        <Pressable
+          accessibilityLabel="Minimize pending input"
+          onPress={() => setReviewOpen(false)}
+          style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}
+        >
+          <Icon name="minimize-2" color={colors.ink3} />
+        </Pressable>
+      )}
     >
-      <View style={[styles.backdrop, { backgroundColor: colors.scrim }]}>
-        <View style={[styles.dialog, elevation(2, colors, isDark)]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Minimize pending input"
-            onPress={() => setReviewOpen(false)}
-            style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.sunken : colors.sunken }]}
-          >
-            <Ionicons name="remove-outline" size={20} color={colors.ink3} />
-          </Pressable>
-          <PromptBody
-            prompt={activePrompt}
-            submitting={submitting}
-            submit={submit}
-            cancel={cancel}
-            queueDepth={queue.length}
-          />
-        </View>
-      </View>
-    </ModalFrame>
+      <PromptBody
+        prompt={activePrompt}
+        submitting={submitting}
+        submit={submit}
+        cancel={cancel}
+        queueDepth={queue.length}
+      />
+    </Sheet>
   );
+}
+
+function announcement(prompt: PendingPrompt): string {
+  if (prompt.shape === 'tool_approval') {
+    return `Mucli needs your approval: ${prompt.tool_name || 'a tool'}`;
+  }
+  return `Mucli has a question: ${prompt.question || prompt.message || 'input required'}`;
 }
 
 // ---------- per-shape body ----------------------------------------------
@@ -287,58 +305,33 @@ function PromptBody({ prompt, submitting, submit, cancel, queueDepth }: PromptBo
   }
 }
 
-// ---------- shared header -----------------------------------------------
-
-function PromptHeader({
-  icon,
-  label,
-  title,
-  queueDepth,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  title: string;
-  queueDepth: number;
-}) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.headingRow}>
-      <View style={[styles.icon, { backgroundColor: colors.sunken }]}>
-        <Ionicons name={icon} size={24} color={colors.ink2} />
-      </View>
-      <View style={styles.headingCopy}>
-        <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>
-          {label.toUpperCase()}
-        </Text>
-        <Text variant="lg" style={{ color: colors.ink, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }} numberOfLines={2}>
-          {title}
-        </Text>
-      </View>
-      {queueDepth > 1 && (
-        <View style={[styles.queueBadge, { backgroundColor: colors.sunken }]}>
-          <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>1 of {queueDepth}</Text>
-        </View>
-      )}
-    </View>
-  );
-}
+// ---------- shared pieces -----------------------------------------------
 
 function CancelButton({ onPress }: { onPress: () => void }) {
-  const { colors } = useTheme();
-  return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.denyAction}>
-      <Text variant="sm" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Cancel</Text>
-    </Pressable>
-  );
+  return <Button variant="ghost" label="Cancel" onPress={onPress} accessibilityHint="Dismisses the request without answering" />;
 }
 
 function LoadingRow() {
-  const { colors } = useTheme();
   return (
     <View style={styles.loadingRow}>
-      <ActivityIndicator color={colors.accent.ink} />
-      <Text variant="sm" style={{ color: colors.ink3 }}>Submitting…</Text>
+      <InkDrop label="Submitting…" />
     </View>
+  );
+}
+
+function Actions({ children }: { children: React.ReactNode }) {
+  return <View style={styles.actions}>{children}</View>;
+}
+
+function AnswerField(props: React.ComponentProps<typeof TextInput>) {
+  const { colors } = useTheme();
+  return (
+    <TextInput
+      placeholderTextColor={colors.ink3}
+      maxFontSizeMultiplier={2}
+      {...props}
+      style={[styles.textInput, typeStyle('body-lg'), { backgroundColor: colors.surface, borderColor: colors.controlBorder, color: colors.ink }]}
+    />
   );
 }
 
@@ -357,75 +350,33 @@ export function ToolApprovalBody({
   cancel: () => void;
   queueDepth: number;
 }) {
-  const { colors } = useTheme();
   const [remember, setRemember] = useState(false);
 
-  const argsText = useMemo(() => formatArgs(prompt.tool_args), [prompt.tool_args]);
+  const argsText = formatArgs(prompt.tool_args);
   const risk = typeof prompt.risk === 'string' ? prompt.risk : '';
   const description =
     (typeof prompt.description === 'string' && prompt.description.trim()) ||
     `Allow ${prompt.tool_name || 'this tool'} to run?`;
 
   return (
-    <>
-      <PromptHeader
-        icon="shield-checkmark-outline"
-        label="Tool approval"
-        title={prompt.tool_name || 'Tool request'}
-        queueDepth={queueDepth}
-      />
-      <Text variant="sm" style={[styles.description, { color: colors.ink2 }]}>
-        {description}
-      </Text>
-      {!!risk && (
-        <View style={[styles.riskRow, { backgroundColor: colors.attention.wash, borderColor: colors.attention.ink }]}>
-          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.attention.ink }}>◆</Text>
-          <Text variant="xs" style={{ color: colors.ink2, flex: 1 }}>
-            Risk: {risk}
-          </Text>
-        </View>
-      )}
-      {!!argsText && (
-        <View style={[styles.argsPanel, { backgroundColor: colors.code, borderColor: colors.hairline }]}>
-          <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
-            Arguments
-          </Text>
-          <ScrollView style={styles.argsScroll} nestedScrollEnabled>
-            <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }} selectable>
-              {argsText}
-            </Text>
-          </ScrollView>
-        </View>
-      )}
-      <Pressable
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: remember }}
-        accessibilityLabel="Always allow this tool"
-        onPress={() => setRemember(v => !v)}
-        style={styles.checkboxRow}
-        testID="tool-approval-remember"
-      >
-        <Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={remember ? colors.accent.ink : colors.ink3} />
-        <Text variant="sm" style={{ color: colors.ink2, marginLeft: spacing.sm }}>
-          Always allow this tool
-        </Text>
-      </Pressable>
-      {submitting ? (
-        <LoadingRow />
-      ) : (
-        <View style={styles.actions}>
-          {/* One control, one meaning: the checkbox above decides whether
-              the approval is remembered for this tool. */}
-          <Button
-            title={remember ? 'Always allow' : 'Allow once'}
-            onPress={() => submit({ approved: true, remember })}
-            style={styles.primaryAction}
-            testID="tool-approval-allow"
-          />
-          <CancelButton onPress={cancel} />
-        </View>
-      )}
-    </>
+    <ApprovalCard
+      toolName={prompt.tool_name || 'this tool'}
+      description={description}
+      target={primaryArg(prompt.tool_args)}
+      preview={argsText}
+      risk={risk}
+      highRisk={/high|critical|destructive/i.test(risk)}
+      remember={remember}
+      onRememberChange={setRemember}
+      rememberTestID="tool-approval-remember"
+      approveTestID="tool-approval-allow"
+      submitting={submitting}
+      queue={queueDepth > 1 ? { index: 1, total: queueDepth } : undefined}
+      // One control, one meaning: the checkbox decides whether the approval is remembered.
+      onApprove={() => submit({ approved: true, remember })}
+      denyLabel="Cancel"
+      onDeny={cancel}
+    />
   );
 }
 
@@ -444,7 +395,6 @@ function ChoiceBody({
   cancel: () => void;
   queueDepth: number;
 }) {
-  const { colors } = useTheme();
   const isChoices = prompt.shape === 'choices';
   const multi = !!prompt.multi_select && !isChoices;
   const options = Array.isArray(prompt.options) ? prompt.options
@@ -480,93 +430,30 @@ function ChoiceBody({
 
   const canSubmit = selected.length > 0 || (useOther && otherText.trim().length > 0);
 
+  const choiceOptions = options.map(opt => ({ value: optValue(opt), label: optLabel(opt) }));
   return (
-    <>
-      <PromptHeader
-        icon="list-outline"
-        label="Choose"
-        title={prompt.question || prompt.message || 'Choose an option'}
-        queueDepth={queueDepth}
-      />
-      {!!prompt.description && (
-        <Text variant="sm" style={[styles.description, { color: colors.ink2 }]}>
-          {prompt.description}
-        </Text>
-      )}
-      <ScrollView style={styles.choiceScroll} nestedScrollEnabled>
-        {options.map((opt, idx) => {
-          const value = optValue(opt);
-          const label = optLabel(opt);
-          const isSelected = selected.includes(value);
-          return (
-            <Pressable
-              key={`opt-${idx}`}
-              accessibilityRole={multi ? 'checkbox' : 'radio'}
-              onPress={() => toggle(value)}
-              style={[
-                styles.optionRow,
-                {
-                  backgroundColor: isSelected ? colors.accent.wash : colors.raised,
-                  borderColor: isSelected ? colors.accent.ink : colors.hairline,
-                },
-              ]}
-            >
-              <Ionicons
-                name={multi
-                  ? (isSelected ? 'checkbox' : 'square-outline')
-                  : (isSelected ? 'radio-button-on' : 'radio-button-off')}
-                size={22}
-                color={isSelected ? colors.accent.ink : colors.ink3}
-              />
-              <Text variant="sm" style={{ color: colors.ink, flex: 1, marginLeft: spacing.md }}>
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
-        {allowOther && (
-          <Pressable
-            accessibilityRole="radio"
-            onPress={() => { setUseOther(true); if (!multi) setSelected([]); }}
-            style={[
-              styles.optionRow,
-              {
-                backgroundColor: useOther ? colors.accent.wash : colors.raised,
-                borderColor: useOther ? colors.accent.ink : colors.hairline,
-              },
-            ]}
-          >
-            <Ionicons
-              name={multi ? (useOther ? 'checkbox' : 'square-outline') : (useOther ? 'radio-button-on' : 'radio-button-off')}
-              size={22}
-              color={useOther ? colors.accent.ink : colors.ink3}
-            />
-            <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.md }}>Other…</Text>
-          </Pressable>
-        )}
-        {allowOther && useOther && (
-          <TextInput
-            value={otherText}
-            onChangeText={setOtherText}
-            placeholder="Type your answer"
-            placeholderTextColor={colors.ink3}
-            style={[
-              styles.textInput,
-              { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink },
-            ]}
-            autoFocus
-          />
-        )}
-      </ScrollView>
-      {submitting ? (
-        <LoadingRow />
-      ) : (
-        <View style={styles.actions}>
-          <Button title="Submit" onPress={handleSubmit} disabled={!canSubmit} style={styles.primaryAction} />
+    <PromptFrame tone="accent" chip="Question" title={prompt.question || prompt.message || 'Choose an option'}
+      queue={queueDepth > 1 ? { index: 1, total: queueDepth } : undefined}
+      actions={submitting ? <LoadingRow /> : (
+        <Actions>
           <CancelButton onPress={cancel} />
-        </View>
+          <Button variant="primary" label="Submit" onPress={handleSubmit} disabled={!canSubmit} />
+        </Actions>
+      )}>
+      {!!prompt.description && <Text variant="body" tone="ink2">{prompt.description}</Text>}
+      <ChoicePrompt options={choiceOptions} selected={selected} onToggle={toggle} multi={multi} />
+      {allowOther && (
+        <ChoicePrompt
+          options={[{ value: '__other__', label: 'Other…' }]}
+          selected={useOther ? ['__other__'] : []}
+          multi={multi}
+          onToggle={() => { setUseOther(true); if (!multi) setSelected([]); }}
+        />
       )}
-    </>
+      {allowOther && useOther && (
+        <AnswerField value={otherText} onChangeText={setOtherText} placeholder="Type your answer" accessibilityLabel="Your answer" />
+      )}
+    </PromptFrame>
   );
 }
 
@@ -585,7 +472,6 @@ function QuizBody({
   cancel: () => void;
   queueDepth: number;
 }) {
-  const { colors } = useTheme();
   const questions: QuizQuestion[] = Array.isArray(prompt.questions) ? prompt.questions : [];
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
@@ -604,72 +490,31 @@ function QuizBody({
   const canSubmit = questions.length > 0 && answeredCount === questions.length;
 
   return (
-    <>
-      <PromptHeader
-        icon="school-outline"
-        label="Quiz"
-        title="Answer the questions"
-        queueDepth={queueDepth}
-      />
-      <ScrollView style={styles.choiceScroll} nestedScrollEnabled>
-        {questions.map((q, qi) => (
-          <View key={q.qid || `q-${qi}`} style={styles.quizQuestionBlock}>
-            <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
-              {qi + 1}. {q.prompt}
-            </Text>
-            {q.kind === 'fill_blank' ? (
-              <TextInput
-                value={answers[q.qid] || ''}
-                onChangeText={text => setAnswer(q.qid, text)}
-                placeholder="Type your answer"
-                placeholderTextColor={colors.ink3}
-                style={[
-                  styles.textInput,
-                  { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink },
-                ]}
-              />
-            ) : (
-              (q.options || []).map((opt, oi) => {
-                const optVal = quizOptionValue(opt);
-                const optLbl = optLabel(opt);
-                const isSelected = answers[q.qid] === optVal;
-                return (
-                  <Pressable
-                    key={`q${qi}-opt${oi}`}
-                    accessibilityRole="radio"
-                    onPress={() => setAnswer(q.qid, optVal)}
-                    style={[
-                      styles.optionRow,
-                      {
-                        backgroundColor: isSelected ? colors.accent.wash : colors.raised,
-                        borderColor: isSelected ? colors.accent.ink : colors.hairline,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                      size={22}
-                      color={isSelected ? colors.accent.ink : colors.ink3}
-                    />
-                    <Text variant="sm" style={{ color: colors.ink, flex: 1, marginLeft: spacing.md }}>
-                      {optLbl}
-                    </Text>
-                  </Pressable>
-                );
-              })
-            )}
-          </View>
-        ))}
-      </ScrollView>
-      {submitting ? (
-        <LoadingRow />
-      ) : (
-        <View style={styles.actions}>
-          <Button title="Submit" onPress={handleSubmit} disabled={!canSubmit} style={styles.primaryAction} />
+    <PromptFrame tone="accent" chip="Quiz" title="Answer the questions"
+      queue={queueDepth > 1 ? { index: 1, total: queueDepth } : undefined}
+      actions={submitting ? <LoadingRow /> : (
+        <Actions>
           <CancelButton onPress={cancel} />
+          <Button variant="primary" label="Submit" onPress={handleSubmit} disabled={!canSubmit} />
+        </Actions>
+      )}>
+      {questions.map((q, qi) => (
+        <View key={q.qid || `q-${qi}`} style={styles.quizQuestionBlock}>
+          <Text variant="body" style={{ fontWeight: '600', marginBottom: spacing.sm }}>
+            {qi + 1}. {q.prompt}
+          </Text>
+          {q.kind === 'fill_blank' ? (
+            <AnswerField value={answers[q.qid] || ''} onChangeText={text => setAnswer(q.qid, text)} placeholder="Type your answer" accessibilityLabel={`Answer to question ${qi + 1}`} />
+          ) : (
+            <ChoicePrompt
+              options={(q.options || []).map(opt => ({ value: quizOptionValue(opt), label: optLabel(opt) }))}
+              selected={answers[q.qid] !== undefined ? [answers[q.qid]] : []}
+              onToggle={value => setAnswer(q.qid, value)}
+            />
+          )}
         </View>
-      )}
-    </>
+      ))}
+    </PromptFrame>
   );
 }
 
@@ -688,27 +533,19 @@ function ConfirmBody({
   cancel: () => void;
   queueDepth: number;
 }) {
-  const { colors } = useTheme();
   const message = prompt.message || prompt.description || 'Confirm?';
 
   return (
-    <>
-      <PromptHeader
-        icon="help-circle-outline"
-        label="Confirm"
-        title={message}
-        queueDepth={queueDepth}
-      />
-      {submitting ? (
-        <LoadingRow />
-      ) : (
-        <View style={styles.actions}>
-          <Button title="Yes" onPress={() => submit({ value: true })} style={styles.primaryAction} />
-          <Button title="No" variant="secondary" onPress={() => submit({ value: false })} style={styles.secondaryAction} />
+    <PromptFrame tone="accent" chip="Confirm" title={message}
+      queue={queueDepth > 1 ? { index: 1, total: queueDepth } : undefined}
+      actions={submitting ? <LoadingRow /> : (
+        <Actions>
           <CancelButton onPress={cancel} />
-        </View>
+          <Button variant="secondary" label="No" onPress={() => submit({ value: false })} />
+          <Button variant="primary" label="Yes" onPress={() => submit({ value: true })} />
+        </Actions>
       )}
-    </>
+    />
   );
 }
 
@@ -727,7 +564,6 @@ function InputBody({
   cancel: () => void;
   queueDepth: number;
 }) {
-  const { colors } = useTheme();
   const defaultValue = typeof prompt.default === 'string' ? prompt.default : '';
   const [text, setText] = useState(defaultValue);
   const message = prompt.message || prompt.description || 'Input';
@@ -737,34 +573,16 @@ function InputBody({
   };
 
   return (
-    <>
-      <PromptHeader
-        icon="create-outline"
-        label="Input"
-        title={message}
-        queueDepth={queueDepth}
-      />
-      <TextInput
-        value={text}
-        onChangeText={setText}
-        placeholder={defaultValue || 'Type your answer'}
-        placeholderTextColor={colors.ink3}
-        style={[
-          styles.textInput,
-          { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink },
-        ]}
-        autoFocus
-        multiline
-      />
-      {submitting ? (
-        <LoadingRow />
-      ) : (
-        <View style={styles.actions}>
-          <Button title="Submit" onPress={handleSubmit} disabled={text.trim().length === 0} style={styles.primaryAction} />
+    <PromptFrame tone="accent" chip="Input" title={message}
+      queue={queueDepth > 1 ? { index: 1, total: queueDepth } : undefined}
+      actions={submitting ? <LoadingRow /> : (
+        <Actions>
           <CancelButton onPress={cancel} />
-        </View>
-      )}
-    </>
+          <Button variant="primary" label="Submit" onPress={handleSubmit} disabled={text.trim().length === 0} />
+        </Actions>
+      )}>
+      <AnswerField value={text} onChangeText={setText} placeholder={defaultValue || 'Type your answer'} accessibilityLabel="Your answer" multiline />
+    </PromptFrame>
   );
 }
 
@@ -783,69 +601,16 @@ const styles = StyleSheet.create({
     minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: radii.panel,
+    borderRadius: radii.lg,
     paddingHorizontal: spacing.base,
     borderWidth: 1,
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
   },
-  pendingIcon: { width: 40, height: 40, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  pendingIcon: { width: 40, height: 40, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
   pendingCopy: { flex: 1, marginHorizontal: spacing.md },
-  minimizeButton: {
-    position: 'absolute',
-    top: spacing.md,
-    right: spacing.md,
-    zIndex: 2,
-    width: touchTarget,
-    height: touchTarget,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backdrop: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  dialog: {
-    width: '100%',
-    maxWidth: 520,
-    maxHeight: '88%',
-    alignSelf: 'center',
-    borderRadius: radii.panel,
-    padding: spacing.lg,
-  },
-  headingRow: { flexDirection: 'row', alignItems: 'center' },
-  icon: { width: 48, height: 48, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
-  headingCopy: { flex: 1, marginLeft: spacing.md },
-  queueBadge: { borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
-  description: { marginTop: spacing.base, lineHeight: typography.sm.lineHeight },
-  riskRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.control, borderWidth: 1, borderLeftWidth: 3, padding: spacing.md, marginTop: spacing.md },
-  argsPanel: { borderRadius: radii.control, borderWidth: 1, padding: spacing.md, marginTop: spacing.md },
-  argsScroll: { maxHeight: 190 },
-  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, minHeight: touchTarget },
-  choiceScroll: { maxHeight: 320, marginTop: spacing.md },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: touchTarget,
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  textInput: {
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-    marginTop: spacing.sm,
-    fontSize: fontSizes.md,
-    minHeight: 48,
-    textAlignVertical: 'top',
-  },
+  minimizeButton: { width: touchTarget, height: touchTarget, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
+  textInput: { borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, minHeight: 48, textAlignVertical: 'top' },
   quizQuestionBlock: { marginBottom: spacing.base },
-  actions: { marginTop: spacing.base, gap: spacing.sm },
-  primaryAction: { minHeight: 48, borderRadius: radii.sm },
-  secondaryAction: { minHeight: 48, borderRadius: radii.sm },
-  denyAction: { minHeight: touchTarget, alignItems: 'center', justifyContent: 'center' },
-  loadingRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: spacing.sm },
+  loadingRow: { minHeight: 72, alignItems: 'center', justifyContent: 'center' },
 });

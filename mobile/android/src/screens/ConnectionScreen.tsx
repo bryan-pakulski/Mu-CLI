@@ -9,7 +9,7 @@ import { checkHealth } from '../api/client';
 import { validateBaseUrl } from '../api/urlSafety';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { fontWeights, spacing } from '../theme/tokens';
-import { Button, Field, Panel, StatusIcon, Text, TextField } from '../ui';
+import { Button, Field, Panel, StatusIcon, Text, TextField, WashBackground } from '../ui';
 
 export function ConnectionScreen() {
   const { colors } = useTheme();
@@ -87,8 +87,10 @@ export function ConnectionScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
-      <View style={{ flex: 1, padding: spacing.base, gap: spacing.base }}>
+    <WashBackground art="dawn" height={220} testID="connection-wash">
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
+      {/* Content starts where the Dawn wash has dissolved into canvas (G§6.2.1). */}
+      <View style={{ flex: 1, padding: spacing.base, paddingTop: 150, gap: spacing.base }}>
         <Text variant="lg" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>
           Connection Settings
         </Text>
@@ -111,5 +113,6 @@ export function ConnectionScreen() {
         </Panel>
       </View>
     </SafeAreaView>
+    </WashBackground>
   );
 }

@@ -6,7 +6,7 @@ import { tracesApi, TraceRun, TraceSummary } from '../api/traces';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { spacing, fontSizes, fontWeights, radii, tracking, typography, touchTarget } from '../theme/tokens';
-import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { Card, ContextRing, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 type NumericPoint = Record<string, unknown>;
 
@@ -184,6 +184,10 @@ export function SessionTraceScreenV2() {
           </ScrollView>
         ) : null}
 
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
+          <ContextRing fill={contextFill(summary)} />
+          <Text variant="caption" tone="ink3">Peak context fill</Text>
+        </View>
         <MetricGrid metrics={[
           { label: 'Iterations', value: formatInteger(summary.iters), detail: `${summary.tool_calls} tool calls` },
           { label: 'Context peak', value: formatTokens(Math.max(summary.peak_context, summary.peak_estimated)), detail: `${formatPercent(contextFill(summary))} of window` },

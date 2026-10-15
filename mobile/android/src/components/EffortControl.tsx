@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { effortApi, effortHint, effortLabel, effortOptions } from '../api/effort';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Pressable, Sheet, Text } from '../ui';
+import { Pressable, Sheet, Text, Icon } from '../ui';
 
 const HIT = { top: 6, bottom: 6, left: 4, right: 4 };
 
@@ -68,9 +67,9 @@ export function EffortControl({ variant = 'chip' }: { variant?: 'chip' | 'row' }
           accessibilityRole="button"
           accessibilityLabel={`Effort: ${effortLabel(effort)}`}
         >
-          <Ionicons name="speedometer-outline" size={13} color={effort ? colors.accent.ink : colors.ink3} />
+          <Icon name="gauge" size="sm" color={effort ? colors.accent.ink : colors.ink3} />
           <Text variant="xs" style={{ color: effort ? colors.ink2 : colors.ink3 }}>{effortLabel(effort)}</Text>
-          <Ionicons name="chevron-down" size={13} color={colors.ink3} />
+          <Icon name="chevron-down" size="sm" color={colors.ink3} />
         </Pressable>
       ) : (
         <Pressable
@@ -80,14 +79,14 @@ export function EffortControl({ variant = 'chip' }: { variant?: 'chip' | 'row' }
           accessibilityRole="button"
           accessibilityLabel={`Effort: ${effortLabel(effort)}`}
         >
-          <Ionicons name="speedometer-outline" size={20} color={colors.ink3} />
+          <Icon name="gauge" size="md" color={colors.ink3} />
           <View style={styles.rowCopy}>
             <Text variant="base" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>Effort</Text>
             <Text variant="xs" style={{ color: colors.ink3 }}>
               {disabled ? 'Load a session to set effort' : `${effortLabel(effort)} · ${effortHint(effort)}`}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
+          <Icon name="chevron-right" size="sm" color={colors.ink3} />
         </Pressable>
       )}
 
@@ -115,7 +114,7 @@ export function EffortControl({ variant = 'chip' }: { variant?: 'chip' | 'row' }
                   <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{effortLabel(level)}</Text>
                   <Text variant="xs" dim>{effortHint(level)}</Text>
                 </View>
-                {active ? <Ionicons name="checkmark" size={18} color={colors.accent.ink} /> : null}
+                {active ? <Icon name="check" size="md" color={colors.accent.ink} /> : null}
               </Pressable>
             );
           })}

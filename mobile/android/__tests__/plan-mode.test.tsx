@@ -82,7 +82,8 @@ describe('plan mode indicators', () => {
     useConnectionStore.setState({ planMode: true } as any);
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const screen = render(<PlanModeBadge />);
-    expect(screen.getByText('🔒 Plan')).toBeTruthy();
+    expect(screen.getByText('Plan')).toBeTruthy();
+    expect(screen.getByTestId('plan-mode-badge-lock', { includeHiddenElements: true })).toBeTruthy();
     fireEvent.press(screen.getByTestId('plan-mode-badge'));
     expect(alert).toHaveBeenCalledWith('Turn off plan mode?', expect.any(String), expect.any(Array));
     const buttons = alert.mock.calls[0][2] as Array<{ text: string; onPress?: () => void }>;
@@ -96,6 +97,7 @@ describe('plan mode indicators', () => {
     useConnectionStore.setState({ planMode: true } as any);
     const screen = render(<PlanModeStrip />);
     expect(screen.getByText(/read-only\. Writing is blocked\./)).toBeTruthy();
+    expect(screen.getByTestId('plan-mode-strip-lock', { includeHiddenElements: true })).toBeTruthy();
     fireEvent.press(screen.getByLabelText('Turn off plan mode'));
     await waitFor(() => expect(inspector.setVariable).toHaveBeenCalledWith('plan_mode', false, 's1'));
     await waitFor(() => expect(screen.queryByTestId('plan-mode-strip')).toBeNull());

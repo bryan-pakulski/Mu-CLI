@@ -2,11 +2,10 @@ import React, { useState, useCallback } from 'react';
 import { FlatList, View, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { skillsApi, Skill } from '../api/skills';
 import { elevation, radii, spacing, fontWeights, fonts } from '../theme/tokens';
-import { Button, Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { Button, Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
 
 export function SkillsScreen() {
   const { colors, isDark } = useTheme();
@@ -98,7 +97,7 @@ export function SkillsScreen() {
               <Button title="Details" variant="ghost" onPress={() => setSelected(item)} />
               <Button title={item.enabled ? 'Disable' : 'Enable'} onPress={() => toggle(item)} />
               <Pressable accessibilityLabel={`Remove skill ${item.name}`} onPress={() => remove(item.name)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ minHeight: 44, justifyContent: 'center' }}>
-                <Ionicons name="trash-outline" size={20} color={colors.danger.ink} />
+                <Icon name="trash-2" size="md" color={colors.danger.ink} />
               </Pressable>
             </View>
           </Card>

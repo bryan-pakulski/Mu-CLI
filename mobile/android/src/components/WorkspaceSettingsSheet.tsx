@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { WorkspacePathField } from './WorkspacePathField';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
-import { ModalFrame, Pressable, Text } from '../ui';
+import { ModalFrame, Pressable, Text, Icon } from '../ui';
 
 export type WorkspaceSettingsSheetProps = {
   visible: boolean;
@@ -90,7 +89,7 @@ export function WorkspaceSettingsSheet({
       >
         <View style={[styles.header, { paddingTop: spacing.base }]}>
           <Pressable accessibilityLabel="Close" onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline }]}>
-            <Ionicons name="close" size={20} color={colors.ink} />
+            <Icon name="x" size="md" color={colors.ink} />
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={[styles.title, { color: colors.ink }]}>Workspace folders</Text>
@@ -110,7 +109,7 @@ export function WorkspaceSettingsSheet({
               <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.ink3 }]}>Attached</Text>
               {workspaces.length === 0 ? (
                 <View style={[styles.empty, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-                  <Ionicons name="folder-open-outline" size={22} color={colors.ink3} />
+                  <Icon name="folder-open" size="md" color={colors.ink3} />
                   <Text variant="sm" dim>No workspace is attached to this session.</Text>
                 </View>
               ) : (
@@ -122,12 +121,12 @@ export function WorkspaceSettingsSheet({
                         styles.workspaceRow,
                       ]}
                     >
-                      <Ionicons name="folder-outline" size={17} color={colors.ink3} />
+                      <Icon name="folder" size="sm" color={colors.ink3} />
                       <Text variant="xs" style={styles.pathText} numberOfLines={2} ellipsizeMode="middle">
                         {path}
                       </Text>
                       <Pressable accessibilityLabel={`Remove workspace ${path}`} onPress={() => removeWorkspace(path)} style={styles.removeButton}>
-                        <Ionicons name="close" size={17} color={colors.ink3} />
+                        <Icon name="x" size="sm" color={colors.ink3} />
                       </Pressable>
                     </View>
                   ))}
@@ -141,7 +140,7 @@ export function WorkspaceSettingsSheet({
                 disabled={!canAdd}
                 style={[styles.addButton, { backgroundColor: colors.raised, borderColor: colors.hairline, opacity: canAdd ? 1 : 0.5 }]}
               >
-                <Ionicons name="add" size={18} color={canAdd ? colors.ink : colors.ink3} />
+                <Icon name="plus" size="md" color={canAdd ? colors.ink : colors.ink3} />
                 <Text variant="sm" style={{ color: canAdd ? colors.ink : colors.ink3, fontWeight: fontWeights.semibold }}>
                   Attach folder
                 </Text>

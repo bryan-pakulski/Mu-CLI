@@ -119,10 +119,11 @@ def test_artifact_strip_viz_uses_view_url():
 
 def test_artifact_strip_viz_icon_differs_from_files():
     src = read(ARTIFACT_STRIP)
-    assert "stats-chart-outline" in src, "Visualizations should use chart icon"
-    assert "open-outline" in src, "Visualizations should use open icon for action"
-    assert "document-attach-outline" in src, "Files should use document icon"
-    assert "arrow-down-circle-outline" in src, "Files should use download icon"
+    # Wash line icons (G§4) replace the Ionicons names.
+    assert 'name="bar-chart-3"' in src, "Visualizations should use chart icon"
+    assert 'name="external-link"' in src, "Visualizations should use open icon for action"
+    assert 'name="paperclip"' in src, "Files should use document icon"
+    assert 'name="download"' in src, "Files should use download icon"
 
 
 def test_artifact_strip_conditionally_renders_sections():

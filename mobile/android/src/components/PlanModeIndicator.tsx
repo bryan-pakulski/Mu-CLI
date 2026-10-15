@@ -4,7 +4,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { PLAN_MODE_TOOLTIP, setPlanModeRemote } from '../api/planMode';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Icon, Pressable, Text } from '../ui';
 
 export const PLAN_MODE_PLACEHOLDER = 'Plan mode: read-only — writing is blocked';
 
@@ -63,7 +63,8 @@ export function PlanModeBadge() {
       onPress={confirmTurnOff}
       style={[styles.badge, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
     >
-      <Text variant="xs" style={[styles.badgeText, { color: colors.plan.ink }]}>🔒 Plan</Text>
+      <Icon name="lock" size="sm" color={colors.plan.ink} testID="plan-mode-badge-lock" />
+      <Text variant="xs" style={[styles.badgeText, { color: colors.plan.ink }]}>Plan</Text>
     </Pressable>
   );
 }
@@ -80,8 +81,9 @@ export function PlanModeStrip() {
       accessibilityLabel="Plan mode, read-only. Writing is blocked."
       style={[styles.strip, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
     >
+      <Icon name="lock" size="sm" color={colors.plan.ink} testID="plan-mode-strip-lock" />
       <Text variant="xs" style={[styles.stripText, { color: colors.ink }]}>
-        <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>🔒 Plan mode</Text>
+        <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>Plan mode</Text>
         {' — read-only. Writing is blocked.'}
       </Text>
       <Pressable
@@ -101,6 +103,9 @@ export function PlanModeStrip() {
 
 const styles = StyleSheet.create({
   badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radii.pill,

@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi } from '../api/sessions';
 import {
@@ -17,7 +16,7 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { EmptyState, Pressable, Skeleton, Text } from '../ui';
+import { EmptyState, Pressable, Skeleton, Text, Icon } from '../ui';
 
 export type ThreadsScreenProps = NativeStackScreenProps<RootStackParamList, 'Threads'>;
 
@@ -211,7 +210,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             style={[styles.createButton, { backgroundColor: colors.accent.ink }]}
             accessibilityLabel="Create thread"
           >
-            <Ionicons name="add" size={18} color={colors.onInk} />
+            <Icon name="plus" size="md" color={colors.onInk} />
             <Text variant="sm" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Thread</Text>
           </Pressable>
         </View>
@@ -268,17 +267,17 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
               </View>
             ) : null}
             {thread.thread_id === currentThreadId ? (
-              <Ionicons name="checkmark" size={18} color={colors.accent.ink} />
+              <Icon name="check" size="md" color={colors.accent.ink} />
             ) : !ACTIVE_STATUSES.includes(thread.status) ? (
               <Pressable
                 onPress={() => deleteThread(thread)}
                 style={styles.deleteButton}
                 accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
               >
-                <Ionicons name="trash-outline" size={17} color={colors.ink3} />
+                <Icon name="trash-2" size="sm" color={colors.ink3} />
               </Pressable>
             ) : (
-              <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
+              <Icon name="chevron-right" size="sm" color={colors.ink3} />
             )}
           </Pressable>
         ))}
@@ -289,7 +288,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
         </View>
         {!loading && activity.length === 0 ? (
           <View style={styles.activityEmpty}>
-            <Ionicons name="pulse-outline" size={22} color={colors.ink3} />
+            <Icon name="activity" size="md" color={colors.ink3} />
             <Text variant="sm" dim style={styles.activityEmptyText}>
               Messages, path claims, status changes, and conflicts will appear here.
             </Text>

@@ -2,12 +2,11 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { sessionsApi } from '../api/sessions';
 import { spacing, fontSizes, fontWeights, fonts, radii, typography, touchTarget } from '../theme/tokens';
-import { Chip, Pressable, Text } from '../ui';
+import { Chip, Pressable, Text, Icon } from '../ui';
 
 const MUCLI_SHELL_QOL_V1 = true;
 const SHELL_HISTORY = new Map<string, string[]>();
@@ -351,7 +350,7 @@ export function ShellScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Ionicons name="terminal-outline" size={18} color={colors.ink2} />
+          <Icon name="terminal" size="md" color={colors.ink2} />
           <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Shell</Text>
           <Chip
             label={connected ? 'Connected' : connecting ? 'Connecting…' : 'Disconnected'}
@@ -361,15 +360,15 @@ export function ShellScreen() {
         <View style={styles.headerActions}>
           {!followingOutput && output ? (
             <Pressable onPress={() => jumpToEnd()} style={styles.actionBtn} accessibilityLabel="Jump to latest shell output">
-              <Ionicons name="arrow-down-circle-outline" size={20} color={colors.ink2} />
+              <Icon name="arrow-down" size="md" color={colors.ink2} />
             </Pressable>
           ) : null}
           <Pressable onPress={clear} style={styles.actionBtn} accessibilityLabel="Clear output">
-            <Ionicons name="trash-outline" size={20} color={colors.ink3} />
+            <Icon name="trash-2" size="md" color={colors.ink3} />
           </Pressable>
           {connected ? (
             <Pressable onPress={disconnect} style={styles.actionBtn} accessibilityLabel="Disconnect">
-              <Ionicons name="close-circle-outline" size={20} color={colors.danger.ink || colors.ink3} />
+              <Icon name="circle-x" size="md" color={colors.danger.ink || colors.ink3} />
             </Pressable>
           ) : (
             <Pressable
@@ -378,7 +377,7 @@ export function ShellScreen() {
               style={styles.actionBtn}
               accessibilityLabel="Connect"
             >
-              <Ionicons name="play-circle-outline" size={20} color={colors.accent.ink} />
+              <Icon name="play" size="md" color={colors.accent.ink} />
             </Pressable>
           )}
         </View>
@@ -435,16 +434,16 @@ export function ShellScreen() {
               <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>TAB</Text>
             </Pressable>
             <Pressable onPress={() => cycleHistory(-1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Previous shell command">
-              <Ionicons name="chevron-up" size={17} color={colors.ink3} />
+              <Icon name="chevron-up" size="sm" color={colors.ink3} />
             </Pressable>
             <Pressable onPress={() => cycleHistory(1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Next shell command">
-              <Ionicons name="chevron-down" size={17} color={colors.ink3} />
+              <Icon name="chevron-down" size="sm" color={colors.ink3} />
             </Pressable>
           </View>
         </KeyboardAvoidingView>
       ) : (
         <View style={styles.emptyWrap}>
-          <Ionicons name="terminal-outline" size={48} color={colors.ink3} />
+          <Icon name="terminal" size="lg" color={colors.ink3} />
           <Text variant="sm" style={{ color: colors.ink3, marginTop: spacing.sm, textAlign: 'center' }}>
             {'No shell connected.\nTap the connect button to open an interactive terminal into the session container.'}
           </Text>

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 
 import { ApiError } from '../api/client';
 import { isMissingEndpoint, jobCoreApi, type ActivityContainer, type ActivityJob, type ActivityLog, type ActivityVM } from '../api/jobCore';
@@ -11,7 +10,7 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing } from '../theme/tokens';
 import { ACTIVE_STATES, bytes, duration, money, stateLabel, stateStatus } from '../theme/status';
-import { Banner, Button, Empty, Loading, Panel, Pill, Pre, Sheet, Sparkline, StatusIcon, StatusPill, Text, useToast } from '../ui';
+import { Banner, Button, Empty, Loading, Panel, Pill, Pre, Sheet, Sparkline, StatusIcon, StatusPill, Text, useToast, Icon, type IconName } from '../ui';
 
 export type JobActivityScreenProps = NativeStackScreenProps<RootStackParamList, 'JobActivity'>;
 
@@ -35,8 +34,8 @@ export function appendSamples(prev: Samples, containers: ActivityContainer[], li
   return next;
 }
 
-const KIND_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
-  agent: 'hardware-chip-outline', checks: 'hammer-outline', provision: 'sync-outline', push: 'cloud-upload-outline', waiting: 'pause-circle-outline',
+const KIND_ICON: Record<string, IconName> = {
+  agent: 'cpu', checks: 'hammer', provision: 'refresh-cw', push: 'cloud-upload', waiting: 'pause',
 };
 
 /** Wash Activity: jobs → agent/checks/containers with CPU/mem sparklines, log viewer, remove container. */
@@ -178,7 +177,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
                   key={job.id}
                   testID={`activity-job-${job.id}`}
                   title={<View style={[styles.row, { flex: 1 }]}>
-                    <Ionicons name={KIND_ICON[job.kind] || 'ellipse-outline'} size={16} color={st === 'active' ? colors.running.ink : colors.attention.ink} accessibilityLabel={job.kind} />
+                    <Icon name={KIND_ICON[job.kind] || 'circle'} size="sm" color={st === 'active' ? colors.running.ink : colors.attention.ink} accessibilityLabel={job.kind} />
                     <Text variant="sm" style={[styles.mono, { color: colors.accent.ink, fontWeight: fontWeights.semibold }]}>{job.key || `#${job.id.slice(0, 8)}`}</Text>
                     <StatusPill status={st} label={stateLabel(job.state)} />
                   </View>}

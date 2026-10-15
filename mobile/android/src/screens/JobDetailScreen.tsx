@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 
 import { jobCoreApi, subscribeToJobChanges, type Finding, type JobPart, type JobVM } from '../api/jobCore';
 import { jobsApi, type JobAttempt, type JobDiagnosticsSnapshot } from '../api/jobs';
@@ -18,7 +17,7 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, duration, money, stateLabel, stateStatus, verdictStyle, when } from '../theme/status';
-import { Banner, Button, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, Pre, Pressable, type TabItem, Tabs, Text } from '../ui';
+import { Banner, Button, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, Pre, Pressable, type TabItem, Tabs, Text, Icon } from '../ui';
 
 export const LIVE_DIFF_REFRESH_MS = 5000;
 
@@ -238,7 +237,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           </View>
           <Text variant="md">{job.title}</Text>
           <View style={styles.wrap}>
-            {job.branch ? <View style={styles.row} accessible accessibilityLabel={`branch ${job.branch}`}><Ionicons name="git-branch-outline" size={14} color={colors.ink3} /><Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{job.branch}</Text></View> : null}
+            {job.branch ? <View style={styles.row} accessible accessibilityLabel={`branch ${job.branch}`}><Icon name="git-branch" size="sm" color={colors.ink3} /><Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{job.branch}</Text></View> : null}
             {job.repository ? <Text variant="xs" style={{ color: colors.ink3 }}>repo: <Text variant="xs" style={styles.mono}>{job.repository}</Text></Text> : null}
             {failed && job.failed_from ? <Text variant="xs" style={{ color: colors.danger.ink }}>failed in {stateLabel(job.failed_from)}</Text> : null}
             {agentsLabel ? <Text variant="xs" testID="job-stage-agents" style={{ color: colors.ink3 }}>agents: {agentsLabel}</Text> : null}

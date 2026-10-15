@@ -2,14 +2,14 @@
 
 Covers three surfaces:
 1. Web GUI welcome.html — sessionGlyph() for chat/workspace/container.
-2. Mobile SwipeSessionsDrawer — typeIcon() maps session_type to Ionicons.
+2. Mobile SwipeSessionsDrawer — typeIcon() maps session_type to Wash icons.
 3. TUI mucli — session picker shows glyph prefix; creation prompt shows glyph.
 4. SessionManager.get_session_list_with_type() — reads session_type from disk.
 
 Glyphs used across surfaces:
-  chat      → ○  (Ionicons: chatbubble-ellipses-outline)
-  workspace → ▱  (Ionicons: folder-open-outline)
-  container → ◇  (Ionicons: cube-outline)
+  chat      → ○  (Wash icon: message-circle)
+  workspace → ▱  (Wash icon: folder-open)
+  container → ◇  (Wash icon: box)
 """
 
 import json
@@ -78,11 +78,9 @@ class TestMobileSessionDrawer:
 
     def test_type_icon_maps_all_three_types(self):
         src = read(SWIPE_DRAWER)
-        assert "cube-outline" in src, "container icon cube-outline missing"
-        assert "chatbubble-ellipses-outline" in src, (
-            "chat icon chatbubble-ellipses-outline missing"
-        )
-        assert "folder-open-outline" in src, "workspace icon folder-open-outline missing"
+        assert "return 'box'" in src, "container icon box missing"
+        assert "return 'message-circle'" in src, "chat icon message-circle missing"
+        assert "return 'folder-open'" in src, "workspace icon folder-open missing"
 
     def test_type_icon_wrap_style_exists(self):
         src = read(SWIPE_DRAWER)
@@ -98,9 +96,9 @@ class TestMobileNewSessionSheet:
 
     def test_session_types_array_has_icons(self):
         src = read(NEW_SESSION)
-        assert "chatbubble-ellipses-outline" in src
-        assert "folder-open-outline" in src
-        assert "cube-outline" in src
+        assert "icon: 'message-circle'" in src
+        assert "icon: 'folder-open'" in src
+        assert "icon: 'box'" in src
 
 
 # ── TUI ──────────────────────────────────────────────────────────────────────

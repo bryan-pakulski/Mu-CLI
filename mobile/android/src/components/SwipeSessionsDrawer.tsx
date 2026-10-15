@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, PanResponder, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi, type SessionSummary } from '../api/sessions';
 import { threadsApi, type ThreadStatus, type ThreadSummary } from '../api/threads';
 import { useConnectionStore } from '../store/connection';
@@ -9,7 +8,7 @@ import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
 import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
-import { ModalFrame, Pressable, Text } from '../ui';
+import { ModalFrame, Pressable, Text, Icon, type IconName } from '../ui';
 
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
@@ -177,10 +176,10 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
     return colors.ink3;
   };
 
-  const typeIcon = (session: SessionSummary): keyof typeof Ionicons.glyphMap => {
-    if (session.session_type === 'container') return 'cube-outline';
-    if (session.session_type === 'chat') return 'chatbubble-ellipses-outline';
-    return 'folder-open-outline';
+  const typeIcon = (session: SessionSummary): IconName => {
+    if (session.session_type === 'container') return 'box';
+    if (session.session_type === 'chat') return 'message-circle';
+    return 'folder-open';
   };
 
   const drawerVisible = visible && !createSessionOpen && !createThreadOpen;
@@ -214,10 +213,10 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   style={styles.iconButton}
                   accessibilityLabel={activeSessionName ? 'Create thread' : 'Create session'}
                 >
-                  <Ionicons name="add" size={20} color={colors.ink3} />
+                  <Icon name="plus" size="md" color={colors.ink3} />
                 </Pressable>
                 <Pressable onPress={onClose} style={styles.iconButton} accessibilityLabel="Close threads">
-                  <Ionicons name="close" size={20} color={colors.ink3} />
+                  <Icon name="x" size="md" color={colors.ink3} />
                 </Pressable>
               </View>
             </View>
@@ -232,9 +231,9 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   activeOpacity={0.72}
                   style={[styles.primaryAction, { backgroundColor: colors.accent.wash }]}
                 >
-                  <Ionicons name="git-branch-outline" size={18} color={colors.accent.ink} />
+                  <Icon name="git-branch" size="md" color={colors.accent.ink} />
                   <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>New thread</Text>
-                  <Ionicons name="add" size={18} color={colors.accent.ink} />
+                  <Icon name="plus" size="md" color={colors.accent.ink} />
                 </Pressable>
               ) : null}
 
@@ -269,17 +268,17 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                         </View>
                       ) : null}
                       {activeSessionName === thread.session_name ? (
-                        <Ionicons name="checkmark" size={17} color={colors.accent.ink} />
+                        <Icon name="check" size="sm" color={colors.accent.ink} />
                       ) : !ACTIVE_THREAD_STATUSES.includes(thread.status) ? (
                         <Pressable
                           onPress={() => deleteThread(thread)}
                           style={styles.rowAction}
                           accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
                         >
-                          <Ionicons name="trash-outline" size={17} color={colors.ink3} />
+                          <Icon name="trash-2" size="sm" color={colors.ink3} />
                         </Pressable>
                       ) : (
-                        <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
+                        <Icon name="chevron-right" size="sm" color={colors.ink3} />
                       )}
                     </Pressable>
                   ))}
@@ -309,7 +308,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
-                      <Ionicons name={typeIcon(session)} size={17} color={activeSessionName === session.name ? colors.accent.ink : session.is_loaded ? colors.ink2 : colors.ink3} />
+                      <Icon name={typeIcon(session)} size="sm" color={activeSessionName === session.name ? colors.accent.ink : session.is_loaded ? colors.ink2 : colors.ink3} />
                     </View>
                     <View style={styles.rowCopy}>
                       <Text variant="sm" style={styles.rowName} numberOfLines={1}>{session.name}</Text>
@@ -318,10 +317,10 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                       </Text>
                     </View>
                     <Pressable onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>
-                      <Ionicons name="remove-circle-outline" size={18} color={colors.ink3} />
+                      <Icon name="circle-minus" size="md" color={colors.ink3} />
                     </Pressable>
                     <Pressable onPress={() => deleteSession(session)} style={styles.rowAction} accessibilityLabel={`Delete ${session.name}`}>
-                      <Ionicons name="trash-outline" size={17} color={colors.ink3} />
+                      <Icon name="trash-2" size="sm" color={colors.ink3} />
                     </Pressable>
                   </Pressable>
                 ))}
@@ -332,7 +331,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 activeOpacity={0.72}
                 style={[styles.secondaryAction, { borderColor: colors.hairline }]}
               >
-                <Ionicons name="add-circle-outline" size={17} color={colors.ink3} />
+                <Icon name="plus" size="sm" color={colors.ink3} />
                 <Text variant="sm" dim style={{ fontWeight: fontWeights.semibold }}>New session</Text>
               </Pressable>
             </ScrollView>

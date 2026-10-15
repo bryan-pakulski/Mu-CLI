@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, radii, spacing, touchTarget, typography } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 
 export type WorkspacePathFieldProps = {
   value: string;
@@ -62,7 +61,7 @@ export function WorkspacePathField({
   return (
     <View>
       <View style={[styles.inputShell, { backgroundColor: colors.canvas, borderColor: colors.hairline }]}>
-        <Ionicons name="folder-outline" size={18} color={colors.ink3} />
+        <Icon name="folder" size="md" color={colors.ink3} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -79,7 +78,7 @@ export function WorkspacePathField({
         {loading ? (
           <ActivityIndicator size="small" color={colors.accent.ink} />
         ) : value.trim() && exists ? (
-          <Ionicons name="checkmark-circle-outline" size={18} color={colors.ok.ink} />
+          <Icon name="circle-check" size="md" color={colors.ok.ink} />
         ) : null}
       </View>
 
@@ -94,11 +93,11 @@ export function WorkspacePathField({
                 styles.suggestion,
               ]}
             >
-              <Ionicons name="folder-outline" size={16} color={colors.ink3} />
+              <Icon name="folder" size="sm" color={colors.ink3} />
               <Text variant="xs" style={styles.suggestionText} numberOfLines={1} ellipsizeMode="middle">
                 {path}
               </Text>
-              <Ionicons name="return-down-back" size={15} color={colors.ink3} />
+              <Icon name="corner-down-left" size="sm" color={colors.ink3} />
             </Pressable>
           ))}
         </View>

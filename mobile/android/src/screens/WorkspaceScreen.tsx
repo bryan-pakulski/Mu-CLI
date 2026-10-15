@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 import { WorkspaceSettingsSheet } from '../components/WorkspaceSettingsSheet';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
@@ -10,7 +9,7 @@ import { useConnectionStore } from '../store/connection';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { WORKSPACE_CATEGORIES } from '../navigation/workspace';
 import { fontSizes, fontWeights, radii, spacing, tracking } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 
 export type WorkspaceScreenProps = NativeStackScreenProps<RootStackParamList, 'Workspace'>;
 
@@ -65,7 +64,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
             </View>
           </View>
           <View style={styles.workspaceRow}>
-            <Ionicons name="folder-outline" size={17} color={colors.ink3} />
+            <Icon name="folder" size="sm" color={colors.ink3} />
             <Text variant="xs" dim style={styles.workspacePath} numberOfLines={1} ellipsizeMode="middle">
               {workspaces.length > 0
                 ? workspaces.length === 1 ? workspaces[0] : `${workspaces[0]} +${workspaces.length - 1}`
@@ -88,7 +87,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
               onPress={() => navigation.navigate('WorkspaceCategory', { categoryId: category.id, title: category.title })}
               style={styles.categoryRow}
             >
-              <Ionicons name={category.icon} size={20} color={colors.ink3} />
+              <Icon name={category.icon} size="md" color={colors.ink3} />
               <View style={styles.categoryCopy}>
                 <View style={styles.categoryTitleRow}>
                   <Text variant="base" style={styles.categoryTitle}>{category.title}</Text>
@@ -96,7 +95,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 </View>
                 <Text variant="sm" dim>{category.description}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
+              <Icon name="chevron-right" size="md" color={colors.ink3} />
             </Pressable>
           ))}
         </View>

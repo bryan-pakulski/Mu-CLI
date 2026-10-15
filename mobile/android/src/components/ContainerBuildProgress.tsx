@@ -1,9 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 import { STATUS } from '../theme/status';
 
 export type ContainerProgressLog = {
@@ -79,9 +78,9 @@ export function ContainerBuildProgress({
           </Text>
         </View>
         <View style={styles.chevron}>
-          <Ionicons
+          <Icon
             name={expanded ? 'chevron-up' : 'chevron-down'}
-            size={17}
+            size="sm"
             color={colors.ink3}
           />
         </View>

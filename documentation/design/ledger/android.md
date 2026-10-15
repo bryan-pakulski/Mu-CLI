@@ -88,3 +88,28 @@ onto the kit `Pressable`. New coverage: `mobile/android/__tests__/wash-kit.test.
 - `tests/test_mobile_streaming_perf.py:91-95` — `"from 'react-native-markdown-display'" in ChatScreenProduct` → the chat renders `<Markdown variant=…>` and `ui/Markdown.tsx` imports the renderer — Markdown is still only used after finalize.
 - `tests/test_mobile_product_ui.py:114-136` — planos bubbles (`colors.raised` assistant with a squared top-left corner, accent-bordered user bubble, mono interim line, `settings-outline`) → Wash transcript: accent-wash user bubble with a 6px bottom-right corner and ≤80% width, bubble-less assistant prose, "Worked · N steps" interim row, tool calls as `ToolCard`s, labelled session-settings icon button, 44dp pill send — the chat stays flat, compact and single-pane (G§9.6–§9.8).
 - `tests/test_artifact_visualizations_subsection.py:103,110` — `"VISUALIZATIONS"` / `"FILES"` headings → `>Visualizations<` / `>Files<` — the strip still splits visualizations from files; headings follow sentence case (G§2.2 "no ALL-CAPS labels").
+
+## Final pass — one icon set, no chrome emoji, static font weights
+
+Every Ionicons usage under `mobile/android/src` now renders the Wash `Icon`
+(generated Lucide path data, 1.5 stroke, token sizes 16/20/24) and
+`@expo/vector-icons` is no longer a direct dependency (G§4). The Ionicon →
+Wash names follow one mapping (`chevron-forward` → `chevron-right`, `close` →
+`x`, `trash-outline` → `trash-2`, `cube-outline` → `box`,
+`chatbubble-ellipses-outline` → `message-circle`, `folder-open-outline` →
+`folder-open`, `stats-chart-outline` → `bar-chart-3`, `open-outline` →
+`external-link`, `document-attach-outline` → `paperclip`,
+`arrow-down-circle-outline` → `download`, `terminal-outline` → `terminal`,
+…); fourteen missing Lucide icons were added to `mu/design/icons/`. Every
+`accessibilityLabel` and `testID` is unchanged. New coverage:
+`mobile/android/__tests__/wash-icons.test.ts` (no `@expo/vector-icons`/
+`Ionicons` under `src/`, every literal `Icon`/`IconButton` name exists in
+`iconData`, `Icon` sizes are only `sm`/`md`/`lg`, no emoji-presentation
+characters in `src/`).
+
+- `tests/test_artifact_visualizations_subsection.py:123-126` — `"stats-chart-outline"`, `"open-outline"`, `"document-attach-outline"`, `"arrow-down-circle-outline"` in the strip → `name="bar-chart-3"`, `name="external-link"`, `name="paperclip"`, `name="download"` — visualizations keep a chart icon and an open action, files keep a document icon and a download action; the names are the Wash set.
+- `tests/test_session_type_icons.py:81-83` — `typeIcon()` contains `cube-outline` / `chatbubble-ellipses-outline` / `folder-open-outline` → returns `'box'` / `'message-circle'` / `'folder-open'` — each session type keeps its own icon in the session list (docstring lines 5, 10-12 updated to match).
+- `tests/test_session_type_icons.py:99-101` — `SESSION_TYPES` contains the same three Ionicon names → `icon: 'message-circle'` / `icon: 'folder-open'` / `icon: 'box'` — the new-session sheet uses the same per-type icons as the list.
+- `tests/test_mobile_shell_screen.py:113` — `"terminal-outline" in workspace.ts` → `"icon: 'terminal'"` — the Shell entry still has the terminal icon.
+- `mobile/android/__tests__/plan-mode.test.tsx:85-86` — `getByText('🔒 Plan')` → `getByText('Plan')` plus the `plan-mode-badge-lock` icon — the badge still says Plan with a lock; the lock is a Wash line icon instead of an emoji (G§4 "the current 🔒 usages all go away").
+- `mobile/android/__tests__/plan-mode.test.tsx:100` (new assertion) — the composer strip renders the `plan-mode-strip-lock` icon beside "Plan mode" — same lock affordance in the strip.

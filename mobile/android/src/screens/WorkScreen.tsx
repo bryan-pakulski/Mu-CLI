@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 
 import {
   jobsApi,
@@ -33,7 +32,7 @@ import { fontWeights, fonts, radii, spacing, touchTarget, tracking } from '../th
 import { STATUS, duration, money, stateLabel, stateStatus } from '../theme/status';
 import { BAR_HIDDEN, actionLabel, actionTone } from '../components/JobActions';
 import { JobRow, JobsNavBar, ResultRow, focusStep, jobKey, stepsOf, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatStrip, StatusIcon, WashBackground, SwitchRow, Text, TextField, useInterval } from '../ui';
+import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatStrip, StatusIcon, WashBackground, SwitchRow, Text, TextField, useInterval, Icon } from '../ui';
 
 export type WorkScreenProps = NativeStackScreenProps<RootStackParamList, 'Work'>;
 
@@ -164,21 +163,21 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
           <Button
             label="Jira"
             accessibilityLabel="Jira tickets and link settings"
-            icon={<Ionicons name="ticket-outline" size={18} color={colors.ink3} />}
+            icon={<Icon name="ticket" size="md" color={colors.ink3} />}
             onPress={() => setJiraOpen(true)}
           />
           <Button
             iconOnly
             label="Job settings"
             accessibilityLabel="Job settings: stage models"
-            icon={<Ionicons name="options-outline" size={18} color={colors.ink3} />}
+            icon={<Icon name="sliders-horizontal" size="md" color={colors.ink3} />}
             onPress={() => setSettingsOpen(true)}
           />
           <Button
             primary
             label="New job"
             accessibilityLabel="Create engineering job"
-            icon={<Ionicons name="add" size={18} color={colors.onInk} />}
+            icon={<Icon name="plus" size="md" color={colors.onInk} />}
             onPress={() => setCreateOpen(true)}
           />
         </View>
@@ -306,7 +305,7 @@ function RunningRow({ job, onPress }: { job: JobSummary; onPress: () => void }) 
     <Pressable accessibilityRole="button" accessibilityLabel={`${jobKey(job)} ${stateLabel(job.state)}`} onPress={onPress}
       style={({ pressed }) => [styles.running, { backgroundColor: pressed ? colors.sunken : 'transparent', borderBottomColor: colors.hairline }]}>
       <View style={styles.cardHead}>
-        <Ionicons name={job.state === 'checking' ? 'hammer-outline' : job.state === 'pushing' ? 'cloud-upload-outline' : 'hardware-chip-outline'} size={16} color={colors.running.ink} accessibilityLabel={job.state === 'checking' ? 'checks' : 'agent'} />
+        <Icon name={job.state === 'checking' ? 'hammer' : job.state === 'pushing' ? 'cloud-upload' : 'cpu'} size="sm" color={colors.running.ink} accessibilityLabel={job.state === 'checking' ? 'checks' : 'agent'} />
         <Text variant="sm" style={[styles.key, { color: colors.accent.ink }]}>{jobKey(job)}</Text>
         <Text variant="xs">{stateLabel(job.state)}</Text>
         <View style={{ flex: 1 }} />

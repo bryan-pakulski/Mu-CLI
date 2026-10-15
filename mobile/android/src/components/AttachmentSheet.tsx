@@ -1,12 +1,11 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { attachmentsApi, type AttachmentDescriptor } from '../api/attachments';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Button, Pressable, Sheet, Text } from '../ui';
+import { Button, Pressable, Sheet, Text, Icon } from '../ui';
 
 interface Props {
   visible: boolean;
@@ -100,7 +99,7 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
       <View style={styles.header}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Attachments</Text>
         <Pressable onPress={onClose} accessibilityLabel="Close attachments" hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
-          <Ionicons name="close" size={22} color={colors.ink3} />
+          <Icon name="x" size="md" color={colors.ink3} />
         </Pressable>
       </View>
       <View style={styles.toolbar}>
@@ -121,13 +120,13 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
                 onPress={() => toggle(item)}
                 style={[styles.row, { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline }]}
               >
-                <Ionicons name={active ? 'checkbox-outline' : 'document-outline'} size={20} color={active ? colors.accent.ink : colors.ink3} />
+                <Icon name={active ? 'square-check' : 'file'} size="md" color={active ? colors.accent.ink : colors.ink3} />
                 <View style={styles.copy}>
                   <Text variant="sm" numberOfLines={1} style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text>
                   <Text variant="xs" dim>{formatSize(item.size)} · {item.mime_type}</Text>
                 </View>
                 <Pressable accessibilityLabel="Remove attachment" onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
-                  <Ionicons name="trash-outline" size={18} color={colors.ink3} />
+                  <Icon name="trash-2" size="md" color={colors.ink3} />
                 </Pressable>
               </Pressable>
             );

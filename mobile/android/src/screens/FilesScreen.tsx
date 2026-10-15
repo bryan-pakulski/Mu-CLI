@@ -2,11 +2,10 @@ import React, { useState, useCallback } from 'react';
 import { View, ScrollView, RefreshControl, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { filesApi, FileEntry } from '../api/files';
 import { spacing, fonts } from '../theme/tokens';
-import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
 
 export function FilesScreen() {
   const { colors } = useTheme();
@@ -87,7 +86,7 @@ export function FilesScreen() {
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
           <Pressable onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
-            <Ionicons name="arrow-back" size={24} color={colors.ink} />
+            <Icon name="arrow-left" size="lg" color={colors.ink} />
           </Pressable>
           <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
             {fileContent.path}
@@ -107,7 +106,7 @@ export function FilesScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {currentPath && (
           <Pressable onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
-            <Ionicons name="arrow-back" size={24} color={colors.ink} />
+            <Icon name="arrow-left" size="lg" color={colors.ink} />
           </Pressable>
         )}
         <Text variant="sm" style={{ color: colors.ink3, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
@@ -122,9 +121,9 @@ export function FilesScreen() {
           <Pressable key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
             <Card style={{ marginBottom: spacing.xs, minHeight: 44 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                <Ionicons
-                  name={entry.is_dir ? 'folder-outline' : 'document-outline'}
-                  size={20}
+                <Icon
+                  name={entry.is_dir ? 'folder' : 'file'}
+                  size="md"
                   color={entry.is_dir ? colors.ink2 : colors.ink3}
                 />
                 <Text variant="sm" style={{ flex: 1 }} numberOfLines={1}>{entry.name}</Text>

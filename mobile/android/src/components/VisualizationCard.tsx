@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import type { ArtifactDescriptor } from '../api/artifacts';
 import { artifactsApi } from '../api/artifacts';
@@ -9,7 +8,7 @@ import { openExternalUrl } from '../api/urlSafety';
 import type { ThemeColors } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
-import { ModalFrame, Pressable, Text } from '../ui';
+import { ModalFrame, Pressable, Text, Icon } from '../ui';
 
 const MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1 = true;
 
@@ -172,7 +171,7 @@ function VisualizationCardImpl({
               accessibilityRole="button"
               accessibilityLabel="Open visualization full screen"
             >
-              <Ionicons name="expand-outline" size={17} color={colors.ink3} />
+              <Icon name="maximize-2" size="sm" color={colors.ink3} />
             </Pressable>
             <Pressable
               onPress={() => openExternal()}
@@ -180,7 +179,7 @@ function VisualizationCardImpl({
               accessibilityRole="button"
               accessibilityLabel="Open visualization in browser"
             >
-              <Ionicons name="open-outline" size={16} color={colors.ink3} />
+              <Icon name="external-link" size="sm" color={colors.ink3} />
             </Pressable>
           </View>
         </View>
@@ -192,7 +191,7 @@ function VisualizationCardImpl({
             onPress={() => setExpanded(true)}
             style={styles.previewPrompt}
           >
-            <Ionicons name="eye-outline" size={18} color={colors.accent.ink} />
+            <Icon name="eye" size="md" color={colors.accent.ink} />
             <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
               Show interactive preview
             </Text>
@@ -206,7 +205,7 @@ function VisualizationCardImpl({
                 accessibilityRole="button"
                 accessibilityLabel="Hide visualization preview"
               >
-                <Ionicons name="eye-off-outline" size={16} color={colors.ink3} />
+                <Icon name="eye-off" size="sm" color={colors.ink3} />
                 <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>
                   Hide
                 </Text>
@@ -217,7 +216,7 @@ function VisualizationCardImpl({
                 accessibilityRole="button"
                 accessibilityLabel="Open visualization full screen"
               >
-                <Ionicons name="expand-outline" size={16} color={colors.ink3} />
+                <Icon name="maximize-2" size="sm" color={colors.ink3} />
                 <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>
                   Full screen
                 </Text>
@@ -256,7 +255,7 @@ function VisualizationCardImpl({
               accessibilityRole="button"
               accessibilityLabel="Open visualization in browser"
             >
-              <Ionicons name="open-outline" size={17} color={colors.ink3} />
+              <Icon name="external-link" size="sm" color={colors.ink3} />
             </Pressable>
             <Pressable
               onPress={() => setFullScreen(false)}
@@ -264,7 +263,7 @@ function VisualizationCardImpl({
               accessibilityRole="button"
               accessibilityLabel="Exit full-screen visualization"
             >
-              <Ionicons name="close" size={24} color={colors.ink} />
+              <Icon name="x" size="lg" color={colors.ink} />
             </Pressable>
           </View>
           <View style={styles.fullScreenFrame}>

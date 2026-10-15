@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Switch, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import {
   inspectorApi,
   InspectorVariable,
@@ -9,7 +8,7 @@ import {
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget, typography } from '../theme/tokens';
-import { Pressable, Sheet, Text } from '../ui';
+import { Pressable, Sheet, Text, Icon } from '../ui';
 
 export type AdvancedSettingsSheetProps = {
   visible: boolean;
@@ -198,7 +197,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
           </Text>
 
           <View style={[styles.searchShell, { borderColor: colors.hairline, backgroundColor: colors.canvas }]}>
-            <Ionicons name="search-outline" size={17} color={colors.ink3} />
+            <Icon name="search" size="sm" color={colors.ink3} />
             <TextInput
               value={search}
               onChangeText={setSearch}
@@ -210,7 +209,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
             />
             {search ? (
               <Pressable accessibilityLabel="Clear search" onPress={() => setSearch('')} style={styles.clearButton}>
-                <Ionicons name="close" size={17} color={colors.ink3} />
+                <Icon name="x" size="sm" color={colors.ink3} />
               </Pressable>
             ) : null}
           </View>
@@ -235,9 +234,9 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
                       activeOpacity={0.72}
                       style={styles.groupHeader}
                     >
-                      <Ionicons
-                        name={isOpen ? 'chevron-down' : 'chevron-forward'}
-                        size={15}
+                      <Icon
+                        name={isOpen ? 'chevron-down' : 'chevron-right'}
+                        size="sm"
                         color={colors.ink3}
                       />
                       <View style={styles.groupCopy}>
@@ -321,7 +320,7 @@ function VariableRow({
         </View>
         {!variable.is_default ? (
           <Pressable onPress={onReset} disabled={saving} style={styles.resetButton} accessibilityLabel={`Reset ${variable.key}`}>
-            <Ionicons name="refresh-outline" size={15} color={colors.ink3} />
+            <Icon name="refresh-cw" size="sm" color={colors.ink3} />
           </Pressable>
         ) : null}
       </View>
@@ -387,7 +386,7 @@ function VariableRow({
             {saving ? (
               <ActivityIndicator size="small" color={colors.accent.ink} />
             ) : (
-              <Ionicons name="checkmark" size={18} color={colors.accent.ink} />
+              <Icon name="check" size="md" color={colors.accent.ink} />
             )}
           </Pressable>
         </View>

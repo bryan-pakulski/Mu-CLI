@@ -36,6 +36,7 @@
     max-height: min(420px, 70vh);
     overflow-y: auto;
 }
+.w-menu > * { flex-shrink: 0; }   /* items keep their height when the menu scrolls */
 .w-popover { padding: var(--wash-space-4); }
 .w-menu__item {
     display: flex;

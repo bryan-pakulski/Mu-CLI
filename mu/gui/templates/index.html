@@ -1,263 +1,281 @@
+{#- The chat page (/) on the shared Wash shell (G§8.1, spec W4).
+
+    Top bar: μcli › session › thread, then status chips (mode, provider·model,
+    context ring, plan, auto-approve, ◆ approvals, connection) and tools.
+    Sidebar: the shared Navigate list plus Threads and Sessions
+    (`sidebar_extra`), a job-attention badge on Work (`work_badge`).
+    Stage: plan / auto-approve banners, the chat column and the workspace
+    panel stage (one header with a mode-tint band). Without a session the
+    stage shows the welcome launcher. -#}
 {% extends "base.html" %}
-{% block title %}MuCLI{% if session_active %} — {{ session_name }}{% endif %}{% endblock %}
 {% import "macros/wash.html" as w %}
+{% set nav_active = "chat" %}
+{% block title %}μcli{% if session_active %} · {{ session_name }}{% endif %}{% endblock %}
 {% block page_css %}
 <link id="mucli-chat-css" rel="stylesheet" href="/static/css/wash/patterns/chat.css">
 {% endblock %}
-{% block page %}
-<script src="/static/js/product.js"></script>
-<script src="/static/js/web_shell.js"></script>
-<script src="/static/js/history_hydration.js"></script>
+{% block page_scripts %}
+    <script src="/static/js/wash/toolcard.js" defer></script>
+    <script src="/static/js/wash/diff.js" defer></script>
+    <script src="/static/js/wash/palette.js" defer></script>
+    <script src="/static/js/wash/chat_palette.js" defer></script>
+    <script src="/static/js/product.js" defer></script>
+    <script src="/static/js/web_shell.js" defer></script>
+    <script src="/static/js/history_hydration.js" defer></script>
+{% endblock %}
+{% block body_class %}chat-body{% if not session_active %} welcome-body{% endif %}{% endblock %}
+{% block body_attrs %} x-data{% endblock %}
+{% block shell_attrs %}{% if session_active %} :data-sidebar-collapsed="$store.layout.sidebarOpen ? null : ''"{% endif %}{% endblock %}
+{% block drop_attrs %}{% if session_active %} :data-state="$store.chat.busy ? 'working' : null"{% endif %}{% endblock %}
 
+{#- Job-attention count on the sidebar's Work item. -#}
+{% set work_badge %}<span class="w-count product-attention-badge" data-tone="attention" x-cloak
+      x-show="$store.chat.jobAttentionCount > 0" x-text="$store.chat.jobAttentionCount"
+      x-init="$store.chat.loadJobAttention()"
+      :aria-label="$store.chat.jobAttentionCount + ' job(s) need you'"></span>{% endset %}
+
+{#- Sidebar sections (G§8.1, §9.20): Threads (the current session's thread
+    group, hidden for singleton groups) and Sessions (the full list). Rows are
+    role=button with keyboard support; row actions show on hover or focus.
+    Rendered through _layout.html's `sidebar_extra` block. -#}
+{% block sidebar_extra %}{% if session_active %}
+<div class="sidebar product-sidebar w-chat-sidebar">
+    <button type="button" class="w-btn sidebar-primary-action" data-variant="secondary" @click="$store.threads.create()">
+        {{ w.icon("plus", size="sm") }}<span class="w-nav__label">New thread</span>
+    </button>
+    <section class="nav-section sessions-only-section"
+             x-show="$store.threads.groupRoster.length > 1"
+             x-cloak aria-labelledby="w-threads-title">
+        <div class="nav-section-title w-sessions__head">
+            <span class="w-sessions__title" id="w-threads-title">Threads</span>
+            <span class="count w-count" x-text="$store.threads.groupRoster.length"></span>
+        </div>
+        <ul class="w-sessions">
+            <template x-for="t in $store.threads.groupRoster" :key="t.thread_id">
+                <li>
+                    <div class="nav-item w-session"
+                         role="button" tabindex="0"
+                         :aria-current="t.session_name === $store.chat.currentName ? 'true' : null"
+                         :data-busy="($store.sessions.isBusy(t.session_name) || $store.threads.statusClass(t.status)) ? '' : null"
+                         :class="{
+                            active: t.session_name === $store.chat.currentName,
+                            loaded: $store.sessions.isLoaded(t.session_name),
+                            busy: $store.sessions.isBusy(t.session_name) || $store.threads.statusClass(t.status)
+                         }"
+                         @click="t.session_name !== $store.chat.currentName && $store.threads.switchTo(t)"
+                         @keydown.enter.prevent="$el.click()"
+                         @keydown.space.prevent="$el.click()"
+                         :title="t.title + ' · ' + t.status + (t.current_goal ? ' · ' + t.current_goal : '')">
+                        <span class="w-session__icon thread-status-dot" :class="$store.threads.statusClass(t.status)" aria-hidden="true">
+                            {{ w.icon("git-branch", size="sm") }}
+                        </span>
+                        <span class="name w-session__name" x-text="t.title || t.session_name"></span>
+                        <span class="w-session__status">
+                            <span class="w-inkdrop" data-size="sm" data-tone="running" x-show="$store.sessions.isBusy(t.session_name)" aria-hidden="true"></span>
+                            <span class="thread-unread w-session__unread" x-show="t.unread_count" x-text="t.unread_count"
+                                  :aria-label="t.unread_count + ' unread'"></span>
+                            <span class="prompt-badge w-session__attention"
+                                  x-show="$store.prompts.queue.some(p => p.session_name === t.session_name) && t.session_name !== $store.chat.currentName"
+                                  title="Awaiting your input" aria-label="Awaiting your input">◆</span>
+                        </span>
+                        <span class="w-session__actions">
+                            <button type="button" class="row-action thread-delete w-session__action" data-tone="danger"
+                                    x-show="t.session_name !== $store.chat.currentName && !$store.sessions.isBusy(t.session_name) && !$store.threads.statusClass(t.status)"
+                                    @click.stop="$store.confirm.ask(`Delete thread '${t.title || t.session_name}'?`, $event, () => $store.threads.remove(t), {danger:true})"
+                                    title="Delete thread"
+                                    aria-label="Delete thread">×</button>
+                        </span>
+                    </div>
+                </li>
+            </template>
+        </ul>
+    </section>
+    <section class="nav-section sessions-only-section sidebar-other-sessions" aria-labelledby="w-sessions-title">
+        <div class="nav-section-title w-sessions__head">
+            <span class="w-sessions__title" id="w-sessions-title">Sessions</span>
+            <span class="count w-count" x-text="$store.sessions.list.length"></span>
+        </div>
+        <ul class="w-sessions">
+            <template x-for="s in $store.sessions.list" :key="s.name">
+                <li>
+                    <div class="nav-item w-session"
+                         :class="{ active: s.name === $store.chat.currentName, busy: $store.sessions.isBusy(s.name) }"
+                         :aria-current="s.name === $store.chat.currentName ? 'true' : null"
+                         @click="$store.sessions.switchTo(s.name); $store.layout.closeMobileSidebar()"
+                         @keydown.enter.prevent="$el.click()"
+                         @keydown.space.prevent="$el.click()"
+                         role="button" tabindex="0"
+                         :title="s.name + ($store.sessions.isLoaded(s.name) ? ' · loaded' : '') + ($store.sessions.isBusy(s.name) ? ' · busy' : '')">
+                        <span class="sidebar-session-type w-session__icon"
+                              :class="{ loaded: $store.sessions.isLoaded(s.name), busy: $store.sessions.isBusy(s.name) }"
+                              x-html="sessionTypeIconMarkup(s.session_type, 'session-type-svg')"></span>
+                        <span class="name w-session__name" x-text="s.name"></span>
+                        <span class="w-session__status">
+                            <span class="w-inkdrop" data-size="sm" data-tone="running" x-show="$store.sessions.isBusy(s.name)" aria-label="Working"></span>
+                            <span class="w-session__attention" aria-label="Awaiting your input"
+                                  x-show="s.name !== $store.chat.currentName && $store.prompts.queue.some(p => p.session_name === s.name)">◆</span>
+                        </span>
+                        <span class="row-actions w-session__actions">
+                            <button type="button" class="row-action w-session__action"
+                                    x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
+                                    title="Unload session" :aria-label="'Unload session ' + s.name"
+                                    @click.stop="$store.sessions.unload(s.name)">unload</button>
+                            <button type="button" class="row-action row-action-danger w-session__action" data-tone="danger"
+                                    :disabled="s.name === $store.chat.currentName"
+                                    title="Delete session" :aria-label="'Delete session ' + s.name"
+                                    @click.stop="$store.confirm.ask(`Delete session '${s.name}'?`, $event, () => $store.sessions.remove(s.name), {danger:true})">×</button>
+                        </span>
+                    </div>
+                </li>
+            </template>
+        </ul>
+        <button type="button" class="nav-action sidebar-new-session w-btn" data-variant="ghost" data-size="sm"
+                @click="$store.sessions.deactivate()">+ new session</button>
+    </section>
+    <button type="button" class="w-btn w-chat-sidebar__collapse" data-variant="ghost" data-size="sm"
+            @click="$store.layout.toggleSidebar()"
+            :aria-label="$store.layout.sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'"
+            :title="$store.layout.sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'">
+        {{ w.icon("panel-left", size="sm") }}<span class="w-nav__label" x-text="$store.layout.sidebarOpen ? 'Collapse' : 'Expand'">Collapse</span>
+    </button>
+</div>
+{% endif %}{% endblock %}
+
+{% block crumbs %}
+{%- if session_active %}
+    <li class="w-breadcrumb__item session-title-wrap"><span class="session-title" x-text="$store.sessions.current || '{{ session_name }}'">{{ session_name }}</span></li>
+    <li class="w-breadcrumb__item" x-show="$store.threads.groupRoster.length > 1" x-cloak>
+        <span aria-current="page" class="product-crumb-thread"
+              x-text="(($store.threads.groupRoster.find(t => t.session_name === $store.chat.currentName) || {}).title) || 'Thread'"></span>
+    </li>
+{%- else %}
+    <li class="w-breadcrumb__item"><span aria-current="page">Welcome</span></li>
+{%- endif %}
+{% endblock %}
+
+{% block topbar_chips %}
+{%- if session_active %}
+    <li class="w-optional"><span class="w-chip" data-variant="meta"
+              :data-mode-tint="$store.mode.realMode || 'default'" title="Agent mode">
+        <span class="w-chip__dot" style="--w-dot: var(--w-mode-pigment)" aria-hidden="true"></span>
+        <span class="product-crumb-mode" x-text="$store.mode.realMode || 'default'">{{ agent_mode }}</span>
+    </span></li>
+    <li class="w-optional" x-data="{
+            get _provider() { return $store.inspector.currentProvider || '{{ provider }}'; },
+            get _model() { return $store.inspector.currentModel || '{{ model }}'; }
+        }"><button type="button" class="w-chip provider-model" data-variant="meta" title="Provider · model — open settings"
+              @click="$store.inspector.openDrawer()">
+        <span x-text="_provider + ' · ' + _model">{{ provider }} · {{ model }}</span><span class="w-chip__caret" aria-hidden="true">▾</span>
+    </button></li>
+    <li><button type="button" class="w-chip header-token-meter" data-variant="meta"
+              :title="$store.context.label + ' · ' + ($store.tokens.total || 0).toLocaleString() + ' tokens this session'"
+              :aria-label="$store.context.label"
+              @click="$store.mode.setView('memory'); $store.layout.panelOpen = true; $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
+        <span class="w-ring" data-size="sm" :data-level="$store.context.level || null"
+              :style="'--w-fill:' + ($store.context.known ? Math.min(100, Math.round($store.context.fillPct)) : 0) + '%'" aria-hidden="true"></span>
+        <span x-text="$store.context.known ? Math.round($store.context.fillPct) + '%' : '—'">—</span>
+    </button></li>
+    <li x-show="$store.planMode.active" x-cloak><button type="button" class="w-chip plan-mode-pill" data-tone="plan"
+            data-testid="plan-mode-pill"
+            aria-label="Plan mode on: read-only, writing is blocked. Click to turn off."
+            :disabled="$store.planMode.busy"
+            @click="$store.planMode.turnOff({ confirmFirst: true })"
+            :title="$store.planMode.tooltip + ' Click to turn plan mode off.'">
+        <span class="plan-mode-glyph" aria-hidden="true">{{ w.icon("lock", size="sm") }}</span>
+        <span class="plan-mode-label">Plan mode</span>
+    </button></li>
+    <li><button type="button" class="w-chip yolo-toggle product-yolo"
+            :aria-label="$store.yolo.active ? 'Auto-approve on' : 'Approvals required'"
+            :data-tone="$store.yolo.active ? 'caution' : null"
+            :data-variant="$store.yolo.active ? null : 'meta'"
+            :class="$store.yolo.active ? 'active' : ''"
+            @click="$store.yolo.toggle()"
+            :aria-pressed="$store.yolo.active ? 'true' : 'false'"
+            :title="$store.yolo.active ? 'Auto-approve is on. Click to require approvals.' : 'Tool approvals are required. Click to auto-approve.'">
+        <span class="w-chip__glyph status-glyph" aria-hidden="true" x-text="$store.yolo.active ? '◆' : '✓'">✓</span>
+        <span class="yolo-label" x-text="$store.yolo.active ? 'Auto-approve' : 'Approvals'">Approvals</span>
+    </button></li>
+    <li x-show="$store.prompts.visibleQueue.length > 0" x-cloak><button type="button" class="w-chip" data-tone="attention"
+            @click="$store.prompts.focusCard()"
+            :aria-label="$store.prompts.visibleQueue.length + ' prompt(s) need you — review'"
+            title="Jump to the pending approval">
+        <span class="w-chip__glyph" aria-hidden="true">◆</span>
+        <span x-text="$store.prompts.visibleQueue.length"></span>
+    </button></li>
+    <li class="w-optional"><span class="w-chip product-live-chip" role="status"
+              :data-tone="$store.chat.connected === false ? 'caution' : ($store.chat.connected ? 'ok' : 'neutral')"
+              :title="$store.chat.connected === false ? 'Reconnecting to the server…' : 'Live updates connected'">
+        <span class="w-inkdrop" data-size="sm" data-tone="caution" x-show="$store.chat.connected === false" aria-hidden="true"></span>
+        <span class="w-chip__glyph status-glyph" aria-hidden="true" x-show="$store.chat.connected !== false" x-text="$store.chat.connected ? '●' : '○'">○</span>
+        <span x-text="$store.chat.connected === false ? 'Reconnecting…' : ($store.chat.connected ? 'Live' : 'Connecting')">Connecting</span>
+    </span></li>
+{%- endif %}
+{% endblock %}
+
+{% block topbar_tools %}
+{%- if session_active %}
+    <button type="button" class="w-btn" data-variant="icon"
+            @click="if (!$store.mode.panelModes.includes($store.mode.active)) { $store.mode.setView('memory'); $store.layout.panelOpen = true } else { $store.layout.togglePanel() }"
+            :aria-pressed="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'true' : 'false'"
+            :title="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'Hide workspace panel' : 'Open workspace panel'"
+            aria-label="Toggle workspace panel">{{ w.icon("panel-right") }}</button>
+    <button type="button" class="w-btn settings-cog-button" data-variant="icon"
+            @click="$store.inspector.openDrawer()"
+            title="Workspace and settings"
+            aria-label="Open settings">{{ w.icon("settings") }}</button>
+{%- endif %}
+{% endblock %}
+
+{% block content %}
 {% if not session_active %}
 <div class="welcome-shell" x-data>
     {% include "fragments/welcome.html" %}
     {% include "fragments/file_browser.html" %}
 </div>
 {% else %}
-<div class="app product-app"
+<div class="app product-app w-chat"
      x-data
      :class="{
         'has-panel': $store.mode.panelModes.includes($store.mode.active),
         'sidebar-hidden': !$store.layout.sidebarOpen,
         'panel-hidden': !$store.layout.panelOpen
      }"
-     :style="'--sidebar-w:' + ($store.layout.sidebarOpen ? $store.layout.sidebarWidth + 'px' : '0px') + ';--panel-w:' + $store.layout.panelWidth + 'px'">
+     :style="'--panel-w:' + $store.layout.panelWidth + 'px'">
 
-    <header class="header product-header">
-        <div class="header-primary">
-            <button class="icon-btn btn ghost icon product-sidebar-toggle"
-                    @click="$store.layout.toggleSidebar()"
-                    :title="$store.layout.sidebarOpen ? 'Hide sessions' : 'Show sessions'"
-                    aria-label="Toggle sessions">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                    <rect x="3" y="4" width="18" height="16" rx="2.5"></rect>
-                    <path d="M8 4v16"></path>
-                </svg>
-            </button>
-            <a href="/" class="product-logo" aria-label="mucli chat">
-                <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg>
-                <span>mucli</span>
-            </a>
-            <nav class="session-identity product-crumbs" aria-label="Breadcrumb">
-                <ol>
-                    <li class="session-title-wrap"><span class="session-title" x-text="$store.sessions.current || '{{ session_name }}'">{{ session_name }}</span></li>
-                    <li><span aria-current="page" class="product-crumb-mode" x-text="$store.mode.realMode || 'default'">{{ agent_mode }}</span></li>
-                </ol>
-            </nav>
-        </div>
-        <span class="spacer"></span>
-        <ul class="product-chips" aria-label="Status"
-            x-data="{
-                get _provider() { return $store.inspector.currentProvider || '{{ provider }}'; },
-                get _model() { return $store.inspector.currentModel || '{{ model }}'; }
-            }">
-            <li><span class="chip session-subtitle" :class="$store.chat.busy ? 'tone-running' : 'tone-muted'"
-                      title="Agent status">
-                <span class="status-glyph product-status-glyph" :class="{ busy: $store.chat.busy }" aria-hidden="true"
-                      x-text="$store.chat.busy ? '●' : '○'">○</span>
-                <span x-text="$store.chat.busy ? 'Working' : 'Ready'">Ready</span>
-            </span></li>
-            <li class="product-chip-optional"><span class="chip tone-muted provider-model" title="Provider · model"
-                      x-text="_provider + ' · ' + _model">{{ provider }} · {{ model }}</span></li>
-            <li class="product-chip-optional"><label class="chip effort-chip"
-                      :class="$store.effort.value ? 'tone-ok' : 'tone-muted'"
-                      title="Model effort for agent turns. Lower = faster, less thinking. Each provider maps it: Anthropic effort, OpenAI reasoning_effort, Ollama think.">
-                <span class="effort-label">Effort</span>
-                <select class="effort-select" aria-label="Model effort"
-                        :value="$store.effort.value"
-                        @change="$store.effort.set($event.target.value)">
-                    <option value="" :selected="!$store.effort.value">Default</option>
-                    <template x-for="level in $store.effort.levels" :key="level">
-                        <option :value="level" :selected="$store.effort.value === level" x-text="$store.effort.label(level)"></option>
-                    </template>
-                </select>
-            </label></li>
-            <li class="product-chip-optional"><span class="chip tone-muted header-token-meter" title="Total tokens used in this session"
-                      x-text="($store.tokens.total || 0).toLocaleString() + ' tokens'"></span></li>
-            <li x-show="$store.planMode.active" x-cloak><button type="button" class="chip plan-mode-pill"
-                    data-testid="plan-mode-pill"
-                    aria-label="Plan mode on: read-only, writing is blocked. Click to turn off."
+    <!-- Safety banners (G§9.16, §10.4): plan mode (lilac) and auto-approve
+         (sun, never dismissable) stay visible under the top bar. -->
+    <div class="w-chat__banners">
+        <div class="plan-mode-strip w-banner" data-tone="plan" data-flush data-testid="plan-mode-strip"
+             x-show="$store.planMode.active" x-cloak
+             role="status" aria-live="polite"
+             :title="$store.planMode.tooltip">
+            <span class="w-banner__glyph plan-mode-strip-icon" aria-hidden="true">{{ w.icon("lock", size="sm") }}</span>
+            <p class="w-banner__msg plan-mode-strip-text"><strong>Plan mode</strong> — read-only. Writing is blocked.</p>
+            <button type="button" class="w-btn plan-mode-strip-off" data-variant="tonal" data-tone="plan" data-size="sm"
                     :disabled="$store.planMode.busy"
-                    @click="$store.planMode.turnOff({ confirmFirst: true })"
-                    :title="$store.planMode.tooltip + ' Click to turn plan mode off.'">
-                <span class="plan-mode-glyph" aria-hidden="true">🔒</span>
-                <span class="plan-mode-label">Plan mode</span>
-            </button></li>
-            <li><button class="chip yolo-toggle product-yolo"
-                    :aria-label="$store.yolo.active ? 'Auto-approve on' : 'Approvals required'"
-                    :class="$store.yolo.active ? 'active tone-warn' : 'tone-ok'"
-                    @click="$store.yolo.toggle()"
-                    :aria-pressed="$store.yolo.active ? 'true' : 'false'"
-                    :title="$store.yolo.active ? 'Auto-approve is on. Click to require approvals.' : 'Tool approvals are required. Click to auto-approve.'">
-                <span class="status-glyph" aria-hidden="true" x-text="$store.yolo.active ? '◆' : '✓'">✓</span>
-                <span class="yolo-label" x-text="$store.yolo.active ? 'Auto-approve' : 'Approvals'">Approvals</span>
-            </button></li>
-            <li class="product-chip-optional"><span class="chip product-live-chip"
-                      :class="$store.chat.connected === false ? 'tone-warn' : ($store.chat.connected ? 'tone-ok' : 'tone-muted')"
-                      :title="$store.chat.connected === false ? 'Reconnecting to the server…' : 'Live updates connected'">
-                <span class="status-glyph" aria-hidden="true" x-text="$store.chat.connected ? '●' : '○'">○</span>
-                <span x-text="$store.chat.connected === false ? 'offline' : ($store.chat.connected ? 'live' : 'connecting')">connecting</span>
-            </span></li>
-        </ul>
-
-        <div class="header-actions">
-            <button class="product-icon-button"
-                    @click="if (!$store.mode.panelModes.includes($store.mode.active)) { $store.mode.setView('memory'); $store.layout.panelOpen = true } else { $store.layout.togglePanel() }"
-                    :title="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'Hide workspace panel' : 'Open workspace panel'"
-                    aria-label="Toggle workspace panel">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="4" width="18" height="16" rx="2.5"></rect>
-                    <path d="M15 4v16"></path>
-                </svg>
-            </button>
-
-            <a class="product-icon-button product-work-button product-secondary-action"
-               :href="'/work?session=' + encodeURIComponent($store.chat.currentName || '')"
-               :title="$store.chat.jobAttentionCount ? ($store.chat.jobAttentionCount + ' job(s) need you') : 'Engineering work'"
-               aria-label="Open engineering work"
-               x-init="$store.chat.loadJobAttention()">
-                <span class="product-attention-badge" x-show="$store.chat.jobAttentionCount > 0" x-text="$store.chat.jobAttentionCount" aria-hidden="true"></span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="7" width="18" height="13" rx="2"></rect>
-                    <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    <path d="M3 12h18"></path>
-                    <path d="M10 12v2h4v-2"></path>
-                </svg>
-            </a>
-
-            <a class="product-icon-button product-secondary-action"
-               :href="'/trace?session=' + encodeURIComponent($store.chat.currentName || '')"
-               target="_blank" rel="noopener"
-               title="Trace Analyzer" aria-label="Open Trace Analyzer">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 19V9"></path>
-                    <path d="M10 19V5"></path>
-                    <path d="M16 19v-7"></path>
-                    <path d="M22 19V3"></path>
-                    <path d="M2 19h22"></path>
-                </svg>
-            </a>
-
-            <a class="product-icon-button product-secondary-action" href="/containers" title="Container environments" aria-label="Container environments">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"></path>
-                    <path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 21v-8.9"></path>
-                </svg>
-            </a>
-
-            {{ w.theme_toggle(extra_class="product-icon-button product-secondary-action") }}
-
-            <details class="header-mobile-menu" @click.outside="$el.open = false"
-                     @keydown.escape.stop.prevent="$el.open = false; $el.querySelector('summary').focus()">
-                <summary class="product-icon-button" aria-label="More actions" title="More actions">
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
-                </summary>
-                <nav aria-label="More actions">
-                    <a :href="'/work?session=' + encodeURIComponent($store.chat.currentName || '')">Engineering work</a>
-                    <a :href="'/trace?session=' + encodeURIComponent($store.chat.currentName || '')" target="_blank" rel="noopener">Trace analyzer</a>
-                    <a href="/containers">Environments</a>
-                    <button @click="$store.theme.toggle()">Toggle appearance</button>
-                </nav>
-            </details>
-
-            <button class="product-icon-button settings-cog-button"
-                    @click="$store.inspector.openDrawer()"
-                    title="Workspace and settings"
-                    aria-label="Open settings">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-            </button>
+                    @click="$store.planMode.turnOff()">Turn off</button>
         </div>
-    </header>
-
-    <button class="sidebar-scrim" x-show="$store.layout.sidebarOpen" x-cloak
-            @click="$store.layout.toggleSidebar()" aria-label="Close sessions"></button>
-    <aside class="sidebar product-sidebar">
-        <div class="resize-handle-sidebar"
-             @mousedown="$store.layout.startDrag('sidebar', $event)"></div>
-        <div class="sidebar-inner">
-            <button class="btn sidebar-primary-action" @click="$store.threads.create()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-                <span>New thread</span>
-            </button>
-
-            <div class="sidebar-scroll">
-                <section class="nav-section sessions-only-section"
-                         x-show="$store.threads.groupRoster.length > 1"
-                         x-cloak>
-                    <div class="nav-section-title">
-                        <span>Threads</span>
-                        <span class="count" x-text="$store.threads.groupRoster.length"></span>
-                    </div>
-                    <template x-for="t in $store.threads.groupRoster" :key="t.thread_id">
-                        <div class="nav-item"
-                             :class="{
-                                active: t.session_name === $store.chat.currentName,
-                                loaded: $store.sessions.isLoaded(t.session_name),
-                                busy: $store.sessions.isBusy(t.session_name) || $store.threads.statusClass(t.status)
-                             }"
-                             @click="t.session_name !== $store.chat.currentName && $store.threads.switchTo(t)"
-                             :title="t.title + ' · ' + t.status + (t.current_goal ? ' · ' + t.current_goal : '')">
-                            <span class="thread-status-dot" :class="$store.threads.statusClass(t.status)"></span>
-                            <span class="name" x-text="t.title || t.session_name"></span>
-                            <span class="thread-unread" x-show="t.unread_count" x-text="t.unread_count"></span>
-                            <span class="prompt-badge"
-                                  x-show="$store.prompts.queue.some(p => p.session_name === t.session_name) && t.session_name !== $store.chat.currentName"
-                                  title="Awaiting your input">!</span>
-                            <button class="row-action thread-delete"
-                                    x-show="t.session_name !== $store.chat.currentName && !$store.sessions.isBusy(t.session_name) && !$store.threads.statusClass(t.status)"
-                                    @click.stop="$store.confirm.ask(`Delete thread '${t.title || t.session_name}'?`, $event, () => $store.threads.remove(t), {danger:true})"
-                                    title="Delete thread"
-                                    aria-label="Delete thread">×</button>
-                        </div>
-                    </template>
-                </section>
-                <section class="nav-section sessions-only-section sidebar-other-sessions">
-                    <div class="nav-section-title">
-                        <span>Sessions</span>
-                        <span class="count" x-text="$store.sessions.list.length"></span>
-                    </div>
-                    <template x-for="s in $store.sessions.list" :key="s.name">
-                        <div class="nav-item"
-                             :class="{ active: s.name === $store.chat.currentName, busy: $store.sessions.isBusy(s.name) }"
-                             @click="$store.sessions.switchTo(s.name); $store.layout.closeMobileSidebar()"
-                             @keydown.enter.prevent="$el.click()"
-                             @keydown.space.prevent="$el.click()"
-                             role="button" tabindex="0"
-                             :title="s.name + ($store.sessions.isLoaded(s.name) ? ' · loaded' : '') + ($store.sessions.isBusy(s.name) ? ' · busy' : '')">
-                            <span class="sidebar-session-type"
-                                  x-html="sessionTypeIconMarkup(s.session_type, 'session-type-svg')"></span>
-                            <span class="name" x-text="s.name"></span>
-                            <span class="row-actions">
-                                <button class="row-action"
-                                        x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
-                                        title="Unload session"
-                                        @click.stop="$store.sessions.unload(s.name)">unload</button>
-                                <button class="row-action row-action-danger"
-                                        :disabled="s.name === $store.chat.currentName"
-                                        title="Delete session"
-                                        @click.stop="$store.confirm.ask(`Delete session '${s.name}'?`, $event, () => $store.sessions.remove(s.name), {danger:true})">×</button>
-                            </span>
-                        </div>
-                    </template>
-                    <button class="nav-action sidebar-new-session" @click="$store.sessions.deactivate()">+ new session</button>
-                </section>
-            </div>
+        <div class="w-banner yolo-banner" data-tone="caution" data-flush data-testid="yolo-banner"
+             x-show="$store.yolo.active" x-cloak role="status" aria-live="polite">
+            <span class="w-banner__glyph" aria-hidden="true">◆</span>
+            <p class="w-banner__msg"><strong>Auto-approve is on</strong> — Mucli will run tools without asking.</p>
+            <button type="button" class="w-btn" data-variant="tonal" data-tone="caution" data-size="sm"
+                    @click="$store.yolo.toggle()">Turn off</button>
         </div>
-    </aside>
+    </div>
 
-    <main class="main">
-        <div class="chat-column">
+    <div class="main w-chat__main">
+        <section class="chat-column w-chat__column" aria-label="Chat">
             {% include "fragments/chat.html" %}
-        </div>
-        <div class="resize-handle"
+        </section>
+        <div class="resize-handle w-chat__resize"
              x-show="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen"
-             @mousedown="$store.layout.startDrag('panel', $event)"></div>
-        <div class="panel-stage" aria-label="Workspace detail panel">
+             @mousedown="$store.layout.startDrag('panel', $event)"
+             role="separator" aria-orientation="vertical" aria-label="Resize workspace panel"></div>
+        <aside class="panel-stage w-chat__stage" aria-label="Workspace detail panel"
+               :data-mode-tint="$store.mode.active">
             {% include "fragments/panel_tabs.html" %}
+            <div class="w-chat__panels">
             {% include "fragments/teacher_panel.html" %}
             {% include "fragments/feature_panel.html" %}
             {% include "fragments/research_panel.html" %}
@@ -271,8 +289,9 @@
             {% include "fragments/files_panel.html" %}
             {% include "fragments/artifacts_panel.html" %}
             {% include "fragments/shell_panel.html" %}
-        </div>
-    </main>
+            </div>
+        </aside>
+    </div>
 
     {% include "fragments/inspector.html" %}
     {% include "fragments/file_browser.html" %}

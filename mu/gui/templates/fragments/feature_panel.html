@@ -12,19 +12,19 @@
         <section class="feature-view feature-browser" aria-label="Feature browser">
             <header class="feature-browser-head">
                 <div>
-                    <span class="feature-view-kicker mono">feature library</span>
+                    <span class="feature-view-kicker w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Feature library</span>
                     <h3>Plans and delivery history</h3>
                     <p>Open one plan at a time. Archived plans stay read-only until restored.</p>
                 </div>
                 <div class="feature-browser-head-actions">
-                    <button class="feature-text-action"
+                    <button type="button" class="feature-text-action w-btn" data-variant="ghost" data-size="sm"
                             x-show="$store.feature.activePlanAvailable()"
                             @click.stop="$store.feature.closeFeatureBrowser()">
-                        back to plan
+                        Back to plan
                     </button>
-                    <button class="feature-primary-action"
+                    <button type="button" class="feature-primary-action w-btn" data-variant="primary" data-size="sm"
                             @click.stop="$store.feature.openCreateModal()">
-                        + new feature
+                        <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>New feature</span>
                     </button>
                 </div>
             </header>
@@ -32,26 +32,26 @@
             <div class="feature-browser-toolbar"
                  x-show="($store.feature.features || []).length">
                 <label class="feature-search-wrap">
-                    <span class="mono">search</span>
+                    <span class="w-sr-only">Search features</span>
                     <input type="text"
-                           class="feature-search"
-                           placeholder="name, id, or status"
+                           class="feature-search w-input"
+                           placeholder="Search name, id, or status"
                            x-model="$store.feature.searchQuery"
                            @click.stop
                            @keydown.stop />
                 </label>
-                <div class="feature-library-tabs" role="tablist" aria-label="Feature lifecycle">
-                    <button role="tab"
+                <div class="feature-library-tabs w-tabs" role="tablist" aria-label="Feature lifecycle">
+                    <button type="button" role="tab" class="w-tabs__tab"
                             :aria-selected="!$store.feature.showArchived"
                             :class="{ active: !$store.feature.showArchived }"
                             @click="$store.feature.showArchived = false">
-                        current <span x-text="$store.feature.currentCount()"></span>
+                        Current <span class="w-count" x-text="$store.feature.currentCount()"></span>
                     </button>
-                    <button role="tab"
+                    <button type="button" role="tab" class="w-tabs__tab"
                             :aria-selected="$store.feature.showArchived"
                             :class="{ active: $store.feature.showArchived }"
                             @click="$store.feature.showArchived = true">
-                        archive <span x-text="$store.feature.archivedCount()"></span>
+                        Archive <span class="w-count" x-text="$store.feature.archivedCount()"></span>
                     </button>
                 </div>
             </div>
@@ -77,7 +77,8 @@
                                 <span class="feature-id mono muted"
                                       x-text="f.feature_id"></span>
                             </span>
-                            <span class="feature-status-tag"
+                            <span class="feature-status-tag w-chip"
+                                  :data-tone="f.is_active ? 'running' : (f.archived ? 'neutral' : ({ completed: 'ok', approved: 'ok', awaiting_approval: 'attention', blocked: 'danger', in_progress: 'running' })[(f.status || '').toLowerCase().replace(/ /g, '_')] || 'neutral')"
                                   :class="'st-' + (f.is_active ? 'active' : (f.status || 'unknown').toLowerCase().replace(/ /g, '_'))"
                                   x-text="f.is_active ? 'loaded' : (f.archived ? 'archived' : (f.status || '?'))"></span>
                         </button>
@@ -85,42 +86,42 @@
                         <div class="feature-row-actions">
                             <template x-if="f.is_active">
                                 <div class="feature-row-actions-inner">
-                                    <button class="feature-row-control"
-                                            @click.stop="$store.feature.closeFeatureBrowser()">open</button>
-                                    <button class="feature-row-control"
-                                            @click.stop="$store.feature.unloadFeature(f.feature_id)">unload</button>
+                                    <button class="feature-row-control w-btn" data-variant="ghost" data-size="sm"
+                                            @click.stop="$store.feature.closeFeatureBrowser()">Open</button>
+                                    <button class="feature-row-control w-btn" data-variant="ghost" data-size="sm"
+                                            @click.stop="$store.feature.unloadFeature(f.feature_id)">Unload</button>
                                 </div>
                             </template>
                             <template x-if="!f.archived && !f.is_active">
                                 <div class="feature-row-actions-inner">
-                                    <button class="feature-row-control"
-                                            @click.stop="$store.feature.previewFeature(f.feature_id)">view</button>
-                                    <button class="feature-row-control feature-row-control-primary"
-                                            @click.stop="$store.feature.switchFeature(f.feature_id)">load</button>
-                                    <button class="feature-row-control"
+                                    <button class="feature-row-control w-btn" data-variant="ghost" data-size="sm"
+                                            @click.stop="$store.feature.previewFeature(f.feature_id)">View</button>
+                                    <button class="feature-row-control feature-row-control-primary w-btn" data-variant="secondary" data-size="sm"
+                                            @click.stop="$store.feature.switchFeature(f.feature_id)">Load</button>
+                                    <button class="feature-row-control w-btn" data-variant="ghost" data-size="sm"
                                             x-show="(f.status || '').toLowerCase() === 'awaiting_approval'"
                                             @click.stop="$store.confirm.ask(
                                                 'Approve feature \'' + f.feature_id + '\'?',
                                                 $event,
                                                 () => $store.feature.approveFeature(f.feature_id)
-                                            )">approve</button>
-                                    <button class="feature-row-control"
-                                            @click.stop="$store.feature.archiveFeature(f.feature_id)">archive</button>
+                                            )">Approve</button>
+                                    <button class="feature-row-control w-btn" data-variant="ghost" data-size="sm"
+                                            @click.stop="$store.feature.archiveFeature(f.feature_id)">Archive</button>
                                 </div>
                             </template>
                             <template x-if="f.archived">
                                 <div class="feature-row-actions-inner">
-                                    <button class="feature-row-control"
-                                            @click.stop="$store.feature.previewFeature(f.feature_id)">view</button>
-                                    <button class="feature-row-control feature-row-control-primary"
-                                            @click.stop="$store.feature.unarchiveFeature(f.feature_id)">restore</button>
-                                    <button class="feature-row-control feature-row-control-danger"
+                                    <button class="feature-row-control w-btn" data-variant="ghost" data-size="sm"
+                                            @click.stop="$store.feature.previewFeature(f.feature_id)">View</button>
+                                    <button class="feature-row-control feature-row-control-primary w-btn" data-variant="secondary" data-size="sm"
+                                            @click.stop="$store.feature.unarchiveFeature(f.feature_id)">Restore</button>
+                                    <button class="feature-row-control feature-row-control-danger w-btn" data-variant="ghost" data-tone="danger" data-size="sm"
                                             @click.stop="$store.confirm.ask(
                                                 'Permanently delete \'' + f.feature_id + '\'?',
                                                 $event,
                                                 () => $store.feature.deleteFeature(f.feature_id),
                                                 {danger:true}
-                                            )">delete</button>
+                                            )">Delete</button>
                                 </div>
                             </template>
                         </div>
@@ -129,20 +130,21 @@
 
                 <div class="feature-list-zero"
                      x-show="!$store.feature.filteredFeatures().length">
-                    <span class="mono"
-                          x-text="$store.feature.showArchived
-                            ? 'archive is empty'
-                            : 'no current features match this search'"></span>
+                    <span x-text="$store.feature.showArchived
+                            ? 'The archive is empty.'
+                            : 'No current features match this search.'"></span>
                 </div>
             </div>
 
-            <div class="feature-library-empty"
+            <div class="feature-library-empty w-empty" data-size="sm" data-tone="running"
                  x-show="!($store.feature.features || []).length">
-                <span class="feature-empty-mark mono">+</span>
-                <h4>No feature plans yet</h4>
-                <p>Create a plan here or ask the model to start one in Feature mode.</p>
-                <button class="feature-primary-action"
-                        @click="$store.feature.openCreateModal()">create first feature</button>
+                <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-list-checks"></use></svg></div>
+                <h4 class="w-empty__title">No feature plans yet</h4>
+                <p class="w-empty__body">Create a plan here or ask the model to start one in Feature mode.</p>
+                <div class="w-empty__actions">
+                    <button type="button" class="feature-primary-action w-btn" data-variant="primary"
+                            @click="$store.feature.openCreateModal()">Create first feature</button>
+                </div>
             </div>
         </section>
     </template>
@@ -152,44 +154,44 @@
              :data-feature-id="$store.feature.planRenderKey()">
             <header class="panel-head feature-detail-head">
                 <div class="feature-detail-nav">
-                    <button class="feature-text-action"
+                    <button type="button" class="feature-text-action w-btn" data-variant="ghost" data-size="sm"
                             @click.stop="$store.feature.previewMode
                                 ? $store.feature.exitPreview()
                                 : $store.feature.openFeatureBrowser()">
-                        ← features
+                        <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-chevron-left"></use></svg><span>Features</span>
                     </button>
-                    <span class="feature-preview-badge"
+                    <span class="feature-preview-badge w-chip" data-tone="neutral"
                           x-show="$store.feature.previewMode"
                           x-text="$store.feature.previewArchived
-                            ? 'read-only · archived'
-                            : 'read-only preview'"></span>
+                            ? 'Read-only · archived'
+                            : 'Read-only preview'"></span>
                 </div>
 
                 <div class="panel-subject feature-detail-title">
                     <span x-text="$store.feature.plan && ($store.feature.plan.feature_name || $store.feature.plan.feature_id)"></span>
-                    <button class="feature-text-action"
+                    <button type="button" class="feature-text-action w-btn" data-variant="ghost" data-size="sm"
                             x-show="!$store.feature.previewMode"
                             @click.stop="$store.feature.unloadFeature($store.feature.plan && $store.feature.plan.feature_id)">
-                        unload
+                        Unload
                     </button>
                 </div>
-                <div class="panel-meta mono muted">
+                <div class="panel-meta">
                     <span x-text="$store.feature.plan && $store.feature.plan.feature_id"></span>
-                    <span class="tag" x-text="$store.feature.plan && $store.feature.plan.overall_status"></span>
+                    <span class="tag w-chip" data-variant="meta" x-text="$store.feature.plan && $store.feature.plan.overall_status"></span>
                     <span x-text="$store.feature.tasksCompletedCount()
                         + ' / ' + (($store.feature.plan && $store.feature.plan.task_count) || 0)
                         + ' tasks'"></span>
-                    <span class="blocker-badge"
+                    <span class="blocker-badge w-chip" data-tone="danger"
                           x-show="$store.feature.plan
                                   && $store.feature.plan.execution
                                   && ($store.feature.plan.execution.blocked_tasks || []).length"
                           x-text="(($store.feature.plan && $store.feature.plan.execution && $store.feature.plan.execution.blocked_tasks) || []).length + ' blocked'"></span>
                 </div>
-                <div class="module-progress"
-                     x-show="$store.feature.plan && $store.feature.plan.task_count">
-                    <div class="module-progress-bar"
-                         :style="'width: ' + $store.feature.progressPct() + '%'">
-                    </div>
+                <div class="module-progress w-progress" role="progressbar" aria-label="Tasks completed"
+                     aria-valuemin="0" aria-valuemax="100" :aria-valuenow="$store.feature.progressPct()"
+                     x-show="$store.feature.plan && $store.feature.plan.task_count"
+                     :style="'--w-progress: ' + $store.feature.progressPct() + '%'">
+                    <div class="module-progress-bar w-progress__bar"></div>
                 </div>
             </header>
 
@@ -199,7 +201,7 @@
                  x-show="$store.modeWorkspace.shows('board', 'verification')">
                 <div class="empty-row"
                      x-show="!$store.feature.phaseColumns().length">
-                    no phases proposed yet
+                    No phases proposed yet.
                 </div>
                 <template x-for="phase in $store.feature.phaseColumns()"
                           :key="$store.feature.phaseRenderKey(phase)">
@@ -220,11 +222,11 @@
                         <button class="phase-head"
                                 @click="$store.feature.togglePhase(phase.id)"
                                 :aria-expanded="$store.feature.isPhaseOpen(phase.id)">
-                            <span class="caret">›</span>
-                            <span class="status-glyph"
+                            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+                            <span class="status-glyph" aria-hidden="true"
                                   x-text="$store.feature.statusGlyph(phase.status)"></span>
                             <span class="phase-title" x-text="phase.title"></span>
-                            <span class="phase-count mono muted"
+                            <span class="phase-count w-count"
                                   x-show="phase.tasks.length"
                                   x-text="phase.tasks.length"></span>
                         </button>
@@ -242,13 +244,16 @@
                                             'is-blocked': (task.status || '').toLowerCase() === 'blocked',
                                             'is-done': (task.status || '').toLowerCase() === 'completed'
                                         }">
-                                        <div class="task-row"
+                                        <div class="task-row" role="button" tabindex="0"
+                                             :aria-expanded="$store.feature.isTaskExpanded(task.id)"
                                              :draggable="$store.feature.previewMode ? false : true"
                                              @click="$store.feature.toggleTask(task.id)"
+                                             @keydown.enter.prevent="$store.feature.toggleTask(task.id)"
+                                             @keydown.space.prevent="$store.feature.toggleTask(task.id)"
                                              @dragstart="$store.feature.dragTaskId = task.id; $event.currentTarget.classList.add('dragging')"
                                              @dragend="$event.currentTarget.classList.remove('dragging')"
                                              :title="task.title + ' [' + task.status + ']'">
-                                            <span class="status-glyph"
+                                            <span class="status-glyph" aria-hidden="true"
                                                   x-text="$store.feature.statusGlyph(task.status)"></span>
                                             <span class="task-id mono muted" x-text="'#' + task.id"></span>
                                             <span class="task-title" x-text="task.title"></span>
@@ -261,7 +266,7 @@
                                              x-transition.opacity.duration.120ms>
                                             <div class="task-objectives"
                                                  x-show="(task.objectives || []).length">
-                                                <h5>objectives</h5>
+                                                <h5>Objectives</h5>
                                                 <ul>
                                                     <template x-for="(obj, idx) in (task.objectives || [])"
                                                               :key="$store.feature.taskRenderKey(phase, task) + ':objective:' + idx">
@@ -271,14 +276,18 @@
                                             </div>
                                             <div class="task-criteria"
                                                  x-show="(task.exit_criteria || []).length">
-                                                <h5>exit criteria</h5>
+                                                <h5>Exit criteria</h5>
                                                 <ul class="exit-criteria-list">
                                                     <template x-for="(crit, idx) in (task.exit_criteria || [])"
                                                               :key="$store.feature.taskRenderKey(phase, task) + ':criterion:' + idx">
                                                         <li class="exit-criteria-item"
+                                                            role="checkbox" tabindex="0"
+                                                            :aria-checked="$store.feature.isVerified(task, crit) ? 'true' : 'false'"
+                                                            :aria-disabled="$store.feature.previewMode ? 'true' : null"
                                                             :class="{ verified: $store.feature.isVerified(task, crit) }"
-                                                            @click.stop="!$store.feature.previewMode && $store.feature.toggleExitCriterion(task.id, idx)">
-                                                            <span class="status-glyph"
+                                                            @click.stop="!$store.feature.previewMode && $store.feature.toggleExitCriterion(task.id, idx)"
+                                                            @keydown.space.prevent.stop="!$store.feature.previewMode && $store.feature.toggleExitCriterion(task.id, idx)">
+                                                            <span class="status-glyph" aria-hidden="true"
                                                                   x-text="$store.feature.isVerified(task, crit) ? '✓' : '○'"></span>
                                                             <span x-text="crit"></span>
                                                         </li>
@@ -286,7 +295,7 @@
                                                 </ul>
                                             </div>
                                             <div class="task-blocker" x-show="task.blocked_reason">
-                                                <h5>blocked</h5>
+                                                <h5>Blocked</h5>
                                                 <p x-text="task.blocked_reason"></p>
                                             </div>
                                         </div>
@@ -300,18 +309,18 @@
                 </template>
             </div>
 
-            <section class="panel-section"
+            <section class="panel-section w-panel__section"
                      x-show="$store.feature.recentEvents().length && $store.modeWorkspace.shows('reviews')"
                      :class="{ open: $store.feature.openSections.events }">
-                <button class="panel-section-head"
+                <button class="panel-section-head w-panel__section-head"
                         @click="$store.feature.toggleSection('events')"
                         :aria-expanded="$store.feature.openSections.events">
-                    <span class="caret">›</span>
-                    <span class="panel-section-name">events</span>
-                    <span class="panel-section-count mono muted"
+                    <span class="caret w-panel__caret" aria-hidden="true">›</span>
+                    <span class="panel-section-name w-panel__section-title">Events</span>
+                    <span class="panel-section-count w-count"
                           x-text="$store.feature.plan && $store.feature.plan.event_count"></span>
                 </button>
-                <div class="panel-section-body"
+                <div class="panel-section-body w-panel__section-body"
                      x-show="$store.feature.openSections.events"
                      x-transition.opacity.duration.120ms>
                     <template x-for="(ev, i) in $store.feature.recentEvents()"
@@ -326,18 +335,18 @@
                 </div>
             </section>
 
-            <section class="panel-section"
+            <section class="panel-section w-panel__section"
                      x-show="$store.feature.reviews().length && $store.modeWorkspace.shows('reviews')"
                      :class="{ open: $store.feature.openSections.reviews }">
-                <button class="panel-section-head"
+                <button class="panel-section-head w-panel__section-head"
                         @click="$store.feature.toggleSection('reviews')"
                         :aria-expanded="$store.feature.openSections.reviews">
-                    <span class="caret">›</span>
-                    <span class="panel-section-name">reviews</span>
-                    <span class="panel-section-count mono muted"
+                    <span class="caret w-panel__caret" aria-hidden="true">›</span>
+                    <span class="panel-section-name w-panel__section-title">Reviews</span>
+                    <span class="panel-section-count w-count"
                           x-text="$store.feature.reviews().length"></span>
                 </button>
-                <div class="panel-section-body"
+                <div class="panel-section-body w-panel__section-body"
                      x-show="$store.feature.openSections.reviews"
                      x-transition.opacity.duration.120ms>
                     <template x-for="r in $store.feature.reviews()"
@@ -350,7 +359,7 @@
                 </div>
             </section>
 
-            <div class="panel-footnote muted mono"
+            <div class="panel-footnote"
                  x-show="$store.feature.metadataPath"
                  :title="'Plan data read from ' + $store.feature.metadataPath"
                  x-text="'↳ ' + $store.feature.metadataPath"></div>

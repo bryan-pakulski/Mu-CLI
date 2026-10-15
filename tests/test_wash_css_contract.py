@@ -40,6 +40,21 @@ def test_wash_tree_has_the_expected_shape():
     assert wash.startswith("@layer legacy, tokens, base, layout, components, patterns, utilities;")
 
 
+def test_signature_components_are_layered_and_imported():
+    # W3 signature components (spec §4.1) each own a file in components/ and
+    # load through wash.css into the components layer.
+    wash = (WASH / "wash.css").read_text(encoding="utf-8")
+    for name in ("panel", "composer", "message", "markdown", "code", "toolcard", "approval",
+                 "prompt", "diff", "meter", "palette", "session-list"):
+        assert (WASH / "components" / f"{name}.css").is_file(), name
+        assert f'@import url("components/{name}.css") layer(components);' in wash, name
+    # The chat page bundle carries its pattern files in the patterns layer.
+    chat = (WASH / "patterns" / "chat.css").read_text(encoding="utf-8")
+    for name in ("panels", "settings", "welcome"):
+        assert (WASH / "patterns" / f"{name}.css").is_file(), name
+        assert f'@import url("{name}.css") layer(patterns);' in chat, name
+
+
 def test_no_colour_literals_outside_generated_tokens():
     offenders = []
     for path in _wash_files():

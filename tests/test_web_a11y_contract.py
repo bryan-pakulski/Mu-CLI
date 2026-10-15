@@ -149,3 +149,24 @@ def test_work_job_page_controls_expose_their_state():
     assert '<button type="button" class="work-step" data-step=' in view and "aria-current=\"step\"" in view
     # Status is glyph + label, never colour alone.
     assert '<span class="w-sr-only">${esc(text)}</span>' in view
+
+
+def test_chat_signature_components_are_named_and_announced():
+    chat = (TEMPLATES / "fragments" / "chat.html").read_text(encoding="utf-8")
+    # The approval card is a labelled group and new prompts are announced
+    # assertively (G§9.9, §11).
+    card = chat[chat.index('<section class="msg prompt w-approval"'):]
+    card = card[:card.index('<header class="w-approval__head">')]
+    assert 'role="group"' in card and ':aria-labelledby="' in card
+    assert 'role="alert" aria-live="assertive"' in chat
+    # Every icon-only button in the chat column carries a name.
+    for tag, line in _tags(chat, r'data-variant="icon"'):
+        if tag.startswith("<button"):
+            assert "aria-label" in tag, f"fragments/chat.html:{line}"
+    # Sessions and threads rows are keyboard operable (G§9.20).
+    index = (TEMPLATES / "index.html").read_text(encoding="utf-8")
+    for tag, line in _tags(index, r'class="nav-item w-session"'):
+        assert 'role="button"' in tag and 'tabindex="0"' in tag, f"index.html:{line}"
+    # The command palette dialog is labelled.
+    palette = (TEMPLATES.parent / "static" / "js" / "wash" / "palette.js").read_text(encoding="utf-8")
+    assert 'role="dialog" aria-modal="true" aria-labelledby="' in palette

@@ -9,9 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_web_welcome_has_three_primary_entries_and_guided_creation():
     html = (ROOT / "mu/gui/templates/fragments/welcome.html").read_text()
+    # Wash W4 (G§9.18): the three choice cards are Continue, Start new and
+    # Environments; the saved-sessions list keeps its "Sessions" title.
     assert "Sessions" in html
-    assert "Create new" in html
-    assert "Container management" in html
+    assert ">Continue</strong>" in html
+    assert ">Start new</strong>" in html
+    assert ">Environments</strong>" in html
     assert "openSessions" in html
     assert "openCreate" in html
     assert "containerSource" in html

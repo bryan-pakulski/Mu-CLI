@@ -1,0 +1,177 @@
+/* Tool call card (G§9.8) — markup from static/js/wash/toolcard.js.
+ *
+ *   <div class="w-trace">                         a trace turn in the transcript
+ *     <div class="w-toollist">
+ *       <div class="w-toolcard" data-state="running|done|settled|error|blocked" data-kind="read" [data-fresh] [data-open]>
+ *         <button class="w-toolcard__row" aria-expanded="false">
+ *           <span class="w-toolcard__glyph">ink drop | ✓ | ✗ | lock</span>
+ *           <span class="w-toolcard__icon">…</span><span class="w-toolcard__kind">read</span>
+ *           <span class="w-toolcard__target">src/app/main.py</span><span class="w-toolcard__meta">lines 1–120</span>
+ *           <span class="w-toolcard__time">0.4s</span><span class="w-toolcard__chevron">›</span>
+ *         </button>
+ *         <div class="w-toolcard__detail"><dl class="w-toolcard__args">…</dl><pre class="w-toolcard__result">…</pre>…</div>
+ *       </div>
+ *       <div class="w-toolgroup" data-kind="read" [data-open]>  "Read 6 files ›" + cards
+ *       <p class="w-tracenote">…</p>
+ *     </div>
+ *   </div>
+ *   <div class="w-subagents">                     the sub-agent card (shares the row)
+ *
+ * Collapsed row: sunken, radius-md, 36px. Running: a sky ink drop with a
+ * live timer. Done: ✓ in ok ink for 1.2s (data-fresh + --w-age), then the
+ * glyph settles to neutral ink-3. Errors get a danger rule.
+ */
+.w-trace { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; background: none; }
+.w-toollist { display: flex; flex-direction: column; gap: var(--wash-space-1); min-width: 0; }
+
+.w-toolcard,
+.w-toolgroup {
+    min-width: 0;
+    border-radius: var(--wash-radius-md);
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+}
+.w-toolcard__row {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    width: 100%;
+    min-height: 36px;
+    padding: 0 var(--wash-space-3);
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    line-height: var(--wash-type-label-line);
+    text-align: left;
+    cursor: pointer;
+}
+.w-toolcard__row:hover { color: var(--wash-ink); }
+.w-toolcard__row:focus-visible { outline-offset: -2px; }
+.w-toolcard__glyph {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 16px;
+    color: var(--wash-ink-3);
+    font-weight: 600;
+}
+.w-toolcard__icon { display: inline-flex; flex: none; color: var(--wash-ink-3); }
+.w-toolcard__kind { flex: none; color: var(--wash-ink); font-weight: var(--wash-type-label-weight); white-space: nowrap; }
+.w-toolcard__target {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--wash-ink-2);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-toolcard__meta { flex: none; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); white-space: nowrap; }
+.w-toolcard__time {
+    flex: none;
+    margin-left: auto;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-variant-numeric: tabular-nums;
+}
+.w-toolcard__chevron { flex: none; color: var(--wash-ink-3); transition: transform var(--wash-motion-small) var(--wash-ease-small); }
+:is(.w-toolcard, .w-toolgroup)[data-open] > .w-toolcard__row .w-toolcard__chevron,
+.w-toolcard__row[aria-expanded="true"] .w-toolcard__chevron { transform: rotate(90deg); }
+
+/* states */
+.w-toolcard[data-state="running"] .w-toolcard__time { color: var(--wash-running-ink); }
+.w-toolcard[data-state="done"][data-fresh] .w-toolcard__glyph {
+    color: var(--wash-ok-ink);
+    animation: w-toolcard-settle 1.2s step-end forwards;
+    animation-delay: calc(var(--w-age, 0ms) * -1);
+}
+@keyframes w-toolcard-settle { to { color: var(--wash-ink-3); } }
+:is(.w-toolcard, .w-toolgroup)[data-state="error"] { box-shadow: inset 3px 0 var(--wash-danger-pigment); }
+:is(.w-toolcard, .w-toolgroup)[data-state="error"] .w-toolcard__glyph { color: var(--wash-danger-ink); }
+.w-toolcard[data-state="blocked"] { box-shadow: inset 3px 0 var(--wash-plan-pigment); }
+.w-toolcard[data-state="blocked"] :is(.w-toolcard__glyph, .w-toolcard__kind) { color: var(--wash-plan-ink); }
+
+/* expanded */
+.w-toolcard__detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-1) var(--wash-space-3) var(--wash-space-3) calc(var(--wash-space-3) + 16px + var(--wash-space-2));
+    border-top: 1px solid var(--wash-hairline);
+}
+.w-toolcard__args {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 2px var(--wash-space-3);
+    margin: var(--wash-space-2) 0 0;
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: var(--wash-type-mono-sm-line);
+}
+.w-toolcard__arg { display: contents; }
+.w-toolcard__arg dt { color: var(--wash-ink-3); }
+.w-toolcard__arg dd { margin: 0; color: var(--wash-ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow: auto; }
+.w-toolcard__result,
+.w-toolcard__json {
+    max-height: 360px;
+    margin: 0;
+    padding: var(--wash-space-2) var(--wash-space-3);
+    overflow: auto;
+    border-radius: var(--wash-radius-sm);
+    background: var(--wash-surface);
+    color: var(--wash-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: var(--wash-type-mono-sm-line);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.w-toolcard__waiting { margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-style: italic; }
+.w-toolcard__actions { display: flex; flex-wrap: wrap; gap: var(--wash-space-1); }
+
+/* grouped calls */
+.w-toolgroup__cards {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 var(--wash-space-1) var(--wash-space-1);
+}
+.w-toolgroup__cards .w-toolcard { background: var(--wash-surface); }
+
+/* notes inside a trace */
+.w-tracenote {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-height: 28px;
+    margin: 0;
+    padding: 0 var(--wash-space-3);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+.w-tracenote .w-icon { flex: none; }
+.w-tracenote[data-state="working"] { color: var(--wash-ink-2); }
+
+/* sub-agent card */
+.w-subagents {
+    align-self: stretch;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    border-radius: var(--wash-radius-md);
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+}
+
+@media (width < 600px) {
+    .w-toolcard__meta { display: none; }
+    .w-toolcard__detail { padding-left: var(--wash-space-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .w-toolcard[data-state="done"][data-fresh] .w-toolcard__glyph { animation: none; color: var(--wash-ink-3); }
+}

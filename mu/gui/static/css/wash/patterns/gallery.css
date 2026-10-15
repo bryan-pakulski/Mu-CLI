@@ -126,3 +126,13 @@
         .g-theme { padding: var(--wash-space-4); }
     }
 }
+
+/* Chat component states and the live replay (templates/design/_chat_components.html). */
+@layer patterns {
+    .g-composer { width: 100%; padding: 0; }
+    .g-composer .w-composer__slash.g-static { position: static; margin-bottom: var(--wash-space-2); box-shadow: none; }
+    .g-transcript { padding: 0; overflow: visible; }
+    .g-sessions { max-width: 280px; margin-top: var(--wash-space-4); padding: var(--wash-space-2); border-radius: var(--wash-radius-md); background: var(--wash-surface); }
+    .g-chat { padding: var(--wash-space-7) var(--wash-space-6); border-top: 1px solid var(--wash-hairline); }
+    .g-chat__frame { height: 900px; border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-lg); overflow: hidden; }
+}

@@ -24,6 +24,7 @@
     scrollbar-width: none;
 }
 .w-stepper__step {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -35,12 +36,16 @@
     font-weight: var(--wash-type-label-weight);
     white-space: nowrap;
 }
+/* Connectors sit in the gap between steps (outside each step's box), so an
+ * active / waiting pill never encloses the line before it. */
+.w-stepper__step + .w-stepper__step { margin-left: calc(28px + var(--wash-space-2) * 2); }
 .w-stepper__step + .w-stepper__step::before {
     content: "";
-    flex: 1 0 auto;
+    position: absolute;
+    top: 50%;
+    right: calc(100% + var(--wash-space-2));
     width: 28px;
     height: 1px;
-    margin-right: var(--wash-space-2);
     background: var(--wash-hairline-strong);
 }
 .w-stepper__step[data-status="done"] { color: var(--wash-ok-ink); }
@@ -59,7 +64,7 @@
     background: var(--wash-attention-wash);
     color: var(--wash-attention-ink);
 }
-.w-stepper__step + .w-stepper__step:is([data-status="active"], [data-status="waiting"])::before { margin-right: var(--wash-space-2); }
 .w-stepper[data-compact] .w-stepper__step:not([aria-current]) { font-size: 0; gap: 0; }
 .w-stepper[data-compact] .w-stepper__step:not([aria-current]) > [aria-hidden] { font-size: var(--wash-type-caption-size); }
-.w-stepper[data-compact] .w-stepper__step + .w-stepper__step::before { width: 12px; margin-right: 4px; }
+.w-stepper[data-compact] .w-stepper__step + .w-stepper__step { margin-left: 20px; }
+.w-stepper[data-compact] .w-stepper__step + .w-stepper__step::before { width: 12px; right: calc(100% + 4px); }

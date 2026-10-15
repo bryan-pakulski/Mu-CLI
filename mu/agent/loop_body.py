@@ -44,7 +44,13 @@ import uuid
 from collections import deque
 from typing import Any
 
-from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
+from mu.agent.approval import (
+    ApprovalPlan,
+    auto_approved_by_yolo,
+    build_approval_prompt,
+    collect_approval_plans,
+    notify_auto_approval,
+)
 from mu.ui.markup import esc, show_markup, show_renderable
 from mu.agent.hooks import HookContext
 from mu.agent.retry import is_context_overflow_error, parse_overflow_token_counts
@@ -2110,6 +2116,15 @@ def run_turn(session, text, *, origin="user"):
                 else:
                     # No approval needed — defer to exec phase.
                     pending_executions.append(i)
+                    # YOLO skipped a prompt this call would otherwise need:
+                    # leave a visible "auto" breadcrumb in UIs that show one.
+                    if session.ui and auto_approved_by_yolo(
+                        part.tool_name,
+                        part.tool_args,
+                        strict_mode=strict_mode,
+                        yolo=session.variables.get("yolo", False),
+                    ):
+                        notify_auto_approval(session.ui, part.tool_name, part.tool_args)
 
             # --- PHASE 2: execute pending calls (parallel for safe tools, serial for others) ---
             exec_results: dict[int, Any] = {}

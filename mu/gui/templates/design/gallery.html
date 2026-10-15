@@ -4,12 +4,22 @@
     Fixtures come from mu/gui/routers/design.py. -#}
 {% extends "_layout.html" %}
 {% import "macros/wash.html" as w %}
+{% from "design/_chat_components.html" import chat_components with context %}
 {% block title %}μcli · Design gallery{% endblock %}
 {% block page_css %}
     <link id="mucli-gallery-css" rel="stylesheet" href="/static/css/wash/patterns/gallery.css">
 {% endblock %}
 {% block head_scripts %}
+    <script>window.MUCLI_GALLERY_REPLAY = true;</script>
+    <script src="/static/vendor/marked.min.js" defer></script>
+    <script src="/static/vendor/highlight.min.js" defer></script>
+    <script src="/static/vendor/purify.min.js" defer></script>
+    <script src="/static/js/app.js" defer></script>
     <script src="/static/js/dialogs.js" defer></script>
+    <script src="/static/js/wash/toolcard.js" defer></script>
+    <script src="/static/js/wash/diff.js" defer></script>
+    <script src="/static/js/wash/palette.js" defer></script>
+    <script src="/static/js/wash/gallery_chat.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
 {% endblock %}
 {% block body_class %}gallery-body{% endblock %}
@@ -351,6 +361,8 @@ RUN pip install -r requirements.txt</textarea>
 </ul>
 <div class="g-row">{{ w.icon("drop", size="sm") }}{{ w.icon("drop") }}{{ w.icon("drop", size="lg") }}</div>
 {% endcall %}
+
+{{ chat_components(theme) }}
 {%- endmacro -%}
 
 {% block content %}
@@ -385,4 +397,21 @@ RUN pip install -r requirements.txt</textarea>
     </div>
     {%- endfor %}
 </div>
+
+{#- Live chat: a canned conversation replayed through app.js routeEvent()
+    into the real fragments/chat.html (static/js/wash/gallery_chat.js). It
+    follows the page theme; snap.py captures it in Paper and Dusk. -#}
+<section class="g-chat" aria-labelledby="g-chat-title">
+    <header class="g-section__head g-chat__head">
+        <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Chat</span>
+        <h2 class="g-section__title" id="g-chat-title">The working surface, replayed through routeEvent()</h2>
+    </header>
+    <div class="app product-app w-chat g-chat__frame" id="g-chat" x-data>
+        <div class="main w-chat__main">
+            <section class="chat-column w-chat__column" aria-label="Chat replay">
+                {% include "fragments/chat.html" %}
+            </section>
+        </div>
+    </div>
+</section>
 {% endblock %}

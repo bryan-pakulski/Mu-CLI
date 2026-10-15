@@ -156,6 +156,7 @@
     width: 36px;
     height: 20px;
     margin: 0;
+    padding: 0;
     border: 0;
     border-radius: var(--wash-radius-pill);
     background: var(--wash-control-border);
@@ -198,6 +199,7 @@
     width: 18px;
     height: 18px;
     margin: 0;
+    padding: 0;
     border: 1.5px solid var(--wash-control-border);
     border-radius: var(--wash-radius-xs);
     background: var(--wash-surface);

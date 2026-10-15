@@ -6,9 +6,10 @@
     {% include "fragments/mode_workspace_header.html" %}
 
     <!-- empty state -->
-    <div class="panel-empty" x-show="!$store.debug.hypotheses.length && !$store.debug.debugTarget && !$store.debug.findings.length && !$store.debug.notes.length && !$store.debug.suspects.length">
-        <h3>no debug state</h3>
-        <p class="muted">Start debugging in chat. The agent will populate hypotheses
+    <div class="panel-empty w-empty" data-size="sm" data-tone="attention" x-show="!$store.debug.hypotheses.length && !$store.debug.debugTarget && !$store.debug.findings.length && !$store.debug.notes.length && !$store.debug.suspects.length">
+        <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-bug"></use></svg></div>
+        <h3 class="w-empty__title">No debug state</h3>
+        <p class="w-empty__body">Start debugging in chat. The agent will populate hypotheses
         and suspect locations as it investigates.</p>
     </div>
 
@@ -16,8 +17,8 @@
     <div class="panel-head"
          x-show="$store.debug.debugTarget || $store.debug.hypotheses.length || $store.debug.findings.length || $store.debug.notes.length || $store.debug.suspects.length">
         <div class="panel-subject"
-             x-text="$store.debug.debugTarget || 'debugging'"></div>
-        <div class="panel-meta mono muted">
+             x-text="$store.debug.debugTarget || 'Debugging'"></div>
+        <div class="panel-meta">
             <span x-text="$store.debug.hypotheses.length + ' hypotheses'"></span>
             <span x-show="$store.debug.suspects.length"
                   x-text="' · ' + $store.debug.suspects.length + ' suspects'"></span>
@@ -25,25 +26,29 @@
     </div>
 
     <!-- hypothesis stack -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="$store.debug.hypotheses.length && $store.modeWorkspace.shows('hypotheses')"
              :class="{ open: $store.debug.openSections.hypotheses }">
-        <button class="panel-section-head"
+        <button class="panel-section-head w-panel__section-head"
                 @click="$store.debug.toggleSection('hypotheses')"
                 :aria-expanded="$store.debug.openSections.hypotheses">
-            <span class="caret">›</span>
-            <span class="panel-section-name">hypotheses</span>
-            <span class="panel-section-count mono muted"
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="panel-section-name w-panel__section-title">Hypotheses</span>
+            <span class="panel-section-count w-count"
                   x-text="$store.debug.hypotheses.length"></span>
         </button>
-        <div class="panel-section-body" x-show="$store.debug.openSections.hypotheses"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.debug.openSections.hypotheses"
              x-transition.opacity.duration.120ms>
             <template x-for="h in $store.debug.filtered($store.debug.hypotheses)" :key="h.id">
                 <div class="hypothesis-item"
                      :class="{ expanded: $store.debug.isHypothesisExpanded(h.id) }"
-                     @click="$store.debug.toggleHypothesis(h.id)">
+                     role="button" tabindex="0"
+                     :aria-expanded="$store.debug.isHypothesisExpanded(h.id)"
+                     @click="$store.debug.toggleHypothesis(h.id)"
+                     @keydown.enter.prevent="$store.debug.toggleHypothesis(h.id)"
+                     @keydown.space.prevent="$store.debug.toggleHypothesis(h.id)">
                     <div class="hypothesis-row">
-                        <span class="status-glyph"
+                        <span class="status-glyph" aria-hidden="true"
                               :class="{
                                   'hyp-confirmed': h.status === 'confirmed',
                                   'hyp-disproved': h.status === 'disproved',
@@ -51,7 +56,7 @@
                               }"
                               x-text="$store.debug.statusGlyph(h.status)"></span>
                         <span class="hypothesis-text" x-text="h.content"></span>
-                        <span class="tag mono muted" x-text="h.status"></span>
+                        <span class="tag w-chip" data-variant="meta" x-text="h.status"></span>
                     </div>
                     <div class="hypothesis-detail"
                          x-show="$store.debug.isHypothesisExpanded(h.id)"
@@ -66,18 +71,18 @@
     </section>
 
     <!-- suspect locations -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="$store.debug.suspects.length && $store.modeWorkspace.shows('evidence')"
              :class="{ open: $store.debug.openSections.suspects }">
-        <button class="panel-section-head"
+        <button class="panel-section-head w-panel__section-head"
                 @click="$store.debug.toggleSection('suspects')"
                 :aria-expanded="$store.debug.openSections.suspects">
-            <span class="caret">›</span>
-            <span class="panel-section-name">suspects</span>
-            <span class="panel-section-count mono muted"
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="panel-section-name w-panel__section-title">Suspects</span>
+            <span class="panel-section-count w-count"
                   x-text="$store.debug.suspects.length"></span>
         </button>
-        <div class="panel-section-body" x-show="$store.debug.openSections.suspects"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.debug.openSections.suspects"
              x-transition.opacity.duration.120ms>
             <template x-for="s in $store.debug.filtered($store.debug.suspects)" :key="s.id">
                 <div class="suspect-row">
@@ -88,25 +93,25 @@
     </section>
 
     <!-- scratchpad notes (unclassified entries) -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="$store.debug.notes.length && $store.modeWorkspace.shows('evidence')"
              :class="{ open: $store.debug.openSections.notes }">
-        <button class="panel-section-head"
+        <button class="panel-section-head w-panel__section-head"
                 @click="$store.debug.toggleSection('notes')"
                 :aria-expanded="$store.debug.openSections.notes">
-            <span class="caret">›</span>
-            <span class="panel-section-name">notes</span>
-            <span class="panel-section-count mono muted"
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="panel-section-name w-panel__section-title">Notes</span>
+            <span class="panel-section-count w-count"
                   x-text="$store.debug.notes.length"></span>
         </button>
-        <div class="panel-section-body" x-show="$store.debug.openSections.notes"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.debug.openSections.notes"
              x-transition.opacity.duration.120ms>
             <template x-for="n in $store.debug.filtered($store.debug.notes)" :key="n.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + n.id"></span>
                         <template x-for="(tag, ti) in (n.tags || [])" :key="ti">
-                            <span class="tag" x-text="tag"></span>
+                            <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
                         </template>
                     </div>
                     <div class="finding-body" x-text="n.content"></div>
@@ -116,25 +121,25 @@
     </section>
 
     <!-- past root causes / findings -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="$store.debug.findings.length && $store.modeWorkspace.shows('findings')"
              :class="{ open: $store.debug.openSections.findings }">
-        <button class="panel-section-head"
+        <button class="panel-section-head w-panel__section-head"
                 @click="$store.debug.toggleSection('findings')"
                 :aria-expanded="$store.debug.openSections.findings">
-            <span class="caret">›</span>
-            <span class="panel-section-name">past findings</span>
-            <span class="panel-section-count mono muted"
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="panel-section-name w-panel__section-title">Past findings</span>
+            <span class="panel-section-count w-count"
                   x-text="$store.debug.findings.length"></span>
         </button>
-        <div class="panel-section-body" x-show="$store.debug.openSections.findings"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.debug.openSections.findings"
              x-transition.opacity.duration.120ms>
             <template x-for="f in $store.debug.filtered($store.debug.findings)" :key="f.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + f.id"></span>
                         <template x-for="tag in (f.tags || [])" :key="tag">
-                            <span class="tag" x-text="tag"></span>
+                            <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
                         </template>
                     </div>
                     <div class="finding-body" x-text="f.content"></div>
@@ -144,7 +149,7 @@
     </section>
 
     <!-- footnote -->
-    <div class="panel-footnote muted mono" x-show="$store.debug.loaded">
+    <div class="panel-footnote" x-show="$store.debug.loaded">
         <span x-text="$store.debug.scratchpadCount + ' scratchpad entries'"></span>
     </div>
 

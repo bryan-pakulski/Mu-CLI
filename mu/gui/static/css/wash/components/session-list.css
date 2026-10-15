@@ -1,0 +1,100 @@
+/* Sessions and threads list (G§9.20) — rows in the sidebar.
+ *
+ *   <div class="w-sessions__head"><span class="w-sessions__title">Sessions</span><span class="w-count">4</span></div>
+ *   <ul class="w-sessions">
+ *     <li><div class="w-session" role="button" tabindex="0" [aria-current="true"] [data-busy] [data-attention]>
+ *       <span class="w-session__icon">…session-type icon…</span>
+ *       <span class="w-session__name">atlas-api</span>
+ *       <span class="w-session__status">ink drop | unread dot | ◆</span>
+ *       <span class="w-session__actions">…ghost buttons on hover/focus…</span>
+ *     </div></li>
+ *   </ul>
+ *
+ * The active row is sunken with an accent bar (like .w-nav__item). Rows are
+ * role=button + tabindex=0 for sessions and threads alike; row actions show
+ * on hover or keyboard focus.
+ */
+.w-sessions__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    margin: var(--wash-space-4) var(--wash-space-3) var(--wash-space-1);
+}
+.w-sessions__title {
+    flex: 1 1 auto;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-eyebrow-weight);
+    line-height: var(--wash-type-caption-line);
+}
+.w-sessions {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.w-session {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-height: 36px;
+    padding: 0 var(--wash-space-2) 0 var(--wash-space-3);
+    border-radius: var(--wash-radius-sm);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    cursor: pointer;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-micro), color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-session:hover { background: color-mix(in srgb, var(--wash-sunken) 60%, transparent); color: var(--wash-ink); }
+.w-session:focus-visible { outline-offset: -2px; }
+.w-session[aria-current="true"] {
+    background: var(--wash-sunken);
+    color: var(--wash-ink);
+    box-shadow: inset 2px 0 var(--wash-accent-ink);
+}
+.w-session__icon { display: inline-flex; flex: none; width: 16px; height: 16px; color: var(--wash-ink-3); }
+.w-session__icon svg { width: 16px; height: 16px; }
+.w-session__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-session__status { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.w-session__unread {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--wash-accent-wash);
+    color: var(--wash-accent-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: 18px;
+    text-align: center;
+}
+.w-session__attention { color: var(--wash-attention-ink); font-weight: 600; }
+.w-session__actions {
+    display: inline-flex;
+    gap: 2px;
+    flex: none;
+    opacity: 0;
+    transition: opacity var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-session:is(:hover, :focus-within) .w-session__actions { opacity: 1; }
+@media (hover: none) { .w-session__actions { opacity: 1; } }
+.w-session__action {
+    display: inline-grid;
+    place-items: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: var(--wash-radius-pill);
+    background: transparent;
+    color: var(--wash-ink-3);
+    font: inherit;
+    font-size: var(--wash-type-caption-size);
+    cursor: pointer;
+}
+.w-session__action:hover:not(:disabled) { background: var(--wash-surface); color: var(--wash-ink); }
+.w-session__action[data-tone="danger"]:hover:not(:disabled) { color: var(--wash-danger-ink); }
+.w-session__action:disabled { opacity: 0.35; cursor: not-allowed; }

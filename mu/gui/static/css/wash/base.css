@@ -82,6 +82,19 @@ h1, h2, h3 { color: var(--wash-plum); }
 [data-tone="info"] { --w-tone-wash: var(--wash-info-wash); --w-tone-ink: var(--wash-info-ink); --w-tone-pigment: var(--wash-info-pigment); }
 [data-tone="neutral"] { --w-tone-wash: var(--wash-neutral-wash); --w-tone-ink: var(--wash-neutral-ink); --w-tone-pigment: var(--wash-neutral-pigment); }
 
+/* Mode channels (G§1.4): any element with data-mode-tint exposes the mode's
+ * pigment as --w-mode-wash / --w-mode-ink / --w-mode-pigment (composer glow,
+ * mode chip dot, stage panel band, streaming caret). Plan is an overlay: it
+ * keeps lilac and components add a dashed edge. */
+[data-mode-tint] { --w-mode-wash: var(--wash-mode-default-wash); --w-mode-ink: var(--wash-mode-default-ink); --w-mode-pigment: var(--wash-mode-default); }
+[data-mode-tint="feature"] { --w-mode-wash: var(--wash-mode-feature-wash); --w-mode-ink: var(--wash-mode-feature-ink); --w-mode-pigment: var(--wash-mode-feature); }
+[data-mode-tint="research"] { --w-mode-wash: var(--wash-mode-research-wash); --w-mode-ink: var(--wash-mode-research-ink); --w-mode-pigment: var(--wash-mode-research); }
+[data-mode-tint="teacher"] { --w-mode-wash: var(--wash-mode-teacher-wash); --w-mode-ink: var(--wash-mode-teacher-ink); --w-mode-pigment: var(--wash-mode-teacher); }
+[data-mode-tint="security"] { --w-mode-wash: var(--wash-mode-security-wash); --w-mode-ink: var(--wash-mode-security-ink); --w-mode-pigment: var(--wash-mode-security); }
+[data-mode-tint="debug"] { --w-mode-wash: var(--wash-mode-debug-wash); --w-mode-ink: var(--wash-mode-debug-ink); --w-mode-pigment: var(--wash-mode-debug); }
+[data-mode-tint="loop"] { --w-mode-wash: var(--wash-mode-loop-wash); --w-mode-ink: var(--wash-mode-loop-ink); --w-mode-pigment: var(--wash-mode-loop); }
+[data-mode-tint="plan"] { --w-mode-wash: var(--wash-mode-plan-wash); --w-mode-ink: var(--wash-mode-plan-ink); --w-mode-pigment: var(--wash-mode-plan); }
+
 /* ------------------------------------------------------------ focus (G§3.4)
  * 2px accent outline with a 2px offset on every interactive element. Inputs
  * use offset 0 plus a 3px accent wash halo. Never outline:none without a

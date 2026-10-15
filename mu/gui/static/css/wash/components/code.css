@@ -1,0 +1,66 @@
+/* Code block (G§9.12) — emitted by app.js wrapCodeBlocks() around every
+ * fenced block after DOMPurify:
+ *
+ *   <div class="w-code" data-lang="python">
+ *     <div class="w-code__head">
+ *       <span class="w-code__lang">python</span>
+ *       <button class="w-code__copy code-copy-btn" aria-label="Copy code">…<span class="w-code__copy-label">Copy</span></button>
+ *     </div>
+ *     <pre class="w-code__pre"><code class="language-python hljs">…</code></pre>
+ *   </div>
+ *
+ * Sunken, radius-sm, mono, 16px padding. The copy button is a ghost that
+ * becomes "✓ Copied". Token colours come from hljs-wash.css (generated).
+ */
+.w-code {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: var(--wash-radius-sm);
+    background: var(--wash-sunken);
+}
+.w-code__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-height: 32px;
+    padding: 0 var(--wash-space-2) 0 var(--wash-space-4);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.w-code__lang {
+    flex: 1 1 auto;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.w-code__copy {
+    position: static;
+    display: inline-flex;
+    width: auto;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 var(--wash-space-2);
+    border: 0;
+    border-radius: var(--wash-radius-pill);
+    background: transparent;
+    color: var(--wash-ink-3);
+    font: inherit;
+    font-size: var(--wash-type-caption-size);
+    cursor: pointer;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-micro), color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-code__copy:hover { background: var(--wash-hairline); color: var(--wash-ink); }
+.w-code__copy[data-copied] { color: var(--wash-ok-ink); }
+.w-code__pre {
+    margin: 0;
+    padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-4);
+    overflow-x: auto;
+    background: transparent;
+    color: var(--wash-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-size);
+    line-height: var(--wash-type-mono-line);
+    tab-size: 4;
+}
+.w-code__pre code { padding: 0; background: transparent; font: inherit; white-space: pre; }

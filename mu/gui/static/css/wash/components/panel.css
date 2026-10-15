@@ -1,0 +1,119 @@
+/* Stage panel (G§8.1, §9.3 "Panel (stage)")
+ *
+ * One header pattern for every stage panel: title, a mode-tint wash band and
+ * actions. Sections inside are separated by hairlines, never nested cards.
+ *
+ *   <section class="w-panel" data-mode-tint="feature">
+ *     <header class="w-panel__head">
+ *       <span class="w-eyebrow">Mode</span>
+ *       <h2 class="w-panel__title">Feature</h2>
+ *       <div class="w-panel__actions">…ghost / icon buttons…</div>
+ *     </header>
+ *     <div class="w-panel__body">
+ *       <section class="w-panel__section">
+ *         <button class="w-panel__section-head" aria-expanded="true">
+ *           <span class="w-panel__caret" aria-hidden="true">›</span>
+ *           <span class="w-panel__section-title">Backlog</span>
+ *           <span class="w-count">4</span>
+ *         </button>
+ *         <div class="w-panel__section-body">…</div>
+ *       </section>
+ *     </div>
+ *   </section>
+ *
+ * The band reads --w-mode-wash (base.css mode channels); without a
+ * data-mode-tint ancestor it falls back to the accent wash.
+ */
+.w-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    background: var(--wash-surface);
+    color: var(--wash-ink);
+}
+.w-panel__head {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+    min-height: var(--wash-size-topbar);
+    padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) var(--wash-space-5);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+/* Mode tint: a single-pigment band that fades out (G§6.1). */
+.w-panel__head::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: -1;
+    height: 120px;
+    max-height: 100%;
+    background: linear-gradient(to bottom, var(--w-mode-wash, var(--wash-accent-wash)), transparent);
+    opacity: 0.9;
+    pointer-events: none;
+}
+.w-panel__title {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-panel__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    margin-left: auto;
+}
+.w-panel__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.w-panel__section {
+    padding: var(--wash-space-3) var(--wash-space-5);
+    border-top: 1px solid var(--wash-hairline);
+}
+.w-panel__section:first-child { border-top: 0; }
+.w-panel__section-head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    width: 100%;
+    min-height: 32px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--wash-ink);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    text-align: left;
+    cursor: pointer;
+}
+.w-panel__section-head:hover { color: var(--wash-plum); }
+.w-panel__caret {
+    display: inline-block;
+    flex: none;
+    width: 12px;
+    color: var(--wash-ink-3);
+    transition: transform var(--wash-motion-small) var(--wash-ease-small);
+}
+.w-panel__section-head[aria-expanded="true"] .w-panel__caret { transform: rotate(90deg); }
+.w-panel__section-title { flex: 1 1 auto; min-width: 0; }
+.w-panel__section-body { padding: var(--wash-space-2) 0 var(--wash-space-1); }
+@media (width < 840px) {
+    .w-panel__head { padding-left: var(--wash-space-4); }
+    .w-panel__section { padding-left: var(--wash-space-4); padding-right: var(--wash-space-4); }
+}

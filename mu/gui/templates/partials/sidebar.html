@@ -1,9 +1,10 @@
 {#- Shared sidebar (G§8.1): primary navigation for every page on the Wash
     shell. 264px; a 64px icon rail below 1200px; an off-canvas drawer below
     840px (wash_shell.js toggles #w-shell[data-sidebar-open]).
-    `nav_active` names the current item. A page may add its own section
-    under the primary navigation through _layout.html's `sidebar_extra`
-    block (rendered here as `sidebar_extra`). -#}
+    `nav_active` names the current item. Pages fill _layout.html's
+    `sidebar_extra` block (markup rendered after Navigate: the chat page's
+    Sessions and Threads, the Work sub-navigation) and may set `work_badge`
+    (top-level `{% set %}`), a count badge on the Work item. -#}
 {%- import "macros/wash.html" as w -%}
 {%- set active = nav_active | default("") -%}
 {%- set primary = [
@@ -19,12 +20,10 @@
 <aside class="w-sidebar" id="w-sidebar" aria-label="Main navigation">
     <ul class="w-sidebar__section" aria-label="Navigate">
         {%- for key, href, glyph, label in primary %}
-        <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span></a></li>
+        <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span>{% if key == "work" and work_badge is defined %}{{ work_badge }}{% endif %}</a></li>
         {%- endfor %}
     </ul>
-    {%- if sidebar_extra %}
-    {{ sidebar_extra }}
-    {%- endif %}
+    {%- if sidebar_extra is defined and sidebar_extra|trim %}{{ sidebar_extra }}{% endif %}
     <p class="w-sidebar__heading" id="w-sidebar-tools">Insights</p>
     <ul class="w-sidebar__section" aria-labelledby="w-sidebar-tools">
         {%- for key, href, glyph, label in tools %}

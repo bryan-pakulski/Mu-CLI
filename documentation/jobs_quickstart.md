@@ -91,6 +91,22 @@ Push needs a passing check run for the current commit. Mucli squashes the work
 into one commit (ticket key plus a `Mucli-Job` trailer), pushes the branch and
 opens a **draft** PR. The job is then **Pushed**.
 
+**Where the PR / MR opens.** GitHub, GitLab, Bitbucket and Gitea/Forgejo are
+supported. The host kind comes from Settings → Push → PR provider hosts
+(`host=gitea`), else the host name, else the Publish mode setting, else
+automatic detection: a self-hosted Gitea or Forgejo is recognised from its API,
+even when it requires sign-in. Gitea drafts open with a `WIP:` title prefix.
+
+**Tokens.** Opening the PR/MR needs a token for that host:
+`GITEA_TOKEN`, `GITLAB_TOKEN`, `GITHUB_TOKEN` (or `GH_TOKEN`) or
+`BITBUCKET_TOKEN`. Set it in the environment before starting mucli, or store it
+in Settings → Push → PR / MR tokens or with `/job publish token gitea <token>`
+(saved 0600 under `~/.mucli/jobs/`, used only by the host-side push, never
+inside a job container). `/job publish` shows which tokens are set. For Gitea,
+create the token under Settings → Applications with `write:repository` scope.
+If the token is missing, the branch is still pushed and the job asks you to add
+the token and push again; the push dialog warns about this beforehand.
+
 Mucli checks the PR every `publish.merge_poll_seconds` (default 300 s; `0` =
 off). When the PR merges, the job moves to **Done** on its own. When the PR is
 closed without merging, the job needs you: choose **Re-push** to open the PR

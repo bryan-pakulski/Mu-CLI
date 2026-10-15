@@ -76,6 +76,10 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
           ) : null}
           {missing ? <Banner tone="muted" glyph="ℹ" title="This server has no push preview. Leave the fields blank to use the default title and description." /> : null}
           {preview?.reason ? <Banner tone="warn" glyph="◆" title={preview.reason} /> : null}
+          {preview?.token && !preview.token.source ? (
+            <Banner tone="warn" glyph="◆" testID="push-token-missing"
+              title={`No ${preview.token.variable} is set, so the branch will be pushed but no ${preview.token.provider === 'gitlab' ? 'merge request' : 'pull request'} can be opened. Add a ${preview.token.provider} token in Settings → Push on the web.`} />
+          ) : null}
           <Field label="Title" hint="Pull request / merge request title.">
             <TextField accessibilityLabel="Pull request title" value={title} onChangeText={setTitle} maxLength={200} placeholder="Default title" />
           </Field>

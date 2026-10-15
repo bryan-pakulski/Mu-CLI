@@ -221,7 +221,7 @@ the table is stale).
 | --- | --- | --- |
 | `publish.push_remote` | `origin` | Push remote. Remote the job branch is pushed to. |
 | `publish.pr_remote` | `origin` | PR remote. Remote whose host receives the PR/MR (also the base branch's remote). Differs from the push remote for forks. |
-| `publish.provider_hosts` | — | PR provider hosts. Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea. |
+| `publish.provider_hosts` | — | PR provider hosts. Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea. Self-hosted Gitea/Forgejo is also detected automatically; tokens are set below (PR / MR tokens). |
 | `publish.run_hooks` | off | Run commit-msg hook. Run the repository's commit-msg hook on the squashed publish commit (checkpoints never run hooks). |
 | `publish.delete_remote_branch` | off | Delete remote branch on archive. Archiving a pushed, merged or cancelled job also deletes its remote branch (the local branch is always deleted). |
 | `publish.merge_poll_seconds` | 300 seconds | PR merge check interval. How often pushed jobs check whether their PR was merged (merged → done; closed → needs you). 0 = off. |

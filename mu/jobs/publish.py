@@ -25,7 +25,14 @@ commit; default off).
 
 PRs open as drafts unless the push dialog asked for ready-for-review
 (``metadata.publish_override.draft = False``). Tokens come from the environment only and
-are never written to the job record. Any failure parks the job on a human
+are never written to the job record. Tokens come from the environment, else from the
+publish token store (``mu.jobs.publish_tokens``: Settings → Push → Tokens,
+``/job publish token``), which is host-side only and never reaches a job container.
+
+Provider kind for the PR remote: ``publish.provider_hosts`` → host name
+(github/gitlab/bitbucket/gitea/forgejo/codeberg) → ``publish.mode`` when it names a
+provider → a ``https://<host>/api/v1/version`` / home-page probe that recognises
+self-hosted Gitea/Forgejo, including sign-in-only instances (cached per host). Any failure parks the job on a human
 with ``PUBLISH_FAILED``; the human READY_FOR_REVIEW gate is kept on success.
 """
 
@@ -41,6 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import quote
 
 from .models import AttentionReason, Job, JobStatus
+from .publish_tokens import TOKEN_VARS, token_source, with_tokens
 
 RunFn = Callable[[list, str], Tuple[int, str, str]]
 PostFn = Callable[[str, Dict[str, str], Dict[str, Any]], Dict[str, Any]]
@@ -96,6 +104,81 @@ def parse_remote(url: str, hosts: Optional[Dict[str, str]] = None) -> Dict[str, 
     configured = provider_hosts() if hosts is None else hosts
     kind = configured.get(host) or _sniff_kind(host)
     return {"host": host, "path": path, "kind": kind}
+
+
+_PROBE_CACHE: Dict[str, str] = {}
+
+
+_GITEA_SIGNIN_MESSAGES = ("only signed in user is allowed to call apis", "token is required")
+
+
+def _looks_like_gitea(status: int, data: Any, cookies: str, body: str = "") -> bool:
+    if status == 200 and isinstance(data, dict) and str(data.get("version") or "").strip():
+        return True
+    message = str(data.get("message") or "").lower() if isinstance(data, dict) else ""
+    if status in (401, 403) and any(m in message for m in _GITEA_SIGNIN_MESSAGES):
+        return True  # REQUIRE_SIGNIN_VIEW instances refuse anonymous API calls with this message
+    return "i_like_gitea" in cookies.lower() or ('content="gitea' in body.lower() or "forgejo" in body.lower()[:4000])
+
+
+def probe_provider(host: str, *, timeout: float = 4.0) -> str:
+    """Recognise a self-hosted Gitea/Forgejo without configuration.
+
+    Tries ``https://<host>/api/v1/version`` (with ``GITEA_TOKEN`` when one is available, which
+    sign-in-only instances need), accepting a version answer or Gitea's "only signed in user"
+    refusal; then the home page's ``i_like_gitea`` session cookie. Returns ``"gitea"`` or
+    ``"unknown"``; network errors count as unknown. Positive results are cached per host."""
+    host = str(host or "").strip().lower()
+    if not host:
+        return "unknown"
+    if host in _PROBE_CACHE:
+        return _PROBE_CACHE[host]
+    kind = "unknown"
+    try:
+        import httpx
+
+        token = with_tokens().get("GITEA_TOKEN", "")
+        headers = {"Accept": "application/json", **({"Authorization": f"token {token}"} if token else {})}
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(f"https://{host}/api/v1/version", headers=headers)
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+            cookies = "; ".join(resp.headers.get_list("set-cookie"))
+            if _looks_like_gitea(resp.status_code, data, cookies):
+                kind = "gitea"
+            else:
+                home = client.get(f"https://{host}/")
+                if _looks_like_gitea(home.status_code, {}, "; ".join(home.headers.get_list("set-cookie")),
+                                     home.text[:20000]):
+                    kind = "gitea"
+    except Exception:  # noqa: BLE001 - offline / not Gitea: unknown
+        kind = "unknown"
+    if kind != "unknown":
+        _PROBE_CACHE[host] = kind
+    return kind
+
+
+def resolve_kind(remote: Dict[str, str], *, probe: bool = True) -> str:
+    """Provider kind for a parsed remote (order in the module docstring)."""
+    kind = str(remote.get("kind") or "unknown")
+    if kind in PROVIDER_KINDS:
+        return kind
+    try:
+        from .job_settings import rule_or
+        configured = str(rule_or("publish.mode", "") or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        configured = ""
+    if configured in PROVIDER_KINDS:
+        return configured
+    return probe_provider(remote.get("host", "")) if probe else "unknown"
+
+
+def _unknown_host_message(host: str, mode: str) -> str:
+    return (f"couldn't tell which kind of git host {host!r} is (publish mode {mode}): its name doesn't say, and "
+            f"https://{host} doesn't look like Gitea/Forgejo. Add `{host}=gitea` (or gitlab, "
+            "github, bitbucket) to Settings → Push → PR provider hosts, or choose the publish mode there.")
 
 
 def _publish_settings() -> Dict[str, Any]:
@@ -433,11 +516,13 @@ def _create_pr(mode: str, remote: Dict[str, str], *, branch: str, head_ref: str,
             raise PublishError(f"gh pr create failed: {err.strip()[:400]}")
         return {"url": out.strip().splitlines()[-1] if out.strip() else ""}
     if mode not in PROVIDER_KINDS:
-        raise PublishError(f"cannot open a PR for host {remote['host']!r} (publish_mode={mode}); "
-                           "map it in publish.provider_hosts")
+        raise PublishError(_unknown_host_message(remote["host"], mode))
     headers = _auth(mode, env)
     if headers is None:
-        raise PublishError(f"{_TOKEN_NAMES[mode]} is not set")
+        raise PublishError(f"{_TOKEN_NAMES[mode]} is not set: add a {mode} token in Settings → Push → Tokens "
+                           f"(or `/job publish token {mode} <token>`, or export it before starting mucli). "
+                           "The branch is pushed; push again to open the "
+                           f"{'merge request' if mode == 'gitlab' else 'pull request'}.")
     api, path = _api_base(mode, remote["host"]), remote["path"]
     if mode == "github":
         data = post(f"{api}/repos/{path}/pulls", headers,
@@ -477,7 +562,7 @@ def publish_preview(service, job: Job) -> Dict[str, Any]:
                                   capture_output=True, timeout=5)
             if proc.returncode == 0:
                 remote_url = proc.stdout.strip()
-                kind = parse_remote(remote_url)["kind"]
+                kind = resolve_kind(parse_remote(remote_url))
         except (OSError, subprocess.SubprocessError, PublishError):
             pass
         try:
@@ -503,6 +588,10 @@ def publish_preview(service, job: Job) -> Dict[str, Any]:
         "requires_override": verdict == "do_not_merge" or unverified, "verdict": verdict,
         "head_sha": str(run.head_sha or "") if run is not None and (run.passed or unverified) else "",
         "reason": reason,
+        # The token the PR/MR step will use (never the value), so the dialog can warn before pushing.
+        "token": ({"provider": mode, "variable": TOKEN_VARS[mode][0], "source": token_source(mode)}
+                  if mode in TOKEN_VARS else None),
+        "provider": kind,
     }
 
 
@@ -544,6 +633,7 @@ def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str], ve
     if rc != 0:
         raise PublishError(f"no {pr_remote!r} remote: {err.strip()[:200]}")
     remote = parse_remote(out.strip())
+    remote["kind"] = resolve_kind(remote)
     head_ref = branch
     if push_remote != pr_remote:
         rc, push_out, err = run(["git", "remote", "get-url", push_remote], repo)
@@ -646,7 +736,7 @@ def publish_job(service, job_id: str, *, run: Optional[RunFn] = None,
         if check_reason:
             raise PublishError(check_reason)
         pr = open_draft_pr(job, run=run or _default_run, post=post or _default_post,
-                           env=dict(os.environ if env is None else env), verified_head=checked.head_sha,
+                           env=with_tokens(env), verified_head=checked.head_sha,
                            get=get, base_sha=str(checked.base_sha or ""),
                            on_pushed=lambda info: merge_metadata(service, job_id, **info))
     except Exception as exc:  # noqa: BLE001 - any publish failure parks on a human
@@ -699,7 +789,7 @@ def check_pr_state(job: Job, *, run: Optional[RunFn] = None, get: Optional[GetFn
     same token environment variables as publishing. Read-only; raises nothing."""
     run = run or _run_quick
     get = get or _get_quick
-    env = dict(os.environ if env is None else env)
+    env = with_tokens(env)
     meta = dict(job.metadata or {})
     pr = meta.get("pr") if isinstance(meta.get("pr"), dict) else {}
     url = str(pr.get("url") or "")
@@ -725,7 +815,7 @@ def check_pr_state(job: Job, *, run: Optional[RunFn] = None, get: Optional[GetFn
         if rc != 0:
             return {**unknown, "detail": "no PR remote"}
         remote = parse_remote(out.strip())
-        kind = mode if mode in PROVIDER_KINDS else remote["kind"]
+        kind = mode if mode in PROVIDER_KINDS else resolve_kind(remote)
         headers = _auth(kind, env)
         if headers is None or not number:
             return {**unknown, "detail": f"{_TOKEN_NAMES.get(kind, 'a token')} is not set" if headers is None

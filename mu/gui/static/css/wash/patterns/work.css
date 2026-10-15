@@ -88,6 +88,9 @@
     .work-toolbar { display: flex; align-items: center; gap: var(--wash-space-2); flex-wrap: wrap; min-width: 0; }
     .work-spacer { flex: 1 1 auto; }
     .work-grow { flex: 1 1 auto; min-width: 0; }
+    /* Settings → Push → PR / MR tokens: the field and its buttons share one row. */
+    .work-publish-token__row { flex-wrap: nowrap; align-items: center; }
+    .work-publish-token__row > .w-input { width: auto; flex: 1 1 auto; min-width: 0; }
     .work-meta { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); }
     .work-mono { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
     .work-caption { font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); }

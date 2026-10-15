@@ -115,6 +115,9 @@ export interface CommandResult { ok: boolean; parts: JobPart[]; data: { version?
 export interface PushPreview {
   title: string; body: string; branch: string; base: string; mode: string; remote: string; draft: boolean;
   requires_override: boolean; verdict: string; head_sha: string; reason: string;
+  /** PR/MR token the push will use (never the value); source '' means it is not set. */
+  token?: { provider: string; variable: string; source: '' | 'environment' | 'stored' } | null;
+  provider?: string;
 }
 /** CONTRACT §2 push args. */
 export interface PushArgs { pr_title?: string; pr_body?: string; draft?: boolean; override_reason?: string }

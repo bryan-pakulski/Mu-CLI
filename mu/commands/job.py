@@ -1237,6 +1237,34 @@ def agents_text(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _job_publish(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
+    """`/job publish` (token status) and `/job publish token <provider> [token]` (no token clears)."""
+    parts = rest.split()
+    if parts and parts[0].lower() == "token":
+        if len(parts) not in (2, 3):
+            message = "Usage: /job publish token <github|gitlab|bitbucket|gitea> [token]  (no token clears it)"
+            _emit(session, message, allow_prompt, error=True)
+            return CommandResult(ok=False, message=message)
+        try:
+            commands.save_publish_token(parts[1], parts[2] if len(parts) == 3 else "")
+        except ValueError as exc:
+            _emit(session, str(exc), allow_prompt, error=True)
+            return CommandResult(ok=False, message=str(exc))
+        message = f"{parts[1].lower()} token {'saved' if len(parts) == 3 else 'cleared'} (stored 0600, host-side only)"
+        _emit(session, message, allow_prompt)
+        return CommandResult(ok=True, message=message)
+    status = vm.publish_tokens_status()
+    lines = ["PR/MR provider tokens (used when a job pushes and opens its pull/merge request)", ""]
+    for provider, row in status.items():
+        where = {"environment": "set in the environment", "stored": "stored in mucli"}.get(row["source"], "not set")
+        lines.append(f"  {provider:<9} {row['variable']:<16} {where}")
+    lines += ["", "Set one with /job publish token <provider> <token>. Self-hosted hosts: Settings → Push → "
+              "PR provider hosts (host=gitea); Gitea/Forgejo is also detected automatically."]
+    text = "\n".join(lines)
+    _emit(session, text, allow_prompt)
+    return CommandResult(ok=True, message=text, data={"tokens": status})
+
+
 def _job_agents(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
     parts = rest.split()
     if parts and parts[0].lower() == "secret":
@@ -1428,7 +1456,7 @@ _ACTION_ALIASES = {**{_kebab(a): a for a in _ACTION_IDS}, **{a.lower(): a for a 
 _SUBCOMMANDS = ("ui", "tui", "dashboard", "board", "summary", "digest", "list", "show", "receipt", "diff",
                 "sessions", "create", "respond", "jira", "delete", "rm", "settings", "config", "toolchains",
                 "toolchain", "environments", "envs", "env", "setup", "doctor", "agents", "agent", "harness",
-                *_SHORT_ACTIONS, *_ACTION_ALIASES)
+                "publish", *_SHORT_ACTIONS, *_ACTION_ALIASES)
 
 
 def _action_kind(head: str) -> str:
@@ -1568,4 +1596,6 @@ def job_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
         return _job_doctor(session, rest, allow_prompt)
     if sub in {"agents", "agent", "harness"}:
         return _job_agents(session, rest, allow_prompt)
+    if sub == "publish":
+        return _job_publish(session, rest, allow_prompt)
     return _one_shot(session, raw, allow_prompt)

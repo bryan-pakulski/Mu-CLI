@@ -535,6 +535,12 @@ def remove_container(service, name: str) -> Dict[str, Any]:
     return remove(service, name)
 
 
+def publish_tokens_status() -> Dict[str, Dict[str, str]]:
+    """Where each PR/MR provider token is set (environment / stored / unset); never values."""
+    from ..publish_tokens import status
+    return status()
+
+
 def agents_status() -> Dict[str, Any]:
     """Agent harness setup/status (mucli / Claude Code / Codex) for the terminal and GUI surfaces."""
     from ..harness import status

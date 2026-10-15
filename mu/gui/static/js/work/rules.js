@@ -75,6 +75,7 @@
                     ${section.hint ? `<p class="work-jira-muted">${esc(section.hint)}</p>` : ''}
                     ${section.id === 'build_environments' ? '<div class="work-stack-tight work-env-status" data-env-status></div>' : ''}
                     ${section.id === 'harness' ? '<div class="work-stack-tight work-agents-status" data-agents-status></div>' : ''}
+                    ${section.id === 'publish' ? '<div class="work-stack-tight work-publish-tokens" data-publish-tokens></div>' : ''}
                     ${section.fields.map((f, i) => {
                         const id = `rule-${section.id}-${i}`;
                         const overridden = Object.prototype.hasOwnProperty.call(rules.overrides, f.path) && dirty.get(f.path) !== null;
@@ -92,6 +93,46 @@
         bind();
         void environmentStatus(host.querySelector('[data-env-status]'));
         void window.MuJobAgents?.card(host.querySelector('[data-agents-status]'), { api, toast });
+        void publishTokens(host.querySelector('[data-publish-tokens]'));
+    }
+
+    // Push: PR/MR provider tokens (GET/PUT /api/jobs/publish/tokens). Values are never shown;
+    // stored tokens live host-side (0600) and never reach a job container.
+    const PROVIDERS = [['gitea', 'Gitea / Forgejo'], ['gitlab', 'GitLab'], ['github', 'GitHub'], ['bitbucket', 'Bitbucket']];
+    async function publishTokens(target) {
+        if (!target) return;
+        let tokens;
+        try { tokens = (await api('/api/jobs/publish/tokens')).tokens || {}; }
+        catch (error) { target.innerHTML = `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(error.message)}</p></div>`; return; }
+        const where = source => source === 'environment' ? 'set in the environment' : source === 'stored' ? 'stored' : 'not set';
+        target.innerHTML = `<div class="work-stack-tight"><span class="w-field__label">PR / MR tokens</span>
+            <small class="w-field__hint">Used when a job pushes and opens its pull or merge request. Environment variables win over stored tokens.</small>
+            ${PROVIDERS.map(([id, name]) => {
+                const t = tokens[id] || {};
+                return `<div class="work-stack-tight work-caption" role="group" aria-label="${esc(name)} token" data-publish-token="${id}">
+                    <label for="publish-token-${id}" class="work-publish-token__label">${esc(name)} <span class="work-muted">${esc(t.variable || '')} · ${where(t.source)}</span></label>
+                    <div class="w-btn-row work-publish-token__row">
+                        <input id="publish-token-${id}" type="password" autocomplete="off" class="w-input work-grow" placeholder="paste a ${esc(name)} access token">
+                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-token-save>Save</button>
+                        ${t.source === 'stored' ? '<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-token-clear>Clear</button>' : ''}
+                    </div>
+                </div>`;
+            }).join('')}</div>`;
+        target.querySelectorAll('[data-publish-token]').forEach(row => {
+            const provider = row.dataset.publishToken, input = row.querySelector('input');
+            const put = async value => {
+                try {
+                    await api('/api/jobs/publish/tokens', { method: 'PUT', body: { provider, value } });
+                    toast(value ? 'Token saved' : 'Token cleared', 'ok');
+                } catch (error) { toast(error.message, 'danger'); }
+                void publishTokens(target);
+            };
+            const save = () => { const value = input.value.trim(); input.value = ''; if (value) void put(value); };
+            row.querySelector('[data-token-save]').addEventListener('click', save);
+            // Inside the section's <form>: Enter saves the token instead of submitting the section.
+            input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+            row.querySelector('[data-token-clear]')?.addEventListener('click', () => void put(''));
+        });
     }
 
     // Build environments: Docker-in-Docker (Sysbox) status + install steps, GPUs, kept jobs.

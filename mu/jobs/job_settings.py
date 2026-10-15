@@ -360,7 +360,7 @@ RULES_SCHEMA += [
            "Remote whose host receives the PR/MR (also the base branch's remote). Differs from the push remote for forks.",
            pattern=r"[\w.-]+"),
         _f("publish.provider_hosts", "PR provider hosts", "list", [],
-           "Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea.",
+           "Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea. Self-hosted Gitea/Forgejo is also detected automatically; tokens are set below (PR / MR tokens).",
            item_pattern=r"[a-zA-Z0-9.-]+(?::\d+)?=(?:github|gitlab|bitbucket|gitea)", item_label="host=kind entries"),
         _f("publish.run_hooks", "Run commit-msg hook", "bool", False,
            "Run the repository's commit-msg hook on the squashed publish commit (checkpoints never run hooks)."),

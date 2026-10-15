@@ -270,6 +270,7 @@
                 </div>
                 ${preview.remote ? `<div class="work-meta work-ellipsis" title="${esc(preview.remote)}">remote <code>${esc(preview.remote)}</code></div>` : ''}
                 ${preview.reason ? `<div class="w-banner" data-tone="attention" role="note"><span class="w-banner__glyph" aria-hidden="true">◆</span><p class="w-banner__msg">${esc(preview.reason)}</p></div>` : ''}
+                ${preview.token && !preview.token.source ? `<div class="w-banner" data-tone="attention" role="note" data-push-token-missing><span class="w-banner__glyph" aria-hidden="true">◆</span><p class="w-banner__msg">No ${esc(preview.token.variable)} is set, so the branch will be pushed but no ${preview.token.provider === 'gitlab' ? 'merge request' : 'pull request'} can be opened. Add a ${esc(preview.token.provider)} token in Settings → Push.</p></div>` : ''}
                 <div class="w-field"><label class="w-field__label" for="work-push-title">PR title</label>
                     <input class="w-input" id="work-push-title" type="text" maxlength="200" value="${esc(preview.title)}" placeholder="${preview.title ? '' : 'Default: composed from the job'}" data-autofocus></div>
                 <div class="w-field"><div class="work-toolbar"><label class="w-field__label" for="work-push-body">PR description</label><span class="work-spacer"></span>

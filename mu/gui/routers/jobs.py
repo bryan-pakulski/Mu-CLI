@@ -620,6 +620,26 @@ def get_doctor(deep: bool = False):
             "warnings": sum(1 for c in checks if c["status"] == "warn"), "needs_setup": needs_setup()}
 
 
+@router.get("/publish/tokens")
+def get_publish_tokens():
+    """PR/MR provider tokens used when pushing: where each is set (environment / stored / unset).
+    Values are never returned."""
+    from mu.jobs import publish_tokens
+    return {"tokens": publish_tokens.status()}
+
+
+@router.put("/publish/tokens")
+def put_publish_token(payload: Dict[str, Any]):
+    """Store (empty value: clear) a provider token in ``$MUCLI_HOME/jobs/publish_tokens.env`` (0600).
+    Host-side only: never passed into job containers."""
+    from mu.jobs import publish_tokens
+    try:
+        publish_tokens.write_token(str((payload or {}).get("provider") or ""), (payload or {}).get("value"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"tokens": publish_tokens.status()}
+
+
 @router.get("/agents")
 def list_agents():
     """Agent harnesses (mucli / Claude Code / Codex): install, credential kind, readiness, per-stage

@@ -674,6 +674,12 @@ def save_agent_secret(key: str, value: Optional[str]) -> None:
     write_secret(key, value)
 
 
+def save_publish_token(provider: str, value: Optional[str]) -> None:
+    """Store (empty value: clear) a PR/MR provider token (host-side publish only, 0600)."""
+    from ..publish_tokens import write_token
+    write_token(provider, value)
+
+
 def setup_action(step: str, action: str, inputs=None, *, wait: bool = False, on_line=None) -> Dict[str, Any]:
     """Run one setup action (mu.jobs.setup); ``job`` actions block when ``wait``."""
     from ..setup import get_setup

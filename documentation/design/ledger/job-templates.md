@@ -26,3 +26,7 @@ without a replacement and nothing was skipped.
 - tests/test_job_templates.py:184 — fit computed with the default extra egress → with `egress_extra` cleared — intent: a template lacking npm is flagged.
 - tests/test_job_templates.py:412 — `run_job_setup(..., settings={})` → `settings={"sandbox": {"egress_extra": []}}` — intent: setup uses the template allowlist minus model hosts.
 - New: tests/test_default_package_registry_egress.py covers the defaults, plan/review staying closed, an explicit `[]` locking jobs down, and fit not warning for default registries.
+
+## Gitea publishing (2026-10-15)
+
+- tests/test_job_parity_backend.py:152 — push-preview key set `{…, reason}` → adds `token` and `provider`, and checks the token object shape (`provider`, `variable`, `source`; never a value) — intent unchanged: the push-preview contract is pinned; it was extended additively so the dialogs can warn when no PR/MR token is set.

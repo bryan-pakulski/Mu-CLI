@@ -30,7 +30,7 @@ WELCOME_HTML_PATH = os.path.join(
     "mu", "gui", "templates", "fragments", "welcome.html",
 )
 CSS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "mu", "gui", "static", "css", "app.css"
+    os.path.dirname(os.path.dirname(__file__)), "mu", "gui", "static", "css", "wash", "patterns", "conversation.css"
 )
 
 
@@ -254,7 +254,12 @@ def test_welcome_modal_has_local_cloud_toggle_and_key_field():
 def test_css_has_toggle_styles():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
+    chat = open(os.path.join(os.path.dirname(CSS_PATH), "chat.css"), encoding="utf-8").read()
+    markup = open(os.path.join(os.path.dirname(CSS_PATH), "..", "..", "..", "..", "templates",
+                               "fragments", "chat.html"), encoding="utf-8").read()
     assert ".ollama-mode-toggle" in content
-    assert ".ollama-mode-btn" in content
-    assert ".ollama-mode-btn.active" in content
-    assert ".ollama-key-input" in content
+    # The local/cloud buttons are the Wash segmented control (components/tabs.css).
+    assert 'class="ollama-mode-toggle w-segmented"' in markup
+    assert 'class="ollama-mode-btn w-segmented__option"' in markup
+    assert ":aria-pressed" in markup.split('class="ollama-mode-btn w-segmented__option"', 1)[1][:400]
+    assert ".ollama-key-input" in content and ".ollama-key-input" in chat

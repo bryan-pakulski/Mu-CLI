@@ -247,7 +247,13 @@ function traceApp() {
 
         async clearRun() {
             if (!this.runId || this.session) return;
-            if (!window.confirm("Clear this trace run? This deletes the JSONL file.")) return;
+            const confirmed = await window.WashConfirm({
+                title: "Clear this trace run?",
+                message: "This deletes the run's JSONL trace file. It cannot be undone.",
+                confirmLabel: "Delete trace",
+                tone: "danger",
+            });
+            if (!confirmed) return;
             try {
                 const r = await fetch("/api/traces/" + encodeURIComponent(this.runId), {
                     method: "DELETE",

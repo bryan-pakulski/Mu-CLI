@@ -8,7 +8,6 @@
  * `legacy` layer, as on every other page; the page's Wash rules follow in
  * the `patterns` layer.
  */
-@import url("../../theme.css") layer(legacy);
 @import url("panels.css") layer(patterns);
 @import url("settings.css") layer(patterns);
 @import url("welcome.css") layer(patterns);
@@ -102,6 +101,8 @@
         z-index: 0;
     }
     .w-chat__column:has(.w-transcript[data-mode-tint="default"])::before { opacity: 0; }
+    /* Reduce decoration (G§6.2 rule 5): the tint band becomes a flat edge. */
+    :root[data-decoration="reduced"] .w-chat__column::before { height: 3px; background: var(--w-mode-pigment, transparent); }
     .w-chat__column > * { position: relative; z-index: 1; }
     .w-chat__column .w-transcript { flex: 1 1 auto; }
     .turn-wrap { display: contents; }

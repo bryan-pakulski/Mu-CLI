@@ -20,11 +20,11 @@
 
     <!-- filters -->
     <div class="history-filters">
-        <select x-model="$store.history.role" aria-label="Filter by role" class="history-filter-select w-select">
+        <span class="w-select history-filter-select" data-size="sm"><select class="w-select__control" x-model="$store.history.role" aria-label="Filter by role">
             <option value="">All roles</option>
             <option value="user">User</option>
             <option value="assistant">Assistant</option>
-        </select>
+        </select></span>
         <input type="text"
                x-model="$store.history.tool_name"
                placeholder="Filter by tool name"

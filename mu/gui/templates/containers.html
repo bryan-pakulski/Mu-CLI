@@ -52,8 +52,8 @@
     </div>
 
     {#- Create / edit environment: a stepped modal (G§9.17, §9.13). -#}
-    <div class="w-modal manager-modal" id="create-modal" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title" hidden>
-        <section class="w-modal__dialog w-env-create" data-size="md">
+    <div class="w-modal manager-modal" id="create-modal" hidden>
+        <section class="w-modal__dialog w-env-create" data-size="md" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title">
             <header class="w-modal__head">
                 <div class="w-env-modal-heading">
                     <span class="w-eyebrow" data-tone="ok" id="environment-kicker"><i class="w-eyebrow__swatch"></i>New environment</span>
@@ -151,8 +151,8 @@
         </section>
     </div>
 
-    <div class="w-modal manager-modal" id="editor-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title" hidden>
-        <section class="w-modal__dialog" data-size="lg">
+    <div class="w-modal manager-modal" id="editor-modal" hidden>
+        <section class="w-modal__dialog" data-size="lg" role="dialog" aria-modal="true" aria-labelledby="editor-title">
             <header class="w-modal__head"><h2 class="w-modal__title" id="editor-title">Editor</h2>{{ w.btn("Close", variant="icon", icon="x", attrs={"data-close": "editor-modal"}) }}</header>
             <div class="w-modal__body">
                 <div id="dockerfile-editor-panel" class="w-field">
@@ -169,8 +169,8 @@
         </section>
     </div>
 
-    <div class="w-modal manager-modal" id="progress-modal" role="dialog" aria-modal="true" aria-labelledby="progress-title" hidden>
-        <section class="w-modal__dialog" data-size="sm">
+    <div class="w-modal manager-modal" id="progress-modal" hidden>
+        <section class="w-modal__dialog" data-size="sm" role="dialog" aria-modal="true" aria-labelledby="progress-title">
             <header class="w-modal__head"><h2 class="w-modal__title" id="progress-title">Creating environment</h2></header>
             <div class="w-modal__body w-env-progress">
                 <p id="progress-message" role="status">Queued…</p>
@@ -182,8 +182,8 @@
         </section>
     </div>
 
-    <div class="w-modal manager-modal" id="snapshot-modal" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" hidden>
-        <section class="w-modal__dialog" data-size="sm">
+    <div class="w-modal manager-modal" id="snapshot-modal" hidden>
+        <section class="w-modal__dialog" data-size="sm" role="dialog" aria-modal="true" aria-labelledby="snapshot-title">
             <header class="w-modal__head"><h2 class="w-modal__title" id="snapshot-title">Create template</h2>{{ w.btn("Close", variant="icon", icon="x", attrs={"data-close": "snapshot-modal"}) }}</header>
             <div class="w-modal__body w-env-stack">
                 <div class="w-field"><label class="w-field__label" for="snapshot-name">Template name</label><input class="w-input" id="snapshot-name" placeholder="python-data-science"></div>
@@ -196,8 +196,8 @@
         </section>
     </div>
 
-    <div class="w-modal manager-modal" id="shell-modal" role="dialog" aria-modal="true" aria-labelledby="shell-title" hidden>
-        <section class="w-modal__dialog w-env-shell" data-size="lg">
+    <div class="w-modal manager-modal" id="shell-modal" hidden>
+        <section class="w-modal__dialog w-env-shell" data-size="lg" role="dialog" aria-modal="true" aria-labelledby="shell-title">
             <header class="w-modal__head">
                 <div class="w-env-modal-heading"><h2 class="w-modal__title" id="shell-title">Terminal</h2><p class="w-env-modal-lede">Commands run inside the selected environment. Tab completes; ↑/↓ cycles history.</p></div>
                 {{ w.btn("Close", variant="icon", icon="x", attrs={"id": "close-shell"}) }}
@@ -211,8 +211,8 @@
 
     {#- One small modal for confirmations and the attach-session prompt (G§9.17:
         destructive confirm names the consequence; Cancel gets default focus). -#}
-    <div class="w-modal manager-modal" id="ask-modal" role="dialog" aria-modal="true" aria-labelledby="ask-title" hidden>
-        <section class="w-modal__dialog" data-size="sm">
+    <div class="w-modal manager-modal" id="ask-modal" hidden>
+        <section class="w-modal__dialog" data-size="sm" role="dialog" aria-modal="true" aria-labelledby="ask-title">
             <header class="w-modal__head"><h2 class="w-modal__title" id="ask-title">Are you sure?</h2></header>
             <div class="w-modal__body w-env-stack">
                 <p id="ask-message"></p>

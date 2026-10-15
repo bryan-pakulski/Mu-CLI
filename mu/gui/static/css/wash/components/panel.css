@@ -57,6 +57,14 @@
     opacity: 0.9;
     pointer-events: none;
 }
+:root[data-decoration="reduced"] .w-panel__head::before {
+    height: 4px;
+    background: var(--w-mode-pigment, var(--wash-accent-pigment));
+    opacity: 1;
+}
+@media (prefers-reduced-transparency: reduce) {
+    .w-panel__head::before { height: 4px; background: var(--w-mode-pigment, var(--wash-accent-pigment)); opacity: 1; }
+}
 .w-panel__title {
     margin: 0;
     min-width: 0;

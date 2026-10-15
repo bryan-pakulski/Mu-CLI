@@ -192,7 +192,13 @@
     }
 
     async function reset() {
-        if (!window.confirm('Remove the user pricing override and return to packaged defaults?')) return;
+        const confirmed = await window.WashConfirm({
+            title: 'Reset pricing to defaults?',
+            message: 'This removes your pricing override and returns every model to the packaged defaults.',
+            confirmLabel: 'Reset pricing',
+            tone: 'danger',
+        });
+        if (!confirmed) return;
         $('mc-status').textContent = 'Resetting…';
         const response = await fetch('/api/providers/pricing/reset', { method: 'POST' });
         const data = await response.json().catch(() => ({}));

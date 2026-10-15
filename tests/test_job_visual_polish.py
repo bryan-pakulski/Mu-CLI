@@ -44,14 +44,16 @@ def test_engineering_work_uses_planos_chrome_and_theme_switcher():
     assert '{% block crumbs_attrs %} id="work-crumbs" class="work-crumbs"' in html
     assert '{% block topbar_chips_attrs %} id="work-chips"' in html
     assert '/static/js/work/ui.js' in html
-    # Wash W1: jobs mode does not re-declare a palette; legacy names resolve
-    # to the Wash tokens (both themes) through tokens.css. Density stays local.
-    tokens = (ROOT / "mu" / "gui" / "static" / "css" / "tokens.css").read_text(encoding="utf-8")
+    # Jobs mode does not re-declare a palette: it reads the generated Wash
+    # tokens (both themes) directly; the legacy alias file is gone. Density
+    # stays local.
+    tokens = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "tokens.css").read_text(encoding="utf-8")
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "tokens.css").exists()
     assert '--accent:' not in css
     assert re.search(r'#[0-9a-fA-F]{3,8}\b', css) is None
-    for name, wash in (('--accent', 'accent-ink'), ('--ok', 'ok-ink'), ('--warn', 'attention-ink'),
-                       ('--danger', 'danger-ink'), ('--running', 'running-ink')):
-        assert f'{name}: var(--wash-{wash});' in tokens
+    for wash in ('accent-ink', 'ok-ink', 'attention-ink', 'danger-ink', 'running-ink'):
+        assert f'--wash-{wash}:' in tokens
+        assert f'var(--wash-{wash})' in css
     assert '[data-density="compact"]' in css
     # The shared theme controller and toggle come from the layout.
     assert '/static/js/route_theme.js' in layout

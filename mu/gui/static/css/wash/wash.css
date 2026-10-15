@@ -1,27 +1,16 @@
-@layer legacy, tokens, base, layout, components, patterns, utilities;
+@layer tokens, base, layout, components, patterns, utilities;
 
 /* Wash — the single shared stylesheet every page links (spec §4.1).
  *
- * Layer order is declared once, above. Later layers win, so `legacy` comes
- * first and has the lowest priority: any Wash rule beats any legacy rule
- * regardless of specificity, while legacy rules keep styling everything
- * Wash has not replaced yet. Legacy files carry no `!important` (W2 moved
- * those declarations to patterns/legacy-overrides.css and utilities.css).
- *
- * Page-scoped legacy CSS is imported by the page's bundle in patterns/
- * (patterns/chat.css, work.css, containers.css, trace.css, job-trace.css,
- * model-costs.css, gallery.css), linked right after this file by
- * templates/_layout.html. Those bundles import into the same `legacy`
- * layer, in each page's historical order, so pages never pick up each
- * other's selectors (`.trace-*` means different things on / and /trace).
+ * Layer order is declared once, above; later layers win. There is no legacy
+ * layer any more: every rule lives in tokens / base / layout / components /
+ * patterns / utilities. Page bundles in patterns/ (chat.css, work.css,
+ * containers.css, trace.css, job-trace.css, model-costs.css, gallery.css)
+ * are linked right after this file by templates/_layout.html and add their
+ * page's rules to the same layers.
  *
  * Imports below are relative so the file also works from a file:// copy.
  */
-
-/* ------------------------------------------------ legacy shared by every page */
-@import url("../tokens.css") layer(legacy);
-@import url("../app.css") layer(legacy);
-@import url("../floating_popouts.css") layer(legacy);
 
 /* ------------------------------------------------ Wash */
 @import url("tokens.css");                       /* generated; declares @layer tokens itself */
@@ -55,7 +44,9 @@
 @import url("components/meter.css") layer(components);
 @import url("components/palette.css") layer(components);
 @import url("components/session-list.css") layer(components);
+@import url("components/popout.css") layer(components);
 @import url("hljs-wash.css");                    /* generated; declares @layer components itself */
+@import url("patterns/conversation.css") layer(patterns);
+@import url("patterns/overlays.css") layer(patterns);
 @import url("patterns/shell.css") layer(patterns);
-@import url("patterns/legacy-overrides.css") layer(patterns);
 @import url("utilities.css") layer(utilities);

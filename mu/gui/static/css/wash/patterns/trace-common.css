@@ -68,11 +68,15 @@
     margin-left: auto;
 }
 .trace-info-btn.open { background: var(--wash-sunken); color: var(--wash-ink); }
-.trace-info-popout {
+/* Anchored under its info button until floating_popouts.js measures it
+ * (components/popout.css takes over the geometry then). */
+.trace-info-popout:not([data-viewport-floating]) {
     position: absolute;
     top: calc(100% + var(--wash-space-2));
     right: 0;
     z-index: var(--wash-z-popover);
+}
+.trace-info-popout {
     width: min(400px, calc(100vw - var(--wash-space-7)));
     padding: var(--wash-space-4);
     border: 1px solid var(--wash-hairline);

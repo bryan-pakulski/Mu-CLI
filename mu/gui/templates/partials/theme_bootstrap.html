@@ -1,6 +1,10 @@
 <!-- Pre-paint theme bootstrap (Wash). Runs before any stylesheet paints so a
      stored Dusk preference never flashes Paper. Preference values are
-     system | paper | dusk; legacy light/dark values are migrated on read. -->
+     system | paper | dusk; legacy light/dark values are migrated on read.
+     It also applies the "Reduce decoration" preference (G§6.2 rule 5):
+     localStorage `mucli-decoration` = reduced | full; when unset it follows
+     prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
+     which swaps every wash painting for a flat wash token. -->
 <script>
 (function () {
     var root = document.documentElement, pref = 'system';
@@ -15,5 +19,9 @@
     try { dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (e) {}
     root.setAttribute('data-theme', pref === 'system' ? (dark ? 'dusk' : 'paper') : pref);
     root.setAttribute('data-theme-pref', pref);
+    var deco = null, quiet = false;
+    try { deco = localStorage.getItem('mucli-decoration'); } catch (e) {}
+    try { quiet = !!(window.matchMedia && window.matchMedia('(prefers-reduced-transparency: reduce)').matches); } catch (e) {}
+    if (deco === 'reduced' || (deco !== 'full' && quiet)) root.setAttribute('data-decoration', 'reduced');
 })();
 </script>

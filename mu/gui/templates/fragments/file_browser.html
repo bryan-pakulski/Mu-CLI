@@ -2,18 +2,17 @@
 <!-- Filesystem browser modal (.w-modal, G§9.17) — shared by the workspace
      folder picker and the chat file-attach button. Mode "folder" shows a
      "select this folder" button; mode "file" lets you click individual files.
-     Sits above the guided-creation modals (app.css .file-browser-backdrop
-     z-index), so the backdrop keeps its own class. -->
+     Sits above the guided-creation modals (patterns/overlays.css
+     .file-browser-backdrop z-index), so the backdrop keeps its own class.
+     The dialog semantics sit on the surface, not the backdrop. -->
 <div class="file-browser-backdrop w-modal"
      x-dialog="$store.fileBrowser.open"
          x-show="$store.fileBrowser.open"
      x-cloak
-     role="dialog"
-     aria-modal="true"
      x-transition.opacity.duration.120ms
      @click.self="$store.fileBrowser.cancel()"
-     @dialog-close="$store.fileBrowser.cancel()" aria-label="File browser" aria-labelledby="file-browser-title">
-    <section class="file-browser w-modal__dialog" data-size="sm">
+     @dialog-close="$store.fileBrowser.cancel()">
+    <section class="file-browser w-modal__dialog" data-size="sm" role="dialog" aria-modal="true" aria-labelledby="file-browser-title">
         <header class="fb-head w-modal__head">
             <h2 class="fb-title w-modal__title" id="file-browser-title"
                 x-text="$store.fileBrowser.mode === 'folder' ? 'Select folder' : 'Select file'"></h2>

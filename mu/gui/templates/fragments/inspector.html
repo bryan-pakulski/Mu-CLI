@@ -224,6 +224,27 @@
                         title="Manage skills — enable, disable, edit, create"><span>Manage skills</span></button>
             </div>
 
+            <div class="settings-appearance" role="group" aria-labelledby="settings-appearance-title">
+                <h4 class="settings-appearance-title" id="settings-appearance-title">Appearance</h4>
+                <div class="settings-appearance-row">
+                    <label class="w-field__label" for="settings-theme-select">Theme</label>
+                    <span class="w-select settings-theme-select"><select class="w-select__control" id="settings-theme-select" data-theme-select aria-describedby="settings-theme-hint">
+                        <option value="system">Follow system</option>
+                        <option value="paper">Paper</option>
+                        <option value="dusk">Dusk</option>
+                    </select></span>
+                    <p class="w-field__hint" id="settings-theme-hint">Paper and Dusk are full themes; System follows your OS.</p>
+                </div>
+                <div class="settings-appearance-row">
+                    <label class="w-switch">
+                        <span class="w-switch__label">Reduce decoration</span>
+                        <input class="w-switch__input" type="checkbox" role="switch" data-decoration-toggle
+                               aria-describedby="settings-decoration-hint">
+                    </label>
+                    <p class="w-field__hint" id="settings-decoration-hint">Replaces the watercolour washes with flat colour on every page. Follows your OS "reduce transparency" setting until you change it.</p>
+                </div>
+            </div>
+
             <div class="settings-filter">
                 <input type="text" class="w-input"
                        x-model="$store.inspector.varFilter"

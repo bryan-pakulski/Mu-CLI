@@ -65,7 +65,7 @@ def test_web_subagent_surface_lingers_and_exposes_live_progress():
 def test_web_subagent_cards_have_titles_iteration_progress_and_activity_drilldown():
     source = read("mu/gui/static/js/app.js")
     template = read("mu/gui/templates/fragments/chat.html")
-    css = read("mu/gui/static/css/app.css")
+    css = read("mu/gui/static/css/wash/patterns/conversation.css")
 
     assert "subagentTitle(a)" in template
     assert "Iteration progress" in template

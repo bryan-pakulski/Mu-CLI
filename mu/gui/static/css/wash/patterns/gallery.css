@@ -4,7 +4,6 @@
  * Linked after wash.css (which declares the layer order), so these imports
  * land in the lowest-priority `legacy` layer. Wash rules for this page go
  * in the `patterns` layer below. */
-@import url("../../theme.css") layer(legacy);
 
 /* Gallery-only scaffolding (.g-*). Not for reuse in product pages. */
 @layer patterns {
@@ -134,5 +133,20 @@
     .g-transcript { padding: 0; overflow: visible; }
     .g-sessions { max-width: 280px; margin-top: var(--wash-space-4); padding: var(--wash-space-2); border-radius: var(--wash-radius-md); background: var(--wash-surface); }
     .g-chat { padding: var(--wash-space-7) var(--wash-space-6); border-top: 1px solid var(--wash-hairline); }
-    .g-chat__frame { height: 900px; border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-lg); overflow: hidden; }
+    /* The replay frame lays the chat column out like the chat page (patterns/
+     * chat.css .w-chat / __main / __column): a flex column whose transcript
+     * takes the slack, so the composer and its hint row always fit inside
+     * the 900px frame instead of being clipped by its bottom edge. */
+    .g-chat__frame {
+        display: flex;
+        flex-direction: column;
+        height: 900px;
+        border: 1px solid var(--wash-hairline);
+        border-radius: var(--wash-radius-lg);
+        overflow: hidden;
+    }
+    .g-chat__frame > .w-chat__main { position: relative; display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    .g-chat__frame .w-chat__column { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+    .g-chat__frame .w-transcript { flex: 1 1 auto; min-height: 0; }
+    .g-chat__frame .w-composer { flex: none; }
 }

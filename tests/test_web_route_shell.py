@@ -123,10 +123,20 @@ def test_container_dialogs_are_labelled_and_close_on_escape():
         ("snapshot-modal", "snapshot-title"),
         ("shell-modal", "shell-title"),
     ):
-        assert f'id="{modal}" role="dialog" aria-modal="true" aria-labelledby="{title}"' in html
+        # The backdrop is the shared .w-modal; the dialog semantics sit on
+        # its .w-modal__dialog surface (dialogs.js MuDialog).
+        backdrop = html.split(f'id="{modal}" hidden>', 1)[1]
+        surface = backdrop.split(">", 1)[0]
+        assert 'class="w-modal__dialog' in surface
+        assert f'role="dialog" aria-modal="true" aria-labelledby="{title}"' in surface
         assert f'id="{title}"' in html
     script = _read(GUI / "static" / "js" / "containers.js")
-    assert "event.key !== 'Escape'" in script
+    # Esc: the shared dialog stack dispatches `dialog-close`, which clicks the
+    # dialog's own close control.
+    assert "window.MuDialog.open(modal" in script and "window.MuDialog.close(modal)" in script
+    assert "modal.addEventListener('dialog-close'" in script
+    dialogs = _read(GUI / "static" / "js" / "dialogs.js")
+    assert "event.key === 'Escape'" in dialogs and "new CustomEvent('dialog-close')" in dialogs
     assert "renderChips()" in script
     # Wash W2: the theme controller and toggle come from the shared layout.
     layout = _read(GUI / "templates" / "_layout.html")

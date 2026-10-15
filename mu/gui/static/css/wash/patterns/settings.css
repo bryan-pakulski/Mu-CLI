@@ -10,6 +10,142 @@
  * pricing_settings.css and pricing_rows.css (G§9.5, §9.17).
  */
 
+/* ==================================================================== inspector hooks
+ * Surface rules for the legacy hooks the fragments and app.js emit. They
+ * come first so the Wash rules further down win ties. */
+.inspector-backdrop {
+    place-items: center;
+}
+.inspector {
+    min-height: 0;
+}
+.inspector-head {
+    align-items: center;
+    gap: var(--wash-space-2);
+}
+.inspector-tabs {
+    flex: 1;
+}
+.inspector-body {
+    flex: 1 1 0;
+}
+.inspector-body h4 {
+    margin: 0 0 var(--wash-space-3);
+    font-size: var(--wash-type-label-size);
+    color: var(--wash-ink-2);
+    font-weight: var(--wash-type-title-3-weight);
+}
+.inspector .muted {
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+.inspector .empty-row {
+    font-style: italic;
+}
+.inspector .kv-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--wash-space-2) 0;
+    gap: var(--wash-space-2);
+}
+.inspector .kv-key {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--wash-ink);
+}
+.inspector .mem-entry {
+    padding: var(--wash-space-3) 0;
+}
+.inspector .mem-head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    margin-bottom: var(--wash-space-1);
+    font-size: var(--wash-type-caption-size);
+}
+.inspector .tag:where(:not(.w-chip)) {
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+    border-radius: var(--wash-radius-pill);
+    padding: 2px var(--wash-space-2);
+    font-size: var(--wash-type-caption-size);
+}
+.inspector .mem-body {
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.inspector .stat {
+    padding: var(--wash-space-2) 0;
+}
+.inspector .stat-key:where(:not(.w-stat__label)) {
+    margin-bottom: 2px;
+}
+.inspector .stat-val:where(:not(.w-stat__value)) {
+    font-variant-numeric: tabular-nums;
+}
+.inspector .stat-val.large:where(:not(.w-stat__value)) {
+    font-size: var(--wash-type-title-3-size);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+    color: var(--wash-ink);
+}
+.inspector .stat-grid {
+    grid-template-columns: 1fr 1fr;
+}
+.inspector .var-group-head {
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small), color var(--wash-motion-micro) var(--wash-ease-small);
+}
+.inspector .var-group-head .caret {
+    display: inline-block;
+    width: 8px;
+}
+.inspector .var-group.open .var-group-head .caret:where(:not(.w-panel__caret, .w-toolcard__chevron, .w-worked__chevron)) {
+    transform: rotate(90deg);
+}
+.inspector .var-group-name {
+    flex: 1;
+}
+.inspector .var-group.open .var-group-name {
+    color: var(--wash-ink);
+}
+.inspector .var-group-body .var-row:first-child {
+    padding-top: 0;
+}
+.inspector .var-row .var-head {
+    margin-bottom: var(--wash-space-1);
+}
+.inspector .var-row .var-key {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.inspector .var-help-glyph {
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--wash-sunken);
+    border: 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    cursor: help;
+}
+.inspector .var-row .var-bool input {
+    width: auto;
+    accent-color: var(--wash-accent-ink);
+}
+
+/* ==================================================================== Wash rules */
+
+
 /* ================================================================ drawer
  * A wide right-hand drawer: vertical tab rail left, scrolling pane right.
  * Sits just below the modal level so modals opened from it (skills, the
@@ -236,6 +372,26 @@
     line-height: var(--wash-type-body-line);
 }
 .settings-skills-button { flex: none; }
+/* Appearance: theme preference + "Reduce decoration" (G§6.2 rule 5). */
+.settings-appearance {
+    display: grid;
+    gap: var(--wash-space-3);
+    margin: 0 0 var(--wash-space-5);
+    padding: var(--wash-space-4) 0;
+    border-top: 1px solid var(--wash-hairline);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.settings-appearance-title {
+    margin: 0;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-eyebrow-size);
+    font-weight: var(--wash-type-eyebrow-weight);
+    letter-spacing: var(--wash-type-eyebrow-tracking);
+    line-height: var(--wash-type-eyebrow-line);
+}
+.settings-appearance-row { display: grid; gap: var(--wash-space-1); }
+.settings-appearance-row .w-field__hint { margin: 0; }
+.settings-theme-select { max-width: 240px; }
 .settings-filter { margin: 0 0 var(--wash-space-4); }
 .settings-pane .var-group {
     margin: 0;

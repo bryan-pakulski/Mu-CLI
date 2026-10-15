@@ -6,8 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "mu" / "gui" / "templates" / "fragments"
 APP_JS = ROOT / "mu" / "gui" / "static" / "js" / "app.js"
-APP_CSS = ROOT / "mu" / "gui" / "static" / "css" / "app.css"
-TOKENS_CSS = ROOT / "mu" / "gui" / "static" / "css" / "tokens.css"
+APP_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "panels.css"
+BASE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "base.css"
+WASH_TOKENS_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "tokens.css"
 MOBILE_COMPONENT = (
     ROOT / "mobile" / "android" / "src" / "components" / "ModeWorkspace.tsx"
 )
@@ -29,43 +30,34 @@ def test_mode_workspace_exploration_state_survives_page_reload():
 
 def test_web_mode_os_has_explicit_light_and_dark_palette_tokens():
     css = APP_CSS.read_text(encoding="utf-8")
-    tokens = TOKENS_CSS.read_text(encoding="utf-8")
-    # Light and dark palettes live in tokens.css, the single source of
-    # visual values; app.css consumes the mode tokens without redefining them.
-    # Wash W1: the mode names alias per-theme Wash mode pigments, which the
-    # generated wash/tokens.css defines for Paper and Dusk (and the legacy
-    # light/dark names).
-    wash = (TOKENS_CSS.parent / "wash" / "tokens.css").read_text(encoding="utf-8")
+    base = BASE_CSS.read_text(encoding="utf-8")
+    # Each mode keeps its own pigment in both themes: the generated Wash
+    # tokens define the per-theme mode steps, and any element carrying
+    # data-mode-tint reads them through the --w-mode-* channels in base.css.
+    # Panel rules never redefine a mode colour.
+    wash = WASH_TOKENS_CSS.read_text(encoding="utf-8")
     for selector in ('[data-theme="paper"]', '[data-theme="dusk"]', '[data-theme="light"]', '[data-theme="dark"]'):
         assert selector in wash
-    assert "--mode-research: var(--wash-mode-research-ink);" in tokens
-    for token in (
-        "--mode-research",
-        "--mode-security",
-        "--mode-debug",
-        "--mode-loop",
-        "--mode-feature",
-        "--mode-teacher",
-    ):
-        assert token + ":" in tokens
-        assert "var(" + token + ")" in css
-        assert token + ":" not in css
+    for mode in ("research", "security", "debug", "loop", "feature", "teacher"):
+        assert f"--wash-mode-{mode}-ink:" in wash
+        assert f'[data-mode-tint="{mode}"] {{ --w-mode-wash: var(--wash-mode-{mode}-wash); --w-mode-ink: var(--wash-mode-{mode}-ink);' in base
+        assert f"--mode-{mode}:" not in css and f"--wash-mode-{mode}-ink:" not in css
     assert re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", css) is None
 
-
 def test_web_mode_workspace_uses_one_glass_plane_not_nested_cards_or_pills():
-    css = APP_CSS.read_text(encoding="utf-8")
+    from wash_css_helpers import css, decls
+    panels = css("patterns/panels.css")
     markup = (TEMPLATES / "mode_workspace_header.html").read_text(encoding="utf-8")
-    header_rule = css.split(".mode-os {", 1)[1].split(".mode-os-topline", 1)[0]
-    metric_rule = css.split(".mode-os-metrics {", 1)[1].split(".mode-os-metric {", 1)[0]
-    assert "background:" not in header_rule
-    assert "box-shadow:" not in header_rule
-    assert "border-radius:" not in header_rule
-    assert "background:" not in metric_rule
+    for selector in (".mode-os", ".mode-panel .mode-os", ".mode-os-metrics"):
+        rule = decls(panels, selector)
+        assert "background" not in rule, selector
+        assert "box-shadow" not in rule, selector
+        assert "border-radius" not in rule, selector
     assert 'class="mode-os-status-dot"' not in markup
     assert '<dl class="mode-os-metrics">' in markup
-    assert "border-radius: var(--radius-pill)" not in css[css.index(".mode-os {"):css.index(".panel-empty {")]
-
+    # Metrics are flat cells separated by hairlines, not pills.
+    metric = decls(panels, ".mode-os-metric")
+    assert metric.get("border-radius") == "0" and metric.get("background") == "none"
 
 def test_mobile_workspace_uses_live_theme_hairlines_not_nested_surfaces():
     component = MOBILE_COMPONENT.read_text(encoding="utf-8")

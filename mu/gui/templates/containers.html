@@ -11,111 +11,216 @@
         <li class="w-optional"><span class="w-chip" data-variant="meta" id="template-count-chip" title="Templates"><span data-chip-text>0 templates</span></span></li>
 {% endblock %}
 {% block content %}
-<div class="containers-shell">
-<div class="container-manager" id="container-manager">
-    <header class="container-manager-header">
-        <div>
-            <h1>Container environments</h1>
-            <p>Create and manage isolated workspaces for MuCLI. Inspect live resource use, attach sessions, open a terminal, and turn a configured environment into a reusable template.</p>
+<div class="containers-shell w-env" id="container-manager">
+    {#- Meadow hero band (G§6.1): art dissolves into the canvas above the page. -#}
+    <header class="w-hero w-env-hero" data-art="env">
+        <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Environments</span>
+        <h1 class="w-hero__title">Container environments</h1>
+        <p class="w-hero__lede">Isolated workspaces for MuCLI. Watch live resource use, attach sessions, open a terminal, and save a configured environment as a reusable template.</p>
+        <div class="w-env-hero__actions">
+            <button type="button" class="w-btn" data-variant="primary" data-size="lg" id="create-environment-button" title="Create environment">{{ w.icon("plus") }}<span>New environment</span></button>
         </div>
-        <button class="manager-header-action btn primary" id="create-environment-button" title="Create environment"><span aria-hidden="true">＋</span><span>New environment</span></button>
     </header>
 
-    <section class="manager-section" aria-labelledby="environments-title">
-        <div class="manager-section-head"><div><h2 id="environments-title">Environments</h2><span class="muted">Available independently until a session is attached</span></div><button class="manager-icon-action btn ghost icon sm" id="refresh-containers" aria-label="Refresh environments" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M19 11a7.5 7.5 0 1 0 .3 4.3"/></svg></button></div>
-        <div id="container-empty" class="manager-empty">No managed environments yet.</div>
-        <div id="container-list" class="manager-grid"></div>
-    </section>
-
-    <section class="manager-section" aria-labelledby="templates-title">
-        <div class="manager-section-head"><div><h2 id="templates-title">Templates</h2><span class="muted">Reusable snapshots for new environments</span></div></div>
-        <div id="template-empty" class="manager-empty">No templates yet.</div>
-        <div id="template-list" class="manager-grid manager-grid-templates"></div>
-    </section>
-
-    <div class="manager-modal" id="create-modal" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title" hidden>
-        <div class="manager-modal-card manager-modal-wide">
-            <header><div><p class="manager-kicker" id="environment-kicker">New environment</p><h2 id="environment-modal-title">Create environment</h2><p id="environment-modal-description">Build a standalone environment and attach sessions when you need it.</p></div><button data-close="create-modal" aria-label="Close">×</button></header>
-            <div class="manager-form">
-                <label>Name<input id="environment-name" placeholder="research-box"></label>
-                <label>Base<select id="environment-source"><option value="dockerfile">Dockerfile</option><option value="template">Template</option></select></label>
-                <label id="template-select-row" hidden>Template<select id="environment-template"></select></label>
-                <div id="dockerfile-row" class="manager-editor-row">
-                    <button id="edit-dockerfile" class="manager-expand-card"><span><strong>Dockerfile</strong><small id="dockerfile-summary">Editable worker image</small></span><span>Edit ↗</span></button>
+    <div class="w-page w-env-page">
+        <section class="w-section" aria-labelledby="environments-title">
+            <div class="w-env-section-head">
+                <div>
+                    <h2 class="w-env-section-title" id="environments-title">Environments</h2>
+                    <p class="w-env-section-lede">Available on their own until you attach a session</p>
                 </div>
-                <div class="manager-mounts">
-                    <div class="manager-mounts-head"><div><strong>Folder mounts</strong><small>Choose host folders with the MuCLI browser.</small></div><button type="button" class="btn sm" id="add-environment-mount">Add folder</button></div>
-                    <div id="environment-mount-list" class="manager-mount-list"></div>
+                {{ w.btn("Refresh environments", variant="icon", icon="refresh-cw", attrs={"id": "refresh-containers"}) }}
+            </div>
+            <div id="container-empty" class="w-env-empty">
+                {{ w.empty_state("No environments yet", body="Create one from a Dockerfile or a template, then attach sessions when you need it.", icon="box", tone="ok", action="New environment", attrs={"data-empty-create": true}) }}
+            </div>
+            <div id="container-list" class="w-card-grid w-env-grid"></div>
+        </section>
+
+        <section class="w-section" aria-labelledby="templates-title">
+            <div class="w-env-section-head">
+                <div>
+                    <h2 class="w-env-section-title" id="templates-title">Templates</h2>
+                    <p class="w-env-section-lede">Reusable snapshots for new environments</p>
                 </div>
-                <section class="manager-hardware" aria-labelledby="hardware-title">
-                    <div class="manager-mounts-head"><div><strong id="hardware-title">Hardware</strong><small id="hardware-summary">No GPU or host devices attached.</small></div><span aria-hidden="true">⌁</span></div>
-                    <div class="manager-hardware-grid">
-                        <label>GPU access
-                            <select id="environment-gpu-mode"><option value="none">None</option><option value="all">All detected GPUs</option><option value="selected">Selected GPUs</option></select>
-                        </label>
-                        <label id="environment-gpu-selection-row" hidden>GPU indexes or UUIDs<input id="environment-gpu-selection" placeholder="0,1 or GPU-uuid"></label>
-                    </div>
-                    <p class="manager-hardware-capability" id="hardware-capability"></p>
-                    <div id="environment-device-list" class="manager-device-list"></div>
-                    <div class="manager-device-add">
-                        <select id="environment-device-preset"><option value="">Detected device…</option></select>
-                        <input id="environment-device-host" placeholder="/dev/video0">
-                        <input id="environment-device-target" placeholder="Container path">
-                        <select id="environment-device-permissions"><option value="r">r</option><option value="rw">rw</option><option value="rwm" selected>rwm</option></select>
-                        <button type="button" class="btn" id="add-environment-device">Add device</button>
-                    </div>
-                    <p class="manager-hardware-warning">Device passthrough grants this environment direct access to the selected host hardware.</p>
-                </section>
-                <button id="edit-network" class="manager-expand-card"><span><strong>Network policy</strong><small id="network-summary">Default allowlist · empty blocklist</small></span><span>Edit ↗</span></button>
-                <label class="manager-check"><input type="checkbox" id="environment-start" checked> Start after creation</label>
-                <div id="environment-error" class="manager-error"></div>
             </div>
-            <footer><button class="btn" data-close="create-modal">Cancel</button><button class="btn primary" id="submit-environment">Create</button></footer>
-        </div>
-    </div>
-
-    <div class="manager-modal" id="editor-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title" hidden>
-        <div class="manager-modal-card manager-editor-modal">
-            <header><h2 id="editor-title">Editor</h2><button data-close="editor-modal" aria-label="Close">×</button></header>
-            <div id="dockerfile-editor-panel"><textarea id="environment-dockerfile" spellcheck="false"></textarea></div>
-            <div id="network-editor-panel" hidden>
-                <label>Allowed domains<textarea id="environment-allow" rows="10"></textarea></label>
-                <label>Blocked domains<textarea id="environment-deny" rows="10" placeholder="One domain per line"></textarea></label>
-                <p class="muted">Blocklist entries override the allowlist.</p>
+            <div id="template-empty" class="w-env-empty">
+                {{ w.empty_state("No templates yet", body="Open an environment's menu and choose Create template to save its image for reuse.", icon="layers", tone="plan", size="sm") }}
             </div>
-            <footer><button class="btn primary" data-close="editor-modal">Done</button></footer>
-        </div>
+            <div id="template-list" class="w-card-grid w-env-grid w-env-grid--templates"></div>
+        </section>
     </div>
 
-    <div class="manager-modal" id="progress-modal" role="dialog" aria-modal="true" aria-labelledby="progress-title" hidden>
-        <div class="manager-modal-card">
-            <header><div><h2 id="progress-title">Creating environment</h2><p id="progress-message">Queued…</p></div></header>
-            <div class="manager-progress"><span class="container-creation-spinner"></span><span id="progress-stage">queued</span></div>
-            <details id="progress-output"><summary>Build output</summary><pre id="progress-log"></pre></details>
-            <footer><button class="btn" id="close-progress" hidden>Close</button></footer>
-        </div>
+    {#- Create / edit environment: a stepped modal (G§9.17, §9.13). -#}
+    <div class="w-modal manager-modal" id="create-modal" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title" hidden>
+        <section class="w-modal__dialog w-env-create" data-size="md">
+            <header class="w-modal__head">
+                <div class="w-env-modal-heading">
+                    <span class="w-eyebrow" data-tone="ok" id="environment-kicker"><i class="w-eyebrow__swatch"></i>New environment</span>
+                    <h2 class="w-modal__title" id="environment-modal-title">Create environment</h2>
+                    <p class="w-env-modal-lede" id="environment-modal-description">Build a standalone environment and attach sessions when you need it.</p>
+                </div>
+                {{ w.btn("Close", variant="icon", icon="x", attrs={"data-close": "create-modal"}) }}
+            </header>
+            <ol class="w-stepper w-env-steps" id="environment-steps" aria-label="Create environment steps">
+                <li class="w-stepper__step" data-status="active" aria-current="step"><button type="button" class="w-env-step" data-env-step="0"><span aria-hidden="true" data-step-glyph>●</span>Basics</button></li>
+                <li class="w-stepper__step" data-status="pending"><button type="button" class="w-env-step" data-env-step="1"><span aria-hidden="true" data-step-glyph>○</span>Folders and hardware</button></li>
+                <li class="w-stepper__step" data-status="pending"><button type="button" class="w-env-step" data-env-step="2"><span aria-hidden="true" data-step-glyph>○</span>Network and review</button></li>
+            </ol>
+            <div class="w-modal__body w-env-form manager-form">
+                <fieldset class="w-env-pane" data-env-pane="0">
+                    <legend class="w-visually-hidden">Basics</legend>
+                    <div class="w-field">
+                        <label class="w-field__label" for="environment-name">Name</label>
+                        <input class="w-input" id="environment-name" placeholder="research-box" aria-describedby="environment-name-hint">
+                        <p class="w-field__hint" id="environment-name-hint">Used for the container and its volumes.</p>
+                    </div>
+                    <div class="w-field">
+                        <label class="w-field__label" for="environment-source">Base</label>
+                        <span class="w-select"><select class="w-select__control" id="environment-source"><option value="dockerfile">Dockerfile</option><option value="template">Template</option></select></span>
+                    </div>
+                    <div class="w-field" id="template-select-row" hidden>
+                        <label class="w-field__label" for="environment-template">Template</label>
+                        <span class="w-select"><select class="w-select__control" id="environment-template"></select></span>
+                    </div>
+                    <div id="dockerfile-row" class="manager-editor-row">
+                        <button type="button" id="edit-dockerfile" class="w-env-expand">
+                            {{ w.icon("file-text") }}
+                            <span class="w-env-expand__text"><strong>Dockerfile</strong><small id="dockerfile-summary">Editable worker image</small></span>
+                            <span class="w-env-expand__go">Edit<span aria-hidden="true"> ›</span></span>
+                        </button>
+                    </div>
+                </fieldset>
+
+                <fieldset class="w-env-pane" data-env-pane="1" hidden>
+                    <legend class="w-visually-hidden">Folders and hardware</legend>
+                    <section class="w-env-group" aria-labelledby="mounts-title">
+                        <div class="w-env-group__head">
+                            <div><h3 class="w-env-group__title" id="mounts-title">Folder mounts</h3><p class="w-field__hint">Choose host folders with the MuCLI browser.</p></div>
+                            {{ w.btn("Add folder", size="sm", icon="folder-open", attrs={"id": "add-environment-mount"}) }}
+                        </div>
+                        <div id="environment-mount-list" class="w-env-rows"></div>
+                    </section>
+                    <section class="w-env-group manager-hardware" aria-labelledby="hardware-title">
+                        <div class="w-env-group__head">
+                            <div><h3 class="w-env-group__title" id="hardware-title">Hardware</h3><p class="w-field__hint" id="hardware-summary">No GPU or host devices attached.</p></div>
+                            {{ w.icon("cpu") }}
+                        </div>
+                        <div class="w-env-two">
+                            <div class="w-field">
+                                <label class="w-field__label" for="environment-gpu-mode">GPU access</label>
+                                <span class="w-select"><select class="w-select__control" id="environment-gpu-mode"><option value="none">None</option><option value="all">All detected GPUs</option><option value="selected">Selected GPUs</option></select></span>
+                            </div>
+                            <div class="w-field" id="environment-gpu-selection-row" hidden>
+                                <label class="w-field__label" for="environment-gpu-selection">GPU indexes or UUIDs</label>
+                                <input class="w-input" data-mono id="environment-gpu-selection" placeholder="0,1 or GPU-uuid">
+                            </div>
+                        </div>
+                        <p class="w-field__hint" id="hardware-capability"></p>
+                        <div id="environment-device-list" class="w-env-rows"></div>
+                        <div class="w-env-device-add">
+                            <span class="w-select"><select class="w-select__control" id="environment-device-preset" aria-label="Detected device"><option value="">Detected device…</option></select></span>
+                            <input class="w-input" data-mono id="environment-device-host" placeholder="/dev/video0" aria-label="Host device path">
+                            <input class="w-input" data-mono id="environment-device-target" placeholder="Container path" aria-label="Container device path">
+                            <span class="w-select"><select class="w-select__control" id="environment-device-permissions" aria-label="Device permissions"><option value="r">r</option><option value="rw">rw</option><option value="rwm" selected>rwm</option></select></span>
+                            {{ w.btn("Add device", size="sm", attrs={"id": "add-environment-device"}) }}
+                        </div>
+                        <p class="w-env-note" data-tone="caution"><span aria-hidden="true">◆</span> Device passthrough gives this environment direct access to the selected host hardware.</p>
+                    </section>
+                </fieldset>
+
+                <fieldset class="w-env-pane" data-env-pane="2" hidden>
+                    <legend class="w-visually-hidden">Network and review</legend>
+                    <button type="button" id="edit-network" class="w-env-expand">
+                        {{ w.icon("network") }}
+                        <span class="w-env-expand__text"><strong>Network policy</strong><small id="network-summary">Default allowlist · empty blocklist</small></span>
+                        <span class="w-env-expand__go">Edit<span aria-hidden="true"> ›</span></span>
+                    </button>
+                    <dl class="w-env-review" id="environment-review" aria-label="Summary"></dl>
+                    <label class="w-switch"><span class="w-switch__label">Start after creation</span><input class="w-switch__input" type="checkbox" role="switch" id="environment-start" checked></label>
+                </fieldset>
+                <p id="environment-error" class="w-env-error" role="alert"></p>
+            </div>
+            <footer class="w-modal__foot">
+                {{ w.btn("Cancel", variant="ghost", attrs={"data-close": "create-modal"}) }}
+                <span class="w-env-foot-spacer"></span>
+                {{ w.btn("Back", attrs={"id": "environment-back", "hidden": true}) }}
+                {{ w.btn("Next", variant="primary", attrs={"id": "environment-next"}) }}
+                {{ w.btn("Create", variant="primary", attrs={"id": "submit-environment", "hidden": true}) }}
+            </footer>
+        </section>
     </div>
 
-    <div class="manager-modal" id="snapshot-modal" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" hidden>
-        <div class="manager-modal-card">
-            <header><h2 id="snapshot-title">Create template</h2><button data-close="snapshot-modal" aria-label="Close">×</button></header>
-            <label>Template name<input id="snapshot-name" placeholder="python-data-science"></label>
-            <label>Description<input id="snapshot-description" placeholder="Configured Python and analysis tools"></label>
-            <p class="muted">Templates capture the writable image filesystem. Mounted session, home, workspace, and bind volumes are excluded. Provider secrets and worker tokens are cleared.</p>
-            <input type="hidden" id="snapshot-container">
-            <div class="manager-error" id="snapshot-error"></div>
-            <footer><button class="btn" data-close="snapshot-modal">Cancel</button><button class="btn primary" id="submit-snapshot">Create template</button></footer>
-        </div>
+    <div class="w-modal manager-modal" id="editor-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title" hidden>
+        <section class="w-modal__dialog" data-size="lg">
+            <header class="w-modal__head"><h2 class="w-modal__title" id="editor-title">Editor</h2>{{ w.btn("Close", variant="icon", icon="x", attrs={"data-close": "editor-modal"}) }}</header>
+            <div class="w-modal__body">
+                <div id="dockerfile-editor-panel" class="w-field">
+                    <label class="w-visually-hidden" for="environment-dockerfile">Dockerfile</label>
+                    <textarea class="w-textarea w-env-code" data-mono id="environment-dockerfile" spellcheck="false"></textarea>
+                </div>
+                <div id="network-editor-panel" class="w-env-two" hidden>
+                    <div class="w-field"><label class="w-field__label" for="environment-allow">Allowed domains</label><textarea class="w-textarea" data-mono id="environment-allow" rows="10"></textarea></div>
+                    <div class="w-field"><label class="w-field__label" for="environment-deny">Blocked domains</label><textarea class="w-textarea" data-mono id="environment-deny" rows="10" placeholder="One domain per line"></textarea></div>
+                    <p class="w-field__hint">Blocklist entries override the allowlist.</p>
+                </div>
+            </div>
+            <footer class="w-modal__foot">{{ w.btn("Done", variant="primary", attrs={"data-close": "editor-modal"}) }}</footer>
+        </section>
     </div>
 
-    <div class="manager-modal" id="shell-modal" role="dialog" aria-modal="true" aria-labelledby="shell-title" hidden>
-        <div class="manager-modal-card manager-shell-modal">
-            <header><div><h2 id="shell-title">Terminal</h2><p>Commands run inside the selected environment. Tab completes; ↑/↓ cycles history.</p></div><button id="close-shell" aria-label="Close">×</button></header>
-            <pre id="shell-output" class="manager-shell-output"></pre>
-            <form id="shell-form" class="manager-shell-input"><span>$</span><input id="shell-command" autocomplete="off" spellcheck="false" autofocus></form>
-        </div>
+    <div class="w-modal manager-modal" id="progress-modal" role="dialog" aria-modal="true" aria-labelledby="progress-title" hidden>
+        <section class="w-modal__dialog" data-size="sm">
+            <header class="w-modal__head"><h2 class="w-modal__title" id="progress-title">Creating environment</h2></header>
+            <div class="w-modal__body w-env-progress">
+                <p id="progress-message" role="status">Queued…</p>
+                <div class="w-env-progress__stage"><span class="w-inkdrop" data-tone="running" id="progress-drop" aria-hidden="true"></span><span id="progress-stage">queued</span></div>
+                <div class="w-progress" data-indeterminate id="progress-bar" aria-hidden="true"><span class="w-progress__bar"></span></div>
+                <details id="progress-output" class="w-env-log"><summary>Build output</summary><pre id="progress-log" class="w-env-terminal"></pre></details>
+            </div>
+            <footer class="w-modal__foot">{{ w.btn("Close", attrs={"id": "close-progress", "hidden": true}) }}</footer>
+        </section>
     </div>
-</div>
+
+    <div class="w-modal manager-modal" id="snapshot-modal" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" hidden>
+        <section class="w-modal__dialog" data-size="sm">
+            <header class="w-modal__head"><h2 class="w-modal__title" id="snapshot-title">Create template</h2>{{ w.btn("Close", variant="icon", icon="x", attrs={"data-close": "snapshot-modal"}) }}</header>
+            <div class="w-modal__body w-env-stack">
+                <div class="w-field"><label class="w-field__label" for="snapshot-name">Template name</label><input class="w-input" id="snapshot-name" placeholder="python-data-science"></div>
+                <div class="w-field"><label class="w-field__label" for="snapshot-description">Description</label><input class="w-input" id="snapshot-description" placeholder="Configured Python and analysis tools"></div>
+                <p class="w-field__hint">Templates capture the writable image filesystem. Mounted session, home, workspace and bind volumes are excluded. Provider secrets and worker tokens are cleared.</p>
+                <input type="hidden" id="snapshot-container">
+                <p class="w-env-error" id="snapshot-error" role="alert"></p>
+            </div>
+            <footer class="w-modal__foot">{{ w.btn("Cancel", attrs={"data-close": "snapshot-modal"}) }}{{ w.btn("Create template", variant="primary", attrs={"id": "submit-snapshot"}) }}</footer>
+        </section>
+    </div>
+
+    <div class="w-modal manager-modal" id="shell-modal" role="dialog" aria-modal="true" aria-labelledby="shell-title" hidden>
+        <section class="w-modal__dialog w-env-shell" data-size="lg">
+            <header class="w-modal__head">
+                <div class="w-env-modal-heading"><h2 class="w-modal__title" id="shell-title">Terminal</h2><p class="w-env-modal-lede">Commands run inside the selected environment. Tab completes; ↑/↓ cycles history.</p></div>
+                {{ w.btn("Close", variant="icon", icon="x", attrs={"id": "close-shell"}) }}
+            </header>
+            <div class="w-modal__body w-env-shell__body">
+                <pre id="shell-output" class="w-env-terminal manager-shell-output" tabindex="0" aria-label="Terminal output"></pre>
+                <form id="shell-form" class="w-env-shell__input"><span aria-hidden="true">$</span><label class="w-visually-hidden" for="shell-command">Command</label><input id="shell-command" autocomplete="off" spellcheck="false" autofocus></form>
+            </div>
+        </section>
+    </div>
+
+    {#- One small modal for confirmations and the attach-session prompt (G§9.17:
+        destructive confirm names the consequence; Cancel gets default focus). -#}
+    <div class="w-modal manager-modal" id="ask-modal" role="dialog" aria-modal="true" aria-labelledby="ask-title" hidden>
+        <section class="w-modal__dialog" data-size="sm">
+            <header class="w-modal__head"><h2 class="w-modal__title" id="ask-title">Are you sure?</h2></header>
+            <div class="w-modal__body w-env-stack">
+                <p id="ask-message"></p>
+                <div class="w-field" id="ask-field" hidden><label class="w-field__label" for="ask-input" id="ask-label">Value</label><input class="w-input" id="ask-input" autocomplete="off"></div>
+            </div>
+            <footer class="w-modal__foot">{{ w.btn("Cancel", attrs={"id": "ask-cancel"}) }}{{ w.btn("OK", variant="primary", attrs={"id": "ask-ok"}) }}</footer>
+        </section>
+    </div>
 </div>
 {% include "fragments/file_browser.html" %}
 <script src="/static/js/containers.js"></script>

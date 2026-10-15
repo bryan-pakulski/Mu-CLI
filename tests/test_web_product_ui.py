@@ -15,7 +15,7 @@ REFINEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "refinement.css"
 POPOUT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "popouts.css"
 ROUTE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "route-product.css"
 TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "trace.css"
-CONTAINER_CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css"
+CONTAINERS_BUNDLE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "containers.css"
 PRODUCT_JS = ROOT / "mu" / "gui" / "static" / "js" / "product.js"
 WEB_SHELL_JS = ROOT / "mu" / "gui" / "static" / "js" / "web_shell.js"
 OVERRIDES_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "legacy-overrides.css"
@@ -300,19 +300,23 @@ def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():
     template = CONTAINERS.read_text(encoding="utf-8")
-    # Wash W2: /containers links its page bundle importing the route styles.
-    bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "containers.css").read_text(encoding="utf-8")
+    # Wash W4: /containers links its page bundle, which is real Wash rules and
+    # imports no legacy CSS (containers.css / containers-crystal.css retired).
+    bundle = CONTAINERS_BUNDLE_CSS.read_text(encoding="utf-8")
     assert '/static/css/wash/patterns/containers.css' in template
-    assert '@import url("../../route-product.css") layer(legacy);' in bundle
-    assert '@import url("../../containers-crystal.css") layer(legacy);' in bundle
+    assert '@import' not in bundle and '@layer patterns' in bundle
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css").exists()
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "containers.css").exists()
     for dom_id in (
         'container-list', 'template-list', 'create-environment-button',
         'create-modal', 'environment-name', 'shell-modal', 'shell-command',
     ):
         assert f'id="{dom_id}"' in template
 
-    css = CONTAINER_CRYSTAL_CSS.read_text(encoding="utf-8")
-    assert '.manager-card{display:grid' in css
-    assert 'border-bottom:1px solid var(--hairline)' in css
-    assert '.manager-monitor-grid' in css
-    assert '.manager-overflow-menu' in css and 'var(--bg-raised)' in css
+    # Cards, monitor grid and overflow menu are Wash components laid out by the bundle.
+    script = (ROOT / "mu" / "gui" / "static" / "js" / "containers.js").read_text(encoding="utf-8")
+    assert 'class="w-card w-env-card" data-variant="interactive"' in script
+    assert 'class="w-menu w-env-overflow__menu" role="menu"' in script
+    assert 'class="w-card-grid w-env-grid"' in template
+    assert '.w-env-monitor__grid' in bundle
+    assert '.w-env-overflow__menu' in bundle and '.w-env-meta' in bundle

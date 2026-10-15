@@ -16,7 +16,8 @@ RULES = (STATIC / "js" / "work" / "rules.js").read_text(encoding="utf-8")
 ACTIVITY = (STATIC / "js" / "work" / "activity.js").read_text(encoding="utf-8")
 CONTAINERS = (STATIC / "js" / "containers.js").read_text(encoding="utf-8")
 CSS = (STATIC / "css" / "work_polish.css").read_text(encoding="utf-8")
-CONTAINERS_CSS = (STATIC / "css" / "containers-crystal.css").read_text(encoding="utf-8")
+# Wash W4: the Environments page styles live in its pattern bundle (legacy containers*.css retired).
+CONTAINERS_CSS = (STATIC / "css" / "wash" / "patterns" / "containers.css").read_text(encoding="utf-8")
 
 
 def test_environments_module_loads_before_the_views():
@@ -84,7 +85,8 @@ def test_settings_show_docker_in_docker_status_and_kept_jobs():
 def test_environments_page_badge_and_scan_warning():
     assert "ref.jobs_using" in CONTAINERS and "Used by ${Number(ref.jobs_using)} job" in CONTAINERS
     assert "ref.job_scan_blocks" in CONTAINERS and "Secret scan blocked job" in CONTAINERS
-    assert ".manager-jobs-badge" in CONTAINERS_CSS and ".manager-scan-warning" in CONTAINERS_CSS
+    assert "w-env-jobs-badge" in CONTAINERS and "w-env-scan-warning" in CONTAINERS
+    assert ".w-env-jobs-badge" in CONTAINERS_CSS and ".w-env-scan-warning" in CONTAINERS_CSS
     assert ".work-env-pill" in CSS and ".work-env-binding" in CSS
 
 

@@ -21,11 +21,11 @@ export function JobBoardsScreen({ navigation }: JobBoardsScreenProps) {
   const sessionName = useConnectionStore(state => state.activeSessionName);
   const go = (page: JobsPage) => switchJobsPage(navigation, 'JobBoards', page);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="JobBoards" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Tickets</Text>
-        <Text variant="xs" style={{ color: colors.muted }}>Pick Jira tickets and create jobs from them. Tickets already linked to a job open that job.</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }}>Pick Jira tickets and create jobs from them. Tickets already linked to a job open that job.</Text>
         <JiraBrowser
           active
           sessionName={sessionName}

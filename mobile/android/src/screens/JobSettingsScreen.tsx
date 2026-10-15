@@ -28,11 +28,11 @@ export function JobSettingsScreen({ navigation }: JobSettingsScreenProps) {
   const [notify, setNotify] = useState(true);
   useEffect(() => { void loadNotifyEnabled().then(setNotify); }, []);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="JobSettings" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Settings</Text>
-        <Text variant="xs" style={{ color: colors.muted }}>Defaults for every new job. A model set on a job itself takes priority.</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }}>Defaults for every new job. A model set on a job itself takes priority.</Text>
         <View style={styles.tools}>
           <PlanosButton small label="Setup" accessibilityHint="Guided checklist and Doctor: sets up and tests everything jobs need" onPress={() => navigation.navigate('JobSetup')} testID="job-settings-setup" />
         </View>

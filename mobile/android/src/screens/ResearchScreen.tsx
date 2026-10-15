@@ -32,17 +32,17 @@ export function ResearchScreen() {
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   if (loading) return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <View style={{ padding: spacing.base }}><Skeleton height={280} /><Skeleton height={90} style={{ marginTop: spacing.sm }} /></View>
     </SafeAreaView>
   );
-  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
+  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
   if (!state || (!state.active && !state.sources.length && !state.findings.length)) return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}><EmptyState title="No research session" message="Start a research conversation to build a source-backed evidence desk." /></SafeAreaView>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><EmptyState title="No research session" message="Start a research conversation to build a source-backed evidence desk." /></SafeAreaView>
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}
@@ -59,8 +59,8 @@ export function ResearchScreen() {
                   <Badge label={finding.source ? 'source linked' : 'evidence gap'} variant={finding.source ? 'success' : 'warning'} />
                   {finding.tags.slice(0, 3).map(tag => <Badge key={tag} label={tag} variant="neutral" />)}
                 </View>
-                <Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm }}>{finding.content}</Text>
-                <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs, fontFamily: fonts.mono }}>
+                <Text variant="sm" style={{ color: colors.ink, marginTop: spacing.sm }}>{finding.content}</Text>
+                <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs, fontFamily: fonts.mono }}>
                   {finding.source ? `↳ ${finding.source}` : 'Accuracy and relevance have not been independently assessed'}
                 </Text>
               </Card>
@@ -79,19 +79,19 @@ export function ResearchScreen() {
                   <Card style={{ marginBottom: spacing.sm }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
                       <Badge label={source.source_type} variant="neutral" />
-                      <Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontVariant: ['tabular-nums'] }}>source quality {credibility}%</Text>
+                      <Text variant="xs" style={{ marginLeft: 'auto', color: colors.ink3, fontVariant: ['tabular-nums'] }}>source quality {credibility}%</Text>
                     </View>
-                    <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{source.title}</Text>
-                    <View style={{ height: 4, marginTop: spacing.sm, borderRadius: radii.pill, overflow: 'hidden', backgroundColor: colors.bgHover }}>
-                      <View style={{ height: '100%', width: `${credibility}%`, backgroundColor: colors.viz[0] }} />
+                    <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{source.title}</Text>
+                    <View style={{ height: 4, marginTop: spacing.sm, borderRadius: radii.pill, overflow: 'hidden', backgroundColor: colors.sunken }}>
+                      <View style={{ height: '100%', width: `${credibility}%`, backgroundColor: colors.accent.ink }} />
                     </View>
-                    <Text variant="xs" numberOfLines={expanded ? undefined : 1} style={{ color: colors.accentFg, marginTop: spacing.sm }} onPress={() => void openExternalUrl(source.url)}>{source.url}</Text>
+                    <Text variant="xs" numberOfLines={expanded ? undefined : 1} style={{ color: colors.accent.ink, marginTop: spacing.sm }} onPress={() => void openExternalUrl(source.url)}>{source.url}</Text>
                     {expanded && (
                       <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
                         {!!source.authors.length && <MetaRow label="Authors" value={source.authors.join(', ')} />}
                         <MetaRow label="Published" value={source.date || 'Not recorded'} />
                         <MetaRow label="Accessed" value={source.accessed_date || 'Not recorded'} />
-                        <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.sm }}>
+                        <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.sm }}>
                           Credibility describes the source. It does not establish the accuracy of every claim.
                         </Text>
                       </View>
@@ -106,7 +106,7 @@ export function ResearchScreen() {
         {workspaceView.shows('bibliography') && !!state.bibliography && (
           <View>
             <SectionTitle title="Citation output" count={state.source_count} />
-            <Card><Text variant="xs" style={{ color: colors.textSoft, fontFamily: fonts.mono }}>{state.bibliography}</Text></Card>
+            <Card><Text variant="xs" style={{ color: colors.ink2, fontFamily: fonts.mono }}>{state.bibliography}</Text></Card>
           </View>
         )}
       </ScrollView>
@@ -116,15 +116,15 @@ export function ResearchScreen() {
 
 function SectionTitle({ title, count }: { title: string; count: number }) {
   const { colors } = useTheme();
-  return <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>;
+  return <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.ink3, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>;
 }
 
 function QuietEmpty({ text }: { text: string }) {
   const { colors } = useTheme();
-  return <Text variant="xs" style={{ color: colors.textDim, paddingVertical: spacing.md }}>{text}</Text>;
+  return <Text variant="xs" style={{ color: colors.ink3, paddingVertical: spacing.md }}>{text}</Text>;
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
   const { colors } = useTheme();
-  return <View style={{ flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs }}><Text variant="xs" style={{ width: 70, color: colors.textDim }}>{label}</Text><Text variant="xs" style={{ flex: 1, color: colors.textSoft }}>{value}</Text></View>;
+  return <View style={{ flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs }}><Text variant="xs" style={{ width: 70, color: colors.ink3 }}>{label}</Text><Text variant="xs" style={{ flex: 1, color: colors.ink2 }}>{value}</Text></View>;
 }

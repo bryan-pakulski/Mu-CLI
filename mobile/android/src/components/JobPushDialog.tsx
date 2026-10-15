@@ -69,7 +69,7 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
       {loading ? <Loading label="Preparing the pull request…" /> : (
         <View style={styles.root} testID="job-push-dialog">
           {preview ? (
-            <View style={[styles.meta, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+            <View style={[styles.meta, { borderColor: colors.hairline, backgroundColor: colors.canvas }]}>
               <KV label="Branch"><Text variant="xs" style={{ fontFamily: fonts.mono }}>{preview.branch || '—'} → {preview.base || '—'}</Text></KV>
               <KV label="Publish via"><Text variant="xs">{preview.mode || 'none'}{preview.remote ? ` · ${preview.remote}` : ''}</Text></KV>
               {preview.head_sha ? <KV label="Verified head"><Text variant="xs" style={{ fontFamily: fonts.mono }}>{preview.head_sha.slice(0, 12)}</Text></KV> : null}

@@ -121,7 +121,7 @@ export function SubagentActivityPanel({ agents }: Props) {
         styles.panel,
         {
           backgroundColor: colors.surface,
-          borderColor: colors.border,
+          borderColor: colors.hairline,
           opacity: activeCount > 0 ? 1 : 0.82,
         },
       ]}
@@ -134,19 +134,19 @@ export function SubagentActivityPanel({ agents }: Props) {
         accessibilityLabel={panelOpen ? 'Collapse subagent history' : 'Expand subagent history'}
         onPress={() => setPanelOpen(value => !value)}
       >
-        <View style={[styles.headerIcon, { backgroundColor: colors.bgHover }]}>
-          <Ionicons name="git-network-outline" size={16} color={colors.textSoft} />
+        <View style={[styles.headerIcon, { backgroundColor: colors.sunken }]}>
+          <Ionicons name="git-network-outline" size={16} color={colors.ink2} />
         </View>
         <View style={styles.headerCopy}>
-          <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>
+          <Text variant="xs" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>
             SUBAGENTS
           </Text>
-          <Text variant="xs" style={{ color: colors.textDim }}>
+          <Text variant="xs" style={{ color: colors.ink3 }}>
             {activeCount > 0 ? `${activeCount} of ${agents.length} running` : `${agents.length} completed`}
           </Text>
         </View>
-        <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{duration(totalElapsed)}</Text>
-        <Ionicons name={panelOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textDim} />
+        <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{duration(totalElapsed)}</Text>
+        <Ionicons name={panelOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.ink3} />
       </TouchableOpacity>
 
       {panelOpen ? (
@@ -159,19 +159,19 @@ export function SubagentActivityPanel({ agents }: Props) {
         {agents.map(agent => {
           const isExpanded = expanded.has(agent.task_id);
           const statusColor = agent.status === 'done'
-            ? colors.success
+            ? colors.ok.ink
             : (agent.status === 'error' || agent.status === 'killed')
-              ? colors.error
+              ? colors.danger.ink
               : (agent.status === 'stuck' || agent.status === 'stall')
-                ? colors.warning
-                : colors.running;
+                ? colors.attention.ink
+                : colors.running.ink;
           const statusBg = agent.status === 'done'
-            ? colors.successSubtle
+            ? colors.ok.wash
             : (agent.status === 'error' || agent.status === 'killed')
-              ? colors.errorSubtle
+              ? colors.danger.wash
               : (agent.status === 'stuck' || agent.status === 'stall')
-                ? colors.warningSubtle
-                : colors.infoSubtle;
+                ? colors.attention.wash
+                : colors.info.wash;
           const iterationPct = agent.max_iter > 0
             ? Math.min(100, Math.max(0, (agent.iter / agent.max_iter) * 100))
             : 0;
@@ -180,10 +180,10 @@ export function SubagentActivityPanel({ agents }: Props) {
               <View style={[styles.accentRail, { backgroundColor: statusColor }]} />
               <View style={styles.rowHead}>
                 <View style={styles.identity}>
-                  <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>
+                  <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>
                     {taskTitle(agent)}
                   </Text>
-                  <Text variant="xs" numberOfLines={1} style={{ color: colors.textDim, textTransform: 'capitalize' }}>
+                  <Text variant="xs" numberOfLines={1} style={{ color: colors.ink3, textTransform: 'capitalize' }}>
                     {(agent.specialist_key || 'subagent').replace(/[_-]+/g, ' ')} · Depth {agent.depth}{agent.model ? ` · ${agent.model}` : ''}
                   </Text>
                 </View>
@@ -192,14 +192,14 @@ export function SubagentActivityPanel({ agents }: Props) {
                     <Text variant="xs" importantForAccessibility="no" style={{ color: statusColor, fontWeight: fontWeights.semibold }}>{statusGlyph(agent.status)}</Text>
                     <Text variant="xs" numberOfLines={1} style={{ color: statusColor, maxWidth: 98 }}>{statusLabel(agent)}</Text>
                   </View>
-                  <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{duration(elapsedAt(agent, now))}</Text>
+                  <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{duration(elapsedAt(agent, now))}</Text>
                 </View>
               </View>
 
               <View style={styles.meta}>
-                <Metric value={String(agent.tool_count)} label="actions" color={colors.textDim} strong={colors.textSoft} />
-                {agent.tokens_in > 0 ? <Metric value={tokens(agent.tokens_in)} label="tokens" color={colors.textDim} strong={colors.textSoft} /> : null}
-                {agent.context_pct > 0 ? <Metric value={`${Math.round(agent.context_pct)}%`} label="context" color={colors.textDim} strong={colors.textSoft} /> : null}
+                <Metric value={String(agent.tool_count)} label="actions" color={colors.ink3} strong={colors.ink2} />
+                {agent.tokens_in > 0 ? <Metric value={tokens(agent.tokens_in)} label="tokens" color={colors.ink3} strong={colors.ink2} /> : null}
+                {agent.context_pct > 0 ? <Metric value={`${Math.round(agent.context_pct)}%`} label="context" color={colors.ink3} strong={colors.ink2} /> : null}
               </View>
 
               {agent.max_iter > 0 ? (
@@ -207,9 +207,9 @@ export function SubagentActivityPanel({ agents }: Props) {
                   label="Iteration progress"
                   value={`${agent.iter} / ${agent.max_iter} · ${Math.round(iterationPct)}%`}
                   percent={iterationPct}
-                  color={colors.accent}
-                  track={colors.bgHover}
-                  text={colors.textDim}
+                  color={colors.accent.ink}
+                  track={colors.sunken}
+                  text={colors.ink3}
                 />
               ) : null}
               <TouchableOpacity
@@ -219,38 +219,38 @@ export function SubagentActivityPanel({ agents }: Props) {
                 onPress={() => toggleExpanded(agent.task_id)}
                 style={styles.activityToggle}
               >
-                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textDim} />
-                <Text variant="xs" style={{ color: colors.textSoft }}>{isExpanded ? 'Hide activity' : 'View activity'}</Text>
-                <View style={[styles.countBadge, { backgroundColor: colors.bgHover }]}>
-                  <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{agent.actions.length}</Text>
+                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.ink3} />
+                <Text variant="xs" style={{ color: colors.ink2 }}>{isExpanded ? 'Hide activity' : 'View activity'}</Text>
+                <View style={[styles.countBadge, { backgroundColor: colors.sunken }]}>
+                  <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{agent.actions.length}</Text>
                 </View>
               </TouchableOpacity>
 
               {isExpanded ? (
                 <View style={styles.activity}>
                   <View style={styles.activityHead}>
-                    <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.medium }}>ACTION TIMELINE</Text>
-                    <Text variant="xs" style={{ color: colors.textDim }}>oldest → newest</Text>
+                    <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.medium }}>ACTION TIMELINE</Text>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>oldest → newest</Text>
                   </View>
                   {agent.actions.length === 0 ? (
-                    <Text variant="xs" style={[styles.emptyActivity, { color: colors.textDim }]}>Waiting for the first tool action…</Text>
+                    <Text variant="xs" style={[styles.emptyActivity, { color: colors.ink3 }]}>Waiting for the first tool action…</Text>
                   ) : (
                     <ScrollView style={styles.actionScroll} nestedScrollEnabled showsVerticalScrollIndicator>
                       {agent.actions.map(action => {
                         const actionColor = action.status === 'error'
-                          ? colors.error
-                          : (action.status === 'done' ? colors.success : colors.accent);
+                          ? colors.danger.ink
+                          : (action.status === 'done' ? colors.ok.ink : colors.accent.ink);
                         return (
                           <View key={`${agent.task_id}-${action.seq}`} style={styles.action}>
-                            <Text variant="xs" style={[{ color: colors.textDim, width: 24 }, NUM]}>{String(action.seq).padStart(2, '0')}</Text>
+                            <Text variant="xs" style={[{ color: colors.ink3, width: 24 }, NUM]}>{String(action.seq).padStart(2, '0')}</Text>
                             <View style={[styles.actionDot, { backgroundColor: actionColor }]} />
                             <View style={styles.actionCopy}>
-                              <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>{toolLabel(action.tool)}</Text>
-                              {action.detail ? <Text variant="xs" numberOfLines={2} style={{ color: colors.textDim }}>{action.detail}</Text> : null}
+                              <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>{toolLabel(action.tool)}</Text>
+                              {action.detail ? <Text variant="xs" numberOfLines={2} style={{ color: colors.ink3 }}>{action.detail}</Text> : null}
                             </View>
                             <View style={styles.actionState}>
                               <Text variant="xs" style={{ color: actionColor }}>{action.status === 'done' ? 'Done' : (action.status === 'error' ? 'Failed' : 'Running')}</Text>
-                              {action.elapsed > 0 ? <Text variant="xs" style={[{ color: colors.textDim }, NUM]}>{action.elapsed.toFixed(1)}s</Text> : null}
+                              {action.elapsed > 0 ? <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{action.elapsed.toFixed(1)}s</Text> : null}
                             </View>
                           </View>
                         );

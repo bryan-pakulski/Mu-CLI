@@ -29,3 +29,32 @@ is what users actually run.
 - `tests/test_mobile_streaming_perf.py:77-80,89` — `"item.streaming ? ("` → `if (message.streaming)` precedes `<Markdown` in `renderAssistantBody` — streaming text renders as plain Text; Markdown only after finalize.
 - `tests/test_mobile_syntax_highlighting.py:19` — `ChatScreen.tsx` → `ChatScreenProduct.tsx` — code highlighting is wired in the live chat.
 - `tests/test_mobile_syntax_highlighting.py:180,195,206,227` — rule regex `\(node\)\s*=>\s*{` → `\(node(?::\s*\w+)?\)\s*=>\s*[({]` — same rules, typed arrow-expression spelling.
+
+## M1 — token reskin
+
+All colour keys moved from the planos legacy names to the Wash semantic shape
+(`textDim`/`muted` → `ink3`, `textSoft` → `ink2`, `text` → `ink`, `border` →
+`hairline`, `bg` → `canvas`, `glassStrong` → `raised`, `hover` → `sunken`,
+`accent` → `accent.ink`, `accentSubtle` → `accent.wash`, `warn` →
+`attention.ink`, `success` → `ok.ink`, `error` → `danger.ink`, `viz[n]` → the
+matching semantic ink). Assertions that pinned a key name are renamed the same
+way; the visual intent each one guards is unchanged.
+
+- `mobile/android/__tests__/job-views.test.ts:88-94` (was 81-86) — dark/light text tokens ≥ 4.5:1 on bg/surface/raised → every Wash text token (ink, ink-2, ink-3, plum, each semantic ink) ≥ 4.5:1 on canvas/surface/sunken/raised in Paper and Dusk, each semantic ink ≥ 4.5:1 on its own wash, on-ink ≥ 4.5:1 on ink and accent, control-border ≥ 3:1 — contrast floor kept and generalised (spec §5.3 M1).
+- `mobile/android/__tests__/job-views.test.ts:96-103` (was 88-93) — 24 pinned planos hex values → Paper and Dusk palettes equal `wash.generated.ts` (neutrals and every semantic's wash/pigment/ink) — no stale brand colours; one token source.
+- `mobile/android/__tests__/job-views.test.ts:41` — test title "planos status vocabulary" → "shared status vocabulary" — wording only.
+- `mobile/android/__tests__/plan-mode.test.tsx:111-117` — `colors.plan` ≠ `colors.warn` ≠ `colors.accent` (light/dark) → `plan.ink` ≠ `attention.ink` ≠ `accent.ink` and `plan.wash` ≠ `attention.wash` (paper/dusk) — plan mode never reads as attention or accent (lilac/apricot/lagoon).
+- `tests/test_job_status_vocabulary_parity.py:59` — `test_web_and_mobile_tables_match_the_terminal` loops over web and mobile → web only (renamed `test_web_tables_match_the_terminal`) — Android no longer has a table to compare; see next entry.
+- `tests/test_job_status_vocabulary_parity.py:68-73` — mobile `STATE_LABEL["provisioning"] == "preparing"` → the generated module embeds `provisioning` → `preparing` — canonical label everywhere.
+- `tests/test_job_status_vocabulary_parity.py:76-88` (new) — `test_mobile_reads_the_generated_vocabulary_and_has_no_local_tables`: `status.ts` imports `wash.generated`, contains no `STATE_STATUS`/`STATE_LABEL`/glyph literals, and the generated module embeds every `job_state` row of `vocabulary.json` — replaces the literal-table parity check for Android (B8, spec §3.1).
+- `tests/test_job_status_vocabulary_parity.py:93-100` — `NEEDS_YOU_STATES = new Set([...literal...]) == waiting` → `NEEDS_YOU_STATES = new Set(WAITING_STATES)`, `WAITING_STATES` filters the vocabulary by `status === 'waiting'`, and the vocabulary's waiting set equals the terminal's — needs-you states are the waiting states, now by construction.
+- `tests/test_live_conversation_surfaces.py:138` — `borderLeftColor: colors.warn` → `borderLeftColor: colors.attention.ink` — the input-required banner keeps the attention rule.
+- `tests/test_mobile_product_ui.py:30-39` — tokens.ts contains the planos hex values and `skyField`/`glassStrong` names → tokens.ts imports `wash.generated`, declares no hex literal, the generated file carries the Paper/Dusk canvases and lagoon ink, and the planos/old brand hexes appear in neither — mobile uses the same palette as web, from one source.
+- `tests/test_mobile_product_ui.py:52` — `backgroundColor: colors.bg` → `colors.canvas` (atmosphere) — key rename.
+- `tests/test_mobile_product_ui.py:67` — `card: colors.glassStrong` → `card: colors.raised` (navigation theme) — key rename.
+- `tests/test_mobile_product_ui.py:79,83,86-87` — `colors.border` → `colors.hairline`, `toneColor || colors.accent,` → `toneColor || colors.accent.ink,`, `colors.bg` → `colors.canvas` (Card/Button/Input) — key rename.
+- `tests/test_mobile_product_ui.py:102` — `borderBottomColor: colors.border` → `colors.hairline` (header) — key rename.
+- `tests/test_mobile_product_ui.py:113,116` — `colors.glassStrong` → `colors.raised`; `colors.accentSubtle, borderColor: colors.accent` → `colors.accent.wash, borderColor: colors.accent.ink` (chat bubbles) — key rename.
+- `tests/test_mobile_product_ui.py:137,140` — `colors.glassStrong` → `colors.raised` (sessions drawer, mode drawer) — key rename.
+- `tests/test_mobile_product_ui.py:147-150` — `colors.viz[0]/[4]/[3]`, `colors.success : colors.warning` → `colors.accent.ink`/`running.ink`/`danger.ink`, `colors.ok.ink : colors.attention.ink` (trace) — key rename; the trace keeps semantic colours.
+- `tests/test_mobile_syntax_highlighting.py:52-86` — `lightColors`/`darkColors` each declare a literal `syntax: {…}` block with 11 keys → `paperColors`/`duskColors` are built by `washColors()`, whose `syntaxFrom` builder defines all 11 keys from the generated Wash syntax slots (`keyword` → lilac, `string` → meadow, …) — both themes have a full syntax palette, now from tokens (G§9.12).

@@ -328,7 +328,7 @@ export function ChatScreenProduct() {
           color: colors.syntax.keyword,
           fontFamily: fonts.mono,
           fontSize: fontSizes.xs,
-          backgroundColor: colors.codeBg,
+          backgroundColor: colors.code,
           borderRadius: radii.sm,
           paddingHorizontal: spacing.xs,
         }}
@@ -343,7 +343,7 @@ export function ChatScreenProduct() {
   const renderAssistantBody = useCallback((message: ChatMessage, compact = false) => {
     if (message.streaming) {
       return (
-        <Text style={{ color: compact ? colors.textSoft : colors.text, fontSize: compact ? fontSizes.xs : fontSizes.base, lineHeight: compact ? typography.xs.lineHeight : typography.base.lineHeight }}>
+        <Text style={{ color: compact ? colors.ink2 : colors.ink, fontSize: compact ? fontSizes.xs : fontSizes.base, lineHeight: compact ? typography.xs.lineHeight : typography.base.lineHeight }}>
           {message.text}
         </Text>
       );
@@ -384,7 +384,7 @@ export function ChatScreenProduct() {
             onPress={() => setMessages(current => current.map(message =>
               message.id === item.id ? { ...message, collapseOpen: !message.collapseOpen } : message,
             ))}
-            style={[styles.interimHeader, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            style={[styles.interimHeader, { backgroundColor: colors.surface, borderColor: colors.hairline }]}
             activeOpacity={0.7}
             hitSlop={HIT}
             accessibilityRole="button"
@@ -393,16 +393,16 @@ export function ChatScreenProduct() {
             <Ionicons
               name={item.collapseOpen ? 'chevron-down' : 'chevron-forward'}
               size={13}
-              color={colors.muted}
+              color={colors.ink3}
             />
-            <Text variant="xs" numberOfLines={1} style={{ color: colors.muted, fontFamily: fonts.mono, fontVariant: ['tabular-nums'], flexShrink: 1 }}>
+            <Text variant="xs" numberOfLines={1} style={{ color: colors.ink3, fontFamily: fonts.mono, fontVariant: ['tabular-nums'], flexShrink: 1 }}>
               › {count} interim update{count !== 1 ? 's' : ''}
               {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
               {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
             </Text>
           </TouchableOpacity>
           {item.collapseOpen ? (
-            <View style={[styles.interimBody, { borderLeftColor: colors.border }]}>
+            <View style={[styles.interimBody, { borderLeftColor: colors.hairline }]}>
               {item.childTurns?.map(child => {
                 if (child.role !== 'assistant') return null;
                 return (
@@ -428,12 +428,12 @@ export function ChatScreenProduct() {
           style={[
             isUser ? styles.userMessage : styles.assistantMessage,
             isUser
-              ? { backgroundColor: colors.accentSubtle, borderColor: colors.accent, borderRightColor: colors.accent }
-              : { backgroundColor: colors.glassStrong, borderColor: colors.border },
+              ? { backgroundColor: colors.accent.wash, borderColor: colors.accent.ink, borderRightColor: colors.accent.ink }
+              : { backgroundColor: colors.raised, borderColor: colors.hairline },
           ]}
         >
           {isUser ? (
-            <Text style={{ color: colors.text, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight }}>{item.text}</Text>
+            <Text style={{ color: colors.ink, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight }}>{item.text}</Text>
           ) : (
             renderAssistantBody(item)
           )}
@@ -441,9 +441,9 @@ export function ChatScreenProduct() {
           {isUser && item.attachments?.length ? (
             <View style={styles.messageAttachments}>
               {item.attachments.map(attachment => (
-                <View key={attachment.attachment_id} style={[styles.messageAttachment, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Ionicons name="document-outline" size={13} color={colors.muted} />
-                  <Text variant="xs" numberOfLines={1} style={{ color: colors.textSoft, maxWidth: 210 }}>{attachment.name}</Text>
+                <View key={attachment.attachment_id} style={[styles.messageAttachment, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+                  <Ionicons name="document-outline" size={13} color={colors.ink3} />
+                  <Text variant="xs" numberOfLines={1} style={{ color: colors.ink2, maxWidth: 210 }}>{attachment.name}</Text>
                 </View>
               ))}
             </View>
@@ -452,14 +452,14 @@ export function ChatScreenProduct() {
           {isAssistant && item.text.length > 0 ? (
             <View style={styles.assistantMeta}>
               {workedMs ? (
-                <Text variant="xs" style={{ color: colors.muted, fontVariant: ['tabular-nums'] }}>{formatWorkedDuration(workedMs)}</Text>
+                <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>{formatWorkedDuration(workedMs)}</Text>
               ) : <View />}
               <TouchableOpacity
                 onPress={() => copyMessage(item.text)}
                 hitSlop={HIT}
                 style={styles.copyButton}
               >
-                <Ionicons name="copy-outline" size={13} color={colors.muted} />
+                <Ionicons name="copy-outline" size={13} color={colors.ink3} />
               </TouchableOpacity>
             </View>
           ) : null}
@@ -481,7 +481,7 @@ export function ChatScreenProduct() {
   }, [hasMore, loadOlderHistory, loadingOlder]);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -521,11 +521,11 @@ export function ChatScreenProduct() {
                 </View>
               ) : null}
               {error && messages.length > 0 ? (
-                <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: colors.errorSubtle, borderColor: colors.danger }]}>
-                  <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
-                  <Text variant="xs" style={{ color: colors.text, flex: 1 }}>{error}</Text>
+                <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: colors.danger.wash, borderColor: colors.danger.ink }]}>
+                  <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+                  <Text variant="xs" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
                   <TouchableOpacity onPress={retry} hitSlop={HIT}>
-                    <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>Retry</Text>
+                    <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
                   </TouchableOpacity>
                 </View>
               ) : null}
@@ -664,10 +664,10 @@ function Composer({
       {selectedAttachments.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.selectedAttachments}>
           {selectedAttachments.map(item => (
-            <View key={item.attachment_id} style={[styles.selectedAttachment, { backgroundColor: colors.raised, borderColor: colors.border }]}>
-              <Text variant="xs" numberOfLines={1} style={{ maxWidth: 180, color: colors.textSoft }}>{item.name}</Text>
+            <View key={item.attachment_id} style={[styles.selectedAttachment, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
+              <Text variant="xs" numberOfLines={1} style={{ maxWidth: 180, color: colors.ink2 }}>{item.name}</Text>
               <TouchableOpacity onPress={() => onRemoveAttachment(item.attachment_id)} hitSlop={HIT}>
-                <Ionicons name="close" size={14} color={colors.muted} />
+                <Ionicons name="close" size={14} color={colors.ink3} />
               </TouchableOpacity>
             </View>
           ))}
@@ -676,8 +676,8 @@ function Composer({
 
       <View style={styles.composerUtilities}>
         <TouchableOpacity onPress={onModePress} style={styles.utilityButton} hitSlop={HIT_SM}>
-          <Text variant="xs" style={{ color: colors.muted, textTransform: 'capitalize' }}>{activeMode}</Text>
-          <Ionicons name="chevron-down" size={13} color={colors.muted} />
+          <Text variant="xs" style={{ color: colors.ink3, textTransform: 'capitalize' }}>{activeMode}</Text>
+          <Ionicons name="chevron-down" size={13} color={colors.ink3} />
         </TouchableOpacity>
         <EffortControl variant="chip" />
         <TouchableOpacity
@@ -689,45 +689,45 @@ function Composer({
           <Ionicons
             name={artifactsVisible ? 'eye' : 'eye-off'}
             size={16}
-            color={artifactsVisible ? colors.accent : colors.textDim}
+            color={artifactsVisible ? colors.accent.ink : colors.ink3}
           />
         </TouchableOpacity>
         <TouchableOpacity onPress={onSettingsPress} style={styles.utilityIconButton} hitSlop={HIT_SM} accessibilityLabel="Session settings">
-          <Ionicons name="settings-outline" size={16} color={colors.muted} />
+          <Ionicons name="settings-outline" size={16} color={colors.ink3} />
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.composerPane, { backgroundColor: colors.glassStrong, borderColor: colors.border }]}>
+      <View style={[styles.composerPane, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
         <TouchableOpacity
           onPress={onAttachmentsPress}
           style={styles.composerIconButton}
           hitSlop={HIT_SM}
           accessibilityLabel="Attach files"
         >
-          <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent : colors.textDim} />
+          <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent.ink : colors.ink3} />
         </TouchableOpacity>
         {/* Keep focus and the draft keyboard open while a turn is running. */}
         <TextInput
           value={input}
           onChangeText={setInput}
           placeholder={planMode ? PLAN_MODE_PLACEHOLDER : 'Message MuCLI'}
-          placeholderTextColor={colors.textDim}
+          placeholderTextColor={colors.ink3}
           multiline
-          style={[styles.input, { color: colors.text }]}
+          style={[styles.input, { color: colors.ink }]}
         />
         {streaming ? (
           <TouchableOpacity onPress={onStop} style={styles.sendButton} hitSlop={HIT_SM} accessibilityLabel="Stop generation">
-            <Ionicons name="stop" size={16} color={colors.danger} />
+            <Ionicons name="stop" size={16} color={colors.danger.ink} />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
             onPress={onSend}
             disabled={!canSend}
-            style={[styles.sendButton, canSend && { backgroundColor: colors.accent }]}
+            style={[styles.sendButton, canSend && { backgroundColor: colors.accent.ink }]}
             hitSlop={HIT_SM}
             accessibilityLabel="Send message"
           >
-            <Ionicons name="arrow-up" size={18} color={canSend ? colors.accentOn : colors.textDim} />
+            <Ionicons name="arrow-up" size={18} color={canSend ? colors.onInk : colors.ink3} />
           </TouchableOpacity>
         )}
       </View>
@@ -757,13 +757,13 @@ function ModeSheet({
             key={mode.name}
             onPress={() => onSelect(mode.name)}
             disabled={mode.disabled}
-            style={[styles.optionRow, { borderColor: activeMode === mode.name ? colors.accent : colors.border, backgroundColor: activeMode === mode.name ? colors.accentSubtle : colors.raised }, mode.disabled && styles.disabledOption]}
+            style={[styles.optionRow, { borderColor: activeMode === mode.name ? colors.accent.ink : colors.hairline, backgroundColor: activeMode === mode.name ? colors.accent.wash : colors.raised }, mode.disabled && styles.disabledOption]}
           >
             <View style={styles.optionCopy}>
-              <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{mode.display_name}</Text>
+              <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{mode.display_name}</Text>
               {mode.description ? <Text variant="xs" dim>{mode.description}</Text> : null}
             </View>
-            {activeMode === mode.name ? <Ionicons name="checkmark" size={18} color={colors.accent} /> : null}
+            {activeMode === mode.name ? <Ionicons name="checkmark" size={18} color={colors.accent.ink} /> : null}
           </TouchableOpacity>
         ))}
       </View>
@@ -791,27 +791,27 @@ function SessionSettingsSheet({
   const { colors } = useTheme();
   return (
     <ModernBottomSheet visible={visible} onClose={onClose} title="Session settings">
-      <View style={[styles.settingsSummary, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={[styles.settingsSummary, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
         <SettingLine label="Provider" value={provider || '—'} />
         <SettingLine label="Model" value={model || '—'} />
         <SettingLine label="Auto-approve" value={yolo ? 'On' : 'Off'} />
       </View>
-      <Text variant="xs" style={[styles.settingsSectionLabel, { color: colors.muted }]}>Variables</Text>
+      <Text variant="xs" style={[styles.settingsSectionLabel, { color: colors.ink3 }]}>Variables</Text>
       {loading ? (
         <Text variant="xs" dim style={styles.settingsLoading}>Loading…</Text>
       ) : groups.length === 0 ? (
         <Text variant="xs" dim style={styles.settingsLoading}>No variables configured</Text>
       ) : (
         groups.map(group => (
-          <View key={group.name} style={[styles.settingsGroup, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text variant="sm" accessibilityRole="header" style={[styles.settingsGroupTitle, { borderBottomColor: colors.border }]}>{group.name}</Text>
+          <View key={group.name} style={[styles.settingsGroup, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+            <Text variant="sm" accessibilityRole="header" style={[styles.settingsGroupTitle, { borderBottomColor: colors.hairline }]}>{group.name}</Text>
             {group.variables.map(variable => (
               <View key={variable.key} style={styles.settingsVariable}>
                 <View style={styles.settingsVariableCopy}>
-                  <Text variant="xs" style={{ color: colors.textSoft }}>{variable.key}</Text>
+                  <Text variant="xs" style={{ color: colors.ink2 }}>{variable.key}</Text>
                   {variable.help ? <Text variant="xs" dim numberOfLines={2}>{variable.help}</Text> : null}
                 </View>
-                <Text variant="xs" style={{ color: variable.is_default ? colors.textDim : colors.text, fontWeight: variable.is_default ? fontWeights.regular : fontWeights.medium }} numberOfLines={1}>
+                <Text variant="xs" style={{ color: variable.is_default ? colors.ink3 : colors.ink, fontWeight: variable.is_default ? fontWeights.regular : fontWeights.medium }} numberOfLines={1}>
                   {String(variable.value)}
                 </Text>
               </View>
@@ -828,7 +828,7 @@ function SettingLine({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.settingLine}>
       <Text variant="xs" dim>{label}</Text>
-      <Text variant="sm" style={{ color: colors.textSoft }} numberOfLines={1}>{value}</Text>
+      <Text variant="sm" style={{ color: colors.ink2 }} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
@@ -885,16 +885,16 @@ function formatWorkedDuration(ms: number): string {
 
 function markdownStyles(colors: any) {
   return {
-    body: { color: colors.text, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight },
+    body: { color: colors.ink, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight },
     paragraph: { marginTop: 0, marginBottom: spacing.sm },
     heading1: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight, marginTop: spacing.md, marginBottom: spacing.sm },
     heading2: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, marginTop: spacing.sm, marginBottom: spacing.xs },
     heading3: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, marginTop: spacing.sm, marginBottom: spacing.xs },
-    code_inline: { backgroundColor: colors.codeBg, borderRadius: radii.sm, paddingHorizontal: spacing.xs, fontFamily: fonts.mono },
-    fence: { backgroundColor: colors.codeBg, borderColor: colors.border, borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, fontFamily: fonts.mono },
-    code_block: { backgroundColor: colors.codeBg, borderColor: colors.border, borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, fontFamily: fonts.mono },
-    link: { color: colors.accentFg, textDecorationLine: 'underline' as const },
-    blockquote: { borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: spacing.md, marginLeft: 0, marginTop: spacing.sm, marginBottom: spacing.sm },
+    code_inline: { backgroundColor: colors.code, borderRadius: radii.sm, paddingHorizontal: spacing.xs, fontFamily: fonts.mono },
+    fence: { backgroundColor: colors.code, borderColor: colors.hairline, borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, fontFamily: fonts.mono },
+    code_block: { backgroundColor: colors.code, borderColor: colors.hairline, borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, fontFamily: fonts.mono },
+    link: { color: colors.accent.ink, textDecorationLine: 'underline' as const },
+    blockquote: { borderLeftWidth: 2, borderLeftColor: colors.hairline, paddingLeft: spacing.md, marginLeft: 0, marginTop: spacing.sm, marginBottom: spacing.sm },
     list_item: { marginTop: 2, marginBottom: 2 },
   };
 }
@@ -902,7 +902,7 @@ function markdownStyles(colors: any) {
 function compactMarkdownStyles(colors: any) {
   return {
     ...markdownStyles(colors),
-    body: { color: colors.textSoft, fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight },
+    body: { color: colors.ink2, fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight },
     paragraph: { marginTop: 0, marginBottom: spacing.xs },
     heading1: { fontSize: fontSizes.base, fontWeight: fontWeights.semibold, marginTop: spacing.xs, marginBottom: spacing.xs },
     heading2: { fontSize: fontSizes.base, fontWeight: fontWeights.semibold, marginTop: spacing.xs, marginBottom: spacing.xs },

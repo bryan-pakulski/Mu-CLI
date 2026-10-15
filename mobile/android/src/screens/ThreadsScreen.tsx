@@ -123,10 +123,10 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
   }, [load]));
 
   const statusColor = (status: ThreadStatus) => {
-    if (status === 'error') return colors.error;
-    if (status === 'interrupted') return colors.warning;
-    if (ACTIVE_STATUSES.includes(status)) return colors.accent;
-    return colors.textDim;
+    if (status === 'error') return colors.danger.ink;
+    if (status === 'interrupted') return colors.attention.ink;
+    if (ACTIVE_STATUSES.includes(status)) return colors.accent.ink;
+    return colors.ink3;
   };
 
   const switchThread = async (thread: ThreadSummary) => {
@@ -188,7 +188,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
 
   if (!activeSessionName) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }] }>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }] }>
         <EmptyState
           title="No active session"
           message="Load a session before creating or reviewing agent threads."
@@ -201,38 +201,38 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
   }
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }] }>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }] }>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
         contentContainerStyle={[styles.content, { padding: spacing.base }]}
       >
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderCopy}>
-            <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Agent conversations</Text>
+            <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Agent conversations</Text>
             <Text variant="sm" dim numberOfLines={1}>{groupId || activeSessionName}</Text>
           </View>
           <TouchableOpacity
             testID="create-thread"
             onPress={() => setCreateOpen(true)}
             activeOpacity={0.72}
-            style={[styles.createButton, { backgroundColor: colors.accent }]}
+            style={[styles.createButton, { backgroundColor: colors.accent.ink }]}
             accessibilityLabel="Create thread"
           >
-            <Ionicons name="add" size={18} color={colors.accentOn} />
-            <Text variant="sm" style={{ color: colors.accentOn, fontWeight: fontWeights.medium }}>Thread</Text>
+            <Ionicons name="add" size={18} color={colors.onInk} />
+            <Text variant="sm" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Thread</Text>
           </TouchableOpacity>
         </View>
 
         {error ? (
-          <TouchableOpacity onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.errorSubtle }]}>
-            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
-            <Text variant="xs" style={[styles.errorCopy, { color: colors.error }]}>{error}</Text>
-            <Text variant="xs" style={{ color: colors.error, fontWeight: fontWeights.semibold }}>Retry</Text>
+          <TouchableOpacity onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.danger.wash }]}>
+            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+            <Text variant="xs" style={[styles.errorCopy, { color: colors.danger.ink }]}>{error}</Text>
+            <Text variant="xs" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
           </TouchableOpacity>
         ) : null}
 
         <View style={styles.sectionHeader}>
-          <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>Thread group</Text>
+          <Text variant="xs" style={[styles.sectionTitle, { color: colors.ink3 }]}>Thread group</Text>
           <Text variant="xs" dim style={styles.num}>{threads.length}</Text>
         </View>
         {loading && threads.length === 0 ? (
@@ -249,7 +249,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             activeOpacity={0.7}
             style={[
               styles.threadRow,
-              thread.thread_id === currentThreadId && { backgroundColor: colors.accentSubtle },
+              thread.thread_id === currentThreadId && { backgroundColor: colors.accent.wash },
             ]}
           >
             <View style={[styles.statusDot, { backgroundColor: statusColor(thread.status) }]} />
@@ -264,39 +264,39 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
                 {switchingName === thread.session_name ? 'Opening…' : thread.current_goal || thread.session_name}
               </Text>
               {thread.claimed_paths?.length ? (
-                <Text variant="xs" style={[styles.claims, { color: colors.textSoft }]} numberOfLines={2}>
+                <Text variant="xs" style={[styles.claims, { color: colors.ink2 }]} numberOfLines={2}>
                   owns {thread.claimed_paths.join(', ')}
                 </Text>
               ) : null}
             </View>
             {thread.unread_count > 0 ? (
-              <View style={[styles.unreadBadge, { backgroundColor: colors.accentSubtle }]}>
-                <Text variant="xs" style={[styles.num, { color: colors.accentFg, fontWeight: fontWeights.semibold }]}>{thread.unread_count}</Text>
+              <View style={[styles.unreadBadge, { backgroundColor: colors.accent.wash }]}>
+                <Text variant="xs" style={[styles.num, { color: colors.accent.ink, fontWeight: fontWeights.semibold }]}>{thread.unread_count}</Text>
               </View>
             ) : null}
             {thread.thread_id === currentThreadId ? (
-              <Ionicons name="checkmark" size={18} color={colors.accentFg} />
+              <Ionicons name="checkmark" size={18} color={colors.accent.ink} />
             ) : !ACTIVE_STATUSES.includes(thread.status) ? (
               <TouchableOpacity
                 onPress={() => deleteThread(thread)}
                 style={styles.deleteButton}
                 accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
               >
-                <Ionicons name="trash-outline" size={17} color={colors.textDim} />
+                <Ionicons name="trash-outline" size={17} color={colors.ink3} />
               </TouchableOpacity>
             ) : (
-              <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
+              <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
             )}
           </TouchableOpacity>
         ))}
 
         <View style={[styles.sectionHeader, styles.activityHeader]}>
-          <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>Coordination activity</Text>
+          <Text variant="xs" style={[styles.sectionTitle, { color: colors.ink3 }]}>Coordination activity</Text>
           <Text variant="xs" dim style={styles.num}>{activity.length}</Text>
         </View>
         {!loading && activity.length === 0 ? (
           <View style={styles.activityEmpty}>
-            <Ionicons name="pulse-outline" size={22} color={colors.textDim} />
+            <Ionicons name="pulse-outline" size={22} color={colors.ink3} />
             <Text variant="sm" dim style={styles.activityEmptyText}>
               Messages, path claims, status changes, and conflicts will appear here.
             </Text>
@@ -311,7 +311,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
               key={event.event_id}
               style={[
                 styles.eventRow,
-                conflict && { borderLeftColor: colors.error, borderLeftWidth: 2, paddingLeft: spacing.md },
+                conflict && { borderLeftColor: colors.danger.ink, borderLeftWidth: 2, paddingLeft: spacing.md },
               ]}
             >
               <View style={styles.eventMeta}>

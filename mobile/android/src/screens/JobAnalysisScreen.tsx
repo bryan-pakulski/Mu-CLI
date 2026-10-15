@@ -100,10 +100,10 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
   useEffect(() => { void load(); }, [load]);
 
   if (loading && !analysis) {
-    return <SafeAreaView edges={['bottom']} style={styles.center}><ActivityIndicator color={colors.accent} /></SafeAreaView>;
+    return <SafeAreaView edges={['bottom']} style={styles.center}><ActivityIndicator color={colors.accent.ink} /></SafeAreaView>;
   }
   if (!analysis) {
-    return <SafeAreaView edges={['bottom']} style={styles.center}><Text variant="sm" style={{ color: colors.error }}>{error || 'Could not load job analysis.'}</Text></SafeAreaView>;
+    return <SafeAreaView edges={['bottom']} style={styles.center}><Text variant="sm" style={{ color: colors.danger.ink }}>{error || 'Could not load job analysis.'}</Text></SafeAreaView>;
   }
 
   const s = analysis.summary;
@@ -117,22 +117,22 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
     <SafeAreaView edges={['bottom']} style={styles.safe}>
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={colors.textDim} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={colors.ink3} />}
       >
         <View style={styles.hero}>
-          <Text variant="xs" style={{ color: colors.textDim }}>{label(analysis.job.status)}{analysis.job.archived ? ' · Archived' : ''}</Text>
+          <Text variant="xs" style={{ color: colors.ink3 }}>{label(analysis.job.status)}{analysis.job.archived ? ' · Archived' : ''}</Text>
           <Text variant="xl" style={styles.title}>Job performance</Text>
           <Text variant="sm" dim style={styles.subtitle}>Durable execution analysis separates active work from waiting, review and stopped/error residence.</Text>
-          {error ? <Text variant="xs" style={{ color: colors.error, marginTop: spacing.sm }}>{error}</Text> : null}
+          {error ? <Text variant="xs" style={{ color: colors.danger.ink, marginTop: spacing.sm }}>{error}</Text> : null}
         </View>
 
-        <View style={[styles.metrics, { backgroundColor: colors.bgSubtle }]}>
+        <View style={[styles.metrics, { backgroundColor: colors.surface }]}>
           <Metric label="Wall" value={duration(s.elapsed_seconds)} />
           <Metric label="Active" value={duration(s.active_seconds)} />
           <Metric label="Passive" value={duration(s.passive_seconds || 0)} />
           <Metric label="Stopped" value={duration(s.stopped_seconds || 0)} />
         </View>
-        <View style={[styles.metrics, { backgroundColor: colors.bgSubtle }]}>
+        <View style={[styles.metrics, { backgroundColor: colors.surface }]}>
           <Metric label={costIsEstimate ? 'Cost est.' : 'Cost'} value={`$${cost.toFixed(2)}`} />
           <Metric label="Attempts" value={String(s.attempts)} />
           <Metric label="Tools" value={String(s.tool_calls)} />
@@ -165,8 +165,8 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
         <Section title="Lifecycle">
           {analysis.phase_breakdown.map(item => (
             <View key={item.status} style={styles.barRow}>
-              <View style={styles.barHead}><Text variant="xs" style={{ color: colors.textSoft }}>{label(item.status)}</Text><Text variant="xs" dim style={styles.num}>{duration(item.seconds)} · {item.percent.toFixed(1)}%</Text></View>
-              <View style={[styles.track, { backgroundColor: colors.bgHover }]}><View style={[styles.fill, { width: `${Math.max(1, item.percent)}%`, backgroundColor: colors.viz[0] }]} /></View>
+              <View style={styles.barHead}><Text variant="xs" style={{ color: colors.ink2 }}>{label(item.status)}</Text><Text variant="xs" dim style={styles.num}>{duration(item.seconds)} · {item.percent.toFixed(1)}%</Text></View>
+              <View style={[styles.track, { backgroundColor: colors.sunken }]}><View style={[styles.fill, { width: `${Math.max(1, item.percent)}%`, backgroundColor: colors.accent.ink }]} /></View>
             </View>
           ))}
         </Section>
@@ -175,10 +175,10 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
           {(analysis.phase_intervals || []).length ? (analysis.phase_intervals || []).map((item, index) => (
             <View key={`${index}-${item.status}`} style={styles.interval}>
               <View style={styles.barHead}>
-                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, color: item.classification === 'stopped' ? colors.error : colors.text }}>{label(item.status)}</Text>
+                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, color: item.classification === 'stopped' ? colors.danger.ink : colors.ink }}>{label(item.status)}</Text>
                 <Text variant="xs" dim style={styles.num}>{label(item.classification)} · {duration(item.duration_seconds)}</Text>
               </View>
-              <Text variant="xs" style={[styles.copy, { color: colors.textSoft }]}>{item.interpretation}</Text>
+              <Text variant="xs" style={[styles.copy, { color: colors.ink2 }]}>{item.interpretation}</Text>
               <Text variant="xs" dim style={styles.copy}>{item.explanation}</Text>
               <Row label="Entered" value={item.entry_event?.summary || 'Not recorded'} />
               <Row label="Exited" value={item.exit_event?.summary || 'Not recorded'} />
@@ -200,8 +200,8 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
         <Section title="Tool profile">
           {analysis.tools.length ? analysis.tools.slice(0, 20).map(item => (
             <View key={item.name} style={styles.toolRow}>
-              <Text variant="xs" style={[styles.toolName, { color: colors.textSoft }]} numberOfLines={1}>{item.name}</Text>
-              <View style={[styles.toolTrack, { backgroundColor: colors.bgHover }]}><View style={[styles.toolFill, { width: `${item.count / maxTool * 100}%`, backgroundColor: colors.viz[0] }]} /></View>
+              <Text variant="xs" style={[styles.toolName, { color: colors.ink2 }]} numberOfLines={1}>{item.name}</Text>
+              <View style={[styles.toolTrack, { backgroundColor: colors.sunken }]}><View style={[styles.toolFill, { width: `${item.count / maxTool * 100}%`, backgroundColor: colors.accent.ink }]} /></View>
               <Text variant="xs" dim style={styles.toolCount}>{item.count}</Text>
             </View>
           )) : <Text variant="sm" dim>No tool-call telemetry recorded.</Text>}
@@ -210,7 +210,7 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
         <Section title={`Verification · ${analysis.verifications.length}`}>
           {analysis.verifications.length ? analysis.verifications.map((item, index) => (
             <View key={`${index}-${item.status}`} style={styles.verification}>
-              <Text variant="sm" style={{ color: item.passed ? colors.success : colors.error, fontWeight: fontWeights.semibold }}>{item.passed ? 'PASS' : 'FAIL'} · Run {index + 1}</Text>
+              <Text variant="sm" style={{ color: item.passed ? colors.ok.ink : colors.danger.ink, fontWeight: fontWeights.semibold }}>{item.passed ? 'PASS' : 'FAIL'} · Run {index + 1}</Text>
               <Text variant="xs" dim style={styles.attemptMeta}>{item.checks_passed}/{item.checks} checks · {duration(item.duration_seconds)} · {item.changed_files} files{item.dirty ? ' · dirty' : ''}</Text>
             </View>
           )) : <Text variant="sm" dim>No deterministic verification recorded.</Text>}
@@ -220,7 +220,7 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
           <Row label="Human gates" value={String(analysis.human_gates.length)} />
           {analysis.human_gates.slice(-6).reverse().map(item => <Text key={`g-${item.event_id}`} variant="xs" dim style={styles.incident}>{item.reason || 'Human input required'}</Text>)}
           <Row label="Failures" value={String(analysis.failures.length)} />
-          {analysis.failures.slice(-8).reverse().map(item => <Text key={`f-${item.event_id}`} variant="xs" style={[styles.incident, { color: colors.error }]}>{label(item.event_type)} · {item.summary}</Text>)}
+          {analysis.failures.slice(-8).reverse().map(item => <Text key={`f-${item.event_id}`} variant="xs" style={[styles.incident, { color: colors.danger.ink }]}>{label(item.event_type)} · {item.summary}</Text>)}
         </Section>
       </ScrollView>
     </SafeAreaView>
@@ -232,11 +232,11 @@ function Metric({ label: metricLabel, value }: { label: string; value: string })
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const { colors } = useTheme();
-  return <View style={styles.section}><Text variant="sm" style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>{children}</View>;
+  return <View style={styles.section}><Text variant="sm" style={[styles.sectionTitle, { color: colors.ink }]}>{title}</Text>{children}</View>;
 }
 function Row({ label: rowLabel, value }: { label: string; value: string }) {
   const { colors } = useTheme();
-  return <View style={styles.row}><Text variant="xs" dim>{rowLabel}</Text><Text variant="xs" style={{ color: colors.textSoft, flex: 1, textAlign: 'right', fontVariant: ['tabular-nums'] }}>{value}</Text></View>;
+  return <View style={styles.row}><Text variant="xs" dim>{rowLabel}</Text><Text variant="xs" style={{ color: colors.ink2, flex: 1, textAlign: 'right', fontVariant: ['tabular-nums'] }}>{value}</Text></View>;
 }
 
 const styles = StyleSheet.create({

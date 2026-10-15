@@ -214,7 +214,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
             <TextField accessibilityLabel={a11y} keyboardType="numeric" invalid={invalid} value={String(draft)}
               placeholder={field.optional ? 'default' : undefined}
               onChangeText={t => edit(field.path, t)} style={{ flex: 1 }} />
-            {field.unit ? <Text variant="xs" style={{ color: colors.muted }}>{field.unit}</Text> : null}
+            {field.unit ? <Text variant="xs" style={{ color: colors.ink3 }}>{field.unit}</Text> : null}
           </View>
         );
       case 'select':
@@ -236,7 +236,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
         return (
           <View style={styles.suites}>
             {rows.map((row, i) => (
-              <View key={i} style={[styles.suite, { borderColor: colors.border }]}>
+              <View key={i} style={[styles.suite, { borderColor: colors.hairline }]}>
                 <TextField accessibilityLabel={`Suite ${i + 1} name`} placeholder="name" value={row.name} autoCapitalize="none"
                   onChangeText={t => setRow(i, { name: t })} invalid={invalid} />
                 <TextField accessibilityLabel={`Suite ${i + 1} command`} placeholder="command" mono value={row.command} autoCapitalize="none"
@@ -260,16 +260,16 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
         return (
           <View style={styles.suites}>
             {rows.map((row, i) => (
-              <View key={i} style={[styles.suite, { borderColor: colors.border }]} testID={`rule-row-${field.path}-${i}`}>
+              <View key={i} style={[styles.suite, { borderColor: colors.hairline }]} testID={`rule-row-${field.path}-${i}`}>
                 {columns.map(column => {
                   const hint = rowCellError(field, column, row);
                   return (
                     <View key={column.key} style={styles.cell}>
-                      <Text variant="xs" style={{ color: colors.muted }}>{`${column.label}${column.required ? '' : ' (optional)'}`}</Text>
+                      <Text variant="xs" style={{ color: colors.ink3 }}>{`${column.label}${column.required ? '' : ' (optional)'}`}</Text>
                       <TextField accessibilityLabel={`${column.label} ${i + 1}`} placeholder={column.placeholder || column.label} mono
                         value={row[column.key] || ''} autoCapitalize="none" autoCorrect={false} invalid={invalid || !!hint}
                         onChangeText={t => setCell(i, column.key, t)} />
-                      {hint ? <Text variant="xs" style={{ color: colors.danger }}>{hint.slice(field.label.length + 2)}</Text> : null}
+                      {hint ? <Text variant="xs" style={{ color: colors.danger.ink }}>{hint.slice(field.label.length + 2)}</Text> : null}
                     </View>
                   );
                 })}
@@ -292,13 +292,13 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
   return (
     <View style={styles.root} testID="job-rules-form">
       <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Run rules</Text>
-      <Text variant="xs" style={{ color: colors.muted }}>Limits and policies every job run obeys. Blank or reset values use the default.</Text>
+      <Text variant="xs" style={{ color: colors.ink3 }}>Limits and policies every job run obeys. Blank or reset values use the default.</Text>
       {rules.schema.map(section => {
         const dirty = section.fields.filter(isDirty).length;
         return (
           <Panel key={section.id} testID={`rules-${section.id}`} title={section.title}
             right={dirty ? <Pill tone="warn" glyph="●" testID={`rules-${section.id}-dirty`}>{`${dirty} unsaved`}</Pill> : null}>
-            {section.hint ? <Text variant="xs" style={{ color: colors.muted }}>{section.hint}</Text> : null}
+            {section.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{section.hint}</Text> : null}
             {section.fields.map(field => {
               const set = isSet(field);
               const meta = [
@@ -312,7 +312,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                 <View style={styles.inline}>
                   {set
                     ? <Pill tone="accent" testID={`rule-set-${field.path}`}>set</Pill>
-                    : <Text variant="xs" style={{ color: colors.muted }}>{defaultLabel(field)}</Text>}
+                    : <Text variant="xs" style={{ color: colors.ink3 }}>{defaultLabel(field)}</Text>}
                   {set ? (
                     <PlanosButton small ghost label="Reset" accessibilityLabel={`Reset ${field.label}`} disabled={busy === section.id}
                       onPress={() => { void reset(section, field); }} />
@@ -325,7 +325,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                     <SwitchRow label={field.label} hint={field.hint} value={!!valueOf(field)} onValueChange={v => edit(field.path, v)}
                       testID={`rule-${field.path}`} />
                     {status}
-                    {errors[field.path] ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger }}>{errors[field.path]}</Text> : null}
+                    {errors[field.path] ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{errors[field.path]}</Text> : null}
                   </View>
                 );
               }
@@ -341,7 +341,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
               );
             })}
             {sectionErrors[section.id] ? (
-              <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger }}>{sectionErrors[section.id]}</Text>
+              <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{sectionErrors[section.id]}</Text>
             ) : null}
             <View style={styles.inline}>
               <PlanosButton primary small label={`Save ${section.title.toLowerCase()}`} accessibilityLabel={`Save ${section.title}`}
@@ -417,7 +417,7 @@ export function ToolchainImages({ saved }: { saved: string }) {
 
   if (items === null) return null;
   if (!items.length) {
-    return <Text variant="xs" style={{ color: colors.muted }} testID="toolchain-images-empty">Save a row to build its image.</Text>;
+    return <Text variant="xs" style={{ color: colors.ink3 }} testID="toolchain-images-empty">Save a row to build its image.</Text>;
   }
   return (
     <View style={styles.suites} testID="toolchain-images">
@@ -431,7 +431,7 @@ export function ToolchainImages({ saved }: { saved: string }) {
               <StatusPill status={meta.status} label={meta.label} />
               <Text variant="xs" style={{ flexShrink: 1, fontFamily: fonts.mono }}>{`${item.repository || ''} ← ${key}`}</Text>
             </View>
-            {item.error ? <Text variant="xs" style={{ color: colors.danger }}>{item.error}</Text> : null}
+            {item.error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{item.error}</Text> : null}
             <View style={styles.inline}>
               {item.status === 'building' ? null : (
                 <PlanosButton small label={item.status === 'built' ? 'Rebuild' : 'Build'} accessibilityLabel={`${item.status === 'built' ? 'Rebuild' : 'Build'} ${key}`}

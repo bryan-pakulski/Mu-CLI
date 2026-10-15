@@ -180,10 +180,10 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   };
 
   const threadStatusColor = (status: ThreadStatus) => {
-    if (status === 'error') return colors.error;
-    if (status === 'interrupted') return colors.warning;
-    if (ACTIVE_THREAD_STATUSES.includes(status)) return colors.accent;
-    return colors.textDim;
+    if (status === 'error') return colors.danger.ink;
+    if (status === 'interrupted') return colors.attention.ink;
+    if (ACTIVE_THREAD_STATUSES.includes(status)) return colors.accent.ink;
+    return colors.ink3;
   };
 
   const typeIcon = (session: SessionSummary): keyof typeof Ionicons.glyphMap => {
@@ -206,7 +206,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
               {
                 borderWidth: 0,
                 borderRightWidth: 1,
-                backgroundColor: colors.glassStrong,
+                backgroundColor: colors.raised,
                 borderRightColor: colors.hairline,
                 paddingTop: spacing.base,
               },
@@ -214,7 +214,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
           >
             <View style={[styles.header, { borderBottomColor: colors.hairline }] }>
               <View style={styles.headerCopy}>
-                <Text style={[styles.title, { color: colors.text }]}>Threads</Text>
+                <Text style={[styles.title, { color: colors.ink }]}>Threads</Text>
                 <Text variant="xs" dim>Agent conversations and sessions</Text>
               </View>
               <View style={styles.headerActions}>
@@ -223,10 +223,10 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   style={styles.iconButton}
                   accessibilityLabel={activeSessionName ? 'Create thread' : 'Create session'}
                 >
-                  <Ionicons name="add" size={20} color={colors.textDim} />
+                  <Ionicons name="add" size={20} color={colors.ink3} />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close threads">
-                  <Ionicons name="close" size={20} color={colors.textDim} />
+                  <Ionicons name="close" size={20} color={colors.ink3} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -239,11 +239,11 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 <TouchableOpacity
                   onPress={() => setCreateThreadOpen(true)}
                   activeOpacity={0.72}
-                  style={[styles.primaryAction, { backgroundColor: colors.accentSubtle }]}
+                  style={[styles.primaryAction, { backgroundColor: colors.accent.wash }]}
                 >
-                  <Ionicons name="git-branch-outline" size={18} color={colors.accentFg} />
-                  <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>New thread</Text>
-                  <Ionicons name="add" size={18} color={colors.accentFg} />
+                  <Ionicons name="git-branch-outline" size={18} color={colors.accent.ink} />
+                  <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>New thread</Text>
+                  <Ionicons name="add" size={18} color={colors.accent.ink} />
                 </TouchableOpacity>
               ) : null}
 
@@ -257,7 +257,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                       activeOpacity={0.7}
                       style={[
                         styles.row,
-                        activeSessionName === thread.session_name && { backgroundColor: colors.accentSubtle },
+                        activeSessionName === thread.session_name && { backgroundColor: colors.accent.wash },
                       ]}
                     >
                       <View style={styles.typeIconWrap}>
@@ -273,22 +273,22 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                         </Text>
                       </View>
                       {thread.unread_count > 0 ? (
-                        <View style={[styles.unreadBadge, { backgroundColor: colors.accentSubtle }] }>
-                          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{thread.unread_count}</Text>
+                        <View style={[styles.unreadBadge, { backgroundColor: colors.accent.wash }] }>
+                          <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{thread.unread_count}</Text>
                         </View>
                       ) : null}
                       {activeSessionName === thread.session_name ? (
-                        <Ionicons name="checkmark" size={17} color={colors.accentFg} />
+                        <Ionicons name="checkmark" size={17} color={colors.accent.ink} />
                       ) : !ACTIVE_THREAD_STATUSES.includes(thread.status) ? (
                         <TouchableOpacity
                           onPress={() => deleteThread(thread)}
                           style={styles.rowAction}
                           accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
                         >
-                          <Ionicons name="trash-outline" size={17} color={colors.textDim} />
+                          <Ionicons name="trash-outline" size={17} color={colors.ink3} />
                         </TouchableOpacity>
                       ) : (
-                        <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
+                        <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
                       )}
                     </TouchableOpacity>
                   ))}
@@ -304,7 +304,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 ) : null}
                 {loadError ? (
                   <TouchableOpacity onPress={() => void load()} style={styles.retryAction}>
-                    <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>Retry</Text>
+                    <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
                   </TouchableOpacity>
                 ) : null}
                 {sortSessions(sessions, activeSessionName).map(session => (
@@ -314,11 +314,11 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     activeOpacity={0.7}
                     style={[
                       styles.row,
-                      activeSessionName === session.name && { backgroundColor: colors.accentSubtle },
+                      activeSessionName === session.name && { backgroundColor: colors.accent.wash },
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
-                      <Ionicons name={typeIcon(session)} size={17} color={activeSessionName === session.name ? colors.accentFg : session.is_loaded ? colors.textSoft : colors.textDim} />
+                      <Ionicons name={typeIcon(session)} size={17} color={activeSessionName === session.name ? colors.accent.ink : session.is_loaded ? colors.ink2 : colors.ink3} />
                     </View>
                     <View style={styles.rowCopy}>
                       <Text variant="sm" style={styles.rowName} numberOfLines={1}>{session.name}</Text>
@@ -327,10 +327,10 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                       </Text>
                     </View>
                     <TouchableOpacity onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>
-                      <Ionicons name="remove-circle-outline" size={18} color={colors.textDim} />
+                      <Ionicons name="remove-circle-outline" size={18} color={colors.ink3} />
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => deleteSession(session)} style={styles.rowAction} accessibilityLabel={`Delete ${session.name}`}>
-                      <Ionicons name="trash-outline" size={17} color={colors.textDim} />
+                      <Ionicons name="trash-outline" size={17} color={colors.ink3} />
                     </TouchableOpacity>
                   </TouchableOpacity>
                 ))}
@@ -339,9 +339,9 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
               <TouchableOpacity
                 onPress={() => setCreateSessionOpen(true)}
                 activeOpacity={0.72}
-                style={[styles.secondaryAction, { borderColor: colors.border }]}
+                style={[styles.secondaryAction, { borderColor: colors.hairline }]}
               >
-                <Ionicons name="add-circle-outline" size={17} color={colors.textDim} />
+                <Ionicons name="add-circle-outline" size={17} color={colors.ink3} />
                 <Text variant="sm" dim style={{ fontWeight: fontWeights.semibold }}>New session</Text>
               </TouchableOpacity>
             </ScrollView>
@@ -368,7 +368,7 @@ function SectionTitle({ label, count }: { label: string; count: number }) {
   const { colors } = useTheme();
   return (
     <View style={styles.sectionTitleRow}>
-      <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>{label}</Text>
+      <Text variant="xs" style={[styles.sectionTitle, { color: colors.ink3 }]}>{label}</Text>
       <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{count}</Text>
     </View>
   );

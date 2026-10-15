@@ -12,7 +12,7 @@ export type TextProps = RNTextProps & {
 export function Text({ variant = 'base', dim, accent, style, ...rest }: TextProps) {
   const { colors, typography } = useTheme();
   const fontSpec = typography[variant];
-  const color = accent ? colors.accentFg : dim ? colors.textDim : colors.text;
+  const color = accent ? colors.accent.ink : dim ? colors.ink3 : colors.ink;
   return (
     <RNText
       style={[{ color, fontFamily: fonts.ui, fontSize: fontSpec.fontSize, lineHeight: fontSpec.lineHeight }, style]}

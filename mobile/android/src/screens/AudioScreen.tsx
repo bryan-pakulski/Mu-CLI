@@ -29,7 +29,7 @@ export function AudioScreen() {
   }, [text, activeSessionName]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <View style={{ padding: spacing.base }}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Audio</Text>
 
@@ -39,16 +39,16 @@ export function AudioScreen() {
             value={text}
             onChangeText={setText}
             placeholder="Enter text to synthesize…"
-            placeholderTextColor={colors.textDim}
+            placeholderTextColor={colors.ink3}
             multiline
-            style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.sm }}
+            style={{ color: colors.ink, borderWidth: 1, borderColor: colors.hairline, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.sm }}
           />
           <Button title={loading ? 'Generating…' : 'Generate TTS'} onPress={tts} disabled={loading || !text.trim()} />
         </Card>
 
         <Card style={{ marginBottom: spacing.sm }}>
           <Text variant="base" style={{ fontWeight: fontWeights.medium, marginBottom: spacing.sm }}>Speech-to-Text</Text>
-          <Text variant="xs" style={{ color: colors.textDim }}>
+          <Text variant="xs" style={{ color: colors.ink3 }}>
             STT requires recording audio. Connect a microphone and use the record button below.
           </Text>
           <Button

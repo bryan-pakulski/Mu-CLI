@@ -40,7 +40,7 @@ export function Skeleton({ width, height = 20, radius = radii.sm, style }: Skele
           width: width ?? '100%',
           height,
           borderRadius: radius,
-          backgroundColor: colors.hover,
+          backgroundColor: colors.sunken,
           opacity,
         },
         style,

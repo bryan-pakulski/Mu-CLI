@@ -70,7 +70,7 @@ export function SystemPromptsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4].map(i => <Skeleton key={i} height={60} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -80,7 +80,7 @@ export function SystemPromptsScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -88,14 +88,14 @@ export function SystemPromptsScreen() {
 
   if (prompts.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <EmptyState title="No system prompts" message="No system prompts configured" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <FlatList
         data={prompts}
         keyExtractor={item => item.name}
@@ -106,7 +106,7 @@ export function SystemPromptsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1 }}>
                 <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{item.name}</Text>
-                <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
+                <Text variant="xs" style={{ color: colors.ink3, marginTop: 2, fontVariant: ['tabular-nums'] }}>
                   {item.chars} chars · {item.source}
                 </Text>
               </View>
@@ -128,10 +128,10 @@ export function SystemPromptsScreen() {
                 value={editText}
                 onChangeText={setEditText}
                 placeholder="Prompt text…"
-                placeholderTextColor={colors.textDim}
+                placeholderTextColor={colors.ink3}
                 multiline
                 textAlignVertical="top"
-                style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, minHeight: 200, fontFamily: fonts.mono }}
+                style={{ color: colors.ink, borderWidth: 1, borderColor: colors.hairline, borderRadius: radii.sm, padding: spacing.md, minHeight: 200, fontFamily: fonts.mono }}
               />
             </ScrollView>
             <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end', marginTop: spacing.sm }}>

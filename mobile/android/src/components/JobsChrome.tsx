@@ -11,7 +11,7 @@ import { prPill } from './jobViews';
 import { MiniStepper, Pill, StatusIcon, useInterval } from './planos';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, fonts, spacing, toneColor, touchTarget } from '../theme/tokens';
+import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, age, money, stateLabel, stateStatus, verdictStyle } from '../theme/status';
 
 export type JobsPage = 'Work' | 'JobsList' | 'JobActivity' | 'JobBoards' | 'JobHistory' | 'JobSettings';
@@ -53,20 +53,20 @@ export function JobsNavBar({ current, onNavigate, home }: { current: JobsPage; o
   const checks = status?.checks ?? home?.running.filter(j => j.state === 'checking').length ?? 0;
   const chip = (glyph: string, n: number, label: string, tone: 'running' | 'warn') => (
     <View accessible accessibilityLabel={`${n} ${label}`} style={styles.chip}>
-      <Text variant="xs" style={{ color: n ? toneColor(colors, tone) : colors.muted }}>{glyph} {n}</Text>
-      <Text variant="xs" style={{ color: colors.muted }}>{label}</Text>
+      <Text variant="xs" style={{ color: n ? toneInk(colors, tone) : colors.ink3 }}>{glyph} {n}</Text>
+      <Text variant="xs" style={{ color: colors.ink3 }}>{label}</Text>
     </View>
   );
   return (
-    <View style={[styles.nav, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+    <View style={[styles.nav, { borderBottomColor: colors.hairline, backgroundColor: colors.surface }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navRow} accessibilityRole="tablist" accessibilityLabel="Jobs pages">
         {JOBS_PAGES.map(p => {
           const on = p.id === current;
           return (
             <Pressable key={p.id} testID={`jobs-nav-${p.id}`} accessibilityRole="tab" accessibilityLabel={p.label} accessibilityState={{ selected: on }}
               onPress={() => { if (!on) onNavigate(p.id); }}
-              style={({ pressed }) => [styles.navItem, { borderBottomColor: on ? colors.accent : 'transparent', backgroundColor: pressed ? colors.hover : 'transparent' }]}>
-              <Text variant="sm" style={{ color: on ? colors.text : colors.muted, fontWeight: on ? fontWeights.semibold : fontWeights.medium }}>{p.label}</Text>
+              style={({ pressed }) => [styles.navItem, { borderBottomColor: on ? colors.accent.ink : 'transparent', backgroundColor: pressed ? colors.sunken : 'transparent' }]}>
+              <Text variant="sm" style={{ color: on ? colors.ink : colors.ink3, fontWeight: on ? fontWeights.semibold : fontWeights.medium }}>{p.label}</Text>
             </Pressable>
           );
         })}
@@ -93,26 +93,26 @@ export function JobRow({ job, onPress, now = Date.now() / 1000, right, testID }:
   const needs = st === 'waiting' && job.attention_detail;
   return (
     <Pressable testID={testID || `job-row-${job.id}`} accessibilityRole="button" accessibilityLabel={`${jobKey(job)} ${job.title}, ${stateLabel(job.state)}`} onPress={onPress}
-      style={({ pressed }) => [styles.row, { borderBottomColor: colors.border, backgroundColor: pressed ? colors.hover : 'transparent' }]}>
+      style={({ pressed }) => [styles.row, { borderBottomColor: colors.hairline, backgroundColor: pressed ? colors.sunken : 'transparent' }]}>
       <View style={styles.rowTop}>
-        <Text variant="sm" style={[styles.key, { color: colors.accent }]} numberOfLines={1}>{jobKey(job)}</Text>
-        {st === 'active' ? <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running }}>●</Text> : null}
+        <Text variant="sm" style={[styles.key, { color: colors.accent.ink }]} numberOfLines={1}>{jobKey(job)}</Text>
+        {st === 'active' ? <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running.ink }}>●</Text> : null}
         <MiniStepper steps={steps} />
-        <Text variant="xs" style={{ color: colors.muted }} numberOfLines={1}>{step?.label?.toLowerCase() || ''}</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{step?.label?.toLowerCase() || ''}</Text>
         <View style={{ flex: 1 }} />
-        <Text variant="xs" style={[styles.num, { color: colors.text }]}>{money(job.cost_usd)}{job.max_cost_usd ? <Text variant="xs" style={{ color: colors.muted }}>{` / ${money(job.max_cost_usd)}`}</Text> : null}</Text>
-        <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{age(now - (job.created_at || now))}</Text>
+        <Text variant="xs" style={[styles.num, { color: colors.ink }]}>{money(job.cost_usd)}{job.max_cost_usd ? <Text variant="xs" style={{ color: colors.ink3 }}>{` / ${money(job.max_cost_usd)}`}</Text> : null}</Text>
+        <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{age(now - (job.created_at || now))}</Text>
       </View>
       <Text variant="sm" numberOfLines={1}>{job.title}</Text>
       <View style={styles.rowBottom}>
         <Pill tone={s.tone} glyph={s.icon}>{stateLabel(job.state)}</Pill>
-        {job.verdict ? <Text variant="xs" style={{ color: toneColor(colors, vTone) }}>{vLabel}</Text> : null}
+        {job.verdict ? <Text variant="xs" style={{ color: toneInk(colors, vTone) }}>{vLabel}</Text> : null}
         <PrPill pr={job.pr} testID={`job-row-${job.id}-pr`} />
-        {needs ? <Text variant="xs" style={{ color: colors.warn, flex: 1 }} numberOfLines={1}>{job.limit?.summary || job.attention_detail}</Text> : <View style={{ flex: 1 }} />}
+        {needs ? <Text variant="xs" style={{ color: colors.attention.ink, flex: 1 }} numberOfLines={1}>{job.limit?.summary || job.attention_detail}</Text> : <View style={{ flex: 1 }} />}
         {right}
       </View>
       {job.origin_session || job.repository ? (
-        <Text variant="xs" style={{ color: colors.muted, fontFamily: fonts.mono }} numberOfLines={1} testID={`job-row-${job.id}-meta`}>
+        <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }} numberOfLines={1} testID={`job-row-${job.id}-meta`}>
           {[job.origin_session ? `session · ${job.origin_session}` : '', job.repository || ''].filter(Boolean).join('  ')}
         </Text>
       ) : null}
@@ -140,12 +140,12 @@ export function ResultRow({ job, onPress, now }: { job: JobSummary; onPress: () 
   const [vTone, vLabel] = verdictStyle(job.verdict);
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`${jobKey(job)} ${job.title}, ${stateLabel(job.state)}`} onPress={onPress}
-      style={({ pressed }) => [styles.result, { backgroundColor: pressed ? colors.hover : 'transparent' }]}>
+      style={({ pressed }) => [styles.result, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}>
       <StatusIcon status={stateStatus(job.state)} label={stateLabel(job.state)} />
-      <Text variant="xs" style={{ fontFamily: fonts.mono, color: colors.accent }}>{jobKey(job)}</Text>
+      <Text variant="xs" style={{ fontFamily: fonts.mono, color: colors.accent.ink }}>{jobKey(job)}</Text>
       <Text variant="sm" style={{ flex: 1 }} numberOfLines={1}>{job.title}</Text>
       {job.verdict ? <Pill tone={vTone}>{vLabel}</Pill> : null}
-      <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{age(now - job.updated_at)} ago</Text>
+      <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{age(now - job.updated_at)} ago</Text>
     </Pressable>
   );
 }

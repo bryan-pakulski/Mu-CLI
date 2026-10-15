@@ -16,16 +16,16 @@ export function ConnectionPrompt({ onConnect }: ConnectionPromptProps) {
   const baseUrl = useConnectionStore(state => state.baseUrl);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
-      <View style={[styles.iconWrap, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-        <Ionicons name="terminal-outline" size={32} color={colors.textDim} />
+    <View style={[styles.root, { backgroundColor: colors.canvas }]}>
+      <View style={[styles.iconWrap, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+        <Ionicons name="terminal-outline" size={32} color={colors.ink3} />
       </View>
       <Text variant="xl" style={styles.title}>Connect to MuCLI</Text>
       <Text variant="sm" dim style={styles.body}>
         The mobile client needs a reachable MuCLI GUI instance before chat, sessions, modes, or traces can be used.
       </Text>
-      <View style={[styles.urlBox, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-        <View style={[styles.dot, { backgroundColor: colors.error }]} />
+      <View style={[styles.urlBox, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+        <View style={[styles.dot, { backgroundColor: colors.danger.ink }]} />
         <Text variant="sm" style={styles.url} numberOfLines={1}>{baseUrl}</Text>
       </View>
       <Button title="Configure connection" onPress={onConnect} style={styles.button} />

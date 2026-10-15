@@ -120,7 +120,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
     const running = c.status === 'running';
     const memPct = c.mem_bytes != null && c.mem_limit ? Math.round((c.mem_bytes / c.mem_limit) * 100) : null;
     return (
-      <View key={c.name} testID={`container-${c.name}`} style={[styles.container, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+      <View key={c.name} testID={`container-${c.name}`} style={[styles.container, { borderColor: colors.hairline, backgroundColor: colors.canvas }]}>
         <View style={styles.row}>
           <StatusIcon status={running ? 'active' : c.status === 'exited' ? 'skipped' : 'pending'} label={c.status_text || c.status || 'unknown'} />
           <Text variant="xs" style={[styles.mono, { flex: 1 }]} numberOfLines={1}>{c.name}</Text>
@@ -129,34 +129,34 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
               : c.stage ? <Pill tone="muted">{c.stage}</Pill> : null}
         </View>
         {c.binding && c.role !== 'broker' || c.gpus ? (
-          <Text variant="xs" style={{ color: colors.muted }} numberOfLines={1}>
+          <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>
             {[c.binding && c.role !== 'broker' ? `environment ${c.binding}` : '', c.gpus ? `GPUs ${c.gpus}` : ''].filter(Boolean).join(' · ')}
           </Text>
         ) : null}
-        <Text variant="xs" style={{ color: colors.muted }} numberOfLines={1}>{c.image}{c.started_at ? ` · up ${duration((now - c.started_at) * 1000)}` : ''}{c.status_text ? ` · ${c.status_text}` : ''}</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{c.image}{c.started_at ? ` · up ${duration((now - c.started_at) * 1000)}` : ''}{c.status_text ? ` · ${c.status_text}` : ''}</Text>
         <View style={styles.metrics}>
           <View style={styles.metric}>
-            <Text variant="xs" style={{ color: colors.muted }}>CPU <Text variant="xs" style={styles.num}>{c.cpu_percent == null ? '—' : `${c.cpu_percent.toFixed(0)}%`}</Text></Text>
+            <Text variant="xs" style={{ color: colors.ink3 }}>CPU <Text variant="xs" style={styles.num}>{c.cpu_percent == null ? '—' : `${c.cpu_percent.toFixed(0)}%`}</Text></Text>
             <Sparkline values={s.cpu} max={Math.max(100, ...s.cpu.map(v => v || 0))} tone="running" accessibilityLabel={`CPU ${c.cpu_percent == null ? 'no sample yet' : `${c.cpu_percent.toFixed(0)} percent`}`} testID={`cpu-spark-${c.name}`} />
           </View>
           <View style={styles.metric}>
-            <Text variant="xs" style={{ color: colors.muted }}>Mem <Text variant="xs" style={styles.num}>{c.mem_bytes == null ? '—' : `${bytes(c.mem_bytes)}${c.mem_limit ? ` / ${bytes(c.mem_limit)}` : ''}`}</Text></Text>
+            <Text variant="xs" style={{ color: colors.ink3 }}>Mem <Text variant="xs" style={styles.num}>{c.mem_bytes == null ? '—' : `${bytes(c.mem_bytes)}${c.mem_limit ? ` / ${bytes(c.mem_limit)}` : ''}`}</Text></Text>
             <Sparkline values={s.mem} max={c.mem_limit || undefined} tone={memPct != null && memPct > 85 ? 'warn' : 'accent'} accessibilityLabel={`Memory ${c.mem_bytes == null ? 'no sample yet' : bytes(c.mem_bytes)}${memPct != null ? `, ${memPct} percent of limit` : ''}`} testID={`mem-spark-${c.name}`} />
           </View>
         </View>
         <View style={styles.row}>
           <PlanosButton small tone="danger" label="Remove" accessibilityLabel={`Remove container ${c.name}`} disabled={!removable} onPress={() => setRemoving(c)} testID={`remove-${c.name}`} />
-          {!removable && reason ? <Text variant="xs" style={{ color: colors.muted }}>{reason}</Text> : null}
+          {!removable && reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{reason}</Text> : null}
         </View>
       </View>
     );
   };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="JobActivity" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.muted} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.ink3} />}>
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Activity</Text>
         {unsupported ? <Banner tone="muted" glyph="ℹ" title="Activity needs a newer mucli server (GET /api/jobs/vm/activity)." /> : null}
         {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
@@ -180,17 +180,17 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
                   key={job.id}
                   testID={`activity-job-${job.id}`}
                   title={<View style={[styles.row, { flex: 1 }]}>
-                    <Ionicons name={KIND_ICON[job.kind] || 'ellipse-outline'} size={16} color={st === 'active' ? colors.running : colors.warn} accessibilityLabel={job.kind} />
-                    <Text variant="sm" style={[styles.mono, { color: colors.accent, fontWeight: fontWeights.semibold }]}>{job.key || `#${job.id.slice(0, 8)}`}</Text>
+                    <Ionicons name={KIND_ICON[job.kind] || 'ellipse-outline'} size={16} color={st === 'active' ? colors.running.ink : colors.attention.ink} accessibilityLabel={job.kind} />
+                    <Text variant="sm" style={[styles.mono, { color: colors.accent.ink, fontWeight: fontWeights.semibold }]}>{job.key || `#${job.id.slice(0, 8)}`}</Text>
                     <Pill tone={st === 'active' ? 'running' : st === 'waiting' ? 'warn' : 'muted'} glyph={st === 'active' ? '●' : '◆'}>{stateLabel(job.state)}</Pill>
                   </View>}
                   right={<Text variant="xs" style={styles.num}>{money(job.cost_usd)}</Text>}
                 >
                   <Text variant="sm" numberOfLines={1} onPress={() => navigation.navigate('JobDetail', { jobId: job.id })} accessibilityRole="link">{job.title}</Text>
-                  <Text variant="xs" style={{ color: colors.muted }}>
+                  <Text variant="xs" style={{ color: colors.ink3 }}>
                     {job.kind}{job.stage ? ` · ${job.stage}` : ''}{job.since ? ` · ${duration((now - job.since) * 1000)}` : ''}{job.worker_id ? ` · worker ${job.worker_id.slice(0, 8)}` : ''}{job.heartbeat_at ? ` · heartbeat ${duration((now - job.heartbeat_at) * 1000)} ago` : ''}
                   </Text>
-                  {job.last ? <Text variant="xs" style={[styles.mono, { color: colors.muted }]} numberOfLines={2}>› {job.last}</Text> : null}
+                  {job.last ? <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={2}>› {job.last}</Text> : null}
                   {(job.containers || []).map(c => containerRow(c, !active, active ? 'job is active' : ''))}
                   <View style={styles.wrap}>
                     <PlanosButton small label="View log" onPress={() => void openLog(job)} testID={`activity-log-${job.id}`} />
@@ -201,7 +201,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
             }) : <Panel><Empty status="done">No agents, checks or containers are running.</Empty></Panel>}
             {vm.orphans?.length ? (
               <Panel title="Orphaned containers" badge={vm.orphans.length} badgeTone="warn" testID="activity-orphans">
-                <Text variant="xs" style={{ color: colors.muted }}>mucli-job containers whose job is no longer active.</Text>
+                <Text variant="xs" style={{ color: colors.ink3 }}>mucli-job containers whose job is no longer active.</Text>
                 {vm.orphans.map(c => containerRow(c, true))}
               </Panel>
             ) : null}
@@ -213,7 +213,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
         {logBusy ? <Loading label="Loading log…" /> : (
           <View style={{ gap: spacing.sm }}>
             <View style={styles.row}>
-              <Text variant="xs" style={{ color: colors.muted, flex: 1 }}>{log?.source ? `${log.source} log` : ''}{log?.truncated ? ' · showing the tail' : ''}</Text>
+              <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>{log?.source ? `${log.source} log` : ''}{log?.truncated ? ' · showing the tail' : ''}</Text>
               {logJob ? <PlanosButton small label="Refresh" onPress={() => void openLog(logJob)} /> : null}
             </View>
             <Pre testID="activity-log-text">{log?.text || 'No output yet.'}</Pre>

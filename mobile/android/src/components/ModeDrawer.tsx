@@ -81,7 +81,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
             {
               borderWidth: 0,
               borderLeftWidth: 1,
-              backgroundColor: colors.glassStrong,
+              backgroundColor: colors.raised,
               borderLeftColor: colors.hairline,
               paddingTop: spacing.base,
             },
@@ -90,7 +90,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
           <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <View style={styles.headerCopy}>
               <Text variant="xs" dim>Active mode</Text>
-              <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+              <Text style={[styles.title, { color: colors.ink }]} numberOfLines={1}>
                 {activeMode?.display_name || (loading ? 'Loading…' : 'Default mode')}
               </Text>
               <Text variant="xs" dim numberOfLines={2}>
@@ -98,7 +98,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
-              <Ionicons name="close" size={20} color={colors.textDim} />
+              <Ionicons name="close" size={20} color={colors.ink3} />
             </TouchableOpacity>
           </View>
 
@@ -107,7 +107,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               <ModeContent />
             ) : (
               <View style={styles.emptyState}>
-                <Ionicons name="options-outline" size={24} color={colors.textDim} />
+                <Ionicons name="options-outline" size={24} color={colors.ink3} />
                 <Text variant="lg" style={styles.emptyTitle}>No mode explorer</Text>
                 <Text variant="sm" dim style={styles.emptyBody}>
                   Select Feature, Research, Debug, Security, Loop, or Teacher mode to expose its dedicated controls here.

@@ -195,7 +195,7 @@ export function MemoryScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           <Skeleton height={44} style={{ marginBottom: spacing.sm }} />
           <Skeleton height={120} style={{ marginBottom: spacing.sm }} />
@@ -207,7 +207,7 @@ export function MemoryScreen() {
 
   if (error && !ledger && !snapshot) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -222,12 +222,12 @@ export function MemoryScreen() {
         alignItems: 'center',
         justifyContent: 'center',
         borderBottomWidth: 2,
-        borderBottomColor: tab === target ? colors.accent : colors.border,
+        borderBottomColor: tab === target ? colors.accent.ink : colors.hairline,
       }}
     >
       <Text
         variant="sm"
-        style={{ color: tab === target ? colors.text : colors.textDim, fontWeight: tab === target ? fontWeights.semibold : fontWeights.medium }}
+        style={{ color: tab === target ? colors.ink : colors.ink3, fontWeight: tab === target ? fontWeights.semibold : fontWeights.medium }}
       >
         {title}
       </Text>
@@ -239,7 +239,7 @@ export function MemoryScreen() {
   // position in the live snapshot so every chart agrees.
   const layerColor = (id: string) => {
     const index = Math.max(0, (snapshot?.layers || []).findIndex(layer => layer.id === id));
-    return colors.viz[index % colors.viz.length];
+    return colors.series[index % colors.series.length].pigment;
   };
   const contextSummary = contextTimeline?.summary || { samples: 0 };
   const activeContextPoint = selectedContextPoint
@@ -247,7 +247,7 @@ export function MemoryScreen() {
   const maxChurn = Math.max(10, ...contextPoints.map(point => point.churn_score || 0));
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {tabButton('memories', 'Memories')}
         {tabButton('context', 'Context')}
@@ -268,7 +268,7 @@ export function MemoryScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
                 <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Memory Plane</Text>
-                <Text variant="xs" style={{ color: colors.textDim }}>
+                <Text variant="xs" style={{ color: colors.ink3 }}>
                   Automatic model-managed capture · no approval prompts
                 </Text>
               </View>
@@ -360,10 +360,10 @@ export function MemoryScreen() {
                     marginTop: spacing.sm,
                   }}
                 >
-                  <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>
+                  <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>
                     {memory.id.slice(0, 8)} · v{memory.version}
                   </Text>
-                  <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
+                  <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>
                     recalled {memory.recall_count || 0}
                   </Text>
                 </View>
@@ -396,13 +396,13 @@ export function MemoryScreen() {
           ) : (
             <>
               <Card style={{ marginBottom: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.textDim }}>
+                <Text variant="xs" style={{ color: colors.ink3 }}>
                   MODEL INPUT · LIVE
                 </Text>
                 <Text variant="lg" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.xs }}>
                   Context Observatory
                 </Text>
-                <Text variant="xs" style={{ color: colors.textDim }}>
+                <Text variant="xs" style={{ color: colors.ink3 }}>
                   Provider-visible context, captured at every model call.
                 </Text>
 
@@ -420,7 +420,7 @@ export function MemoryScreen() {
                         paddingVertical: spacing.sm,
                       }}
                     >
-                      <Text variant="xs" style={{ color: colors.textDim }}>{label}</Text>
+                      <Text variant="xs" style={{ color: colors.ink3 }}>{label}</Text>
                       <Text variant="base" style={{ fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>
                         {value}
                       </Text>
@@ -430,8 +430,8 @@ export function MemoryScreen() {
 
                 <View style={{ marginTop: spacing.base }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs }}>
-                    <Text variant="xs" style={{ color: colors.textDim }}>Current composition</Text>
-                    <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>Current composition</Text>
+                    <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>
                       {snapshot.total_tokens.toLocaleString()} / {snapshot.context_limit.toLocaleString()} tok
                     </Text>
                   </View>
@@ -442,7 +442,7 @@ export function MemoryScreen() {
                       gap: 2,
                       padding: 2,
                       borderRadius: radii.pill,
-                      backgroundColor: colors.bgHover,
+                      backgroundColor: colors.sunken,
                       overflow: 'hidden',
                     }}
                   >
@@ -460,7 +460,7 @@ export function MemoryScreen() {
                       style={{
                         flex: Math.max(1, snapshot.free_tokens),
                         borderRadius: radii.pill,
-                        backgroundColor: colors.bgActive,
+                        backgroundColor: colors.sunken,
                       }}
                     />
                   </View>
@@ -486,10 +486,10 @@ export function MemoryScreen() {
                       justifyContent: 'center',
                       minHeight: touchTarget,
                       borderRadius: radii.sm,
-                      backgroundColor: contextView === view ? colors.accentSubtle : 'transparent',
+                      backgroundColor: contextView === view ? colors.accent.wash : 'transparent',
                     }}
                   >
-                    <Text variant="xs" style={{ color: contextView === view ? colors.accentFg : colors.textDim, fontWeight: contextView === view ? fontWeights.semibold : fontWeights.regular }}>
+                    <Text variant="xs" style={{ color: contextView === view ? colors.accent.ink : colors.ink3, fontWeight: contextView === view ? fontWeights.semibold : fontWeights.regular }}>
                       {view === 'heatmap' ? 'Evolution heatmap' : 'Churn pulse'}
                     </Text>
                   </TouchableOpacity>
@@ -502,7 +502,7 @@ export function MemoryScreen() {
                     <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>
                       {contextView === 'heatmap' ? 'Layer evolution' : 'Context churn'}
                     </Text>
-                    <Text variant="xs" style={{ color: colors.textDim }}>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>
                       {contextView === 'heatmap'
                         ? 'Brightness = content replaced at each provider call'
                         : 'Replacement rate; teal bars mark compaction'}
@@ -513,7 +513,7 @@ export function MemoryScreen() {
 
                 {contextPoints.length === 0 ? (
                   <View style={{ minHeight: 140, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text variant="xs" style={{ color: colors.textDim }}>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>
                       Waiting for the first provider call…
                     </Text>
                   </View>
@@ -522,7 +522,7 @@ export function MemoryScreen() {
                     <View style={{ width: 38, paddingRight: spacing.xs }}>
                       {snapshot.layers.map(layer => (
                         <View key={layer.id} style={{ height: 20, justifyContent: 'center' }}>
-                          <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono, fontSize: fontSizes.xs, lineHeight: typography.sm.lineHeight }}>
+                          <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono, fontSize: fontSizes.xs, lineHeight: typography.sm.lineHeight }}>
                             {layer.id}
                           </Text>
                         </View>
@@ -549,7 +549,7 @@ export function MemoryScreen() {
                                     marginRight: 2,
                                     borderRadius: radii.sm,
                                     borderWidth: activeContextPoint?.id === point.id ? 1 : 0,
-                                    borderColor: colors.text,
+                                    borderColor: colors.ink,
                                     backgroundColor: withAlpha(layerColor(layer.id), alpha),
                                   }}
                                 />
@@ -571,7 +571,7 @@ export function MemoryScreen() {
                             width: 8,
                             height: Math.max(3, (point.churn_score || 0) / maxChurn * 128),
                             borderRadius: radii.pill,
-                            backgroundColor: point.compaction ? colors.viz[6] : colors.viz[3],
+                            backgroundColor: point.compaction ? colors.series[0].ink : colors.danger.ink,
                             opacity: activeContextPoint?.id === point.id ? 1 : 0.68,
                           }}
                         />
@@ -588,7 +588,7 @@ export function MemoryScreen() {
                       <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>
                         Provider call {activeContextPoint.id}
                       </Text>
-                      <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
+                      <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>
                         {new Date(activeContextPoint.at * 1000).toLocaleTimeString()}
                       </Text>
                     </View>
@@ -620,11 +620,11 @@ export function MemoryScreen() {
                             backgroundColor: layerColor(layer.id),
                           }}
                         />
-                        <Text variant="xs" style={{ width: 34, fontFamily: fonts.mono, color: colors.textDim }}>
+                        <Text variant="xs" style={{ width: 34, fontFamily: fonts.mono, color: colors.ink3 }}>
                           {layer.id}
                         </Text>
                         <Text variant="xs" style={{ flex: 1 }} numberOfLines={1}>{layer.name}</Text>
-                        <Text variant="xs" style={{ color: layer.changed ? colors.warning : colors.textDim, fontVariant: ['tabular-nums'] }}>
+                        <Text variant="xs" style={{ color: layer.changed ? colors.attention.ink : colors.ink3, fontVariant: ['tabular-nums'] }}>
                           {layer.tokens.toLocaleString()} · Δ{layer.changed_chunks}
                         </Text>
                       </TouchableOpacity>
@@ -633,7 +633,7 @@ export function MemoryScreen() {
                 </Card>
               )}
 
-              <Text variant="xs" style={{ color: colors.textDim, textAlign: 'center', marginVertical: spacing.sm }}>
+              <Text variant="xs" style={{ color: colors.ink3, textAlign: 'center', marginVertical: spacing.sm }}>
                 Session-run history stores measurements and hashes, never prompt text.
               </Text>
             </>
@@ -659,7 +659,7 @@ export function MemoryScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Memory detail</Text>
               <TouchableOpacity onPress={() => setDetail(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
-                <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
+                <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
               </TouchableOpacity>
             </View>
             {detail && (
@@ -705,19 +705,19 @@ export function MemoryScreen() {
                 <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>
                   Sources
                 </Text>
-                <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono }}>
+                <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }}>
                   {JSON.stringify(detail.memory.source_refs, null, 2)}
                 </Text>
                 <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.base }}>
                   Relationships
                 </Text>
                 {(detail.graph.edges || []).map((edge, index) => (
-                  <Text key={edge.source + edge.target + index} variant="xs" style={{ color: colors.textDim }}>
+                  <Text key={edge.source + edge.target + index} variant="xs" style={{ color: colors.ink3 }}>
                     {edge.source.slice(0, 8)} —{edge.type}→ {edge.target.slice(0, 8)}
                   </Text>
                 ))}
                 {!detail.graph.edges.length && (
-                  <Text variant="xs" style={{ color: colors.textDim }}>No related memories.</Text>
+                  <Text variant="xs" style={{ color: colors.ink3 }}>No related memories.</Text>
                 )}
                 <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.base }}>
                   Timeline
@@ -727,7 +727,7 @@ export function MemoryScreen() {
                     <Text variant="xs" style={{ fontFamily: fonts.mono }}>
                       {String(event.type || 'event')} · {String(event.actor || 'system')}
                     </Text>
-                    <Text variant="xs" style={{ color: colors.textDim }}>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>
                       {JSON.stringify(event.after || {})}
                     </Text>
                   </View>
@@ -749,11 +749,11 @@ export function MemoryScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Why memory was used</Text>
               <TouchableOpacity onPress={() => setReceipt(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
-                <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
+                <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
               </TouchableOpacity>
             </View>
             <ScrollView>
-              <Text variant="xs" style={{ color: colors.textDim, fontFamily: fonts.mono }}>
+              <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }}>
                 {receipt ? JSON.stringify(receipt, null, 2) : ''}
               </Text>
             </ScrollView>
@@ -772,14 +772,14 @@ export function MemoryScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selectedLayer?.name}</Text>
               <TouchableOpacity onPress={() => setSelectedLayer(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
-                <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
+                <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 400 }}>
               {layerLoading ? (
                 <Skeleton height={40} />
               ) : (
-                <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }}>
+                <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }}>
                   {selectedLayer?.content}
                 </Text>
               )}

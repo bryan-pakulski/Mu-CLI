@@ -69,7 +69,7 @@ export function ModesScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4].map(i => (
             <Skeleton key={i} height={64} style={{ marginBottom: spacing.sm }} />
@@ -81,7 +81,7 @@ export function ModesScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -89,14 +89,14 @@ export function ModesScreen() {
 
   if (modes.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <EmptyState title="No modes" message="No agent modes available" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <FlatList
         data={modes}
         keyExtractor={item => item.name}
@@ -105,14 +105,14 @@ export function ModesScreen() {
         ListHeaderComponent={
           <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <View style={styles.eyebrowRow}>
-              <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>Modes</Text>
-              <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
-              <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.success : colors.warning }}>
+              <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>Modes</Text>
+              <Text variant="xs" style={{ color: colors.ink3 }}>/</Text>
+              <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.ok.ink : colors.attention.ink }}>
                 {sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
               </Text>
             </View>
             <Text variant="lg" style={styles.headerTitle}>Choose the operating harness</Text>
-            <Text variant="xs" style={[styles.headerCopy, { color: colors.textSoft }]}>
+            <Text variant="xs" style={[styles.headerCopy, { color: colors.ink2 }]}>
               A mode changes how the model investigates and acts. Its explorer presents the facts, evidence, and controls that belong to that workflow.
             </Text>
           </View>
@@ -134,15 +134,15 @@ export function ModesScreen() {
               <View style={[styles.modeRail, { backgroundColor: isActive ? accent : 'transparent' }]} />
               <View style={styles.modeCopy}>
                 <View style={styles.modeTitleRow}>
-                  <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{surface.title}</Text>
-                  {isActive && <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Current</Text>}
-                  {item.disabled && <Text variant="xs" style={{ color: colors.warning }}>Workspace required</Text>}
+                  <Text variant="base" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{surface.title}</Text>
+                  {isActive && <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Current</Text>}
+                  {item.disabled && <Text variant="xs" style={{ color: colors.attention.ink }}>Workspace required</Text>}
                 </View>
-                <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{surface.purpose}</Text>
-                <Text variant="xs" style={[styles.lenses, { color: colors.textDim }]}>{surface.lenses.join('  ·  ')}</Text>
+                <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{surface.purpose}</Text>
+                <Text variant="xs" style={[styles.lenses, { color: colors.ink3 }]}>{surface.lenses.join('  ·  ')}</Text>
               </View>
               {isActive && <Ionicons name="checkmark" size={18} color={accent} />}
-              {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={17} color={colors.textDim} />}
+              {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={17} color={colors.ink3} />}
             </TouchableOpacity>
           );
         }}
@@ -166,5 +166,5 @@ const styles = StyleSheet.create({
 // Mode identity is neutral: the active mode is carried by its label plus the
 // single accent (selection), never by a per-mode colour.
 function modeAccent(_mode: string, colors: ReturnType<typeof useTheme>['colors']) {
-  return colors.accent;
+  return colors.accent.ink;
 }

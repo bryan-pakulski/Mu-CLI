@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, touchTarget } from '../theme/tokens';
+import { fontWeights, toneInk, touchTarget } from '../theme/tokens';
 
 export type ButtonProps = {
   title: string;
@@ -53,27 +53,27 @@ export function Button({
     opacity: disabled ? 0.5 : 1,
   };
 
-  const toneColor = tone ? colors[tone] : null;
+  const toneColor = tone ? toneInk(colors, tone) : null;
   const variantStyles: Record<string, ViewStyle> = {
-    primary: { backgroundColor: toneColor || colors.accent, borderColor: toneColor || colors.accent },
-    secondary: { backgroundColor: colors.raised, borderColor: toneColor || colors.border },
+    primary: { backgroundColor: toneColor || colors.accent.ink, borderColor: toneColor || colors.accent.ink },
+    secondary: { backgroundColor: colors.raised, borderColor: toneColor || colors.hairline },
     ghost: { backgroundColor: 'transparent', borderColor: 'transparent' },
-    danger: { backgroundColor: colors.danger, borderColor: colors.danger },
+    danger: { backgroundColor: colors.danger.ink, borderColor: colors.danger.ink },
   };
   const pressedStyles: Record<string, ViewStyle> = {
-    primary: toneColor ? { opacity: 0.86 } : { backgroundColor: colors.accentHover, borderColor: colors.accentHover },
-    secondary: { backgroundColor: colors.hover },
-    ghost: { backgroundColor: colors.hover },
+    primary: toneColor ? { opacity: 0.86 } : { backgroundColor: colors.accent.ink, borderColor: colors.accent.ink },
+    secondary: { backgroundColor: colors.sunken },
+    ghost: { backgroundColor: colors.sunken },
     danger: { opacity: 0.86 },
   };
 
   const textColor = variant === 'primary' || variant === 'danger'
-    ? colors.accentOn
+    ? colors.onInk
     : toneColor
       ? toneColor
       : variant === 'ghost'
-        ? colors.muted
-        : colors.text;
+        ? colors.ink3
+        : colors.ink;
   const fontSpec = typography.sm;
 
   return (

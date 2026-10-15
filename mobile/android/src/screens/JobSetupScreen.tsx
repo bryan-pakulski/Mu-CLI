@@ -14,7 +14,7 @@ import { SafeAreaModal } from '../components/SafeAreaModal';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { STATUS } from '../theme/status';
-import { fontWeights, fonts, spacing, toneColor, touchTarget } from '../theme/tokens';
+import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 
 export type JobSetupScreenProps = NativeStackScreenProps<RootStackParamList, 'JobSetup'>;
 
@@ -100,7 +100,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
   );
   if (tab === 'doctor') {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
         <ScrollView contentContainerStyle={styles.content} testID="job-setup-doctor-tab">
           <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Setup</Text>
           {tabs}
@@ -112,7 +112,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
 
   if (!vm) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
         {error ? <View style={styles.content}><Banner tone="danger" glyph="✗" title="Could not load setup" role="alert"><Text variant="xs">{error}</Text></Banner>
           <PlanosButton label="Try again" onPress={() => void load()} /></View> : <Loading label="Checking your machine…" />}
       </SafeAreaView>
@@ -121,18 +121,18 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
 
   const job = vm.job;
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" testID="job-setup">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Setup</Text>
         {tabs}
         <View style={styles.progress}>
           <View style={{ flex: 1 }}><Meter value={vm.done} max={vm.total || 1} tone="ok" accessibilityLabel={`${vm.done} of ${vm.total} done`} /></View>
-          <Text variant="xs" style={{ color: colors.muted }} testID="job-setup-progress">{vm.done}/{vm.total} done</Text>
+          <Text variant="xs" style={{ color: colors.ink3 }} testID="job-setup-progress">{vm.done}/{vm.total} done</Text>
         </View>
-        <Text variant="xs" style={{ color: colors.muted }}>Each step checks the host live; re-run any time.</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }}>Each step checks the host live; re-run any time.</Text>
         {vm.can_finish
           ? <Banner tone="ok" glyph="✓" title="All set" right={<PlanosButton small primary tone="ok" label="Finish" onPress={() => void finish()} testID="job-setup-finish" />} />
-          : <Text variant="sm" style={{ color: vm.blocking.length ? colors.warn : colors.muted }} testID="job-setup-blocking">
+          : <Text variant="sm" style={{ color: vm.blocking.length ? colors.attention.ink : colors.ink3 }} testID="job-setup-blocking">
               {vm.blocking.length ? `To do: ${vm.blocking.join(', ')}` : 'Checking…'}
             </Text>}
         <View style={styles.row}>
@@ -145,26 +145,26 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
           </Panel>
         ) : null}
 
-        <View style={[styles.list, { borderColor: colors.border }]}>
+        <View style={[styles.list, { borderColor: colors.hairline }]}>
           {vm.steps.map(step => {
             const st = STATUS[stepStatus(step)];
             const expanded = open === step.id;
             return (
-              <View key={step.id} style={[styles.step, { borderBottomColor: colors.border }]}>
+              <View key={step.id} style={[styles.step, { borderBottomColor: colors.hairline }]}>
                 <Pressable accessibilityRole="button" accessibilityState={{ expanded }} testID={`setup-step-${step.id}`}
                   accessibilityLabel={`${step.title}, ${step.checking ? 'checking' : st.label}`}
                   onPress={() => setOpen(expanded ? null : step.id)}
-                  style={({ pressed }) => [styles.stepHead, { backgroundColor: pressed ? colors.hover : 'transparent' }]}>
+                  style={({ pressed }) => [styles.stepHead, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}>
                   <StatusIcon status={stepStatus(step)} label={step.checking ? 'checking' : st.label} />
                   <View style={{ flex: 1 }}>
-                    <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{step.title}{step.optional ? <Text variant="xs" style={{ color: colors.muted }}> (optional)</Text> : null}</Text>
-                    <Text variant="xs" style={{ color: step.checking ? colors.muted : toneColor(colors, st.tone === 'muted' ? 'muted' : st.tone) }} numberOfLines={expanded ? undefined : 2}>{step.detail}</Text>
+                    <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{step.title}{step.optional ? <Text variant="xs" style={{ color: colors.ink3 }}> (optional)</Text> : null}</Text>
+                    <Text variant="xs" style={{ color: step.checking ? colors.ink3 : toneInk(colors, st.tone) }} numberOfLines={expanded ? undefined : 2}>{step.detail}</Text>
                   </View>
-                  <Text variant="xs" style={{ color: colors.muted }}>{expanded ? '▾' : '▸'}</Text>
+                  <Text variant="xs" style={{ color: colors.ink3 }}>{expanded ? '▾' : '▸'}</Text>
                 </Pressable>
                 {expanded ? (
                   <View style={styles.stepBody} testID={`setup-step-${step.id}-body`}>
-                    <Text variant="xs" style={{ color: colors.muted }}>{step.why}</Text>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>{step.why}</Text>
                     {step.actions.map(action => (
                       <View key={action.id} style={styles.action}>
                         <PlanosButton small label={`${action.label}${action.kind === 'terminal' ? '  (terminal)' : ''}`}
@@ -172,7 +172,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
                           loading={busy === `${step.id}:${action.id}`}
                           disabled={Boolean(busy) || (action.kind === 'job' && Boolean(job?.running))}
                           onPress={() => press(step, action)} testID={`setup-action-${step.id}-${action.id}`} />
-                        {action.hint ? <Text variant="xs" style={{ color: colors.muted }}>{action.hint}</Text> : null}
+                        {action.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{action.hint}</Text> : null}
                       </View>
                     ))}
                   </View>
@@ -184,12 +184,12 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
       </ScrollView>
 
       <SafeAreaModal visible={dialog !== null} transparent animationType="fade" onRequestClose={() => setDialog(null)}>
-        <View style={styles.backdrop}>
-          <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.backdrop, { backgroundColor: colors.scrim }]}>
+          <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
             {dialog?.kind === 'prompts' ? (
               <>
                 <Text variant="md" style={{ fontWeight: fontWeights.semibold }}>{dialog.action.label}</Text>
-                {dialog.action.hint ? <Text variant="xs" style={{ color: colors.muted }}>{dialog.action.hint}</Text> : null}
+                {dialog.action.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{dialog.action.hint}</Text> : null}
                 {(dialog.action.prompts || []).map((prompt, i) => (
                   <Field key={prompt.label} label={prompt.label}>
                     <TextField value={dialog.values[i]} secureTextEntry={Boolean(prompt.secret)} autoCapitalize="none" autoCorrect={false}
@@ -209,7 +209,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
             ) : dialog?.kind === 'terminal' ? (
               <>
                 <Text variant="md" style={{ fontWeight: fontWeights.semibold }}>{dialog.action.label}</Text>
-                <Text variant="xs" style={{ color: colors.muted }}>Run this in a terminal on the mucli host{dialog.action.hint ? ` — ${dialog.action.hint}` : ''}.</Text>
+                <Text variant="xs" style={{ color: colors.ink3 }}>Run this in a terminal on the mucli host{dialog.action.hint ? ` — ${dialog.action.hint}` : ''}.</Text>
                 <Pre testID="setup-terminal-command" style={{ fontFamily: fonts.mono }}>{dialog.action.command || ''}</Pre>
                 <View style={styles.row}>
                   <PlanosButton label="Copy" testID="setup-terminal-copy" onPress={() => {
@@ -242,6 +242,6 @@ const styles = StyleSheet.create({
   stepHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: touchTarget },
   stepBody: { paddingHorizontal: spacing.md, paddingBottom: spacing.md, gap: spacing.sm },
   action: { gap: 2, alignItems: 'flex-start' },
-  backdrop: { flex: 1, justifyContent: 'center', padding: spacing.base, backgroundColor: 'rgba(0,0,0,0.45)' },
+  backdrop: { flex: 1, justifyContent: 'center', padding: spacing.base },
   sheet: { borderWidth: 1, borderRadius: 12, padding: spacing.base, gap: spacing.md },
 });

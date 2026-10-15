@@ -20,23 +20,23 @@ export function SessionStartPrompt({ onLoadSession, onCreateSession, onManageCon
   ];
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+    <View style={[styles.root, { backgroundColor: colors.canvas }]}>
       <View style={styles.content}>
         <View style={styles.hero}>
-          <View style={[styles.mark, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}><Text style={[styles.glyph, { color: colors.accent, fontWeight: fontWeights.bold }]}>μ</Text></View>
+          <View style={[styles.mark, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Text style={[styles.glyph, { color: colors.accent.ink, fontWeight: fontWeights.bold }]}>μ</Text></View>
           <View style={styles.heroCopy}>
-            <Text style={[styles.kicker, { color: colors.textDim }]}>mucli control centre</Text>
-            <Text style={[styles.title, { color: colors.text }]}>Choose where to begin.</Text>
+            <Text style={[styles.kicker, { color: colors.ink3 }]}>mucli control centre</Text>
+            <Text style={[styles.title, { color: colors.ink }]}>Choose where to begin.</Text>
             <Text variant="sm" dim style={styles.subtitle}>The MuCLI host is connected and ready.</Text>
           </View>
         </View>
 
         <View style={styles.entries}>
           {entries.map(entry => (
-            <TouchableOpacity key={entry.title} onPress={entry.onPress} activeOpacity={0.72} style={[styles.entry, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-              <View style={[styles.entryIcon, { backgroundColor: colors.bgHover }]}><Ionicons name={entry.icon} size={20} color={colors.textSoft} /></View>
+            <TouchableOpacity key={entry.title} onPress={entry.onPress} activeOpacity={0.72} style={[styles.entry, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+              <View style={[styles.entryIcon, { backgroundColor: colors.sunken }]}><Ionicons name={entry.icon} size={20} color={colors.ink2} /></View>
               <View style={styles.entryCopy}><Text variant="base" style={styles.entryTitle}>{entry.title}</Text><Text variant="xs" dim style={styles.entryDetail}>{entry.detail}</Text></View>
-              <Ionicons name="arrow-forward" size={19} color={colors.textDim} />
+              <Ionicons name="arrow-forward" size={19} color={colors.ink3} />
             </TouchableOpacity>
           ))}
         </View>

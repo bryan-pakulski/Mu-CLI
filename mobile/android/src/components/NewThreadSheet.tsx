@@ -59,13 +59,13 @@ export function NewThreadSheet({
           <Text variant="sm" style={styles.parentName}>{parentSessionName || 'the current session'}</Text>.
           Chat history and working memory start clean.
         </Text>
-        <Text variant="xs" style={[styles.label, { color: colors.textDim }]}>Thread title</Text>
+        <Text variant="xs" style={[styles.label, { color: colors.ink3 }]}>Thread title</Text>
         <TextInput
           testID="thread-title-input"
           value={title}
           onChangeText={setTitle}
           placeholder="Investigate the parser"
-          placeholderTextColor={colors.textDim}
+          placeholderTextColor={colors.ink3}
           maxLength={120}
           autoCapitalize="sentences"
           autoCorrect
@@ -74,16 +74,16 @@ export function NewThreadSheet({
           style={[
             styles.input,
             {
-              color: colors.text,
+              color: colors.ink,
               backgroundColor: colors.surface,
-              borderColor: colors.border,
+              borderColor: colors.hairline,
             },
           ]}
         />
         <Text variant="xs" dim style={styles.help}>
           The new thread inherits provider, mode, workspace, and container access.
         </Text>
-        {error ? <Text variant="xs" style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+        {error ? <Text variant="xs" style={[styles.error, { color: colors.danger.ink }]}>{error}</Text> : null}
         <View style={styles.actions}>
           <Button title="Cancel" variant="ghost" onPress={onClose} disabled={creating} style={styles.action} />
           <Button

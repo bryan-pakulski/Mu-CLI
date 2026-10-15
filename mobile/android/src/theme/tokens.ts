@@ -1,259 +1,334 @@
-// Mobile design tokens — the planos design system (planos `src/core/theme.ts`,
-// mirrored by mu/gui/static/css/work.css for the web jobs mode).
+// Wash design tokens for the Android client (wash_design_guide.md §1-§5,
+// wash_implementation_spec.md §5.1).
 //
-// Components consume only these values: no raw colours, font sizes, radii,
-// shadows or durations outside this file. One Tokyo Night-style palette in
-// dark and a GitHub-like palette in light: accent for brand/focus/links,
-// ok/warn/danger/running for state, muted for secondary text, and
-// bg < surface (panels) < raised (controls, dialogs) < hover for elevation.
-// Legacy names (bgSubtle, glass, hairline, success, ...) are re-pointed at the
-// planos tokens so every existing screen picks the palette up unchanged.
-// Contrast ratios (WCAG 2.2) for text tokens are listed in the report table
-// and in `__tests__/planos-theme.test.ts`.
+// This file is a thin adapter over `wash.generated.ts`, which is generated
+// from `mu/design/tokens.json` by `scripts/design/build_tokens.py` and is the
+// only colour source. Nothing here declares a colour literal: every value is
+// read from the generated Paper or Dusk palette.
+//
+// Components consume the semantic shape (`colors.canvas`, `colors.ink3`,
+// `colors.attention.wash`, ...) through `useTheme()`. Pigments are only used
+// directly for categorical graphics (modes, layers, series).
 
-import { Easing, Platform, type ViewStyle } from 'react-native';
+import { Easing, Platform, type TextStyle, type ViewStyle } from 'react-native';
+import {
+  dusk,
+  layer as layerPigments,
+  mode as modePigments,
+  motion as washMotion,
+  paper,
+  radius as washRadius,
+  semantic as semanticPigments,
+  series as seriesPigments,
+  shadowTint,
+  size as washSize,
+  space as washSpace,
+  syntax as syntaxSlots,
+  type as washType,
+  type WashPalette,
+  type WashThemeName,
+} from './wash.generated';
 
-/* ------------------------------------------------------------ constants */
+/* ------------------------------------------------------------ colour shape */
 
-/** Spacing — the 8 px scale with a 4 px half step (4/8/12/16/24/32/48/64/96). */
-export const spacing = { xs: 4, sm: 8, md: 12, base: 16, lg: 24, xl: 32, '2xl': 48, '3xl': 64, '4xl': 96 } as const;
+/** One pigment or semantic in its three steps (G§1.2). `pigment` is never text. */
+export type Tone3 = { wash: string; pigment: string; ink: string };
 
-/** Font sizes — planos type scale 12/14/16/20 (legacy keys re-pointed onto it). */
-export const fontSizes = { xs: 12, sm: 14, base: 14, md: 16, lg: 20, xl: 20, '2xl': 20 } as const;
+export type Semantic = 'accent' | 'running' | 'ok' | 'attention' | 'caution' | 'danger' | 'plan' | 'info' | 'neutral';
+export type PigmentName = 'lagoon' | 'meadow' | 'sun' | 'apricot' | 'rose' | 'lilac' | 'sky' | 'plum';
+export type ModeName = keyof typeof modePigments;
+export type LayerName = keyof typeof layerPigments;
 
-/** Weights 400/500/600; 700 only for stat values and the logo. */
-export const fontWeights = { regular: '400', medium: '500', semibold: '600', bold: '700' } as const;
-
-/** Line-height ratios: body 1.5, snug 1.4, headings 1.25. */
-export const lineHeights = { tight: 1.25, snug: 1.4, body: 1.5 } as const;
-
-/** planos headings use normal tracking. */
-export const tracking = { tight: 0 } as const;
-
-export const typography = {
-  xs: { fontSize: 12, lineHeight: 18 },
-  sm: { fontSize: 14, lineHeight: 20 },
-  base: { fontSize: 14, lineHeight: 21 },
-  md: { fontSize: 16, lineHeight: 24 },
-  lg: { fontSize: 20, lineHeight: 26 },
-  xl: { fontSize: 20, lineHeight: 26 },
-  '2xl': { fontSize: 20, lineHeight: 26 },
-} as const;
-
-/**
- * Inter-like system UI font (Roboto on Android) for everything; mono only for
- * code, logs, IDs, paths, hashes and numeric data (JetBrains Mono when the
- * device has it, otherwise the platform monospace).
- */
-export const fonts = {
-  ui: Platform.select({ android: 'sans-serif', default: undefined }) as string | undefined,
-  mono: 'monospace',
-} as const;
-
-/** Radius: 6 for controls/rows/chips, 10 for panels/dialogs/sheets, pill for dots/badges. */
-export const radii = { sm: 6, control: 6, md: 10, lg: 10, panel: 10, pill: 999 } as const;
-
-/** Motion durations (ms). */
-export const motion = { micro: 120, small: 200, large: 300 } as const;
-
-/** Easing curves matching --ease-out / --ease-in / --ease-standard. */
-export const easings = {
-  out: Easing.bezier(0.16, 1, 0.3, 1),
-  in: Easing.bezier(0.4, 0, 1, 1),
-  standard: Easing.bezier(0.2, 0, 0, 1),
-} as const;
-
-/** Minimum touch target (dp). */
-export const touchTarget = 44;
-
-/** Hex colour + alpha → rgba(). The planos "currentColor tint" for pills, banners and fills. */
-export function tint(hex: string, alpha: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return hex;
-  const n = parseInt(m[1], 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
+export const SEMANTICS: readonly Semantic[] = ['accent', 'running', 'ok', 'attention', 'caution', 'danger', 'plan', 'info', 'neutral'];
+export const PIGMENTS: readonly PigmentName[] = ['lagoon', 'meadow', 'sun', 'apricot', 'rose', 'lilac', 'sky', 'plum'];
 
 export type SyntaxColors = {
-  keyword: string; string: string; comment: string; number: string; func: string;
+  keyword: string; string: string; comment: string; number: string; func: string; type: string;
   operator: string; punctuation: string; plain: string; added: string; removed: string; diffHeader: string;
 };
 
-/** planos semantic tokens (theme.ts TOKENS + WEB_EXTRA). */
-export type PlanosTone = 'accent' | 'ok' | 'warn' | 'danger' | 'running' | 'muted';
-
-export type ThemeColors = {
-  // planos tokens
-  surface: string;
-  border: string;
-  raised: string;
-  hover: string;
-  ok: string;
-  warn: string;
-  danger: string;
-  running: string;
-  muted: string;
-  // Canonical surfaces
+export type WashColors = {
+  name: WashThemeName;
   canvas: string;
-  bg: string;
-  bgSubtle: string;
-  bgRaised: string;
-  bgHover: string;
-  bgActive: string;
-  // Canonical text (text = primary, textSoft = secondary, textDim = tertiary)
-  text: string;
-  textSoft: string;
-  textDim: string;
-  textPrimary: string;
-  textSecondary: string;
-  textTertiary: string;
-  // Accent
-  accent: string;
-  accentHover: string;
-  accentSubtle: string;
-  accentFg: string;
-  accentOn: string;
-  // Lines
+  surface: string;
+  sunken: string;
+  raised: string;
   hairline: string;
+  hairlineStrong: string;
   controlBorder: string;
-  // Semantic (solid for text/icons, subtle for fills)
-  success: string;
-  successSubtle: string;
-  warning: string;
-  warningSubtle: string;
-  error: string;
-  errorSubtle: string;
-  info: string;
-  infoSubtle: string;
-  /** Plan mode (read-only) indicator — violet so it never reads as warn/YOLO. */
-  plan: string;
-  planSubtle: string;
+  ink: string;
+  ink2: string;
+  ink3: string;
+  plum: string;
+  onInk: string;
   scrim: string;
-  codeBg: string;
+  code: string;
+  terminal: string;
+  /** Shadow colour (warm plum on Paper, near-black on Dusk); always used with a low opacity. */
   shadow: string;
-  /** Data-visualisation series only; never UI chrome. */
-  viz: readonly [string, string, string, string, string, string, string, string];
-  // Legacy aliases — kept so existing code resolves to the new system.
-  bgLift: string;
-  glass: string;
-  glassStrong: string;
-  accentStrong: string;
-  accentSoft: string;
-  accentText: string;
-  accentLine: string;
-  accentMuted: string;
-  highlight: string;
-  borderStrong: string;
-  // Retired atmosphere — names kept, values are flat surfaces.
-  skyField: string;
-  glacierField: string;
-  sunriseField: string;
-  peachField: string;
-  alpineField: string;
-  snowField: string;
-  card: string;
-  errorBg: string;
+  accent: Tone3;
+  running: Tone3;
+  ok: Tone3;
+  attention: Tone3;
+  caution: Tone3;
+  danger: Tone3;
+  plan: Tone3;
+  info: Tone3;
+  neutral: Tone3;
+  pigment: Record<PigmentName, Tone3>;
+  mode: Record<ModeName, Tone3>;
+  layer: Record<LayerName, Tone3>;
+  series: readonly Tone3[];
   syntax: SyntaxColors;
 };
 
-/** Text colour that sits on a solid tone fill (primary/solid buttons). */
-export function onTone(colors: ThemeColors, tone: PlanosTone): string {
-  return tone === 'muted' ? colors.text : colors.accentOn;
+/** Backwards-compatible name used by existing call sites. */
+export type ThemeColors = WashColors;
+
+function tone3(p: WashPalette, name: string): Tone3 {
+  const key = (step: string) => `${name}-${step}` as keyof WashPalette;
+  return { wash: p[key('wash')], pigment: p[key('pigment')], ink: p[key('ink')] };
 }
 
-/** Resolve a planos tone to its colour. */
-export function toneColor(colors: ThemeColors, tone: PlanosTone | '' | undefined | null): string {
-  switch (tone) {
-    case 'ok': return colors.ok;
-    case 'warn': return colors.warn;
-    case 'danger': return colors.danger;
-    case 'running': return colors.running;
-    case 'muted': return colors.muted;
-    case 'accent': return colors.accent;
-    default: return colors.text;
-  }
+function mapRecord<K extends string>(source: Record<K, string>, p: WashPalette): Record<K, Tone3> {
+  const out = {} as Record<K, Tone3>;
+  (Object.keys(source) as K[]).forEach(k => { out[k] = tone3(p, source[k]); });
+  return out;
 }
 
-function build(P: {
-  accent: string; accentHover: string; ok: string; warn: string; danger: string; running: string; muted: string;
-  text: string; surface: string; border: string; bg: string; raised: string; hover: string;
-  borderStrong: string; purple: string; teal: string; onAccent: string; scrim: string; shadow: string; tintAlpha: number;
-}): Omit<ThemeColors, 'syntax'> {
-  const a = P.tintAlpha;
+function syntaxFrom(p: WashPalette): SyntaxColors {
+  const slot = (name: string) => (name.startsWith('ink') ? p[name as keyof WashPalette] : p[`${name}-ink` as keyof WashPalette]);
   return {
-    surface: P.surface, border: P.border, raised: P.raised, hover: P.hover,
-    ok: P.ok, warn: P.warn, danger: P.danger, running: P.running, muted: P.muted,
-    canvas: P.bg, bg: P.bg, bgSubtle: P.surface, bgRaised: P.raised, bgHover: P.hover, bgActive: P.hover,
-    text: P.text, textSoft: P.muted, textDim: P.muted, textPrimary: P.text, textSecondary: P.muted, textTertiary: P.muted,
-    accent: P.accent, accentHover: P.accentHover, accentSubtle: tint(P.accent, a), accentFg: P.accent, accentOn: P.onAccent,
-    hairline: P.border, controlBorder: P.border,
-    success: P.ok, successSubtle: tint(P.ok, a), warning: P.warn, warningSubtle: tint(P.warn, a),
-    error: P.danger, errorSubtle: tint(P.danger, a), info: P.running, infoSubtle: tint(P.running, a),
-    plan: P.purple, planSubtle: tint(P.purple, a),
-    scrim: P.scrim, codeBg: P.bg, shadow: P.shadow,
-    viz: [P.accent, P.ok, P.warn, P.danger, P.running, P.purple, P.teal, P.muted],
-    bgLift: P.surface, glass: P.surface, glassStrong: P.raised,
-    accentStrong: P.accentHover, accentSoft: tint(P.accent, a), accentText: P.onAccent, accentLine: P.accent,
-    accentMuted: P.muted, highlight: P.warn, borderStrong: P.borderStrong,
-    skyField: P.bg, glacierField: P.bg, sunriseField: P.bg, peachField: P.bg, alpineField: P.bg, snowField: P.bg,
-    card: P.surface, errorBg: tint(P.danger, a),
+    keyword: slot(syntaxSlots.keyword),
+    string: slot(syntaxSlots.string),
+    number: slot(syntaxSlots.number),
+    func: slot(syntaxSlots.function),
+    type: slot(syntaxSlots.type),
+    comment: slot(syntaxSlots.comment),
+    punctuation: slot(syntaxSlots.punctuation),
+    operator: slot(syntaxSlots.punctuation),
+    plain: p.ink,
+    added: p['ok-ink'],
+    removed: p['danger-ink'],
+    diffHeader: p['running-ink'],
   };
 }
 
-/* ------------------------------------------------------------ light */
-// accent #2f5bd3 · ok #1a7f37 · warn #9a6700 · danger #cf222e · running #0969da
-// muted #57606a · text #1f2328 · surface #ffffff · border #d0d7de · bg #f6f8fa
-// raised #ffffff · hover #eaeef2
-export const lightColors: ThemeColors = {
-  ...build({
-    accent: '#2f5bd3', accentHover: '#2449b0', ok: '#1a7f37', warn: '#9a6700', danger: '#cf222e', running: '#0969da', muted: '#57606a',
-    text: '#1f2328', surface: '#ffffff', border: '#d0d7de', bg: '#f6f8fa', raised: '#ffffff', hover: '#eaeef2',
-    borderStrong: '#afb8c1', purple: '#8250df', teal: '#1b7c83', onAccent: '#ffffff', scrim: 'rgba(31,35,40,0.4)', shadow: '#1f2328', tintAlpha: 0.1,
-  }),
-  // Every syntax token is >= 4.5:1 on codeBg (#f6f8fa).
-  syntax: {
-    keyword: '#2f5bd3', string: '#1a7f37', comment: '#57606a', number: '#9a6700',
-    func: '#0969da', operator: '#57606a', punctuation: '#57606a', plain: '#1f2328',
-    added: '#1a7f37', removed: '#cf222e', diffHeader: '#0969da',
-  },
-};
+/** Build the semantic colour shape from one generated palette. */
+export function washColors(name: WashThemeName): WashColors {
+  const p = name === 'dusk' ? dusk : paper;
+  const pigment = {} as Record<PigmentName, Tone3>;
+  PIGMENTS.forEach(n => { pigment[n] = tone3(p, n); });
+  return {
+    name,
+    canvas: p.canvas,
+    surface: p.surface,
+    sunken: p.sunken,
+    raised: p.raised,
+    hairline: p.hairline,
+    hairlineStrong: p['hairline-strong'],
+    controlBorder: p['control-border'],
+    ink: p.ink,
+    ink2: p['ink-2'],
+    ink3: p['ink-3'],
+    plum: p.plum,
+    onInk: p['on-ink'],
+    scrim: p.scrim,
+    code: p.code,
+    terminal: p.terminal,
+    shadow: `rgb(${shadowTint[name]})`,
+    accent: tone3(p, 'accent'),
+    running: tone3(p, 'running'),
+    ok: tone3(p, 'ok'),
+    attention: tone3(p, 'attention'),
+    caution: tone3(p, 'caution'),
+    danger: tone3(p, 'danger'),
+    plan: tone3(p, 'plan'),
+    info: tone3(p, 'info'),
+    neutral: tone3(p, 'neutral'),
+    pigment,
+    mode: mapRecord(modePigments as Record<ModeName, string>, p),
+    layer: mapRecord(layerPigments as Record<LayerName, string>, p),
+    series: seriesPigments.map(n => tone3(p, n)),
+    syntax: syntaxFrom(p),
+  };
+}
 
-/* ------------------------------------------------------------ dark (default on web) */
-// accent #7aa2f7 · ok #73c991 · warn #e0af68 · danger #f7768e · running #7dcfff
-// muted #8b93b8 · text #c0caf5 · surface #1a1b26 · border #2f3549 · bg #16161e
-// raised #1f2335 · hover #292e42
-export const darkColors: ThemeColors = {
-  ...build({
-    accent: '#7aa2f7', accentHover: '#8fb1f9', ok: '#73c991', warn: '#e0af68', danger: '#f7768e', running: '#7dcfff', muted: '#8b93b8',
-    text: '#c0caf5', surface: '#1a1b26', border: '#2f3549', bg: '#16161e', raised: '#1f2335', hover: '#292e42',
-    borderStrong: '#3b4261', purple: '#bb9af7', teal: '#2ac3de', onAccent: '#16161e', scrim: 'rgba(0,0,0,0.55)', shadow: '#000000', tintAlpha: 0.15,
-  }),
-  // Every syntax token is >= 4.5:1 on codeBg (#16161e).
-  syntax: {
-    keyword: '#7aa2f7', string: '#73c991', comment: '#8b93b8', number: '#e0af68',
-    func: '#7dcfff', operator: '#8b93b8', punctuation: '#8b93b8', plain: '#c0caf5',
-    added: '#73c991', removed: '#f7768e', diffHeader: '#7dcfff',
-  },
-};
+export const paperColors: WashColors = washColors('paper');
+export const duskColors: WashColors = washColors('dusk');
+
+/** Sanity: the semantic → pigment mapping the generator emitted. */
+export const semanticPigment = semanticPigments;
+
+/* ------------------------------------------------------------ tones */
+
+/**
+ * Tone names accepted by kit components. Wash semantics, plus the two legacy
+ * planos names that older call sites and server payloads still send
+ * (`warn` → attention, `muted` → neutral).
+ */
+export type Tone = Semantic | 'warn' | 'muted' | '';
+
+export function toSemantic(tone: Tone | string | null | undefined): Semantic {
+  switch (tone) {
+    case 'warn': return 'attention';
+    case 'muted': case '': case null: case undefined: return 'neutral';
+    default: return (SEMANTICS as readonly string[]).includes(String(tone)) ? (tone as Semantic) : 'neutral';
+  }
+}
+
+/** The three steps of a semantic tone. */
+export function toneOf(colors: WashColors, tone: Tone | string | null | undefined): Tone3 {
+  return colors[toSemantic(tone)];
+}
+
+/** Text-safe colour of a tone (`neutral` resolves to ink-3). */
+export function toneInk(colors: WashColors, tone: Tone | string | null | undefined): string {
+  return toneOf(colors, tone).ink;
+}
+
+/** Replacement for the old `tint(color, alpha)`: the semantic's wash fill. */
+export function washOf(colors: WashColors, tone: Tone | string | null | undefined): string {
+  return toneOf(colors, tone).wash;
+}
+
+/* ------------------------------------------------------------ type */
+
+/** Families registered by `useFonts` in App.tsx (assets/fonts). */
+export const fonts = {
+  ui: 'Inter',
+  mono: 'JetBrainsMono',
+} as const;
+
+export type TypeName = keyof typeof washType;
+
+/** A complete text style for one Wash type token (G§2.2). */
+export function typeStyle(name: TypeName): TextStyle {
+  const t = washType[name];
+  return {
+    fontFamily: name === 'mono' || name === 'mono-sm' ? fonts.mono : fonts.ui,
+    fontSize: t.size,
+    lineHeight: t.line,
+    fontWeight: String(t.weight) as TextStyle['fontWeight'],
+    letterSpacing: Number((t.tracking * t.size).toFixed(2)),
+  };
+}
+
+/** Font sizes — the Wash scale under the legacy key names. */
+export const fontSizes = {
+  xs: washType.caption.size,
+  sm: washType.body.size,
+  base: washType.body.size,
+  md: washType['body-lg'].size,
+  lg: washType['title-3'].size,
+  xl: washType['title-2'].size,
+  '2xl': washType['title-1'].size,
+} as const;
+
+export const fontWeights = { regular: '400', medium: '500', semibold: '600', bold: '700' } as const;
+
+export const lineHeights = { tight: 1.25, snug: 1.4, body: 1.5 } as const;
+
+/** Display/title tracking (G§2.2), in dp at title-3 size. */
+export const tracking = { tight: Number((washType['title-3'].tracking * washType['title-3'].size).toFixed(2)) } as const;
+
+/** Legacy text variants mapped onto Wash type tokens. */
+export const typography = {
+  xs: { fontSize: washType.caption.size, lineHeight: washType.caption.line },
+  sm: { fontSize: washType.body.size, lineHeight: washType.body.line },
+  base: { fontSize: washType.body.size, lineHeight: washType.body.line },
+  md: { fontSize: washType['body-lg'].size, lineHeight: washType['body-lg'].line },
+  lg: { fontSize: washType['title-3'].size, lineHeight: washType['title-3'].line },
+  xl: { fontSize: washType['title-2'].size, lineHeight: washType['title-2'].line },
+  '2xl': { fontSize: washType['title-1'].size, lineHeight: washType['title-1'].line },
+} as const;
+
+/* ------------------------------------------------------------ space, shape, motion */
+
+/** Spacing — the Wash 4px scale under named keys (space-1..10 = 4..96). */
+export const spacing = {
+  xs: washSpace[0],
+  sm: washSpace[1],
+  md: washSpace[2],
+  base: washSpace[3],
+  '20': washSpace[4],
+  lg: washSpace[5],
+  xl: washSpace[6],
+  '2xl': washSpace[7],
+  '3xl': washSpace[8],
+  '4xl': washSpace[9],
+} as const;
+
+/** Wash radius (G§3.2) plus the two role names older call sites use. */
+export const radii = {
+  xs: washRadius.xs,
+  sm: washRadius.sm,
+  md: washRadius.md,
+  lg: washRadius.lg,
+  xl: washRadius.xl,
+  pill: washRadius.pill,
+  control: washRadius.sm,
+  panel: washRadius.lg,
+} as const;
+
+/** Motion durations (ms). */
+export const motion = {
+  micro: washMotion.micro.duration,
+  small: washMotion.small.duration,
+  medium: washMotion.medium.duration,
+  large: washMotion.medium.duration,
+  bleed: washMotion.bleed.duration,
+} as const;
+
+function bezier(css: string) {
+  const [a, b, c, d] = (css.match(/[\d.]+/g) || ['0', '0', '1', '1']).map(Number);
+  return Easing.bezier(a, b, c, d);
+}
+
+export const easings = {
+  micro: bezier(washMotion.micro.easing),
+  out: bezier(washMotion.small.easing),
+  bleed: bezier(washMotion.bleed.easing),
+  in: Easing.bezier(0.4, 0, 1, 1),
+  standard: bezier(washMotion.micro.easing),
+} as const;
+
+/** Icon sizes (G§4): 16 inline, 20 buttons, 24 navigation. */
+export const iconSize = { sm: washSize['icon-sm'], md: washSize.icon, lg: washSize['icon-lg'] } as const;
+
+/** Minimum touch target (dp). */
+export const touchTarget = washSize.touch;
+
+/** Control heights (G§9.1). */
+export const controlSize = { sm: washSize['control-sm'], md: washSize.control, lg: washSize['control-lg'], field: washSize.field } as const;
 
 /* ------------------------------------------------------------ elevation */
 
 /**
- * Elevation for floating layers only (sheets, modals, menus, toasts): planos
- * dialogs are `raised` + 1px border. Level 1 = menus/popovers/toasts,
- * level 2 = modals/sheets/drawers. Light adds a soft shadow; dark relies on
- * the lighter raised surface + border.
+ * Elevation (G§3.3): paper resting on paper. Level 1 = surface + hairline;
+ * level 2 = raised + hairline + faint warm shadow (menus, toasts); level 3 =
+ * raised + deeper shadow (sheets, modals). Dusk adds a hairline-strong top
+ * edge at level 2+ because shadows barely show on dark surfaces.
  */
-export function elevation(level: 1 | 2, colors: ThemeColors, isDark: boolean): ViewStyle {
-  const ring: ViewStyle = { borderWidth: 1, borderColor: colors.border };
-  if (isDark) return { ...ring, backgroundColor: colors.bgRaised };
-  return level === 1
-    ? { ...ring, backgroundColor: colors.bgRaised, shadowColor: colors.shadow, shadowOpacity: 0.06, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }
-    : { ...ring, backgroundColor: colors.bgRaised, shadowColor: colors.shadow, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 12 }, elevation: 8 };
+export function elevation(level: 1 | 2 | 3, colors: WashColors, isDark = colors.name === 'dusk'): ViewStyle {
+  if (level === 1) return { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline };
+  const base: ViewStyle = {
+    backgroundColor: colors.raised,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    shadowColor: colors.shadow,
+    shadowOpacity: level === 2 ? 0.08 : 0.16,
+    shadowRadius: level === 2 ? 12 : 32,
+    shadowOffset: { width: 0, height: level === 2 ? 8 : 24 },
+    elevation: level === 2 ? 4 : 12,
+  };
+  return isDark ? { ...base, borderTopColor: colors.hairlineStrong } : base;
 }
 
+/* ------------------------------------------------------------ theme */
+
 export type Theme = {
-  colors: ThemeColors;
+  colors: WashColors;
   spacing: typeof spacing;
   typography: typeof typography;
   fontSizes: typeof fontSizes;
@@ -262,5 +337,8 @@ export type Theme = {
   motion: typeof motion;
 };
 
-export const lightTheme: Theme = { colors: lightColors, spacing, typography, fontSizes, fontWeights, radii, motion };
-export const darkTheme: Theme = { colors: darkColors, spacing, typography, fontSizes, fontWeights, radii, motion };
+export const paperTheme: Theme = { colors: paperColors, spacing, typography, fontSizes, fontWeights, radii, motion };
+export const duskTheme: Theme = { colors: duskColors, spacing, typography, fontSizes, fontWeights, radii, motion };
+
+/** Platform default UI family when the bundled fonts have not loaded. */
+export const fallbackUiFont = Platform.select({ android: 'sans-serif', default: undefined }) as string | undefined;

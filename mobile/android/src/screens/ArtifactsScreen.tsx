@@ -23,7 +23,7 @@ import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from '../components/Text';
 import { EmptyState } from '../components/EmptyState';
-import { fontSizes, fontWeights, lightColors, radii, spacing, touchTarget } from '../theme/tokens';
+import { fontSizes, fontWeights, paperColors, radii, spacing, touchTarget } from '../theme/tokens';
 
 type UnifiedItem =
   | { kind: 'visualization'; artifact: ArtifactDescriptor }
@@ -161,15 +161,15 @@ export function ArtifactsScreen() {
       return (
         <View style={styles.sectionHeader}>
           <View style={{ flex: 1 }}>
-            <Text variant="xs" style={{ fontWeight: fontWeights.semibold, color: colors.textDim }}>
+            <Text variant="xs" style={{ fontWeight: fontWeights.semibold, color: colors.ink3 }}>
               {item.title.toUpperCase()}
             </Text>
             <Text variant="xs" dim style={{ marginTop: 2 }}>
               {item.subtitle}
             </Text>
           </View>
-          <View style={[styles.countBadge, { backgroundColor: colors.bgHover }]}>
-            <Text variant="xs" style={{ fontWeight: fontWeights.medium, color: colors.textSoft, fontVariant: ['tabular-nums'] }}>{item.count}</Text>
+          <View style={[styles.countBadge, { backgroundColor: colors.sunken }]}>
+            <Text variant="xs" style={{ fontWeight: fontWeights.medium, color: colors.ink2, fontVariant: ['tabular-nums'] }}>{item.count}</Text>
           </View>
         </View>
       );
@@ -183,8 +183,8 @@ export function ArtifactsScreen() {
           style={styles.row}
           activeOpacity={0.7}
         >
-          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-            <Ionicons name="analytics-outline" size={20} color={colors.textSoft} />
+          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+            <Ionicons name="analytics-outline" size={20} color={colors.ink2} />
           </View>
           <View style={styles.rowCopy}>
             <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
@@ -201,14 +201,14 @@ export function ArtifactsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Download visualization"
           >
-            <Ionicons name="download-outline" size={18} color={colors.textDim} />
+            <Ionicons name="download-outline" size={18} color={colors.ink3} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
-            <Ionicons name="trash-outline" size={18} color={colors.error} />
+            <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
           </TouchableOpacity>
         </TouchableOpacity>
       );
@@ -222,8 +222,8 @@ export function ArtifactsScreen() {
           style={styles.row}
           activeOpacity={0.7}
         >
-          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-            <Ionicons name="document-attach-outline" size={20} color={colors.textSoft} />
+          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+            <Ionicons name="document-attach-outline" size={20} color={colors.ink2} />
           </View>
           <View style={styles.rowCopy}>
             <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
@@ -238,14 +238,14 @@ export function ArtifactsScreen() {
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
-            <Ionicons name="download-outline" size={18} color={colors.textDim} />
+            <Ionicons name="download-outline" size={18} color={colors.ink3} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
-            <Ionicons name="trash-outline" size={18} color={colors.error} />
+            <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
           </TouchableOpacity>
         </TouchableOpacity>
       );
@@ -259,8 +259,8 @@ export function ArtifactsScreen() {
         style={styles.row}
         activeOpacity={0.7}
       >
-        <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-          <Ionicons name="cloud-upload-outline" size={20} color={colors.textSoft} />
+        <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+          <Ionicons name="cloud-upload-outline" size={20} color={colors.ink2} />
         </View>
         <View style={styles.rowCopy}>
           <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
@@ -275,14 +275,14 @@ export function ArtifactsScreen() {
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
-          <Ionicons name="download-outline" size={18} color={colors.textDim} />
+          <Ionicons name="download-outline" size={18} color={colors.ink3} />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => removeUpload(u)}
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
-          <Ionicons name="trash-outline" size={18} color={colors.error} />
+          <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
         </TouchableOpacity>
       </TouchableOpacity>
     );
@@ -309,22 +309,22 @@ export function ArtifactsScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.canvas }}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: insets.top + spacing.xs }]}>
+      <View style={[styles.header, { borderBottomColor: colors.hairline, paddingTop: insets.top + spacing.xs }]}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Session files</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity
             onPress={pickFiles}
             disabled={uploading || !sessionName}
-            style={[styles.uploadBtn, { backgroundColor: colors.accent, opacity: uploading || !sessionName ? 0.5 : 1 }]}
+            style={[styles.uploadBtn, { backgroundColor: colors.accent.ink, opacity: uploading || !sessionName ? 0.5 : 1 }]}
           >
             {uploading ? (
-              <ActivityIndicator color={colors.accentText} size="small" />
+              <ActivityIndicator color={colors.onInk} size="small" />
             ) : (
-              <Ionicons name="cloud-upload-outline" size={18} color={colors.accentText} />
+              <Ionicons name="cloud-upload-outline" size={18} color={colors.onInk} />
             )}
-            <Text variant="xs" style={{ color: colors.accentText, fontWeight: fontWeights.semibold, marginLeft: spacing.xs }}>
+            <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.semibold, marginLeft: spacing.xs }}>
               {uploading ? 'Uploading' : 'Upload'}
             </Text>
           </TouchableOpacity>
@@ -341,7 +341,7 @@ export function ArtifactsScreen() {
         }}
         renderItem={renderItem}
         contentContainerStyle={{ paddingBottom: spacing['2xl'] }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent.ink} />}
         ListEmptyComponent={
           totalCount === 0 ? (
             <EmptyState
@@ -361,39 +361,39 @@ export function ArtifactsScreen() {
         statusBarTranslucent
         onRequestClose={() => setViewingArtifact(null)}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-          <View style={[styles.visHeader, { borderBottomColor: colors.border }]}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+          <View style={[styles.visHeader, { borderBottomColor: colors.hairline }]}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text variant="xs" dim style={{ fontWeight: fontWeights.semibold }}>
                 VISUALIZATION
               </Text>
-              <Text numberOfLines={1} style={{ fontSize: fontSizes.base, fontWeight: fontWeights.semibold, color: colors.text }}>
+              <Text numberOfLines={1} style={{ fontSize: fontSizes.base, fontWeight: fontWeights.semibold, color: colors.ink }}>
                 {viewingArtifact?.title || viewingArtifact?.name || ''}
               </Text>
             </View>
             {sessionName && viewingArtifact && (
               <TouchableOpacity
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, viewingArtifact.artifact_id))}
-                style={[styles.iconButton, { backgroundColor: colors.bgHover }]}
+                style={[styles.iconButton, { backgroundColor: colors.sunken }]}
                 accessibilityRole="button"
                 accessibilityLabel="Download visualization"
               >
-                <Ionicons name="download-outline" size={18} color={colors.textDim} />
+                <Ionicons name="download-outline" size={18} color={colors.ink3} />
               </TouchableOpacity>
             )}
             <TouchableOpacity
               onPress={() => setViewingArtifact(null)}
-              style={[styles.closeButton, { backgroundColor: colors.bgHover }]}
+              style={[styles.closeButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Close visualization"
             >
-              <Ionicons name="close" size={24} color={colors.text} />
+              <Ionicons name="close" size={24} color={colors.ink} />
             </TouchableOpacity>
           </View>
           {sessionName && viewingArtifact && (
             <WebView
               source={{ uri: artifactUri }}
-              style={{ flex: 1, backgroundColor: lightColors.bgRaised }}
+              style={{ flex: 1, backgroundColor: paperColors.raised }}
               originWhitelist={['http://*', 'https://*']}
               javaScriptEnabled
               domStorageEnabled

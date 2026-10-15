@@ -35,7 +35,7 @@ export function Input({
       value={value}
       onChangeText={onChangeText}
       placeholder={placeholder}
-      placeholderTextColor={colors.muted}
+      placeholderTextColor={colors.ink3}
       multiline={multiline}
       numberOfLines={numberOfLines}
       secureTextEntry={secureTextEntry}
@@ -44,12 +44,12 @@ export function Input({
       keyboardType={keyboardType}
       style={[
         {
-          color: colors.text,
+          color: colors.ink,
           fontSize: fontSpec.fontSize,
           lineHeight: fontSpec.lineHeight,
-          backgroundColor: colors.bg,
+          backgroundColor: colors.canvas,
           borderWidth: 1,
-          borderColor: colors.border,
+          borderColor: colors.hairline,
           borderRadius: radii.sm,
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm,

@@ -49,36 +49,38 @@ def test_theme_colors_includes_syntax():
     assert "syntax: SyntaxColors" in src, "ThemeColors missing syntax field"
 
 
+def _syntax_builder(src: str) -> str:
+    return src.split("function syntaxFrom")[1].split("\n}\n")[0]
+
+
 def test_light_colors_has_syntax_palette():
-    """lightColors object must have a ``syntax`` block with color values."""
+    """Paper's syntax palette is built from the generated Wash syntax slots."""
     src = read(TOKENS)
-    # Find lightColors syntax block — should contain hex colors
-    assert "syntax: {" in src, "No syntax block found in tokens.ts"
-    # Verify light theme has specific colors (purple-ish keyword for light)
-    light_section = src.split("export const lightColors")[1].split("export const darkColors")[0]
-    assert "keyword:" in light_section, "light colors missing syntax.keyword"
-    assert light_section.count("keyword:") >= 1
+    assert "export const paperColors: WashColors = washColors('paper');" in src
+    assert "syntax: syntaxFrom(p)" in src
+    builder = _syntax_builder(src)
+    assert "keyword: slot(syntaxSlots.keyword)" in builder
 
 
 def test_dark_colors_has_syntax_palette():
-    """darkColors object must have a ``syntax`` block with color values."""
+    """Dusk's syntax palette comes from the same builder over the Dusk palette."""
     src = read(TOKENS)
-    dark_section = src.split("export const darkColors")[1]
-    assert "syntax: {" in dark_section, "dark colors missing syntax block"
-    assert "keyword:" in dark_section, "dark colors missing syntax.keyword"
-    assert "string:" in dark_section, "dark colors missing syntax.string"
+    assert "export const duskColors: WashColors = washColors('dusk');" in src
+    assert "const p = name === 'dusk' ? dusk : paper;" in src
+    builder = _syntax_builder(src)
+    assert "keyword:" in builder and "string:" in builder
 
 
 def test_both_themes_have_all_syntax_keys():
-    """Both lightColors and darkColors must define all 11 syntax keys."""
+    """One builder defines all syntax keys for both themes (G§9.12 Wash syntax theme)."""
     src = read(TOKENS)
-    light = src.split("export const lightColors")[1].split("export const darkColors")[0]
-    dark = src.split("export const darkColors")[1].split("export type Theme")[0]
+    builder = _syntax_builder(src)
     required = ["keyword", "string", "comment", "number", "func", "operator",
                 "punctuation", "plain", "added", "removed", "diffHeader"]
     for key in required:
-        assert f"{key}:" in light, f"lightColors syntax missing key: {key}"
-        assert f"{key}:" in dark, f"darkColors syntax missing key: {key}"
+        assert f"{key}:" in builder, f"syntax builder missing key: {key}"
+    generated = (TOKENS.parent / "wash.generated.ts").read_text(encoding="utf-8")
+    assert '"keyword": "lilac"' in generated and '"string": "meadow"' in generated
 
 
 # ── CodeBlock.tsx ─────────────────────────────────────────────────────────

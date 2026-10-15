@@ -26,14 +26,14 @@ export function EmptyState({ title, message, icon, actionLabel, onAction }: Empt
           height: 56,
           borderRadius: radii.panel,
           borderWidth: 1,
-          borderColor: colors.border,
+          borderColor: colors.hairline,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: colors.surface,
           marginBottom: spacing.base,
         }}
       >
-        <Ionicons name={iconName} size={24} color={colors.muted} />
+        <Ionicons name={iconName} size={24} color={colors.ink3} />
       </View>
       <Text variant="md" style={{ marginBottom: spacing.sm, textAlign: 'center', fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }}>
         {title}

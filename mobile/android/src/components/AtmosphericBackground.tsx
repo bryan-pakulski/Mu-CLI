@@ -8,7 +8,7 @@ import { useTheme } from '../theme/ThemeContext';
 export function AtmosphericBackground({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+    <View style={[styles.root, { backgroundColor: colors.canvas }]}>
       <View style={styles.content}>{children}</View>
     </View>
   );

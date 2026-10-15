@@ -194,7 +194,7 @@ export function FeatureExplorerScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
         <View style={styles.loadingWrap}>
           <Skeleton height={52} style={styles.loadingBlock} />
           <Skeleton height={112} style={styles.loadingBlock} />
@@ -206,14 +206,14 @@ export function FeatureExplorerScreen() {
 
   if (error && !state) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
         <ErrorState message={error} onRetry={() => load(false)} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />}
         contentContainerStyle={styles.content}
@@ -225,7 +225,7 @@ export function FeatureExplorerScreen() {
             <Text variant="xl" style={styles.pageTitle}>Features</Text>
             <Text variant="sm" dim>Preview, load, and inspect every feature plan without changing the active feature.</Text>
           </View>
-          {previewLoading ? <ActivityIndicator color={colors.accent} /> : null}
+          {previewLoading ? <ActivityIndicator color={colors.accent.ink} /> : null}
         </View>
 
         {workspaceView.shows('overview') ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
@@ -239,10 +239,10 @@ export function FeatureExplorerScreen() {
                 hitSlop={{ top: spacing.xs, bottom: spacing.xs }}
                 style={[
                   styles.filterChip,
-                  { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border },
+                  { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline },
                 ]}
               >
-                <Text variant="xs" style={{ color: active ? colors.accentFg : colors.textSoft, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
+                <Text variant="xs" style={{ color: active ? colors.accent.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
                   {item.label} · {count}
                 </Text>
               </TouchableOpacity>
@@ -270,9 +270,9 @@ export function FeatureExplorerScreen() {
         ))}
 
         {error ? (
-          <View style={[styles.errorBox, { backgroundColor: colors.errorSubtle }]}>
-            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
-            <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
+          <View style={[styles.errorBox, { backgroundColor: colors.danger.wash }]}>
+            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+            <Text variant="xs" style={{ color: colors.danger.ink, flex: 1 }}>{error}</Text>
           </View>
         ) : null}
 
@@ -353,7 +353,7 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
       activeOpacity={0.72}
       style={[
         styles.featureRow,
-        { backgroundColor: selected ? colors.accentSubtle : 'transparent' },
+        { backgroundColor: selected ? colors.accent.wash : 'transparent' },
       ]}
     >
       <View style={[styles.featureStatusDot, { backgroundColor: statusColor(item.status, item.archived, colors) }]} />
@@ -362,11 +362,11 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
         <Text variant="xs" dim>{item.archived ? 'Archived' : formatStatus(item.status)}</Text>
       </View>
       {item.is_active ? (
-        <View style={[styles.activeBadge, { backgroundColor: colors.accentSubtle }]}>
-          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Loaded</Text>
+        <View style={[styles.activeBadge, { backgroundColor: colors.accent.wash }]}>
+          <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Loaded</Text>
         </View>
       ) : null}
-      <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+      <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
     </TouchableOpacity>
   );
 }
@@ -410,7 +410,7 @@ function FeatureOverview({
 
       {plan.directory ? (
         <View style={styles.pathBox}>
-          <Ionicons name="folder-outline" size={16} color={colors.textDim} />
+          <Ionicons name="folder-outline" size={16} color={colors.ink3} />
           <Text variant="xs" style={styles.pathText} numberOfLines={2}>{plan.directory}</Text>
         </View>
       ) : null}
@@ -457,7 +457,7 @@ function PhaseDetail({
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
         </View>
         <StatusPill label={phase.status || 'pending'} />
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.ink3} />
       </TouchableOpacity>
 
       {expanded ? (
@@ -498,7 +498,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.verified_exit_criteria?.length || 0}/{task.exit_criteria?.length || 0} criteria verified</Text>
         </View>
         <StatusPill label={task.status} />
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={colors.textDim} />
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={colors.ink3} />
       </TouchableOpacity>
 
       {expanded ? (
@@ -512,8 +512,8 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
                 const verified = task.verified_exit_criteria?.includes(criterion);
                 return (
                   <View key={`${criterion}-${index}`} style={styles.criteriaRow}>
-                    <Ionicons name={verified ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={verified ? colors.success : colors.textDim} />
-                    <Text variant="xs" style={{ flex: 1, color: verified ? colors.textSoft : colors.text }}>{criterion}</Text>
+                    <Ionicons name={verified ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={verified ? colors.ok.ink : colors.ink3} />
+                    <Text variant="xs" style={{ flex: 1, color: verified ? colors.ink2 : colors.ink }}>{criterion}</Text>
                   </View>
                 );
               })}
@@ -522,9 +522,9 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           {task.notes ? <TextBlock title="Notes" value={task.notes} /> : null}
           {task.blocked_reason ? <TextBlock title="Blocked reason" value={task.blocked_reason} error /> : null}
           {activeFeature && normalizeStatus(task.status) === 'in_progress' ? (
-            <TouchableOpacity onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent }]}>
-              <Ionicons name="checkmark" size={16} color={colors.accentOn} />
-              <Text variant="xs" style={{ color: colors.accentOn, fontWeight: fontWeights.medium }}>Mark completed</Text>
+            <TouchableOpacity onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent.ink }]}>
+              <Ionicons name="checkmark" size={16} color={colors.onInk} />
+              <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Mark completed</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -644,7 +644,7 @@ function ExpandableRecord({ title, subtitle, expanded, onToggle, children }: {
           <Text variant="sm" style={styles.recordTitle}>{title}</Text>
           <Text variant="xs" dim numberOfLines={2} style={{ fontVariant: ['tabular-nums'] }}>{subtitle}</Text>
         </View>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.ink3} />
       </TouchableOpacity>
       {expanded ? <View style={styles.recordBody}>{children}</View> : null}
     </Card>
@@ -664,19 +664,19 @@ function StatusPill({ label }: { label: string }) {
   const { colors } = useTheme();
   const normalized = normalizeStatus(label);
   const foreground = normalized === 'completed'
-    ? colors.success
+    ? colors.ok.ink
     : normalized === 'blocked'
-      ? colors.error
+      ? colors.danger.ink
       : normalized === 'in_progress'
-        ? colors.info
-        : colors.textSoft;
+        ? colors.info.ink
+        : colors.ink2;
   const background = normalized === 'completed'
-    ? colors.successSubtle
+    ? colors.ok.wash
     : normalized === 'blocked'
-      ? colors.errorSubtle
+      ? colors.danger.wash
       : normalized === 'in_progress'
-        ? colors.infoSubtle
-        : colors.bgHover;
+        ? colors.info.wash
+        : colors.sunken;
   return (
     <View style={[styles.statusPill, { backgroundColor: background }]}>
       <View style={[styles.statusMiniDot, { backgroundColor: foreground }]} />
@@ -697,11 +697,11 @@ function ActionButton({ label, icon, onPress, primary = false }: {
       onPress={onPress}
       activeOpacity={0.72}
       style={[styles.actionButton, primary
-        ? { backgroundColor: colors.accent, borderColor: colors.accent }
-        : { backgroundColor: 'transparent', borderColor: colors.border }]}
+        ? { backgroundColor: colors.accent.ink, borderColor: colors.accent.ink }
+        : { backgroundColor: 'transparent', borderColor: colors.hairline }]}
     >
-      <Ionicons name={icon} size={16} color={primary ? colors.accentOn : colors.text} />
-      <Text variant="xs" style={{ color: primary ? colors.accentOn : colors.text, fontWeight: fontWeights.medium }}>{label}</Text>
+      <Ionicons name={icon} size={16} color={primary ? colors.onInk : colors.ink} />
+      <Text variant="xs" style={{ color: primary ? colors.onInk : colors.ink, fontWeight: fontWeights.medium }}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -730,7 +730,7 @@ function TextBlock({ title, value, error = false }: { title: string; value: stri
   return (
     <View style={styles.detailBlock}>
       <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
-      <Text variant="xs" style={{ color: error ? colors.error : colors.text }}>{value}</Text>
+      <Text variant="xs" style={{ color: error ? colors.danger.ink : colors.ink }}>{value}</Text>
     </View>
   );
 }
@@ -741,7 +741,7 @@ function JsonBlock({ title, value, raw = false }: { title: string; value: unknow
   return (
     <View style={styles.detailBlock}>
       <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
-      <View style={[styles.jsonBox, { backgroundColor: colors.bg }]}>
+      <View style={[styles.jsonBox, { backgroundColor: colors.canvas }]}>
         <Text variant="xs" style={styles.jsonText} selectable>{text}</Text>
       </View>
     </View>
@@ -769,12 +769,12 @@ function countForFilter(features: FeatureListItem[], filter: FeatureFilter): num
 }
 
 function statusColor(status: string, archived: boolean, colors: any): string {
-  if (archived) return colors.textDim;
+  if (archived) return colors.ink3;
   const normalized = normalizeStatus(status);
-  if (normalized === 'completed') return colors.success;
-  if (normalized === 'blocked') return colors.error;
-  if (normalized === 'in_progress') return colors.info;
-  return colors.textDim;
+  if (normalized === 'completed') return colors.ok.ink;
+  if (normalized === 'blocked') return colors.danger.ink;
+  if (normalized === 'in_progress') return colors.info.ink;
+  return colors.ink3;
 }
 
 function formatDate(timestamp?: number | null): string {

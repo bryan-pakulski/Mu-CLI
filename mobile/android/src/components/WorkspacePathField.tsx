@@ -67,8 +67,8 @@ export function WorkspacePathField({
 
   return (
     <View>
-      <View style={[styles.inputShell, { backgroundColor: colors.bg, borderColor: colors.border }]}>
-        <Ionicons name="folder-outline" size={18} color={colors.textDim} />
+      <View style={[styles.inputShell, { backgroundColor: colors.canvas, borderColor: colors.hairline }]}>
+        <Ionicons name="folder-outline" size={18} color={colors.ink3} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -79,18 +79,18 @@ export function WorkspacePathField({
           autoCapitalize="none"
           autoCorrect={false}
           placeholder={placeholder}
-          placeholderTextColor={colors.textDim}
-          style={[styles.input, { color: colors.text }]}
+          placeholderTextColor={colors.ink3}
+          style={[styles.input, { color: colors.ink }]}
         />
         {loading ? (
-          <ActivityIndicator size="small" color={colors.accent} />
+          <ActivityIndicator size="small" color={colors.accent.ink} />
         ) : value.trim() && exists ? (
-          <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+          <Ionicons name="checkmark-circle" size={18} color={colors.ok.ink} />
         ) : null}
       </View>
 
       {focused && suggestions.length > 0 ? (
-        <View style={[styles.suggestions, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+        <View style={[styles.suggestions, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
           {suggestions.map((path, index) => (
             <TouchableOpacity
               key={path}
@@ -100,11 +100,11 @@ export function WorkspacePathField({
                 styles.suggestion,
               ]}
             >
-              <Ionicons name="folder" size={16} color={colors.textDim} />
+              <Ionicons name="folder" size={16} color={colors.ink3} />
               <Text variant="xs" style={styles.suggestionText} numberOfLines={1} ellipsizeMode="middle">
                 {path}
               </Text>
-              <Ionicons name="return-down-back" size={15} color={colors.textDim} />
+              <Ionicons name="return-down-back" size={15} color={colors.ink3} />
             </TouchableOpacity>
           ))}
         </View>

@@ -52,7 +52,7 @@ export function SkillsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4].map(i => <Skeleton key={i} height={60} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -62,7 +62,7 @@ export function SkillsScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -70,14 +70,14 @@ export function SkillsScreen() {
 
   if (skills.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <EmptyState title="No skills" message="No skills installed" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <FlatList
         data={skills}
         keyExtractor={item => item.name}
@@ -88,7 +88,7 @@ export function SkillsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1 }}>
                 <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{item.name}</Text>
-                <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }} numberOfLines={2}>
+                <Text variant="xs" style={{ color: colors.ink3, marginTop: 2 }} numberOfLines={2}>
                   {item.description}
                 </Text>
               </View>
@@ -98,7 +98,7 @@ export function SkillsScreen() {
               <Button title="Details" variant="ghost" onPress={() => setSelected(item)} />
               <Button title={item.enabled ? 'Disable' : 'Enable'} onPress={() => toggle(item)} />
               <TouchableOpacity onPress={() => remove(item.name)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ minHeight: 44, justifyContent: 'center' }}>
-                <Ionicons name="trash-outline" size={20} color={colors.error} />
+                <Ionicons name="trash-outline" size={20} color={colors.danger.ink} />
               </TouchableOpacity>
             </View>
           </Card>
@@ -111,12 +111,12 @@ export function SkillsScreen() {
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                 <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selected.name}</Text>
                 <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                  <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
+                  <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
                 </TouchableOpacity>
               </View>
-              <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs }}>Trigger: {selected.trigger}</Text>
-              <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs }}>Source: {selected.source}</Text>
-              <Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm, fontFamily: fonts.mono }}>
+              <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.xs }}>Trigger: {selected.trigger}</Text>
+              <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.xs }}>Source: {selected.source}</Text>
+              <Text variant="sm" style={{ color: colors.ink, marginTop: spacing.sm, fontFamily: fonts.mono }}>
                 {selected.body.slice(0, 500)}
                 {selected.body.length > 500 ? '...' : ''}
               </Text>

@@ -20,18 +20,18 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
           flexDirection: 'row',
           gap: spacing.sm,
           alignItems: 'flex-start',
-          backgroundColor: colors.errorSubtle,
+          backgroundColor: colors.danger.wash,
           borderWidth: 1,
           borderLeftWidth: 3,
-          borderColor: colors.danger,
+          borderColor: colors.danger.ink,
           borderRadius: radii.control,
           padding: spacing.md,
           marginBottom: spacing.md,
           maxWidth: 420,
         }}
       >
-        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
-        <Text variant="sm" style={{ color: colors.text, flexShrink: 1 }}>
+        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+        <Text variant="sm" style={{ color: colors.ink, flexShrink: 1 }}>
           {message}
         </Text>
       </View>

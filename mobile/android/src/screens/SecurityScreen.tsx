@@ -63,7 +63,7 @@ export function SecurityScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3].map(i => <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -73,7 +73,7 @@ export function SecurityScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -81,7 +81,7 @@ export function SecurityScreen() {
 
   if (!state || (!state.report && state.findings.length === 0)) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <EmptyState title="No security findings" message="No security scan or findings available" />
       </SafeAreaView>
     );
@@ -94,7 +94,7 @@ export function SecurityScreen() {
   });
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <FlatList
         data={findings}
         keyExtractor={item => item.finding_id}
@@ -105,13 +105,13 @@ export function SecurityScreen() {
             <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
             {state.report && (
               <Card style={{ marginBottom: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.textDim }}>Scan brief</Text>
-                <Text variant="sm" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{state.report.summary || 'No report summary recorded.'}</Text>
+                <Text variant="xs" style={{ color: colors.ink3 }}>Scan brief</Text>
+                <Text variant="sm" style={{ color: colors.ink2, marginTop: spacing.xs }}>{state.report.summary || 'No report summary recorded.'}</Text>
               </Card>
             )}
           </>
         }
-        ListEmptyComponent={<Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No records match this evidence lens.</Text>}
+        ListEmptyComponent={<Text variant="xs" style={{ color: colors.ink3, padding: spacing.md }}>No records match this evidence lens.</Text>}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs }}>
@@ -119,12 +119,12 @@ export function SecurityScreen() {
               <Badge label={item.status} variant={item.status === 'approved' ? 'success' : 'neutral'} />
             </View>
             <Text variant="sm" style={{ fontWeight: fontWeights.medium }}>{item.title}</Text>
-            <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }} numberOfLines={3}>{item.summary}</Text>
+            <Text variant="xs" style={{ color: colors.ink3, marginTop: 2 }} numberOfLines={3}>{item.summary}</Text>
             <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
-              <Text variant="xs" style={{ color: item.has_proof ? colors.success : colors.textDim }}>
+              <Text variant="xs" style={{ color: item.has_proof ? colors.ok.ink : colors.ink3 }}>
                 PoC: {item.proof_verified ? 'Verified' : item.has_proof ? 'Pending' : 'None'}
               </Text>
-              <Text variant="xs" style={{ color: item.has_remediation ? colors.success : colors.textDim }}>
+              <Text variant="xs" style={{ color: item.has_remediation ? colors.ok.ink : colors.ink3 }}>
                 Fix: {item.remediation_verified ? 'Verified' : item.has_remediation ? 'Pending' : 'None'}
               </Text>
             </View>
@@ -143,7 +143,7 @@ export function SecurityScreen() {
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                 <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selected.title}</Text>
                 <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                  <Text variant="sm" style={{ color: colors.accentFg }}>Close</Text>
+                  <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
                 </TouchableOpacity>
               </View>
               <FlatList
@@ -158,8 +158,8 @@ export function SecurityScreen() {
                 keyExtractor={item => item.k}
                 renderItem={({ item }) => (
                   <View style={{ paddingVertical: spacing.xs, minHeight: 28 }}>
-                    <Text variant="xs" style={{ color: colors.textDim }}>{item.k}</Text>
-                    <Text variant="sm" style={{ color: colors.text, fontFamily: fonts.mono }}>{item.v}</Text>
+                    <Text variant="xs" style={{ color: colors.ink3 }}>{item.k}</Text>
+                    <Text variant="sm" style={{ color: colors.ink, fontFamily: fonts.mono }}>{item.v}</Text>
                   </View>
                 )}
               />

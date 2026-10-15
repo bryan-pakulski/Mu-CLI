@@ -46,7 +46,7 @@ export function ModernBottomSheet({ visible, onClose, children, title }: ModernB
               elevation(2, colors, isDark),
               {
                 backgroundColor: colors.raised,
-                borderColor: colors.border,
+                borderColor: colors.hairline,
                 borderTopLeftRadius: radii.panel,
                 borderTopRightRadius: radii.panel,
                 borderBottomWidth: 0,
@@ -56,16 +56,16 @@ export function ModernBottomSheet({ visible, onClose, children, title }: ModernB
               },
             ]}
           >
-            <View style={[styles.handle, { backgroundColor: colors.border }]} />
-            <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            <View style={[styles.handle, { backgroundColor: colors.hairline }]} />
+            <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
                 <Text variant="md" accessibilityRole={title ? 'header' : undefined} numberOfLines={2} style={styles.title}>{title || ''}</Text>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Close"
                   onPress={onClose}
-                  style={({ pressed }) => [styles.closeButton, { borderRadius: radii.sm }, pressed && { backgroundColor: colors.hover }]}
+                  style={({ pressed }) => [styles.closeButton, { borderRadius: radii.sm }, pressed && { backgroundColor: colors.sunken }]}
                 >
-                  <Ionicons name="close" size={20} color={colors.muted} />
+                  <Ionicons name="close" size={20} color={colors.ink3} />
                 </Pressable>
             </View>
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">

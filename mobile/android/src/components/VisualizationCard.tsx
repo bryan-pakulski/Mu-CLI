@@ -71,10 +71,10 @@ function InteractiveWebView({
     >
       {failed ? (
         <View style={styles.fallback}>
-          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
+          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
           <Text variant="sm" dim style={styles.fallbackText}>Inline preview failed.</Text>
           <TouchableOpacity onPress={() => onOpenExternal()} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
-            <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>
+            <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
               Open in browser
             </Text>
           </TouchableOpacity>
@@ -83,7 +83,7 @@ function InteractiveWebView({
         <>
           <WebView
             source={{ uri }}
-            style={[styles.webview, { backgroundColor: colors.bg }]}
+            style={[styles.webview, { backgroundColor: colors.canvas }]}
             originWhitelist={['http://*', 'https://*']}
             javaScriptEnabled
             domStorageEnabled
@@ -120,8 +120,8 @@ function InteractiveWebView({
             }}
           />
           {loading ? (
-            <View style={[styles.loading, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-              <ActivityIndicator color={colors.accent} />
+            <View style={[styles.loading, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+              <ActivityIndicator color={colors.accent.ink} />
             </View>
           ) : null}
         </>
@@ -164,11 +164,11 @@ function VisualizationCardImpl({
 
   return (
     <>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
         <View style={styles.header}>
           <View style={styles.titleWrap}>
             <Text variant="xs" dim style={styles.eyebrow}>Visualization</Text>
-            <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
+            <Text numberOfLines={1} style={[styles.title, { color: colors.ink }]}>
               {artifact.title || artifact.name}
             </Text>
           </View>
@@ -176,19 +176,19 @@ function VisualizationCardImpl({
           <View style={styles.headerActions}>
             <TouchableOpacity
               onPress={openFullScreen}
-              style={[styles.iconButton, { backgroundColor: colors.bgHover }]}
+              style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Open visualization full screen"
             >
-              <Ionicons name="expand-outline" size={17} color={colors.textDim} />
+              <Ionicons name="expand-outline" size={17} color={colors.ink3} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => openExternal()}
-              style={[styles.iconButton, { backgroundColor: colors.bgHover }]}
+              style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Open visualization in browser"
             >
-              <Ionicons name="open-outline" size={16} color={colors.textDim} />
+              <Ionicons name="open-outline" size={16} color={colors.ink3} />
             </TouchableOpacity>
           </View>
         </View>
@@ -200,8 +200,8 @@ function VisualizationCardImpl({
             onPress={() => setExpanded(true)}
             style={styles.previewPrompt}
           >
-            <Ionicons name="eye-outline" size={18} color={colors.accentFg} />
-            <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>
+            <Ionicons name="eye-outline" size={18} color={colors.accent.ink} />
+            <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
               Show interactive preview
             </Text>
           </TouchableOpacity>
@@ -214,8 +214,8 @@ function VisualizationCardImpl({
                 accessibilityRole="button"
                 accessibilityLabel="Hide visualization preview"
               >
-                <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
-                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>
+                <Ionicons name="eye-off-outline" size={16} color={colors.ink3} />
+                <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>
                   Hide
                 </Text>
               </TouchableOpacity>
@@ -225,8 +225,8 @@ function VisualizationCardImpl({
                 accessibilityRole="button"
                 accessibilityLabel="Open visualization full screen"
               >
-                <Ionicons name="expand-outline" size={16} color={colors.textDim} />
-                <Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>
+                <Ionicons name="expand-outline" size={16} color={colors.ink3} />
+                <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>
                   Full screen
                 </Text>
               </TouchableOpacity>
@@ -250,29 +250,29 @@ function VisualizationCardImpl({
         statusBarTranslucent
         onRequestClose={() => setFullScreen(false)}
       >
-        <SafeAreaView style={[styles.fullScreenRoot, { backgroundColor: colors.bg }]}>
+        <SafeAreaView style={[styles.fullScreenRoot, { backgroundColor: colors.canvas }]}>
           <View style={[styles.fullScreenHeader, { borderColor: colors.hairline }]}>
             <View style={styles.fullScreenTitleWrap}>
               <Text variant="xs" dim style={styles.eyebrow}>Visualization</Text>
-              <Text numberOfLines={1} style={[styles.fullScreenTitle, { color: colors.text }]}>
+              <Text numberOfLines={1} style={[styles.fullScreenTitle, { color: colors.ink }]}>
                 {artifact.title || artifact.name}
               </Text>
             </View>
             <TouchableOpacity
               onPress={() => openExternal()}
-              style={[styles.iconButton, { backgroundColor: colors.bgHover }]}
+              style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Open visualization in browser"
             >
-              <Ionicons name="open-outline" size={17} color={colors.textDim} />
+              <Ionicons name="open-outline" size={17} color={colors.ink3} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setFullScreen(false)}
-              style={[styles.closeButton, { backgroundColor: colors.bgHover }]}
+              style={[styles.closeButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Exit full-screen visualization"
             >
-              <Ionicons name="close" size={24} color={colors.text} />
+              <Ionicons name="close" size={24} color={colors.ink} />
             </TouchableOpacity>
           </View>
           <View style={styles.fullScreenFrame}>

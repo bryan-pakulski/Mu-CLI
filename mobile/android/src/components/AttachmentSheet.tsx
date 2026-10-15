@@ -102,17 +102,17 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
       <View style={styles.header}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Attachments</Text>
         <TouchableOpacity onPress={onClose} accessibilityLabel="Close attachments" hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
-          <Ionicons name="close" size={22} color={colors.textDim} />
+          <Ionicons name="close" size={22} color={colors.ink3} />
         </TouchableOpacity>
       </View>
       <View style={styles.toolbar}>
         <Button title={uploading ? 'Uploading…' : 'Upload documents'} onPress={pick} disabled={uploading} />
-        {uploading ? <ActivityIndicator color={colors.accent} /> : null}
+        {uploading ? <ActivityIndicator color={colors.accent.ink} /> : null}
       </View>
-      <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.sm }}>
+      <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>
         Uploaded files are stored with this session. Select files to attach them to the next message.
       </Text>
-      {loading ? <ActivityIndicator color={colors.accent} /> : (
+      {loading ? <ActivityIndicator color={colors.accent.ink} /> : (
         <View style={styles.list}>
           {items.length === 0 ? <Text variant="sm" dim>No uploaded documents</Text> : null}
           {items.map(item => {
@@ -121,15 +121,15 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
               <TouchableOpacity
                 key={item.attachment_id}
                 onPress={() => toggle(item)}
-                style={[styles.row, { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border }]}
+                style={[styles.row, { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline }]}
               >
-                <Ionicons name={active ? 'checkbox' : 'document-outline'} size={20} color={active ? colors.accentFg : colors.textDim} />
+                <Ionicons name={active ? 'checkbox' : 'document-outline'} size={20} color={active ? colors.accent.ink : colors.ink3} />
                 <View style={styles.copy}>
                   <Text variant="sm" numberOfLines={1} style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text>
                   <Text variant="xs" dim>{formatSize(item.size)} · {item.mime_type}</Text>
                 </View>
                 <TouchableOpacity onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
-                  <Ionicons name="trash-outline" size={18} color={colors.textDim} />
+                  <Ionicons name="trash-outline" size={18} color={colors.ink3} />
                 </TouchableOpacity>
               </TouchableOpacity>
             );

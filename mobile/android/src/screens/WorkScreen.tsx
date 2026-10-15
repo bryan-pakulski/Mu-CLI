@@ -39,7 +39,7 @@ import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, fonts, radii, spacing, tint, touchTarget, tracking } from '../theme/tokens';
+import { fontWeights, fonts, radii, spacing, touchTarget, tracking } from '../theme/tokens';
 import { duration, money, stateLabel, stateStatus } from '../theme/status';
 import { Banner, Empty, Field, Loading, Panel, PlanosButton, StatTile, StatusIcon, SwitchRow, TextField, useInterval } from '../components/planos';
 import { BAR_HIDDEN, actionLabel, actionTone } from '../components/JobActions';
@@ -157,37 +157,37 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="Work" onNavigate={go} home={board} />
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.muted} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.ink3} />}
       >
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderCopy}>
             <Text variant="xl" accessibilityRole="header" style={styles.pageTitle}>Dashboard</Text>
-            <Text variant="xs" style={{ color: colors.muted }}>
-              All sessions · <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{total} total</Text>
+            <Text variant="xs" style={{ color: colors.ink3 }}>
+              All sessions · <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{total} total</Text>
             </Text>
           </View>
           <PlanosButton
             label="Jira"
             accessibilityLabel="Jira tickets and link settings"
-            icon={<Ionicons name="ticket-outline" size={18} color={colors.muted} />}
+            icon={<Ionicons name="ticket-outline" size={18} color={colors.ink3} />}
             onPress={() => setJiraOpen(true)}
           />
           <PlanosButton
             iconOnly
             label="Job settings"
             accessibilityLabel="Job settings: stage models"
-            icon={<Ionicons name="options-outline" size={18} color={colors.muted} />}
+            icon={<Ionicons name="options-outline" size={18} color={colors.ink3} />}
             onPress={() => setSettingsOpen(true)}
           />
           <PlanosButton
             primary
             label="New job"
             accessibilityLabel="Create engineering job"
-            icon={<Ionicons name="add" size={18} color={colors.accentOn} />}
+            icon={<Ionicons name="add" size={18} color={colors.onInk} />}
             onPress={() => setCreateOpen(true)}
           />
         </View>
@@ -201,7 +201,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
               title={setupPending
                 ? `Finish jobs setup: check and test everything jobs need.${missingStages.length ? ` No default model for ${missingStages.join(', ')} (jobs use their session’s model).` : ''}`
                 : `No default model for ${missingStages.join(', ')}: jobs use their session’s model for those stages.`}
-              right={<Text variant="xs" style={{ color: colors.accent, fontWeight: fontWeights.semibold }}>{setupPending ? 'Open setup' : 'Set models'}</Text>} />
+              right={<Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>{setupPending ? 'Open setup' : 'Set models'}</Text>} />
           </Pressable>
         ) : null}
 
@@ -220,7 +220,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
             </View>
             {total === 0 ? (
               <Panel title="No engineering jobs yet">
-                <Text variant="sm" style={{ color: colors.muted }}>
+                <Text variant="sm" style={{ color: colors.ink3 }}>
                   Queue a real ticket here, from the TUI, or from the web Engineering Work page. Import tickets from a Jira board on Tickets.
                 </Text>
               </Panel>
@@ -277,20 +277,20 @@ function NeedsYouCard({ job, onOpen, onAction }: { job: JobSummary; onOpen: () =
   const failed = job.state === 'failed';
   const primary = job.actions.filter(a => a.primary && a.enabled && !BAR_HIDDEN.has(a.id) && !a.hidden);
   return (
-    <View testID={`needs-you-${job.id}`} style={[styles.card, { borderColor: failed ? tint(colors.danger, 0.5) : colors.border, backgroundColor: colors.raised, borderLeftColor: failed ? colors.danger : colors.warn }]}>
+    <View testID={`needs-you-${job.id}`} style={[styles.card, { borderColor: failed ? colors.danger.pigment : colors.hairline, backgroundColor: colors.raised, borderLeftColor: failed ? colors.danger.ink : colors.attention.ink }]}>
       <Pressable accessibilityRole="button" accessibilityLabel={`Open ${jobKey(job)} ${job.title}`} onPress={onOpen} style={styles.cardHead}>
         <StatusIcon status={stateStatus(job.state)} label={stateLabel(job.state)} />
-        <Text variant="sm" style={[styles.key, { color: colors.accent }]}>{jobKey(job)}</Text>
-        <Text variant="xs" style={{ color: failed ? colors.danger : colors.warn }}>{stateLabel(job.state)}</Text>
+        <Text variant="sm" style={[styles.key, { color: colors.accent.ink }]}>{jobKey(job)}</Text>
+        <Text variant="xs" style={{ color: failed ? colors.danger.ink : colors.attention.ink }}>{stateLabel(job.state)}</Text>
         <View style={{ flex: 1 }} />
-        <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{money(job.cost_usd)}</Text>
+        <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{money(job.cost_usd)}</Text>
       </Pressable>
       <Text variant="sm" numberOfLines={2}>{job.title}</Text>
-      {job.origin_session ? <Text variant="xs" style={{ color: colors.muted, fontFamily: fonts.mono }} numberOfLines={1}>session · {job.origin_session}</Text> : null}
+      {job.origin_session ? <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }} numberOfLines={1}>session · {job.origin_session}</Text> : null}
       {job.limit ? (
-        <Text variant="xs" testID={`needs-you-${job.id}-limit`} style={{ color: colors.warn, fontWeight: fontWeights.semibold }} numberOfLines={1}>{job.limit.summary || job.attention_summary || job.limit.message}</Text>
+        <Text variant="xs" testID={`needs-you-${job.id}-limit`} style={{ color: colors.attention.ink, fontWeight: fontWeights.semibold }} numberOfLines={1}>{job.limit.summary || job.attention_summary || job.limit.message}</Text>
       ) : null}
-      {job.attention_detail ? <Text variant="xs" style={{ color: colors.muted }} numberOfLines={2}>{job.attention_detail}</Text> : null}
+      {job.attention_detail ? <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={2}>{job.attention_detail}</Text> : null}
       {primary.length ? (
         <View style={styles.cardActions}>
           {primary.map(a => <PlanosButton key={a.id} small primary tone={actionTone(a)} label={actionLabel(a)} onPress={() => onAction(a.id)} testID={`needs-you-${job.id}-${a.id}`} />)}
@@ -306,17 +306,17 @@ function RunningRow({ job, onPress }: { job: JobSummary; onPress: () => void }) 
   const step = focusStep(stepsOf(job));
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`${jobKey(job)} ${stateLabel(job.state)}`} onPress={onPress}
-      style={({ pressed }) => [styles.running, { backgroundColor: pressed ? colors.hover : 'transparent', borderBottomColor: colors.border }]}>
+      style={({ pressed }) => [styles.running, { backgroundColor: pressed ? colors.sunken : 'transparent', borderBottomColor: colors.hairline }]}>
       <View style={styles.cardHead}>
-        <Ionicons name={job.state === 'checking' ? 'hammer-outline' : job.state === 'pushing' ? 'cloud-upload-outline' : 'hardware-chip-outline'} size={16} color={colors.running} accessibilityLabel={job.state === 'checking' ? 'checks' : 'agent'} />
-        <Text variant="sm" style={[styles.key, { color: colors.accent }]}>{jobKey(job)}</Text>
+        <Ionicons name={job.state === 'checking' ? 'hammer-outline' : job.state === 'pushing' ? 'cloud-upload-outline' : 'hardware-chip-outline'} size={16} color={colors.running.ink} accessibilityLabel={job.state === 'checking' ? 'checks' : 'agent'} />
+        <Text variant="sm" style={[styles.key, { color: colors.accent.ink }]}>{jobKey(job)}</Text>
         <Text variant="xs">{stateLabel(job.state)}</Text>
         <View style={{ flex: 1 }} />
-        <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{(step?.elapsed || 0) >= 1 ? duration((step?.elapsed || 0) * 1000) : ''}</Text>
+        <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{(step?.elapsed || 0) >= 1 ? duration((step?.elapsed || 0) * 1000) : ''}</Text>
         <Text variant="xs" style={styles.num}>{money(job.cost_usd)}</Text>
       </View>
-      <Text variant="xs" numberOfLines={1}>{job.title}{job.origin_session ? <Text variant="xs" style={{ color: colors.muted }}>{`  · ${job.origin_session}`}</Text> : null}</Text>
-      {step?.detail ? <Text variant="xs" style={{ color: colors.muted, fontFamily: fonts.mono }} numberOfLines={1}>› {step.detail}</Text> : null}
+      <Text variant="xs" numberOfLines={1}>{job.title}{job.origin_session ? <Text variant="xs" style={{ color: colors.ink3 }}>{`  · ${job.origin_session}`}</Text> : null}</Text>
+      {step?.detail ? <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }} numberOfLines={1}>› {step.detail}</Text> : null}
     </Pressable>
   );
 }
@@ -488,7 +488,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
           <SheetField label="Description" value={description} onChangeText={setDescription} placeholder="What should change?" multiline />
           <SheetField label="Acceptance criteria" value={acceptance} onChangeText={setAcceptance} placeholder="One per line (optional: the planner proposes them)" multiline />
           <SheetField label="Validation commands" value={validation} onChangeText={setValidation} placeholder={'pytest tests/auth\nnpm run typecheck'} multiline />
-          <Text variant="xs" style={[styles.sheetHint, { color: colors.muted }]}>
+          <Text variant="xs" style={[styles.sheetHint, { color: colors.ink3 }]}>
             Optional. The planner proposes checks from the repository; commands listed here are added to them.
           </Text>
         </>
@@ -504,7 +504,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
         testID="job-advanced-toggle"
         style={styles.stageToggle}
       >
-        <Text variant="xs" style={{ color: colors.accent, fontWeight: fontWeights.semibold }}>
+        <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
           {showAdvanced ? '▴ Hide advanced' : '▾ Advanced: models, environments, budgets, retries'}
         </Text>
       </TouchableOpacity>
@@ -518,7 +518,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
             <SheetField label="Runtime sec" value={runtime} onChangeText={edit('runtime', setRuntime)} placeholder="no limit" keyboardType="number-pad" compact />
             <SheetField label="Retries" value={retries} onChangeText={edit('retries', setRetries)} placeholder="2" keyboardType="number-pad" compact />
           </View>
-          <Text variant="xs" testID="job-cost-hint" style={[styles.sheetHint, { color: colors.muted }]}>
+          <Text variant="xs" testID="job-cost-hint" style={[styles.sheetHint, { color: colors.ink3 }]}>
             {costCapPayload(cost) === 0 ? 'Cost: no cap — only the per-stage budgets apply.' : 'Cost: blank = Settings default · 0 = no cap.'}
           </Text>
         </View>

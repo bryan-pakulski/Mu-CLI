@@ -82,7 +82,7 @@ export function ContainerHardwareSection({
           <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Hardware</Text>
           <Text variant="xs" dim>GPU acceleration and explicit host device passthrough.</Text>
         </View>
-        <Ionicons name="hardware-chip-outline" size={20} color={colors.textSoft} />
+        <Ionicons name="hardware-chip-outline" size={20} color={colors.ink2} />
       </View>
 
       <Text variant="xs" style={styles.label}>GPU access</Text>
@@ -91,7 +91,7 @@ export function ContainerHardwareSection({
         <Choice label="All" selected={gpuMode === 'all'} disabled={!gpu?.supported} onPress={() => setMode('all')} />
         <Choice label="Selected" selected={gpuMode === 'selected'} disabled={!gpu?.supported || !(gpu?.devices?.length)} onPress={() => setMode('selected')} />
       </View>
-      <Text variant="xs" style={{ color: gpu?.supported ? colors.success : colors.textDim, marginBottom: spacing.sm }}>
+      <Text variant="xs" style={{ color: gpu?.supported ? colors.ok.ink : colors.ink3, marginBottom: spacing.sm }}>
         {gpu?.reason || 'Hardware capability has not been loaded.'}
       </Text>
 
@@ -106,9 +106,9 @@ export function ContainerHardwareSection({
                 onPress={() => toggleGpu(id)}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: active }}
-                style={[styles.detectedRow, { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border }]}
+                style={[styles.detectedRow, { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline }]}
               >
-                <Ionicons name={active ? 'checkbox' : 'square-outline'} size={18} color={active ? colors.accentFg : colors.textDim} />
+                <Ionicons name={active ? 'checkbox' : 'square-outline'} size={18} color={active ? colors.accent.ink : colors.ink3} />
                 <View style={styles.copy}>
                   <Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{item.name || `GPU ${id}`}</Text>
                   <Text variant="xs" dim style={styles.mono}>{item.uuid || `index ${id}`}</Text>
@@ -121,14 +121,14 @@ export function ContainerHardwareSection({
 
       <Text variant="xs" style={[styles.label, { marginTop: spacing.md }]}>Attached devices</Text>
       {devices.map((device, index) => (
-        <View key={`${device.host_path}-${index}`} style={[styles.deviceRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-          <Ionicons name="hardware-chip-outline" size={17} color={colors.textDim} />
+        <View key={`${device.host_path}-${index}`} style={[styles.deviceRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+          <Ionicons name="hardware-chip-outline" size={17} color={colors.ink3} />
           <View style={styles.copy}>
             <Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{device.container_path}</Text>
             <Text variant="xs" dim numberOfLines={1}>{device.host_path} · {device.permissions}</Text>
           </View>
           <TouchableOpacity onPress={() => onDevicesChange(devices.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
-            <Ionicons name="close" size={18} color={colors.error} />
+            <Ionicons name="close" size={18} color={colors.danger.ink} />
           </TouchableOpacity>
         </View>
       ))}
@@ -139,7 +139,7 @@ export function ContainerHardwareSection({
             <TouchableOpacity
               key={device.host_path}
               onPress={() => addDevice(device.host_path, device.container_path)}
-              style={[styles.preset, { borderColor: colors.border }]}
+              style={[styles.preset, { borderColor: colors.hairline }]}
             >
               <Text variant="xs" numberOfLines={1}>{device.name || device.host_path}</Text>
               <Text variant="xs" dim>{device.kind}</Text>
@@ -157,8 +157,8 @@ export function ContainerHardwareSection({
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="/dev/video0"
-        placeholderTextColor={colors.textDim}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
+        placeholderTextColor={colors.ink3}
+        style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]}
       />
       <TextInput
         value={deviceTarget}
@@ -166,8 +166,8 @@ export function ContainerHardwareSection({
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="Container path, e.g. /dev/video0"
-        placeholderTextColor={colors.textDim}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
+        placeholderTextColor={colors.ink3}
+        style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]}
       />
       <View style={styles.deviceActions}>
         <View style={styles.permissionChoices}>
@@ -178,16 +178,16 @@ export function ContainerHardwareSection({
         <TouchableOpacity
           onPress={() => addDevice(deviceHost, deviceTarget)}
           disabled={!deviceHost.trim()}
-          style={[styles.addButton, { borderColor: colors.border, opacity: deviceHost.trim() ? 1 : 0.42 }]}
+          style={[styles.addButton, { borderColor: colors.hairline, opacity: deviceHost.trim() ? 1 : 0.42 }]}
         >
-          <Ionicons name="add" size={18} color={colors.text} />
-          <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.medium }}>Add device</Text>
+          <Ionicons name="add" size={18} color={colors.ink} />
+          <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Add device</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.warning, { backgroundColor: colors.warningSubtle }]}>
-        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.warn }}>◆</Text>
-        <Text variant="xs" style={[styles.warningText, { color: colors.textSoft }]}>
+      <View style={[styles.warning, { backgroundColor: colors.attention.wash }]}>
+        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.attention.ink }}>◆</Text>
+        <Text variant="xs" style={[styles.warningText, { color: colors.ink2 }]}>
           {capabilities?.warning || 'Device passthrough grants direct access to selected host hardware.'}
         </Text>
       </View>
@@ -215,12 +215,12 @@ function Choice({
       disabled={disabled}
       style={[
         compact ? styles.choiceCompact : styles.choice,
-        { backgroundColor: selected ? colors.accentSubtle : 'transparent', borderColor: selected ? colors.accentSubtle : colors.border, opacity: disabled ? 0.42 : 1 },
+        { backgroundColor: selected ? colors.accent.wash : 'transparent', borderColor: selected ? colors.accent.wash : colors.hairline, opacity: disabled ? 0.42 : 1 },
       ]}
       accessibilityRole="button"
       accessibilityState={{ selected, disabled }}
     >
-      <Text variant="sm" style={{ color: selected ? colors.accentFg : colors.textSoft, fontWeight: selected ? fontWeights.semibold : fontWeights.medium }}>{label}</Text>
+      <Text variant="sm" style={{ color: selected ? colors.accent.ink : colors.ink2, fontWeight: selected ? fontWeights.semibold : fontWeights.medium }}>{label}</Text>
     </TouchableOpacity>
   );
 }

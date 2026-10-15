@@ -114,7 +114,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
   return (
     <View style={styles.root}>
       <Panel title="Stage models">
-        <Text variant="xs" style={{ color: colors.muted }}>
+        <Text variant="xs" style={{ color: colors.ink3 }}>
           Default model for each pipeline stage. A model set on a job itself takes priority; a blank stage uses the job’s session model.
         </Text>
         {JOB_STAGE_NAMES.map(stage => {
@@ -124,10 +124,10 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
             .filter(name => !entry.model || name.toLowerCase().includes(entry.model.toLowerCase()))
             .slice(0, 8);
           return (
-            <View key={stage} style={[styles.stage, { borderTopColor: colors.border }]}>
+            <View key={stage} style={[styles.stage, { borderTopColor: colors.hairline }]}>
               <Text variant="sm" style={styles.stageTitle}>{STAGE_LABELS[stage]}</Text>
-              <Text variant="xs" style={[styles.stageHint, { color: colors.muted }]}>{STAGE_HINTS[stage]}</Text>
-              <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.medium }}>Provider</Text>
+              <Text variant="xs" style={[styles.stageHint, { color: colors.ink3 }]}>{STAGE_HINTS[stage]}</Text>
+              <Text variant="xs" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Provider</Text>
               <View style={styles.chips} accessibilityLabel={`${STAGE_LABELS[stage]} provider`}>
                 {providers.map(item => {
                   const selected = item.name === provider;
@@ -144,13 +144,13 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                       style={[
                         styles.chip,
                         {
-                          borderColor: selected ? colors.accent : colors.border,
-                          backgroundColor: selected ? colors.accentSubtle : colors.raised,
+                          borderColor: selected ? colors.accent.ink : colors.hairline,
+                          backgroundColor: selected ? colors.accent.wash : colors.raised,
                           opacity: item.configured ? 1 : 0.55,
                         },
                       ]}
                     >
-                      <Text variant="sm" style={{ color: selected ? colors.accent : colors.text, fontWeight: selected ? fontWeights.semibold : fontWeights.regular }}>{item.name}</Text>
+                      <Text variant="sm" style={{ color: selected ? colors.accent.ink : colors.ink, fontWeight: selected ? fontWeights.semibold : fontWeights.regular }}>{item.name}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -168,7 +168,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                 />
               </Field>
               {openStage === stage && suggestions.length ? (
-                <View style={[styles.suggestions, { borderColor: colors.border, backgroundColor: colors.raised }]}>
+                <View style={[styles.suggestions, { borderColor: colors.hairline, backgroundColor: colors.raised }]}>
                   {suggestions.map(name => (
                     <TouchableOpacity
                       key={name}
@@ -176,7 +176,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                       onPress={() => { setStage(stage, { model: name }); setOpenStage(null); }}
                       style={styles.suggestion}
                     >
-                      <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }}>{name}</Text>
+                      <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }}>{name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>

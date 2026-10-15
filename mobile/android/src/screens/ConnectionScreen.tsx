@@ -88,7 +88,7 @@ export function ConnectionScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <View style={{ flex: 1, padding: spacing.base, gap: spacing.base }}>
         <Text variant="lg" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>
           Connection Settings
@@ -108,7 +108,7 @@ export function ConnectionScreen() {
             />
           </Field>
           <Button title={testing ? 'Testing…' : 'Test Connection'} onPress={testConnection} disabled={testing} />
-          {testing && <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />}
+          {testing && <ActivityIndicator color={colors.accent.ink} style={{ marginTop: spacing.sm }} />}
         </Panel>
       </View>
     </SafeAreaView>

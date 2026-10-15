@@ -39,7 +39,7 @@ export function TeacherScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           <Skeleton height={120} style={{ marginBottom: spacing.sm }} />
           <Skeleton height={80} style={{ marginBottom: spacing.sm }} />
@@ -51,7 +51,7 @@ export function TeacherScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -59,7 +59,7 @@ export function TeacherScreen() {
 
   if (!state || (!state.active && state.courses.length === 0)) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <EmptyState title="No courses" message="No teacher courses available" />
       </SafeAreaView>
     );
@@ -73,7 +73,7 @@ export function TeacherScreen() {
   const reviews = (course?.scheduled_reviews || []) as Array<Record<string, any>>;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <FlatList
         data={modules}
         keyExtractor={item => String(item.module_id)}
@@ -85,7 +85,7 @@ export function TeacherScreen() {
           {course ? (
             <Card style={{ marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{course.subject}</Text>
-              <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
+              <Text variant="xs" style={{ color: colors.ink3, marginTop: 2, fontVariant: ['tabular-nums'] }}>
                 {course.target_level} · {course.lessons_completed_count}/{course.lesson_total} lessons
               </Text>
               <View style={{ flexDirection: 'row', gap: spacing.xs, marginTop: spacing.sm }}>
@@ -97,11 +97,11 @@ export function TeacherScreen() {
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>No active course</Text>
               {state.courses.length > 0 && (
                 <>
-                  <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.sm, marginBottom: spacing.xs }}>
+                  <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.sm, marginBottom: spacing.xs }}>
                     Available courses ({state.courses.length}):
                   </Text>
                   {state.courses.map(c => (
-                    <Text key={c.course_id} variant="sm" style={{ color: colors.text, paddingVertical: spacing.xs }}>
+                    <Text key={c.course_id} variant="sm" style={{ color: colors.ink, paddingVertical: spacing.xs }}>
                       {c.subject} · {c.status}
                     </Text>
                   ))}
@@ -120,20 +120,20 @@ export function TeacherScreen() {
                   const grade = assignment.grade as Record<string, any> | undefined;
                   return <Card key={String(assignment.assignment_id || index)} style={{ marginBottom: spacing.sm }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(assignment.kind || assignment.status || 'assignment')} variant="neutral" />{grade && <Badge label={`${grade.score_pct ?? '—'}%`} variant={grade.passed ? 'success' : 'warning'} />}</View>
-                    <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{String(assignment.assignment_id || 'Assignment')}</Text>
-                    {!!assignment.prompt && <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{String(assignment.prompt)}</Text>}
-                    {!!grade?.feedback && <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs }}>Evidence: {String(grade.feedback)}</Text>}
-                    {!grade && <Text variant="xs" style={{ color: colors.warning, marginTop: spacing.xs }}>Mastery not assessed yet.</Text>}
+                    <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{String(assignment.assignment_id || 'Assignment')}</Text>
+                    {!!assignment.prompt && <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{String(assignment.prompt)}</Text>}
+                    {!!grade?.feedback && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs }}>Evidence: {String(grade.feedback)}</Text>}
+                    {!grade && <Text variant="xs" style={{ color: colors.attention.ink, marginTop: spacing.xs }}>Mastery not assessed yet.</Text>}
                   </Card>;
                 })}
-                {!assignments.length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No mastery checks recorded.</Text>}
+                {!assignments.length && <Text variant="xs" style={{ color: colors.ink3, padding: spacing.md }}>No mastery checks recorded.</Text>}
               </View>
             )}
             {workspaceView.shows('reviews') && (
               <View>
                 <SectionLabel title="Retention schedule" count={reviews.length} />
-                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(review.status || 'scheduled')} variant={review.status === 'done' ? 'success' : 'neutral'} /><Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.text, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.success, marginTop: spacing.xs }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs }}>{String(review.notes)}</Text>}</Card>)}
-                {!reviews.length && <Text variant="xs" style={{ color: colors.textDim, padding: spacing.md }}>No spaced reviews scheduled.</Text>}
+                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(review.status || 'scheduled')} variant={review.status === 'done' ? 'success' : 'neutral'} /><Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.ink, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.ok.ink, marginTop: spacing.xs }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs }}>{String(review.notes)}</Text>}</Card>)}
+                {!reviews.length && <Text variant="xs" style={{ color: colors.ink3, padding: spacing.md }}>No spaced reviews scheduled.</Text>}
               </View>
             )}
           </View>
@@ -153,7 +153,7 @@ export function TeacherScreen() {
 
 function SectionLabel({ title, count }: { title: string; count: number }) {
   const { colors } = useTheme();
-  return <View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.textSoft, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.textDim, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>;
+  return <View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.ink3, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>;
 }
 
 function ModuleCard({ module, expanded, onToggle, colors }: {
@@ -165,12 +165,12 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1 }}>
             <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{module.title}</Text>
-            <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
+            <Text variant="xs" style={{ color: colors.ink3, marginTop: 2, fontVariant: ['tabular-nums'] }}>
               {module.lessons.filter(l => l.status === 'completed').length}/{module.lessons.length} lessons
             </Text>
           </View>
           {module.status && <Badge label={module.status} variant={module.status === 'completed' ? 'success' : 'neutral'} />}
-          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textDim} />
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.ink3} />
         </View>
       </TouchableOpacity>
       {expanded && (
@@ -196,7 +196,7 @@ function LessonRow({ lesson, colors }: { lesson: TeacherLesson; colors: any }) {
         } />
       </View>
       {lesson.lecture_comprehension_pct !== null && (
-        <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
+        <Text variant="xs" style={{ color: colors.ink3, marginTop: 2, fontVariant: ['tabular-nums'] }}>
           Comprehension: {lesson.lecture_comprehension_pct}%
         </Text>
       )}

@@ -65,7 +65,7 @@ export function ConversationStageRail({
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.list, { backgroundColor: colors.bgLift, borderColor: colors.hairline }]}
+        contentContainerStyle={[styles.list, { backgroundColor: colors.surface, borderColor: colors.hairline }]}
       >
         {hasMoreHistory ? (
           <TouchableOpacity
@@ -80,7 +80,7 @@ export function ConversationStageRail({
               <Ionicons
                 name={loadingHistory ? 'hourglass-outline' : 'chevron-up'}
                 size={13}
-                color={colors.textSoft}
+                color={colors.ink2}
               />
             </View>
           </TouchableOpacity>
@@ -99,7 +99,7 @@ export function ConversationStageRail({
             >
               <View style={[
                 styles.dot,
-                { backgroundColor: active ? colors.accent : colors.border },
+                { backgroundColor: active ? colors.accent.ink : colors.hairline },
                 active && styles.activeDot,
               ]} />
             </TouchableOpacity>

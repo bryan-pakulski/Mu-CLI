@@ -74,13 +74,13 @@ export function JobsListScreen({ navigation }: JobsListScreenProps) {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="JobsList" onNavigate={go} home={home} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await reload(true); setRefreshing(false); }} tintColor={colors.muted} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await reload(true); setRefreshing(false); }} tintColor={colors.ink3} />}>
         <View style={styles.head}>
-          <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Jobs <Text variant="xl" style={{ color: colors.muted }}>({home?.jobs.length || 0})</Text></Text>
-          <Text variant="xs" style={{ color: colors.muted, marginLeft: spacing.sm }}>{session === ALL_SESSIONS ? 'all sessions' : `session · ${session || 'none'}`}</Text>
+          <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Jobs <Text variant="xl" style={{ color: colors.ink3 }}>({home?.jobs.length || 0})</Text></Text>
+          <Text variant="xs" style={{ color: colors.ink3, marginLeft: spacing.sm }}>{session === ALL_SESSIONS ? 'all sessions' : `session · ${session || 'none'}`}</Text>
         </View>
         <TextField accessibilityLabel="Filter jobs" placeholder="Filter…" value={query} onChangeText={setQuery} autoCapitalize="none" autoCorrect={false} />
         <SessionFilter sessions={sessions} value={session} onChange={setSession} total={home?.jobs.length || 0} />
@@ -95,9 +95,9 @@ export function JobsListScreen({ navigation }: JobsListScreenProps) {
                   right={(
                     <View style={styles.rowActions}>
                       <PlanosButton small ghost iconOnly label={`Archive ${jobKey(row)}`} testID={`archive-${row.id}`}
-                        icon={<Ionicons name="archive-outline" size={18} color={colors.muted} />} onPress={() => setArchiveRow(row)} />
+                        icon={<Ionicons name="archive-outline" size={18} color={colors.ink3} />} onPress={() => setArchiveRow(row)} />
                       <PlanosButton small ghost iconOnly label={`Delete ${jobKey(row)}`} testID={`delete-${row.id}`} disabled={!deleteAction?.enabled}
-                        icon={<Ionicons name="trash-outline" size={18} color={colors.danger} />} onPress={() => { setDeleteRow(row); if (deleteAction) setTimeout(() => del.invoke(deleteAction), 0); }} />
+                        icon={<Ionicons name="trash-outline" size={18} color={colors.danger.ink} />} onPress={() => { setDeleteRow(row); if (deleteAction) setTimeout(() => del.invoke(deleteAction), 0); }} />
                     </View>
                   )}
                 />
@@ -135,8 +135,8 @@ function SessionFilter({ sessions, value, onChange, total }: { sessions: Array<{
           <Pressable key={o.name || '__none'} testID={`jobs-session-${o.name === ALL_SESSIONS ? 'all' : o.name || 'none'}`} accessibilityRole="radio"
             accessibilityLabel={`${o.label}, ${o.count} job${o.count === 1 ? '' : 's'}`} accessibilityState={{ selected: on, checked: on }}
             onPress={() => onChange(o.name)}
-            style={[styles.sessionChip, { borderColor: on ? colors.accent : colors.border, backgroundColor: on ? colors.accentSubtle : colors.raised }]}>
-            <Text variant="xs" style={{ color: on ? colors.text : colors.muted, fontWeight: on ? fontWeights.semibold : fontWeights.medium }} numberOfLines={1}>{o.label} · {o.count}</Text>
+            style={[styles.sessionChip, { borderColor: on ? colors.accent.ink : colors.hairline, backgroundColor: on ? colors.accent.wash : colors.raised }]}>
+            <Text variant="xs" style={{ color: on ? colors.ink : colors.ink3, fontWeight: on ? fontWeights.semibold : fontWeights.medium }} numberOfLines={1}>{o.label} · {o.count}</Text>
           </Pressable>
         );
       })}

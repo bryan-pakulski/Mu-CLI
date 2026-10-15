@@ -218,10 +218,10 @@ export function AppNavigator() {
     colors: {
       ...baseTheme.colors,
       background: 'transparent',
-      card: colors.glassStrong,
+      card: colors.raised,
       border: colors.hairline,
-      text: colors.text,
-      primary: colors.accent,
+      text: colors.ink,
+      primary: colors.accent.ink,
     },
   };
 
@@ -232,9 +232,9 @@ export function AppNavigator() {
       <Stack.Navigator
         screenOptions={{
           animation: 'slide_from_right',
-          contentStyle: { backgroundColor: colors.bg },
+          contentStyle: { backgroundColor: colors.canvas },
           headerStyle: { backgroundColor: colors.surface },
-          headerTintColor: colors.text,
+          headerTintColor: colors.ink,
           headerShadowVisible: false,
           headerBackTitle: '',
           headerTitleStyle: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
@@ -249,7 +249,7 @@ export function AppNavigator() {
             title: 'Job review',
             headerRight: () => (
               <Pressable accessibilityRole="button" accessibilityLabel="Analyze job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId: route.params.jobId })} hitSlop={14} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, minHeight: 44, justifyContent: 'center' })}>
-                <Text style={{ color: colors.accent, fontSize: fontSizes.xs, fontWeight: fontWeights.semibold }}>Analyze</Text>
+                <Text style={{ color: colors.accent.ink, fontSize: fontSizes.xs, fontWeight: fontWeights.semibold }}>Analyze</Text>
               </Pressable>
             ),
           })}

@@ -127,7 +127,7 @@ export function ModernHeader({
           styles.container,
           {
             backgroundColor: colors.surface,
-            borderBottomColor: colors.border,
+            borderBottomColor: colors.hairline,
             paddingTop: insets.top + spacing.xs,
           },
         ]}
@@ -138,7 +138,7 @@ export function ModernHeader({
           onPress={onOpenSessions}
           style={styles.iconButton}
         >
-          <Text style={[styles.brandMark, { color: colors.accent }]}>μ</Text>
+          <Text style={[styles.brandMark, { color: colors.accent.ink }]}>μ</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -150,13 +150,13 @@ export function ModernHeader({
           style={styles.titleBlock}
         >
           <View style={styles.titleRow}>
-            <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+            <Text style={[styles.title, { color: colors.ink }]} numberOfLines={1}>
               {sessionTitle}
             </Text>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.ok : colors.danger }]} />
+            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.ok.ink : colors.danger.ink }]} />
             <PlanModeBadge />
           </View>
-          <Text style={[styles.subtitle, { color: isConnected ? colors.muted : colors.danger }]} numberOfLines={1}>
+          <Text style={[styles.subtitle, { color: isConnected ? colors.ink3 : colors.danger.ink }]} numberOfLines={1}>
             {sessionMeta}{queueBadge}
           </Text>
         </TouchableOpacity>
@@ -169,7 +169,7 @@ export function ModernHeader({
             onPress={onOpenWork}
             style={[styles.iconButton, !isConnected && styles.disabledAction]}
           >
-            <Ionicons name="briefcase-outline" size={19} color={colors.muted} />
+            <Ionicons name="briefcase-outline" size={19} color={colors.ink3} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="button"
@@ -178,7 +178,7 @@ export function ModernHeader({
             onPress={onOpenTraces}
             style={[styles.iconButton, !activeSessionName && styles.disabledAction]}
           >
-            <Ionicons name="analytics-outline" size={19} color={colors.muted} />
+            <Ionicons name="analytics-outline" size={19} color={colors.ink3} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="button"
@@ -186,7 +186,7 @@ export function ModernHeader({
             onPress={() => setMenuOpen(true)}
             style={styles.iconButton}
           >
-            <Ionicons name="settings-outline" size={20} color={colors.muted} />
+            <Ionicons name="settings-outline" size={20} color={colors.ink3} />
           </TouchableOpacity>
         </View>
       </View>
@@ -197,12 +197,12 @@ export function ModernHeader({
             onPress={() => openFromMenu(onOpenConnection)}
             style={styles.connectionBanner}
           >
-            <Ionicons name="wifi-outline" size={20} color={colors.muted} />
+            <Ionicons name="wifi-outline" size={20} color={colors.ink3} />
             <View style={styles.menuCopy}>
-              <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>Connect to MuCLI</Text>
-              <Text variant="xs" style={{ color: colors.textDim }}>Configure a reachable GUI server</Text>
+              <Text variant="base" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>Connect to MuCLI</Text>
+              <Text variant="xs" style={{ color: colors.ink3 }}>Configure a reachable GUI server</Text>
             </View>
-            <Ionicons name="chevron-forward" size={17} color={colors.muted} />
+            <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
           </TouchableOpacity>
         )}
 
@@ -285,8 +285,8 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   const { colors } = useTheme();
   return (
     <View style={styles.section}>
-      <Text variant="xs" accessibilityRole="header" style={[styles.sectionTitle, { color: colors.muted }]}>{title}</Text>
-      <View style={[styles.sectionBody, { borderColor: colors.border, backgroundColor: colors.surface }]}>{children}</View>
+      <Text variant="xs" accessibilityRole="header" style={[styles.sectionTitle, { color: colors.ink3 }]}>{title}</Text>
+      <View style={[styles.sectionBody, { borderColor: colors.hairline, backgroundColor: colors.surface }]}>{children}</View>
     </View>
   );
 }
@@ -307,13 +307,13 @@ function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
       style={styles.menuRow}
     >
       <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={19} color={colors.muted} />
+        <Ionicons name={icon} size={19} color={colors.ink3} />
       </View>
       <View style={styles.menuCopy}>
-        <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{label}</Text>
+        <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{label}</Text>
         <Text variant="xs" dim numberOfLines={2}>{detail}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={17} color={colors.muted} />
+      <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
     </TouchableOpacity>
   );
 }
@@ -329,18 +329,18 @@ function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false
   return (
     <View style={styles.menuRow}>
       <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={19} color={colors.muted} />
+        <Ionicons name={icon} size={19} color={colors.ink3} />
       </View>
       <View style={styles.menuCopy}>
-        <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{label}</Text>
+        <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{label}</Text>
         <Text variant="xs" dim>{detail}</Text>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
         disabled={disabled}
-        trackColor={{ false: colors.border, true: colors.accent }}
-        thumbColor={value ? colors.accentOn : colors.raised}
+        trackColor={{ false: colors.hairline, true: colors.accent.ink }}
+        thumbColor={value ? colors.onInk : colors.raised}
       />
     </View>
   );

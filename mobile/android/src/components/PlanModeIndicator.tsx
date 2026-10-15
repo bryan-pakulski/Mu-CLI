@@ -61,9 +61,9 @@ export function PlanModeBadge() {
       accessibilityHint={PLAN_MODE_TOOLTIP}
       disabled={busy}
       onPress={confirmTurnOff}
-      style={[styles.badge, { backgroundColor: colors.planSubtle, borderColor: colors.plan }]}
+      style={[styles.badge, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
     >
-      <Text variant="xs" style={[styles.badgeText, { color: colors.plan }]}>🔒 Plan</Text>
+      <Text variant="xs" style={[styles.badgeText, { color: colors.plan.ink }]}>🔒 Plan</Text>
     </TouchableOpacity>
   );
 }
@@ -78,10 +78,10 @@ export function PlanModeStrip() {
       testID="plan-mode-strip"
       accessibilityRole="summary"
       accessibilityLabel="Plan mode, read-only. Writing is blocked."
-      style={[styles.strip, { backgroundColor: colors.planSubtle, borderColor: colors.plan }]}
+      style={[styles.strip, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
     >
-      <Text variant="xs" style={[styles.stripText, { color: colors.text }]}>
-        <Text variant="xs" style={{ color: colors.plan, fontWeight: fontWeights.semibold }}>🔒 Plan mode</Text>
+      <Text variant="xs" style={[styles.stripText, { color: colors.ink }]}>
+        <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>🔒 Plan mode</Text>
         {' — read-only. Writing is blocked.'}
       </Text>
       <TouchableOpacity
@@ -89,9 +89,9 @@ export function PlanModeStrip() {
         accessibilityLabel="Turn off plan mode"
         disabled={busy}
         onPress={() => { void turnOff(); }}
-        style={[styles.stripButton, { borderColor: colors.plan }, busy && styles.disabled]}
+        style={[styles.stripButton, { borderColor: colors.plan.ink }, busy && styles.disabled]}
       >
-        <Text variant="xs" style={{ color: colors.plan, fontWeight: fontWeights.semibold }}>
+        <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>
           {busy ? 'Turning off…' : 'Turn off'}
         </Text>
       </TouchableOpacity>

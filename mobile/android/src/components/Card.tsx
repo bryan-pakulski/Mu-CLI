@@ -18,7 +18,7 @@ export function Card({ children, style, elevated }: CardProps) {
         {
           backgroundColor: colors.surface,
           borderWidth: 1,
-          borderColor: colors.border,
+          borderColor: colors.hairline,
           borderRadius: radii.panel,
           padding: spacing.base,
         },

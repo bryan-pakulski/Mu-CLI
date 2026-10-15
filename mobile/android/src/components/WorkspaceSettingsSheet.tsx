@@ -92,17 +92,17 @@ export function WorkspaceSettingsSheet({
   }, [workspaces.length]);
 
   return (
-    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.bg }}>
+    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={[styles.header, { paddingTop: spacing.base }]}>
-          <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border }]}>
-            <Ionicons name="close" size={20} color={colors.text} />
+          <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline }]}>
+            <Ionicons name="close" size={20} color={colors.ink} />
           </TouchableOpacity>
           <View style={styles.headerCopy}>
-            <Text style={[styles.title, { color: colors.text }]}>Workspace folders</Text>
+            <Text style={[styles.title, { color: colors.ink }]}>Workspace folders</Text>
             <Text variant="xs" dim>{summary}</Text>
           </View>
           <View style={styles.iconSpacer} />
@@ -113,17 +113,17 @@ export function WorkspaceSettingsSheet({
           contentContainerStyle={[styles.content, { paddingBottom: spacing['4xl'] }]}
         >
           {loading ? (
-            <ActivityIndicator color={colors.accent} style={styles.loader} />
+            <ActivityIndicator color={colors.accent.ink} style={styles.loader} />
           ) : (
             <>
-              <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.muted }]}>Attached</Text>
+              <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.ink3 }]}>Attached</Text>
               {workspaces.length === 0 ? (
-                <View style={[styles.empty, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
-                  <Ionicons name="folder-open-outline" size={22} color={colors.textDim} />
+                <View style={[styles.empty, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+                  <Ionicons name="folder-open-outline" size={22} color={colors.ink3} />
                   <Text variant="sm" dim>No workspace is attached to this session.</Text>
                 </View>
               ) : (
-                <View style={[styles.list, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+                <View style={[styles.list, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
                   {workspaces.map((path, index) => (
                     <View
                       key={path}
@@ -131,27 +131,27 @@ export function WorkspaceSettingsSheet({
                         styles.workspaceRow,
                       ]}
                     >
-                      <Ionicons name="folder" size={17} color={colors.textDim} />
+                      <Ionicons name="folder" size={17} color={colors.ink3} />
                       <Text variant="xs" style={styles.pathText} numberOfLines={2} ellipsizeMode="middle">
                         {path}
                       </Text>
                       <TouchableOpacity onPress={() => removeWorkspace(path)} style={styles.removeButton}>
-                        <Ionicons name="close" size={17} color={colors.textDim} />
+                        <Ionicons name="close" size={17} color={colors.ink3} />
                       </TouchableOpacity>
                     </View>
                   ))}
                 </View>
               )}
 
-              <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.muted }]}>Add folder</Text>
+              <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.ink3 }]}>Add folder</Text>
               <WorkspacePathField value={candidate} onChangeText={setCandidate} />
               <TouchableOpacity
                 onPress={addWorkspace}
                 disabled={!canAdd}
-                style={[styles.addButton, { backgroundColor: colors.raised, borderColor: colors.border, opacity: canAdd ? 1 : 0.5 }]}
+                style={[styles.addButton, { backgroundColor: colors.raised, borderColor: colors.hairline, opacity: canAdd ? 1 : 0.5 }]}
               >
-                <Ionicons name="add" size={18} color={canAdd ? colors.text : colors.textDim} />
-                <Text variant="sm" style={{ color: canAdd ? colors.text : colors.textDim, fontWeight: fontWeights.semibold }}>
+                <Ionicons name="add" size={18} color={canAdd ? colors.ink : colors.ink3} />
+                <Text variant="sm" style={{ color: canAdd ? colors.ink : colors.ink3, fontWeight: fontWeights.semibold }}>
                   Attach folder
                 </Text>
               </TouchableOpacity>
@@ -159,23 +159,23 @@ export function WorkspaceSettingsSheet({
           )}
 
           {error ? (
-            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: colors.errorSubtle, borderColor: colors.danger }]}>
-              <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
-              <Text variant="xs" style={{ color: colors.text, flex: 1 }}>{error}</Text>
+            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: colors.danger.wash, borderColor: colors.danger.ink }]}>
+              <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+              <Text variant="xs" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
             </View>
           ) : null}
         </ScrollView>
 
-        <View style={[styles.footer, { backgroundColor: colors.bg, borderTopColor: colors.border, paddingBottom: spacing.base }]}>
+        <View style={[styles.footer, { backgroundColor: colors.canvas, borderTopColor: colors.hairline, paddingBottom: spacing.base }]}>
           <TouchableOpacity
             onPress={save}
             disabled={!canSave}
-            style={[styles.saveButton, { backgroundColor: canSave ? colors.accent : colors.raised, borderColor: canSave ? colors.accent : colors.border }]}
+            style={[styles.saveButton, { backgroundColor: canSave ? colors.accent.ink : colors.raised, borderColor: canSave ? colors.accent.ink : colors.hairline }]}
           >
             {saving ? (
-              <ActivityIndicator color={colors.accentOn} />
+              <ActivityIndicator color={colors.onInk} />
             ) : (
-              <Text style={{ color: canSave ? colors.accentOn : colors.textDim, fontWeight: fontWeights.semibold }}>Save workspace</Text>
+              <Text style={{ color: canSave ? colors.onInk : colors.ink3, fontWeight: fontWeights.semibold }}>Save workspace</Text>
             )}
           </TouchableOpacity>
         </View>

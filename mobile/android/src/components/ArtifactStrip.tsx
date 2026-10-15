@@ -69,16 +69,16 @@ export function ArtifactStrip({
                 <TouchableOpacity
                   key={artifact.artifact_id}
                   onPress={() => openExternalUrl(artifactsApi.viewUrl(sessionName, artifact.artifact_id))}
-                  style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+                  style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
                 >
-                  <Ionicons name="stats-chart-outline" size={16} color={colors.textSoft} />
+                  <Ionicons name="stats-chart-outline" size={16} color={colors.ink2} />
                   <View style={styles.copy}>
                     <Text variant="xs" style={styles.name} numberOfLines={1}>
                       {artifact.title || artifact.name}
                     </Text>
                     <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                   </View>
-                  <Ionicons name="open-outline" size={17} color={colors.textDim} />
+                  <Ionicons name="open-outline" size={17} color={colors.ink3} />
                 </TouchableOpacity>
               );
             })}
@@ -97,14 +97,14 @@ export function ArtifactStrip({
               <TouchableOpacity
                 key={artifact.artifact_id}
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, artifact.artifact_id))}
-                style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+                style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
               >
-                <Ionicons name="document-attach-outline" size={16} color={colors.textSoft} />
+                <Ionicons name="document-attach-outline" size={16} color={colors.ink2} />
                 <View style={styles.copy}>
                   <Text variant="xs" style={styles.name} numberOfLines={1}>{artifact.name}</Text>
                   <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                 </View>
-                <Ionicons name="arrow-down-circle-outline" size={17} color={colors.textDim} />
+                <Ionicons name="arrow-down-circle-outline" size={17} color={colors.ink3} />
               </TouchableOpacity>
             ))}
           </ScrollView>

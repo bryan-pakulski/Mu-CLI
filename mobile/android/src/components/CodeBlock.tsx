@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import type { SyntaxColors } from '../theme/tokens';
+import type { SyntaxColors, WashColors } from '../theme/tokens';
 import { spacing, fontSizes, fonts, radii, typography } from '../theme/tokens';
 
 // ── Token types ───────────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ function tokenize(code: string, lang: string): Token[][] {
 interface CodeBlockProps {
   code: string;
   language?: string;
-  colors: { bgHover: string; textSoft: string; textDim: string; syntax: SyntaxColors; codeBg?: string; border?: string; muted?: string };
+  colors: WashColors;
 }
 
 const LINE_HEIGHT = typography.xs.lineHeight;
@@ -305,15 +305,15 @@ export function CodeBlock({ code, language, colors }: CodeBlockProps) {
   }, [needsWindowing]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.codeBg ?? colors.bgHover, borderColor: colors.border ?? colors.bgHover }]}>
+    <View style={[styles.container, { backgroundColor: colors.code, borderColor: colors.hairline }]}>
       <View style={styles.header}>
         {langLabel ? (
-          <Text style={[styles.langLabel, { color: colors.muted ?? colors.textDim }]}>
+          <Text style={[styles.langLabel, { color: colors.ink3 }]}>
             {langLabel}
           </Text>
         ) : null}
         <TouchableOpacity onPress={copy} accessibilityRole="button" accessibilityLabel="Copy code" hitSlop={{ top: spacing.base, bottom: spacing.base, left: spacing.base, right: spacing.base }}>
-          <Ionicons name="copy-outline" size={15} color={colors.muted ?? colors.textDim} />
+          <Ionicons name="copy-outline" size={15} color={colors.ink3} />
         </TouchableOpacity>
       </View>
       <ScrollView

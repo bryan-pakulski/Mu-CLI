@@ -17,9 +17,9 @@ export function WorkspaceCategoryScreen({ navigation, route }: WorkspaceCategory
   const category = getWorkspaceCategory(route.params.categoryId);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
-        <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Tools</Text>
+        <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Tools</Text>
         <Text variant="sm" dim style={[styles.intro, { borderBottomColor: colors.hairline }]}>{category.description}</Text>
         {category.items.map(item => (
           <TouchableOpacity
@@ -28,12 +28,12 @@ export function WorkspaceCategoryScreen({ navigation, route }: WorkspaceCategory
             onPress={() => navigation.dispatch(StackActions.push(item.screen))}
             style={styles.row}
           >
-            <Ionicons name={item.icon} size={19} color={colors.textDim} />
+            <Ionicons name={item.icon} size={19} color={colors.ink3} />
             <View style={styles.copy}>
               <Text variant="base" style={styles.title}>{item.title}</Text>
               <Text variant="sm" dim>{item.description}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+            <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
           </TouchableOpacity>
         ))}
       </ScrollView>

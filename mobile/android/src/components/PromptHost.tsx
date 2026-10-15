@@ -221,19 +221,19 @@ export function PromptHost() {
         accessibilityLabel="Review pending agent input"
         activeOpacity={0.86}
         onPress={() => setReviewOpen(true)}
-        style={[elevation(1, colors, isDark), styles.pendingBanner, { backgroundColor: colors.raised, borderColor: colors.border, borderLeftColor: colors.warn }]}
+        style={[elevation(1, colors, isDark), styles.pendingBanner, { backgroundColor: colors.raised, borderColor: colors.hairline, borderLeftColor: colors.attention.ink }]}
       >
-        <View style={[styles.pendingIcon, { backgroundColor: colors.warningSubtle }]}>
-          <Text variant="base" importantForAccessibility="no" style={{ color: colors.warn, fontWeight: fontWeights.semibold }}>◆</Text>
+        <View style={[styles.pendingIcon, { backgroundColor: colors.attention.wash }]}>
+          <Text variant="base" importantForAccessibility="no" style={{ color: colors.attention.ink, fontWeight: fontWeights.semibold }}>◆</Text>
         </View>
         <View style={styles.pendingCopy}>
-          <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>Input required</Text>
+          <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>Input required</Text>
           <Text variant="xs" dim numberOfLines={1}>Agent is waiting · tap to review</Text>
         </View>
         {queue.length > 1 ? (
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{queue.length} pending</Text>
         ) : null}
-        <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
       </TouchableOpacity>
     );
   }
@@ -251,9 +251,9 @@ export function PromptHost() {
             accessibilityRole="button"
             accessibilityLabel="Minimize pending input"
             onPress={() => setReviewOpen(false)}
-            style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.bgActive : colors.bgHover }]}
+            style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.sunken : colors.sunken }]}
           >
-            <Ionicons name="remove-outline" size={20} color={colors.textDim} />
+            <Ionicons name="remove-outline" size={20} color={colors.ink3} />
           </Pressable>
           <PromptBody
             prompt={activePrompt}
@@ -314,20 +314,20 @@ function PromptHeader({
   const { colors } = useTheme();
   return (
     <View style={styles.headingRow}>
-      <View style={[styles.icon, { backgroundColor: colors.bgHover }]}>
-        <Ionicons name={icon} size={24} color={colors.textSoft} />
+      <View style={[styles.icon, { backgroundColor: colors.sunken }]}>
+        <Ionicons name={icon} size={24} color={colors.ink2} />
       </View>
       <View style={styles.headingCopy}>
-        <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>
+        <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>
           {label.toUpperCase()}
         </Text>
-        <Text variant="lg" style={{ color: colors.text, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }} numberOfLines={2}>
+        <Text variant="lg" style={{ color: colors.ink, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }} numberOfLines={2}>
           {title}
         </Text>
       </View>
       {queueDepth > 1 && (
-        <View style={[styles.queueBadge, { backgroundColor: colors.bgHover }]}>
-          <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>1 of {queueDepth}</Text>
+        <View style={[styles.queueBadge, { backgroundColor: colors.sunken }]}>
+          <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>1 of {queueDepth}</Text>
         </View>
       )}
     </View>
@@ -338,7 +338,7 @@ function CancelButton({ onPress }: { onPress: () => void }) {
   const { colors } = useTheme();
   return (
     <TouchableOpacity accessibilityRole="button" onPress={onPress} style={styles.denyAction}>
-      <Text variant="sm" style={{ color: colors.error, fontWeight: fontWeights.semibold }}>Cancel</Text>
+      <Text variant="sm" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Cancel</Text>
     </TouchableOpacity>
   );
 }
@@ -347,8 +347,8 @@ function LoadingRow() {
   const { colors } = useTheme();
   return (
     <View style={styles.loadingRow}>
-      <ActivityIndicator color={colors.accent} />
-      <Text variant="sm" style={{ color: colors.textDim }}>Submitting…</Text>
+      <ActivityIndicator color={colors.accent.ink} />
+      <Text variant="sm" style={{ color: colors.ink3 }}>Submitting…</Text>
     </View>
   );
 }
@@ -385,24 +385,24 @@ export function ToolApprovalBody({
         title={prompt.tool_name || 'Tool request'}
         queueDepth={queueDepth}
       />
-      <Text variant="sm" style={[styles.description, { color: colors.textSoft }]}>
+      <Text variant="sm" style={[styles.description, { color: colors.ink2 }]}>
         {description}
       </Text>
       {!!risk && (
-        <View style={[styles.riskRow, { backgroundColor: colors.warningSubtle, borderColor: colors.warn }]}>
-          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.warn }}>◆</Text>
-          <Text variant="xs" style={{ color: colors.textSoft, flex: 1 }}>
+        <View style={[styles.riskRow, { backgroundColor: colors.attention.wash, borderColor: colors.attention.ink }]}>
+          <Text variant="sm" importantForAccessibility="no" style={{ color: colors.attention.ink }}>◆</Text>
+          <Text variant="xs" style={{ color: colors.ink2, flex: 1 }}>
             Risk: {risk}
           </Text>
         </View>
       )}
       {!!argsText && (
-        <View style={[styles.argsPanel, { backgroundColor: colors.codeBg, borderColor: colors.border }]}>
-          <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
+        <View style={[styles.argsPanel, { backgroundColor: colors.code, borderColor: colors.hairline }]}>
+          <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
             Arguments
           </Text>
           <ScrollView style={styles.argsScroll} nestedScrollEnabled>
-            <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }} selectable>
+            <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }} selectable>
               {argsText}
             </Text>
           </ScrollView>
@@ -416,8 +416,8 @@ export function ToolApprovalBody({
         style={styles.checkboxRow}
         testID="tool-approval-remember"
       >
-        <Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={remember ? colors.accent : colors.textDim} />
-        <Text variant="sm" style={{ color: colors.textSoft, marginLeft: spacing.sm }}>
+        <Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={remember ? colors.accent.ink : colors.ink3} />
+        <Text variant="sm" style={{ color: colors.ink2, marginLeft: spacing.sm }}>
           Always allow this tool
         </Text>
       </TouchableOpacity>
@@ -500,7 +500,7 @@ function ChoiceBody({
         queueDepth={queueDepth}
       />
       {!!prompt.description && (
-        <Text variant="sm" style={[styles.description, { color: colors.textSoft }]}>
+        <Text variant="sm" style={[styles.description, { color: colors.ink2 }]}>
           {prompt.description}
         </Text>
       )}
@@ -517,8 +517,8 @@ function ChoiceBody({
               style={[
                 styles.optionRow,
                 {
-                  backgroundColor: isSelected ? colors.accentSubtle : colors.raised,
-                  borderColor: isSelected ? colors.accent : colors.border,
+                  backgroundColor: isSelected ? colors.accent.wash : colors.raised,
+                  borderColor: isSelected ? colors.accent.ink : colors.hairline,
                 },
               ]}
             >
@@ -527,9 +527,9 @@ function ChoiceBody({
                   ? (isSelected ? 'checkbox' : 'square-outline')
                   : (isSelected ? 'radio-button-on' : 'radio-button-off')}
                 size={22}
-                color={isSelected ? colors.accent : colors.textDim}
+                color={isSelected ? colors.accent.ink : colors.ink3}
               />
-              <Text variant="sm" style={{ color: colors.text, flex: 1, marginLeft: spacing.md }}>
+              <Text variant="sm" style={{ color: colors.ink, flex: 1, marginLeft: spacing.md }}>
                 {label}
               </Text>
             </TouchableOpacity>
@@ -542,17 +542,17 @@ function ChoiceBody({
             style={[
               styles.optionRow,
               {
-                backgroundColor: useOther ? colors.accentSubtle : colors.raised,
-                borderColor: useOther ? colors.accent : colors.border,
+                backgroundColor: useOther ? colors.accent.wash : colors.raised,
+                borderColor: useOther ? colors.accent.ink : colors.hairline,
               },
             ]}
           >
             <Ionicons
               name={multi ? (useOther ? 'checkbox' : 'square-outline') : (useOther ? 'radio-button-on' : 'radio-button-off')}
               size={22}
-              color={useOther ? colors.accent : colors.textDim}
+              color={useOther ? colors.accent.ink : colors.ink3}
             />
-            <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.md }}>Other…</Text>
+            <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.md }}>Other…</Text>
           </TouchableOpacity>
         )}
         {allowOther && useOther && (
@@ -560,10 +560,10 @@ function ChoiceBody({
             value={otherText}
             onChangeText={setOtherText}
             placeholder="Type your answer"
-            placeholderTextColor={colors.textDim}
+            placeholderTextColor={colors.ink3}
             style={[
               styles.textInput,
-              { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
+              { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink },
             ]}
             autoFocus
           />
@@ -625,7 +625,7 @@ function QuizBody({
       <ScrollView style={styles.choiceScroll} nestedScrollEnabled>
         {questions.map((q, qi) => (
           <View key={q.qid || `q-${qi}`} style={styles.quizQuestionBlock}>
-            <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
+            <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
               {qi + 1}. {q.prompt}
             </Text>
             {q.kind === 'fill_blank' ? (
@@ -633,10 +633,10 @@ function QuizBody({
                 value={answers[q.qid] || ''}
                 onChangeText={text => setAnswer(q.qid, text)}
                 placeholder="Type your answer"
-                placeholderTextColor={colors.textDim}
+                placeholderTextColor={colors.ink3}
                 style={[
                   styles.textInput,
-                  { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
+                  { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink },
                 ]}
               />
             ) : (
@@ -652,17 +652,17 @@ function QuizBody({
                     style={[
                       styles.optionRow,
                       {
-                        backgroundColor: isSelected ? colors.accentSubtle : colors.raised,
-                        borderColor: isSelected ? colors.accent : colors.border,
+                        backgroundColor: isSelected ? colors.accent.wash : colors.raised,
+                        borderColor: isSelected ? colors.accent.ink : colors.hairline,
                       },
                     ]}
                   >
                     <Ionicons
                       name={isSelected ? 'radio-button-on' : 'radio-button-off'}
                       size={22}
-                      color={isSelected ? colors.accent : colors.textDim}
+                      color={isSelected ? colors.accent.ink : colors.ink3}
                     />
-                    <Text variant="sm" style={{ color: colors.text, flex: 1, marginLeft: spacing.md }}>
+                    <Text variant="sm" style={{ color: colors.ink, flex: 1, marginLeft: spacing.md }}>
                       {optLbl}
                     </Text>
                   </TouchableOpacity>
@@ -759,10 +759,10 @@ function InputBody({
         value={text}
         onChangeText={setText}
         placeholder={defaultValue || 'Type your answer'}
-        placeholderTextColor={colors.textDim}
+        placeholderTextColor={colors.ink3}
         style={[
           styles.textInput,
-          { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
+          { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink },
         ]}
         autoFocus
         multiline

@@ -51,9 +51,9 @@ export function ContainerBuildProgress({
       style={[
         styles.container,
         {
-          backgroundColor: failed ? colors.errorSubtle : colors.surface,
-          borderColor: colors.border,
-          borderLeftColor: failed ? colors.danger : running ? colors.running : colors.ok,
+          backgroundColor: failed ? colors.danger.wash : colors.surface,
+          borderColor: colors.hairline,
+          borderLeftColor: failed ? colors.danger.ink : running ? colors.running.ink : colors.ok.ink,
         },
       ]}
     >
@@ -66,12 +66,12 @@ export function ContainerBuildProgress({
         style={styles.header}
       >
         {running ? (
-          <ActivityIndicator color={colors.running} accessibilityLabel="in progress" />
+          <ActivityIndicator color={colors.running.ink} accessibilityLabel="in progress" />
         ) : (
           <Text
             variant="base"
             accessibilityLabel={failed ? 'failed' : 'done'}
-            style={{ color: failed ? colors.danger : colors.ok, fontWeight: fontWeights.semibold }}
+            style={{ color: failed ? colors.danger.ink : colors.ok.ink, fontWeight: fontWeights.semibold }}
           >
             {failed ? '✗' : '✓'}
           </Text>
@@ -88,13 +88,13 @@ export function ContainerBuildProgress({
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={17}
-            color={colors.textDim}
+            color={colors.ink3}
           />
         </View>
       </TouchableOpacity>
 
       {expanded ? (
-        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.codeBg }]}>
+        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.code }]}>
           <View style={styles.outputHeader}>
             <Text variant="xs" dim style={styles.outputTitle}>stdout / stderr</Text>
             <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{logs.length} events</Text>
@@ -111,7 +111,7 @@ export function ContainerBuildProgress({
                 <Text
                   variant="xs"
                   style={{
-                    color: line.stream === 'stderr' ? colors.error : colors.textDim,
+                    color: line.stream === 'stderr' ? colors.danger.ink : colors.ink3,
                     fontWeight: fontWeights.semibold,
                   }}
                 >
@@ -121,7 +121,7 @@ export function ContainerBuildProgress({
                   selectable
                   style={[
                     styles.logText,
-                    { color: line.stream === 'stderr' ? colors.error : colors.text },
+                    { color: line.stream === 'stderr' ? colors.danger.ink : colors.ink },
                   ]}
                 >
                   {line.text.replace(/\s+$/, '') || ' '}

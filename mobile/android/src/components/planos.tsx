@@ -2,8 +2,7 @@
 // (Panel, Pill/Badge, Status, Stepper, Tabs, bars, Sparkline, Toasts, form
 // fields) built from plain Views: no SVG or other native dependency.
 //
-// Colours come only from theme tokens; tints use `tint()` ("currentColor"
-// tint). Status always pairs a glyph with a label. Touch targets are >= 44dp.
+// Colours come only from theme tokens; tints use the semantic wash steps. Status always pairs a glyph with a label. Touch targets are >= 44dp.
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
@@ -26,15 +25,14 @@ import {
   fontWeights,
   radii,
   spacing,
-  tint,
-  toneColor,
-  onTone,
+  toneInk as toneColor,
+  washOf,
   touchTarget,
-  type PlanosTone,
+  type Tone as WashTone,
 } from '../theme/tokens';
 import { STATUS, asStatus, duration, money, type Status } from '../theme/status';
 
-export type Tone = PlanosTone | '';
+export type Tone = WashTone;
 
 /* ------------------------------------------------------------ Panel */
 
@@ -60,9 +58,9 @@ export type PanelProps = {
 export function Panel({ title, badge, badgeTone = '', glyph, glyphTone = '', right, children, flush, style, bodyStyle, testID, accessibilityLabel }: PanelProps) {
   const { colors } = useTheme();
   return (
-    <View testID={testID} accessibilityLabel={accessibilityLabel} style={[styles.panel, { backgroundColor: colors.surface, borderColor: colors.border }, style]}>
+    <View testID={testID} accessibilityLabel={accessibilityLabel} style={[styles.panel, { backgroundColor: colors.surface, borderColor: colors.hairline }, style]}>
       {title != null || right != null ? (
-        <View style={[styles.panelHead, { borderBottomColor: colors.border }]}>
+        <View style={[styles.panelHead, { borderBottomColor: colors.hairline }]}>
           {glyph ? <Text variant="sm" accessibilityElementsHidden importantForAccessibility="no" style={{ color: toneColor(colors, glyphTone || 'muted') }}>{glyph}</Text> : null}
           {typeof title === 'string' ? <Text variant="sm" accessibilityRole="header" style={styles.panelTitle} numberOfLines={1}>{title}</Text> : title}
           {badge != null && badge !== '' ? <CountBadge tone={badgeTone}>{badge}</CountBadge> : null}
@@ -81,7 +79,7 @@ export function Pill({ tone = 'muted', children, glyph, style, accessibilityLabe
   const { colors } = useTheme();
   const c = toneColor(colors, tone || 'muted');
   return (
-    <View testID={testID} accessibilityLabel={accessibilityLabel} style={[styles.pill, { backgroundColor: tint(c, 0.14), borderColor: tint(c, 0.4) }, style]}>
+    <View testID={testID} accessibilityLabel={accessibilityLabel} style={[styles.pill, { backgroundColor: washOf(colors, tone || 'muted'), borderColor: washOf(colors, tone || 'muted') }, style]}>
       {glyph ? <Text variant="xs" importantForAccessibility="no" style={{ color: c, fontWeight: fontWeights.semibold }}>{glyph}</Text> : null}
       <Text variant="xs" style={{ color: c, fontWeight: fontWeights.medium }} numberOfLines={1}>{children}</Text>
     </View>
@@ -90,10 +88,10 @@ export function Pill({ tone = 'muted', children, glyph, style, accessibilityLabe
 
 export function CountBadge({ tone = '', children }: { tone?: Tone; children: React.ReactNode }) {
   const { colors } = useTheme();
-  const c = tone ? toneColor(colors, tone) : colors.muted;
+  const c = tone ? toneColor(colors, tone) : colors.ink3;
   return (
-    <View style={[styles.countBadge, { backgroundColor: tone ? tint(c, 0.16) : colors.hover }]}>
-      <Text variant="xs" style={{ color: tone ? c : colors.text, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{children}</Text>
+    <View style={[styles.countBadge, { backgroundColor: tone ? washOf(colors, tone) : colors.sunken }]}>
+      <Text variant="xs" style={{ color: tone ? c : colors.ink, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{children}</Text>
     </View>
   );
 }
@@ -149,9 +147,9 @@ export function PlanosButton({ label, onPress, primary, tone = '', ghost, disabl
   const { colors } = useTheme();
   const toneC = tone ? toneColor(colors, tone) : null;
   const solid = !!primary && !disabled && !ariaDisabled;
-  const bg = ghost ? 'transparent' : solid ? (toneC || colors.accent) : selected ? colors.accentSubtle : colors.raised;
-  const border = ghost ? 'transparent' : solid ? (toneC || colors.accent) : toneC ? tint(toneC, 0.55) : selected ? colors.accent : colors.border;
-  const fg = solid ? onTone(colors, (tone || 'accent') as PlanosTone) : toneC || (selected ? colors.accent : colors.text);
+  const bg = ghost ? 'transparent' : solid ? (toneC || colors.accent.ink) : selected ? colors.accent.wash : colors.raised;
+  const border = ghost ? 'transparent' : solid ? (toneC || colors.accent.ink) : toneC ? toneC : selected ? colors.accent.ink : colors.hairline;
+  const fg = solid ? colors.onInk : toneC || (selected ? colors.accent.ink : colors.ink);
   return (
     <Pressable
       testID={testID}
@@ -166,7 +164,7 @@ export function PlanosButton({ label, onPress, primary, tone = '', ghost, disabl
         styles.btn,
         small && styles.btnSmall,
         iconOnly && styles.btnIcon,
-        { backgroundColor: pressed && !solid ? colors.hover : bg, borderColor: border, opacity: disabled || ariaDisabled ? 0.5 : pressed && solid ? 0.86 : 1 },
+        { backgroundColor: pressed && !solid ? colors.sunken : bg, borderColor: border, opacity: disabled || ariaDisabled ? 0.5 : pressed && solid ? 0.86 : 1 },
         style,
       ]}
     >
@@ -184,7 +182,7 @@ export type TabItem = { id: string; label: string; badge?: React.ReactNode; test
 export function Tabs({ items, value, onChange, accessibilityLabel = 'Views' }: { items: TabItem[]; value: string; onChange: (id: string) => void; accessibilityLabel?: string }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.tabsWrap, { borderBottomColor: colors.border }]}>
+    <View style={[styles.tabsWrap, { borderBottomColor: colors.hairline }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist" accessibilityLabel={accessibilityLabel} contentContainerStyle={styles.tabsRow}>
         {items.map(item => {
           const on = item.id === value;
@@ -196,9 +194,9 @@ export function Tabs({ items, value, onChange, accessibilityLabel = 'Views' }: {
               accessibilityLabel={item.label}
               accessibilityState={{ selected: on }}
               onPress={() => onChange(item.id)}
-              style={({ pressed }) => [styles.tab, { borderBottomColor: on ? colors.accent : 'transparent', backgroundColor: pressed ? colors.hover : 'transparent' }]}
+              style={({ pressed }) => [styles.tab, { borderBottomColor: on ? colors.accent.ink : 'transparent', backgroundColor: pressed ? colors.sunken : 'transparent' }]}
             >
-              <Text variant="sm" style={{ color: on ? colors.text : colors.muted, fontWeight: on ? fontWeights.semibold : fontWeights.medium }}>{item.label}</Text>
+              <Text variant="sm" style={{ color: on ? colors.ink : colors.ink3, fontWeight: on ? fontWeights.semibold : fontWeights.medium }}>{item.label}</Text>
               {item.badge != null && item.badge !== '' ? item.badge : null}
             </Pressable>
           );
@@ -212,13 +210,13 @@ export function Tabs({ items, value, onChange, accessibilityLabel = 'Views' }: {
 export function Segmented<T extends string>({ options, value, onChange, accessibilityLabel }: { options: Array<{ value: T; label: string }>; value: T; onChange: (v: T) => void; accessibilityLabel: string }) {
   const { colors } = useTheme();
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={[styles.segmented, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={[styles.segmented, { borderColor: colors.hairline, backgroundColor: colors.canvas }]}>
       {options.map(o => {
         const on = o.value === value;
         return (
           <Pressable key={o.value} accessibilityRole="radio" accessibilityLabel={o.label} accessibilityState={{ selected: on, checked: on }} onPress={() => onChange(o.value)}
-            style={[styles.segment, { backgroundColor: on ? colors.raised : 'transparent', borderColor: on ? colors.border : 'transparent' }]}>
-            <Text variant="xs" style={{ color: on ? colors.text : colors.muted, fontWeight: on ? fontWeights.semibold : fontWeights.medium }}>{o.label}</Text>
+            style={[styles.segment, { backgroundColor: on ? colors.raised : 'transparent', borderColor: on ? colors.hairline : 'transparent' }]}>
+            <Text variant="xs" style={{ color: on ? colors.ink : colors.ink3, fontWeight: on ? fontWeights.semibold : fontWeights.medium }}>{o.label}</Text>
           </Pressable>
         );
       })}
@@ -247,7 +245,7 @@ export function MiniStepper({ steps, testID }: { steps: StepLike[]; testID?: str
         const hollow = s.status === 'pending';
         return (
           <React.Fragment key={s.id || i}>
-            {i > 0 ? <View style={[styles.miniLink, { backgroundColor: colors.border }]} /> : null}
+            {i > 0 ? <View style={[styles.miniLink, { backgroundColor: colors.hairline }]} /> : null}
             <View style={[styles.miniNode, { borderColor: c, backgroundColor: hollow ? 'transparent' : c }]} />
           </React.Fragment>
         );
@@ -268,19 +266,19 @@ export function PipelineStepper({ steps, onStep }: { steps: StepLike[]; onStep?:
         const meta = [(s.elapsed || 0) >= 1 ? duration((s.elapsed || 0) * 1000) : '', s.cost_usd ? money(s.cost_usd) : '', (s.runs || 0) > 1 ? `×${s.runs}` : ''].filter(Boolean).join(' · ');
         return (
           <React.Fragment key={s.id}>
-            {i > 0 ? <View style={[styles.stepLink, { backgroundColor: steps[i - 1].status === 'done' || steps[i - 1].status === 'skipped' ? tint(colors.ok, 0.6) : colors.border }]} /> : null}
+            {i > 0 ? <View style={[styles.stepLink, { backgroundColor: steps[i - 1].status === 'done' || steps[i - 1].status === 'skipped' ? colors.ok.pigment : colors.hairline }]} /> : null}
             <Pressable
               testID={`pipeline-step-${s.id}`}
               accessibilityRole="button"
               accessibilityLabel={describeStep(s) + (s.detail ? `. ${s.detail}` : '')}
               onPress={onStep ? () => onStep(s.id) : undefined}
-              style={({ pressed }) => [styles.step, pressed && { backgroundColor: colors.hover }]}
+              style={({ pressed }) => [styles.step, pressed && { backgroundColor: colors.sunken }]}
             >
-              <View style={[styles.stepNode, { borderColor: pending ? colors.border : c, backgroundColor: pending ? 'transparent' : tint(c, 0.16) }]}>
-                <Text variant="sm" style={{ color: pending ? colors.muted : c, fontWeight: fontWeights.semibold }}>{st.icon}</Text>
+              <View style={[styles.stepNode, { borderColor: pending ? colors.hairline : c, backgroundColor: pending ? 'transparent' : washOf(colors, st.tone) }]}>
+                <Text variant="sm" style={{ color: pending ? colors.ink3 : c, fontWeight: fontWeights.semibold }}>{st.icon}</Text>
               </View>
-              <Text variant="xs" style={{ color: pending ? colors.muted : colors.text, fontWeight: fontWeights.medium }}>{s.label}</Text>
-              <Text variant="xs" style={[styles.num, { color: colors.muted }]} numberOfLines={1}>{meta || ' '}</Text>
+              <Text variant="xs" style={{ color: pending ? colors.ink3 : colors.ink, fontWeight: fontWeights.medium }}>{s.label}</Text>
+              <Text variant="xs" style={[styles.num, { color: colors.ink3 }]} numberOfLines={1}>{meta || ' '}</Text>
             </Pressable>
           </React.Fragment>
         );
@@ -297,10 +295,10 @@ export function ResultBar({ passed, failed, skipped = 0, large = false, testID }
   const sum = Math.max(1, passed + failed + skipped);
   const text = `${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`;
   return (
-    <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={text} style={[styles.bar, large && styles.barLarge, { backgroundColor: colors.hover }]}>
-      {passed ? <View style={{ flex: passed / sum, backgroundColor: colors.ok }} /> : null}
-      {failed ? <View style={{ flex: failed / sum, backgroundColor: colors.danger }} /> : null}
-      {skipped ? <View style={{ flex: skipped / sum, backgroundColor: colors.muted }} /> : null}
+    <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={text} style={[styles.bar, large && styles.barLarge, { backgroundColor: colors.sunken }]}>
+      {passed ? <View style={{ flex: passed / sum, backgroundColor: colors.ok.ink }} /> : null}
+      {failed ? <View style={{ flex: failed / sum, backgroundColor: colors.danger.ink }} /> : null}
+      {skipped ? <View style={{ flex: skipped / sum, backgroundColor: colors.ink3 }} /> : null}
     </View>
   );
 }
@@ -310,7 +308,7 @@ export function Meter({ value, max = 1, tone = 'accent', accessibilityLabel }: {
   const { colors } = useTheme();
   const pct = Math.max(0, Math.min(1, max > 0 ? value / max : 0));
   return (
-    <View accessible={!!accessibilityLabel} accessibilityLabel={accessibilityLabel} style={[styles.bar, { backgroundColor: colors.hover, flex: 1 }]}>
+    <View accessible={!!accessibilityLabel} accessibilityLabel={accessibilityLabel} style={[styles.bar, { backgroundColor: colors.sunken, flex: 1 }]}>
       <View style={{ width: `${pct * 100}%`, backgroundColor: toneColor(colors, tone || 'accent') }} />
     </View>
   );
@@ -321,7 +319,7 @@ export function Sparkline({ values, max, tone = 'running', height = 24, colorsFo
   const { colors } = useTheme();
   const top = max ?? Math.max(1e-9, ...values.map(v => Number(v || 0)));
   return (
-    <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel} style={[styles.spark, { height, borderBottomColor: colors.border }]}>
+    <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel} style={[styles.spark, { height, borderBottomColor: colors.hairline }]}>
       {values.map((v, i) => (
         <View key={i} style={{ flex: 1, height: `${Math.max(v == null ? 0 : 4, (Number(v || 0) / top) * 100)}%`, backgroundColor: v == null ? 'transparent' : colorsFor?.(i) || toneColor(colors, tone || 'running'), marginHorizontal: 0.5, borderTopLeftRadius: 1, borderTopRightRadius: 1 }} />
       ))}
@@ -335,9 +333,9 @@ export function StatTile({ value, label, tone, glyph, onPress, testID }: { value
   const c = toneColor(colors, tone || 'muted');
   return (
     <Pressable testID={testID} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={`${value} ${label}`} onPress={onPress}
-      style={({ pressed }) => [styles.stat, { backgroundColor: pressed ? colors.hover : colors.surface, borderColor: colors.border }]}>
+      style={({ pressed }) => [styles.stat, { backgroundColor: pressed ? colors.sunken : colors.surface, borderColor: colors.hairline }]}>
       <Text style={[styles.statValue, { color: c }]}><Text style={{ color: c }} importantForAccessibility="no">{glyph}</Text> {value}</Text>
-      <Text variant="xs" style={{ color: colors.muted }} numberOfLines={1}>{label}</Text>
+      <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -349,10 +347,10 @@ export function Banner({ tone = 'warn', glyph, title, children, right, role, tes
   const { colors } = useTheme();
   const c = toneColor(colors, tone || 'warn');
   return (
-    <View testID={testID} accessibilityRole={role} style={[styles.banner, { backgroundColor: tint(c, 0.1), borderColor: tint(c, 0.4), borderLeftColor: c }]}>
+    <View testID={testID} accessibilityRole={role} style={[styles.banner, { backgroundColor: washOf(colors, tone || 'warn'), borderColor: washOf(colors, tone || 'warn'), borderLeftColor: c }]}>
       <View style={styles.row}>
         {glyph ? <Text variant="sm" importantForAccessibility="no" style={{ color: c, fontWeight: fontWeights.semibold }}>{glyph}</Text> : null}
-        {typeof title === 'string' ? <Text variant="sm" style={{ flex: 1, color: colors.text, fontWeight: fontWeights.semibold }}>{title}</Text> : title}
+        {typeof title === 'string' ? <Text variant="sm" style={{ flex: 1, color: colors.ink, fontWeight: fontWeights.semibold }}>{title}</Text> : title}
         {right}
       </View>
       {children}
@@ -367,10 +365,10 @@ export function Field({ label, hint, error, optional, children, testID }: { labe
   const { colors } = useTheme();
   return (
     <View testID={testID} style={styles.field}>
-      <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.medium }}>{label}{optional ? <Text variant="xs" style={{ color: colors.muted }}> (optional)</Text> : null}</Text>
+      <Text variant="xs" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>{label}{optional ? <Text variant="xs" style={{ color: colors.ink3 }}> (optional)</Text> : null}</Text>
       {children}
-      {hint ? <Text variant="xs" style={{ color: colors.muted }}>{hint}</Text> : null}
-      {error ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text> : null}
+      {hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{hint}</Text> : null}
+      {error ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{error}</Text> : null}
     </View>
   );
 }
@@ -380,7 +378,7 @@ export function TextField({ style, multiline, mono, invalid, ...rest }: TextInpu
   const [focused, setFocused] = useState(false);
   return (
     <TextInput
-      placeholderTextColor={colors.muted}
+      placeholderTextColor={colors.ink3}
       multiline={multiline}
       {...rest}
       onFocus={e => { setFocused(true); rest.onFocus?.(e); }}
@@ -388,7 +386,7 @@ export function TextField({ style, multiline, mono, invalid, ...rest }: TextInpu
       style={[
         styles.input,
         multiline && styles.textarea,
-        { color: colors.text, backgroundColor: colors.bg, borderColor: invalid ? colors.danger : focused ? colors.accent : colors.border, borderWidth: focused ? 2 : 1 },
+        { color: colors.ink, backgroundColor: colors.canvas, borderColor: invalid ? colors.danger.ink : focused ? colors.accent.ink : colors.hairline, borderWidth: focused ? 2 : 1 },
         mono && { fontFamily: fonts.mono },
         style as StyleProp<TextStyle>,
       ]}
@@ -403,7 +401,7 @@ export function SwitchRow({ label, hint, value, onValueChange, disabled, testID 
     <View style={styles.switchRow}>
       <View style={{ flex: 1 }}>
         <Text variant="sm" style={{ fontWeight: fontWeights.medium }}>{label}</Text>
-        {hint ? <Text variant="xs" style={{ color: colors.muted }}>{hint}</Text> : null}
+        {hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{hint}</Text> : null}
       </View>
       <Switch
         testID={testID}
@@ -411,8 +409,8 @@ export function SwitchRow({ label, hint, value, onValueChange, disabled, testID 
         value={value}
         disabled={disabled}
         onValueChange={onValueChange}
-        trackColor={{ false: colors.border, true: colors.accent }}
-        thumbColor={value ? colors.accentOn : colors.raised}
+        trackColor={{ false: colors.hairline, true: colors.accent.ink }}
+        thumbColor={value ? colors.onInk : colors.raised}
       />
     </View>
   );
@@ -424,10 +422,10 @@ export function CheckRow({ label, checked, onChange, disabled, accessibilityLabe
   return (
     <Pressable testID={testID} accessibilityRole="checkbox" accessibilityLabel={accessibilityLabel || label} accessibilityState={{ checked, disabled: !!disabled }} disabled={disabled}
       onPress={() => onChange(!checked)} style={[styles.check, { opacity: disabled ? 0.5 : 1 }]}>
-      <View style={[styles.checkBox, { borderColor: checked ? colors.accent : colors.border, backgroundColor: checked ? colors.accent : colors.bg }]}>
-        {checked ? <Text variant="xs" style={{ color: colors.accentOn, fontWeight: fontWeights.bold, lineHeight: 14 }}>✓</Text> : null}
+      <View style={[styles.checkBox, { borderColor: checked ? colors.accent.ink : colors.hairline, backgroundColor: checked ? colors.accent.ink : colors.canvas }]}>
+        {checked ? <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.bold, lineHeight: 14 }}>✓</Text> : null}
       </View>
-      <Text variant="xs" style={{ color: colors.text }}>{label}</Text>
+      <Text variant="xs" style={{ color: colors.ink }}>{label}</Text>
     </Pressable>
   );
 }
@@ -439,7 +437,7 @@ export function Empty({ children, status }: { children: React.ReactNode; status?
   return (
     <View style={styles.empty}>
       {status ? <StatusIcon status={status} /> : null}
-      <Text variant="sm" style={{ color: colors.muted, flex: 1 }}>{children}</Text>
+      <Text variant="sm" style={{ color: colors.ink3, flex: 1 }}>{children}</Text>
     </View>
   );
 }
@@ -448,8 +446,8 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
   const { colors } = useTheme();
   return (
     <View accessibilityRole="progressbar" accessibilityLabel={label} style={styles.empty}>
-      <ActivityIndicator size="small" color={colors.running} />
-      <Text variant="sm" style={{ color: colors.muted }}>{label}</Text>
+      <ActivityIndicator size="small" color={colors.running.ink} />
+      <Text variant="sm" style={{ color: colors.ink3 }}>{label}</Text>
     </View>
   );
 }
@@ -458,7 +456,7 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
 export function Pre({ children, testID, style, numberOfLines }: { children: React.ReactNode; testID?: string; style?: StyleProp<TextStyle>; numberOfLines?: number }) {
   const { colors } = useTheme();
   return (
-    <Text testID={testID} selectable variant="xs" numberOfLines={numberOfLines} style={[styles.pre, { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text }, style]}>{children}</Text>
+    <Text testID={testID} selectable variant="xs" numberOfLines={numberOfLines} style={[styles.pre, { backgroundColor: colors.canvas, borderColor: colors.hairline, color: colors.ink }, style]}>{children}</Text>
   );
 }
 
@@ -496,11 +494,11 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
               const c = toneColor(colors, item.tone || 'accent');
               return (
                 <View key={item.id} accessibilityRole={item.tone === 'danger' ? 'alert' : 'text'} accessibilityLiveRegion="polite"
-                  style={[styles.toast, { backgroundColor: colors.raised, borderColor: colors.border, borderLeftColor: c }]}>
+                  style={[styles.toast, { backgroundColor: colors.raised, borderColor: colors.hairline, borderLeftColor: c }]}>
                   <Text variant="sm" importantForAccessibility="no" style={{ color: c }}>{TOAST_GLYPH[item.tone] || 'ℹ'}</Text>
-                  <Text variant="sm" style={{ flex: 1, color: colors.text }}>{item.text}</Text>
+                  <Text variant="sm" style={{ flex: 1, color: colors.ink }}>{item.text}</Text>
                   <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => dismiss(item.id)} hitSlop={10} style={styles.toastClose}>
-                    <Text variant="sm" style={{ color: colors.muted }}>✕</Text>
+                    <Text variant="sm" style={{ color: colors.ink3 }}>✕</Text>
                   </Pressable>
                 </View>
               );
@@ -523,7 +521,7 @@ export function KV({ label, children }: { label: string; children: React.ReactNo
   const { colors } = useTheme();
   return (
     <View style={styles.kv}>
-      <Text variant="xs" style={{ color: colors.muted, minWidth: 96 }}>{label}</Text>
+      <Text variant="xs" style={{ color: colors.ink3, minWidth: 96 }}>{label}</Text>
       <View style={{ flex: 1 }}>{typeof children === 'string' || typeof children === 'number' ? <Text variant="xs">{children}</Text> : children}</View>
     </View>
   );

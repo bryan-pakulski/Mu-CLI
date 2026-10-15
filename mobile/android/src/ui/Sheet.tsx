@@ -125,7 +125,8 @@ export function Sheet({ visible, onClose, title, children, dismissable = true, f
     },
   }), [dismissable, drag, onClose]);
 
-  if (!visible) return null;
+  // Keep the Modal mounted and drive it with `visible`: unmounting a visible RN Modal on Android
+  // can leave its native window on screen (a stale sheet that also swallows every touch).
   const requestClose = dismissable ? onClose : () => undefined;
 
   const header = (
@@ -149,7 +150,7 @@ export function Sheet({ visible, onClose, title, children, dismissable = true, f
 
   if (full) {
     return (
-      <ModalFrame testID={testID} visible transparent={false} onRequestClose={requestClose} animationType={reducedMotion ? 'none' : 'slide'}>
+      <ModalFrame testID={testID} visible={visible} transparent={false} onRequestClose={requestClose} animationType={reducedMotion ? 'none' : 'slide'}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={[styles.fullInner]}>
             {header}
@@ -162,7 +163,7 @@ export function Sheet({ visible, onClose, title, children, dismissable = true, f
   }
 
   return (
-    <ModalFrame testID={testID} visible onRequestClose={requestClose} animationType={reducedMotion ? 'none' : 'fade'} edges={['top', 'bottom', 'left', 'right']}>
+    <ModalFrame testID={testID} visible={visible} onRequestClose={requestClose} animationType={reducedMotion ? 'none' : 'fade'} edges={['top', 'bottom', 'left', 'right']}>
       <SheetBody
         colors={colors}
         isDark={isDark}
@@ -226,10 +227,10 @@ export type DialogProps = {
 /** Centred level-3 dialog: title-2 header, scrolling body, right-aligned actions. */
 export function Dialog({ visible, onClose, title, children, footer, dismissable = true, testID }: DialogProps) {
   const { colors, reduceDecoration } = useTheme();
-  if (!visible) return null;
+  // Mounted and driven by `visible` (see Sheet): never unmount a visible Modal on Android.
   const requestClose = dismissable ? onClose : () => undefined;
   return (
-    <ModalFrame testID={testID} visible onRequestClose={requestClose}>
+    <ModalFrame testID={testID} visible={visible} onRequestClose={requestClose}>
       <View style={[styles.dialogRoot, { backgroundColor: colors.scrim }]}>
         <View accessibilityViewIsModal style={[styles.dialog, glassStyle(3, colors, { solid: reduceDecoration }), { backgroundColor: 'transparent', overflow: 'hidden' }]}>
           <GlassBackdrop level={3} testID="dialog-glass" />

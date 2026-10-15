@@ -39,7 +39,10 @@ def test_pending_prompt_does_not_automatically_cover_navigator():
     source = read("mobile/android/src/components/PromptHost.tsx")
     assert "if (!activeSessionName) return false" in source
     assert "Input required" in source
-    assert "if (!reviewOpen)" in source
+    # Banner until the user opens it; the review sheet stays mounted and only becomes visible on
+    # request (a visible RN Modal is never unmounted — Android leaves a stale, touch-eating window).
+    assert "activePrompt && !reviewOpen ?" in source
+    assert "const sheetOpen = !!activePrompt && reviewOpen;" in source and "visible={sheetOpen}" in source
     assert "setInterval(recoverPending" not in source
 
 

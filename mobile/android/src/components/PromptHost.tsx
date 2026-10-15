@@ -217,60 +217,63 @@ export function PromptHost() {
     }
   }, [activePrompt, recoverPending, removePrompt, submitting]);
 
-  if (!activePrompt) return null;
-
-  if (!reviewOpen) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Review pending agent input"
-        haptic="light"
-        onPress={() => setReviewOpen(true)}
-        // Attention state on level-2 glass chrome: blurred backdrop, the
-        // attention wash mixed into the glass and the ◆ glyph; no side rule.
-        style={[glass.style(2), styles.pendingBanner, { backgroundColor: 'transparent', overflow: 'hidden' }]}
-      >
-        <GlassBackdrop level={2} testID="pending-banner-glass" />
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: glass.tint('attention') }]} />
-        <View style={[styles.pendingIcon, { backgroundColor: colors.attention.wash }]}>
-          <Text variant="title3" importantForAccessibility="no" style={{ color: colors.attention.ink }}>{vocabulary.status.waiting.glyph}</Text>
-        </View>
-        <View style={styles.pendingCopy}>
-          <Text variant="body" style={{ fontWeight: '600' }}>Input required</Text>
-          <Text variant="caption" tone="ink3" numberOfLines={1}>Mucli is waiting · tap to review</Text>
-        </View>
-        {queue.length > 1 ? (
-          <Text variant="caption" tone="ink3" numeric>{queue.length} pending</Text>
-        ) : null}
-        <Icon name="chevron-right" color={colors.ink3} />
-      </Pressable>
-    );
-  }
-
+  // The review Sheet stays mounted and is driven by `visible`. Swapping it out for the banner (or
+  // for nothing when the prompt resolves) unmounted a visible RN Modal, which on Android can leave
+  // its native window on screen: a stale prompt that also swallows every touch.
+  const sheetOpen = !!activePrompt && reviewOpen;
   return (
-    <Sheet
-      visible
-      dismissable={false}
-      onClose={() => setReviewOpen(false)}
-      title={activePrompt.shape === 'tool_approval' ? 'Approval needed' : 'Mucli has a question'}
-      headerRight={(
+    <>
+      {activePrompt && !reviewOpen ? (
         <Pressable
-          accessibilityLabel="Minimize pending input"
-          onPress={() => setReviewOpen(false)}
-          style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}
+          accessibilityRole="button"
+          accessibilityLabel="Review pending agent input"
+          haptic="light"
+          onPress={() => setReviewOpen(true)}
+          // Attention state on level-2 glass chrome: blurred backdrop, the
+          // attention wash mixed into the glass and the ◆ glyph; no side rule.
+          style={[glass.style(2), styles.pendingBanner, { backgroundColor: 'transparent', overflow: 'hidden' }]}
         >
-          <Icon name="minimize-2" color={colors.ink3} />
+          <GlassBackdrop level={2} testID="pending-banner-glass" />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: glass.tint('attention') }]} />
+          <View style={[styles.pendingIcon, { backgroundColor: colors.attention.wash }]}>
+            <Text variant="title3" importantForAccessibility="no" style={{ color: colors.attention.ink }}>{vocabulary.status.waiting.glyph}</Text>
+          </View>
+          <View style={styles.pendingCopy}>
+            <Text variant="body" style={{ fontWeight: '600' }}>Input required</Text>
+            <Text variant="caption" tone="ink3" numberOfLines={1}>Mucli is waiting · tap to review</Text>
+          </View>
+          {queue.length > 1 ? (
+            <Text variant="caption" tone="ink3" numeric>{queue.length} pending</Text>
+          ) : null}
+          <Icon name="chevron-right" color={colors.ink3} />
         </Pressable>
-      )}
-    >
-      <PromptBody
-        prompt={activePrompt}
-        submitting={submitting}
-        submit={submit}
-        cancel={cancel}
-        queueDepth={queue.length}
-      />
-    </Sheet>
+      ) : null}
+      <Sheet
+        visible={sheetOpen}
+        dismissable={false}
+        onClose={() => setReviewOpen(false)}
+        title={activePrompt?.shape === 'tool_approval' ? 'Approval needed' : 'Mucli has a question'}
+        headerRight={(
+          <Pressable
+            accessibilityLabel="Minimize pending input"
+            onPress={() => setReviewOpen(false)}
+            style={({ pressed }) => [styles.minimizeButton, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}
+          >
+            <Icon name="minimize-2" color={colors.ink3} />
+          </Pressable>
+        )}
+      >
+        {activePrompt ? (
+          <PromptBody
+            prompt={activePrompt}
+            submitting={submitting}
+            submit={submit}
+            cancel={cancel}
+            queueDepth={queue.length}
+          />
+        ) : null}
+      </Sheet>
+    </>
   );
 }
 

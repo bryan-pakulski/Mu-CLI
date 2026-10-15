@@ -195,3 +195,15 @@ Android chrome uses the translucent glass fill (the G§3.3 no-blur fallback), an
 with Reduce decoration. New `__tests__/android-no-live-blur.test.tsx` (fails against the old code).
 No existing test was changed. Version 0.5.1 (versionCode 17); the Makefile derives the APK name
 from package.json.
+
+## Fix: never unmount a visible Modal (0.5.2)
+
+A resumed job's "continue" sheet stayed on screen and sessions could not be switched. `Sheet` and
+`Dialog` returned `null` when hidden and `PromptHost` swapped its review sheet for the banner,
+unmounting a visible RN Modal; on Android that can leave the native window up, showing stale
+content and swallowing touches. They now stay mounted and pass `visible` through (RN dismisses the
+window natively). New `__tests__/modal-stays-mounted.test.tsx` (fails against the old code).
+
+- tests/test_mobile_responsiveness.py:42 — `"if (!reviewOpen)" in source` → asserts the banner
+  condition `activePrompt && !reviewOpen ?` and the mounted sheet `visible={sheetOpen}` — intent
+  unchanged: a pending prompt shows as a banner and only covers the navigator when opened.

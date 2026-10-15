@@ -80,7 +80,7 @@ export function ConnectionScreen() {
           // failure; never block navigation on it.
         });
       if (navigation.canGoBack()) navigation.goBack();
-      else navigation.navigate('Chat');
+      else navigation.navigate('Tabs', { screen: 'Chat' });
     } finally {
       setTesting(false);
     }

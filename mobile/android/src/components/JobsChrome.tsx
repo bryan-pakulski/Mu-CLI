@@ -29,9 +29,11 @@ export const JOBS_PAGES: Array<{ id: JobsPage; label: string }> = [
  * AppNavigator) instead of being pushed, so Back leaves jobs mode rather than replaying
  * every tab visited.
  */
-export function switchJobsPage(navigation: { replace?: (name: any) => void; navigate: (name: any) => void },
+export function switchJobsPage(navigation: { replace?: (name: any) => void; navigate: (name: any, params?: any) => void },
                                current: JobsPage, page: JobsPage) {
   if (page === current) return;
+  // The dashboard lives in the tab shell; returning to it pops back to the tabs.
+  if (page === 'Work') { navigation.navigate('Tabs', { screen: 'Work' }); return; }
   if (navigation.replace) navigation.replace(page);
   else navigation.navigate(page);
 }

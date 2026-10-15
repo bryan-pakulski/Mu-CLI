@@ -100,15 +100,17 @@ def test_mobile_shared_surfaces_are_quiet_glass_not_legacy_cards():
 def test_mobile_header_matches_web_information_hierarchy():
     text = read(HEADER)
     assert 'accessibilityLabel="Open sessions"' in text
-    assert 'accessibilityLabel="Open Trace Analyzer"' in text
-    assert 'name="analytics-outline"' in text
-    assert 'name="settings-outline"' in text
-    # planos top bar: surface + 1px bottom border; settings groups are panels.
-    assert "backgroundColor: colors.surface" in text
-    assert "borderBottomColor: colors.hairline" in text
-    assert "sectionBody: { borderWidth: 1, borderRadius: radii.panel" in text
+    # Wash icon buttons (always labelled): trace and settings.
+    assert '<IconButton icon="activity" label="Open Trace Analyzer"' in text
+    assert '<IconButton icon="settings" label="Open settings" onPress={onOpenSettings}' in text
+    # Wash top bar (G§8.3): solid canvas with a 1px hairline bottom edge.
+    assert "backgroundColor: colors.canvas, borderBottomColor: colors.hairline" in text
     assert "borderBottomWidth: 1" in text
     assert "ellipsis-horizontal" not in text
+    # Settings is a real screen (G§8.3) whose groups are sunken cards (G§9.3).
+    settings = read(MOBILE / "src" / "screens" / "SettingsScreen.tsx")
+    assert '<Card variant="sunken"' in settings
+    assert "<Segmented<ThemePreference>" in settings and "Reduce decoration" in settings
 
 
 def test_mobile_chat_is_flat_compact_and_single_pane():

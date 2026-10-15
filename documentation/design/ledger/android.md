@@ -79,3 +79,8 @@ onto the kit `Pressable`. New coverage: `mobile/android/__tests__/wash-kit.test.
 - `tests/test_mobile_safe_area_modals.py:41` — `"SafeAreaModal" in source` → `"ModalFrame" in source or "<Sheet" in source` — full-height flows go through the safe-area wrapper.
 - `tests/test_mobile_safe_area_modals.py:46-55` — `ModernBottomSheet.tsx`/`BottomSheet.tsx` contain `SafeAreaModal` → `ui/Sheet.tsx` renders `<ModalFrame`; drawers and PromptHost use `ModalFrame` or `<Sheet` — sheets and drawers stay above the Android navigation bar.
 - `tests/test_mobile_shell_screen.py:96` — `"Badge" in src` → `"<Chip" in src` — the shell connection status is a status chip (Badge retired, G§9.2).
+
+## M3 — navigation and patterns
+
+- `tests/test_job_review_surfaces.py:125-134` — header carries `accessibilityLabel="Open engineering work"` with `briefcase-outline` and a `label="Engineering work"` settings row → Work is a bottom tab (`<Tab.Screen name="Work"`, `tabBarAccessibilityLabel: 'Work'`), the header keeps a labelled `IconButton icon="briefcase" label="Open engineering work"`, and Containers moved to the Settings screen — Work stays one tap from chat (G§8.3).
+- `tests/test_mobile_product_ui.py:100-113` — header `accessibilityLabel="Open Trace Analyzer"`, `analytics-outline`/`settings-outline` Ionicons, surface top bar, settings sheet groups as bordered panels → labelled Wash `IconButton`s (`activity`, `settings` → Settings screen), canvas top bar with a hairline bottom edge, and Settings as a real screen whose groups are sunken cards with the System/Paper/Dusk segmented control and Reduce decoration — same information hierarchy, Settings no longer a long sheet (G§8.3, G§9.3).

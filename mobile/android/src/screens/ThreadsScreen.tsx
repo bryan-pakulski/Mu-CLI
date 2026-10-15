@@ -124,7 +124,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
 
   const switchThread = async (thread: ThreadSummary) => {
     if (switchingName || thread.session_name === activeSessionName) {
-      if (thread.session_name === activeSessionName) navigation?.navigate('Chat');
+      if (thread.session_name === activeSessionName) navigation?.navigate('Tabs', { screen: 'Chat' });
       return;
     }
     setSwitchingName(thread.session_name);
@@ -133,7 +133,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
       // the requested session, so one call covers both saved and live peers.
       await sessionsApi.load(thread.session_name);
       setActiveSession(thread.session_name);
-      navigation?.navigate('Chat');
+      navigation?.navigate('Tabs', { screen: 'Chat' });
     } catch (cause) {
       const problem = describeSessionLoadError(cause);
       setError(`${problem.title}: ${formatSessionLoadProblem(problem)}`);
@@ -145,7 +145,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
   const threadCreated = (thread: CreateThreadResponse) => {
     setActiveSession(thread.session_name);
     setCreateOpen(false);
-    navigation?.navigate('Chat');
+    navigation?.navigate('Tabs', { screen: 'Chat' });
   };
 
   const deleteThread = (thread: ThreadSummary) => {
@@ -187,7 +187,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
           message="Load a session before creating or reviewing agent threads."
           icon="git-branch"
           actionLabel="Back to chat"
-          onAction={() => navigation?.navigate('Chat')}
+          onAction={() => navigation?.navigate('Tabs', { screen: 'Chat' })}
         />
       </SafeAreaView>
     );

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef, type NavigatorScreenParams } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import type { WorkspaceCategoryId } from './workspace';
@@ -48,11 +49,25 @@ import { HistoryScreen } from '../screens/HistoryScreen';
 import { ThreadsScreen } from '../screens/ThreadsScreen';
 import { ShellScreen } from '../screens/ShellScreen';
 import { ArtifactsScreen } from '../screens/ArtifactsScreen';
-import { fontSizes, fontWeights } from '../theme/tokens';
+import { SettingsScreen } from '../screens/SettingsScreen';
+import { MoreScreen } from '../screens/MoreScreen';
+import { fontSizes, fontWeights, radii } from '../theme/tokens';
 import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
-import { Pressable, Text, ToastHost } from '../ui';
+import { Icon, Pressable, Text, ToastHost, textStyle, type IconName } from '../ui';
+
+/** Bottom tabs (G§8.3): Chat, Work, Workspace, More. */
+export type TabParamList = {
+  Chat: undefined;
+  Work: undefined;
+  Workspace: undefined;
+  More: undefined;
+};
 
 export type RootStackParamList = {
+  /** The tab shell; navigate with `navigate('Tabs', { screen: 'Work' })`. */
+  Tabs: NavigatorScreenParams<TabParamList> | undefined;
+  Settings: undefined;
+  // Tab routes, typed here so their screens share the root param list.
   Chat: undefined;
   Work: undefined;
   JobDetail: { jobId: string; tab?: string; action?: string };
@@ -101,10 +116,22 @@ const JOBS_PAGE_SCREENS: { name: JobsPageRoute; title: string; component: React.
 ];
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createBottomTabNavigator<TabParamList>();
+
+/** Route names that live in the tab shell rather than the root stack. */
+export const TAB_ROUTES = new Set<string>(['Chat', 'Work', 'Workspace', 'More']);
+
+/** Navigate from anywhere: tab routes go through the tab shell. */
+export function navigateTo(name: string, params?: object) {
+  const nav = navRef.current;
+  if (!nav) return;
+  if (TAB_ROUTES.has(name)) (nav.navigate as unknown as (n: string, p?: object) => void)('Tabs', { screen: name });
+  else (nav.navigate as unknown as (n: string, p?: object) => void)(name, params);
+}
 const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
 const PANEL_SCREENS: {
-  name: Exclude<keyof RootStackParamList, 'Chat' | 'Work' | 'JobDetail' | 'JobAnalysis' | 'JobSetup' | 'JobDoctor' | 'Workspace' | 'WorkspaceCategory' | JobsPageRoute>;
+  name: Exclude<keyof RootStackParamList, 'Tabs' | 'Settings' | 'Chat' | 'Work' | 'JobDetail' | 'JobAnalysis' | 'JobSetup' | 'JobDoctor' | 'Workspace' | 'WorkspaceCategory' | JobsPageRoute>;
   title: string;
   component: React.ComponentType;
 }[] = [
@@ -173,18 +200,14 @@ function ChatScreenWithChrome() {
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ModernHeader
           onOpenSessions={openSessions}
-          onOpenWork={() => isConnected ? navRef.current?.navigate('Work') : navRef.current?.navigate('Connection')}
-          onOpenWorkspace={() => activeSessionName ? navRef.current?.navigate('Workspace') : openSessions()}
-          onOpenTraces={() => activeSessionName ? navRef.current?.navigate('Traces') : openSessions()}
-          onOpenThreads={() => activeSessionName ? navRef.current?.navigate('Threads') : openSessions()}
-          onOpenConnection={() => navRef.current?.navigate('Connection')}
-          onOpenModes={() => activeSessionName ? navRef.current?.navigate('Modes') : openSessions()}
-          onOpenProviders={() => navRef.current?.navigate('Providers')}
-          onOpenArtifacts={() => activeSessionName ? navRef.current?.navigate('Artifacts') : openSessions()}
-          onOpenContainers={() => setContainersOpen(true)}
+          onOpenWork={() => isConnected ? navigateTo('Work') : navigateTo('Connection')}
+          onOpenTraces={() => activeSessionName ? navigateTo('Traces') : openSessions()}
+          onOpenConnection={() => navigateTo('Connection')}
+          onOpenSettings={() => navigateTo('Settings')}
+          onOpenContext={() => navigateTo('Memory')}
         />
         {!isConnected ? (
-          <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
+          <ConnectionPrompt onConnect={() => navigateTo('Connection')} />
         ) : activeSessionName ? (
           <ChatScreenProduct />
         ) : (
@@ -203,10 +226,53 @@ function ChatScreenWithChrome() {
         <ModeDrawer
           visible={Boolean(activeSessionName) && modeOpen}
           onClose={() => setModeOpen(false)}
-          onOpenModes={() => navRef.current?.navigate('Modes')}
+          onOpenModes={() => navigateTo('Modes')}
         />
       </View>
     </EdgeSwipeView>
+  );
+}
+
+const TAB_ICONS: Record<keyof TabParamList, IconName> = {
+  Chat: 'message-circle',
+  Work: 'briefcase',
+  Workspace: 'layout-dashboard',
+  More: 'more-horizontal',
+};
+
+/** Tab bar item (G§9.4 M): 24 icon, 12 label; active = accent icon, ink label, wash pill behind the icon. */
+function TabIcon({ name, focused }: { name: keyof TabParamList; focused: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ width: 56, height: 28, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: focused ? colors.accent.wash : 'transparent' }}>
+      <Icon name={TAB_ICONS[name]} size="lg" color={focused ? colors.accent.ink : colors.ink3} />
+    </View>
+  );
+}
+
+function MainTabs() {
+  const { colors } = useTheme();
+  return (
+    <Tab.Navigator
+      sceneContainerStyle={{ backgroundColor: colors.canvas }}
+      screenOptions={({ route }) => ({
+        tabBarIcon: ({ focused }) => <TabIcon name={route.name} focused={focused} />,
+        tabBarActiveTintColor: colors.ink,
+        tabBarInactiveTintColor: colors.ink3,
+        tabBarLabelStyle: { ...textStyle('caption'), marginBottom: 2 },
+        tabBarStyle: { backgroundColor: colors.canvas, borderTopColor: colors.hairline, minHeight: 64, paddingTop: 6 },
+        tabBarItemStyle: { minHeight: 44 },
+        headerStyle: { backgroundColor: colors.canvas },
+        headerTintColor: colors.ink,
+        headerShadowVisible: false,
+        headerTitleStyle: { ...textStyle('title3'), color: colors.plum },
+      })}
+    >
+      <Tab.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false, tabBarAccessibilityLabel: 'Chat', tabBarTestID: 'tab-chat' }} />
+      <Tab.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work', tabBarLabel: 'Work', tabBarAccessibilityLabel: 'Work', tabBarTestID: 'tab-work' }} />
+      <Tab.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace', tabBarAccessibilityLabel: 'Workspace', tabBarTestID: 'tab-workspace' }} />
+      <Tab.Screen name="More" component={MoreScreen} options={{ title: 'More', tabBarAccessibilityLabel: 'More', tabBarTestID: 'tab-more' }} />
+    </Tab.Navigator>
   );
 }
 
@@ -240,8 +306,8 @@ export function AppNavigator() {
           headerTitleStyle: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
         }}
       >
-        <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />
-        <Stack.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work', animation: 'fade' }} />
+        <Stack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false }} />
+        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
         <Stack.Screen
           name="JobDetail"
           component={JobDetailScreen}
@@ -261,7 +327,6 @@ export function AppNavigator() {
           // Jobs-mode tabs: switched in place (switchJobsPage) with a fade, not a history slide.
           <Stack.Screen key={name} name={name} component={component} options={{ title, animation: 'fade' }} />
         ))}
-        <Stack.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace' }} />
         <Stack.Screen
           name="WorkspaceCategory"
           component={WorkspaceCategoryScreen}

@@ -58,7 +58,7 @@
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head w-modal__head">
                 <div><span class="welcome-modal-eyebrow w-eyebrow">Saved work</span><h2 class="w-modal__title" id="welcome-sessions-title">Sessions</h2></div>
-                <button type="button" class="icon-btn w-btn" data-variant="icon" @click="closeModal()" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
+                <button type="button" class="w-btn" data-variant="icon" @click="closeModal()" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </header>
             <div class="welcome-modal-body session-modal-body w-modal__body">
                 <div class="welcome-session-load-error" x-show="error" x-cloak role="alert" aria-live="assertive">
@@ -110,7 +110,7 @@
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head wizard-head w-modal__head">
                 <div><span class="welcome-modal-eyebrow w-eyebrow">New session</span><h2 class="w-modal__title" id="welcome-create-title" x-text="stepTitle"></h2></div>
-                <button type="button" class="icon-btn w-btn" data-variant="icon" @click="closeModal()" :disabled="creating" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
+                <button type="button" class="w-btn" data-variant="icon" @click="closeModal()" :disabled="creating" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </header>
 
             <nav class="wizard-progress w-welcome__steps" aria-label="Creation progress">
@@ -184,7 +184,7 @@
                             <button type="button" class="folder-picker-button" @click="browseWorkspace()">
                                 <span class="folder-picker-icon session-type-icon" x-html="sessionIcon('workspace')" aria-hidden="true"></span><div><strong x-text="form.workspace || 'Choose workspace folder'"></strong><small>Browse folders on the MuCLI host</small></div><span>browse</span>
                             </button>
-                            <button class="subtle compact-clear" x-show="form.workspace" @click="form.workspace = ''">clear selection</button>
+                            <button class="w-btn compact-clear" data-variant="secondary" x-show="form.workspace" @click="form.workspace = ''">clear selection</button>
                         </div>
                     </template>
                     <template x-if="form.sessionType === 'container'">
@@ -227,7 +227,7 @@
                                             <span>→</span>
                                             <input x-model="mount.container_path" aria-label="Container mount path">
                                             <select x-model="mount.mode" aria-label="Mount mode"><option value="rw">rw</option><option value="ro">ro</option></select>
-                                            <button type="button" class="icon-btn" @click="form.mounts.splice(index, 1)">×</button>
+                                            <button type="button" class="w-btn" data-variant="icon" data-size="sm" @click="form.mounts.splice(index, 1)" aria-label="Remove mount" title="Remove mount">{{ w.icon("x", size="sm") }}</button>
                                         </div>
                                     </template>
                                 </div>
@@ -238,7 +238,7 @@
                                         <label x-show="form.gpuMode === 'selected'" x-cloak>GPU indexes or UUIDs<input x-model.trim="form.gpuSelection" placeholder="0,1 or GPU-uuid"></label>
                                     </div>
                                     <small x-text="gpuReason()"></small>
-                                    <template x-for="(device,index) in form.devices" :key="device.host_path + index"><div class="wizard-device-row"><span>⌁</span><div><strong x-text="device.container_path"></strong><small x-text="`${device.host_path} · ${device.permissions}`"></small></div><button type="button" class="icon-btn" @click="form.devices.splice(index,1)">×</button></div></template>
+                                    <template x-for="(device,index) in form.devices" :key="device.host_path + index"><div class="wizard-device-row"><span>⌁</span><div><strong x-text="device.container_path"></strong><small x-text="`${device.host_path} · ${device.permissions}`"></small></div><button type="button" class="w-btn" data-variant="icon" data-size="sm" @click="form.devices.splice(index,1)" aria-label="Remove device" title="Remove device">{{ w.icon("x", size="sm") }}</button></div></template>
                                     <div class="wizard-device-add">
                                         <input x-model.trim="form.deviceHost" @input="!form.deviceTarget && (form.deviceTarget=form.deviceHost)" placeholder="/dev/video0">
                                         <input x-model.trim="form.deviceTarget" placeholder="Container device path">
@@ -284,8 +284,8 @@
                 <div class="wizard-error" x-text="error"></div>
                 <button type="button" class="w-btn" data-variant="ghost" x-show="step > 1" @click="step--" :disabled="creating">Back</button>
                 <span class="spacer"></span>
-                <button type="button" x-show="step < 4" class="primary w-btn" data-variant="primary" @click="nextStep()" :disabled="!canContinue">Continue</button>
-                <button type="button" x-show="step === 4" class="primary w-btn" data-variant="primary" @click="createSession()" :disabled="creating" :aria-busy="creating ? 'true' : null">
+                <button type="button" x-show="step < 4" class="w-btn" data-variant="primary" @click="nextStep()" :disabled="!canContinue">Continue</button>
+                <button type="button" x-show="step === 4" class="w-btn" data-variant="primary" @click="createSession()" :disabled="creating" :aria-busy="creating ? 'true' : null">
                     <span x-show="!creating">Create and open</span><span x-show="creating">Working…</span>
                 </button>
             </footer>
@@ -296,13 +296,13 @@
     <div class="container-editor-backdrop w-modal" x-dialog="editorModal"
          x-show="editorModal" x-cloak @dialog-close="editorModal && (editorModal = null)">
         <section class="container-editor-modal w-modal__dialog" data-size="lg" @click.stop role="dialog" aria-modal="true" aria-labelledby="welcome-editor-title">
-            <header class="container-editor-header"><div><strong id="welcome-editor-title" x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button type="button" class="icon-btn w-btn" data-variant="icon" @click="editorModal = null" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></header>
+            <header class="container-editor-header"><div><strong id="welcome-editor-title" x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button type="button" class="w-btn" data-variant="icon" @click="editorModal = null" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></header>
             <div class="container-editor-body" :class="{'container-network-editor': editorModal === 'network'}">
                 <textarea x-show="editorModal === 'dockerfile'" x-model="form.dockerfile" spellcheck="false"></textarea>
                 <template x-if="editorModal === 'network'"><label>Allowlist<small>One domain or IPv4 address per line.</small><textarea x-model="form.egressAllow" spellcheck="false"></textarea></label></template>
                 <template x-if="editorModal === 'network'"><label>Blocklist<small>Entries here take precedence.</small><textarea x-model="form.egressDeny" spellcheck="false"></textarea></label></template>
             </div>
-            <footer class="container-editor-footer w-modal__foot"><button type="button" class="primary w-btn" data-variant="primary" @click="editorModal = null">Done</button></footer>
+            <footer class="container-editor-footer w-modal__foot"><button type="button" class="w-btn" data-variant="primary" @click="editorModal = null">Done</button></footer>
         </section>
     </div>
 </div>

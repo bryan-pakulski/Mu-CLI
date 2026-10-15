@@ -36,7 +36,7 @@
                            x-model="$store.feature.createForm.directory"
                            placeholder="Working directory (default: cwd)"
                            @keydown.stop />
-                    <button type="button" class="subtle w-btn" data-variant="secondary"
+                    <button type="button" class="w-btn" data-variant="secondary"
                             @click="$store.fileBrowser.show('folder', p => $store.feature.createForm.directory = p)"><span>Browse</span></button>
                 </div>
             </div>
@@ -120,7 +120,7 @@
         </div>
         <footer class="modal-actions w-modal__foot">
             <button type="button" class="w-btn" data-variant="secondary" @click="$store.feature.closeCreateModal()"><span>Cancel</span></button>
-            <button type="button" class="w-btn primary" data-variant="primary" @click="$store.feature.submitCreateFeature()"><span>Create feature</span></button>
+            <button type="button" class="w-btn" data-variant="primary" @click="$store.feature.submitCreateFeature()"><span>Create feature</span></button>
         </footer>
     </section>
 </div>

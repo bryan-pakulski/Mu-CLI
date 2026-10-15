@@ -8070,7 +8070,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <span class="pricing-settings-dirty" x-text="$store.pricingSettings.dirty ? 'Unsaved pricing changes' : ($store.pricingSettings.usingOverride ? 'Operator pricing override active' : 'Using packaged defaults')"></span>
                 <div class="pricing-settings-buttons">
                     <button type="button" class="w-btn" data-variant="secondary" @click="$store.confirm.ask('Reset all model pricing to packaged defaults?', $event, () => $store.pricingSettings.reset(), {danger:true})"><span>Reset</span></button>
-                    <button type="button" class="primary w-btn" data-variant="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'Saving…' : 'Save pricing'"></button>
+                    <button type="button" class="w-btn" data-variant="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'Saving…' : 'Save pricing'"></button>
                 </div>
             </div>
         `;

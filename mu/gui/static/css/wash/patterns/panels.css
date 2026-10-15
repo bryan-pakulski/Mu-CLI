@@ -2455,9 +2455,6 @@
 .shell-panel-head > div {
     min-width:0;
 }
-.shell-panel-actions .icon-btn {
-    width:auto;
-}
 .shell-panel-status {
     color:var(--wash-ink-3);
     font:var(--wash-type-label-weight) var(--wash-type-caption-size)/1 var(--wash-font-sans);

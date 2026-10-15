@@ -200,9 +200,6 @@ html.has-dialog body {
 .fb-current {
     overflow-wrap: anywhere;
 }
-.fb-head .icon-btn:where(:not(.w-btn)) {
-    flex-shrink: 0;
-}
 .modal-actions {
     flex-wrap: wrap;
 }

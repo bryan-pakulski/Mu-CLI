@@ -21,7 +21,7 @@
 
     <header class="w-drawer__head inspector-titlebar">
         <h2 class="w-drawer__title" id="inspector-title">Settings</h2>
-        <button type="button" class="w-btn icon-btn" data-variant="icon"
+        <button type="button" class="w-btn" data-variant="icon"
                 @click="$store.inspector.close()"
                 aria-label="Close inspector" title="Close (Esc)">
             <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
@@ -63,7 +63,7 @@
                 <template x-for="p in $store.inspector.workspace.folders" :key="p">
                     <div class="kv-row">
                         <span class="kv-key mono" x-text="p" :title="p"></span>
-                        <button type="button" class="w-btn icon-btn" data-variant="icon"
+                        <button type="button" class="w-btn" data-variant="icon"
                                 @click="$store.confirm.ask('Detach \'' + p + '\'?', $event, () => $store.inspector.removeWorkspace(p))"
                                 aria-label="Detach folder"
                                 title="Detach this folder from the session (asks first)">
@@ -87,7 +87,7 @@
                 <button type="button" class="w-btn" data-variant="secondary"
                         @click="$store.fileBrowser.show('folder', (p) => { $store.inspector.workspace.newPath = p })"
                         title="Browse for a folder"><span>Browse</span></button>
-                <button type="submit" class="w-btn primary" data-variant="primary"
+                <button type="submit" class="w-btn" data-variant="primary"
                         title="Attach the folder (validates it exists)"><span>Attach</span></button>
             </form>
             <p class="inspector-note"
@@ -121,7 +121,7 @@
                             <span class="mem-hits mono"
                                   x-text="e.hits + ' hits'"
                                   :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"></span>
-                            <button type="button" class="w-btn icon-btn" data-variant="icon"
+                            <button type="button" class="w-btn" data-variant="icon"
                                     @click="$store.confirm.ask('Delete memory #' + e.id + '?', $event, () => $store.inspector.deleteMemory(e.id), {danger:true})"
                                     aria-label="Delete memory entry"
                                     title="Delete this memory entry (asks first)">
@@ -150,7 +150,7 @@
                             <span class="mem-hits mono"
                                   x-text="e.hits + ' hits'"
                                   :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"></span>
-                            <button type="button" class="w-btn icon-btn" data-variant="icon"
+                            <button type="button" class="w-btn" data-variant="icon"
                                     @click="$store.confirm.ask('Delete memory #' + e.id + '?', $event, () => $store.inspector.deleteMemory(e.id), {danger:true})"
                                     aria-label="Delete memory entry"
                                     title="Delete this memory entry (asks first)">
@@ -276,7 +276,7 @@
                                     <span class="var-key w-field__label" x-text="v.key"></span>
                                     <span class="var-type mono" x-text="v.type" :title="'type: ' + v.type"></span>
                                     <span class="var-help-glyph" x-show="v.help" aria-hidden="true" :title="v.help">?</span>
-                                    <button type="button" class="w-btn icon-btn" data-variant="icon" data-size="sm"
+                                    <button type="button" class="w-btn" data-variant="icon" data-size="sm"
                                             x-show="!v.is_default"
                                             @click="$store.confirm.ask('Reset ' + v.key + ' to ' + JSON.stringify(v.default) + '?', $event, () => $store.inspector.resetVariable(v.key))"
                                             aria-label="Reset to default"

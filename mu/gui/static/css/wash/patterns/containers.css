@@ -420,7 +420,6 @@
         font-weight: var(--wash-type-title-2-weight);
         letter-spacing: var(--wash-type-title-2-tracking);
     }
-    .containers-body .fb-head .icon-btn,
     .containers-body .fb-up,
     .containers-body .fb-new-folder,
     .containers-body .fb-create-confirm,
@@ -438,7 +437,6 @@
         font-size: var(--wash-type-label-size);
         cursor: pointer;
     }
-    .containers-body .fb-head .icon-btn { border-color: transparent; background: transparent; }
     .containers-body :is(.fb-head .icon-btn, .fb-up, .fb-new-folder, .fb-create-confirm, .fb-create-cancel):hover { background: var(--wash-sunken); }
     .containers-body .fb-path {
         display: flex;

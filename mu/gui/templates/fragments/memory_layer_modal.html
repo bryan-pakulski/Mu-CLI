@@ -20,7 +20,7 @@
                 <span class="modal-title w-modal__title" id="memory-layer-title"
                       x-text="$store.memory.layerModal.id + ' · ' + $store.memory.layerModal.name"></span>
             </div>
-            <button type="button" class="icon-btn w-btn" data-variant="icon"
+            <button type="button" class="w-btn" data-variant="icon"
                     @click="$store.memory.closeLayer()"
                     aria-label="Close" title="Close (Esc)"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
         </div>
@@ -50,7 +50,7 @@
                     :title="'Copy layer contents to clipboard'">
                 <span x-text="$store.memory.layerModal.copied ? '✓ Copied' : 'Copy'"></span>
             </button>
-            <button type="button" class="primary w-btn" data-variant="primary" @click="$store.memory.closeLayer()">Close</button>
+            <button type="button" class="w-btn" data-variant="primary" @click="$store.memory.closeLayer()">Close</button>
         </div>
     </div>
 </div>

@@ -63,18 +63,8 @@ button:hover,
 button.primary {
     font-weight: var(--wash-type-label-weight);
 }
-button.subtle {
-    background: var(--wash-surface);
-    color: var(--wash-ink);
-}
-button.subtle:hover {
-    background: var(--wash-sunken);
-}
 button:active {
     transform: translateY(1px);
-}
-.icon-btn {
-    width: 32px;
 }
 input {
     background: var(--wash-surface);
@@ -128,7 +118,6 @@ textarea::placeholder {
     .skill-row,
     .feature-row,
     .msg-action-btn,
-    .icon-btn,
     .code-copy-btn,
     .welcome-row-icon,
     .artifact-row-delete,
@@ -137,7 +126,6 @@ textarea::placeholder {
         min-height: var(--wash-size-touch);
     }
     .msg-action-btn,
-    .icon-btn,
     .welcome-row-icon,
     .artifact-row-delete,
     .artifact-row-download,

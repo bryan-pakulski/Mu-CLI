@@ -1057,8 +1057,8 @@ body[data-ambient]::before {
    Cross-document View Transitions: same-origin navigations (/, /work, /containers,
    /trace, …) cross-fade instead of flashing white. The shell's top bar and sidebar are
    named so they hold still; only the stage content fades and rises. The ambient wash
-   cross-fades with the root (pages use different washes). Browsers without support
-   navigate normally and get a short stage fade-in instead. */
+   cross-fades with the root (pages use different washes). Browsers without cross-document
+   support use the scripted fade below. */
 @view-transition { navigation: auto; }
 
 .w-topbar { view-transition-name: w-topbar; }
@@ -1078,8 +1078,14 @@ body[data-ambient]::before {
 @keyframes w-stage-out { to { opacity: 0; } }
 @keyframes w-stage-in { from { opacity: 0; transform: translateY(6px); } }
 
-@supports not (view-transition-name: none) {
-    .w-stage { animation: w-stage-in var(--wash-motion-medium) var(--wash-ease-medium) both; }
+/* Scripted fallback (html[data-nav="fade"], set pre-paint; e.g. Firefox): the stage fades in
+   on load, and wash_shell.js adds .w-leaving and waits for the fade-out before following a
+   same-origin link. Back/forward-cache restores clear .w-leaving on pageshow. */
+html[data-nav="fade"] .w-stage { animation: w-stage-in var(--wash-motion-medium) var(--wash-ease-medium) both; }
+html[data-nav="fade"].w-leaving .w-stage {
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity var(--wash-motion-small) var(--wash-ease-micro), transform var(--wash-motion-small) var(--wash-ease-micro);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1088,4 +1094,6 @@ body[data-ambient]::before {
     ::view-transition-old(*),
     ::view-transition-new(*) { animation: none; }
     .w-stage { animation: none; }
+    html[data-nav="fade"] .w-stage { animation: none; }
+    html[data-nav="fade"].w-leaving .w-stage { transition: none; }
 }

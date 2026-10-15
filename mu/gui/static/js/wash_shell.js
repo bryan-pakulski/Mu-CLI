@@ -5,6 +5,8 @@
 // - window.WashToast.show(message, tone, {timeout, action: {label, run}}) —
 //   every page's toasts, including app.js's $store.toast (which delegates here). Errors go to the assertive region and persist;
 //   info/success go to the polite region and auto-dismiss after 5s (G§9.16).
+// - Page transitions where the browser lacks cross-document View Transitions (Firefox):
+//   fade the stage out before following a same-origin link.
 (function () {
     'use strict';
 
@@ -91,4 +93,39 @@
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSidebar);
     else initSidebar();
+
+    // Scripted page transition for browsers without cross-document View Transitions
+    // (html[data-nav="fade"], set pre-paint by partials/theme_bootstrap.html — e.g. Firefox).
+    // A same-origin page link fades the stage out (base.css .w-leaving) before navigating;
+    // the next page fades its stage in. Hash-only links (/work routes), new-tab clicks,
+    // downloads, API/static URLs and handlers that already called preventDefault are left alone.
+    var LEAVE_MS = 160;
+    function navigable(event) {
+        if (document.documentElement.getAttribute('data-nav') !== 'fade') return null;
+        if (event.defaultPrevented || event.button !== 0) return null;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
+        var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+        if (!link || link.hasAttribute('download') || link.hasAttribute('data-no-transition')) return null;
+        var target = (link.getAttribute('target') || '').toLowerCase();
+        if (target && target !== '_self') return null;
+        var url;
+        try { url = new URL(link.href, location.href); } catch (e) { return null; }
+        if (url.origin !== location.origin) return null;
+        if (/^\/(api|static)\//.test(url.pathname)) return null;
+        if (url.pathname === location.pathname && url.search === location.search) return null;  // in-page / hash route
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+        return url;
+    }
+    document.addEventListener('click', function (event) {
+        var url = navigable(event);
+        if (!url) return;
+        event.preventDefault();
+        var root = document.documentElement;
+        root.classList.add('w-leaving');
+        setTimeout(function () { location.assign(url.href); }, LEAVE_MS);
+        // A beforeunload prompt can cancel the navigation; never leave the page faded out.
+        setTimeout(function () { root.classList.remove('w-leaving'); }, LEAVE_MS + 1500);
+    });
+    // Back/forward-cache restores show the page exactly as it was left: undo the fade-out.
+    window.addEventListener('pageshow', function () { document.documentElement.classList.remove('w-leaving'); });
 })();

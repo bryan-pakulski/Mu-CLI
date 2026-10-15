@@ -4,7 +4,8 @@
      It also applies the "Reduce decoration" preference (G§6.2 rule 5):
      localStorage `mucli-decoration` = reduced | full; when unset it follows
      prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
-     which swaps every wash painting for a flat wash token. -->
+     which swaps every wash painting for a flat wash token. It also sets
+     html[data-nav] = vt | fade for page transitions. -->
 <script>
 (function () {
     var root = document.documentElement, pref = 'system';
@@ -23,5 +24,9 @@
     try { deco = localStorage.getItem('mucli-decoration'); } catch (e) {}
     try { quiet = !!(window.matchMedia && window.matchMedia('(prefers-reduced-transparency: reduce)').matches); } catch (e) {}
     if (deco === 'reduced' || (deco !== 'full' && quiet)) root.setAttribute('data-decoration', 'reduced');
+    // Page navigation style (base.css "page transitions"): browsers with cross-document View
+    // Transitions (pageswap/pagereveal) animate natively; the rest (e.g. Firefox) get the
+    // scripted fade in wash_shell.js.
+    root.setAttribute('data-nav', ('onpageswap' in window) ? 'vt' : 'fade');
 })();
 </script>

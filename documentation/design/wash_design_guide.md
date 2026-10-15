@@ -357,7 +357,11 @@ Signature motions:
 - **Page transitions.** Navigating between web pages never flashes. Cross-document
   View Transitions cross-fade the pages; the top bar and sidebar hold still, and
   the stage content fades out and rises in (`motion-small` out, `motion-medium`
-  in). `/work`'s in-page sections use the same animation. Same-origin links are
+  in). `/work`'s in-page sections use the same animation. Browsers without
+  cross-document View Transitions (Firefox) get a scripted equivalent: a
+  same-origin link fades the stage out (160ms) before navigating, and every
+  page fades its stage in on load (`html[data-nav="fade"]`, detected before
+  first paint). Same-origin links are
   prefetched on hover (speculation rules, prefetch only). Pages close their live
   streams on `pagehide` rather than `beforeunload`, so Back and Forward restore
   from the back/forward cache instantly.

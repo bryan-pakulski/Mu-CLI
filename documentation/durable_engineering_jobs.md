@@ -419,7 +419,7 @@ its `cwd`, else a path its command names, else the primary. With several
 bindings the implementer gets `run_in_environment(env, command, cwd)`, run in a
 sibling container with the same isolation (approval rules as `bash`).
 
-**Egress and GPUs.** Implement and checks may reach `sandbox.egress_extra` plus
+**Egress and GPUs.** Implement and checks may reach `sandbox.egress_extra` (by default the npm, Cargo/crates.io, Maven/Gradle and PyPI registries) plus
 the environment's egress allowlist (`environments.inherit_egress`).
 Model-provider hosts are always dropped. GPU bindings get `--gpus`
 (`sandbox.gpus_enabled` turns this off for all jobs). A host without a usable

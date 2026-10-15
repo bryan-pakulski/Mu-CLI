@@ -14,6 +14,8 @@ import os
 import tempfile
 from typing import Any, Dict, List, Optional
 
+from mu.container.network import PACKAGE_REGISTRY_EGRESS
+
 from .models import STAGES
 
 _DEFAULTS: Dict[str, Any] = {"stage_models": {}, "plan_approval": True}
@@ -239,7 +241,7 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
            "Base image = an image that already has the project's toolchain (e.g. rust:1.88 or the project's CI image), "
            "template:<name> or environment:<name> (a container-mode environment). Paths limit the row to repository-relative "
            "components (comma-separated; blank = whole repository). Docker = yes gives the job a private Docker engine (needs Sysbox). "
-           "Add the package registries the build needs (crates.io, static.crates.io, index.crates.io, pypi.org …) to Extra egress domains.",
+           "npm, Cargo/crates.io, Maven/Gradle and PyPI registries are allowed by default (Extra egress domains); add any other registry the build needs there.",
            columns=[{"key": "repository", "label": "Repository path", "placeholder": "/home/me/src/project", "required": True},
                     {"key": "base_image", "label": "Base image", "placeholder": "rust:1.88-bookworm · environment:rust-build", "required": True,
                      "pattern": r"[\w./:@-]+"},
@@ -289,8 +291,10 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
         _f("jobs.container_cli", "Container CLI", "select", "auto",
            "Auto uses Docker when present, else Podman. Podman cannot run the per-job Docker engine.",
            options=[["auto", "Auto"], ["docker", "Docker"], ["podman", "Podman"]]),
-        _f("sandbox.egress_extra", "Extra egress domains", "list", [],
-           "Domains implement and checks may reach in addition to the model relay, e.g. pypi.org or *.npmjs.org.", item_pattern=r"(?:\*\.)?[a-zA-Z0-9.-]+"),
+        _f("sandbox.egress_extra", "Extra egress domains", "list", list(PACKAGE_REGISTRY_EGRESS),
+           "Domains implement, checks and template job setup may reach in addition to the model relay. "
+           "Defaults to the npm, Cargo/crates.io, Maven/Gradle and PyPI registries; clear the list to lock jobs down.",
+           item_pattern=r"(?:\*\.)?[a-zA-Z0-9.-]+"),
      ]},
     {"id": "publish", "title": "Push", "hint": "What “Push / open PR” does.",
      "fields": [

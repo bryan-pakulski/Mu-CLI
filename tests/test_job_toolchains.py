@@ -82,7 +82,8 @@ def test_toolchain_rows_resolve_to_per_job_build_environment_bindings(home):
 
 
 def test_with_build_environment_swaps_image_python_cache_and_gpus(home):
-    policy = SandboxPolicy.for_stage("checks")
+    # Extra egress cleared so only the environment's own allowlist is under test.
+    policy = SandboxPolicy.for_stage("checks", {"sandbox": {"egress_extra": []}})
     state = {"name": "rust-build", "job_image": "mucli/job-abcdef012345-rust-build-runtime:1", "gpus": "device=0",
              "egress_allow": ["crates.io", "api.openai.com", "*.anthropic.com"], "status": "ready"}
     swapped = with_build_environment(policy, job(home), state, stage="checks")

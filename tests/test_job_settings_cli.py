@@ -209,6 +209,10 @@ def test_tui_bool_toggles_and_invalid_value_keeps_prompt(home):
 
 
 def test_tui_list_and_suites_parse(home):
+    from mu.jobs.job_settings import set_rule
+    # The editor pre-fills the current value; start from an empty list so the typed text is the
+    # whole value (the default is now the package-registry list).
+    set_rule("sandbox.egress_extra", [])
     app = _app()
     app.open_settings()
     _select(app, "sandbox.egress_extra")

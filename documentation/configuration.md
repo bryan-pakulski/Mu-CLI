@@ -145,7 +145,7 @@ the table is stale).
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `sandbox.toolchains` | — | Repository toolchain images. Base image = an image that already has the project's toolchain (e.g. rust:1.88 or the project's CI image), template:<name> or environment:<name> (a container-mode environment). Paths limit the row to repository-relative components (comma-separated; blank = whole repository). Docker = yes gives the job a private Docker engine (needs Sysbox). Add the package registries the build needs (crates.io, static.crates.io, index.crates.io, pypi.org …) to Extra egress domains. |
+| `sandbox.toolchains` | — | Repository toolchain images. Base image = an image that already has the project's toolchain (e.g. rust:1.88 or the project's CI image), template:<name> or environment:<name> (a container-mode environment). Paths limit the row to repository-relative components (comma-separated; blank = whole repository). Docker = yes gives the job a private Docker engine (needs Sysbox). npm, Cargo/crates.io, Maven/Gradle and PyPI registries are allowed by default (Extra egress domains); add any other registry the build needs there. |
 
 **Build environments**
 
@@ -172,7 +172,7 @@ the table is stale).
 | `sandbox.pids_limit` | 4,096 | Process limit. Most processes and threads one stage or check container may run (builds and parallel test runners need many). |
 | `sandbox.cache_max_gb` | 20 GB | Dependency cache cap. Shared package caches reused across jobs; least recently used entries are pruned. 0 = unlimited. |
 | `jobs.container_cli` | `auto` | Container CLI. Auto uses Docker when present, else Podman. Podman cannot run the per-job Docker engine. |
-| `sandbox.egress_extra` | — | Extra egress domains. Domains implement and checks may reach in addition to the model relay, e.g. pypi.org or *.npmjs.org. |
+| `sandbox.egress_extra` | `registry.npmjs.org`, `registry.yarnpkg.com`, `crates.io`, `index.crates.io`, `static.crates.io`, `static.rust-lang.org`, `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org`, `pypi.org`, `files.pythonhosted.org`, `pythonhosted.org` | Extra egress domains. Domains implement, checks and template job setup may reach in addition to the model relay. Defaults to the npm, Cargo/crates.io, Maven/Gradle and PyPI registries; clear the list to lock jobs down. |
 
 **Push**
 

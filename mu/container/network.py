@@ -15,15 +15,38 @@ from dataclasses import dataclass, field
 
 from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback, run_with_output
 
+# Package registries every build environment may reach by default: npm, Cargo/crates.io
+# (with rustup toolchain downloads), Maven Central / Gradle, and PyPI. Shared by container-mode
+# environments (DEFAULT_EGRESS_ALLOW) and job stages (Settings → Extra egress domains default).
+PACKAGE_REGISTRY_EGRESS = [
+    # npm (and yarn's mirror of it)
+    "registry.npmjs.org",
+    "registry.yarnpkg.com",
+    # Rust: cargo / crates.io, rustup toolchains
+    "crates.io",
+    "index.crates.io",
+    "static.crates.io",
+    "static.rust-lang.org",
+    # JVM: Maven Central, Gradle wrapper distributions and plugin portal
+    "repo.maven.apache.org",
+    "repo1.maven.org",
+    "services.gradle.org",
+    "downloads.gradle.org",
+    "plugins.gradle.org",
+    "plugins-artifacts.gradle.org",
+    # Python: PyPI
+    "pypi.org",
+    "files.pythonhosted.org",
+    "pythonhosted.org",
+]
+
 DEFAULT_EGRESS_ALLOW = [
     "api.openai.com",
     "api.anthropic.com",
     "generativelanguage.googleapis.com",
     "ollama.com",
     "openaipublic.blob.core.windows.net",
-    "pypi.org",
-    "files.pythonhosted.org",
-    "pythonhosted.org",
+    *PACKAGE_REGISTRY_EGRESS,
     "github.com",
     "objects.githubusercontent.com",
     "gitlab.com",

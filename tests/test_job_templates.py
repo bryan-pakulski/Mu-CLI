@@ -185,6 +185,9 @@ def test_list_sources_templates_carry_size_setup_egress(home, monkeypatch):
 
 def test_fit_warns_for_unreachable_registries_and_allow_clears_it(home, tmp_path, monkeypatch):
     from mu.jobs.core.vm import environments_vm
+    from mu.jobs.job_settings import set_rule
+    # Extra egress cleared (the default allows the common registries) to judge the template alone.
+    set_rule("sandbox.egress_extra", [])
     add_template("gpu-enabled-ubuntu24", egress_allow=["pypi.org", "api.anthropic.com"])
     add_template("rsq", egress_allow=["*.npmjs.org"])
     repo = node_repo(tmp_path)
@@ -413,7 +416,7 @@ def test_setup_runs_commands_in_order_with_stage_isolation(home, tmp_path, monke
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-never-leak")
     service, job, state = _setup_job(tmp_path)
     runner = SetupRunner()
-    job_setup.run_job_setup(service, job, [state], runner=runner, settings={})
+    job_setup.run_job_setup(service, job, [state], runner=runner, settings={"sandbox": {"egress_extra": []}})
     assert [c["command"] for c in runner.commands] == state["job_setup"]
     assert all(c["shell"] is True and c["cwd"] == "" for c in runner.commands)
     for args in runner.creates:

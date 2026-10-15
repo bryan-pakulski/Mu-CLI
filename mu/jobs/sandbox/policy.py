@@ -66,7 +66,11 @@ class SandboxPolicy:
         memory = str(raw.get("memory") or "8g")
         if not re.fullmatch(r"[1-9][0-9]*[kmgKMG]?", memory):
             raise ValueError("invalid sandbox memory limit")
-        extra = raw.get("egress_extra") or []
+        # Effective rule: the saved list (an explicit [] locks jobs down), else the schema
+        # default, which allows the common package registries (job_settings PACKAGE_REGISTRY_EGRESS).
+        from ..job_settings import rule
+        extra = rule("sandbox.egress_extra", settings)
+        extra = [] if extra is None else extra
         if not isinstance(extra, list) or any(not re.fullmatch(r"(?:\*\.)?[a-zA-Z0-9.-]+", str(x)) for x in extra):
             raise ValueError("sandbox.egress_extra must contain domain names")
         return cls(

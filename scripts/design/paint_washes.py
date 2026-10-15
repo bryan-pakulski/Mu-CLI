@@ -8,6 +8,7 @@ Pillow (requirements-dev.txt). Outputs are committed:
 
 * mu/gui/static/wash/art/<wash>-<theme>-{1600,800}.webp  (landscapes)
 * mu/gui/static/wash/art/<spot>-<theme>-320.webp          (spot washes)
+* mu/gui/static/wash/art/ambient-<wash>-<theme>-{1920,960}.webp (glass backdrops)
 * mobile/android/assets/wash/<wash>-<theme>.webp          (800w / 320w)
 """
 
@@ -79,14 +80,15 @@ def main() -> int:
         spec = json.loads(path.read_text(encoding="utf-8"))
         name = path.stem
         spot = name.startswith("spot-")
+        ambient = name.startswith("ambient-")
         for theme in THEMES:
-            widths = (320,) if spot else (1600, 800)
+            widths = (320,) if spot else (1920, 960) if ambient else (1600, 800)
             for width in widths:
                 target = WEB_OUT / f"{name}-{theme}-{width}.webp"
                 paint(spec, theme, width).save(target, quality=82, method=6)
                 print(f"{target.relative_to(ROOT)}  {target.stat().st_size // 1024} KB")
             mobile = MOBILE_OUT / f"{name}-{theme}.webp"
-            paint(spec, theme, 320 if spot else 800).save(mobile, quality=80, method=6)
+            paint(spec, theme, 320 if spot else 960 if ambient else 800).save(mobile, quality=80, method=6)
     return 0
 
 

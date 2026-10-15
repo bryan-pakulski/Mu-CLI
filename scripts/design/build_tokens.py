@@ -70,6 +70,11 @@ def _theme_block(theme: str) -> list[str]:
     tint = spec["shadow"]["tint"]
     for level, value in tokens["elevation"].items():
         lines.append(f"  --wash-elevation-{level}: {value.replace('{tint}', tint)};")
+    for name, value in spec.get("glass", {}).items():
+        var = "--wash-glass" if name == "surface" else f"--wash-glass-{name}"
+        lines.append(f"  {var}: {value};")
+    for wash in tokens["glass"]["ambient"]:
+        lines.append(f"  --wash-art-ambient-{wash}: url(\"/static/wash/art/ambient-{wash}-{theme}-1920.webp\");")
     lines.append(f"  --wash-art-hero: url(\"/static/wash/art/dawn-{theme}-1600.webp\");")
     lines.append(f"  --wash-art-work: url(\"/static/wash/art/lagoon-{theme}-1600.webp\");")
     lines.append(f"  --wash-art-env: url(\"/static/wash/art/meadow-{theme}-1600.webp\");")
@@ -120,6 +125,10 @@ def _static_block() -> list[str]:
         lines.append(f"  --wash-ease-{name}: {spec['easing']};")
     for name, value in tokens["z"].items():
         lines.append(f"  --wash-z-{name}: {value};")
+    glass = tokens["glass"]
+    lines.append(f"  --wash-glass-blur: {_px(glass['blur'])};")
+    lines.append(f"  --wash-glass-blur-strong: {_px(glass['blur_strong'])};")
+    lines.append(f"  --wash-glass-saturate: {glass['saturate']};")
     return lines
 
 
@@ -206,6 +215,8 @@ def _payload() -> dict:
         "motion": tokens["motion"],
         "z": tokens["z"],
         "shadowTint": {theme: tokens["themes"][theme]["shadow"]["tint"] for theme in THEMES},
+        "glass": {theme: tokens["themes"][theme]["glass"] for theme in THEMES},
+        "glassEffect": tokens["glass"],
         "vocabulary": load_vocabulary(),
     }
 

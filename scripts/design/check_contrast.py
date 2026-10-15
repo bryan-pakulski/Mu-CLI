@@ -12,7 +12,56 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import re  # noqa: E402
+
 from mu.design import THEMES, contrast_ratio, load_tokens  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+ART = ROOT / "mu/gui/static/wash/art"
+_RGBA = re.compile(r"rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)")
+
+
+def _lum(rgb) -> float:
+    out = []
+    for channel in rgb:
+        c = channel / 255
+        out.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+
+
+def _hex_rgb(value: str):
+    v = value.lstrip("#")
+    return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def glass_backdrops(theme: str) -> list[tuple[str, tuple, tuple]]:
+    """(wash, darkest, lightest) composited glass-over-art colours.
+
+    The ambient art is blurred like ``backdrop-filter`` would, the glass
+    surface colour is alpha-composited over it, and the extreme pixels are
+    returned: text contrast is lowest against one of them.
+    """
+    from PIL import Image, ImageFilter
+
+    tokens = load_tokens()
+    match = _RGBA.match(tokens["themes"][theme]["glass"]["surface"])
+    gr, gg, gb, alpha = (*map(int, match.groups()[:3]), float(match.group(4)))
+    out = []
+    for wash in tokens["glass"]["ambient"]:
+        path = ART / f"ambient-{wash}-{theme}-960.webp"
+        im = Image.open(path).convert("RGB").filter(ImageFilter.GaussianBlur(12)).resize((240, 150))
+        pixels = [
+            (r * (1 - alpha) + gr * alpha, g * (1 - alpha) + gg * alpha, b * (1 - alpha) + gb * alpha)
+            for r, g, b in im.getdata()
+        ]
+        pixels.sort(key=_lum)
+        out.append((wash, pixels[0], pixels[-1]))
+    return out
+
+
+def _ratio(fg_rgb, bg_rgb) -> float:
+    a, b = sorted((_lum(fg_rgb), _lum(bg_rgb)), reverse=True)
+    return (a + 0.05) / (b + 0.05)
 
 TEXT_FLOOR = 4.5
 UI_FLOOR = 3.0
@@ -46,6 +95,12 @@ def failures() -> list[tuple[str, str, str, float, float]]:
             ratio = contrast_ratio(colors["control-border"], colors[bg_name])
             if ratio < UI_FLOOR:
                 out.append((theme, "control-border", bg_name, ratio, UI_FLOOR))
+        # Glass: text sits on translucent surfaces over the ambient art.
+        for wash, dark, light in glass_backdrops(theme):
+            for fg_name, fg in fgs.items():
+                ratio = min(_ratio(_hex_rgb(fg), dark), _ratio(_hex_rgb(fg), light))
+                if ratio < TEXT_FLOOR:
+                    out.append((theme, fg_name, f"glass/{wash}", ratio, TEXT_FLOOR))
         accent = pigments[tokens["semantic"]["accent"]]["ink"]
         ratio = contrast_ratio(accent, colors["surface"])
         if ratio < UI_FLOOR:

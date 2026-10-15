@@ -252,29 +252,46 @@ There is a 4px base unit. The tokens are `space-1` through `space-10`:
 A child's radius equals its parent's radius minus the gap between them. Do
 not nest a 20 inside a 20.
 
-### 3.3 Elevation
+### 3.3 Elevation and glass
 
-Elevation is like paper resting on paper. Shadows are warm and plum-tinted,
-and kept faint (as on Duna).
+Wash surfaces are **frosted glass laid over a watercolour**. Every page has a
+fixed, full-bleed *ambient wash* behind it (§6). Surfaces are translucent and
+blurred, so the painting glows softly through them. Elevation comes from
+opacity and blur, not from heavy shadows.
 
-| Level | Treatment | Use |
-|---|---|---|
-| 0 | No border, sits on canvas | Page sections |
-| 1 | `surface` + 1px `hairline` | Cards, panels, composer |
-| 2 | `raised` + hairline + `0 1px 2px rgba(45,32,50,.06), 0 8px 24px rgba(45,32,50,.08)` | Menus, popovers, toasts |
-| 3 | `raised` + `0 24px 64px rgba(45,32,50,.16)` | Modals, sheets, command palette |
+| Level | Token | Treatment | Use |
+|---|---|---|---|
+| 0 | none | Ambient wash on `canvas` | Page background |
+| 1 | `glass` | 62% surface, `blur(24px) saturate(1.5)`, 1px `glass-border` highlight edge plus `glass-edge` outline, `glass-highlight` top sheen, `glass-shadow` | Cards, panels, sidebar, top bar, stage, composer, tables |
+| 1s | `glass-subtle` | Tinted translucent inset; no blur of its own | Inputs, tool-card rows, code, chips on glass, selected rows |
+| 2 | `glass-strong` | 82–84% surface, `blur(32px)`, highlight edge, `elevation-2` | Menus, popovers, toasts, the active nav item |
+| 3 | `glass-strong` | As level 2 plus `elevation-3` | Modals, sheets, command palette |
 
-On Dusk, shadows go to near-black at the same alpha, and level 2+ also gets a
-1px `hairline-strong` top edge, because shadows barely show on dark surfaces.
+Rules:
 
-**Glass.** Backdrop blur (16px) is allowed only on the sticky top bar and on
-the mobile header when they are over art. There must always be a solid
-fallback. Do not use glass on cards.
+- **Opacity floor.** Text-bearing glass is never more transparent than 62%.
+  `check_contrast.py` composites `glass` over the blurred ambient art and
+  requires every text token to stay at 4.5:1 or better on the worst pixel.
+- **Edges are light, not colour.** A glass surface is outlined by a white
+  highlight (Paper) or faint white line (Dusk), plus a very low-alpha dark
+  edge. Edges are never pigment-coloured (§3.4).
+- **Nesting.** Glass on glass is allowed; each layer compounds opacity, so
+  nested surfaces only become more legible. Avoid more than two levels.
+- **Fallbacks.** Without `backdrop-filter` support, or with
+  `prefers-reduced-transparency`, "Reduce decoration" or forced colours, glass
+  becomes the solid `surface` / `raised` colour and the ambient wash becomes
+  flat `canvas`.
 
 ### 3.4 Borders and focus
 
-- 1px hairlines only. Coloured borders are reserved for states: attention,
-  danger, plan (dashed), and focus.
+- 1px neutral edges only (`hairline`, or the glass edge tokens on glass).
+- **No coloured side accents.** Surfaces, rows and list items never carry a
+  coloured left or right bar, rule or inset stripe, not even for state. State
+  is shown by a tinted header strip, the status chip (glyph plus label), and
+  the semantic ink of the text. Structural indentation lines (trees, nested
+  replies) use a neutral `hairline`.
+- Coloured outlines are reserved for focus and for plan mode's dashed
+  composer outline.
 - **Focus ring:** a 2px `accent` outline with a 2px offset. Inputs use offset
   0 plus a 3px `accent` wash halo. It is visible on every interactive element,
   and never `outline: none` without a replacement.
@@ -362,12 +379,15 @@ reproducible, themable, and small (about 25 KB WebP).
 
 ### 6.2 Rules
 
-1. **Art never sits behind body text or data.** Hero text may sit on art only
-   where the art fades to at least 80% paper under the text, or on a solid or
-   glass surface. Re-check contrast against the real composited pixels.
-2. **Art lives at the edges of the task.** It appears in hero areas,
-   headers, empty states and onboarding. It does not appear in the transcript,
-   tables, diffs or forms.
+1. **Text never sits directly on art.** Body text and data sit on glass
+   (§3.3) at or above the opacity floor. Hero headings may sit on hero art
+   where it fades to at least 80% paper. Contrast is always checked against
+   the composited pixels.
+2. **Ambient wash behind everything; vivid art at the edges.** Every page has
+   a soft, fixed, full-bleed ambient wash: Dawn for chat and welcome, Lagoon
+   for Work and Trace, Meadow for Environments. The ambient wash is the glass
+   backdrop. The stronger hero paintings still appear only in hero areas,
+   headers, empty states and onboarding.
 3. **Bottom edges dissolve into canvas.** Art never has a hard bottom edge,
    just as Duna's hero dissolves into the page.
 4. **Dusk gets its own paintings.** Do not darken a Paper wash with a filter.
@@ -457,8 +477,10 @@ copying it:
   16-colour uses semantic ANSI names (accent = cyan, running = blue,
   ok = green, attention = yellow, danger = red, plan = magenta, muted = bright
   black). With `NO_COLOR`, use glyphs and text only.
-- **Rhythm:** one blank line between turns. Panels use `ROUNDED` borders in
-  `hairline` colour only. There are no HEAVY or DOUBLE boxes.
+- **Rhythm:** one blank line between turns. Panels use `ROUNDED` borders in a
+  neutral border colour only, never a semantic colour; state lives in the
+  panel title (glyph plus semantic ink). There are no HEAVY or DOUBLE boxes.
+  Terminals cannot blur, so there is no glass: panels stay borderless-fill.
 - **Splash:** a single line, `μcli` in plum or bold, followed by a
   pigment-gradient rule (`━━━━` that cycles apricot → rose → lilac → lagoon in
   truecolor). Then a 3-line info grid: session, model, workspace. No block
@@ -527,27 +549,29 @@ on every surface uses only semantic tokens.
 
 ### 9.3 Card and panel
 
-- **Card:** `surface`, `radius-lg`, 1px hairline, 20–24 padding. Title in
+- **Card:** `glass`, `radius-lg`, glass edge, 20–24 padding. Title in
   `title-3`, optional eyebrow, body, and a footer with actions aligned right.
-- **Feature/sunken card (Duna "Automated tasks"):** `sunken` fill, no border.
+- **Feature/sunken card (Duna "Automated tasks"):** `glass-subtle` fill, no border.
   Used for the selected item in a list of explanations, settings groups, and
   onboarding steps.
-- **State card:** a card with a 4px left rule in the semantic pigment and a
-  12% wash on the header strip. Only `attention`, `danger`, `plan` and `ok`
+- **State card:** a glass card whose header strip is tinted with the
+  semantic wash (about 70% wash mixed into the glass) and carries the status
+  chip. There is no side rule. Only `attention`, `danger`, `plan` and `ok`
   use this. It is how approvals, failures and plan prompts stand out.
 - **Stat strip:** do not use a card per metric. Show stats as one row of big
   numbers (`title-1`, tabular) with captions underneath and hairline dividers
   between them (Duna's "10.6x / 4.8x / 37%"). This replaces the five-tile row
   on the Work dashboard.
-- **Panel (stage):** full-height, `surface`, with a header of title,
+- **Panel (stage):** full-height `glass`, with a header of title,
   mode-tint band and actions. Sections inside are separated by hairlines, not
   nested cards.
 
 ### 9.4 Top bar and navigation
 
-- **Nav item:** 36px high, `radius-sm`, icon plus label. The active item has a
-  `sunken` fill, `ink` text and a 2px `accent` bar on the left. Hover gives a
-  `sunken` fill at 60%. The count badge is aligned right.
+- **Nav item:** 36px high, `radius-sm`, icon plus label. The active item is a
+  `glass-strong` pill with `ink` text and an `accent`-ink icon, plus
+  `aria-current`. There is no side bar. Hover gives a `glass-subtle` fill.
+  The count badge is aligned right.
 - **Breadcrumb:** `ink-3` separators `›`, with the current crumb in `ink`
   using `label` type.
 - **Tabs:** text tabs with a 2px `accent` underline on the active tab, `label`
@@ -626,7 +650,8 @@ This is the most-used control. Anatomy:
 - **Markdown:**
   - Headings use the title scale, not oversized.
   - Lists have 24px indents.
-  - Blockquotes have a 3px lilac rule.
+  - Blockquotes are a `glass-subtle` inset with italic `ink-2` text; no
+    coloured side rule.
   - Tables are hairline tables with a `sunken` header.
   - Links are `accent` ink, underlined on hover.
   - Inline code is `sunken`, `radius-xs`, `mono`.
@@ -653,8 +678,8 @@ copies.
   secondary meta in `ink-3`, duration, and a disclosure chevron. It uses
   `sunken` with `radius-md` and is 36px high.
 - **Expanded:** arguments as a key/value grid (`mono-sm`), then a result
-  preview (first 20 lines, with "Show all" and a cache link). Errors get a
-  danger state rule.
+  preview (first 20 lines, with "Show all" and a cache link). Errors show a
+  `✗` in danger ink and a danger-wash header tint, with no side rule.
 - **Grouping:** three or more consecutive calls of the same kind collapse into
   "Read 6 files ›".
 - **Running:** a sky ink drop with a live elapsed timer. **Done:** `✓` in ok
@@ -674,18 +699,20 @@ This is the most important component in the system. It must be unmistakable,
 calm, and impossible to approve by accident.
 
 ```
-┌▌ ◆ Needs you · Permission to edit 2 files ───────────────────────┐
-│▌ write_file  src/server/routes.py   +18 −4                        │
-│▌ ┌ diff preview (unified, 12 lines, "Open full diff ›") ───────┐  │
-│▌ └─────────────────────────────────────────────────────────────┘  │
-│▌ Risk: modifies tracked files                    [ ] Always allow │
-│▌                         ( Deny )  ( Edit )  (  ✓ Approve  ⏎ )    │
+┌───────────────────────────────────────────────────────────────────┐
+│░░ ◆ Needs you · Permission to edit 2 files ░░░░░░░ (tinted strip) │
+│  write_file  src/server/routes.py   +18 −4                        │
+│  ┌ diff preview (unified, 12 lines, "Open full diff ›") ───────┐  │
+│  └─────────────────────────────────────────────────────────────┘  │
+│  Risk: modifies tracked files                    [ ] Always allow │
+│                          ( Deny )  ( Edit )  (  ✓ Approve  ⏎ )    │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-- It is a **state card** in `attention`: a 4px apricot rule, an apricot wash
-  header strip, and the `◆ Needs you` status chip. A high-risk tool (shell
-  with network, delete, push) escalates the rule and risk chip to `danger`.
+- It is a **state card** in `attention`: an apricot-wash header strip and
+  the `◆ Needs you` status chip, on glass, with no side rule. A high-risk
+  tool (shell with network, delete, push) escalates the header tint and risk
+  chip to `danger`.
   Denial uses the `danger` button only when the action itself is destructive;
   otherwise Deny is `secondary`.
 - **Content:**
@@ -714,7 +741,7 @@ calm, and impossible to approve by accident.
 - **M:** a bottom sheet that cannot be swiped away and needs an explicit
   choice. The floating "Input required" banner keeps the same attention
   styling.
-- **T:** a rounded panel with an attention-ink border, the title
+- **T:** a rounded panel with a neutral border and an attention-ink title
   `◆ Needs you · Permission to edit 2 files`, the diff preview, and the key
   hint row `[a] approve  [A] always  [d] deny  [e] edit`. **All
   model-supplied text is escaped before it goes into markup** (this fixes the
@@ -888,7 +915,7 @@ header in `ink-2` bold, and no borders between columns.
 
 Each row has a session-type icon, the name (`label`), last activity in
 `caption`, and status: a busy ink drop, an unread dot in the accent pigment,
-or attention `◆`. The active row is `sunken` with an accent bar. Rows use
+or attention `◆`. The active row is a `glass-strong` pill (no side bar). Rows use
 `role=button`/`tabindex=0` (sessions *and* threads) and have an overflow menu
 on hover or long-press.
 

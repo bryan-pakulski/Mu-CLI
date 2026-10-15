@@ -707,7 +707,7 @@ occurrences. Existing ones are fixed in Phase 0.
 | Prompt (`mu/ui/input.py:769`, style dict `:658`) | `μ session · mode ›`, mode in pigment, `[plan]` and `[yolo]` chips, **no blink**. All mode classes are defined, including teacher and loop (B7). Style comes from `pt_style.py`. **Class names are preserved** (`mode-feature`, `plan-indicator`, `yolo-indicator`) because tests and toolbar code use them; only their colours change. |
 | Bottom toolbar (`input.py:829,839`) | Key-hint styling (`wash.key` / `wash.hint`). |
 | Pickers (4 files) | Delete the 4 local style dicts and use `pt_style.picker_style()`: cursor `❯` accent, current row accent wash (truecolor) or reverse (16), selected `✓` ok, hints `wash.hint` (fixes invisible `ansiblack` hints). |
-| Approval (`approval.py:147-164`, `rich_ui.py:224`) | Rounded panel with attention border and the title `◆ Needs you · Permission to …`. Diff preview through the shared diff renderer. Key-hint row. B1 escaping. The `prompt_choice` label stays "Approval choice" (test contract). |
+| Approval (`approval.py:147-164`, `rich_ui.py:224`) | Rounded panel with a neutral border and the attention-ink title `◆ Needs you · Permission to …`. Diff preview through the shared diff renderer. Key-hint row. B1 escaping. The `prompt_choice` label stays "Approval choice" (test contract). |
 | Tool markers (`rich_ui.py:123,970,1018`) | `● kind  target` live, rewritten as `✓ kind  target  0.4s` in muted on completion (the `_GenerationLive` region already re-renders). No emoji. |
 | Thinking | `wash.muted italic`. The test `test_streaming_unified_live.py:343` currently asserts `style == "dim italic"`. Thinking keeps an equivalent: `wash.thinking` resolves to `italic` plus muted colour, and the test is migrated to assert the named style (§8). |
 | Diff (`rich_ui.py:557-660`) | Unified by default. Foreground ok/danger. Background tint only in truecolor, from the Paper or Dusk wash per the detected background. Side-by-side stays available above 160 columns. Remove the hardcoded `on #3a0000…`. Pygments: Wash style. |
@@ -949,3 +949,29 @@ migration ledgers live in `documentation/design/ledger/`: `web-foundation`,
   through Rich SVG exports and the `NO_COLOR` text output.
 - Raw RN `Text` that sets `fontWeight` outside the kit `Text` still gets
   synthetic bold on Android.
+
+---
+
+## 13. Glass restructure (2026-10-15, after §12)
+
+The user asked for a glass look and for the coloured side accents on panels
+to go. Changes:
+
+- **Tokens:** per-theme `glass` (surface, strong, subtle, border, edge,
+  highlight, shadow) and a global `glass` block (`blur` 24, `blur_strong` 32,
+  `saturate` 1.5, `min_alpha` 0.62, ambient washes). The generator emits
+  `--wash-glass*`, `--wash-glass-blur*`, `--wash-glass-saturate` and
+  `--wash-art-ambient-{dawn,lagoon,meadow}`, plus `glass` / `glassEffect` in
+  the Android TS and `window.WASH`.
+- **Art:** `mu/design/art/ambient-*.json` add full-bleed, unfaded ambient
+  washes at 1920 and 960 px (web) and 960 px (Android).
+- **Contrast:** `check_contrast.py` composites `glass` over the blurred
+  ambient art and checks every text token on the worst pixel. At 62% the
+  worst case is `ink-3`: 4.8:1 on Paper, 5.1:1 on Dusk.
+- **Guide:** G§3.3 (elevation is now glass), G§3.4 (no coloured side
+  accents), G§6.2 (ambient wash behind everything), and the state card, nav,
+  tool card, approval card, blockquote, session row and terminal panel
+  entries.
+- **Contract tests:** the web CSS and Android styles reject coloured side
+  bars, rules and inset stripes. Glass surfaces must use the glass tokens and
+  keep a solid fallback.

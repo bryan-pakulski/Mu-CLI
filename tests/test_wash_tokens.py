@@ -113,3 +113,33 @@ def test_xterm_mapping_is_stable():
         for steps in load_tokens()["themes"][theme]["pigment"].values():
             assert 16 <= nearest_xterm256(steps["ink"]) <= 255
     assert contrast_ratio("#000000", "#FFFFFF") == pytest.approx(21.0)
+
+
+def test_glass_tokens_exist_for_both_themes_and_respect_the_opacity_floor():
+    tokens = load_tokens()
+    keys = {"surface", "strong", "subtle", "border", "edge", "highlight", "shadow"}
+    floor = tokens["glass"]["min_alpha"]
+    for theme in THEMES:
+        glass = tokens["themes"][theme]["glass"]
+        assert set(glass) == keys, theme
+        for name in ("surface", "strong"):
+            alpha = float(re.search(r"rgba\([^)]*,\s*([\d.]+)\s*\)", glass[name]).group(1))
+            assert alpha >= floor, (theme, name, alpha)
+    assert tokens["glass"]["blur"] > 0 and tokens["glass"]["blur_strong"] >= tokens["glass"]["blur"]
+
+
+def test_ambient_washes_are_vendored_for_web_and_android():
+    for wash in load_tokens()["glass"]["ambient"]:
+        for theme in THEMES:
+            for width in (1920, 960):
+                path = ROOT / f"mu/gui/static/wash/art/ambient-{wash}-{theme}-{width}.webp"
+                assert path.is_file() and path.stat().st_size < 80_000, path.name
+            assert (ROOT / f"mobile/android/assets/wash/ambient-{wash}-{theme}.webp").is_file()
+
+
+def test_generated_css_exposes_glass_variables():
+    css = (ROOT / "mu/gui/static/css/wash/tokens.css").read_text(encoding="utf-8")
+    for name in ("--wash-glass:", "--wash-glass-strong:", "--wash-glass-subtle:", "--wash-glass-border:",
+                 "--wash-glass-edge:", "--wash-glass-highlight:", "--wash-glass-shadow:", "--wash-glass-blur:",
+                 "--wash-glass-saturate:", "--wash-art-ambient-dawn:"):
+        assert name in css, name

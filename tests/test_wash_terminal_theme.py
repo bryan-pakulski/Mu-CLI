@@ -536,3 +536,24 @@ def test_command_tables_use_simple_head():
             elif isinstance(box_kw, ast.Attribute) and box_kw.attr != "SIMPLE_HEAD":
                 offenders.append(f"{rel}:{node.lineno} ({box_kw.attr})")
     assert offenders == [], offenders
+
+
+def test_panels_never_colour_their_border_with_state():
+    """G§3.4: state lives in the panel title, never in the panel edge."""
+    from mu.ui.jobs.primitives import panel as jobs_panel
+    from mu.ui.rich_ui import RichUI
+    from mu.ui.theme import components
+
+    for tone in ("attention", "danger", "plan", "ok"):
+        rendered = components.panel(Text("body"), title="State", tone=tone)
+        assert rendered.border_style == "wash.border", tone
+        assert rendered.title.style == f"wash.{tone}"
+    approval = RichUI().build_approval_panel(
+        tool_name="write_file", display_args={"filename": "a.py"}, count_info="",
+        can_approve=True, approval_policy="default", choices=["y", "n", "e"],
+    )
+    assert approval.border_style == "wash.border"
+    lines = jobs_panel([[("", "x")]], 20, 3, title="Approvals", tone="warn")
+    borders = {style for line in lines for style, chunk in line if chunk and chunk[0] in "╭╮╰╯│─"}
+    assert borders == {"muted"}
+    assert ("bold warn", "Approvals") in lines[0]

@@ -277,7 +277,7 @@ class RichUI:
         choices=("y", "n", "e"),
         approval_policy="default",
     ):
-        """The approval card (G§9.9 T): attention border, ``◆ Needs you``
+        """The approval card (G§9.9 T): neutral border, attention ``◆ Needs you``
         title, escaped args, and a key-hint row. All model-supplied text is
         added as plain ``Text`` so it can never be parsed as markup."""
         name = str(tool_name or "").strip()

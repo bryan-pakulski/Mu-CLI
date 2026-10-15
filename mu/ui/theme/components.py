@@ -176,9 +176,15 @@ def status_chip(status: str, label: Optional[str] = None) -> Text:
 
 
 def panel(body, *, title=None, tone: str = "border", **kwargs) -> Panel:
-    """Rounded panel with a hairline (or semantic) border."""
-    border = "wash.border" if tone == "border" else f"wash.border.{tone}" if tone in (
-        "attention", "danger", "plan") else f"wash.{tone}"
+    """Rounded panel with a neutral border.
+
+    Wash never colours panel edges with state (G§3.4): a semantic ``tone``
+    colours a plain-string title instead; callers that pass a styled
+    ``Text`` title keep their own styling.
+    """
+    border = "wash.border"
+    if isinstance(title, str) and tone != "border":
+        title = Text(title, style=f"wash.{tone}")
     kwargs.setdefault("box", PANEL_BOX)
     kwargs.setdefault("title_align", "left")
     return Panel(body, title=title, border_style=border, **kwargs)

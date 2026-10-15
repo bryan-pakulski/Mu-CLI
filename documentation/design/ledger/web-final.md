@@ -58,3 +58,17 @@ legacy file's source formatting.
 
 - tests/test_web_shell_components.py:296 — `INDEX.index("/static/js/wash/palette.js") < INDEX.index("/static/js/wash/chat_palette.js")` → `_layout.html` loads `<script src="/static/js/wash/palette.js"></script>` (not deferred) and index.html no longer links it but still loads chat_palette.js — the palette is on every page, before each page's own registrations.
 - (new) tests/test_wash_css_contract.py::test_one_command_palette_on_every_page — one palette module; /, /work, /containers, /trace, /jobs/trace and /models/costs each register their own sources; work/ui.js has no local palette and work.css no `.work-palette` rules.
+
+## Known gaps from the earlier ledgers (fixed)
+
+- Memory and history panel selects were bare `<select class="w-select">`: now `<span class="w-select" data-size="sm"><select class="w-select__control">` (new `.w-select[data-size="sm"]`, touch height on coarse pointers).
+- /containers modals had `role="dialog"` on the backdrop: the `.w-modal__dialog` surface carries `role="dialog" aria-modal aria-labelledby`; containers.js opens them through the shared dialog stack (`MuDialog`, dialogs.js) and closes on its `dialog-close` (Esc). The shared file browser got the same fix.
+- /trace info popouts did not trap focus: each popout is an `x-dialog` (focus trapped, Esc closes, focus returns to its info button); trace.html loads dialogs.js.
+- The pricing reset used `window.confirm`: it opens a Wash destructive confirm (`static/js/wash/confirm.js`, `role="alertdialog"`, Cancel focused). The trace "clear run" confirm moved to it as well.
+- `fragments/file_browser.html` emoji: already sprite icons (`wash.svg#i-folder` / `#i-file`) on this branch; a contract test now pins it.
+- The /design chat replay frame clipped the composer hint row: the frame is a flex column whose transcript takes the slack.
+- The /work New job modal had its own focus trap: it (and every work/ui.js dialog) uses the shared dialog stack (dialogs.js `MuDialog`, the vanilla entry of the `x-dialog` mechanism — /work does not run Alpine).
+- "Reduce decoration" (G§6.2 rule 5): Appearance group in the settings drawer (theme select + switch), persisted as localStorage `mucli-decoration` (`reduced` | `full`), applied by the pre-paint bootstrap, following `prefers-reduced-transparency` until set (`window.MuDecoration` in route_theme.js). Hero art, empty-state blots and mode tint bands flatten.
+- Canvas charts drew L1A and L4 grey (no server hue): every layer maps through `--wash-layer-<id>`; charts redraw on `mucli-theme-change`.
+
+New contract tests (nothing removed): tests/test_wash_css_contract.py (`test_static_css_holds_only_the_wash_tree`, `test_no_legacy_cascade_layer_or_import_remains`, `test_no_raw_px_font_sizes_anywhere_in_the_css_tree`, `test_no_colour_literals_anywhere_in_the_css_tree`, `test_templates_scripts_and_css_reference_no_legacy_alias_variable`, `test_context_charts_map_every_layer_through_its_wash_pigment`, `test_one_diff_renderer_and_one_diff_stylesheet`, `test_one_command_palette_on_every_page`) and tests/test_web_a11y_contract.py (`test_dialog_semantics_sit_on_the_surface_not_the_backdrop`, `test_trace_info_popouts_trap_focus`, `test_destructive_confirms_are_wash_modals_with_cancel_focused`, `test_memory_and_history_panel_selects_are_wash_selects`, `test_file_browser_uses_sprite_icons_not_emoji`, `test_reduce_decoration_preference_is_persisted_and_applied_before_paint`, `test_gallery_chat_replay_frame_fits_the_composer`).

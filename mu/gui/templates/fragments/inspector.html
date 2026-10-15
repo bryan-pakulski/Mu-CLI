@@ -228,7 +228,8 @@
                 <h4 class="settings-appearance-title" id="settings-appearance-title">Appearance</h4>
                 <div class="settings-appearance-row">
                     <label class="w-field__label" for="settings-theme-select">Theme</label>
-                    <span class="w-select settings-theme-select"><select class="w-select__control" id="settings-theme-select" data-theme-select aria-describedby="settings-theme-hint">
+                    <span class="w-select settings-theme-select"><select class="w-select__control" id="settings-theme-select" data-theme-select aria-describedby="settings-theme-hint"
+                            x-init="$nextTick(() => { if (window.MuTheme) $el.value = MuTheme.preference(); })">
                         <option value="system">Follow system</option>
                         <option value="paper">Paper</option>
                         <option value="dusk">Dusk</option>
@@ -239,6 +240,7 @@
                     <label class="w-switch">
                         <span class="w-switch__label">Reduce decoration</span>
                         <input class="w-switch__input" type="checkbox" role="switch" data-decoration-toggle
+                               x-init="if (window.MuDecoration) $el.checked = MuDecoration.reduced()"
                                aria-describedby="settings-decoration-hint">
                     </label>
                     <p class="w-field__hint" id="settings-decoration-hint">Replaces the watercolour washes with flat colour on every page. Follows your OS "reduce transparency" setting until you change it.</p>

@@ -288,6 +288,7 @@ def _show_diff(session: Any, token: str, allow_prompt: bool) -> CommandResult:
 
 def _jira_job(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
     """/job jira pull KEY [KEY...] | /job jira pull --jql "project = X" [--session NAME] [--in PATH] [--force]
+    [--template NAME [--remember]]
 
     ``--force`` starts a new job even for tickets whose latest job is done."""
 
@@ -297,7 +298,8 @@ def _jira_job(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
         _emit(session, f"Invalid arguments: {exc}", allow_prompt, error=True)
         return CommandResult(ok=False, message=str(exc), data={"error": str(exc)})
     if not tokens or tokens[0] not in {"pull", "import"}:
-        message = 'Usage: /job jira pull KEY [KEY...] | /job jira pull --jql "<JQL>" [--session NAME] [--in PATH] [--force]'
+        message = ('Usage: /job jira pull KEY [KEY...] | /job jira pull --jql "<JQL>" [--session NAME] [--in PATH] [--force] '
+                   '[--template NAME [--remember]]')
         _emit(session, message, allow_prompt, error=True)
         return CommandResult(ok=False, message=message, data={"error": message})
     try:
@@ -306,11 +308,24 @@ def _jira_job(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
         _emit(session, f"Jira import failed: {exc}", allow_prompt, error=True)
         return CommandResult(ok=False, message=str(exc), data={"error": str(exc)})
     keys, jql, force = [], "", False
+    template, remember = "", False
     i = 0
     while i < len(args):
         if args[i] in ("--force", "-f"):
             force = True
             i += 1
+            continue
+        if args[i] == "--remember":
+            remember = True
+            i += 1
+            continue
+        if args[i].startswith("--template="):
+            template = template_name(args[i].split("=", 1)[1])
+            i += 1
+            continue
+        if args[i] == "--template" and i + 1 < len(args):
+            template = template_name(args[i + 1])
+            i += 2
             continue
         if args[i] == "--jql" and i + 1 < len(args):
             jql = args[i + 1]
@@ -318,6 +333,16 @@ def _jira_job(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
             continue
         keys.append(args[i])
         i += 1
+    if remember and not template:
+        message = "--remember needs --template NAME"
+        _emit(session, f"Jira import failed: {message}", allow_prompt, error=True)
+        return CommandResult(ok=False, message=message, data={"error": message})
+    defaults = dict(defaults)
+    if template:
+        # "Run in" for every imported ticket (job_templates.md §3.2).
+        defaults["execution"] = {**dict(defaults.get("execution") or {}), "template": template,
+                                 **({"remember_template": True} if remember else {})}
+        # An unknown template fails the whole import ("Unknown template '<name>'", core check).
     try:
         result = commands.import_jira(
             get_default_job_service(),
@@ -593,6 +618,11 @@ def _parse_create(raw: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
             execution["auto_approve_writes"] = name == "auto-approve"
             index += 1
             continue
+        if name == "remember":
+            # "Remember for this workspace": the Toolchains row repository -> template:<name>.
+            execution["remember_template"] = True
+            index += 1
+            continue
         if "=" in name:
             name, value = name.split("=", 1)
         else:
@@ -638,6 +668,8 @@ def _parse_create(raw: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
             except ValueError as exc:
                 raise ValueError(f"--env {value}: {exc}") from None
             execution.setdefault("environments", []).append(binding)
+        elif name in {"template", "run-in"}:
+            execution["template"] = template_name(value)
         elif name in {"agent", "agents"}:
             try:
                 execution["stage_agents"] = {**dict(execution.get("stage_agents") or {}),
@@ -647,8 +679,20 @@ def _parse_create(raw: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
         else:
             raise ValueError(f"unknown option --{name}")
         index += 1
+    if execution.get("remember_template") and not execution.get("template"):
+        raise ValueError("--remember needs --template NAME")
     values["title"] = " ".join(title_parts).strip()
     return values
+
+
+def template_name(value: str) -> str:
+    """``--template NAME`` (``template:NAME`` accepted); ``default``/``none`` = Default runtime."""
+    text = str(value or "").strip()
+    if text.lower().startswith("template:"):
+        text = text[len("template:"):].strip()
+    if text.lower() in {"", "default", "none", "runtime"}:
+        return ""
+    return text
 
 
 def _create_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
@@ -673,15 +717,34 @@ def _create_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
     return CommandResult(ok=host.running, message=message, data={"job": job.to_dict(), "controller": host.__dict__})
 
 
-def _dashboard_create(session: Any, title: str, agents: str = "") -> str:
-    """New job from the dashboard: the current session's defaults plus the per-stage agents."""
+def _dashboard_create(session: Any, title: str, agents: str = "", run_in: str = "") -> str:
+    """New job from the dashboard: the current session's defaults plus the per-stage agents and
+    the "Run in" choice (``template:<name>`` / ``environment:<name>``)."""
     session_name, defaults = _resolve_session(session, "")
-    parts = [title] + (["--agent", agents] if agents else [])
+    parts = [title] + (["--agent", agents] if agents else []) + _run_in_flags(run_in)
     payload = _with_origin(_parse_create(shlex.join(parts), defaults), session_name)
     service = get_default_job_service()
     result = commands.dispatch(service, {"type": "create", "args": payload})
     ensure_controller_daemon()
     return result.job_id
+
+
+def _run_in_flags(run_in: str) -> List[str]:
+    value = str(run_in or "").strip()
+    if not value or value == "default":
+        return []
+    if value.startswith("template:"):
+        return ["--template", value[len("template:"):]]
+    return ["--env", value]
+
+
+def _dashboard_sources(session: Any) -> Dict[str, Any]:
+    """"Run in" choices for the dashboard's new-job prompt (the current session's workspace)."""
+    try:
+        _name, defaults = _resolve_session(session, "", required=False)
+    except (OSError, ValueError):
+        defaults = {}
+    return vm.environments_vm(repository=str(defaults.get("workspace_root") or ""), include_images=False)
 
 
 def _respond_job(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
@@ -810,7 +873,8 @@ def _open_dashboard(session: Any, rest: str, allow_prompt: bool, *, explicit: bo
         return CommandResult(ok=False, message=message, data=result.data)
     try:
         open_jobs_tui(start_job=rest.strip() or None, service=get_default_job_service(),
-                      creator=lambda title, agents: _dashboard_create(session, title, agents))
+                      creator=lambda title, agents, run_in="": _dashboard_create(session, title, agents, run_in),
+                      sources=lambda: _dashboard_sources(session))
     except Exception as exc:  # noqa: BLE001 - never lose the REPL to a UI failure
         message = f"Job dashboard failed: {exc}"
         _emit(session, message, allow_prompt, error=True)
@@ -1433,8 +1497,10 @@ def _one_shot(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
         "board, summary [N|all], list [status], show|receipt|diff <id>, "
         "sessions (every saved session; jobs span all sessions), "
         "create <title> [--in PATH|URL (alias --repo) --session NAME --provider NAME --model NAME --accept TEXT --check CMD "
-        "--env name[:paths][:docker] --agent claude|codex|mucli or --agent plan=claude,implement=codex[:model],review=mucli] "
-        "(default session = the current one), jira pull KEY... | --jql JQL [--in PATH] [--force] (--force re-runs done tickets), "
+        "--env name[:paths][:docker] --template NAME [--remember] (run in a container template; --remember makes it the "
+        "workspace default) --agent claude|codex|mucli or --agent plan=claude,implement=codex[:model],review=mucli] "
+        "(default session = the current one), jira pull KEY... | --jql JQL [--in PATH] [--force] [--template NAME [--remember]] "
+        "(--force re-runs done tickets), "
         "agents [secret <KEY> <value>] (Claude Code / Codex setup and status), "
         "setup [<step> <action> | finish] (guided setup checklist; doctor [--deep] checks everything jobs need), "
         "approve <id> [version] (default: latest plan), replan <id> <feedback>, save-plan-draft <id> <file>, "

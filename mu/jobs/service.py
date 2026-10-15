@@ -58,6 +58,13 @@ class JobService:
         value = apply_repository(dict(payload or {}))  # CloneError is a ValueError
         repository = str(value.get("workspace_root") or "").strip()
         execution = dict(value.get("execution") or {})
+        # "Run in" picker (job_templates.md §3.1): ``execution.template`` names a container
+        # template; it becomes the job's build environment. Unknown names are rejected here.
+        chosen_template = str(execution.get("template") or "").strip()
+        remember_choice = bool(chosen_template) and str(execution.get("remember_template") or "").strip().lower() in (
+            "1", "true", "yes", "on")
+        from .sandbox.environments import normalize_template_choice
+        execution = normalize_template_choice(execution)
         metadata = dict(value.get("metadata") or {})
         supplied_base_branch = str(value.get("base_branch") or "").strip()
         supplied_base_sha = str(value.get("base_sha") or "").strip()
@@ -163,6 +170,15 @@ class JobService:
             execution=execution,
             metadata=metadata,
         ))
+        if remember_choice and repository:
+            from .sandbox.environments import remember_template
+            try:
+                remember_template(repository, chosen_template)
+            except ValueError as exc:
+                self.store.append_event(job.id, "template_remember_failed", reason=str(exc)[:500])
+            else:
+                self.store.append_event(job.id, "template_remembered", reason=f"{repository} → template:{chosen_template}",
+                                        payload={"repository": repository, "template": chosen_template})
         for warning in clone_warnings:
             # e.g. git-lfs missing: the job still runs, the warning is visible on it.
             self.store.append_event(job.id, "repository_warning", reason=warning,

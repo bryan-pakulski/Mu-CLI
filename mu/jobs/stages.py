@@ -375,6 +375,9 @@ def apply_review_verdict(service, job_id: str, review: Dict[str, Any]) -> int:
     checks = art.read_json("checks/summary.json", {}) or {}
     report.checks_context = {"new_failures": int(checks.get("new_failures") or 0),
                              "preexisting_failures": int(checks.get("preexisting_failures") or 0)}
+    if checks.get("verified") is False:
+        # Unrunnable checks cap the verdict at needs_work (job_templates.md §5).
+        report.checks_context["unverified"] = int(checks.get("unrunnable") or 1)
     for finding in report.findings:
         finding.disposition = "open"
     report.recompute()

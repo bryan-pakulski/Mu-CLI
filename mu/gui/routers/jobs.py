@@ -428,6 +428,14 @@ async def _import_tickets(request: Request, body: Dict[str, Any]):
             status_code=400,
             detail="Choose a workspace or repository for the imported jobs.",
         )
+    template = str((defaults.get("execution") or {}).get("template") or "").strip()
+    if template:
+        # "Run in" for every imported ticket: reject an unknown template once, not per ticket.
+        from mu.jobs.sandbox.environments import normalize_template_choice
+        try:
+            normalize_template_choice({"template": template})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     service = _service(request)
     try:
         max_results = int(body.get("max_results") or 20)

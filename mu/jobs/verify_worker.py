@@ -120,6 +120,15 @@ def missing_tool_message(summary: dict) -> str:
     return " ".join(parts)
 
 
+def _template_of(job) -> str:
+    """The template the job's primary build environment snapshots ('' when none)."""
+    states = list((job.metadata or {}).get("build_environments") or [])
+    for state in states:
+        if isinstance(state, dict) and state.get("source") == "template" and (state.get("primary") or len(states) == 1):
+            return str(state.get("ref") or "")
+    return ""
+
+
 def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
     """Only new failures enter the bounded implementation repair loop."""
     current = service.get(job_id)
@@ -133,13 +142,26 @@ def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
                               "Configure at least one check suite before review and push.", payload=feedback)
         return 21
     missing = list(run.summary.get("missing_tools") or [])
-    if missing:
-        # The implementer cannot install toolchains, so a repair loop would be wasted spend.
-        service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED, missing_tool_message(run.summary),
-            payload={**feedback, "missing_tools": missing,
+    unrunnable = list(run.summary.get("unrunnable_suites") or [])
+    if missing or unrunnable:
+        # Honest gate (job_templates.md §5): checks that could not run prove nothing. The
+        # implementer cannot install toolchains or dependencies, so a repair loop would be wasted
+        # spend; the job parks unverified until the environment is fixed or a human continues.
+        service.store.patch_metadata(job_id, {"checks_unverified": True})
+        message = missing_tool_message(run.summary) if missing else ""
+        extra = [u for u in unrunnable if u.get("kind") != "missing_tool" or u.get("tool") not in missing]
+        if extra:
+            from .checks import unverified_message
+            message = " ".join(p for p in (message, unverified_message(extra, template=_template_of(current))) if p)
+        service.store.append_event(job_id, "checks_unverified", reason=message[:2000],
+                                   payload={"unrunnable": unrunnable, "missing_tools": missing})
+        service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED, message,
+            payload={**feedback, "missing_tools": missing, "unverified": True, "unrunnable": unrunnable,
                      "missing_tool_environments": run.summary.get("missing_tool_environments") or {}})
         _refresh_receipt(service, job_id)
         return 22
+    if (current.metadata or {}).get("checks_unverified"):
+        service.store.patch_metadata(job_id, remove=("checks_unverified",))
     from .job_settings import load_settings
     settings = load_settings().get("checks") or {}
     maximum = max(0, int((current.execution.get("checks") or {}).get("max_fix_attempts", settings.get("max_fix_attempts", 2))))

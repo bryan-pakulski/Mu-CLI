@@ -1,6 +1,6 @@
 # Plan: run a job in a container template
 
-Status: approved direction (2026-10-15) · Owner: jobs · Builds on: `job_build_environments.md`
+Status: implemented (2026-10-15; see §7) · Owner: jobs · Builds on: `job_build_environments.md`
 (rev 3; templates are already valid job environments). Supersedes the Prepare stage and
 environment agent in `job_build_sandbox.md`; that plan's Phase 0 "honest gate" is kept here as
 §5.
@@ -145,3 +145,20 @@ What changes:
 - **Honest gate:** the rsq-cloud outputs (`vitest: not found`, `tsc: not found`, ESLint 6.4)
   become `unrunnable`, the job is unverified, and the review is capped.
 - **UI:** picker contract tests (web), jest (Android), and CLI flag parsing (terminal).
+
+## 7. Implementation status (2026-10-15, branch `jobs/templates`)
+
+Implemented for web, terminal and the backend; Android builds against the same API in parallel.
+
+| Spec | Where |
+|---|---|
+| §3.1 payload, remember, fit | `execution.template` → `environments: ["template:<name>"]`, `Unknown template '<name>'`, `remember_template` writes the Toolchains row (`environments.normalize_template_choice`, `remember_template`, `remembered_template`, `template_fit`; `JobService.create_from_payload`). `GET /api/jobs/environments` templates carry `size`, `size_bytes`, `gpus`, `job_setup`, `egress_allow` and, with a workspace, `fit`; top level `remembered`. |
+| §3.1/§3.2 picker | Web `static/js/work/run_in_picker.js` in the New job sheet and the Jira import dialog; a "Run in" select per Jira watcher query (`trackers.watch.queries[].template`, applied by `tracker_sync.poll_watches`). Terminal `/job create --template NAME [--remember]`, `/job jira pull … --template NAME`, and a "Run in" step in the jobs dashboard. |
+| §3.2 template card | "Used for jobs" on `/containers` (job setup commands, network allowlist, "Used by N jobs"); `PATCH /api/containers/templates/{name}`; terminal `/container template setup NAME [list|add|remove|clear]`. |
+| §4 job setup | `mu/jobs/sandbox/job_setup.py`, run from `ensure_environments` once per job image (so again after `refreshEnvironments` and after re-creation following idle cleanup). Checks-stage isolation (worktree rw, `/cache`, egress bridge with the template's allowlist minus model hosts, read-only rootfs, host uid:gid, `--cap-drop ALL`, no credentials, no relay). Events `environment_setup` (`{binding, command, index, status, exit_code?, output_tail?}`), output chunks as `environment_setup_log`. Failure parks with `environment_failure`; actions Retry (resume), **Continue without setup** (`skipSetup`). Files setup leaves in `git status` are listed (`environment_setup_dirty`) and ignored by the checks' dirty rule and the push gate. |
+| §5 honest gate | `checks.classify_unrunnable` (exit 126/127, missing-tool signatures, registry `E403`/`ENOTFOUND`, project-declared tools missing from `node_modules/.bin`); results `status` passed/failed/unrunnable and `unrunnable {tool, cause, hint}`; summary `unrunnable`, `verified`, `unrunnable_suites`; run status `unverified`. The job parks (`verification_required`) with the cause and fix; **Continue unverified** (`continueUnverified`) reviews with the verdict capped at `needs_work`; push needs `override_reason`, and publish only proceeds with the override recorded for that check run. Vocabulary `unverified` (`?`, caution) and check status `unrunnable`. The runtime image installs Node from the pinned upstream tarball, not Debian's `npm`. |
+
+Notes and limits:
+- A stray global tool is detected for *failing* checks only (a passing check is never marked unrunnable).
+- "Remember for this workspace" replaces that repository's Toolchains rows with one whole-repository row.
+- Setup files that git does not ignore can still be included by an implement checkpoint; the job warns and lists them.

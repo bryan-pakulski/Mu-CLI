@@ -101,3 +101,51 @@ queried.
 Costs are capped at $100 per job by default (`defaults.max_cost_usd`). Leave
 the New job cost field blank to use that default, or enter `0` for no cap. All job settings: `/job settings` or
 [configuration.md](configuration.md#job-settings).
+
+## 7. Run a job in a template
+
+A job normally runs in the shared runtime image (Python and Node, no project
+tools). To run planning, implementation, checks and review in an image that
+already has your project's toolchain, build and tune a container on
+**Environments** (`/containers`) and save it as a **template**. Then choose it
+when you create the job:
+
+- **Web:** the New job sheet's **Run in** picker lists Default runtime, your
+  templates (size, GPU, job setup) and your environments. **Advanced…** opens
+  the multi-environment editor (monorepo paths, Docker, GPUs). Tick
+  **Remember for this workspace** to make the template the repository's
+  default (a Settings → Toolchains row), which scheduled Jira imports also use.
+  The Jira import dialog and each Jira watcher query have the same **Run in**
+  choice.
+- **Terminal:** `/job create "Fix login" --in ~/src/app --template rsq-node-build --remember`,
+  or `/job jira pull PROJ-1 --template rsq-node-build`. The jobs dashboard asks
+  **Run in** when you create a job.
+
+When a template can't reach a registry your lockfiles need, the picker warns
+`◆ can't reach registry.npmjs.org`; **Allow** adds the domain to the template's
+network allowlist.
+
+**Job setup** installs the repository's dependencies into each job's worktree,
+once per job, before planning. Add the commands on the template card's **Used
+for jobs** section (or `/container template setup rsq-node-build add "npm ci"`),
+for example:
+
+```
+npm --prefix resq-management ci
+cargo fetch --manifest-path stream-processor-rs/Cargo.toml
+```
+
+Setup runs in the job image with the template's network allowlist (model hosts
+dropped), the worktree read-write, the shared `/cache`, no credentials and the
+usual stage isolation. Its output appears in the job's Activity. When a command
+fails, the job waits for you: **Retry**, edit the template, or **Continue
+without setup**. Setup runs again after **Refresh environments** and when a job's
+images were cleaned while it sat idle. Edits to a template affect only jobs
+started afterwards.
+
+**Unverified checks.** A check that could not run (a missing command, a tool
+from `node_modules` that isn't installed, a registry it couldn't reach) is
+**unrunnable** (`?`), never a pre-existing failure. The job stops as
+**unverified** and names the commands, the cause and the fix. **Continue
+unverified** reviews it anyway: the verdict is capped at *needs work* and
+pushing needs an override reason.

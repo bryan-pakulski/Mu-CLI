@@ -369,6 +369,16 @@
                     <small class="w-field__hint" id="job-repository-hint">The repository the job works in: a local path or a git URL (https or ssh).</small>
                     <div class="work-env-approval" id="job-environments-approval" role="region" aria-label="Build environment approval" hidden></div>
                 </div>
+                <div class="w-field work-field work-field-wide" id="job-environments-field">
+                    <span class="w-field__label" id="job-environments-label">Run in</span>
+                    <div class="work-runin-host" id="job-run-in" role="group" aria-labelledby="job-environments-label"></div>
+                    <div class="w-btn-row work-env-field" role="group" aria-label="Build environments">
+                        <span class="work-grow work-meta" id="job-environments-summary" aria-live="polite">Choose a workspace to see the build environments.</span>
+                        <button type="button" class="w-btn" data-variant="ghost" data-size="sm" id="job-environments-change">Advanced…</button>
+                        <button type="button" class="w-btn" data-variant="ghost" data-size="sm" id="job-environments-reset" hidden>Use default</button>
+                    </div>
+                    <small class="w-field__hint" id="job-environments-hint">Each job snapshots its environment at start and removes it when it ends.</small>
+                </div>
                 <label class="w-field work-field work-field-wide">
                     <span class="w-field__label">Title or ticket key</span>
                     <input class="w-input" id="job-title" required maxlength="180" placeholder="Fix OAuth callback validation — or PROJ-123" aria-describedby="job-title-hint">
@@ -403,15 +413,6 @@
                             <span class="w-field__label" id="job-agents-label">Agent per stage</span>
                             <div id="job-agents"></div>
                             <small class="w-field__hint" id="job-agents-hint">Agent and model for each stage. A blank model uses Settings → Stage models, then the session’s model.</small>
-                        </div>
-                        <div class="w-field work-field work-field-wide" id="job-environments-field">
-                            <span class="w-field__label" id="job-environments-label">Build environments</span>
-                            <div class="w-btn-row work-env-field" role="group" aria-labelledby="job-environments-label">
-                                <span class="work-grow work-mono work-meta" id="job-environments-summary" aria-live="polite">Choose a workspace to see the build environments.</span>
-                                <button type="button" class="w-btn" data-variant="secondary" data-size="sm" id="job-environments-change">Change</button>
-                                <button type="button" class="w-btn" data-variant="ghost" data-size="sm" id="job-environments-reset" hidden>Use default</button>
-                            </div>
-                            <small class="w-field__hint" id="job-environments-hint">Each job snapshots its environments at start and removes them when it ends.</small>
                         </div>
                         <div class="work-form-grid">
                             <label class="w-field work-field">
@@ -451,6 +452,7 @@
 <script src="/static/js/work/ui.js"></script>
 <script src="/static/js/work/plan_editor.js"></script>
 <script src="/static/js/work/environments.js"></script>
+<script src="/static/js/work/run_in_picker.js"></script>
 <script src="/static/js/work/agents.js"></script>
 <script src="/static/js/wash/diff.js"></script>
 <script src="/static/js/work/view.js"></script>

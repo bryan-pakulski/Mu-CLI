@@ -99,6 +99,29 @@
     }
     .w-env-meta__chips { display: flex; gap: var(--wash-space-1); flex-wrap: wrap; white-space: normal; }
 
+    /* Template card: "Used for jobs" (job setup commands, network allowlist, jobs using it). */
+    .w-env-card__use { margin-left: auto; color: inherit; }
+    .w-env-jobs { margin-top: var(--wash-space-3); border-top: 1px solid var(--wash-hairline); padding-top: var(--wash-space-2); }
+    .w-env-jobs__summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--wash-space-2);
+        min-height: 32px;
+        cursor: pointer;
+        list-style: none;
+    }
+    .w-env-jobs__summary::-webkit-details-marker { display: none; }
+    .w-env-jobs__summary::before { content: "▸"; color: var(--wash-ink-3); transition: transform var(--wash-motion-small) var(--wash-ease-small); }
+    .w-env-jobs[open] > .w-env-jobs__summary::before { transform: rotate(90deg); }
+    .w-env-jobs__title { font-weight: var(--wash-type-label-weight); }
+    .w-env-jobs__meta { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .w-env-jobs__form { display: grid; gap: var(--wash-space-3); padding-top: var(--wash-space-2); cursor: auto; }
+    .w-env-jobs__cmds { display: grid; gap: var(--wash-space-1); margin: 0 0 var(--wash-space-2); padding: 0; list-style: none; }
+    .w-env-jobs__cmds:empty { display: none; }
+    .w-env-jobs__cmd { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--wash-space-2); }
+    .w-env-jobs__num { color: var(--wash-ink-3); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); text-align: right; }
+
     .w-env-scan-warning {
         padding: var(--wash-space-3) var(--wash-space-4);
         border-radius: var(--wash-radius-sm);

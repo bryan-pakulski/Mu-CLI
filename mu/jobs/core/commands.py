@@ -104,6 +104,11 @@ def import_jira(service, *, keys, jql, defaults, force=False):
     """``force`` re-imports tickets whose latest job is done (terminal ``--force``)."""
     from mu.integrations.jira import JiraClient, import_issues
     from mu.integrations.jira_settings import resolve_config
+    template = str(((defaults or {}).get("execution") or {}).get("template") or "").strip()
+    if template:
+        # "Run in" for every ticket: an unknown template fails the import once (ValueError).
+        from ..sandbox.environments import normalize_template_choice
+        normalize_template_choice({"template": template})
     return import_issues(service, JiraClient(resolve_config()), keys=keys, jql=jql, defaults=defaults, force=force)
 
 
@@ -348,6 +353,26 @@ def _retry(service, job, facts, args):
     return ["state", "pipeline"], {}
 
 
+def _skip_setup(service, job, facts, args):
+    """"Continue without setup": the failed template job setup is marked skipped for the
+    job's current image and the parked stage resumes."""
+    from ..sandbox.job_setup import skip_failed_setup
+    skipped = skip_failed_setup(service, job.id)
+    fresh = service.get(job.id)
+    _resume(service, fresh, facts_for_job(service, fresh), {"guidance": ""})
+    return ["state", "pipeline", "session"], {"skipped": skipped}
+
+
+def _continue_unverified(service, job, facts, args):
+    """Review a job whose checks could not all run (job_templates.md §5). The review verdict is
+    capped at needs_work and pushing needs an override reason."""
+    _merge_meta(service, job.id, checks_unverified=None, continued_unverified=True)
+    service.store.append_event(job.id, "continue_unverified", reason="human continued with unverified checks",
+                               payload={"reason": str(args.get("reason") or "")[:2000]})
+    service.transition(job.id, "reviewing", reason="continue unverified: review with unrunnable checks")
+    return ["state", "pipeline", "checks", "review"], {}
+
+
 def _recheck(service, job, facts, args):
     # Re-run Checks + Review on the current HEAD (no implement run).
     if not job.worktree:
@@ -408,18 +433,25 @@ def _mark_findings(service, job, facts, args):
 
 def _push(service, job, facts, args):
     from ..checks import push_check_reason
-    reason = push_check_reason(service, job)
+    from ..verification import VerificationStore
+    run = VerificationStore(service.store).latest(job.id)
+    reason = push_check_reason(service, job, run=run, allow_unverified=True)
     if reason:
         raise CommandRejected(reason)
     override = str(args.get("override_reason") or "").strip()
     if facts.verdict == "do_not_merge" and not override:
         raise CommandRejected("verdict is do_not_merge: push requires override_reason")
+    unverified = run is not None and not run.verified
+    if unverified and not override:
+        raise CommandRejected("checks are unverified (some could not run): push requires override_reason")
     publish_override = _publish_override(args)
     if override:
         service.store.append_event(job.id, "push_override", reason="human override",
-                                   payload={"verdict": facts.verdict, "reason": override[:2000]})
+                                   payload={"verdict": facts.verdict, "reason": override[:2000], "unverified": unverified})
     # Always (re)written so a stale override from an earlier push never leaks.
-    _merge_meta(service, job.id, publish_override=publish_override)
+    _merge_meta(service, job.id, publish_override=publish_override,
+                unverified_override={"head_sha": run.head_sha, "verification_id": run.id, "reason": override[:2000]}
+                if unverified else None)
     service.store.transition_core(job.id, JobState.PUSHING, reason="human push")
     return ["state", "pipeline"], {"publish_override": publish_override}
 
@@ -626,7 +658,7 @@ _HANDLERS = {
     "denyTool": lambda s, j, f, a: _tool_response(s, j, f, a, "deny"),
     "approvePlan": _approve_plan, "rejectPlan": _reject_plan, "savePlanDraft": _save_plan_draft,
     "message": _message, "resume": _resume, "raiseLimit": _raise_limit, "restartStage": _restart_stage, "retry": _retry,
-    "recheck": _recheck, "reprompt": _reprompt, "markFindings": _mark_findings, "markViewed": _mark_viewed, "push": _push, "repush": _repush,
+    "recheck": _recheck, "skipSetup": _skip_setup, "continueUnverified": _continue_unverified, "reprompt": _reprompt, "markFindings": _mark_findings, "markViewed": _mark_viewed, "push": _push, "repush": _repush,
     "markMerged": _mark_merged, "discard": _discard, "delete": _delete,
     "setEnvironments": _set_environments, "refreshEnvironments": _refresh_environments,
     "keepEnvironments": _keep_environments,

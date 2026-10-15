@@ -146,6 +146,9 @@ class ReviewReport:
             checks_context={
                 "new_failures": int((raw.get("checks_context") or {}).get("new_failures") or 0),
                 "preexisting_failures": int((raw.get("checks_context") or {}).get("preexisting_failures") or 0),
+                # Present only for unverified check runs (unrunnable checks; verdict capped).
+                **({"unverified": int((raw.get("checks_context") or {})["unverified"])}
+                   if int((raw.get("checks_context") or {}).get("unverified") or 0) else {}),
             },
             out_of_scope_changes=[str(x) for x in raw.get("out_of_scope_changes") or []],
             model_verdict=str(raw.get("model_verdict") or raw.get("verdict") or ""),
@@ -187,6 +190,9 @@ def compute_verdict(findings: Iterable[Finding], coverage: Iterable[Coverage],
         return "do_not_merge"
     if "major" in open_sev or any(c.status == "unmet" for c in coverage):
         return "needs_work"
+    if int((checks or {}).get("unverified") or 0) > 0:
+        # Honest gate (job_templates.md §5): checks that could not run never yield "ready".
+        return "needs_work"
     if open_sev & {"minor", "nit"}:
         return "ready_with_nits"
     return "ready"
@@ -201,4 +207,6 @@ def compute_readiness(findings: Iterable[Finding], coverage: Iterable[Coverage],
     for c in coverage:
         score -= {"unmet": 15, "partial": 5}.get(c.status, 0)
     score -= 25 * int((checks or {}).get("new_failures") or 0)
+    if int((checks or {}).get("unverified") or 0) > 0:
+        score = min(score - 20, 60)
     return max(0, min(100, score))

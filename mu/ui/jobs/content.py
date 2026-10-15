@@ -216,6 +216,15 @@ def session_items(session: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
             items.append({"kind": "chip", "text": f"build environment {payload.get('binding') or ''} ready"})
         elif etype == "build_environment_failed":
             items.append({"kind": "error", "text": str(ev.get("reason") or "build environment failed")})
+        elif etype == "environment_setup" and payload.get("status") in ("ok", "failed"):
+            # Template job setup (job_templates.md §4): one line per finished command.
+            label = f"setup [{payload.get('binding') or ''}] {payload.get('command') or ''}"
+            if payload.get("status") == "ok":
+                items.append({"kind": "chip", "text": f"{label} ✓"})
+            else:
+                items.append({"kind": "error", "text": f"{label} failed (exit {payload.get('exit_code')})"})
+        elif etype in ("environment_setup_dirty", "environment_setup_skipped"):
+            items.append({"kind": "chip", "text": str(ev.get("reason") or etype)})
     return items
 
 
@@ -501,11 +510,31 @@ def run_counts(run: Dict[str, Any]) -> Dict[str, int]:
 
 
 def run_status(run: Dict[str, Any]) -> str:
+    if run.get("verified") is False:
+        return "unverified"  # some checks could not run (job_templates.md §5)
     if run.get("passed") is True:
         return "done"
     if run.get("passed") is False:
         return "failed"
     return "active"
+
+
+def suite_status(suite: Dict[str, Any]) -> str:
+    """Vocabulary status of one suite result: ``done`` / ``failed`` / ``unverified`` (unrunnable)."""
+    if str(suite.get("status") or "") == "unrunnable":
+        return "unverified"
+    return "done" if suite.get("passed") else "failed"
+
+
+def _status_token(status: str) -> str:
+    # The unverified status is the caution semantic (G vocabulary: glyph ``?``).
+    return "caution" if status == "unverified" else STATUS[status]["token"]
+
+
+def _status_seg(status: str) -> Tuple[str, str]:
+    if status == "unverified":
+        return ("caution", STATUS.get("unverified", {}).get("icon", "?"))
+    return status_icon(status)
 
 
 def failed_cases(checks: Dict[str, Any], run_index: int) -> List[Dict[str, Any]]:
@@ -580,8 +609,8 @@ def checks_lines(checks: Optional[Dict[str, Any]], state: str, width: int, run_c
         st = run_status(r)
         n = run_counts(r)
         dur = duration((r.get("duration_ms") or 0) / 1000.0) if r.get("duration_ms") else "—"
-        line = [("accent", "› " if sel else "  "), status_icon(st), ("", pad(f" {r.get('run', idx + 1)}", 5)),
-                (STATUS[st]["token"], pad("passed" if st == "done" else ("failed" if st == "failed" else "running"), 10)),
+        line = [("accent", "› " if sel else "  "), _status_seg(st), ("", pad(f" {r.get('run', idx + 1)}", 5)),
+                (_status_token(st), pad({"done": "passed", "failed": "failed", "unverified": "unverified"}.get(st, "running"), 10)),
                 ("muted", pad(str(r.get("trigger") or "—"), 9) + pad(dur, 10) + pad(str(r.get("head_sha") or "")[:8], 10)),
                 ("ok", f"{n['passed']} ok"), ("danger" if n["failed"] else "muted", f" {n['failed']} ✗"),
                 ("muted", f" {n['skipped']} skipped")]
@@ -608,12 +637,27 @@ def checks_lines(checks: Optional[Dict[str, Any]], state: str, width: int, run_c
                     ("muted", f"  {n['passed']} passed · {n['failed']} failed · {n['skipped']} skipped")])
         out.append([("", "  ")] + stacked_bar([(n["passed"], "ok"), (n["failed"], "danger"), (n["skipped"], "muted")],
                                               min(60, w - 4)))
+        if r.get("verified") is False:
+            count = int(r.get("unrunnable") or 0) or sum(1 for x in r.get("suites") or [] if suite_status(x) == "unverified")
+            out.append(fit_line([_status_seg("unverified"),
+                                 ("caution bold", f" unverified · {count} check{'s' if count != 1 else ''} could not run"),
+                                 ("muted", " · fix the environment, then re-run checks")], w, pad_to=False))
         for suite in r.get("suites") or []:
-            sst = "done" if suite.get("passed") else "failed"
+            sst = suite_status(suite)
             sd = duration((suite.get("duration_ms") or 0) / 1000.0) if suite.get("duration_ms") else ""
             env: Line = [("accent", f"[{suite['environment']}] ")] if suite.get("environment") else []
-            out.append([("", "  "), status_icon(sst), ("", f" {suite.get('suite', '')} ")] + env +
+            label = [("caution", "unrunnable ")] if sst == "unverified" else []
+            out.append([("", "  "), _status_seg(sst), ("", f" {suite.get('suite', '')} ")] + label + env +
                        [("muted", f"{clean(suite.get('command', ''))}  {sd}")])
+            info = suite.get("unrunnable") or {}
+            if sst == "unverified" and info:
+                cause = clean(str(info.get("cause") or ""))
+                tool = clean(str(info.get("tool") or ""))
+                for l in wrap_text((f"`{tool}`: " if tool else "") + cause, w - 8)[:3]:
+                    out.append([("caution", "      " + l)])
+                if info.get("hint"):
+                    for l in wrap_text("→ " + clean(str(info["hint"])), w - 8)[:3]:
+                        out.append([("muted", "      " + l)])
         cases = failed_cases(checks, run_cursor)
         if cases:
             out.append([])

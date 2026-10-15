@@ -38,9 +38,18 @@ class VerificationCheck:
     stdout: str = ""
     stderr: str = ""
     error: str = ""
+    # Honest gate (job_templates.md §5): passed | failed | unrunnable ('' = recorded before it).
+    status: str = ""
+    # For unrunnable checks: {tool, cause, hint}.
+    unrunnable: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "VerificationCheck":
+        allowed = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in dict(raw or {}).items() if k in allowed})
 
 
 @dataclass(frozen=True)
@@ -66,9 +75,17 @@ class VerificationRun:
     manifest_path: str = ""
     summary: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def verified(self) -> bool:
+        """False when any check could not run (the run proves nothing about those suites)."""
+        if "verified" in (self.summary or {}):
+            return bool(self.summary["verified"])
+        return self.status != "unverified"
+
     def to_dict(self) -> Dict[str, Any]:
         value = asdict(self)
         value["checks"] = [check.to_dict() for check in self.checks]
+        value["verified"] = self.verified
         return value
 
 
@@ -222,7 +239,7 @@ class VerificationStore:
             head_sha=row["head_sha"],
             branch=row["branch"],
             worktree=row["worktree"],
-            checks=[VerificationCheck(**item) for item in checks_raw],
+            checks=[VerificationCheck.from_dict(item) for item in checks_raw],
             changed_files=json.loads(row["changed_files_json"] or "[]"),
             additions=int(row["additions"]),
             deletions=int(row["deletions"]),

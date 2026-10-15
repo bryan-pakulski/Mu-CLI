@@ -16,6 +16,22 @@
     const SOURCE_LABEL = {job:'this job', repo:'repo config', session:'session', settings:'settings', default:'default runtime', error:'error'};
     const STATUS = {ready:['ok', '✓', 'ready'], preparing:['running', '●', 'preparing'], failed:['danger', '✗', 'failed'], cleaned:['muted', '○', 'cleaned']};
     const ACTIONS = new Set(['setEnvironments', 'refreshEnvironments', 'keepEnvironments']);
+    // Template job setup (job_templates.md §4): the binding's setup status and per-command progress.
+    const SETUP = {running:['running', '●', 'job setup running'], ok:['ok', '✓', 'job setup done'], failed:['danger', '✗', 'job setup failed'],
+        skipped:['muted', '–', 'job setup skipped'], pending:['muted', '○', 'job setup pending']};
+    function setupBlock(x) {
+        const setup = x.setup || {};
+        const commands = (setup.commands || []).length ? setup.commands : (x.job_setup || []).map((command, index) => ({index, command, status:'pending'}));
+        if (!commands.length) return '';
+        const [tone, glyph, word] = SETUP[setup.status || 'pending'] || SETUP.pending;
+        const rows = commands.map(c => { const [t, g] = SETUP[c.status] || SETUP.pending;
+            return `<li class="work-setup-cmd" data-setup-index="${esc(c.index)}" data-setup-status="${esc(c.status || 'pending')}"><span class="w-status" data-tone="${t === 'muted' ? 'neutral' : t}">${c.status === 'running' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${g}</span>`}<span class="w-sr-only">${esc(c.status || 'pending')}</span></span><code>${esc(c.command)}</code>${c.exit_code != null && c.status !== 'ok' ? `<span class="work-meta">exit ${esc(c.exit_code)}</span>` : ''}</li>`; }).join('');
+        return `<div class="work-stack-tight" data-env-setup="${esc(setup.status || 'pending')}"><div class="work-toolbar">${pill(tone, `<span aria-hidden="true" class="w-chip__glyph"${setup.status === 'running' ? ' data-state="active"' : ''}>${glyph}</span><span>${esc(word)}</span>`)}
+            ${x.source === 'template' ? `<a class="work-meta" href="/containers#template-${encodeURIComponent(x.ref)}">Edit template</a>` : ''}</div>
+            <ol class="work-setup-cmds" aria-label="Job setup commands of ${esc(x.name)}">${rows}</ol>
+            ${(setup.files || []).length ? `<p class="work-meta" data-tone="attention">Setup left ${setup.files.length} file${setup.files.length === 1 ? '' : 's'} git does not ignore (checks ignore them): ${esc(setup.files.slice(0, 6).join(', '))}${setup.files.length > 6 ? '…' : ''}</p>` : ''}
+            ${setup.status === 'failed' && setup.error ? `<pre class="work-log">${esc(setup.error)}</pre>` : ''}</div>`;
+    }
 
     function bytes(n) {
         const v = Number(n || 0);
@@ -139,6 +155,7 @@
                     ${x.primary ? pill('accent', 'primary') : ''}${x.docker ? pill('accent', `<span aria-hidden="true">⬢</span> docker${x.engine ? ` · ${esc(x.engine)}` : ''}`) : ''}${x.gpus ? pill('accent', `gpus ${esc(x.gpus)}`) : ''}
                     <span class="work-spacer"></span>${x.image_bytes ? `<span class="work-caption work-num" title="job image size">${esc(bytes(x.image_bytes))}</span>` : ''}</div>
                 <div class="work-meta">${esc((x.paths || []).length ? x.paths.join(', ') : 'whole repository')}${probe ? ` · ${esc(probe)}` : ''}${x.home_bytes ? ` · home ${esc(bytes(x.home_bytes))}` : ''}</div>
+                ${setupBlock(x)}
                 ${x.error ? `<div class="w-banner work-banner-sm" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(x.error)}</p></div>` : ''}
                 ${(x.secret_paths || []).length ? `<details open><summary class="work-meta" data-tone="danger">Secret scan blocked ${x.secret_paths.length} path${x.secret_paths.length === 1 ? '' : 's'}</summary><ul class="work-caption work-mono">${x.secret_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
                 ${(x.skipped_paths || []).length ? `<details><summary class="work-meta">${x.skipped_paths.length} home path${x.skipped_paths.length === 1 ? '' : 's'} left out of the snapshot</summary><ul class="work-meta work-mono">${x.skipped_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}</li>`;
@@ -160,5 +177,5 @@
         return `[${a.env || '?'}] ${a.command || ''}${a.cwd && a.cwd !== '.' ? `  (in ${a.cwd})` : ''}`;
     }
 
-    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow};
+    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow, setupBlock};
 })();

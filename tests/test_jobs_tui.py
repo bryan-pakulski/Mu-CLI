@@ -641,7 +641,7 @@ def test_color_mode_detection():
 
 def test_status_vocabulary_and_state_style():
     assert {k: v["icon"] for k, v in theme.STATUS.items()} == {
-        "done": "✓", "active": "●", "waiting": "◆", "failed": "✗", "skipped": "–", "pending": "○"}
+        "done": "✓", "active": "●", "waiting": "◆", "failed": "✗", "unverified": "?", "skipped": "–", "pending": "○"}
     assert theme.state_style("review_done") == {"status": "waiting", "token": "warn", "icon": "◆", "label": "review done"}
     assert theme.state_style("implementing")["token"] == "running"
     assert theme.state_style("failed")["token"] == "danger"

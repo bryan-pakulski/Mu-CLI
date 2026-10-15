@@ -82,6 +82,81 @@
     return `<span class="w-chip" data-tone="${style.tone}" data-status="${esc(key)}"><span class="w-chip__glyph" aria-hidden="true">${style.glyph}</span><span>${esc(style.label)}</span></span>`;
   };
 
+  // ---------------------------------------------------------------- templates: "Used for jobs"
+  // (documentation/plans/job_templates.md §3.2/§4): job setup commands, the network allowlist
+  // and "Used by N jobs". Saved through PATCH /api/containers/templates/{name}; jobs that already
+  // started keep the snapshot they took.
+  const MAX_SETUP = 20;
+  const openJobs = new Set();
+  const setupDrafts = {};
+  function setupRow(name, command, index) {
+    return `<li class="w-env-jobs__cmd" data-setup-row="${index}"><span class="w-env-jobs__num" aria-hidden="true">${index + 1}</span>
+      <input class="w-input" data-mono type="text" maxlength="2000" data-setup-cmd value="${esc(command)}" placeholder="npm ci" aria-label="Job setup command ${index + 1} of template ${esc(name)}">
+      <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-setup-remove="${index}" aria-label="Remove command ${index + 1}" title="Remove command ${index + 1}">${icon('x', 'sm')}</button></li>`;
+  }
+  function templateJobsSection(item) {
+    const name = item.name;
+    const setup = setupDrafts[name] || item.job_setup || [];
+    const egress = item.egress_allow || [];
+    const used = Number(item.jobs_using || 0);
+    const meta = [`${setup.length} setup command${setup.length === 1 ? '' : 's'}`, `${egress.length} domain${egress.length === 1 ? '' : 's'}`].join(' · ');
+    return `<details class="w-env-jobs" data-template-jobs="${esc(name)}"${openJobs.has(name) ? ' open' : ''}>
+      <summary class="w-env-jobs__summary"><span class="w-env-jobs__title">Used for jobs</span>
+        <span class="w-chip" data-variant="meta" data-template-used="${used}">Used by ${used} job${used === 1 ? '' : 's'}</span><span class="w-env-jobs__meta">${esc(meta)}</span></summary>
+      <form class="w-env-jobs__form" data-template-jobs-form="${esc(name)}" novalidate>
+        <div class="w-field"><span class="w-field__label" id="tpl-setup-${esc(name)}">Job setup commands</span>
+          <ol class="w-env-jobs__cmds" aria-labelledby="tpl-setup-${esc(name)}">${setup.map((c, i) => setupRow(name, c, i)).join('') || ''}</ol>
+          <div class="w-btn-row"><button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-setup-add${setup.length >= MAX_SETUP ? ' disabled' : ''}>${icon('plus', 'sm')}<span>Add command</span></button></div>
+          <p class="w-field__hint">Run in order, once per job, in the job's worktree after its image is built and before planning, e.g. <code>npm ci</code>. At most ${MAX_SETUP}.</p></div>
+        <div class="w-field"><label class="w-field__label" for="tpl-egress-${esc(name)}">Network allowlist</label>
+          <textarea class="w-textarea" data-mono rows="4" id="tpl-egress-${esc(name)}" data-template-egress placeholder="registry.npmjs.org">${esc(egress.join('\n'))}</textarea>
+          <p class="w-field__hint">One domain per line (<code>*.example.com</code> allowed). Job setup, implement and checks may reach these; model provider hosts are always dropped.</p></div>
+        <p class="w-field__error" data-template-jobs-error role="alert"></p>
+        <div class="w-btn-row" data-align="end"><button type="submit" class="w-btn" data-variant="primary" data-size="sm">Save</button></div>
+      </form></details>`;
+  }
+  function readSetup(form) { return [...form.querySelectorAll('[data-setup-cmd]')].map(i => i.value); }
+  function bindTemplateJobs() {
+    document.querySelectorAll('[data-template-jobs]').forEach(details => {
+      const name = details.dataset.templateJobs;
+      const form = details.querySelector('form');
+      details.addEventListener('toggle', () => { if (details.open) openJobs.add(name); else openJobs.delete(name); });
+      const redraw = commands => {
+        setupDrafts[name] = commands;
+        form.querySelector('.w-env-jobs__cmds').innerHTML = commands.map((c, i) => setupRow(name, c, i)).join('');
+        form.querySelector('[data-setup-add]').disabled = commands.length >= MAX_SETUP;
+      };
+      form.addEventListener('click', event => {
+        const remove = event.target.closest('[data-setup-remove]');
+        if (remove) { const list = readSetup(form); list.splice(Number(remove.dataset.setupRemove), 1); redraw(list); return; }
+        if (event.target.closest('[data-setup-add]')) {
+          const list = readSetup(form);
+          if (list.length >= MAX_SETUP) return;
+          redraw([...list, '']);
+          form.querySelector(`[data-setup-row="${list.length}"] [data-setup-cmd]`)?.focus();
+        }
+      });
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const error = form.querySelector('[data-template-jobs-error]');
+        error.textContent = '';
+        const job_setup = readSetup(form).map(c => c.trim()).filter(Boolean);
+        const egress_allow = splitLines(form.querySelector('[data-template-egress]').value);
+        if (job_setup.length > MAX_SETUP) { error.textContent = `At most ${MAX_SETUP} setup commands.`; return; }
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+        try {
+          await api(`/api/containers/templates/${encodeURIComponent(name)}`, {method: 'PATCH', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({job_setup, egress_allow})});
+          delete setupDrafts[name];
+          openJobs.add(name);
+          await load();
+          toast(`Saved job settings for template ${name}`, 'ok');
+        } catch (err) { error.textContent = String(err.message || err); button.disabled = false; }
+      });
+    });
+  }
+
   async function load() {
     const [listing, defaults] = await Promise.all([api('/api/containers'), api('/api/container-defaults')]);
     state.containers = listing.containers || [];
@@ -157,7 +232,7 @@
     }).join('');
 
     $('template-empty').hidden = state.templates.length > 0;
-    $('template-list').innerHTML = state.templates.map(item => `<article class="w-card w-env-card w-env-card--template" data-variant="interactive" data-template-action="use" data-name="${esc(item.name)}" tabindex="0" role="button" aria-label="Create environment from template ${esc(item.name)}">
+    $('template-list').innerHTML = state.templates.map(item => `<article class="w-card w-env-card w-env-card--template" data-variant="interactive" data-template-action="use" data-name="${esc(item.name)}" id="template-${esc(item.name)}" aria-label="Template ${esc(item.name)}">
       <header class="w-card__head">
         <span class="w-eyebrow" data-tone="plan"><i class="w-eyebrow__swatch"></i>Template</span>
         <div class="w-env-card__tools"><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-template-action="remove" data-name="${esc(item.name)}" title="Delete template" aria-label="Delete template ${esc(item.name)}">${icon('trash-2', 'sm')}</button></div>
@@ -166,9 +241,11 @@
       <div class="w-card__body">
         <p class="w-env-card__lede">${esc(item.description || 'Reusable container environment')}</p>
         <dl class="w-env-meta"><dt>Source</dt><dd>${esc(item.source_container)}</dd><dt>Image</dt><dd>${esc(item.image)}</dd></dl>
+        ${templateJobsSection(item)}
       </div>
-      <footer class="w-card__foot w-env-card__hint"><span>Use as a base</span><span aria-hidden="true">›</span></footer>
+      <footer class="w-card__foot w-env-card__hint"><button type="button" class="w-btn w-env-card__use" data-variant="ghost" data-size="sm" data-template-action="use" data-name="${esc(item.name)}" aria-label="Create environment from template ${esc(item.name)}">Use as a base <span aria-hidden="true">›</span></button></footer>
     </article>`).join('');
+    bindTemplateJobs();
 
     $('environment-template').innerHTML = state.templates.map(item => `<option value="${esc(item.name)}">${esc(item.name)}</option>`).join('');
     const option = $('environment-source').querySelector('option[value="template"]');
@@ -640,6 +717,7 @@
       return;
     }
     const templateButton = event.target.closest('[data-template-action]');
+    if (templateButton && event.target.closest('.w-env-jobs')) return;  // the "Used for jobs" editor
     if (templateButton) {
       const name = templateButton.dataset.name;
       if (templateButton.dataset.templateAction === 'use') return openCreate(name);

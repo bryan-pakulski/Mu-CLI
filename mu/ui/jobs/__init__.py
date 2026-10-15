@@ -22,10 +22,11 @@ def can_open_tui(session: Any = None, *, allow_prompt: bool = True) -> bool:
         return False
 
 
-def open_jobs_tui(*, start_job: Optional[str] = None, service: Any = None, creator: Any = None) -> None:
+def open_jobs_tui(*, start_job: Optional[str] = None, service: Any = None, creator: Any = None,
+                  sources: Any = None) -> None:
     from .data import JobsData
     from .run import run_jobs_tui
-    run_jobs_tui(data=JobsData(service, creator=creator), start_job=start_job)
+    run_jobs_tui(data=JobsData(service, creator=creator, sources=sources), start_job=start_job)
 
 
 __all__ = ["can_open_tui", "open_jobs_tui"]

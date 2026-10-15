@@ -187,9 +187,56 @@ def _create_environment(
     )
 
 
+SETUP_USAGE = ("Usage: /container template setup <template> [list | add <command> | remove <n> | clear] "
+               "(job setup commands run in each job's worktree before planning, e.g. `npm ci`)")
+
+
+def _template_setup(supervisor: ContainerSupervisor, raw: str) -> CommandResult:
+    """``setup <template> [list | add <command> | remove <n> | clear]`` (job_templates.md §4).
+
+    ``add`` keeps the rest of the line verbatim (quotes and ``&&`` included); commands are
+    numbered from 1. Running jobs keep the setup they snapshotted."""
+    registry = supervisor.template_registry
+    name, _, rest = str(raw or "").strip().partition(" ")
+    if not name:
+        return CommandResult(ok=False, message=SETUP_USAGE)
+    template = registry.get(name)
+    if template is None:
+        return CommandResult(ok=False, message=f"Template not found: {name}")
+    action, _, value = rest.strip().partition(" ")
+    action, value = action.lower() or "list", value.strip()
+    commands = list(template.job_setup or [])
+    if action in {"list", "ls", "show"}:
+        lines = [f"Job setup · {template.name} ({len(commands)} command(s))"]
+        lines += [f"  {i}. {cmd}" for i, cmd in enumerate(commands, 1)] or ["  (none) — add one: "
+                                                                           f"/container template setup {template.name} add npm ci"]
+        lines.append(f"Egress: {', '.join(template.egress_allow) or '(none)'}")
+        return CommandResult(ok=True, message="\n".join(lines),
+                             data={"template": template.name, "job_setup": commands,
+                                   "egress_allow": list(template.egress_allow)})
+    if action == "add":
+        if not value:
+            return CommandResult(ok=False, message=SETUP_USAGE)
+        commands.append(value)
+    elif action in {"remove", "rm", "delete"}:
+        if not value.isdigit() or not 1 <= int(value) <= len(commands):
+            return CommandResult(ok=False, message=f"remove needs a command number 1–{len(commands)}" if commands
+                                 else f"Template {template.name} has no job setup commands.")
+        commands.pop(int(value) - 1)
+    elif action == "clear":
+        commands = []
+    else:
+        return CommandResult(ok=False, message=SETUP_USAGE)
+    updated = registry.update(template.name, job_setup=commands)
+    return CommandResult(ok=True, message=f"Job setup for {template.name}: {len(updated.job_setup)} command(s). "
+                                          "Jobs started from now on use it.",
+                         data={"template": updated.name, "job_setup": list(updated.job_setup)})
+
+
 @command(
     "/container",
-    help="Manage host container environments: list, create, start, stop, restart, shell, attach, detach, snapshot, remove.",
+    help="Manage host container environments: list, create, start, stop, restart, shell, attach, detach, snapshot, remove; "
+         "template setup <template> [list|add <command>|remove <n>|clear] edits a template's job setup.",
 )
 def container_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     raw = (args or "").strip()
@@ -206,6 +253,11 @@ def container_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comm
             return CommandResult(ok=True, message=f"{len(rows)} managed container(s).", data={"containers": rows})
         if sub in {"create", "new"}:
             return _create_environment(session, rest, allow_prompt=allow_prompt)
+        if sub in {"template", "templates"}:
+            action, _, tail = rest.partition(" ")
+            if action.lower() == "setup":
+                return _template_setup(supervisor, tail)
+            return template_cmd(session, rest, allow_prompt=allow_prompt)
 
         parts = shlex.split(rest)
         name = parts[0] if parts else ""
@@ -255,14 +307,20 @@ def container_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comm
 @command(
     "/template",
     "/templates",
-    help="Manage container templates: list, snapshot <container> <name>, use <template> <container>, delete <name>.",
+    help="Manage container templates: list, snapshot <container> <name>, use <template> <container>, delete <name>, "
+         "setup <template> [list|add <command>|remove <n>|clear] (job setup commands).",
 )
 def template_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     raw = (args or "").strip()
     head, _, rest = raw.partition(" ")
     sub = head.lower() if head else "list"
-    parts = shlex.split(rest)
     supervisor = _supervisor(session)
+    if sub == "setup":
+        try:
+            return _template_setup(supervisor, rest)
+        except ValueError as exc:
+            return CommandResult(ok=False, message=str(exc))
+    parts = shlex.split(rest)
     try:
         if sub in {"list", "ls"}:
             rows = _show_templates(supervisor) if allow_prompt else [
@@ -283,4 +341,5 @@ def template_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
             return CommandResult(ok=removed, message=(f"Removed template {parts[0]}" if removed else f"Template not found: {parts[0]}"))
     except (ContainerRuntimeError, RuntimeError, ValueError) as exc:
         return CommandResult(ok=False, message=str(exc))
-    return CommandResult(ok=False, message="Usage: /template [list|snapshot <container> <name>|use <template> <container>|delete <name>]")
+    return CommandResult(ok=False, message="Usage: /template [list|snapshot <container> <name>|use <template> <container>|delete <name>|"
+                                           "setup <template> [list|add <command>|remove <n>|clear]]")

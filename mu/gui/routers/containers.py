@@ -166,8 +166,45 @@ async def list_managed_containers(request: Request):
     templates = supervisor.template_registry.list_templates()
     return {
         "containers": [{**ref.to_dict(include_secret=False), **_job_usage(request, ref.name)} for ref in refs],
-        "templates": [item.to_dict() for item in templates],
+        "templates": [_template_payload(request, item) for item in templates],
     }
+
+
+def _template_payload(request: Request, template) -> dict[str, Any]:
+    """A template plus "Used by N jobs" (non-terminal jobs bound to ``template:<name>``)."""
+    count = 0
+    service = getattr(request.app.state, "job_service", None)
+    if service is not None:
+        try:
+            from mu.jobs.sandbox.environments import jobs_using_template
+            count = len(jobs_using_template(service, template.name))
+        except Exception:  # noqa: BLE001 - the badge is informational
+            count = 0
+    return {**template.to_dict(), "jobs_using": count}
+
+
+@router.patch("/api/containers/templates/{name}")
+async def update_container_template(name: str, request: Request, payload: dict[str, Any]):
+    """Edit a template's job fields: ``job_setup`` (≤20 commands of ≤2000 chars), ``egress_allow``
+    (validated like the job sandbox's egress domains) and ``description``. Jobs that already
+    started keep the snapshot they took."""
+    _require_local_client(request)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="expected a JSON object")
+    unknown = sorted(set(payload) - {"job_setup", "egress_allow", "description"})
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"unsupported template fields: {', '.join(unknown)}")
+    registry = request.app.state.container_supervisor.template_registry
+    try:
+        template = await asyncio.to_thread(
+            registry.update, name, job_setup=payload.get("job_setup"),
+            egress_allow=payload.get("egress_allow"), description=payload.get("description"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if template is None:
+        raise HTTPException(status_code=404, detail="container template not found")
+    return {"ok": True, "template": _template_payload(request, template)}
 
 
 def _job_usage(request: Request, name: str) -> dict[str, Any]:

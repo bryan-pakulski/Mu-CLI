@@ -865,7 +865,8 @@ def resolve_source(binding: Dict[str, Any]) -> Dict[str, Any]:
         template = TemplateRegistry().get(binding["ref"])
         if template is None:
             raise _blocked_missing(binding)
-        return {"image": template.image, "egress_allow": list(template.egress_allow or []), "gpus": ""}
+        return {"image": template.image, "egress_allow": list(template.egress_allow or []), "gpus": "",
+                "job_setup": list(template.job_setup or [])}
     return {"image": binding["ref"], "egress_allow": [], "gpus": ""}
 
 
@@ -889,6 +890,8 @@ def snapshot_binding(job: Any, binding: Dict[str, Any], *, docker: Docker, setti
     runtime_tag = f"mucli/job-{job12(job.id)}-{slug}-runtime:{stamp}"
     state: Dict[str, Any] = {**binding, "status": "preparing", "probed_env": {}, "home_bytes": 0, "skipped_paths": [],
                              "egress_allow": source.get("egress_allow") or [],
+                             # The template's job setup as of this snapshot (§4 of job_templates.md).
+                             "job_setup": list(source.get("job_setup") or []),
                              "gpus": effective_gpus(binding, source, settings), "python": VENV_PYTHON}
     extra_excludes = list(rule("environments.home_exclude_extra", settings) or [])
     if binding["source"] == "environment":
@@ -1085,107 +1088,119 @@ def ensure_environments(service, job: Any, *, docker: Optional[Docker] = None, f
         from ..job_settings import load_settings
         settings = load_settings()
     with _job_lock(job):
-        job = service.get(job.id)
-        meta = dict(job.metadata or {})
-        try:
-            bindings, origin = resolve_bindings(job, settings)
-        except ValueError as exc:
-            raise EnvironmentBlocked(f"Build environments are misconfigured: {exc}") from exc
-        _require_approval(service, job, bindings)
-        prepared = job_states(job)
-        if not bindings:
-            if prepared:
-                cleanup_job(job.id, service=service, docker=docker, reason="environments removed", engine=True)
-            if prepared or meta.get("build_environments_source") != "default":
-                save_meta(service, job.id, build_environments=[], build_environments_source="default",
-                          environments_refresh_requested=None)
-            return []
-        docker = docker or Docker()
-        wanted = [b.to_dict() for b in bindings]
-        refresh = bool(meta.get("environments_refresh_requested"))
-        if not force and not refresh and prepared and _same_set(prepared, wanted) \
-                and all(s.get("status") == "ready" and s.get("job_image") and docker.exists("image", s["job_image"])
-                        for s in prepared):
-            return prepared
-        if prepared and not force and not refresh and _same_set(prepared, wanted):
-            service.store.append_event(job.id, "build_environments_recreated",
-                                       reason="Build environment images were cleaned while the job sat idle; "
-                                              "re-creating them from the current environments.",
-                                       payload={"bindings": [s.get("name") for s in prepared]})
+        states = _ensure_locked(service, job, docker=docker, force=force, settings=settings)
+        if states and any(s.get("job_setup") for s in states):
+            # Template job setup (job_templates.md §4): once per job image, before the stage.
+            from .job_setup import run_job_setup
+            run_job_setup(service, service.get(job.id), states,
+                          runner=docker.runner if docker is not None else None, settings=settings)
+        return states
+
+
+def _ensure_locked(service, job: Any, *, docker: Optional[Docker], force: bool,
+                   settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    job = service.get(job.id)
+    meta = dict(job.metadata or {})
+    try:
+        bindings, origin = resolve_bindings(job, settings)
+    except ValueError as exc:
+        raise EnvironmentBlocked(f"Build environments are misconfigured: {exc}") from exc
+    _require_approval(service, job, bindings)
+    prepared = job_states(job)
+    if not bindings:
         if prepared:
-            cleanup_job(job.id, service=None, docker=docker, reason="re-snapshot", containers=False, engine=False)
-            if any(b.get("docker") for b in wanted):
-                # A fresh engine preloads the new job images (its storage volume is kept).
-                from .engine import engine_name
-                docker.run("rm", "-f", engine_name(job.id), check=False, timeout=120)
-        # Effective GPU requests need the source registry (inherit from the environment).
-        try:
-            sources = {b["name"]: resolve_source(b) for b in wanted}
-        except EnvironmentBlocked as exc:
-            save_meta(service, job.id, build_environments=[{**b, "status": "failed", "error": str(exc)} for b in wanted],
-                      build_environments_source=origin)
-            raise
-        states = [{**b, "status": "preparing", "gpus": effective_gpus(b, sources[b["name"]], settings),
-                   "egress_allow": sources[b["name"]].get("egress_allow") or []} for b in wanted]
-        try:
-            _preflight(states, docker)
-        except EnvironmentBlocked as exc:
-            save_meta(service, job.id, build_environments=[{**s, "status": "failed", "error": str(exc)} for s in states],
-                      build_environments_source=origin)
-            raise
-        save_meta(service, job.id, build_environments=states, build_environments_source=origin,
-                  environments_refresh_requested=None, environments_cleaned_at=None)
-        total = len(states)
-        service.store.append_event(job.id, "build_environments_preparing",
-                                   reason=f"Preparing build environments (0/{total})…",
-                                   payload={"total": total, "source": origin, "bindings": [s["name"] for s in states]})
-        done = [0]
-        lock = threading.Lock()
-        results: Dict[str, Dict[str, Any]] = {}
-        errors: Dict[str, BaseException] = {}
+            cleanup_job(job.id, service=service, docker=docker, reason="environments removed", engine=True)
+        if prepared or meta.get("build_environments_source") != "default":
+            save_meta(service, job.id, build_environments=[], build_environments_source="default",
+                      environments_refresh_requested=None)
+        return []
+    docker = docker or Docker()
+    wanted = [b.to_dict() for b in bindings]
+    refresh = bool(meta.get("environments_refresh_requested"))
+    if not force and not refresh and prepared and _same_set(prepared, wanted) \
+            and all(s.get("status") == "ready" and s.get("job_image") and docker.exists("image", s["job_image"])
+                    for s in prepared):
+        return prepared
+    if prepared and not force and not refresh and _same_set(prepared, wanted):
+        service.store.append_event(job.id, "build_environments_recreated",
+                                   reason="Build environment images were cleaned while the job sat idle; "
+                                          "re-creating them from the current environments.",
+                                   payload={"bindings": [s.get("name") for s in prepared]})
+    if prepared:
+        cleanup_job(job.id, service=None, docker=docker, reason="re-snapshot", containers=False, engine=False)
+        if any(b.get("docker") for b in wanted):
+            # A fresh engine preloads the new job images (its storage volume is kept).
+            from .engine import engine_name
+            docker.run("rm", "-f", engine_name(job.id), check=False, timeout=120)
+    # Effective GPU requests need the source registry (inherit from the environment).
+    try:
+        sources = {b["name"]: resolve_source(b) for b in wanted}
+    except EnvironmentBlocked as exc:
+        save_meta(service, job.id, build_environments=[{**b, "status": "failed", "error": str(exc)} for b in wanted],
+                  build_environments_source=origin)
+        raise
+    states = [{**b, "status": "preparing", "gpus": effective_gpus(b, sources[b["name"]], settings),
+               "egress_allow": sources[b["name"]].get("egress_allow") or [],
+               "job_setup": list(sources[b["name"]].get("job_setup") or [])} for b in wanted]
+    try:
+        _preflight(states, docker)
+    except EnvironmentBlocked as exc:
+        save_meta(service, job.id, build_environments=[{**s, "status": "failed", "error": str(exc)} for s in states],
+                  build_environments_source=origin)
+        raise
+    save_meta(service, job.id, build_environments=states, build_environments_source=origin,
+              environments_refresh_requested=None, environments_cleaned_at=None)
+    total = len(states)
+    service.store.append_event(job.id, "build_environments_preparing",
+                               reason=f"Preparing build environments (0/{total})…",
+                               payload={"total": total, "source": origin, "bindings": [s["name"] for s in states]})
+    done = [0]
+    lock = threading.Lock()
+    results: Dict[str, Dict[str, Any]] = {}
+    errors: Dict[str, BaseException] = {}
 
-        def work(binding: Dict[str, Any]) -> None:
-            def log(text: str) -> None:
-                if text.strip():
-                    service.store.append_event(job.id, "build_environment_log",
-                                               payload={"binding": binding["name"], "text": text[-2000:]})
-            try:
-                results[binding["name"]] = snapshot_binding(job, binding, docker=docker, settings=settings, log=log)
-            except BaseException as exc:  # noqa: BLE001 - recorded per binding
-                errors[binding["name"]] = exc
-            with lock:
-                done[0] += 1
-                service.store.append_event(job.id, "build_environment_progress",
-                                           reason=f"Preparing build environments ({done[0]}/{total})…",
-                                           payload={"done": done[0], "total": total, "binding": binding["name"],
-                                                    "ok": binding["name"] in results})
+    def work(binding: Dict[str, Any]) -> None:
+        def log(text: str) -> None:
+            if text.strip():
+                service.store.append_event(job.id, "build_environment_log",
+                                           payload={"binding": binding["name"], "text": text[-2000:]})
+        try:
+            results[binding["name"]] = snapshot_binding(job, binding, docker=docker, settings=settings, log=log)
+        except BaseException as exc:  # noqa: BLE001 - recorded per binding
+            errors[binding["name"]] = exc
+        with lock:
+            done[0] += 1
+            service.store.append_event(job.id, "build_environment_progress",
+                                       reason=f"Preparing build environments ({done[0]}/{total})…",
+                                       payload={"done": done[0], "total": total, "binding": binding["name"],
+                                                "ok": binding["name"] in results})
 
-        with ThreadPoolExecutor(max_workers=max(1, min(MAX_PARALLEL_SNAPSHOTS, total))) as pool:
-            list(pool.map(work, wanted))
-        final = []
-        for state in states:
-            name = state["name"]
-            if name in results:
-                final.append(results[name])
-            else:
-                exc = errors.get(name)
-                final.append({**state, "status": "failed", "error": str(exc)[-2000:] if exc else "not prepared",
-                              "secret_paths": list(getattr(exc, "secret_paths", []) or [])})
-        save_meta(service, job.id, build_environments=final, build_environments_source=origin)
-        for state in final:
-            if state["status"] == "ready":
-                service.store.append_event(job.id, "build_environment_ready", payload={
-                    "binding": state["name"], "source": state["source"], "ref": state["ref"],
-                    "job_image": state["job_image"], "image_bytes": state.get("image_bytes", 0),
-                    "probed_env": sorted(state.get("probed_env") or {}), "skipped": len(state.get("skipped_paths") or [])})
-        if errors:
-            name, exc = next(iter(errors.items()))
-            if isinstance(exc, EnvironmentBlocked):
-                raise exc
-            tail = str(exc).strip()[-1200:]
-            service.store.append_event(job.id, "build_environment_failed", reason=tail, payload={"binding": name})
-            raise EnvironmentBlocked(f"Build environment `{name}` could not be prepared: {tail}. Retry re-attempts the snapshot.") from exc
-        return final
+    with ThreadPoolExecutor(max_workers=max(1, min(MAX_PARALLEL_SNAPSHOTS, total))) as pool:
+        list(pool.map(work, wanted))
+    final = []
+    for state in states:
+        name = state["name"]
+        if name in results:
+            final.append(results[name])
+        else:
+            exc = errors.get(name)
+            final.append({**state, "status": "failed", "error": str(exc)[-2000:] if exc else "not prepared",
+                          "secret_paths": list(getattr(exc, "secret_paths", []) or [])})
+    save_meta(service, job.id, build_environments=final, build_environments_source=origin)
+    for state in final:
+        if state["status"] == "ready":
+            service.store.append_event(job.id, "build_environment_ready", payload={
+                "binding": state["name"], "source": state["source"], "ref": state["ref"],
+                "job_image": state["job_image"], "image_bytes": state.get("image_bytes", 0),
+                "probed_env": sorted(state.get("probed_env") or {}), "skipped": len(state.get("skipped_paths") or [])})
+    if errors:
+        name, exc = next(iter(errors.items()))
+        if isinstance(exc, EnvironmentBlocked):
+            raise exc
+        tail = str(exc).strip()[-1200:]
+        service.store.append_event(job.id, "build_environment_failed", reason=tail, payload={"binding": name})
+        raise EnvironmentBlocked(f"Build environment `{name}` could not be prepared: {tail}. Retry re-attempts the snapshot.") from exc
+    return final
 
 
 def request_refresh(service, job_id: str) -> None:
@@ -1426,15 +1441,25 @@ def list_sources(*, docker: Optional[Docker] = None, include_images: bool = True
         pass
     try:
         from mu.container.templates import TemplateRegistry
+        gpu_of = {e["container"]: e["gpus"] for e in environments}
         for template in TemplateRegistry().list_templates():
             templates.append({"name": template.name, "image": template.image, "description": template.description,
-                              "spec": f"template:{template.name}"})
+                              "spec": f"template:{template.name}", "size": "", "size_bytes": 0,
+                              "gpus": str(gpu_of.get(template.source_container) or ""),
+                              "job_setup": list(template.job_setup or []),
+                              "egress_allow": list(template.egress_allow or [])})
     except Exception:  # noqa: BLE001
         pass
     sysbox = False
     gpu: Dict[str, Any] = {"supported": False, "reason": "Docker is unavailable"}
     try:
         docker = docker or Docker()
+        for row in templates:
+            try:
+                row["size_bytes"] = int(docker.inspect("image", row["image"], "{{.Size}}") or 0)
+            except (ValueError, OSError, subprocess.SubprocessError):
+                row["size_bytes"] = 0
+            row["size"] = human_size(row["size_bytes"]) if row["size_bytes"] else ""
         if include_images:
             result = docker.run("image", "ls", "--format", "{{.Repository}}:{{.Tag}}\t{{.Size}}", check=False, timeout=30)
             for line in (result.stdout or "").splitlines():
@@ -1454,8 +1479,108 @@ def list_sources(*, docker: Optional[Docker] = None, include_images: bool = True
                     "devices": gpu.get("devices") or []}}
 
 
+def human_size(value: int) -> str:
+    """``2.1 GB`` (decimal units, like ``docker image ls``)."""
+    size = float(value or 0)
+    for unit in ("B", "kB", "MB", "GB", "TB"):
+        if size < 1000 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit in ("B", "kB") else f"{size:.1f} {unit}"
+        size /= 1000
+    return f"{size:.1f} TB"
+
+
+def _domain_covered(domain: str, allowed: Iterable[str]) -> bool:
+    domain = str(domain or "").strip().lower()
+    for raw in allowed or ():
+        rule = str(raw or "").strip().lower().rstrip(".")
+        if not rule:
+            continue
+        if rule == domain:
+            return True
+        if rule.startswith("*.") and (domain.endswith(rule[1:]) or domain == rule[2:]):
+            return True
+    return False
+
+
+def template_fit(template_egress: Iterable[str], detected: Optional[Dict[str, Any]],
+                 settings: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
+    """Fit of a template for a repository (§3.1): the registries the repository's lockfiles need
+    that neither the template's egress nor Settings → Extra egress domains allow, and the
+    detected toolchains. ``detected`` is ``detect.summary``."""
+    detected = dict(detected or {})
+    try:
+        from ..job_settings import rule
+        extra = list(rule("sandbox.egress_extra", settings) or [])
+    except Exception:  # noqa: BLE001 - unreadable settings: judge on the template alone
+        extra = []
+    allowed = [*filter_model_hosts(template_egress or []), *extra]
+    missing = [d for d in detected.get("egress") or [] if not _domain_covered(d, allowed)]
+    return {"missing_egress": list(dict.fromkeys(missing)), "toolchains": list(detected.get("toolchains") or [])}
+
+
+def _same_repository(a: str, b: str) -> bool:
+    return bool(a and b) and os.path.realpath(os.path.expanduser(a)) == os.path.realpath(os.path.expanduser(b))
+
+
+def remembered_template(repository: str, settings: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, str]]:
+    """``{"source": "template:<name>"}`` when Settings → Toolchains maps exactly this repository
+    (whole repository, no paths) to a template; else ``None``."""
+    if not str(repository or "").strip():
+        return None
+    from .toolchain import toolchain_rows
+    try:
+        rows = toolchain_rows(settings)
+    except Exception:  # noqa: BLE001
+        return None
+    for row in rows:
+        if not _same_repository(str(row.get("repository") or ""), repository):
+            continue
+        base = str(row.get("base_image") or "").strip()
+        if base.startswith("template:") and not str(row.get("paths") or "").strip():
+            return {"source": base}
+    return None
+
+
+def remember_template(repository: str, template: str) -> Dict[str, Any]:
+    """"Remember for this workspace": write or update the repository's Settings → Toolchains
+    row (repository → ``template:<name>``). Rows of other repositories are kept; this
+    repository's rows are replaced by the single whole-repository row."""
+    repo = str(repository or "").strip()
+    if not repo:
+        raise ValueError("remember_template needs a workspace or repository")
+    validate_ref("template", template)
+    from ..job_settings import load_settings, rule, set_rule
+    current = [dict(r) for r in (rule("sandbox.toolchains", load_settings()) or []) if isinstance(r, dict)]
+    kept = [r for r in current if not _same_repository(str(r.get("repository") or ""), repo)]
+    row = {"repository": os.path.realpath(os.path.expanduser(repo)), "base_image": f"template:{template}",
+           "paths": "", "docker": "", "gpus": ""}
+    set_rule("sandbox.toolchains", [*kept, row])
+    return row
+
+
+def normalize_template_choice(execution: Dict[str, Any], repository: str = "") -> Dict[str, Any]:
+    """``execution.template`` → ``execution.environments = ["template:<name>"]`` (§3.1).
+
+    ``""``/absent changes nothing. An unknown template raises ``ValueError("Unknown template
+    '<name>'")``. ``remember_template: true`` writes the repository's Toolchains row and is
+    dropped from the stored execution."""
+    out = dict(execution or {})
+    name = str(out.pop("template", "") or "").strip()
+    remember = _bool(out.pop("remember_template", False))
+    if not name:
+        return out
+    from mu.container.templates import TemplateRegistry
+    if not REF_RE.fullmatch(name) or TemplateRegistry().get(name) is None:
+        raise ValueError(f"Unknown template '{name}'")
+    out["environments"] = [f"template:{name}"]
+    if remember and str(repository or "").strip():
+        remember_template(repository, name)
+    return out
+
+
 def describe(job: Any) -> Dict[str, Any]:
     """Job VM ``build_environments`` part (metadata only; no docker calls)."""
+    from .job_setup import describe_setup
     meta = dict(getattr(job, "metadata", None) or {})
     states = job_states(job)
     rows = []
@@ -1469,7 +1594,8 @@ def describe(job: Any) -> Dict[str, Any]:
                      "skipped_paths": list(state.get("skipped_paths") or [])[:100],
                      "secret_paths": list(state.get("secret_paths") or [])[:50],
                      "engine": "sysbox" if state.get("docker") else "", "job_image": state.get("job_image") or "",
-                     "label": binding_label(state)})
+                     "label": binding_label(state), "job_setup": list(state.get("job_setup") or []),
+                     "setup": describe_setup(job, str(state.get("name") or ""))})
     return {"source": str(meta.get("build_environments_source") or ("default" if not states else "")),
             "kept": bool(meta.get("environments_kept")), "refresh_pending": bool(meta.get("environments_refresh_requested")),
             "bindings": rows, "count": len(rows), "bytes": sum(r["image_bytes"] for r in rows if r["status"] == "ready"),
@@ -1557,6 +1683,30 @@ def jobs_using(service, environment: str) -> List[str]:
     for job in service.list_unarchived(limit=1000):
         states = job_states(job)
         if not any(s.get("source") == "environment" and s.get("ref") in names for s in states):
+            continue
+        try:
+            if service.store.core_state(job.id).state in TERMINAL:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        out.append(job.id)
+    return out
+
+
+def jobs_using_template(service, template: str) -> List[str]:
+    """Non-terminal jobs bound to ``template:<name>`` (template card "Used by N jobs")."""
+    from ..core.states import TERMINAL
+    name = str(template or "")
+    out = []
+    for job in service.list_unarchived(limit=1000):
+        bound = any(s.get("source") == "template" and s.get("ref") == name for s in job_states(job))
+        if not bound:
+            try:
+                bound = any(b.source == "template" and b.ref == name
+                            for b in bindings_from_list((job.execution or {}).get("environments") or []))
+            except ValueError:
+                bound = False
+        if not bound:
             continue
         try:
             if service.store.core_state(job.id).state in TERMINAL:

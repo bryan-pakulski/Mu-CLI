@@ -130,11 +130,14 @@ class DispatchError(RuntimeError):
 class JobsData:
     """Thin facade over ``mu.jobs.core`` (lazy imports, one lock)."""
 
-    def __init__(self, service: Any = None, *, creator: Optional[Callable[[str, str], str]] = None):
+    def __init__(self, service: Any = None, *, creator: Optional[Callable[..., str]] = None,
+                 sources: Optional[Callable[[], Dict[str, Any]]] = None):
         self._service = service
-        # ``creator(title, agent_spec) -> job id``: set when the dashboard runs inside a session
-        # (/jobs), which supplies the workspace and model defaults a new job needs.
+        # ``creator(title, agent_spec[, run_in]) -> job id``: set when the dashboard runs inside a
+        # session (/jobs), which supplies the workspace and model defaults a new job needs.
         self.creator = creator
+        # ``sources() -> environments_vm`` for the new job's workspace ("Run in" choices).
+        self.sources = sources
         self._lock = threading.RLock()
         self._cursor: Optional[int] = None
         self._bus = None
@@ -332,11 +335,47 @@ class JobsData:
             raise DispatchError(str(exc) or exc.__class__.__name__) from exc
 
     # ------------------------------------------------------------ writes
-    def create_job(self, title: str, agents: str = "") -> str:
-        """Queue a new job in the dashboard's session; ``agents`` is a ``--agent`` spec."""
+    def run_in_choices(self) -> Dict[str, Any]:
+        """"Run in" choices for a new job: ``{choices: [{value, label, detail}], preselect}``.
+
+        ``value`` is ``default``, ``template:<name>`` or ``environment:<name>``. Preselection
+        (job_templates.md §3.1): the workspace's remembered template, else Default runtime."""
+        choices = [{"value": "default", "label": "Default runtime", "detail": "Python 3.12 + Node · no project tools",
+                    "kind": "default"}]
+        data: Dict[str, Any] = {}
+        if self.sources is not None:
+            try:
+                data = dict(self.sources() or {})
+            except Exception:  # noqa: BLE001 - the picker falls back to the default runtime
+                data = {}
+        for t in data.get("templates") or []:
+            parts = [str(t.get("description") or "")]
+            if t.get("job_setup"):
+                parts.append(f"setup: {len(t['job_setup'])} command(s)")
+            if t.get("gpus"):
+                parts.append("GPU")
+            if t.get("size"):
+                parts.append(str(t["size"]))
+            missing = list((t.get("fit") or {}).get("missing_egress") or [])
+            if missing:
+                parts.append("◆ can't reach " + ", ".join(missing))
+            choices.append({"value": f"template:{t.get('name')}", "label": str(t.get("name") or ""),
+                            "detail": " · ".join(p for p in parts if p), "kind": "template"})
+        for e in data.get("environments") or []:
+            choices.append({"value": f"environment:{e.get('name')}", "label": str(e.get("name") or ""),
+                            "detail": f"environment · {e.get('status') or ''}".strip(" ·"), "kind": "environment"})
+        remembered = str((data.get("remembered") or {}).get("source") or "")
+        preselect = remembered if any(c["value"] == remembered for c in choices) else "default"
+        return {"choices": choices, "preselect": preselect, "remembered": remembered}
+
+    def create_job(self, title: str, agents: str = "", run_in: str = "") -> str:
+        """Queue a new job in the dashboard's session; ``agents`` is a ``--agent`` spec and
+        ``run_in`` a "Run in" value (``template:<name>`` / ``environment:<name>``; blank = default)."""
         if self.creator is None:
             raise DispatchError("open the dashboard from a session (/jobs) to create jobs")
         try:
+            if run_in and run_in != "default":
+                return str(self.creator(title, agents, run_in))
             return str(self.creator(title, agents))
         except (ValueError, TypeError, RuntimeError, OSError, KeyError) as exc:
             raise DispatchError(str(exc) or exc.__class__.__name__) from exc

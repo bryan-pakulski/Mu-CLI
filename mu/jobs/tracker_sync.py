@@ -382,6 +382,9 @@ def poll_watches(service, now: Optional[float] = None) -> Dict[str, Any]:
                 }
                 if entry.get("session_name"):
                     defaults["metadata"]["origin_session"] = entry["session_name"]
+                if entry.get("template"):
+                    # The entry's "Run in" template (job_templates.md §3.2).
+                    defaults["execution"] = {"template": entry["template"]}
                 result = import_tickets(service, tracker_for(entry["tracker"]), query=entry["query"],
                                         defaults=defaults, max_results=int(entry.get("max_results") or 10))
                 outcome.update(created=[c["key"] for c in result["created"]],

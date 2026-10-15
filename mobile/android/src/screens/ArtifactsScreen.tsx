@@ -1,18 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  AppState,
-  FlatList,
-  Modal,
-  RefreshControl,
-  StyleSheet,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, AppState, FlatList, Modal, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SafeAreaModal } from '../components/SafeAreaModal';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { WebView } from 'react-native-webview';
@@ -21,9 +9,8 @@ import { openExternalUrl } from '../api/urlSafety';
 import { attachmentsApi, type AttachmentDescriptor, type PickedDocument } from '../api/attachments';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from '../components/Text';
-import { EmptyState } from '../components/EmptyState';
 import { fontSizes, fontWeights, paperColors, radii, spacing, touchTarget } from '../theme/tokens';
+import { EmptyState, ModalFrame, Pressable, Text } from '../ui';
 
 type UnifiedItem =
   | { kind: 'visualization'; artifact: ArtifactDescriptor }
@@ -178,7 +165,7 @@ export function ArtifactsScreen() {
     if (item.kind === 'visualization') {
       const a = item.artifact;
       return (
-        <TouchableOpacity
+        <Pressable
           onPress={() => setViewingArtifact(a)}
           style={styles.row}
           activeOpacity={0.7}
@@ -194,7 +181,7 @@ export function ArtifactsScreen() {
               {formatBytes(a.size)} · visualization
             </Text>
           </View>
-          <TouchableOpacity
+          <Pressable
             onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
@@ -202,22 +189,22 @@ export function ArtifactsScreen() {
             accessibilityLabel="Download visualization"
           >
             <Ionicons name="download-outline" size={18} color={colors.ink3} />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </Pressable>
+        </Pressable>
       );
     }
 
     if (item.kind === 'model') {
       const a = item.artifact;
       return (
-        <TouchableOpacity
+        <Pressable
           onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
           style={styles.row}
           activeOpacity={0.7}
@@ -233,28 +220,28 @@ export function ArtifactsScreen() {
               {formatBytes(a.size)} · {a.mime_type || 'file'}
             </Text>
           </View>
-          <TouchableOpacity
+          <Pressable
             onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="download-outline" size={18} color={colors.ink3} />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </Pressable>
+        </Pressable>
       );
     }
 
     // upload
     const u = item.attachment;
     return (
-      <TouchableOpacity
+      <Pressable
         onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
         style={styles.row}
         activeOpacity={0.7}
@@ -270,21 +257,21 @@ export function ArtifactsScreen() {
             {formatBytes(u.size)} · {u.mime_type || 'file'}
           </Text>
         </View>
-        <TouchableOpacity
+        <Pressable
           onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
           <Ionicons name="download-outline" size={18} color={colors.ink3} />
-        </TouchableOpacity>
-        <TouchableOpacity
+        </Pressable>
+        <Pressable
           onPress={() => removeUpload(u)}
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
           <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </Pressable>
+      </Pressable>
     );
   };
 
@@ -314,7 +301,7 @@ export function ArtifactsScreen() {
       <View style={[styles.header, { borderBottomColor: colors.hairline, paddingTop: insets.top + spacing.xs }]}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Session files</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity
+          <Pressable
             onPress={pickFiles}
             disabled={uploading || !sessionName}
             style={[styles.uploadBtn, { backgroundColor: colors.accent.ink, opacity: uploading || !sessionName ? 0.5 : 1 }]}
@@ -327,7 +314,7 @@ export function ArtifactsScreen() {
             <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.semibold, marginLeft: spacing.xs }}>
               {uploading ? 'Uploading' : 'Upload'}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
 
@@ -345,7 +332,7 @@ export function ArtifactsScreen() {
         ListEmptyComponent={
           totalCount === 0 ? (
             <EmptyState
-              icon="file-tray-outline"
+              icon="folder-open"
               title="No files yet"
               message="Agent outputs, visualizations, and your uploads will appear here in one place."
             />
@@ -354,7 +341,7 @@ export function ArtifactsScreen() {
       />
 
       {/* In-app visualization viewer */}
-      <SafeAreaModal
+      <ModalFrame transparent={false}
         visible={viewingArtifact !== null}
         animationType="fade"
         presentationStyle="fullScreen"
@@ -372,23 +359,23 @@ export function ArtifactsScreen() {
               </Text>
             </View>
             {sessionName && viewingArtifact && (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, viewingArtifact.artifact_id))}
                 style={[styles.iconButton, { backgroundColor: colors.sunken }]}
                 accessibilityRole="button"
                 accessibilityLabel="Download visualization"
               >
                 <Ionicons name="download-outline" size={18} color={colors.ink3} />
-              </TouchableOpacity>
+              </Pressable>
             )}
-            <TouchableOpacity
+            <Pressable
               onPress={() => setViewingArtifact(null)}
               style={[styles.closeButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Close visualization"
             >
               <Ionicons name="close" size={24} color={colors.ink} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
           {sessionName && viewingArtifact && (
             <WebView
@@ -423,7 +410,7 @@ export function ArtifactsScreen() {
             />
           )}
         </SafeAreaView>
-      </SafeAreaModal>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

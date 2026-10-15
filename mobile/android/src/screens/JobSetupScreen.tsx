@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,14 +7,12 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   firstAttention, promptInitials, setupApi, stepStatus, type SetupAction, type SetupStep, type SetupVM,
 } from '../api/setup';
-import { Banner, Field, Loading, Meter, Panel, PlanosButton, Pre, StatusIcon, Tabs, TextField, useInterval, useToast } from '../components/planos';
 import { DoctorPanel } from './JobDoctorScreen';
-import { Text } from '../components/Text';
-import { SafeAreaModal } from '../components/SafeAreaModal';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { STATUS } from '../theme/status';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
+import { Banner, Button, Field, Loading, Meter, ModalFrame, Panel, Pre, Pressable, StatusIcon, Tabs, Text, TextField, useInterval, useToast } from '../ui';
 
 export type JobSetupScreenProps = NativeStackScreenProps<RootStackParamList, 'JobSetup'>;
 
@@ -25,7 +23,7 @@ type Dialog =
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** planos-style guided setup: a live checklist; every step re-checks the host, so it's re-runnable. */
+/** Wash-style guided setup: a live checklist; every step re-checks the host, so it's re-runnable. */
 export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
   const { colors } = useTheme();
   // Doctor is a tab of Setup (one entry point on every surface).
@@ -114,7 +112,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
     return (
       <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
         {error ? <View style={styles.content}><Banner tone="danger" glyph="✗" title="Could not load setup" role="alert"><Text variant="xs">{error}</Text></Banner>
-          <PlanosButton label="Try again" onPress={() => void load()} /></View> : <Loading label="Checking your machine…" />}
+          <Button label="Try again" onPress={() => void load()} /></View> : <Loading label="Checking your machine…" />}
       </SafeAreaView>
     );
   }
@@ -131,12 +129,12 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
         </View>
         <Text variant="xs" style={{ color: colors.ink3 }}>Each step checks the host live; re-run any time.</Text>
         {vm.can_finish
-          ? <Banner tone="ok" glyph="✓" title="All set" right={<PlanosButton small primary tone="ok" label="Finish" onPress={() => void finish()} testID="job-setup-finish" />} />
+          ? <Banner tone="ok" glyph="✓" title="All set" right={<Button small primary tone="ok" label="Finish" onPress={() => void finish()} testID="job-setup-finish" />} />
           : <Text variant="sm" style={{ color: vm.blocking.length ? colors.attention.ink : colors.ink3 }} testID="job-setup-blocking">
               {vm.blocking.length ? `To do: ${vm.blocking.join(', ')}` : 'Checking…'}
             </Text>}
         <View style={styles.row}>
-          <PlanosButton small label="Check all again" onPress={() => void load(true)} testID="job-setup-recheck" />
+          <Button small label="Check all again" onPress={() => void load(true)} testID="job-setup-recheck" />
         </View>
 
         {job && (job.running || job.lines.length) ? (
@@ -167,7 +165,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
                     <Text variant="xs" style={{ color: colors.ink3 }}>{step.why}</Text>
                     {step.actions.map(action => (
                       <View key={action.id} style={styles.action}>
-                        <PlanosButton small label={`${action.label}${action.kind === 'terminal' ? '  (terminal)' : ''}`}
+                        <Button small label={`${action.label}${action.kind === 'terminal' ? '  (terminal)' : ''}`}
                           primary={step.state === 'todo' && action === step.actions[0]}
                           loading={busy === `${step.id}:${action.id}`}
                           disabled={Boolean(busy) || (action.kind === 'job' && Boolean(job?.running))}
@@ -183,7 +181,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
         </View>
       </ScrollView>
 
-      <SafeAreaModal visible={dialog !== null} transparent animationType="fade" onRequestClose={() => setDialog(null)}>
+      <ModalFrame statusBarTranslucent={false} visible={dialog !== null} transparent animationType="fade" onRequestClose={() => setDialog(null)}>
         <View style={[styles.backdrop, { backgroundColor: colors.scrim }]}>
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
             {dialog?.kind === 'prompts' ? (
@@ -198,8 +196,8 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
                   </Field>
                 ))}
                 <View style={styles.row}>
-                  <PlanosButton label="Cancel" onPress={() => setDialog(null)} />
-                  <PlanosButton primary label="Save" testID="setup-prompt-save" onPress={() => {
+                  <Button label="Cancel" onPress={() => setDialog(null)} />
+                  <Button primary label="Save" testID="setup-prompt-save" onPress={() => {
                     const { step, action, values } = dialog;
                     setDialog(null);
                     void run(step, action, values);
@@ -212,12 +210,12 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
                 <Text variant="xs" style={{ color: colors.ink3 }}>Run this in a terminal on the mucli host{dialog.action.hint ? ` — ${dialog.action.hint}` : ''}.</Text>
                 <Pre testID="setup-terminal-command" style={{ fontFamily: fonts.mono }}>{dialog.action.command || ''}</Pre>
                 <View style={styles.row}>
-                  <PlanosButton label="Copy" testID="setup-terminal-copy" onPress={() => {
+                  <Button label="Copy" testID="setup-terminal-copy" onPress={() => {
                     void Clipboard.setStringAsync(dialog.action.command || '');
                     toast('Command copied', 'ok');
                   }} />
-                  <PlanosButton label="Close" onPress={() => setDialog(null)} />
-                  <PlanosButton primary label="I ran it — check again" testID="setup-terminal-done" onPress={() => {
+                  <Button label="Close" onPress={() => setDialog(null)} />
+                  <Button primary label="I ran it — check again" testID="setup-terminal-done" onPress={() => {
                     const { step, action } = dialog;
                     setDialog(null);
                     void run(step, action);
@@ -227,7 +225,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
             ) : null}
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

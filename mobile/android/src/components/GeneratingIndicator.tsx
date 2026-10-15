@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { useMotionPreference } from '../hooks/useMotionPreference';
 import { easings, motion, radii, spacing } from '../theme/tokens';
+import { Text } from '../ui';
 
 export type GeneratingIndicatorProps = {
   label?: string;

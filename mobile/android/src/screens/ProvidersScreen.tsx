@@ -1,13 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, Alert, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { providersApi, ProviderInfo } from '../api/providers';
 import { spacing, fontWeights, fonts } from '../theme/tokens';
-import { Panel, StatusIcon } from '../components/planos';
+import { Button, Card, Chip, EmptyState, ErrorState, Panel, Pressable, Skeleton, StatusIcon, Text } from '../ui';
 
 export function ProvidersScreen() {
   const { colors } = useTheme();
@@ -125,8 +124,8 @@ export function ProvidersScreen() {
             )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            {item.configured && <Badge label="✓ Ready" variant="success" />}
-            {isSelected && <Badge label="Selected" variant="accent" />}
+            {item.configured && <Chip label="✓ Ready" tone="ok" />}
+            {isSelected && <Chip label="Selected" tone="accent" />}
             <Button
               title={isSelected ? 'Selected' : 'Select'}
               variant={isSelected ? 'ghost' : 'primary'}
@@ -141,7 +140,7 @@ export function ProvidersScreen() {
               {loadingModels ? 'Loading models…' : `Models (${models.length})`}
             </Text>
             {models.map(m => (
-              <TouchableOpacity
+              <Pressable
                 key={m}
                 onPress={() => selectModel(m)}
                 accessibilityRole="button"
@@ -155,8 +154,8 @@ export function ProvidersScreen() {
                 <Text variant="sm" style={{ color: selectedModel === m ? colors.accent.ink : colors.ink, fontWeight: selectedModel === m ? fontWeights.medium : fontWeights.regular }}>
                   {m}
                 </Text>
-                {selectedModel === m && <Badge label="Active" variant="accent" />}
-              </TouchableOpacity>
+                {selectedModel === m && <Chip label="Active" tone="accent" />}
+              </Pressable>
             ))}
             {!loadingModels && models.length === 0 && (
               <Text variant="xs" style={{ color: colors.ink3 }}>No models available</Text>

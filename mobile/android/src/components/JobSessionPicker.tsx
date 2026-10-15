@@ -3,18 +3,16 @@
 // provider/model, mode and approval policy it inherits.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import {
   jobsApi, defaultJobSession, defaultWorkspace, isRepositoryUrl, recentWorkspaces, sessionForWorkspace, sessionModelLabel,
   type JobSessionOption, type TicketImportTarget,
 } from '../api/jobs';
 import { isMissingEndpoint } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Banner, Empty, Field, Loading, PlanosButton, SwitchRow, TextField } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
+import { Banner, Button, Empty, Field, Loading, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 export type JobSessionsState = {
   sessions: JobSessionOption[];
@@ -91,16 +89,16 @@ export function JobSessionSheet({ visible, title = 'Choose session', intro, defa
   useEffect(() => { if (visible) setValue(null); }, [visible]);
   const chosen = value ?? (supported ? defaultJobSession(sessions, defaultSession) : defaultSession);
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title={title}>
+    <Sheet visible={visible} onClose={onClose} title={title}>
       {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
       {supported
         ? <JobSessionPicker sessions={sessions} value={chosen} onChange={setValue} loading={loading} error={error} />
         : <Text variant="sm">{defaultSession ? `Session: ${defaultSession}` : 'This server cannot list sessions. Open jobs from a session first.'}</Text>}
       <View style={styles.actions}>
-        <PlanosButton label="Cancel" onPress={onClose} />
-        <PlanosButton primary testID="job-session-confirm" label={confirmLabel} disabled={!chosen} onPress={() => { if (chosen) onConfirm(chosen); }} />
+        <Button label="Cancel" onPress={onClose} />
+        <Button primary testID="job-session-confirm" label={confirmLabel} disabled={!chosen} onPress={() => { if (chosen) onConfirm(chosen); }} />
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -170,7 +168,7 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
     onConfirm({ workspace: path || undefined, session: matched || (path ? null : fallbackSession), force });
   };
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title={title}>
+    <Sheet visible={visible} onClose={onClose} title={title}>
       {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
       <WorkspaceField sessions={sessions} value={workspace} onChange={pick} testID="job-import-workspace"
         hint={workspaceHint(sessions, workspace, fallbackSession)} error={error} />
@@ -178,10 +176,10 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
         hint="Also start a new job for tickets whose latest job is done." />
       {problem ? <Banner tone="danger" glyph="✗" role="alert" title={problem} /> : null}
       <View style={styles.actions}>
-        <PlanosButton label="Cancel" onPress={onClose} />
-        <PlanosButton primary testID="job-import-confirm" label={confirmLabel} onPress={confirm} />
+        <Button label="Cancel" onPress={onClose} />
+        <Button primary testID="job-import-confirm" label={confirmLabel} onPress={confirm} />
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

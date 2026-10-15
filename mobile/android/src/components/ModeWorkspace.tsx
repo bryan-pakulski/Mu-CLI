@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ModeWorkspaceContract, ModeWorkspaceTone } from '../api/modeWorkspace';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontWeights, fonts, spacing, touchTarget, tracking, typography } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 const VIEW_STORAGE_PREFIX = 'mucli.mode-workspace.view.v1.';
 

@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, TextInput, Alert, ScrollView } from 'react-native';
+import { FlatList, View, RefreshControl, TextInput, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { systemPromptsApi, SystemPromptInfo } from '../api/systemPrompts';
 import { elevation, spacing, fontWeights, fonts, radii } from '../theme/tokens';
-import { SafeAreaModal } from '../components/SafeAreaModal';
+import { Button, Card, Chip, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text } from '../ui';
 
 export function SystemPromptsScreen() {
   const { colors, isDark } = useTheme();
@@ -110,7 +109,7 @@ export function SystemPromptsScreen() {
                   {item.chars} chars · {item.source}
                 </Text>
               </View>
-              {item.has_override && <Badge label="Override" variant="accent" />}
+              {item.has_override && <Chip label="Override" tone="accent" />}
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
               <Button title="Edit" onPress={() => openEdit(item.name)} />
@@ -119,7 +118,7 @@ export function SystemPromptsScreen() {
           </Card>
         )}
       />
-      <SafeAreaModal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+      <ModalFrame statusBarTranslucent={false} visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <View style={{ flex: 1, backgroundColor: colors.scrim, justifyContent: 'center' }}>
           <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>{editing?.name}</Text>
@@ -140,7 +139,7 @@ export function SystemPromptsScreen() {
             </View>
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

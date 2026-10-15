@@ -1,15 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ContainerConfiguration,
@@ -27,11 +17,10 @@ import {
 import { ContainerHardwareSection } from './ContainerHardwareSection'; // MUCLI_CONTAINER_HARDWARE_V1
 import { ContainerStatsPanel } from './ContainerStatsPanel'; // MUCLI_CONTAINER_MONITOR_V1
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
 import { WorkspacePathField } from './WorkspacePathField';
-import { SafeAreaModal } from './SafeAreaModal';
 import { fontSizes, fontWeights, fonts, radii, spacing, tracking, typography, touchTarget, elevation } from '../theme/tokens';
+import { ModalFrame, Pressable, Text } from '../ui';
 
 export type ContainerManagerSheetProps = {
   visible: boolean;
@@ -291,20 +280,20 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
   const title = mode === 'list' ? 'Container management' : editingName ? 'Edit environment' : 'Create environment';
 
   return (
-    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
+    <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
       <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}>
-          <TouchableOpacity onPress={mode === 'form' ? () => setMode('list') : onClose} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+          <Pressable onPress={mode === 'form' ? () => setMode('list') : onClose} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
             <Ionicons name={mode === 'form' ? 'arrow-back' : 'close'} size={20} color={colors.ink} />
-          </TouchableOpacity>
+          </Pressable>
           <View style={styles.headerCopy}>
             <Text style={[styles.title, { color: colors.ink }]}>{title}</Text>
             <Text variant="xs" dim>{mode === 'list' ? 'Create, edit, clone, and snapshot host environments.' : 'Changes recreate the worker while retaining named volumes.'}</Text>
           </View>
           {mode === 'list' ? (
-            <TouchableOpacity onPress={() => openCreate()} style={[styles.iconButton, { backgroundColor: colors.accent.ink }]}>
+            <Pressable onPress={() => openCreate()} style={[styles.iconButton, { backgroundColor: colors.accent.ink }]}>
               <Ionicons name="add" size={20} color={colors.onInk} />
-            </TouchableOpacity>
+            </Pressable>
           ) : <View style={styles.iconButton} />}
         </View>
 
@@ -315,29 +304,29 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             <SectionTitle label="Environments" detail={`${containers.length} managed`} />
             {containers.length === 0 && !loading ? <EmptyCard text="No managed environments." /> : null}
             {containers.map(container => (
-              <TouchableOpacity key={container.name} onPress={() => openEdit(container, false)} activeOpacity={0.72} style={[styles.card, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+              <Pressable key={container.name} onPress={() => openEdit(container, false)} activeOpacity={0.72} style={[styles.card, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
                 <View style={styles.cardHead}>
                   <View style={styles.cardCopy}><Text variant="sm" style={styles.cardTitle}>{container.name}</Text><Text variant="xs" dim numberOfLines={1}>{container.template_name ? `Template · ${container.template_name}` : container.image}</Text></View>
                   <View style={styles.cardTools}>
                     <View style={[styles.status, { backgroundColor: container.status === 'running' ? colors.ok.wash : colors.sunken }]}><Text variant="xs" style={{ color: container.status === 'running' ? colors.ok.ink : colors.ink2 }}>{container.status}</Text></View>
-                    <TouchableOpacity onPress={event => { event.stopPropagation(); runAction(container, container.status === 'running' ? 'stop' : 'start'); }} style={styles.smallIcon} accessibilityLabel={`${container.status === 'running' ? 'Stop' : 'Start'} ${container.name}`}><Ionicons name={container.status === 'running' ? 'stop-outline' : 'play-outline'} size={18} color={colors.ink3} /></TouchableOpacity>
-                    <TouchableOpacity onPress={event => { event.stopPropagation(); setActionContainer(container); }} style={styles.smallIcon} accessibilityLabel={`More actions for ${container.name}`}><Ionicons name="ellipsis-horizontal" size={19} color={colors.ink3} /></TouchableOpacity>
+                    <Pressable onPress={event => { event.stopPropagation(); runAction(container, container.status === 'running' ? 'stop' : 'start'); }} style={styles.smallIcon} accessibilityLabel={`${container.status === 'running' ? 'Stop' : 'Start'} ${container.name}`}><Ionicons name={container.status === 'running' ? 'stop-outline' : 'play-outline'} size={18} color={colors.ink3} /></Pressable>
+                    <Pressable onPress={event => { event.stopPropagation(); setActionContainer(container); }} style={styles.smallIcon} accessibilityLabel={`More actions for ${container.name}`}><Ionicons name="ellipsis-horizontal" size={19} color={colors.ink3} /></Pressable>
                   </View>
                 </View>
                 <Text variant="xs" dim>{container.attached_sessions?.length ? `Sessions · ${container.attached_sessions.join(', ')}` : 'No attached sessions'}</Text>
                 <ContainerStatsPanel stats={containerStats[container.name]} status={container.status} />
                 <View style={styles.cardHint}><Text variant="xs" dim>Open configuration</Text><Ionicons name="arrow-forward" size={16} color={colors.ink3} /></View>
-              </TouchableOpacity>
+              </Pressable>
             ))}
 
             <SectionTitle label="Templates" detail={`${templates.length} saved`} />
             {templates.length === 0 ? <EmptyCard text="Snapshots will appear here." /> : null}
             {templates.map(template => (
-              <TouchableOpacity key={template.name} onPress={() => openCreate(template.name)} activeOpacity={0.72} style={[styles.templateRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+              <Pressable key={template.name} onPress={() => openCreate(template.name)} activeOpacity={0.72} style={[styles.templateRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
                 <View style={styles.cardCopy}><Text variant="sm" style={styles.cardTitle}>{template.name}</Text><Text variant="xs" dim numberOfLines={2}>{template.description || template.image}</Text></View>
                 <Ionicons name="arrow-forward" size={17} color={colors.ink3} />
-                <TouchableOpacity onPress={event => { event.stopPropagation(); Alert.alert('Delete template?', template.name, [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{await containersApi.removeTemplate(template.name);load();}}]); }} style={styles.smallIcon} accessibilityLabel={`Delete template ${template.name}`}><Ionicons name="trash-outline" size={18} color={colors.ink3} /></TouchableOpacity>
-              </TouchableOpacity>
+                <Pressable onPress={event => { event.stopPropagation(); Alert.alert('Delete template?', template.name, [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{await containersApi.removeTemplate(template.name);load();}}]); }} style={styles.smallIcon} accessibilityLabel={`Delete template ${template.name}`}><Ionicons name="trash-outline" size={18} color={colors.ink3} /></Pressable>
+              </Pressable>
             ))}
           </ScrollView>
         ) : (
@@ -350,7 +339,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
               <Segment selected={source === 'template'} label="Template" onPress={() => setSource('template')} />
             </View>
             {source === 'template' ? (
-              <View style={styles.templateChoices}>{templates.map(template => <TouchableOpacity key={template.name} onPress={() => setTemplateName(template.name)} accessibilityState={{ selected: templateName === template.name }} style={[styles.templateChoice, { backgroundColor: templateName === template.name ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: templateName === template.name ? colors.accent.ink : colors.hairline }]}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{template.name}</Text><Text variant="xs" dim>{template.description || 'Container snapshot'}</Text></TouchableOpacity>)}</View>
+              <View style={styles.templateChoices}>{templates.map(template => <Pressable key={template.name} onPress={() => setTemplateName(template.name)} accessibilityState={{ selected: templateName === template.name }} style={[styles.templateChoice, { backgroundColor: templateName === template.name ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: templateName === template.name ? colors.accent.ink : colors.hairline }]}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{template.name}</Text><Text variant="xs" dim>{template.description || 'Container snapshot'}</Text></Pressable>)}</View>
             ) : (
               <View style={styles.editorGrid}>
                 <EditorCard title="Dockerfile" detail={`${countLines(dockerfile)} lines`} icon="document-text-outline" onPress={() => setEditor('dockerfile')} />
@@ -359,10 +348,10 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             )}
 
             <FieldLabel label="Folder mounts" optional />
-            {mounts.map((mount, index) => <View key={`${mount.host_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><View style={styles.cardCopy}><Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{mount.container_path}</Text><Text variant="xs" dim numberOfLines={1}>{mount.host_path} · {mount.mode}</Text></View><TouchableOpacity onPress={() => setMounts(current => current.filter((_, i) => i !== index))} style={styles.smallIcon}><Ionicons name="close" size={18} color={colors.danger.ink} /></TouchableOpacity></View>)}
+            {mounts.map((mount, index) => <View key={`${mount.host_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><View style={styles.cardCopy}><Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{mount.container_path}</Text><Text variant="xs" dim numberOfLines={1}>{mount.host_path} · {mount.mode}</Text></View><Pressable onPress={() => setMounts(current => current.filter((_, i) => i !== index))} style={styles.smallIcon}><Ionicons name="close" size={18} color={colors.danger.ink} /></Pressable></View>)}
             <WorkspacePathField value={mountHost} onChangeText={value => { setMountHost(value); const base = value.split('/').filter(Boolean).pop(); if (base) setMountTarget(`/workspace/${base}`); }} placeholder="Browse a host folder" />
             <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline, marginTop: spacing.sm }]} />
-            <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment selected={mountMode === 'rw'} label="RW" onPress={() => setMountMode('rw')} compact /><Segment selected={mountMode === 'ro'} label="RO" onPress={() => setMountMode('ro')} compact /></View><TouchableOpacity onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addButton, { borderColor: colors.hairline, opacity: mountHost.trim() && mountTarget.trim() ? 1 : 0.42 }]}><Ionicons name="add" size={18} color={colors.ink} /><Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Add folder</Text></TouchableOpacity></View>
+            <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment selected={mountMode === 'rw'} label="RW" onPress={() => setMountMode('rw')} compact /><Segment selected={mountMode === 'ro'} label="RO" onPress={() => setMountMode('ro')} compact /></View><Pressable onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addButton, { borderColor: colors.hairline, opacity: mountHost.trim() && mountTarget.trim() ? 1 : 0.42 }]}><Ionicons name="add" size={18} color={colors.ink} /><Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Add folder</Text></Pressable></View>
 
             <ContainerHardwareSection
               capabilities={hardware}
@@ -386,21 +375,21 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
           </ScrollView>
         )}
 
-        {mode === 'form' ? <View style={[styles.footer, { backgroundColor: colors.canvas, borderTopColor: colors.hairline, paddingBottom: spacing.base }]}><TouchableOpacity onPress={submit} disabled={!canSubmit} style={[styles.submit, { backgroundColor: canSubmit ? colors.accent.ink : colors.sunken }]}>{saving ? <ActivityIndicator color={colors.onInk} /> : <Text style={{ color: canSubmit ? colors.onInk : colors.ink3, fontWeight: fontWeights.medium }}>{editingName ? 'Save and recreate' : 'Create environment'}</Text>}</TouchableOpacity></View> : null}
+        {mode === 'form' ? <View style={[styles.footer, { backgroundColor: colors.canvas, borderTopColor: colors.hairline, paddingBottom: spacing.base }]}><Pressable onPress={submit} disabled={!canSubmit} style={[styles.submit, { backgroundColor: canSubmit ? colors.accent.ink : colors.sunken }]}>{saving ? <ActivityIndicator color={colors.onInk} /> : <Text style={{ color: canSubmit ? colors.onInk : colors.ink3, fontWeight: fontWeights.medium }}>{editingName ? 'Save and recreate' : 'Create environment'}</Text>}</Pressable></View> : null}
       </KeyboardAvoidingView>
 
-      <SafeAreaModal visible={editor !== null} animationType="slide" onRequestClose={() => setEditor(null)} containerStyle={{ backgroundColor: colors.canvas }}>
+      <ModalFrame statusBarTranslucent={false} transparent={false} visible={editor !== null} animationType="slide" onRequestClose={() => setEditor(null)} containerStyle={{ backgroundColor: colors.canvas }}>
         <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.ink }]}>{editor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}</Text><Text variant="xs" dim>{editor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><TouchableOpacity onPress={() => setEditor(null)} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Ionicons name="close" size={20} color={colors.ink} /></TouchableOpacity></View>
+          <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.ink }]}>{editor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}</Text><Text variant="xs" dim>{editor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><Pressable onPress={() => setEditor(null)} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Ionicons name="close" size={20} color={colors.ink} /></Pressable></View>
           {editor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.ink, backgroundColor: colors.code }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={allow} onChangeText={setAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.code, borderColor: colors.hairline }]} /><FieldLabel label="Blocklist" optional /><TextInput value={deny} onChangeText={setDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.code, borderColor: colors.hairline }]} /></ScrollView>}
         </KeyboardAvoidingView>
-      </SafeAreaModal>
+      </ModalFrame>
 
-      <SafeAreaModal visible={actionContainer !== null} transparent animationType="fade" onRequestClose={() => setActionContainer(null)} edges={['bottom']} statusBarTranslucent>
+      <ModalFrame visible={actionContainer !== null} transparent animationType="fade" onRequestClose={() => setActionContainer(null)} edges={['bottom']} statusBarTranslucent>
         <View style={[styles.overlay, { backgroundColor: colors.scrim }]}>
-          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setActionContainer(null)} accessibilityLabel="Close environment actions" />
+          <Pressable style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setActionContainer(null)} accessibilityLabel="Close environment actions" />
           <View style={[styles.actionSheet, elevation(1, colors, isDark)]}>
-            <View style={styles.actionSheetHead}><View style={styles.cardCopy}><Text style={[styles.title, { color: colors.ink }]}>{actionContainer?.name}</Text><Text variant="xs" dim>Environment actions</Text></View><TouchableOpacity onPress={() => setActionContainer(null)} style={styles.smallIcon}><Ionicons name="close" size={19} color={colors.ink3} /></TouchableOpacity></View>
+            <View style={styles.actionSheetHead}><View style={styles.cardCopy}><Text style={[styles.title, { color: colors.ink }]}>{actionContainer?.name}</Text><Text variant="xs" dim>Environment actions</Text></View><Pressable onPress={() => setActionContainer(null)} style={styles.smallIcon}><Ionicons name="close" size={19} color={colors.ink3} /></Pressable></View>
             {actionContainer ? <>
               <ActionRow icon="refresh-outline" label="Restart" onPress={() => { const item=actionContainer; setActionContainer(null); runAction(item, 'restart'); }} />
               <ActionRow icon="copy-outline" label="Clone configuration" onPress={() => { const item=actionContainer; setActionContainer(null); openEdit(item, true); }} />
@@ -409,21 +398,21 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             </> : null}
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
 
-      <SafeAreaModal visible={snapshotContainer !== null} transparent animationType="fade" onRequestClose={() => setSnapshotContainer(null)} edges={['top', 'bottom']}>
-        <View style={[styles.overlay, { backgroundColor: colors.scrim }]}><View style={[styles.snapshotCard, elevation(2, colors, isDark)]}><Text style={[styles.title, { color: colors.ink }]}>Create template</Text><TextInput value={snapshotName} onChangeText={setSnapshotName} placeholder="template-name" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /><TextInput value={snapshotDescription} onChangeText={setSnapshotDescription} placeholder="Description" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /><View style={styles.snapshotActions}><TouchableOpacity onPress={() => setSnapshotContainer(null)} style={styles.cancel}><Text variant="sm">Cancel</Text></TouchableOpacity><TouchableOpacity onPress={createSnapshot} style={[styles.smallButton, { backgroundColor: colors.accent.ink }]}><Text variant="sm" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Snapshot</Text></TouchableOpacity></View></View></View>
-      </SafeAreaModal>
-    </SafeAreaModal>
+      <ModalFrame statusBarTranslucent={false} visible={snapshotContainer !== null} transparent animationType="fade" onRequestClose={() => setSnapshotContainer(null)} edges={['top', 'bottom']}>
+        <View style={[styles.overlay, { backgroundColor: colors.scrim }]}><View style={[styles.snapshotCard, elevation(2, colors, isDark)]}><Text style={[styles.title, { color: colors.ink }]}>Create template</Text><TextInput value={snapshotName} onChangeText={setSnapshotName} placeholder="template-name" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /><TextInput value={snapshotDescription} onChangeText={setSnapshotDescription} placeholder="Description" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /><View style={styles.snapshotActions}><Pressable onPress={() => setSnapshotContainer(null)} style={styles.cancel}><Text variant="sm">Cancel</Text></Pressable><Pressable onPress={createSnapshot} style={[styles.smallButton, { backgroundColor: colors.accent.ink }]}><Text variant="sm" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Snapshot</Text></Pressable></View></View></View>
+      </ModalFrame>
+    </ModalFrame>
   );
 }
 
 function SectionTitle({ label, detail }: { label: string; detail: string }) { return <View style={styles.sectionTitle}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{label}</Text><Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{detail}</Text></View>; }
 function FieldLabel({ label, optional = false }: { label: string; optional?: boolean }) { return <View style={styles.fieldLabel}><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{label}</Text>{optional ? <Text variant="xs" dim>optional</Text> : null}</View>; }
 function EmptyCard({ text }: { text: string }) { const { colors } = useTheme(); return <View style={[styles.empty, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Text variant="xs" dim>{text}</Text></View>; }
-function Segment({ selected, label, onPress, compact = false }: { selected: boolean; label: string; onPress: () => void; compact?: boolean }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} style={[compact ? styles.segmentButtonCompact : styles.segmentButton, { backgroundColor: selected ? colors.accent.wash : 'transparent', borderColor: selected ? colors.accent.wash : colors.hairline }]}><Text variant="sm" style={{ color: selected ? colors.accent.ink : colors.ink2, fontWeight: selected ? fontWeights.semibold : fontWeights.medium }}>{label}</Text></TouchableOpacity>; }
-function ActionRow({ icon, label, onPress, destructive = false }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; destructive?: boolean }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={styles.actionRow}><Ionicons name={icon} size={19} color={destructive ? colors.danger.ink : colors.ink3} /><Text variant="sm" style={{ flex: 1, color: destructive ? colors.danger.ink : colors.ink, fontWeight: fontWeights.semibold }}>{label}</Text><Ionicons name="chevron-forward" size={17} color={colors.ink3} /></TouchableOpacity>; }
-function EditorCard({ title, detail, icon, onPress }: { title: string; detail: string; icon: keyof typeof Ionicons.glyphMap; onPress: () => void }) { const { colors } = useTheme(); return <TouchableOpacity onPress={onPress} style={[styles.editorCard, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Ionicons name={icon} size={20} color={colors.ink2} /><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" dim>{detail}</Text></View><Ionicons name="expand-outline" size={18} color={colors.ink3} /></TouchableOpacity>; }
+function Segment({ selected, label, onPress, compact = false }: { selected: boolean; label: string; onPress: () => void; compact?: boolean }) { const { colors } = useTheme(); return <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} style={[compact ? styles.segmentButtonCompact : styles.segmentButton, { backgroundColor: selected ? colors.accent.wash : 'transparent', borderColor: selected ? colors.accent.wash : colors.hairline }]}><Text variant="sm" style={{ color: selected ? colors.accent.ink : colors.ink2, fontWeight: selected ? fontWeights.semibold : fontWeights.medium }}>{label}</Text></Pressable>; }
+function ActionRow({ icon, label, onPress, destructive = false }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; destructive?: boolean }) { const { colors } = useTheme(); return <Pressable onPress={onPress} style={styles.actionRow}><Ionicons name={icon} size={19} color={destructive ? colors.danger.ink : colors.ink3} /><Text variant="sm" style={{ flex: 1, color: destructive ? colors.danger.ink : colors.ink, fontWeight: fontWeights.semibold }}>{label}</Text><Ionicons name="chevron-forward" size={17} color={colors.ink3} /></Pressable>; }
+function EditorCard({ title, detail, icon, onPress }: { title: string; detail: string; icon: keyof typeof Ionicons.glyphMap; onPress: () => void }) { const { colors } = useTheme(); return <Pressable onPress={onPress} style={[styles.editorCard, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Ionicons name={icon} size={20} color={colors.ink2} /><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" dim>{detail}</Text></View><Ionicons name="expand-outline" size={18} color={colors.ink3} /></Pressable>; }
 function splitLines(value: string): string[] { return value.split(/[\n,]/).map(item => item.trim()).filter(Boolean); }
 function countLines(value: string): number { return value.split(/\r?\n/).filter(item => item.trim()).length; }
 

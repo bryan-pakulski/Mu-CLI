@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,13 +8,11 @@ import { jobsApi } from '../api/jobs';
 import type { JobSummary } from '../api/jobCore';
 import { useJobCommands } from '../components/JobActions';
 import { JobRow, JobsNavBar, jobKey, useJobsHome, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { ModernBottomSheet } from '../components/ModernBottomSheet';
-import { Banner, CheckRow, Empty, Loading, Panel, PlanosButton, TextField, useToast } from '../components/planos';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
 import { stateLabel, stateStatus } from '../theme/status';
+import { Banner, Button, CheckRow, Empty, Loading, Panel, Pressable, Sheet, Text, TextField, useToast } from '../ui';
 
 export type JobsListScreenProps = NativeStackScreenProps<RootStackParamList, 'JobsList'>;
 
@@ -40,7 +38,7 @@ export function jobSessions(rows: JobSummary[]): Array<{ name: string; count: nu
     .sort((a, b) => (a.name === '' ? 1 : 0) - (b.name === '' ? 1 : 0) || b.count - a.count || a.name.localeCompare(b.name));
 }
 
-/** planos Jobs page: filter, only-needs-me, rows with mini steppers, archive and delete. */
+/** Wash Jobs page: filter, only-needs-me, rows with mini steppers, archive and delete. */
 export function JobsListScreen({ navigation }: JobsListScreenProps) {
   const { colors } = useTheme();
   const toast = useToast();
@@ -94,9 +92,9 @@ export function JobsListScreen({ navigation }: JobsListScreenProps) {
                 <JobRow key={row.id} job={row} now={now} onPress={() => navigation.navigate('JobDetail', { jobId: row.id })}
                   right={(
                     <View style={styles.rowActions}>
-                      <PlanosButton small ghost iconOnly label={`Archive ${jobKey(row)}`} testID={`archive-${row.id}`}
+                      <Button small ghost iconOnly label={`Archive ${jobKey(row)}`} testID={`archive-${row.id}`}
                         icon={<Ionicons name="archive-outline" size={18} color={colors.ink3} />} onPress={() => setArchiveRow(row)} />
-                      <PlanosButton small ghost iconOnly label={`Delete ${jobKey(row)}`} testID={`delete-${row.id}`} disabled={!deleteAction?.enabled}
+                      <Button small ghost iconOnly label={`Delete ${jobKey(row)}`} testID={`delete-${row.id}`} disabled={!deleteAction?.enabled}
                         icon={<Ionicons name="trash-outline" size={18} color={colors.danger.ink} />} onPress={() => { setDeleteRow(row); if (deleteAction) setTimeout(() => del.invoke(deleteAction), 0); }} />
                     </View>
                   )}
@@ -110,13 +108,13 @@ export function JobsListScreen({ navigation }: JobsListScreenProps) {
           </Panel>
         )}
       </ScrollView>
-      <ModernBottomSheet visible={!!archiveRow} onClose={() => setArchiveRow(null)} title={archiveRow ? `Archive ${jobKey(archiveRow)}` : 'Archive'}>
+      <Sheet visible={!!archiveRow} onClose={() => setArchiveRow(null)} title={archiveRow ? `Archive ${jobKey(archiveRow)}` : 'Archive'}>
         <Text variant="sm">Archive {archiveRow ? jobKey(archiveRow) : ''}? It leaves the board; History keeps its record and evidence.</Text>
         <View style={styles.sheetActions}>
-          <PlanosButton label="Cancel" onPress={() => setArchiveRow(null)} />
-          <PlanosButton primary label="Archive" onPress={() => void archive()} testID="archive-confirm" />
+          <Button label="Cancel" onPress={() => setArchiveRow(null)} />
+          <Button primary label="Archive" onPress={() => void archive()} testID="archive-confirm" />
         </View>
-      </ModernBottomSheet>
+      </Sheet>
       {del.sheets}
     </SafeAreaView>
   );

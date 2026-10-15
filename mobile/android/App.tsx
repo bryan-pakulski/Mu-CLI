@@ -1,12 +1,11 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ThemeProvider } from './src/theme/ThemeContext';
+import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { PromptHost } from './src/components/PromptHost';
-import { AtmosphericBackground } from './src/components/AtmosphericBackground';
 import { refreshPendingMutations, useConnectionStore } from './src/store/connection';
 
 // Hold the native splash (Paper canvas) until the bundled Wash fonts load,
@@ -63,11 +62,17 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AtmosphericBackground>
+        <AppCanvas>
           <AppNavigator />
           <PromptHost />
-        </AtmosphericBackground>
+        </AppCanvas>
       </ThemeProvider>
     </SafeAreaProvider>
   );
+}
+
+/** Paper/Dusk canvas behind every screen (art is placed per screen by WashBackground). */
+function AppCanvas({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return <View style={{ flex: 1, backgroundColor: colors.canvas }}>{children}</View>;
 }

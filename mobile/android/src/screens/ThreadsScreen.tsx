@@ -1,12 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import {
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,12 +12,12 @@ import {
   type ThreadStatus,
   type ThreadSummary,
 } from '../api/threads';
-import { EmptyState, Skeleton, Text } from '../components';
 import { NewThreadSheet } from '../components/NewThreadSheet';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
+import { EmptyState, Pressable, Skeleton, Text } from '../ui';
 
 export type ThreadsScreenProps = NativeStackScreenProps<RootStackParamList, 'Threads'>;
 
@@ -192,7 +185,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
         <EmptyState
           title="No active session"
           message="Load a session before creating or reviewing agent threads."
-          icon="git-branch-outline"
+          icon="git-branch"
           actionLabel="Back to chat"
           onAction={() => navigation?.navigate('Chat')}
         />
@@ -211,7 +204,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Agent conversations</Text>
             <Text variant="sm" dim numberOfLines={1}>{groupId || activeSessionName}</Text>
           </View>
-          <TouchableOpacity
+          <Pressable
             testID="create-thread"
             onPress={() => setCreateOpen(true)}
             activeOpacity={0.72}
@@ -220,15 +213,15 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
           >
             <Ionicons name="add" size={18} color={colors.onInk} />
             <Text variant="sm" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Thread</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {error ? (
-          <TouchableOpacity onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.danger.wash }]}>
+          <Pressable onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.danger.wash }]}>
             <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
             <Text variant="xs" style={[styles.errorCopy, { color: colors.danger.ink }]}>{error}</Text>
             <Text variant="xs" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
-          </TouchableOpacity>
+          </Pressable>
         ) : null}
 
         <View style={styles.sectionHeader}>
@@ -241,7 +234,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             <Skeleton height={58} style={styles.skeleton} />
           </View>
         ) : threads.map(thread => (
-          <TouchableOpacity
+          <Pressable
             key={thread.thread_id}
             testID={`thread-row-${thread.thread_id}`}
             onPress={() => void switchThread(thread)}
@@ -277,17 +270,17 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             {thread.thread_id === currentThreadId ? (
               <Ionicons name="checkmark" size={18} color={colors.accent.ink} />
             ) : !ACTIVE_STATUSES.includes(thread.status) ? (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => deleteThread(thread)}
                 style={styles.deleteButton}
                 accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
               >
                 <Ionicons name="trash-outline" size={17} color={colors.ink3} />
-              </TouchableOpacity>
+              </Pressable>
             ) : (
               <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
             )}
-          </TouchableOpacity>
+          </Pressable>
         ))}
 
         <View style={[styles.sectionHeader, styles.activityHeader]}>

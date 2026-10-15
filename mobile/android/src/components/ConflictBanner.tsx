@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
-import { Text, Button } from './';
+import { Text, Button } from '../ui';
 
 /**
  * Round-31 F40: visible banner when offline-queue items are parked as

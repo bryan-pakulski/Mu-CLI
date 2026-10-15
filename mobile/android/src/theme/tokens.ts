@@ -164,7 +164,7 @@ export const semanticPigment = semanticPigments;
 
 /**
  * Tone names accepted by kit components. Wash semantics, plus the two legacy
- * planos names that older call sites and server payloads still send
+ * Wash names that older call sites and server payloads still send
  * (`warn` → attention, `muted` → neutral).
  */
 export type Tone = Semantic | 'warn' | 'muted' | '';

@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
+import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { teacherApi, TeacherState, TeacherModule, TeacherLesson } from '../api/teacher';
 import { spacing, fontWeights, fonts } from '../theme/tokens';
+import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 export function TeacherScreen() {
   const { colors } = useTheme();
@@ -89,7 +90,7 @@ export function TeacherScreen() {
                 {course.target_level} · {course.lessons_completed_count}/{course.lesson_total} lessons
               </Text>
               <View style={{ flexDirection: 'row', gap: spacing.xs, marginTop: spacing.sm }}>
-                <Badge label={course.status} variant={course.status === 'in_progress' ? 'accent' : 'neutral'} />
+                <Chip label={course.status} tone={course.status === 'in_progress' ? 'accent' : 'neutral'} />
               </View>
             </Card>
           ) : (
@@ -119,7 +120,7 @@ export function TeacherScreen() {
                 {assignments.map((assignment, index) => {
                   const grade = assignment.grade as Record<string, any> | undefined;
                   return <Card key={String(assignment.assignment_id || index)} style={{ marginBottom: spacing.sm }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(assignment.kind || assignment.status || 'assignment')} variant="neutral" />{grade && <Badge label={`${grade.score_pct ?? '—'}%`} variant={grade.passed ? 'success' : 'warning'} />}</View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Chip label={String(assignment.kind || assignment.status || 'assignment')} tone="neutral" />{grade && <Chip label={`${grade.score_pct ?? '—'}%`} tone={grade.passed ? 'ok' : 'attention'} />}</View>
                     <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{String(assignment.assignment_id || 'Assignment')}</Text>
                     {!!assignment.prompt && <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{String(assignment.prompt)}</Text>}
                     {!!grade?.feedback && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs }}>Evidence: {String(grade.feedback)}</Text>}
@@ -132,7 +133,7 @@ export function TeacherScreen() {
             {workspaceView.shows('reviews') && (
               <View>
                 <SectionLabel title="Retention schedule" count={reviews.length} />
-                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Badge label={String(review.status || 'scheduled')} variant={review.status === 'done' ? 'success' : 'neutral'} /><Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.ink, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.ok.ink, marginTop: spacing.xs }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs }}>{String(review.notes)}</Text>}</Card>)}
+                {reviews.map((review, index) => <Card key={String(review.review_id || index)} style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}><Chip label={String(review.status || 'scheduled')} tone={review.status === 'done' ? 'ok' : 'neutral'} /><Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>{review.due_at_lesson_count != null ? `due at lesson ${review.due_at_lesson_count}` : ''}</Text></View><Text variant="sm" style={{ color: colors.ink, marginTop: spacing.sm }}>{String(review.source_lesson_title || review.source_lesson_id || 'Review')}</Text>{review.score_pct != null && <Text variant="xs" style={{ color: colors.ok.ink, marginTop: spacing.xs }}>Recall score {String(review.score_pct)}%</Text>}{!!review.notes && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs }}>{String(review.notes)}</Text>}</Card>)}
                 {!reviews.length && <Text variant="xs" style={{ color: colors.ink3, padding: spacing.md }}>No spaced reviews scheduled.</Text>}
               </View>
             )}
@@ -161,7 +162,7 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
 }) {
   return (
     <Card style={{ marginBottom: spacing.sm }}>
-      <TouchableOpacity onPress={onToggle} activeOpacity={0.7} style={{ minHeight: 44 }}>
+      <Pressable onPress={onToggle} activeOpacity={0.7} style={{ minHeight: 44 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1 }}>
             <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{module.title}</Text>
@@ -169,10 +170,10 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
               {module.lessons.filter(l => l.status === 'completed').length}/{module.lessons.length} lessons
             </Text>
           </View>
-          {module.status && <Badge label={module.status} variant={module.status === 'completed' ? 'success' : 'neutral'} />}
+          {module.status && <Chip label={module.status} tone={module.status === 'completed' ? 'ok' : 'neutral'} />}
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.ink3} />
         </View>
-      </TouchableOpacity>
+      </Pressable>
       {expanded && (
         <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
           {module.lessons.map(lesson => (
@@ -189,8 +190,8 @@ function LessonRow({ lesson, colors }: { lesson: TeacherLesson; colors: any }) {
     <View style={{ paddingVertical: spacing.sm, minHeight: 44 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.medium }}>{lesson.title}</Text>
-        <Badge label={lesson.status} variant={
-          lesson.status === 'completed' ? 'success' :
+        <Chip label={lesson.status} tone={
+          lesson.status === 'completed' ? 'ok' :
           lesson.status === 'presenting' || lesson.status === 'in_progress' ? 'accent' :
           'neutral'
         } />

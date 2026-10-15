@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, spacing, toneOf, typography } from '../theme/tokens';
 import { vocabulary } from '../theme/wash.generated';
+import { Text } from '../ui';
+import { STATUS } from '../theme/status';
 
 /** Minimal shape shared by every session list surface. */
 export type SessionStateSource = {
@@ -69,7 +70,7 @@ export function SessionStatusBadge({ session, active, size = 'md' }: SessionStat
   // Status chip: semantic wash fill, semantic ink text, glyph + label.
   const tone3 = toneOf(colors, vocabulary.session_state[state].semantic);
   const tone = tone3.ink;
-  const glyph = state === 'loaded' ? '○' : '●';
+  const glyph = state === 'loaded' ? STATUS.pending.icon : STATUS.active.icon;
   const palette = { bg: tone3.wash, border: tone3.wash, text: state === 'loaded' ? colors.ink2 : tone, dot: tone3.pigment };
   const sm = size === 'sm';
   return (

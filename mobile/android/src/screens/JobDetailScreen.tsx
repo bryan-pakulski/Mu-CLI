@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
 import { jobCoreApi, subscribeToJobChanges, type Finding, type JobPart, type JobVM } from '../api/jobCore';
 import { jobsApi, type JobAttempt, type JobDiagnosticsSnapshot } from '../api/jobs';
-import { Text } from '../components/Text';
 import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
 import { EnvironmentsPill, JobEnvironmentsSheet } from '../components/JobEnvironments';
 import { stageAgentsLabel } from '../api/agents';
@@ -15,19 +14,16 @@ import { budgetSummary } from '../components/jobViews';
 import { ChecksTab, DiffTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
 import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, defaultTab, eventTone, parsePatch, type JobTab } from '../components/jobViews';
 import { PrPill, jobKey } from '../components/JobsChrome';
-import {
-  Banner, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, PlanosButton, Pre, Tabs,
-  type TabItem,
-} from '../components/planos';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, duration, money, stateLabel, stateStatus, verdictStyle, when } from '../theme/status';
+import { Banner, Button, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, Pre, Pressable, type TabItem, Tabs, Text } from '../ui';
 
 export const LIVE_DIFF_REFRESH_MS = 5000;
 
 export type JobDetailScreenProps = NativeStackScreenProps<RootStackParamList, 'JobDetail'>;
-// Tab order (planos Task page): Session · Plan · Diff · Review · Checks · Diagnostics · Cost & audit
+// Tab order (Task page): Session · Plan · Diff · Review · Checks · Diagnostics · Cost & audit
 // (JOB_TABS / JOB_TAB_LABELS in components/jobViews.ts).
 
 export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
@@ -310,8 +306,8 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
             <View style={styles.col}>
               <View style={styles.row}>
                 <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold, flex: 1 }}>Job diagnostics</Text>
-                <PlanosButton small label="Refresh" onPress={loadDiagnostics} />
-                <PlanosButton small label="Job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId })} />
+                <Button small label="Refresh" onPress={loadDiagnostics} />
+                <Button small label="Job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId })} />
               </View>
               {diagnostics ? (
                 <>

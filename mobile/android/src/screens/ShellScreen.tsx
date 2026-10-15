@@ -1,23 +1,13 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
-} from 'react-native';
+import { View, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Badge } from '../components';
 import { useConnectionStore } from '../store/connection';
 import { sessionsApi } from '../api/sessions';
 import { spacing, fontSizes, fontWeights, fonts, radii, typography, touchTarget } from '../theme/tokens';
+import { Chip, Pressable, Text } from '../ui';
 
 const MUCLI_SHELL_QOL_V1 = true;
 const SHELL_HISTORY = new Map<string, string[]>();
@@ -363,33 +353,33 @@ export function ShellScreen() {
         <View style={styles.headerLeft}>
           <Ionicons name="terminal-outline" size={18} color={colors.ink2} />
           <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Shell</Text>
-          <Badge
+          <Chip
             label={connected ? 'Connected' : connecting ? 'Connecting…' : 'Disconnected'}
-            variant={connected ? 'success' : 'neutral'}
+            tone={connected ? 'ok' : 'neutral'}
           />
         </View>
         <View style={styles.headerActions}>
           {!followingOutput && output ? (
-            <TouchableOpacity onPress={() => jumpToEnd()} style={styles.actionBtn} accessibilityLabel="Jump to latest shell output">
+            <Pressable onPress={() => jumpToEnd()} style={styles.actionBtn} accessibilityLabel="Jump to latest shell output">
               <Ionicons name="arrow-down-circle-outline" size={20} color={colors.ink2} />
-            </TouchableOpacity>
+            </Pressable>
           ) : null}
-          <TouchableOpacity onPress={clear} style={styles.actionBtn} accessibilityLabel="Clear output">
+          <Pressable onPress={clear} style={styles.actionBtn} accessibilityLabel="Clear output">
             <Ionicons name="trash-outline" size={20} color={colors.ink3} />
-          </TouchableOpacity>
+          </Pressable>
           {connected ? (
-            <TouchableOpacity onPress={disconnect} style={styles.actionBtn} accessibilityLabel="Disconnect">
+            <Pressable onPress={disconnect} style={styles.actionBtn} accessibilityLabel="Disconnect">
               <Ionicons name="close-circle-outline" size={20} color={colors.danger.ink || colors.ink3} />
-            </TouchableOpacity>
+            </Pressable>
           ) : (
-            <TouchableOpacity
+            <Pressable
               onPress={connect}
               disabled={connecting}
               style={styles.actionBtn}
               accessibilityLabel="Connect"
             >
               <Ionicons name="play-circle-outline" size={20} color={colors.accent.ink} />
-            </TouchableOpacity>
+            </Pressable>
           )}
         </View>
       </View>
@@ -441,15 +431,15 @@ export function ShellScreen() {
               }}
               editable={connected}
             />
-            <TouchableOpacity onPress={complete} disabled={!connected} style={styles.keyButton} accessibilityLabel="Complete shell input">
+            <Pressable onPress={complete} disabled={!connected} style={styles.keyButton} accessibilityLabel="Complete shell input">
               <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>TAB</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => cycleHistory(-1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Previous shell command">
+            </Pressable>
+            <Pressable onPress={() => cycleHistory(-1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Previous shell command">
               <Ionicons name="chevron-up" size={17} color={colors.ink3} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => cycleHistory(1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Next shell command">
+            </Pressable>
+            <Pressable onPress={() => cycleHistory(1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Next shell command">
               <Ionicons name="chevron-down" size={17} color={colors.ink3} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </KeyboardAvoidingView>
       ) : (

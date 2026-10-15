@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, RefreshControl, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, ScrollView, RefreshControl, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { filesApi, FileEntry } from '../api/files';
 import { spacing, fonts } from '../theme/tokens';
+import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 export function FilesScreen() {
   const { colors } = useTheme();
@@ -86,9 +86,9 @@ export function FilesScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
-          <TouchableOpacity onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+          <Pressable onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={24} color={colors.ink} />
-          </TouchableOpacity>
+          </Pressable>
           <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
             {fileContent.path}
           </Text>
@@ -106,9 +106,9 @@ export function FilesScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {currentPath && (
-          <TouchableOpacity onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+          <Pressable onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={24} color={colors.ink} />
-          </TouchableOpacity>
+          </Pressable>
         )}
         <Text variant="sm" style={{ color: colors.ink3, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
           {currentPath || '/'}
@@ -119,7 +119,7 @@ export function FilesScreen() {
         contentContainerStyle={{ padding: spacing.base }}
       >
         {entries.map(entry => (
-          <TouchableOpacity key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
+          <Pressable key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
             <Card style={{ marginBottom: spacing.xs, minHeight: 44 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
                 <Ionicons
@@ -135,7 +135,7 @@ export function FilesScreen() {
                 )}
               </View>
             </Card>
-          </TouchableOpacity>
+          </Pressable>
         ))}
       </ScrollView>
     </SafeAreaView>

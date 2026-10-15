@@ -3,9 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
-import { Button } from './Button';
-import { Text } from './Text';
 import { fontWeights, fonts, radii, spacing, tracking, typography } from '../theme/tokens';
+import { Button, Text } from '../ui';
 
 export type ConnectionPromptProps = {
   onConnect: () => void;

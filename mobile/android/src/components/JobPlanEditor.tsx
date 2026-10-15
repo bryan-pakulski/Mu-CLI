@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import type { ThemeColors } from '../theme/tokens';
 import {
   type PlanRow, type PlanSection, planMarkdownStyles, planProse, replaceRows, rowsFrom,
 } from './planMarkdown';
 import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 const PLAN_SECTIONS: PlanSection[] = ['Acceptance criteria', 'Checks'];
 

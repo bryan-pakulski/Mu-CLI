@@ -7,7 +7,7 @@ import {
 } from '../src/api/agents';
 import { api } from '../src/api/client';
 import { AgentsSettings, StageAgentsField } from '../src/components/JobAgents';
-import { ToastHost } from '../src/components/planos';
+import { ToastHost } from '../src/ui';
 
 jest.mock('../src/api/client', () => ({ api: { get: jest.fn(), put: jest.fn() } }));
 

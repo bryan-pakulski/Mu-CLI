@@ -1,10 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  PanResponder,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { PanResponder, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { modesApi, ModeInfo } from '../api/modes';
 import { useTheme } from '../theme/ThemeContext';
@@ -14,10 +9,8 @@ import { LoopScreen } from '../screens/LoopScreen';
 import { ResearchScreen } from '../screens/ResearchScreen';
 import { SecurityScreen } from '../screens/SecurityScreen';
 import { TeacherScreen } from '../screens/TeacherScreen';
-import { Button } from './Button';
-import { Text } from './Text';
-import { SafeAreaModal } from './SafeAreaModal';
 import { elevation, fontSizes, fontWeights, spacing, touchTarget, typography } from '../theme/tokens';
+import { Button, ModalFrame, Pressable, Text } from '../ui';
 
 export type ModeDrawerProps = {
   visible: boolean;
@@ -70,9 +63,9 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
   };
 
   return (
-    <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <ModalFrame statusBarTranslucent={false} visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         <View
           {...swipeResponder.panHandlers}
           style={[
@@ -97,9 +90,9 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
                 {activeMode?.description || 'No mode-specific explorer is active.'}
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
+            <Pressable onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
               <Ionicons name="close" size={20} color={colors.ink3} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
 
           <View style={styles.content}>
@@ -118,7 +111,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
           </View>
         </View>
       </View>
-    </SafeAreaModal>
+    </ModalFrame>
   );
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import {
   jobsApi,
@@ -8,11 +8,9 @@ import {
   type JobStageName,
 } from '../api/jobs';
 import { providersApi, type ProviderInfo } from '../api/providers';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Banner, Field, Loading, Panel, PlanosButton, SwitchRow, TextField } from './planos';
+import { Banner, Button, Field, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 const STAGE_LABELS: Record<JobStageName, string> = {
   plan: 'Plan',
@@ -36,9 +34,9 @@ export type JobStageModelsSheetProps = {
 
 export function JobStageModelsSheet({ visible, onClose, onSaved }: JobStageModelsSheetProps) {
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Job stage models">
+    <Sheet visible={visible} onClose={onClose} title="Job stage models">
       <JobStageModelsForm active={visible} onCancel={onClose} onSaved={missing => { onSaved?.(missing); onClose(); }} />
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -132,7 +130,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                 {providers.map(item => {
                   const selected = item.name === provider;
                   return (
-                    <TouchableOpacity
+                    <Pressable
                       key={item.name}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
@@ -151,7 +149,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                       ]}
                     >
                       <Text variant="sm" style={{ color: selected ? colors.accent.ink : colors.ink, fontWeight: selected ? fontWeights.semibold : fontWeights.regular }}>{item.name}</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -170,14 +168,14 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
               {openStage === stage && suggestions.length ? (
                 <View style={[styles.suggestions, { borderColor: colors.hairline, backgroundColor: colors.raised }]}>
                   {suggestions.map(name => (
-                    <TouchableOpacity
+                    <Pressable
                       key={name}
                       accessibilityRole="button"
                       onPress={() => { setStage(stage, { model: name }); setOpenStage(null); }}
                       style={styles.suggestion}
                     >
                       <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }}>{name}</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   ))}
                 </View>
               ) : null}
@@ -196,8 +194,8 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
       {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
       {notice ? <Banner tone="ok" glyph="✓" title={notice} /> : null}
       <View style={styles.actions}>
-        {onCancel ? <PlanosButton label="Cancel" onPress={onCancel} /> : null}
-        <PlanosButton primary label={saving ? 'Saving…' : 'Save'} disabled={saving} onPress={() => void save()} />
+        {onCancel ? <Button label="Cancel" onPress={onCancel} /> : null}
+        <Button primary label={saving ? 'Saving…' : 'Save'} disabled={saving} onPress={() => void save()} />
       </View>
     </View>
   );

@@ -1,18 +1,13 @@
 // Job page tabs — Session, Plan, Diff, Review and Checks — ported from the
-// planos web Task page (web/src/pages/task/*) and the mucli web jobs mode.
+// Wash web Task page (web/src/pages/task/*) and the mucli web jobs mode.
 
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
 import type { CheckSuite, Finding, JobAction, JobVM } from '../api/jobCore';
 import { JobPlanEditor, PlanCriteriaCards } from './JobPlanEditor';
 import { planMarkdownStyles, planProse } from './planMarkdown';
-import {
-  Banner, CheckRow, CountBadge, Empty, Meter, Panel, Pill, PlanosButton, Pre, ResultBar, Segmented, Sparkline,
-  StatusIcon, StatusPill, TextField,
-} from './planos';
-import { Text } from './Text';
 import { actionLabel } from './JobActions';
 import {
   FILE_STATUS_LABEL, countOf, listOf, parsePatch, runCounts, runtimeStatus, sessionItems, suiteCounts,
@@ -23,6 +18,7 @@ import { fontWeights, fonts, radii, spacing, toneInk, touchTarget } from '../the
 import {
   COVERAGE, SEVERITY, SEVERITY_ORDER, duration, stateStatus, stripAnsi, verdictStyle, when,
 } from '../theme/status';
+import { Banner, Button, CheckRow, CountBadge, Empty, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
 
 type Invoke = (idOrAction: string | JobAction, extra?: Record<string, unknown>) => void;
 
@@ -62,14 +58,14 @@ export function SessionTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; 
           <View style={{ flex: 1 }}>
             <TextField accessibilityLabel="Message the agent" placeholder="Message the agent…" value={text} onChangeText={setText} multiline style={{ minHeight: 44 }} />
           </View>
-          <PlanosButton primary label="Send" disabled={busy || !text.trim()} onPress={() => { invoke('message', { text: text.trim() }); setText(''); }} testID="job-send-message" />
+          <Button primary label="Send" disabled={busy || !text.trim()} onPress={() => { invoke('message', { text: text.trim() }); setText(''); }} testID="job-send-message" />
         </View>
       ) : <Text variant="xs" style={{ color: colors.ink3 }}>Messaging unavailable{msg?.reason ? `: ${msg.reason}` : ''}.</Text>}
     </View>
   );
 }
 
-/** planos transcript: assistant = raised + border with a squared top-left corner;
+/** Wash transcript: assistant = raised + border with a squared top-left corner;
  * user = accent tint, right-aligned; tool calls fold to one mono line. */
 export function TranscriptItem({ item }: { item: SessionItem }) {
   const { colors } = useTheme();
@@ -147,9 +143,9 @@ export function PlanTab({ job, editing, draft, dirty, historyVersion, busy, onEd
       </Text>
       {(plan?.versions || []).length > 1 ? (
         <View style={styles.wrap} accessibilityLabel="Plan version">
-          <PlanosButton small selected={latest} disabled={dirty} label="Latest" onPress={() => onVersion(undefined)} />
+          <Button small selected={latest} disabled={dirty} label="Latest" onPress={() => onVersion(undefined)} />
           {(plan?.versions || []).map(v => (
-            <PlanosButton key={v} small selected={historyVersion === v} disabled={dirty} onPress={() => onVersion(v)}
+            <Button key={v} small selected={historyVersion === v} disabled={dirty} onPress={() => onVersion(v)}
               label={`v${v}${v === plan?.approved_version ? ' · approved' : ''}`} />
           ))}
         </View>
@@ -160,14 +156,14 @@ export function PlanTab({ job, editing, draft, dirty, historyVersion, busy, onEd
         <>
           <JobPlanEditor value={draft} onChange={onChangeDraft} />
           <View style={styles.wrap}>
-            <PlanosButton primary label={editAction ? editAction.label : 'Save draft'} disabled={busy || !dirty} onPress={onSave} testID="plan-save" />
-            <PlanosButton label="Done" onPress={onCancel} testID="plan-cancel" />
+            <Button primary label={editAction ? editAction.label : 'Save draft'} disabled={busy || !dirty} onPress={onSave} testID="plan-save" />
+            <Button label="Done" onPress={onCancel} testID="plan-cancel" />
           </View>
         </>
       ) : (
         <>
           {editAction?.enabled && latest ? (
-            <View style={styles.wrap}><PlanosButton label={actionLabel(editAction)} onPress={onEdit} testID="plan-edit" /></View>
+            <View style={styles.wrap}><Button label={actionLabel(editAction)} onPress={onEdit} testID="plan-edit" /></View>
           ) : null}
           {plan?.diff_from_previous ? <Collapsible title="Changes from the previous version"><Pre>{plan.diff_from_previous}</Pre></Collapsible> : null}
           {(plan?.errors || []).length ? <Banner tone="warn" glyph="◆" title={(plan?.errors || []).join('\n')} /> : null}
@@ -340,7 +336,7 @@ function InlineFinding({ finding, fixEnabled, fixReason, onFix }: { finding: Fin
       {finding.detail ? <Text variant="xs">{finding.detail}</Text> : null}
       {finding.suggestion ? <Text variant="xs" style={{ color: colors.ink3 }}>Suggestion: {finding.suggestion}</Text> : null}
       <View style={styles.row}>
-        <PlanosButton small label="Fix this" disabled={!fixEnabled} accessibilityHint={fixEnabled ? 'Run a targeted implement pass that fixes only this finding' : fixReason} onPress={onFix} testID={`fix-this-${finding.id}`} />
+        <Button small label="Fix this" disabled={!fixEnabled} accessibilityHint={fixEnabled ? 'Run a targeted implement pass that fixes only this finding' : fixReason} onPress={onFix} testID={`fix-this-${finding.id}`} />
       </View>
     </View>
   );
@@ -383,7 +379,7 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
         <View style={styles.col}>
           <Text variant="xs" style={{ color: colors.ink3 }}>Pick findings to fix in one targeted implement run (checks and review follow); the plan stays as it is.</Text>
           <View style={styles.row}>
-            <PlanosButton primary label={`Fix ${selected.length || ''} selected`} disabled={busy || !fix?.enabled || !selected.length}
+            <Button primary label={`Fix ${selected.length || ''} selected`} disabled={busy || !fix?.enabled || !selected.length}
               accessibilityHint={fix?.enabled ? 'Fix the selected findings' : fix?.reason || 'not available'} onPress={onFixSelected} testID="review-fix-selected" />
           </View>
         </View>
@@ -431,9 +427,9 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
                   {f.suggestion ? <View><Text variant="xs" style={{ color: colors.ink3 }}>Suggestion</Text><Markdown style={md}>{f.suggestion}</Markdown></View> : null}
                   <View style={styles.wrap}>
                     {f.file && files.has(f.file)
-                      ? <PlanosButton small label="◎ Jump to diff" onPress={() => onJump(f)} testID={`jump-${f.id}`} />
+                      ? <Button small label="◎ Jump to diff" onPress={() => onJump(f)} testID={`jump-${f.id}`} />
                       : <Text variant="xs" style={{ color: colors.ink3 }}>not in diff</Text>}
-                    <PlanosButton small label="Fix" disabled={busy || !fix?.enabled || closed} accessibilityHint={fix?.enabled ? 'Fix only this finding' : fix?.reason} onPress={() => onFixOne(f.id)} testID={`fix-${f.id}`} />
+                    <Button small label="Fix" disabled={busy || !fix?.enabled || closed} accessibilityHint={fix?.enabled ? 'Fix only this finding' : fix?.reason} onPress={() => onFixOne(f.id)} testID={`fix-${f.id}`} />
                   </View>
                   <Segmented
                     accessibilityLabel={`Disposition of ${f.title}`}
@@ -476,7 +472,7 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
           </Text>
           <Text variant="xs" style={{ color: colors.ink3 }}>fix attempts {job.fix_attempts || 0} · checks come from the approved plan</Text>
         </View>
-        {recheck ? <PlanosButton label={actionLabel(recheck)} disabled={busy} ariaDisabled={!recheck.enabled} accessibilityHint={recheck.reason} onPress={() => invoke(recheck)} testID="checks-recheck" /> : null}
+        {recheck ? <Button label={actionLabel(recheck)} disabled={busy} ariaDisabled={!recheck.enabled} accessibilityHint={recheck.reason} onPress={() => invoke(recheck)} testID="checks-recheck" /> : null}
       </View>
       {live.length && running ? (
         <Panel title="Live output" glyph="●" glyphTone="running">

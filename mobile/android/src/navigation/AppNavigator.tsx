@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable, Text, View } from 'react-native';
+import { View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import type { WorkspaceCategoryId } from './workspace';
 
@@ -28,7 +28,6 @@ import { JobHistoryScreen } from '../screens/JobHistoryScreen';
 import { JobSettingsScreen } from '../screens/JobSettingsScreen';
 import { JobSetupScreen } from '../screens/JobSetupScreen';
 import { JobDoctorScreen } from '../screens/JobDoctorScreen';
-import { ToastHost } from '../components/planos';
 import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
@@ -51,6 +50,7 @@ import { ShellScreen } from '../screens/ShellScreen';
 import { ArtifactsScreen } from '../screens/ArtifactsScreen';
 import { fontSizes, fontWeights } from '../theme/tokens';
 import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
+import { Pressable, Text, ToastHost } from '../ui';
 
 export type RootStackParamList = {
   Chat: undefined;
@@ -91,7 +91,7 @@ export type RootStackParamList = {
 
 type JobsPageRoute = 'JobsList' | 'JobActivity' | 'JobBoards' | 'JobHistory' | 'JobSettings';
 
-/** planos jobs pages (CONTRACT §6: full screens, not dialogs). */
+/** Wash jobs pages (CONTRACT §6: full screens, not dialogs). */
 const JOBS_PAGE_SCREENS: { name: JobsPageRoute; title: string; component: React.ComponentType<any> }[] = [
   { name: 'JobsList', title: 'Jobs', component: JobsListScreen },
   { name: 'JobActivity', title: 'Activity', component: JobActivityScreen },

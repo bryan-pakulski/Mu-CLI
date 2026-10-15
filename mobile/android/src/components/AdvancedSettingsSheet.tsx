@@ -1,12 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  Switch,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   inspectorApi,
@@ -15,9 +8,8 @@ import {
 } from '../api/inspector';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Text } from './Text';
 import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget, typography } from '../theme/tokens';
+import { Pressable, Sheet, Text } from '../ui';
 
 export type AdvancedSettingsSheetProps = {
   visible: boolean;
@@ -191,7 +183,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
   };
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Session settings">
+    <Sheet visible={visible} onClose={onClose} title="Session settings">
       {!activeSessionName ? (
         <View style={styles.emptyState}>
           <Text variant="base" style={styles.emptyTitle}>Load a session first</Text>
@@ -217,9 +209,9 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
               style={[styles.searchInput, { color: colors.ink }]}
             />
             {search ? (
-              <TouchableOpacity onPress={() => setSearch('')} style={styles.clearButton}>
+              <Pressable onPress={() => setSearch('')} style={styles.clearButton}>
                 <Ionicons name="close" size={17} color={colors.ink3} />
-              </TouchableOpacity>
+              </Pressable>
             ) : null}
           </View>
 
@@ -238,7 +230,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
                 const changed = group.variables.filter(variable => !variable.is_default).length;
                 return (
                   <View key={group.name} style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-                    <TouchableOpacity
+                    <Pressable
                       onPress={() => toggleGroup(group.name)}
                       activeOpacity={0.72}
                       style={styles.groupHeader}
@@ -258,7 +250,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
                         <Text variant="xs" dim numberOfLines={2}>{meta.description}</Text>
                       </View>
                       <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{group.variables.length}</Text>
-                    </TouchableOpacity>
+                    </Pressable>
 
                     {isOpen ? (
                       <View style={styles.variableList}>
@@ -292,7 +284,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
           ) : null}
         </>
       )}
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -328,9 +320,9 @@ function VariableRow({
           {variable.help ? <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{variable.help}</Text> : null}
         </View>
         {!variable.is_default ? (
-          <TouchableOpacity onPress={onReset} disabled={saving} style={styles.resetButton} accessibilityLabel={`Reset ${variable.key}`}>
+          <Pressable onPress={onReset} disabled={saving} style={styles.resetButton} accessibilityLabel={`Reset ${variable.key}`}>
             <Ionicons name="refresh-outline" size={15} color={colors.ink3} />
-          </TouchableOpacity>
+          </Pressable>
         ) : null}
       </View>
 
@@ -339,7 +331,7 @@ function VariableRow({
           {variable.options.map(option => {
             const active = valueToDraft(option) === valueToDraft(variable.value);
             return (
-              <TouchableOpacity
+              <Pressable
                 key={valueToDraft(option) || 'default'}
                 onPress={() => onSave(option)}
                 disabled={saving || active}
@@ -354,7 +346,7 @@ function VariableRow({
                 <Text variant="xs" style={{ color: active ? colors.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>
                   {optionLabel(option)}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
           {saving ? <ActivityIndicator size="small" color={colors.accent.ink} /> : null}
@@ -386,7 +378,7 @@ function VariableRow({
             placeholderTextColor={colors.ink3}
             style={[styles.valueInput, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]}
           />
-          <TouchableOpacity
+          <Pressable
             onPress={() => onSave()}
             disabled={saving || (variable.secret && !draft.trim())}
             style={styles.saveButton}
@@ -397,7 +389,7 @@ function VariableRow({
             ) : (
               <Ionicons name="checkmark" size={18} color={colors.accent.ink} />
             )}
-          </TouchableOpacity>
+          </Pressable>
         </View>
       )}
     </View>
@@ -448,7 +440,7 @@ const styles = StyleSheet.create({
   clearButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
   loader: { marginVertical: spacing.lg },
   noResults: { textAlign: 'center', marginVertical: spacing.lg },
-  // planos Settings: each group is a panel (surface + 1px border + radius 10).
+  // Wash Settings: each group is a panel (surface + 1px border + radius 10).
   groupList: { gap: spacing.md },
   group: { borderWidth: 1, borderRadius: radii.panel, paddingHorizontal: spacing.md, overflow: 'hidden' },
   groupHeader: { minHeight: 62, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, gap: spacing.sm },

@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { PLAN_MODE_TOOLTIP, setPlanModeRemote } from '../api/planMode';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 export const PLAN_MODE_PLACEHOLDER = 'Plan mode: read-only — writing is blocked';
 
@@ -54,7 +54,7 @@ export function PlanModeBadge() {
   const { planMode, busy, confirmTurnOff } = usePlanMode();
   if (!planMode) return null;
   return (
-    <TouchableOpacity
+    <Pressable
       testID="plan-mode-badge"
       accessibilityRole="button"
       accessibilityLabel="Plan mode on: read-only, writing is blocked. Tap to turn off."
@@ -64,7 +64,7 @@ export function PlanModeBadge() {
       style={[styles.badge, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
     >
       <Text variant="xs" style={[styles.badgeText, { color: colors.plan.ink }]}>🔒 Plan</Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -84,7 +84,7 @@ export function PlanModeStrip() {
         <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>🔒 Plan mode</Text>
         {' — read-only. Writing is blocked.'}
       </Text>
-      <TouchableOpacity
+      <Pressable
         accessibilityRole="button"
         accessibilityLabel="Turn off plan mode"
         disabled={busy}
@@ -94,7 +94,7 @@ export function PlanModeStrip() {
         <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>
           {busy ? 'Turning off…' : 'Turn off'}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }

@@ -4,7 +4,7 @@
 // Change) and the Settings card (Docker-in-Docker status, install steps, kept jobs).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import {
   bindingLabel, bindingsFromDrafts, draftError, draftFromBinding, draftFromSpec, emptyDraft, environmentsApi,
@@ -12,12 +12,10 @@ import {
   type BindingSource, type EnvironmentDraft, type EnvironmentsVM, type JobBuildEnvironments, type JobEnvironmentsSummary,
 } from '../api/environments';
 import { jobCoreApi, type JobAction } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Banner, Empty, Field, KV, Loading, Panel, Pill, PlanosButton, Pre, Segmented, SwitchRow, TextField, useToast } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
 import { bytes, when } from '../theme/status';
+import { Banner, Button, Empty, Field, KV, Loading, Panel, Pill, Pre, Pressable, Segmented, Sheet, SwitchRow, Text, TextField, useToast } from '../ui';
 
 type Invoke = (idOrAction: string | JobAction, extra?: Record<string, unknown>) => void;
 
@@ -87,12 +85,12 @@ export function EnvironmentsEditor({ drafts, onChange, sources }: { drafts: Envi
                 placeholder="inherit" onChangeText={gpus => set(i, { gpus })} />
             </Field>
             <View style={styles.rowEnd}>
-              <PlanosButton small ghost tone="danger" label="Remove" accessibilityLabel={`Remove build environment ${i + 1}`} onPress={() => onChange(drafts.filter((_, j) => j !== i))} />
+              <Button small ghost tone="danger" label="Remove" accessibilityLabel={`Remove build environment ${i + 1}`} onPress={() => onChange(drafts.filter((_, j) => j !== i))} />
             </View>
           </View>
         );
       })}
-      <PlanosButton small label="Add environment" onPress={() => onChange([...drafts, emptyDraft()])} testID="environment-add" />
+      <Button small label="Add environment" onPress={() => onChange([...drafts, emptyDraft()])} testID="environment-add" />
     </View>
   );
 }
@@ -116,12 +114,12 @@ export function BuildEnvironmentsField({ active, repository, session, value, onC
       {value ? (
         <>
           <EnvironmentsEditor drafts={value} onChange={onChange} sources={vm} />
-          <PlanosButton small ghost label="Use resolved set" onPress={() => onChange(null)} testID="environments-reset" />
+          <Button small ghost label="Use resolved set" onPress={() => onChange(null)} testID="environments-reset" />
         </>
       ) : vm ? (
         <View style={styles.rowWrap}>
           <Text variant="xs" style={[styles.mono, { flex: 1 }]} testID="environments-summary">{summary}</Text>
-          <PlanosButton small label="Change" testID="environments-change"
+          <Button small label="Change" testID="environments-change"
             onPress={() => onChange(resolved?.bindings?.length ? resolved.bindings.map(draftFromBinding) : [emptyDraft()])} />
         </View>
       ) : null}
@@ -162,7 +160,7 @@ export function RepositoryEnvironmentApproval({ repository, session, debounceMs 
           {r.ignored_features?.length ? <Text variant="xs" style={{ color: colors.ink3 }}>Ignored features: {r.ignored_features.join(', ')}</Text> : null}
           {r.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{r.message}</Text> : null}
           <View style={styles.rowWrap}>
-            <PlanosButton small tone="warn" label="Approve environment" disabled={!!busy} testID={`approve-environment-${r.fingerprint}`}
+            <Button small tone="warn" label="Approve environment" disabled={!!busy} testID={`approve-environment-${r.fingerprint}`}
               onPress={() => {
                 setBusy(r.fingerprint);
                 environmentsApi.approve({ repository: r.repository || repo, fingerprint: r.fingerprint, session: session || undefined })
@@ -207,15 +205,15 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
   const env = environments;
   const editErrors = (editing || []).map(draftError).filter(Boolean);
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Build environments">
+    <Sheet visible={visible} onClose={onClose} title="Build environments">
       <View style={styles.col} testID="job-environments-sheet">
         {editing ? (
           <>
             <Text variant="xs" style={{ color: colors.ink3 }}>Saved as this job's override; its snapshots are re-created before the next stage. Remove every row to fall back to repo config, session or Settings.</Text>
             <EnvironmentsEditor drafts={editing} onChange={setEditing} sources={vm} />
             <View style={styles.rowEnd}>
-              <PlanosButton label="Cancel" onPress={() => setEditing(null)} />
-              <PlanosButton primary label="Save environments" disabled={busy || !!editErrors.length} testID="environments-save"
+              <Button label="Cancel" onPress={() => setEditing(null)} />
+              <Button primary label="Save environments" disabled={busy || !!editErrors.length} testID="environments-save"
                 onPress={() => { invoke('setEnvironments', { environments: bindingsFromDrafts(editing) }); setEditing(null); }} />
             </View>
           </>
@@ -246,10 +244,10 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
               </Panel>
             ))}
             <View style={styles.rowWrap}>
-              {refresh ? <PlanosButton label={`${refresh.label} (E)`} tone="warn" disabled={busy} ariaDisabled={!refresh.enabled} accessibilityHint={refresh.reason} onPress={() => invoke(refresh)} testID="environments-refresh" /> : null}
-              {keep ? <PlanosButton label={keep.label} disabled={busy} ariaDisabled={!keep.enabled} accessibilityHint={keep.reason} onPress={() => invoke(keep)} testID="environments-keep" /> : null}
+              {refresh ? <Button label={`${refresh.label} (E)`} tone="warn" disabled={busy} ariaDisabled={!refresh.enabled} accessibilityHint={refresh.reason} onPress={() => invoke(refresh)} testID="environments-refresh" /> : null}
+              {keep ? <Button label={keep.label} disabled={busy} ariaDisabled={!keep.enabled} accessibilityHint={keep.reason} onPress={() => invoke(keep)} testID="environments-keep" /> : null}
               {change ? (
-                <PlanosButton label="Change" disabled={busy} ariaDisabled={!change.enabled} accessibilityHint={change.reason} testID="environments-edit"
+                <Button label="Change" disabled={busy} ariaDisabled={!change.enabled} accessibilityHint={change.reason} testID="environments-edit"
                   onPress={() => {
                     if (!change.enabled) { invoke(change); return; }
                     setEditing(env?.bindings?.length ? env.bindings.map(draftFromBinding) : [emptyDraft()]);
@@ -259,7 +257,7 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
           </>
         )}
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -315,7 +313,7 @@ export function BuildEnvironmentsSettings({ active }: { active: boolean }) {
                 <Text variant="xs" numberOfLines={1}>{k.title || k.id.slice(0, 8)}</Text>
                 <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={1}>{k.bindings || '—'}{k.bytes ? ` · ${bytes(k.bytes)}` : ''}</Text>
               </View>
-              <PlanosButton small label="Unkeep" loading={busy === k.id} disabled={!!busy} onPress={() => void unkeep(k.id)} testID={`unkeep-${k.id}`} />
+              <Button small label="Unkeep" loading={busy === k.id} disabled={!!busy} onPress={() => void unkeep(k.id)} testID={`unkeep-${k.id}`} />
             </View>
           )) : <Empty>No job keeps its environments past idle retention.</Empty>}
         </>

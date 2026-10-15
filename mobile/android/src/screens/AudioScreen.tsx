@@ -2,10 +2,10 @@ import React, { useState, useCallback } from 'react';
 import { View, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Button, EmptyState, ErrorState } from '../components';
 import { useConnectionStore } from '../store/connection';
 import { audioApi } from '../api/audio';
 import { spacing, fontWeights, radii } from '../theme/tokens';
+import { Button, Card, EmptyState, ErrorState, Text } from '../ui';
 
 export function AudioScreen() {
   const { colors } = useTheme();

@@ -2,12 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { jobCoreApi, optional, type JobAction, type PushArgs, type PushPreview } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Banner, Field, KV, Loading, Pill, PlanosButton, SwitchRow, TextField } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fonts, radii, spacing } from '../theme/tokens';
 import { verdictStyle } from '../theme/status';
+import { Banner, Button, Field, KV, Loading, Pill, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 export type JobPushDialogProps = {
   visible: boolean;
@@ -19,7 +17,7 @@ export type JobPushDialogProps = {
 };
 
 /**
- * planos push dialog (CONTRACT §2): prefilled from
+ * Wash push dialog (CONTRACT §2): prefilled from
  * GET /api/jobs/vm/job/{id}/push-preview, editable PR/MR title and body, a
  * draft switch and — when the review blocks the push — a required override
  * reason. Older servers without push-preview still get the dialog with the
@@ -65,7 +63,7 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
   const [vTone, vLabel] = verdictStyle(preview?.verdict);
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title={action?.label || 'Push'}>
+    <Sheet visible={visible} onClose={onClose} title={action?.label || 'Push'}>
       {loading ? <Loading label="Preparing the pull request…" /> : (
         <View style={styles.root} testID="job-push-dialog">
           {preview ? (
@@ -92,12 +90,12 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
           ) : null}
           {error && !(needsOverride && !reason.trim()) ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
           <View style={styles.actions}>
-            <PlanosButton label="Cancel" onPress={onClose} />
-            <PlanosButton primary tone={needsOverride ? 'warn' : 'ok'} loading={busy} label={needsOverride ? 'Override and push' : draft ? 'Push draft' : 'Push'} onPress={submit} testID="push-submit" />
+            <Button label="Cancel" onPress={onClose} />
+            <Button primary tone={needsOverride ? 'warn' : 'ok'} loading={busy} label={needsOverride ? 'Override and push' : draft ? 'Push draft' : 'Push'} onPress={submit} testID="push-submit" />
           </View>
         </View>
       )}
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

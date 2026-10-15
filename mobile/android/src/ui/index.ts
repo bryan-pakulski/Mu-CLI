@@ -21,3 +21,4 @@ export { PipelineStepper, MiniStepper, describeStep, type StepLike } from './Ste
 export { ContextRing, LayerBar, contextTone, layerTone, CONTEXT_CAUTION, CONTEXT_DANGER, type LayerSegment } from './Meters';
 export { WashBackground, washArt, spotWash, type WashArt } from './WashBackground';
 export { layout, useInterval } from './layout';
+export type { Tone, Semantic } from '../theme/tokens';

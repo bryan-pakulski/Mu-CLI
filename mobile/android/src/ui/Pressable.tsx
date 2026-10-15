@@ -27,7 +27,7 @@ export type Haptic = 'light' | 'medium' | false;
 
 export type PressableProps = Omit<RNPressableProps, 'style' | 'hitSlop'> & {
   style?: StyleProp<ViewStyle> | ((state: PressableStateCallbackType) => StyleProp<ViewStyle>);
-  /** Explicit hit slop; when omitted the wrapper derives one that reaches 44dp. */
+  /** Extra hit slop; the wrapper always adds enough to reach 44dp. `null` disables slop. */
   hitSlop?: number | Insets | null;
   /** Light/medium impact on press-in. Off by default. */
   haptic?: Haptic;
@@ -66,6 +66,18 @@ function slopFor(size: { width: number; height: number } | null): Insets | undef
   return x || y ? { top: y, bottom: y, left: x, right: x } : undefined;
 }
 
+function mergeSlop(explicit: number | Insets | undefined, needed: Insets | undefined): number | Insets | undefined {
+  if (explicit == null) return needed;
+  if (!needed) return explicit;
+  const e: Insets = typeof explicit === 'number' ? { top: explicit, bottom: explicit, left: explicit, right: explicit } : explicit;
+  return {
+    top: Math.max(e.top ?? 0, needed.top ?? 0),
+    bottom: Math.max(e.bottom ?? 0, needed.bottom ?? 0),
+    left: Math.max(e.left ?? 0, needed.left ?? 0),
+    right: Math.max(e.right ?? 0, needed.right ?? 0),
+  };
+}
+
 export function Pressable({
   style,
   hitSlop,
@@ -92,7 +104,9 @@ export function Pressable({
     onPressIn?.(event);
   }, [disabled, haptic, onPressIn]);
 
-  const resolvedSlop = hitSlop === null ? undefined : hitSlop ?? slopFor(size);
+  // An explicit slop never shrinks the target below 44dp: each side takes the
+  // larger of the requested and the measured-shortfall slop.
+  const resolvedSlop = hitSlop === null ? undefined : mergeSlop(hitSlop, slopFor(size));
   const state = disabled ? { ...accessibilityState, disabled: true } : accessibilityState;
 
   return (

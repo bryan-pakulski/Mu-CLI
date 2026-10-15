@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import { FlatList, View, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge, Button, ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
+import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { securityApi, SecurityFinding, SecurityState } from '../api/security';
 import { elevation, radii, spacing, fontWeights, fonts } from '../theme/tokens';
+import { Button, Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 export function SecurityScreen() {
   const { colors, isDark } = useTheme();
@@ -53,9 +54,9 @@ export function SecurityScreen() {
 
   const sevVariant = (sev: string) => {
     switch (sev) {
-      case 'critical': return 'error' as const;
-      case 'high': return 'error' as const;
-      case 'medium': return 'warning' as const;
+      case 'critical': return 'danger' as const;
+      case 'high': return 'danger' as const;
+      case 'medium': return 'attention' as const;
       case 'low': return 'neutral' as const;
       default: return 'neutral' as const;
     }
@@ -115,8 +116,8 @@ export function SecurityScreen() {
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs }}>
-              <Badge label={item.severity} variant={sevVariant(item.severity)} />
-              <Badge label={item.status} variant={item.status === 'approved' ? 'success' : 'neutral'} />
+              <Chip label={item.severity} tone={sevVariant(item.severity)} />
+              <Chip label={item.status} tone={item.status === 'approved' ? 'ok' : 'neutral'} />
             </View>
             <Text variant="sm" style={{ fontWeight: fontWeights.medium }}>{item.title}</Text>
             <Text variant="xs" style={{ color: colors.ink3, marginTop: 2 }} numberOfLines={3}>{item.summary}</Text>
@@ -142,9 +143,9 @@ export function SecurityScreen() {
             <View style={[elevation(2, colors, isDark), { maxHeight: '80%', borderRadius: radii.lg, padding: spacing.base }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                 <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selected.title}</Text>
-                <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Pressable onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                   <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
-                </TouchableOpacity>
+                </Pressable>
               </View>
               <FlatList
                 data={[

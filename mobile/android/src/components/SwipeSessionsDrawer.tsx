@@ -1,24 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  PanResponder,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, PanResponder, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi, type SessionSummary } from '../api/sessions';
 import { threadsApi, type ThreadStatus, type ThreadSummary } from '../api/threads';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
-import { SafeAreaModal } from './SafeAreaModal';
 import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
+import { ModalFrame, Pressable, Text } from '../ui';
 
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
@@ -196,7 +187,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
 
   return (
     <>
-      <SafeAreaModal visible={drawerVisible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalFrame statusBarTranslucent={false} visible={drawerVisible} transparent animationType="fade" onRequestClose={onClose}>
         <View style={styles.overlay}>
           <View
             {...swipeResponder.panHandlers}
@@ -218,16 +209,16 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                 <Text variant="xs" dim>Agent conversations and sessions</Text>
               </View>
               <View style={styles.headerActions}>
-                <TouchableOpacity
+                <Pressable
                   onPress={() => activeSessionName ? setCreateThreadOpen(true) : setCreateSessionOpen(true)}
                   style={styles.iconButton}
                   accessibilityLabel={activeSessionName ? 'Create thread' : 'Create session'}
                 >
                   <Ionicons name="add" size={20} color={colors.ink3} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close threads">
+                </Pressable>
+                <Pressable onPress={onClose} style={styles.iconButton} accessibilityLabel="Close threads">
                   <Ionicons name="close" size={20} color={colors.ink3} />
-                </TouchableOpacity>
+                </Pressable>
               </View>
             </View>
 
@@ -236,7 +227,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
               contentContainerStyle={styles.listContent}
             >
               {activeSessionName ? (
-                <TouchableOpacity
+                <Pressable
                   onPress={() => setCreateThreadOpen(true)}
                   activeOpacity={0.72}
                   style={[styles.primaryAction, { backgroundColor: colors.accent.wash }]}
@@ -244,14 +235,14 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   <Ionicons name="git-branch-outline" size={18} color={colors.accent.ink} />
                   <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>New thread</Text>
                   <Ionicons name="add" size={18} color={colors.accent.ink} />
-                </TouchableOpacity>
+                </Pressable>
               ) : null}
 
               {hasThreadGroup ? (
                 <View style={styles.section}>
                   <SectionTitle label="THREAD GROUP" count={threads.length} />
                   {threads.map(thread => (
-                    <TouchableOpacity
+                    <Pressable
                       key={thread.thread_id}
                       onPress={() => void switchSession(thread.session_name)}
                       activeOpacity={0.7}
@@ -280,17 +271,17 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                       {activeSessionName === thread.session_name ? (
                         <Ionicons name="checkmark" size={17} color={colors.accent.ink} />
                       ) : !ACTIVE_THREAD_STATUSES.includes(thread.status) ? (
-                        <TouchableOpacity
+                        <Pressable
                           onPress={() => deleteThread(thread)}
                           style={styles.rowAction}
                           accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
                         >
                           <Ionicons name="trash-outline" size={17} color={colors.ink3} />
-                        </TouchableOpacity>
+                        </Pressable>
                       ) : (
                         <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
                       )}
-                    </TouchableOpacity>
+                    </Pressable>
                   ))}
                 </View>
               ) : null}
@@ -303,12 +294,12 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   </View>
                 ) : null}
                 {loadError ? (
-                  <TouchableOpacity onPress={() => void load()} style={styles.retryAction}>
+                  <Pressable onPress={() => void load()} style={styles.retryAction}>
                     <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 ) : null}
                 {sortSessions(sessions, activeSessionName).map(session => (
-                  <TouchableOpacity
+                  <Pressable
                     key={session.name}
                     onPress={() => void switchSession(session.name)}
                     activeOpacity={0.7}
@@ -326,29 +317,29 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                         {switchingName === session.name ? 'Opening…' : session.session_type || 'workspace'}
                       </Text>
                     </View>
-                    <TouchableOpacity onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>
+                    <Pressable onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>
                       <Ionicons name="remove-circle-outline" size={18} color={colors.ink3} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => deleteSession(session)} style={styles.rowAction} accessibilityLabel={`Delete ${session.name}`}>
+                    </Pressable>
+                    <Pressable onPress={() => deleteSession(session)} style={styles.rowAction} accessibilityLabel={`Delete ${session.name}`}>
                       <Ionicons name="trash-outline" size={17} color={colors.ink3} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
+                    </Pressable>
+                  </Pressable>
                 ))}
               </View>
 
-              <TouchableOpacity
+              <Pressable
                 onPress={() => setCreateSessionOpen(true)}
                 activeOpacity={0.72}
                 style={[styles.secondaryAction, { borderColor: colors.hairline }]}
               >
                 <Ionicons name="add-circle-outline" size={17} color={colors.ink3} />
                 <Text variant="sm" dim style={{ fontWeight: fontWeights.semibold }}>New session</Text>
-              </TouchableOpacity>
+              </Pressable>
             </ScrollView>
           </View>
-          <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+          <Pressable style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
       <NewSessionSheet
         visible={createSessionOpen}
         onClose={() => setCreateSessionOpen(false)}

@@ -1,13 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,8 +15,9 @@ import {
   FeatureTask,
 } from '../api/feature';
 import { useTheme } from '../theme/ThemeContext';
-import { Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
+import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { spacing, fontWeights, fonts, radii, tracking, touchTarget, typography } from '../theme/tokens';
+import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
 
@@ -233,7 +226,7 @@ export function FeatureExplorerScreen() {
             const active = filter === item.key;
             const count = countForFilter(state?.features || [], item.key);
             return (
-              <TouchableOpacity
+              <Pressable
                 key={item.key}
                 onPress={() => setFilter(item.key)}
                 hitSlop={{ top: spacing.xs, bottom: spacing.xs }}
@@ -245,7 +238,7 @@ export function FeatureExplorerScreen() {
                 <Text variant="xs" style={{ color: active ? colors.accent.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
                   {item.label} · {count}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
         </ScrollView> : null}
@@ -348,7 +341,7 @@ export function FeatureExplorerScreen() {
 function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; selected: boolean; onPress: () => void }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       activeOpacity={0.72}
       style={[
@@ -367,7 +360,7 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
         </View>
       ) : null}
       <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -451,14 +444,14 @@ function PhaseDetail({
   const completed = phase.tasks.filter(task => ['completed', 'archived'].includes(normalizeStatus(task.status))).length;
   return (
     <Card style={styles.phaseCard}>
-      <TouchableOpacity onPress={onToggle} style={styles.phaseHeader} activeOpacity={0.72}>
+      <Pressable onPress={onToggle} style={styles.phaseHeader} activeOpacity={0.72}>
         <View style={styles.phaseCopy}>
           <Text variant="base" style={styles.phaseTitle}>{phase.title}</Text>
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
         </View>
         <StatusPill label={phase.status || 'pending'} />
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.ink3} />
-      </TouchableOpacity>
+      </Pressable>
 
       {expanded ? (
         <View style={styles.taskList}>
@@ -491,7 +484,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
   const { colors } = useTheme();
   return (
     <View style={styles.task}>
-      <TouchableOpacity onPress={onToggle} style={styles.taskHeader} activeOpacity={0.72}>
+      <Pressable onPress={onToggle} style={styles.taskHeader} activeOpacity={0.72}>
         <View style={styles.taskIndex}><Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.id}</Text></View>
         <View style={styles.taskCopy}>
           <Text variant="sm" style={styles.taskTitle}>{task.title}</Text>
@@ -499,7 +492,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
         </View>
         <StatusPill label={task.status} />
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={colors.ink3} />
-      </TouchableOpacity>
+      </Pressable>
 
       {expanded ? (
         <View style={styles.taskBody}>
@@ -512,7 +505,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
                 const verified = task.verified_exit_criteria?.includes(criterion);
                 return (
                   <View key={`${criterion}-${index}`} style={styles.criteriaRow}>
-                    <Ionicons name={verified ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={verified ? colors.ok.ink : colors.ink3} />
+                    <Ionicons name={verified ? 'checkmark-circle-outline' : 'ellipse-outline'} size={17} color={verified ? colors.ok.ink : colors.ink3} />
                     <Text variant="xs" style={{ flex: 1, color: verified ? colors.ink2 : colors.ink }}>{criterion}</Text>
                   </View>
                 );
@@ -522,10 +515,10 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           {task.notes ? <TextBlock title="Notes" value={task.notes} /> : null}
           {task.blocked_reason ? <TextBlock title="Blocked reason" value={task.blocked_reason} error /> : null}
           {activeFeature && normalizeStatus(task.status) === 'in_progress' ? (
-            <TouchableOpacity onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent.ink }]}>
+            <Pressable onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent.ink }]}>
               <Ionicons name="checkmark" size={16} color={colors.onInk} />
               <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Mark completed</Text>
-            </TouchableOpacity>
+            </Pressable>
           ) : null}
         </View>
       ) : null}
@@ -639,13 +632,13 @@ function ExpandableRecord({ title, subtitle, expanded, onToggle, children }: {
   const { colors } = useTheme();
   return (
     <Card style={styles.recordCard}>
-      <TouchableOpacity onPress={onToggle} activeOpacity={0.72} style={styles.recordHeader}>
+      <Pressable onPress={onToggle} activeOpacity={0.72} style={styles.recordHeader}>
         <View style={styles.recordCopy}>
           <Text variant="sm" style={styles.recordTitle}>{title}</Text>
           <Text variant="xs" dim numberOfLines={2} style={{ fontVariant: ['tabular-nums'] }}>{subtitle}</Text>
         </View>
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.ink3} />
-      </TouchableOpacity>
+      </Pressable>
       {expanded ? <View style={styles.recordBody}>{children}</View> : null}
     </Card>
   );
@@ -693,7 +686,7 @@ function ActionButton({ label, icon, onPress, primary = false }: {
 }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       activeOpacity={0.72}
       style={[styles.actionButton, primary
@@ -702,7 +695,7 @@ function ActionButton({ label, icon, onPress, primary = false }: {
     >
       <Ionicons name={icon} size={16} color={primary ? colors.onInk : colors.ink} />
       <Text variant="xs" style={{ color: primary ? colors.onInk : colors.ink, fontWeight: fontWeights.medium }}>{label}</Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 

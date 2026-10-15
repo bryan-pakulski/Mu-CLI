@@ -1,13 +1,4 @@
-export { Text } from './Text';
-export { View } from './View';
-export { Card } from './Card';
-export { Button } from './Button';
-export { Input, type InputProps } from './Input';
-export { Badge } from './Badge';
-export { Skeleton, type SkeletonProps } from './Skeleton';
-export { EmptyState } from './EmptyState';
-export { ErrorState } from './ErrorState';
-export { BottomSheet } from './BottomSheet';
+// Feature components. UI primitives live in src/ui (the Wash kit).
 export { CodeBlock } from './CodeBlock';
 export { ConflictBanner } from './ConflictBanner';
 export { ModeWorkspaceHeader, useModeWorkspaceView } from './ModeWorkspace';

@@ -1,16 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
+import { STATUS } from '../theme/status';
 
 export type ContainerProgressLog = {
   seq: number;
@@ -57,7 +51,7 @@ export function ContainerBuildProgress({
         },
       ]}
     >
-      <TouchableOpacity
+      <Pressable
         onPress={onToggle}
         activeOpacity={0.72}
         accessibilityRole="button"
@@ -73,7 +67,7 @@ export function ContainerBuildProgress({
             accessibilityLabel={failed ? 'failed' : 'done'}
             style={{ color: failed ? colors.danger.ink : colors.ok.ink, fontWeight: fontWeights.semibold }}
           >
-            {failed ? '✗' : '✓'}
+            {failed ? STATUS.failed.icon : STATUS.done.icon}
           </Text>
         )}
         <View style={styles.copy}>
@@ -91,7 +85,7 @@ export function ContainerBuildProgress({
             color={colors.ink3}
           />
         </View>
-      </TouchableOpacity>
+      </Pressable>
 
       {expanded ? (
         <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.code }]}>

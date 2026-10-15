@@ -33,6 +33,12 @@ describe('Pressable', () => {
     expect(ui.getByTestId('p').props.hitSlop).toEqual({ top: 12, bottom: 12, left: 12, right: 12 });
   });
 
+  it('never lets an explicit hit slop shrink the target below 44dp', () => {
+    const ui = wrap(<Pressable testID="p" hitSlop={4} onPress={() => undefined} />);
+    fireEvent(ui.getByTestId('p'), 'layout', { nativeEvent: { layout: { width: 36, height: 32, x: 0, y: 0 } } });
+    expect(ui.getByTestId('p').props.hitSlop).toEqual({ top: 6, bottom: 6, left: 4, right: 4 });
+  });
+
   it('marks disabled controls in accessibilityState and does not fire', () => {
     const onPress = jest.fn();
     const ui = wrap(<Pressable testID="p" disabled onPress={onPress} />);

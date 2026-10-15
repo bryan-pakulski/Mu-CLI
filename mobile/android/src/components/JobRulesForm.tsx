@@ -14,10 +14,9 @@ import {
   type JobRules,
   type ToolchainImage,
 } from '../api/jobs';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fonts, fontWeights, spacing } from '../theme/tokens';
-import { Banner, Field, Loading, Panel, Pill, PlanosButton, Pre, Segmented, StatusPill, SwitchRow, TextField, useToast } from './planos';
+import { Banner, Button, Field, Loading, Panel, Pill, Pre, Segmented, StatusPill, SwitchRow, Text, TextField, useToast } from '../ui';
 
 /** Editable form state of one field: numbers/text/lists are edited as text. */
 type Draft = string | boolean | JobRuleSuite[] | JobRuleRow[];
@@ -123,7 +122,7 @@ function fieldForError(section: JobRuleSection, detail: string): string | null {
 
 export type JobRulesFormProps = { active: boolean };
 
-/** Generated "Run rules" form: one planos Panel per RULES_SCHEMA section. */
+/** Generated "Run rules" form: one Wash Card per RULES_SCHEMA section. */
 export function JobRulesForm({ active }: JobRulesFormProps) {
   const { colors } = useTheme();
   const toast = useToast();
@@ -243,11 +242,11 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                   onChangeText={t => setRow(i, { command: t })} invalid={invalid} />
                 <TextField accessibilityLabel={`Suite ${i + 1} junit`} placeholder="junit report path (optional)" mono value={row.junit || ''} autoCapitalize="none"
                   onChangeText={t => setRow(i, { junit: t })} />
-                <PlanosButton small ghost tone="danger" label="Remove" accessibilityLabel={`Remove suite ${i + 1}`}
+                <Button small ghost tone="danger" label="Remove" accessibilityLabel={`Remove suite ${i + 1}`}
                   onPress={() => edit(field.path, rows.filter((_, j) => j !== i))} />
               </View>
             ))}
-            <PlanosButton small label="Add suite" onPress={() => edit(field.path, [...rows, { name: '', command: '', junit: '' }])} />
+            <Button small label="Add suite" onPress={() => edit(field.path, [...rows, { name: '', command: '', junit: '' }])} />
           </View>
         );
       }
@@ -273,11 +272,11 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                     </View>
                   );
                 })}
-                <PlanosButton small ghost tone="danger" label="Remove" accessibilityLabel={`Remove row ${i + 1}`}
+                <Button small ghost tone="danger" label="Remove" accessibilityLabel={`Remove row ${i + 1}`}
                   onPress={() => edit(field.path, rows.filter((_, j) => j !== i))} />
               </View>
             ))}
-            <PlanosButton small label="Add row" accessibilityLabel={`Add ${field.label} row`} onPress={() => edit(field.path, [...rows, blank])} />
+            <Button small label="Add row" accessibilityLabel={`Add ${field.label} row`} onPress={() => edit(field.path, [...rows, blank])} />
           </View>
         );
       }
@@ -314,7 +313,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                     ? <Pill tone="accent" testID={`rule-set-${field.path}`}>set</Pill>
                     : <Text variant="xs" style={{ color: colors.ink3 }}>{defaultLabel(field)}</Text>}
                   {set ? (
-                    <PlanosButton small ghost label="Reset" accessibilityLabel={`Reset ${field.label}`} disabled={busy === section.id}
+                    <Button small ghost label="Reset" accessibilityLabel={`Reset ${field.label}`} disabled={busy === section.id}
                       onPress={() => { void reset(section, field); }} />
                   ) : null}
                 </View>
@@ -344,10 +343,10 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
               <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{sectionErrors[section.id]}</Text>
             ) : null}
             <View style={styles.inline}>
-              <PlanosButton primary small label={`Save ${section.title.toLowerCase()}`} accessibilityLabel={`Save ${section.title}`}
+              <Button primary small label={`Save ${section.title.toLowerCase()}`} accessibilityLabel={`Save ${section.title}`}
                 disabled={!dirty || busy === section.id} loading={busy === section.id} onPress={() => saveSection(section)} />
               {dirty ? (
-                <PlanosButton small ghost label="Discard" accessibilityLabel={`Discard ${section.title} changes`}
+                <Button small ghost label="Discard" accessibilityLabel={`Discard ${section.title} changes`}
                   onPress={() => setDrafts(prev => {
                     const next = { ...prev };
                     section.fields.forEach(f => delete next[f.path]);
@@ -434,11 +433,11 @@ export function ToolchainImages({ saved }: { saved: string }) {
             {item.error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{item.error}</Text> : null}
             <View style={styles.inline}>
               {item.status === 'building' ? null : (
-                <PlanosButton small label={item.status === 'built' ? 'Rebuild' : 'Build'} accessibilityLabel={`${item.status === 'built' ? 'Rebuild' : 'Build'} ${key}`}
+                <Button small label={item.status === 'built' ? 'Rebuild' : 'Build'} accessibilityLabel={`${item.status === 'built' ? 'Rebuild' : 'Build'} ${key}`}
                   loading={starting === key} disabled={!!starting} onPress={() => { void build(key); }} />
               )}
               {item.log_tail ? (
-                <PlanosButton small ghost label={logOpen ? 'Hide build log' : 'Build log'} accessibilityLabel={`${logOpen ? 'Hide' : 'Show'} build log for ${key}`}
+                <Button small ghost label={logOpen ? 'Hide build log' : 'Build log'} accessibilityLabel={`${logOpen ? 'Hide' : 'Show'} build log for ${key}`}
                   onPress={() => setOpenLogs(prev => ({ ...prev, [key]: !logOpen }))} />
               ) : null}
             </View>

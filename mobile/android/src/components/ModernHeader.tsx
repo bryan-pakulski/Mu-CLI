@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
@@ -7,10 +7,9 @@ import { queueIfOffline, useConnectionStore } from '../store/connection';
 import { inspectorApi } from '../api/inspector';
 import { AdvancedSettingsSheet } from './AdvancedSettingsSheet';
 import { EffortControl } from './EffortControl';
-import { ModernBottomSheet } from './ModernBottomSheet';
 import { PlanModeBadge, usePlanMode } from './PlanModeIndicator';
-import { Text } from './Text';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
+import { Pressable, Sheet, Text } from '../ui';
 
 export type ModernHeaderProps = {
   onOpenSessions: () => void;
@@ -132,16 +131,16 @@ export function ModernHeader({
           },
         ]}
       >
-        <TouchableOpacity
+        <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open sessions"
           onPress={onOpenSessions}
           style={styles.iconButton}
         >
           <Text style={[styles.brandMark, { color: colors.accent.ink }]}>μ</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           accessibilityRole="button"
           accessibilityLabel={isConnected ? 'Current session' : 'Configure MuCLI connection'}
           disabled={isConnected}
@@ -159,10 +158,10 @@ export function ModernHeader({
           <Text style={[styles.subtitle, { color: isConnected ? colors.ink3 : colors.danger.ink }]} numberOfLines={1}>
             {sessionMeta}{queueBadge}
           </Text>
-        </TouchableOpacity>
+        </Pressable>
 
         <View style={styles.headerActions}>
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open engineering work"
             disabled={!isConnected}
@@ -170,8 +169,8 @@ export function ModernHeader({
             style={[styles.iconButton, !isConnected && styles.disabledAction]}
           >
             <Ionicons name="briefcase-outline" size={19} color={colors.ink3} />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open Trace Analyzer"
             disabled={!activeSessionName}
@@ -179,21 +178,21 @@ export function ModernHeader({
             style={[styles.iconButton, !activeSessionName && styles.disabledAction]}
           >
             <Ionicons name="analytics-outline" size={19} color={colors.ink3} />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open settings"
             onPress={() => setMenuOpen(true)}
             style={styles.iconButton}
           >
             <Ionicons name="settings-outline" size={20} color={colors.ink3} />
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
 
-      <ModernBottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title="Settings">
+      <Sheet visible={menuOpen} onClose={() => setMenuOpen(false)} title="Settings">
         {!isConnected && (
-          <TouchableOpacity
+          <Pressable
             onPress={() => openFromMenu(onOpenConnection)}
             style={styles.connectionBanner}
           >
@@ -203,7 +202,7 @@ export function ModernHeader({
               <Text variant="xs" style={{ color: colors.ink3 }}>Configure a reachable GUI server</Text>
             </View>
             <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
-          </TouchableOpacity>
+          </Pressable>
         )}
 
         <SettingsSection title="Session">
@@ -275,7 +274,7 @@ export function ModernHeader({
             onValueChange={() => toggleTheme()}
           />
         </SettingsSection>
-      </ModernBottomSheet>
+      </Sheet>
       <AdvancedSettingsSheet visible={advancedOpen} onClose={() => setAdvancedOpen(false)} />
     </>
   );
@@ -301,7 +300,7 @@ type MenuRowProps = {
 function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       activeOpacity={0.68}
       style={styles.menuRow}
@@ -314,7 +313,7 @@ function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
         <Text variant="xs" dim numberOfLines={2}>{detail}</Text>
       </View>
       <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 

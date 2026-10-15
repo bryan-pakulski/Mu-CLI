@@ -1,12 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { openExternalUrl } from '../api/urlSafety';
-import { Badge, Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
+import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { researchApi, ResearchState } from '../api/research';
 import { spacing, fontWeights, fonts, radii } from '../theme/tokens';
+import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 export function ResearchScreen() {
   const { colors } = useTheme();
@@ -55,9 +56,9 @@ export function ResearchScreen() {
             {state.findings.length === 0 ? <QuietEmpty text="No claims captured yet." /> : state.findings.map(finding => (
               <Card key={finding.id} style={{ marginBottom: spacing.sm }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' }}>
-                  <Badge label={finding.record_type === 'claim' ? 'research claim' : 'legacy note'} variant={finding.record_type === 'claim' ? 'accent' : 'neutral'} />
-                  <Badge label={finding.source ? 'source linked' : 'evidence gap'} variant={finding.source ? 'success' : 'warning'} />
-                  {finding.tags.slice(0, 3).map(tag => <Badge key={tag} label={tag} variant="neutral" />)}
+                  <Chip label={finding.record_type === 'claim' ? 'research claim' : 'legacy note'} tone={finding.record_type === 'claim' ? 'accent' : 'neutral'} />
+                  <Chip label={finding.source ? 'source linked' : 'evidence gap'} tone={finding.source ? 'ok' : 'attention'} />
+                  {finding.tags.slice(0, 3).map(tag => <Chip key={tag} label={tag} tone="neutral" />)}
                 </View>
                 <Text variant="sm" style={{ color: colors.ink, marginTop: spacing.sm }}>{finding.content}</Text>
                 <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs, fontFamily: fonts.mono }}>
@@ -78,7 +79,7 @@ export function ResearchScreen() {
                 <Pressable key={source.id} onPress={() => setExpandedSource(expanded ? null : source.id)} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
                   <Card style={{ marginBottom: spacing.sm }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
-                      <Badge label={source.source_type} variant="neutral" />
+                      <Chip label={source.source_type} tone="neutral" />
                       <Text variant="xs" style={{ marginLeft: 'auto', color: colors.ink3, fontVariant: ['tabular-nums'] }}>source quality {credibility}%</Text>
                     </View>
                     <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>{source.title}</Text>

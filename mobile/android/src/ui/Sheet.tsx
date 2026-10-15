@@ -53,10 +53,12 @@ export type ModalFrameProps = {
   containerStyle?: StyleProp<ViewStyle>;
   children: React.ReactNode;
   testID?: string;
+  statusBarTranslucent?: boolean;
+  presentationStyle?: 'fullScreen' | 'pageSheet' | 'formSheet' | 'overFullScreen';
 };
 
 /** The safe-area-aware native modal window every kit overlay renders into. */
-export function ModalFrame({ visible, onRequestClose, transparent = true, edges = ['top', 'bottom'], animationType = 'fade', containerStyle, children, testID }: ModalFrameProps) {
+export function ModalFrame({ visible, onRequestClose, transparent = true, edges = ['top', 'bottom'], animationType = 'fade', containerStyle, children, testID, statusBarTranslucent = true, presentationStyle }: ModalFrameProps) {
   const { colors } = useTheme();
   return (
     <Modal
@@ -65,7 +67,8 @@ export function ModalFrame({ visible, onRequestClose, transparent = true, edges 
       transparent={transparent}
       animationType={animationType}
       onRequestClose={onRequestClose}
-      statusBarTranslucent
+      statusBarTranslucent={statusBarTranslucent}
+      presentationStyle={presentationStyle}
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore navigationBarTranslucent exists on newer RN; false keeps content above the nav bar.
       navigationBarTranslucent={navigationBarTranslucent}

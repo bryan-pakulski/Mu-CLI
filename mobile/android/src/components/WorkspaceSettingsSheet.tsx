@@ -1,20 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { WorkspacePathField } from './WorkspacePathField';
-import { SafeAreaModal } from './SafeAreaModal';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
+import { ModalFrame, Pressable, Text } from '../ui';
 
 export type WorkspaceSettingsSheetProps = {
   visible: boolean;
@@ -92,15 +83,15 @@ export function WorkspaceSettingsSheet({
   }, [workspaces.length]);
 
   return (
-    <SafeAreaModal visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
+    <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={[styles.header, { paddingTop: spacing.base }]}>
-          <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline }]}>
+          <Pressable onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline }]}>
             <Ionicons name="close" size={20} color={colors.ink} />
-          </TouchableOpacity>
+          </Pressable>
           <View style={styles.headerCopy}>
             <Text style={[styles.title, { color: colors.ink }]}>Workspace folders</Text>
             <Text variant="xs" dim>{summary}</Text>
@@ -131,13 +122,13 @@ export function WorkspaceSettingsSheet({
                         styles.workspaceRow,
                       ]}
                     >
-                      <Ionicons name="folder" size={17} color={colors.ink3} />
+                      <Ionicons name="folder-outline" size={17} color={colors.ink3} />
                       <Text variant="xs" style={styles.pathText} numberOfLines={2} ellipsizeMode="middle">
                         {path}
                       </Text>
-                      <TouchableOpacity onPress={() => removeWorkspace(path)} style={styles.removeButton}>
+                      <Pressable onPress={() => removeWorkspace(path)} style={styles.removeButton}>
                         <Ionicons name="close" size={17} color={colors.ink3} />
-                      </TouchableOpacity>
+                      </Pressable>
                     </View>
                   ))}
                 </View>
@@ -145,7 +136,7 @@ export function WorkspaceSettingsSheet({
 
               <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.ink3 }]}>Add folder</Text>
               <WorkspacePathField value={candidate} onChangeText={setCandidate} />
-              <TouchableOpacity
+              <Pressable
                 onPress={addWorkspace}
                 disabled={!canAdd}
                 style={[styles.addButton, { backgroundColor: colors.raised, borderColor: colors.hairline, opacity: canAdd ? 1 : 0.5 }]}
@@ -154,7 +145,7 @@ export function WorkspaceSettingsSheet({
                 <Text variant="sm" style={{ color: canAdd ? colors.ink : colors.ink3, fontWeight: fontWeights.semibold }}>
                   Attach folder
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             </>
           )}
 
@@ -167,7 +158,7 @@ export function WorkspaceSettingsSheet({
         </ScrollView>
 
         <View style={[styles.footer, { backgroundColor: colors.canvas, borderTopColor: colors.hairline, paddingBottom: spacing.base }]}>
-          <TouchableOpacity
+          <Pressable
             onPress={save}
             disabled={!canSave}
             style={[styles.saveButton, { backgroundColor: canSave ? colors.accent.ink : colors.raised, borderColor: canSave ? colors.accent.ink : colors.hairline }]}
@@ -177,10 +168,10 @@ export function WorkspaceSettingsSheet({
             ) : (
               <Text style={{ color: canSave ? colors.onInk : colors.ink3, fontWeight: fontWeights.semibold }}>Save workspace</Text>
             )}
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaModal>
+    </ModalFrame>
   );
 }
 

@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { FlatList, View, RefreshControl, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
 import { promptsApi, type PendingPrompt } from '../api/prompts';
 import { elevation, fonts, spacing, radii } from '../theme/tokens';
-import { SafeAreaModal } from '../components/SafeAreaModal';
+import { Button, Card, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text } from '../ui';
 
 function promptText(prompt: PendingPrompt | null | undefined): string {
   if (!prompt) return '';
@@ -108,8 +107,8 @@ export function PromptsScreen() {
           </Card>
         )}
       />
-      <SafeAreaModal visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
-        <TouchableOpacity style={{ flex: 1, backgroundColor: colors.scrim }} onPress={() => setAnswering(null)} activeOpacity={1}>
+      <ModalFrame statusBarTranslucent={false} visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: colors.scrim }} onPress={() => setAnswering(null)} activeOpacity={1}>
           <View style={[elevation(2, colors, isDark), { margin: spacing.base, marginTop: spacing['3xl'], borderRadius: radii.lg, padding: spacing.base }]}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>Answer prompt</Text>
             <Text variant="sm" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{promptText(answering)}</Text>
@@ -126,8 +125,8 @@ export function PromptsScreen() {
               <Button title="Send" onPress={() => void submitAnswer()} disabled={!answerText.trim()} />
             </View>
           </View>
-        </TouchableOpacity>
-      </SafeAreaModal>
+        </Pressable>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

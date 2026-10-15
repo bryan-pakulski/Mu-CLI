@@ -1,9 +1,9 @@
 import React from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontSizes, fontWeights, radii, spacing, tracking, typography } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 export type SessionStartPromptProps = {
   onLoadSession: () => void;
@@ -33,11 +33,11 @@ export function SessionStartPrompt({ onLoadSession, onCreateSession, onManageCon
 
         <View style={styles.entries}>
           {entries.map(entry => (
-            <TouchableOpacity key={entry.title} onPress={entry.onPress} activeOpacity={0.72} style={[styles.entry, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+            <Pressable key={entry.title} onPress={entry.onPress} activeOpacity={0.72} style={[styles.entry, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
               <View style={[styles.entryIcon, { backgroundColor: colors.sunken }]}><Ionicons name={entry.icon} size={20} color={colors.ink2} /></View>
               <View style={styles.entryCopy}><Text variant="base" style={styles.entryTitle}>{entry.title}</Text><Text variant="xs" dim style={styles.entryDetail}>{entry.detail}</Text></View>
               <Ionicons name="arrow-forward" size={19} color={colors.ink3} />
-            </TouchableOpacity>
+            </Pressable>
           ))}
         </View>
       </View>

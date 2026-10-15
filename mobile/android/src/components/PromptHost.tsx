@@ -1,17 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from './Button';
-import { Text } from './Text';
 import {
   promptsApi,
   type PendingPrompt,
@@ -20,8 +9,8 @@ import {
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { SafeAreaModal } from './SafeAreaModal';
 import { elevation, fontSizes, fontWeights, fonts, radii, spacing, touchTarget, tracking, typography } from '../theme/tokens';
+import { Button, ModalFrame, Pressable, Text } from '../ui';
 
 // ---------- helpers ------------------------------------------------------
 
@@ -216,7 +205,7 @@ export function PromptHost() {
 
   if (!reviewOpen) {
     return (
-      <TouchableOpacity
+      <Pressable
         accessibilityRole="button"
         accessibilityLabel="Review pending agent input"
         activeOpacity={0.86}
@@ -234,12 +223,12 @@ export function PromptHost() {
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{queue.length} pending</Text>
         ) : null}
         <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
-      </TouchableOpacity>
+      </Pressable>
     );
   }
 
   return (
-    <SafeAreaModal
+    <ModalFrame statusBarTranslucent={false}
       visible
       transparent
       animationType="fade"
@@ -264,7 +253,7 @@ export function PromptHost() {
           />
         </View>
       </View>
-    </SafeAreaModal>
+    </ModalFrame>
   );
 }
 
@@ -337,9 +326,9 @@ function PromptHeader({
 function CancelButton({ onPress }: { onPress: () => void }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity accessibilityRole="button" onPress={onPress} style={styles.denyAction}>
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.denyAction}>
       <Text variant="sm" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Cancel</Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -408,7 +397,7 @@ export function ToolApprovalBody({
           </ScrollView>
         </View>
       )}
-      <TouchableOpacity
+      <Pressable
         accessibilityRole="checkbox"
         accessibilityState={{ checked: remember }}
         accessibilityLabel="Always allow this tool"
@@ -420,7 +409,7 @@ export function ToolApprovalBody({
         <Text variant="sm" style={{ color: colors.ink2, marginLeft: spacing.sm }}>
           Always allow this tool
         </Text>
-      </TouchableOpacity>
+      </Pressable>
       {submitting ? (
         <LoadingRow />
       ) : (
@@ -510,7 +499,7 @@ function ChoiceBody({
           const label = optLabel(opt);
           const isSelected = selected.includes(value);
           return (
-            <TouchableOpacity
+            <Pressable
               key={`opt-${idx}`}
               accessibilityRole={multi ? 'checkbox' : 'radio'}
               onPress={() => toggle(value)}
@@ -532,11 +521,11 @@ function ChoiceBody({
               <Text variant="sm" style={{ color: colors.ink, flex: 1, marginLeft: spacing.md }}>
                 {label}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
         {allowOther && (
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="radio"
             onPress={() => { setUseOther(true); if (!multi) setSelected([]); }}
             style={[
@@ -553,7 +542,7 @@ function ChoiceBody({
               color={useOther ? colors.accent.ink : colors.ink3}
             />
             <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.md }}>Other…</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
         {allowOther && useOther && (
           <TextInput
@@ -645,7 +634,7 @@ function QuizBody({
                 const optLbl = optLabel(opt);
                 const isSelected = answers[q.qid] === optVal;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={`q${qi}-opt${oi}`}
                     accessibilityRole="radio"
                     onPress={() => setAnswer(q.qid, optVal)}
@@ -665,7 +654,7 @@ function QuizBody({
                     <Text variant="sm" style={{ color: colors.ink, flex: 1, marginLeft: spacing.md }}>
                       {optLbl}
                     </Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })
             )}

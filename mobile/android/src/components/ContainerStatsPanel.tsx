@@ -3,8 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ContainerStats } from '../api/containers';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Text } from '../ui';
 
 const MUCLI_CONTAINER_MONITOR_V1 = true;
 

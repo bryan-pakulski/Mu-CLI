@@ -1,18 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { tracesApi, TraceRun, TraceSummary } from '../api/traces';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { Card, EmptyState, ErrorState, Skeleton, Text } from '../components';
 import { spacing, fontSizes, fontWeights, radii, tracking, typography, touchTarget } from '../theme/tokens';
+import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 type NumericPoint = Record<string, unknown>;
 
@@ -123,7 +117,7 @@ export function SessionTraceScreenV2() {
     return (
       <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
         <EmptyState
-          icon="analytics-outline"
+          icon="activity"
           title="No session traces"
           message="Run an agent turn with tracing enabled to populate session analytics."
         />
@@ -332,7 +326,7 @@ export function SessionTraceScreenV2() {
 function ScopeChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
@@ -342,7 +336,7 @@ function ScopeChip({ label, active, onPress }: { label: string; active: boolean;
       ]}
     >
       <Text variant="xs" style={{ color: active ? colors.accent.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{label}</Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 

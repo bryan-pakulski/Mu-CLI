@@ -11,7 +11,7 @@ import { JobsListScreen, filterJobs, jobSessions, ALL_SESSIONS } from '../src/sc
 import { JiraBrowser } from '../src/components/JiraSheet';
 import { JobRulesForm } from '../src/components/JobRulesForm';
 import { JobRow, JobsNavBar } from '../src/components/JobsChrome';
-import { ToastHost } from '../src/components/planos';
+import { ToastHost } from '../src/ui';
 import realRules from './fixtures/job-rules-schema.json';
 
 jest.mock('../src/api/jobs', () => ({

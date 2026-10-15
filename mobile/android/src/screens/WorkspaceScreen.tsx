@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Text } from '../components';
 import { WorkspaceSettingsSheet } from '../components/WorkspaceSettingsSheet';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
@@ -11,6 +10,7 @@ import { useConnectionStore } from '../store/connection';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { WORKSPACE_CATEGORIES } from '../navigation/workspace';
 import { fontSizes, fontWeights, radii, spacing, tracking } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 export type WorkspaceScreenProps = NativeStackScreenProps<RootStackParamList, 'Workspace'>;
 
@@ -72,9 +72,9 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 : 'No workspace attached'}
             </Text>
             {activeSessionName ? (
-              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.editButton}>
+              <Pressable onPress={() => setWorkspaceEditorOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.editButton}>
                 <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Edit</Text>
-              </TouchableOpacity>
+              </Pressable>
             ) : null}
           </View>
         </View>
@@ -82,7 +82,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
         <Text variant="xs" style={[styles.sectionLabel, { color: colors.ink3 }]}>Tool groups</Text>
         <View>
           {WORKSPACE_CATEGORIES.filter(category => category.id !== 'review').map(category => (
-            <TouchableOpacity
+            <Pressable
               key={category.id}
               activeOpacity={0.72}
               onPress={() => navigation.navigate('WorkspaceCategory', { categoryId: category.id, title: category.title })}
@@ -97,7 +97,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 <Text variant="sm" dim>{category.description}</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
-            </TouchableOpacity>
+            </Pressable>
           ))}
         </View>
       </ScrollView>

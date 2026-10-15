@@ -7,10 +7,10 @@ import {
   AGENT_LABELS, AGENT_NAMES, AGENT_STAGES, CODEX_IMPLEMENT_WARNING, agentProblem, agentsApi, defaultModel,
   type AgentName, type AgentStage, type AgentsStatus, type StageAgentDrafts,
 } from '../api/agents';
-import { Banner, Field, KV, Loading, Panel, PlanosButton, Segmented, TextField, useToast } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing } from '../theme/tokens';
+import { Banner, Button, Field, KV, Loading, Panel, Segmented, Text, TextField, useToast } from '../ui';
+import { STATUS } from '../theme/status';
 
 export function useAgentsStatus(active: boolean) {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
@@ -108,7 +108,7 @@ export function AgentsSettings({ active }: { active: boolean }) {
             return (
               <View key={agent} style={styles.col} testID={`agent-status-${agent}`}>
                 <Text variant="sm" style={{ fontWeight: fontWeights.semibold, color: item.ready ? colors.ok.ink : colors.attention.ink }}>
-                  {item.ready ? '✓' : '◆'} {item.label || AGENT_LABELS[agent]} · {item.ready ? 'ready' : 'not ready'}
+                  {item.ready ? STATUS.done.icon : STATUS.waiting.icon} {item.label || AGENT_LABELS[agent]} · {item.ready ? 'ready' : 'not ready'}
                 </Text>
                 {item.binary ? <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={2}>{item.version || 'unknown version'} · {item.binary}</Text> : null}
                 {item.credential ? <Text variant="xs" style={{ color: colors.ink3 }}>credential: {item.credential}{item.credential_source ? ` (${item.credential_source})` : ''}</Text> : null}
@@ -123,8 +123,8 @@ export function AgentsSettings({ active }: { active: boolean }) {
               autoCapitalize="none" autoCorrect={false} accessibilityLabel="Claude setup token" testID="claude-token-input" />
           </Field>
           <View style={styles.rowEnd}>
-            {tokenWhere === 'secrets.env' ? <PlanosButton small label="Clear" disabled={busy} onPress={() => void save('')} testID="claude-token-clear" /> : null}
-            <PlanosButton small primary label="Save token" loading={busy} disabled={busy || !token.trim()} onPress={() => void save(token.trim())} testID="claude-token-save" />
+            {tokenWhere === 'secrets.env' ? <Button small label="Clear" disabled={busy} onPress={() => void save('')} testID="claude-token-clear" /> : null}
+            <Button small primary label="Save token" loading={busy} disabled={busy || !token.trim()} onPress={() => void save(token.trim())} testID="claude-token-save" />
           </View>
         </>
       ) : null}

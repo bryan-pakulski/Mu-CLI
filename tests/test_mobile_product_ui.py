@@ -7,12 +7,12 @@ MOBILE = ROOT / "mobile" / "android"
 TOKENS = MOBILE / "src" / "theme" / "tokens.ts"
 APP = MOBILE / "App.tsx"
 NAV = MOBILE / "src" / "navigation" / "AppNavigator.tsx"
-ATMOSPHERE = MOBILE / "src" / "components" / "AtmosphericBackground.tsx"
+ATMOSPHERE = MOBILE / "src" / "ui" / "WashBackground.tsx"
 HEADER = MOBILE / "src" / "components" / "ModernHeader.tsx"
-CARD = MOBILE / "src" / "components" / "Card.tsx"
-BUTTON = MOBILE / "src" / "components" / "Button.tsx"
-INPUT = MOBILE / "src" / "components" / "Input.tsx"
-SHEET = MOBILE / "src" / "components" / "ModernBottomSheet.tsx"
+CARD = MOBILE / "src" / "ui" / "Card.tsx"
+BUTTON = MOBILE / "src" / "ui" / "Button.tsx"
+INPUT = MOBILE / "src" / "ui" / "Form.tsx"
+SHEET = MOBILE / "src" / "ui" / "Sheet.tsx"
 ADVANCED = MOBILE / "src" / "components" / "AdvancedSettingsSheet.tsx"
 SESSIONS = MOBILE / "src" / "components" / "SwipeSessionsDrawer.tsx"
 MODE_DRAWER = MOBILE / "src" / "components" / "ModeDrawer.tsx"
@@ -47,10 +47,14 @@ def test_mobile_uses_same_alpine_environmental_palette_as_web():
 def test_mobile_atmosphere_is_smooth_colour_not_fake_landscape():
     app = read(APP)
     atmosphere = read(ATMOSPHERE)
-    assert "<AtmosphericBackground>" in app
+    # Wash: the app sits on the canvas; watercolour art is bundled WebP
+    # placed per screen, dissolving into canvas, with a flat-wash fallback.
+    assert "<AppCanvas>" in app and "backgroundColor: colors.canvas" in app
     assert "data:image/png;base64" not in atmosphere
     assert "backgroundColor: colors.canvas" in atmosphere
-    assert "no gradient, glow or blur" in atmosphere
+    assert "require('../../assets/wash/dawn-paper.webp')" in atmosphere
+    assert 'stopColor={colors.canvas} stopOpacity={1}' in atmosphere
+    assert "reduceDecoration" in atmosphere
     assert "resizeMode=\"stretch\"" not in atmosphere
     assert "styles.mountain" not in atmosphere
     assert "clipPath" not in atmosphere
@@ -74,20 +78,22 @@ def test_mobile_shared_surfaces_are_quiet_glass_not_legacy_cards():
     button = read(BUTTON)
     input_text = read(INPUT)
     sheet = read(SHEET)
-    # planos panels: surface + 1px border + radius 10, no shadow.
-    assert "backgroundColor: colors.surface" in card
+    # Wash cards (G§9.3): surface + 1px hairline + radius-lg, no shadow.
+    assert "backgroundColor: elevated ? colors.raised : colors.surface" in card
     assert "borderColor: colors.hairline" in card
-    assert "borderRadius: radii.panel" in card
+    assert "borderRadius: radii.lg" in card
     assert "shadowOpacity" not in card
-    # planos buttons: primary = accent (or tone) fill, secondary = raised + border.
-    assert "primary: { backgroundColor: toneColor || colors.accent.ink," in button
-    assert "secondary: { backgroundColor: colors.raised" in button
-    # planos inputs sit on the page background with a 1px border.
-    assert "backgroundColor: colors.canvas" in input_text
-    assert "borderColor: colors.hairline" in input_text
-    # planos sheets: raised + 1px border, radius 10 top corners.
-    assert "backgroundColor: colors.raised" in sheet
-    assert "borderTopLeftRadius: radii.panel" in sheet
+    # Wash buttons (G§9.1): primary = ink pill with on-ink label, secondary =
+    # surface pill with a hairline-strong outline.
+    assert "case 'primary': return { bg: colors.ink, border: colors.ink, fg: colors.onInk };" in button
+    assert "bg: selected ? colors.accent.wash : colors.surface, border: selected ? colors.accent.pigment : colors.hairlineStrong" in button
+    assert "borderRadius: radii.pill" in button
+    # Wash text fields (G§9.5): surface with a control-border (>= 3:1).
+    assert "backgroundColor: colors.surface" in input_text
+    assert "colors.controlBorder" in input_text
+    # Wash sheets (G§8.3): raised level-3 surface, radius-xl top corners.
+    assert "elevation(3, colors, isDark)" in sheet
+    assert "borderTopLeftRadius: radii.xl" in sheet
     assert "borderTopWidth: 1" in sheet
 
 

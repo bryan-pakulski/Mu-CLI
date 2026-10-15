@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text as RNText } from 'react-native';
 import { render } from '@testing-library/react-native';
-import { BottomSheet } from '../src/components/BottomSheet';
+import { Sheet as BottomSheet } from '../src/ui';
 import { ThemeProvider } from '../src/theme/ThemeContext';
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (

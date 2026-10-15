@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Skeleton, ErrorState, EmptyState } from '../components';
 import { modesApi, ModeInfo } from '../api/modes';
 import { spacing, fontWeights, radii, tracking } from '../theme/tokens';
+import { EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: string }> = {
   default: { title: 'General workspace', lenses: ['plan', 'tools', 'verification'], purpose: 'Flexible coding and codebase assistance.' },
@@ -122,7 +122,7 @@ export function ModesScreen() {
           const surface = MODE_SURFACES[item.name] || { title: item.display_name, lenses: [], purpose: item.description };
           const accent = modeAccent(item.name, colors);
           return (
-            <TouchableOpacity
+            <Pressable
               onPress={() => !item.disabled && selectMode(item.name)}
               disabled={item.disabled || selecting !== null}
               activeOpacity={0.7}
@@ -143,7 +143,7 @@ export function ModesScreen() {
               </View>
               {isActive && <Ionicons name="checkmark" size={18} color={accent} />}
               {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={17} color={colors.ink3} />}
-            </TouchableOpacity>
+            </Pressable>
           );
         }}
       />

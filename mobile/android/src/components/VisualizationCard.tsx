@@ -1,14 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  StyleSheet,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SafeAreaModal } from './SafeAreaModal';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import type { ArtifactDescriptor } from '../api/artifacts';
@@ -16,8 +8,8 @@ import { artifactsApi } from '../api/artifacts';
 import { openExternalUrl } from '../api/urlSafety';
 import type { ThemeColors } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
+import { ModalFrame, Pressable, Text } from '../ui';
 
 const MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1 = true;
 
@@ -73,11 +65,11 @@ function InteractiveWebView({
         <View style={styles.fallback}>
           <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
           <Text variant="sm" dim style={styles.fallbackText}>Inline preview failed.</Text>
-          <TouchableOpacity onPress={() => onOpenExternal()} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
+          <Pressable onPress={() => onOpenExternal()} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
             <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
               Open in browser
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       ) : (
         <>
@@ -174,27 +166,27 @@ function VisualizationCardImpl({
           </View>
 
           <View style={styles.headerActions}>
-            <TouchableOpacity
+            <Pressable
               onPress={openFullScreen}
               style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Open visualization full screen"
             >
               <Ionicons name="expand-outline" size={17} color={colors.ink3} />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </Pressable>
+            <Pressable
               onPress={() => openExternal()}
               style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Open visualization in browser"
             >
               <Ionicons name="open-outline" size={16} color={colors.ink3} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </View>
 
         {!expanded ? (
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="Show interactive visualization preview"
             onPress={() => setExpanded(true)}
@@ -204,11 +196,11 @@ function VisualizationCardImpl({
             <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
               Show interactive preview
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         ) : (
           <>
             <View style={styles.previewActions}>
-              <TouchableOpacity
+              <Pressable
                 onPress={hidePreview}
                 style={styles.textAction}
                 accessibilityRole="button"
@@ -218,8 +210,8 @@ function VisualizationCardImpl({
                 <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>
                   Hide
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </Pressable>
+              <Pressable
                 onPress={openFullScreen}
                 style={styles.textAction}
                 accessibilityRole="button"
@@ -229,7 +221,7 @@ function VisualizationCardImpl({
                 <Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>
                   Full screen
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
             <View style={[styles.frame, { height: frameHeight, borderColor: colors.hairline }]}>
               <InteractiveWebView
@@ -243,7 +235,7 @@ function VisualizationCardImpl({
         )}
       </View>
 
-      <SafeAreaModal
+      <ModalFrame transparent={false}
         visible={fullScreen}
         animationType="fade"
         presentationStyle="fullScreen"
@@ -258,22 +250,22 @@ function VisualizationCardImpl({
                 {artifact.title || artifact.name}
               </Text>
             </View>
-            <TouchableOpacity
+            <Pressable
               onPress={() => openExternal()}
               style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Open visualization in browser"
             >
               <Ionicons name="open-outline" size={17} color={colors.ink3} />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </Pressable>
+            <Pressable
               onPress={() => setFullScreen(false)}
               style={[styles.closeButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
               accessibilityLabel="Exit full-screen visualization"
             >
               <Ionicons name="close" size={24} color={colors.ink} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
           <View style={styles.fullScreenFrame}>
             <InteractiveWebView
@@ -283,7 +275,7 @@ function VisualizationCardImpl({
             />
           </View>
         </SafeAreaView>
-      </SafeAreaModal>
+      </ModalFrame>
     </>
   );
 }

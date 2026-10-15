@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { AppState, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 export function ArtifactStrip({
   sessionName,
@@ -66,7 +66,7 @@ export function ArtifactStrip({
             {visualizations.map(artifact => {
               const isViz = artifact.kind === 'visualization';
               return (
-                <TouchableOpacity
+                <Pressable
                   key={artifact.artifact_id}
                   onPress={() => openExternalUrl(artifactsApi.viewUrl(sessionName, artifact.artifact_id))}
                   style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
@@ -79,7 +79,7 @@ export function ArtifactStrip({
                     <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                   </View>
                   <Ionicons name="open-outline" size={17} color={colors.ink3} />
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </ScrollView>
@@ -94,7 +94,7 @@ export function ArtifactStrip({
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {files.map(artifact => (
-              <TouchableOpacity
+              <Pressable
                 key={artifact.artifact_id}
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, artifact.artifact_id))}
                 style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
@@ -105,7 +105,7 @@ export function ArtifactStrip({
                   <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                 </View>
                 <Ionicons name="arrow-down-circle-outline" size={17} color={colors.ink3} />
-              </TouchableOpacity>
+              </Pressable>
             ))}
           </ScrollView>
         </View>

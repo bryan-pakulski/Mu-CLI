@@ -93,7 +93,7 @@ def test_shell_screen_has_status_indicator():
     """ShellScreen must show connected/disconnected status."""
     src = read(SHELL_SCREEN)
     assert "connected" in src.lower(), "connected state not tracked"
-    assert "Badge" in src, "Badge component not used for status"
+    assert "<Chip" in src, "status chip not used for status"
 
 
 # ── workspace.ts ─────────────────────────────────────────────────────

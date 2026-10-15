@@ -1,13 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,7 +18,6 @@ import {
   type JobStageName,
 } from '../api/jobs';
 import { jobCoreApi, subscribeToJobChanges, type HomeVM, type JobSummary } from '../api/jobCore';
-import { ModernBottomSheet } from '../components/ModernBottomSheet';
 import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
 import { JiraSheet } from '../components/JiraSheet';
 import { WorkspaceField, useJobSessions, workspaceHint } from '../components/JobSessionPicker';
@@ -35,19 +26,18 @@ import { bindingsFromDrafts, draftError, type EnvironmentDraft } from '../api/en
 import { draftsFromDefaults, stageAgentsPayload, stageModelsPayload, type StageAgentDrafts } from '../api/agents';
 import { StageAgentsField, useAgentsStatus, type StageModelDefaults } from '../components/JobAgents';
 import { setupApi } from '../api/setup';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget, tracking } from '../theme/tokens';
-import { duration, money, stateLabel, stateStatus } from '../theme/status';
-import { Banner, Empty, Field, Loading, Panel, PlanosButton, StatTile, StatusIcon, SwitchRow, TextField, useInterval } from '../components/planos';
+import { STATUS, duration, money, stateLabel, stateStatus } from '../theme/status';
 import { BAR_HIDDEN, actionLabel, actionTone } from '../components/JobActions';
 import { JobRow, JobsNavBar, ResultRow, focusStep, jobKey, stepsOf, type JobsPage, switchJobsPage } from '../components/JobsChrome';
+import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatTile, StatusIcon, SwitchRow, Text, TextField, useInterval } from '../ui';
 
 export type WorkScreenProps = NativeStackScreenProps<RootStackParamList, 'Work'>;
 
-/** Dashboard panel order (planos homeVM): Needs you, Running now, then the jobs table. */
+/** Dashboard panel order (homeVM): Needs you, Running now, then the jobs table. */
 const BOARD_ORDER: Array<{ key: 'needs_you' | 'running' | 'jobs'; label: string }> = [
   { key: 'needs_you', label: 'Needs you' },
   { key: 'running', label: 'Running now' },
@@ -150,7 +140,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
       </Panel>
     ),
     jobs: (
-      <Panel key="jobs" title="Jobs" badge={counts.jobs} flush right={<PlanosButton small ghost label="All jobs →" onPress={() => go('JobsList')} />} testID="dashboard-jobs">
+      <Panel key="jobs" title="Jobs" badge={counts.jobs} flush right={<Button small ghost label="All jobs →" onPress={() => go('JobsList')} />} testID="dashboard-jobs">
         {(board?.jobs || []).slice(0, 12).map(job => <JobRow key={job.id} job={job} now={now} onPress={() => open(job.id)} />)}
       </Panel>
     ),
@@ -170,20 +160,20 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
               All sessions · <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{total} total</Text>
             </Text>
           </View>
-          <PlanosButton
+          <Button
             label="Jira"
             accessibilityLabel="Jira tickets and link settings"
             icon={<Ionicons name="ticket-outline" size={18} color={colors.ink3} />}
             onPress={() => setJiraOpen(true)}
           />
-          <PlanosButton
+          <Button
             iconOnly
             label="Job settings"
             accessibilityLabel="Job settings: stage models"
             icon={<Ionicons name="options-outline" size={18} color={colors.ink3} />}
             onPress={() => setSettingsOpen(true)}
           />
-          <PlanosButton
+          <Button
             primary
             label="New job"
             accessibilityLabel="Create engineering job"
@@ -197,7 +187,7 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
           <Pressable accessibilityRole="button" testID="work-setup-cta"
             accessibilityLabel={setupPending ? 'Jobs setup not finished. Open setup.' : 'Stage models not set. Open job settings.'}
             onPress={() => (setupPending ? navigation.navigate('JobSetup') : setSettingsOpen(true))}>
-            <Banner tone={setupPending ? 'accent' : 'warn'} glyph={setupPending ? '○' : '◆'}
+            <Banner tone={setupPending ? 'accent' : 'warn'} glyph={setupPending ? STATUS.pending.icon : STATUS.waiting.icon}
               title={setupPending
                 ? `Finish jobs setup: check and test everything jobs need.${missingStages.length ? ` No default model for ${missingStages.join(', ')} (jobs use their session’s model).` : ''}`
                 : `No default model for ${missingStages.join(', ')}: jobs use their session’s model for those stages.`}
@@ -293,7 +283,7 @@ function NeedsYouCard({ job, onOpen, onAction }: { job: JobSummary; onOpen: () =
       {job.attention_detail ? <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={2}>{job.attention_detail}</Text> : null}
       {primary.length ? (
         <View style={styles.cardActions}>
-          {primary.map(a => <PlanosButton key={a.id} small primary tone={actionTone(a)} label={actionLabel(a)} onPress={() => onAction(a.id)} testID={`needs-you-${job.id}-${a.id}`} />)}
+          {primary.map(a => <Button key={a.id} small primary tone={actionTone(a)} label={actionLabel(a)} onPress={() => onAction(a.id)} testID={`needs-you-${job.id}-${a.id}`} />)}
         </View>
       ) : null}
     </View>
@@ -473,7 +463,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
   };
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="New engineering job">
+    <Sheet visible={visible} onClose={onClose} title="New engineering job">
       <WorkspaceField sessions={sessionsState.sessions} value={workspace} onChange={pickWorkspace}
         hint={workspaceHint(sessionsState.sessions, workspace, fallbackSession)} error={sessionsState.error} />
       {!remote ? <RepositoryEnvironmentApproval repository={workspace.trim() || undefined} session={sessionForJob || null} /> : null}
@@ -496,7 +486,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
       <SwitchRow label="Run unattended in sandbox" testID="job-unattended" value={unattended}
         hint="On: the implement stage auto-approves its writes inside the job’s disposable container. Off: each write waits for your approval. Default from Settings; never taken from the chat session."
         onValueChange={v => { touched.current = { ...touched.current, unattended: true }; setUnattended(v); }} />
-      <TouchableOpacity
+      <Pressable
         onPress={() => setShowAdvanced((v) => !v)}
         accessibilityRole="button"
         accessibilityState={{ expanded: showAdvanced }}
@@ -507,7 +497,7 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
         <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
           {showAdvanced ? '▴ Hide advanced' : '▾ Advanced: models, environments, budgets, retries'}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
       {showAdvanced ? (
         <View style={styles.advanced} testID="job-advanced">
           <StageAgentsField status={agents.status} value={agentDrafts} onChange={setAgentDrafts} stageDefaults={stageDefaults} />
@@ -525,10 +515,10 @@ export function NewJobSheet({ visible, sessionName, onClose, onCreated }: NewJob
       ) : null}
       {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
       <View style={styles.sheetActions}>
-        <PlanosButton label="Cancel" onPress={onClose} />
-        <PlanosButton primary loading={submitting} disabled={submitting} label={ticket ? 'Import ticket' : 'Queue job'} onPress={() => void submit()} testID="job-create-submit" />
+        <Button label="Cancel" onPress={onClose} />
+        <Button primary loading={submitting} disabled={submitting} label={ticket ? 'Import ticket' : 'Queue job'} onPress={() => void submit()} testID="job-create-submit" />
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

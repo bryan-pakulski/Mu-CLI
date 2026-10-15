@@ -19,7 +19,12 @@ export function Field({ label, hint, error, optional, children, testID }: { labe
       <Text variant="label" tone="ink2">{label}{optional ? <Text variant="caption" tone="ink3"> (optional)</Text> : null}</Text>
       {children}
       {hint ? <Text variant="caption" tone="ink3">{hint}</Text> : null}
-      {error ? <Text variant="caption" accessibilityRole="alert" style={{ color: colors.danger.ink }}>✗ {error}</Text> : null}
+      {error ? (
+        <View accessibilityRole="alert" style={{ flexDirection: 'row', gap: spacing.xs }}>
+          <Text variant="caption" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+          <Text variant="caption" style={{ color: colors.danger.ink, flexShrink: 1 }}>{error}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

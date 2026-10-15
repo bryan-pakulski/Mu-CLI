@@ -5,16 +5,15 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { JiraBrowser } from '../components/JiraSheet';
 import { JobsNavBar, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { useToast } from '../components/planos';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, spacing } from '../theme/tokens';
+import { Text, useToast } from '../ui';
 
 export type JobBoardsScreenProps = NativeStackScreenProps<RootStackParamList, 'JobBoards'>;
 
-/** planos Tickets page (route id JobBoards): the Jira browser (link, boards, sprints, tickets, import) as a full screen. */
+/** Wash Tickets page (route id JobBoards): the Jira browser (link, boards, sprints, tickets, import) as a full screen. */
 export function JobBoardsScreen({ navigation }: JobBoardsScreenProps) {
   const { colors } = useTheme();
   const toast = useToast();

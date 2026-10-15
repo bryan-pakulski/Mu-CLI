@@ -1,15 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Animated, FlatList, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -19,8 +9,6 @@ import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { modesApi, ModeInfo } from '../api/modes';
 import { inspectorApi, InspectorVariableGroup } from '../api/inspector';
-import { Text, Skeleton, EmptyState, ErrorState } from '../components';
-import { ModernBottomSheet } from '../components/ModernBottomSheet';
 import { EffortControl } from '../components/EffortControl';
 import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
@@ -39,6 +27,7 @@ import {
 } from '../components/ConversationStageRail';
 import { easings, fontSizes, fontWeights, fonts, motion, radii, spacing, tracking, typography } from '../theme/tokens';
 import { useMotionPreference } from '../hooks/useMotionPreference';
+import { EmptyState, ErrorState, Pressable, Sheet, Skeleton, Text } from '../ui';
 
 const HIT = { top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm };
 const HIT_SM = { top: spacing.xs, bottom: spacing.xs, left: spacing.xs, right: spacing.xs };
@@ -47,7 +36,7 @@ const HIT_SM = { top: spacing.xs, bottom: spacing.xs, left: spacing.xs, right: s
  * Product presentation for the mobile conversation.
  *
  * Data/session behaviour remains owned by useChatSession. This component only
- * brings mobile presentation in line with the planos session transcript:
+ * brings mobile presentation in line with the Wash session transcript:
  * assistant bubbles raised + border with a squared top-left corner, user
  * bubbles accent-tinted on the right, compact interim disclosures folded to one
  * mono line that expands, and one glass composer pane with utilities outside.
@@ -380,7 +369,7 @@ export function ChatScreenProduct() {
       const count = item.collapseCount || item.childTurns?.length || 0;
       return (
         <View style={styles.interimGroup}>
-          <TouchableOpacity
+          <Pressable
             onPress={() => setMessages(current => current.map(message =>
               message.id === item.id ? { ...message, collapseOpen: !message.collapseOpen } : message,
             ))}
@@ -400,7 +389,7 @@ export function ChatScreenProduct() {
               {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
               {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
           {item.collapseOpen ? (
             <View style={[styles.interimBody, { borderLeftColor: colors.hairline }]}>
               {item.childTurns?.map(child => {
@@ -454,13 +443,14 @@ export function ChatScreenProduct() {
               {workedMs ? (
                 <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>{formatWorkedDuration(workedMs)}</Text>
               ) : <View />}
-              <TouchableOpacity
+              <Pressable
                 onPress={() => copyMessage(item.text)}
                 hitSlop={HIT}
                 style={styles.copyButton}
+                accessibilityLabel="Copy message"
               >
                 <Ionicons name="copy-outline" size={13} color={colors.ink3} />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           ) : null}
         </View>
@@ -524,9 +514,9 @@ export function ChatScreenProduct() {
                 <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: colors.danger.wash, borderColor: colors.danger.ink }]}>
                   <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
                   <Text variant="xs" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
-                  <TouchableOpacity onPress={retry} hitSlop={HIT}>
+                  <Pressable onPress={retry} hitSlop={HIT}>
                     <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
               ) : null}
             </View>
@@ -543,7 +533,7 @@ export function ChatScreenProduct() {
               <ErrorState message={error} onRetry={retry} />
             ) : (
               <EmptyState
-                icon="sparkles-outline"
+                icon="sparkles"
                 title="What are you working on?"
                 message="Ask MuCLI to inspect, explain, debug, or change your workspace."
                 actionLabel={activeMode ? `Mode: ${activeMode}` : 'Select mode'}
@@ -666,21 +656,21 @@ function Composer({
           {selectedAttachments.map(item => (
             <View key={item.attachment_id} style={[styles.selectedAttachment, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
               <Text variant="xs" numberOfLines={1} style={{ maxWidth: 180, color: colors.ink2 }}>{item.name}</Text>
-              <TouchableOpacity onPress={() => onRemoveAttachment(item.attachment_id)} hitSlop={HIT}>
+              <Pressable onPress={() => onRemoveAttachment(item.attachment_id)} hitSlop={HIT}>
                 <Ionicons name="close" size={14} color={colors.ink3} />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           ))}
         </ScrollView>
       ) : null}
 
       <View style={styles.composerUtilities}>
-        <TouchableOpacity onPress={onModePress} style={styles.utilityButton} hitSlop={HIT_SM}>
+        <Pressable onPress={onModePress} style={styles.utilityButton} hitSlop={HIT_SM}>
           <Text variant="xs" style={{ color: colors.ink3, textTransform: 'capitalize' }}>{activeMode}</Text>
           <Ionicons name="chevron-down" size={13} color={colors.ink3} />
-        </TouchableOpacity>
+        </Pressable>
         <EffortControl variant="chip" />
-        <TouchableOpacity
+        <Pressable
           onPress={onToggleArtifacts}
           style={styles.utilityIconButton}
           hitSlop={HIT_SM}
@@ -691,21 +681,21 @@ function Composer({
             size={16}
             color={artifactsVisible ? colors.accent.ink : colors.ink3}
           />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onSettingsPress} style={styles.utilityIconButton} hitSlop={HIT_SM} accessibilityLabel="Session settings">
+        </Pressable>
+        <Pressable onPress={onSettingsPress} style={styles.utilityIconButton} hitSlop={HIT_SM} accessibilityLabel="Session settings">
           <Ionicons name="settings-outline" size={16} color={colors.ink3} />
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       <View style={[styles.composerPane, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
-        <TouchableOpacity
+        <Pressable
           onPress={onAttachmentsPress}
           style={styles.composerIconButton}
           hitSlop={HIT_SM}
           accessibilityLabel="Attach files"
         >
           <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent.ink : colors.ink3} />
-        </TouchableOpacity>
+        </Pressable>
         {/* Keep focus and the draft keyboard open while a turn is running. */}
         <TextInput
           value={input}
@@ -716,11 +706,11 @@ function Composer({
           style={[styles.input, { color: colors.ink }]}
         />
         {streaming ? (
-          <TouchableOpacity onPress={onStop} style={styles.sendButton} hitSlop={HIT_SM} accessibilityLabel="Stop generation">
+          <Pressable onPress={onStop} style={styles.sendButton} hitSlop={HIT_SM} accessibilityLabel="Stop generation">
             <Ionicons name="stop" size={16} color={colors.danger.ink} />
-          </TouchableOpacity>
+          </Pressable>
         ) : (
-          <TouchableOpacity
+          <Pressable
             onPress={onSend}
             disabled={!canSend}
             style={[styles.sendButton, canSend && { backgroundColor: colors.accent.ink }]}
@@ -728,7 +718,7 @@ function Composer({
             accessibilityLabel="Send message"
           >
             <Ionicons name="arrow-up" size={18} color={canSend ? colors.onInk : colors.ink3} />
-          </TouchableOpacity>
+          </Pressable>
         )}
       </View>
     </View>
@@ -750,10 +740,10 @@ function ModeSheet({
 }) {
   const { colors } = useTheme();
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Mode">
+    <Sheet visible={visible} onClose={onClose} title="Mode">
       <View style={styles.optionList}>
         {modes.map(mode => (
-          <TouchableOpacity
+          <Pressable
             key={mode.name}
             onPress={() => onSelect(mode.name)}
             disabled={mode.disabled}
@@ -764,10 +754,10 @@ function ModeSheet({
               {mode.description ? <Text variant="xs" dim>{mode.description}</Text> : null}
             </View>
             {activeMode === mode.name ? <Ionicons name="checkmark" size={18} color={colors.accent.ink} /> : null}
-          </TouchableOpacity>
+          </Pressable>
         ))}
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -790,7 +780,7 @@ function SessionSettingsSheet({
 }) {
   const { colors } = useTheme();
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Session settings">
+    <Sheet visible={visible} onClose={onClose} title="Session settings">
       <View style={[styles.settingsSummary, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
         <SettingLine label="Provider" value={provider || '—'} />
         <SettingLine label="Model" value={model || '—'} />
@@ -819,7 +809,7 @@ function SessionSettingsSheet({
           </View>
         ))
       )}
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -919,12 +909,12 @@ const styles = StyleSheet.create({
   msgRow: { flexDirection: 'row', marginBottom: spacing.base },
   userRow: { justifyContent: 'flex-end' },
   assistantRow: { justifyContent: 'flex-start' },
-  // planos transcript: user = accent-tinted bubble on the right; assistant =
+  // Wash transcript: user = accent-tinted bubble on the right; assistant =
   // raised + border bubble with a squared top-left corner.
   userMessage: { maxWidth: '86%', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderRightWidth: 1, borderRadius: radii.panel, borderTopRightRadius: 2 },
   assistantMessage: { width: '100%', paddingTop: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.xs, borderWidth: 1, borderRadius: radii.panel, borderTopLeftRadius: 2 },
   assistantMeta: { minHeight: 26, marginTop: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  copyButton: { width: 32, height: 28, alignItems: 'center', justifyContent: 'center' },
+  copyButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   visualizationWrap: { marginBottom: spacing.base },
   interimGroup: { marginTop: -1, marginBottom: spacing.md },
   interimHeader: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, borderWidth: 1, borderRadius: radii.control, alignSelf: 'flex-start', maxWidth: '100%' },

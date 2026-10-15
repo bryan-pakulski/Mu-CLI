@@ -5,12 +5,11 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeContext';
 import { refreshPendingMutations, useConnectionStore } from '../store/connection';
-import { Text, Input, Button } from '../components';
-import { Field, Panel, StatusIcon } from '../components/planos';
 import { checkHealth } from '../api/client';
 import { validateBaseUrl } from '../api/urlSafety';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { fontWeights, spacing } from '../theme/tokens';
+import { Button, Field, Panel, StatusIcon, Text, TextField } from '../ui';
 
 export function ConnectionScreen() {
   const { colors } = useTheme();
@@ -98,7 +97,7 @@ export function ConnectionScreen() {
           right={<StatusIcon status={isConnected ? 'done' : 'failed'} label={isConnected ? 'Connected' : 'Not connected'} showLabel size="xs" />}
         >
           <Field label="Server URL" hint="The mucli GUI address, e.g. http://192.168.1.20:30311. The saved host only changes after it answers.">
-            <Input
+            <TextField
               value={url}
               onChangeText={setUrl}
               placeholder="http://localhost:30311"

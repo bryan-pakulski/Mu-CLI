@@ -1,25 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import {
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  ErrorState,
-  Input,
-  Skeleton,
-  Text,
-} from '../components';
 import {
   DurableMemory,
   DurableMemoryDetail,
@@ -32,13 +15,13 @@ import {
   memoryApi,
 } from '../api/memory';
 import { spacing, fontSizes, fontWeights, fonts, radii, touchTarget, elevation, typography } from '../theme/tokens';
+import { Button, Card, Chip, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text, TextField } from '../ui';
 
 /** Append an alpha channel to a #RRGGBB token (a tint of a viz token). */
 function withAlpha(hex: string, alpha: number): string {
   const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
   return hex.slice(0, 7) + a;
 }
-import { SafeAreaModal } from '../components/SafeAreaModal';
 
 
 type MemoryTab = 'memories' | 'context';
@@ -214,7 +197,7 @@ export function MemoryScreen() {
   }
 
   const tabButton = (target: MemoryTab, title: string) => (
-    <TouchableOpacity
+    <Pressable
       onPress={() => setTab(target)}
       style={{
         flex: 1,
@@ -231,7 +214,7 @@ export function MemoryScreen() {
       >
         {title}
       </Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 
   const contextPoints = (contextTimeline?.points || []).slice(-96);
@@ -272,16 +255,16 @@ export function MemoryScreen() {
                   Automatic model-managed capture · no approval prompts
                 </Text>
               </View>
-              <Badge
+              <Chip
                 label={String(ledger?.stats.total || 0)}
-                variant="neutral"
+                tone="neutral"
               />
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-              <Badge label={String(ledger?.stats.pinned || 0) + ' pinned'} />
-              <TouchableOpacity onPress={showLastRecall} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.xs, right: spacing.xs }}>
-                <Badge label="Why last recall" variant="accent" />
-              </TouchableOpacity>
+              <Chip label={String(ledger?.stats.pinned || 0) + ' pinned'} />
+              <Pressable onPress={showLastRecall} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.xs, right: spacing.xs }}>
+                <Chip label="Why last recall" tone="accent" />
+              </Pressable>
             </View>
           </Card>
 
@@ -289,7 +272,7 @@ export function MemoryScreen() {
             <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>
               Remember explicitly
             </Text>
-            <Input
+            <TextField
               value={newStatement}
               onChangeText={setNewStatement}
               placeholder="Decision, preference, convention or useful fact…"
@@ -303,9 +286,9 @@ export function MemoryScreen() {
               contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.xs }}
             >
               {['auto', 'repository', 'workspace', 'branch', 'personal'].map(scope => (
-                <TouchableOpacity key={scope} onPress={() => setSelectedScope(scope)} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
-                  <Badge label={scope} variant={selectedScope === scope ? 'accent' : 'neutral'} />
-                </TouchableOpacity>
+                <Pressable key={scope} onPress={() => setSelectedScope(scope)} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
+                  <Chip label={scope} tone={selectedScope === scope ? 'accent' : 'neutral'} />
+                </Pressable>
               ))}
             </ScrollView>
             <ScrollView
@@ -314,9 +297,9 @@ export function MemoryScreen() {
               contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.sm }}
             >
               {['observation', 'decision', 'finding', 'constraint', 'preference', 'procedure'].map(kind => (
-                <TouchableOpacity key={kind} onPress={() => setSelectedKind(kind)} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
-                  <Badge label={kind} variant={selectedKind === kind ? 'accent' : 'neutral'} />
-                </TouchableOpacity>
+                <Pressable key={kind} onPress={() => setSelectedKind(kind)} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
+                  <Chip label={kind} tone={selectedKind === kind ? 'accent' : 'neutral'} />
+                </Pressable>
               ))}
             </ScrollView>
             <Button
@@ -327,7 +310,7 @@ export function MemoryScreen() {
             />
           </Card>
 
-          <Input
+          <TextField
             value={query}
             onChangeText={setQuery}
             placeholder="Search durable memories…"
@@ -335,20 +318,20 @@ export function MemoryScreen() {
           />
 
           {(ledger?.memories || []).map(memory => (
-            <TouchableOpacity
+            <Pressable
               key={memory.id}
               onPress={() => openMemory(memory)}
               activeOpacity={0.72}
             >
               <Card style={{ marginBottom: spacing.sm }}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-                  <Badge label={memory.scope.type} />
-                  <Badge label={memory.kind} />
-                  <Badge
+                  <Chip label={memory.scope.type} />
+                  <Chip label={memory.kind} />
+                  <Chip
                     label={memory.lifecycle}
-                    variant={memory.lifecycle === 'active' ? 'success' : 'warning'}
+                    tone={memory.lifecycle === 'active' ? 'ok' : 'attention'}
                   />
-                  {memory.pinned && <Badge label="pinned" variant="accent" />}
+                  {memory.pinned && <Chip label="pinned" tone="accent" />}
                 </View>
                 <Text variant="sm" style={{ marginTop: spacing.sm }}>
                   {memory.statement}
@@ -368,7 +351,7 @@ export function MemoryScreen() {
                   </Text>
                 </View>
               </Card>
-            </TouchableOpacity>
+            </Pressable>
           ))}
 
           {ledger && ledger.memories.length === 0 && (
@@ -477,7 +460,7 @@ export function MemoryScreen() {
                 }}
               >
                 {(['heatmap', 'churn'] as ContextView[]).map(view => (
-                  <TouchableOpacity
+                  <Pressable
                     key={view}
                     onPress={() => setContextView(view)}
                     style={{
@@ -492,7 +475,7 @@ export function MemoryScreen() {
                     <Text variant="xs" style={{ color: contextView === view ? colors.accent.ink : colors.ink3, fontWeight: contextView === view ? fontWeights.semibold : fontWeights.regular }}>
                       {view === 'heatmap' ? 'Evolution heatmap' : 'Churn pulse'}
                     </Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 ))}
               </View>
 
@@ -508,7 +491,7 @@ export function MemoryScreen() {
                         : 'Replacement rate; teal bars mark compaction'}
                     </Text>
                   </View>
-                  <Badge label="live" variant="success" />
+                  <Chip label="live" tone="ok" />
                 </View>
 
                 {contextPoints.length === 0 ? (
@@ -540,7 +523,7 @@ export function MemoryScreen() {
                                 ? Math.min(0.96, (isDark ? 0.28 : 0.38) + ratio * (isDark ? 0.68 : 0.58))
                                 : (measured?.tokens ? (isDark ? 0.12 : 0.19) : (isDark ? 0.035 : 0.055));
                               return (
-                                <TouchableOpacity
+                                <Pressable
                                   key={point.id}
                                   onPress={() => setSelectedContextPoint(point)}
                                   style={{
@@ -564,7 +547,7 @@ export function MemoryScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={{ height: 150, flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, paddingTop: spacing.sm }}>
                       {contextPoints.map(point => (
-                        <TouchableOpacity
+                        <Pressable
                           key={point.id}
                           onPress={() => setSelectedContextPoint(point)}
                           style={{
@@ -592,21 +575,21 @@ export function MemoryScreen() {
                         {new Date(activeContextPoint.at * 1000).toLocaleTimeString()}
                       </Text>
                     </View>
-                    <Badge
+                    <Chip
                       label={(activeContextPoint.total_delta > 0 ? '+' : '') + activeContextPoint.total_delta + ' tok'}
-                      variant={activeContextPoint.total_delta < 0 ? 'success' : 'neutral'}
+                      tone={activeContextPoint.total_delta < 0 ? 'ok' : 'neutral'}
                     />
                   </View>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm }}>
-                    <Badge label={activeContextPoint.total_tokens.toLocaleString() + ' total'} />
-                    <Badge label={activeContextPoint.churn_score + '% churn'} />
-                    <Badge label={activeContextPoint.changed_layers + ' changed'} />
-                    {activeContextPoint.compaction && <Badge label="compacted" variant="success" />}
+                    <Chip label={activeContextPoint.total_tokens.toLocaleString() + ' total'} />
+                    <Chip label={activeContextPoint.churn_score + '% churn'} />
+                    <Chip label={activeContextPoint.changed_layers + ' changed'} />
+                    {activeContextPoint.compaction && <Chip label="compacted" tone="ok" />}
                   </View>
                   {activeContextPoint.layers.map(layer => {
                     const currentLayer = snapshot.layers.find(item => item.id === layer.id);
                     return (
-                      <TouchableOpacity
+                      <Pressable
                         key={layer.id}
                         onPress={() => currentLayer && openLayer(currentLayer)}
                         style={{ flexDirection: 'row', alignItems: 'center', minHeight: touchTarget }}
@@ -627,7 +610,7 @@ export function MemoryScreen() {
                         <Text variant="xs" style={{ color: layer.changed ? colors.attention.ink : colors.ink3, fontVariant: ['tabular-nums'] }}>
                           {layer.tokens.toLocaleString()} · Δ{layer.changed_chunks}
                         </Text>
-                      </TouchableOpacity>
+                      </Pressable>
                     );
                   })}
                 </Card>
@@ -641,7 +624,7 @@ export function MemoryScreen() {
         </ScrollView>
       )}
 
-      <SafeAreaModal
+      <ModalFrame statusBarTranslucent={false}
         visible={!!detail}
         transparent
         animationType="slide"
@@ -658,18 +641,18 @@ export function MemoryScreen() {
           >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Memory detail</Text>
-              <TouchableOpacity onPress={() => setDetail(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
+              <Pressable onPress={() => setDetail(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
                 <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
             {detail && (
               <ScrollView keyboardShouldPersistTaps="handled">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm }}>
-                  <Badge label={detail.memory.scope.type} />
-                  <Badge label={detail.memory.kind} />
-                  <Badge label={'confidence ' + detail.memory.trust.confidence.toFixed(2)} />
+                  <Chip label={detail.memory.scope.type} />
+                  <Chip label={detail.memory.kind} />
+                  <Chip label={'confidence ' + detail.memory.trust.confidence.toFixed(2)} />
                 </View>
-                <Input
+                <TextField
                   value={editStatement}
                   onChangeText={setEditStatement}
                   multiline
@@ -736,9 +719,9 @@ export function MemoryScreen() {
             )}
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
 
-      <SafeAreaModal
+      <ModalFrame statusBarTranslucent={false}
         visible={!!receipt}
         transparent
         animationType="slide"
@@ -748,9 +731,9 @@ export function MemoryScreen() {
           <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Why memory was used</Text>
-              <TouchableOpacity onPress={() => setReceipt(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
+              <Pressable onPress={() => setReceipt(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
                 <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
             <ScrollView>
               <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }}>
@@ -759,9 +742,9 @@ export function MemoryScreen() {
             </ScrollView>
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
 
-      <SafeAreaModal
+      <ModalFrame statusBarTranslucent={false}
         visible={!!selectedLayer}
         transparent
         animationType="slide"
@@ -771,9 +754,9 @@ export function MemoryScreen() {
           <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
               <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selectedLayer?.name}</Text>
-              <TouchableOpacity onPress={() => setSelectedLayer(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
+              <Pressable onPress={() => setSelectedLayer(null)} accessibilityRole="button" style={{ minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm }}>
                 <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
             <ScrollView style={{ maxHeight: 400 }}>
               {layerLoading ? (
@@ -786,7 +769,7 @@ export function MemoryScreen() {
             </ScrollView>
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

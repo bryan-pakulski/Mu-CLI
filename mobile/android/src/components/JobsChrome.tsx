@@ -1,18 +1,17 @@
 // Shared jobs-mode chrome: the page switcher (Dashboard · Jobs · Activity ·
-// Tickets · History · Settings) with planos status chips, the job row with a
+// Tickets · History · Settings) with Wash status chips, the job row with a
 // mini pipeline stepper, and the home VM hook (GET /api/jobs/vm/home + SSE).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { jobCoreApi, optional, subscribeToJobChanges, type HomeVM, type JobPR, type JobsStatusVM, type JobStep, type JobSummary } from '../api/jobCore';
 import { openExternalUrl } from '../api/urlSafety';
 import { prPill } from './jobViews';
-import { MiniStepper, Pill, StatusIcon, useInterval } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, age, money, stateLabel, stateStatus, verdictStyle } from '../theme/status';
+import { MiniStepper, Pill, Pressable, StatusIcon, Text, useInterval } from '../ui';
 
 export type JobsPage = 'Work' | 'JobsList' | 'JobActivity' | 'JobBoards' | 'JobHistory' | 'JobSettings';
 
@@ -51,7 +50,7 @@ export function JobsNavBar({ current, onNavigate, home }: { current: JobsPage; o
   const needs = status?.needs_you ?? home?.counts.needs_you ?? 0;
   const agents = status?.agents ?? home?.running.filter(j => j.state !== 'checking').length ?? 0;
   const checks = status?.checks ?? home?.running.filter(j => j.state === 'checking').length ?? 0;
-  const chip = (glyph: string, n: number, label: string, tone: 'running' | 'warn') => (
+  const chip = (glyph: string, n: number, label: string, tone: 'running' | 'attention') => (
     <View accessible accessibilityLabel={`${n} ${label}`} style={styles.chip}>
       <Text variant="xs" style={{ color: n ? toneInk(colors, tone) : colors.ink3 }}>{glyph} {n}</Text>
       <Text variant="xs" style={{ color: colors.ink3 }}>{label}</Text>
@@ -73,9 +72,9 @@ export function JobsNavBar({ current, onNavigate, home }: { current: JobsPage; o
       </ScrollView>
       <View style={styles.chips}>
         <Pill tone="muted" glyph="⧉" testID="jobs-scope-chip" accessibilityLabel="Showing jobs from all sessions">all sessions</Pill>
-        {chip('●', agents, agents === 1 ? 'agent' : 'agents', 'running')}
-        {chip('●', checks, checks === 1 ? 'check' : 'checks', 'running')}
-        {chip('◆', needs, 'needs you', 'warn')}
+        {chip(STATUS.active.icon, agents, agents === 1 ? 'agent' : 'agents', 'running')}
+        {chip(STATUS.active.icon, checks, checks === 1 ? 'check' : 'checks', 'running')}
+        {chip(STATUS.waiting.icon, needs, STATUS.waiting.label, 'attention')}
         {status?.engine && status.engine !== 'up' ? <Pill tone="muted" glyph="⬢">{`engine ${status.engine}`}</Pill> : null}
       </View>
     </View>

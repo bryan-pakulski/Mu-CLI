@@ -58,3 +58,24 @@ way; the visual intent each one guards is unchanged.
 - `tests/test_mobile_product_ui.py:137,140` — `colors.glassStrong` → `colors.raised` (sessions drawer, mode drawer) — key rename.
 - `tests/test_mobile_product_ui.py:147-150` — `colors.viz[0]/[4]/[3]`, `colors.success : colors.warning` → `colors.accent.ink`/`running.ink`/`danger.ink`, `colors.ok.ink : colors.attention.ink` (trace) — key rename; the trace keeps semantic colours.
 - `tests/test_mobile_syntax_highlighting.py:52-86` — `lightColors`/`darkColors` each declare a literal `syntax: {…}` block with 11 keys → `paperColors`/`duskColors` are built by `washColors()`, whose `syntaxFrom` builder defines all 11 keys from the generated Wash syntax slots (`keyword` → lilac, `string` → meadow, …) — both themes have a full syntax palette, now from tokens (G§9.12).
+
+## M2 — one component kit
+
+`src/ui/` replaces the legacy primitives (`Button`, `Card`, `Badge`, `Input`,
+`Text`, `View`, `Skeleton`, `EmptyState`, `ErrorState`, `BottomSheet`,
+`ModernBottomSheet`, `SafeAreaModal`, `AtmosphericBackground`) and
+`planos.tsx`, all deleted. Every `TouchableOpacity` and raw `Pressable` moved
+onto the kit `Pressable`. New coverage: `mobile/android/__tests__/wash-kit.test.tsx`.
+
+- `mobile/android/__tests__/button.test.tsx:3` — `Button` from `src/components/Button` → `Button` from `src/ui` (same `title`/`onPress`/`disabled` assertions) — the kit button keeps the legacy `title` alias.
+- `mobile/android/__tests__/bottomsheet.test.tsx:4`, `ui-polish.test.tsx:4` — `BottomSheet` from `src/components/BottomSheet` → `Sheet as BottomSheet` from `src/ui` — same render/close assertions on the one sheet implementation.
+- `mobile/android/__tests__/{effort-settings,job-agents,job-environments,job-rules-form,job-sessions,job-setup}.test.tsx` (import line) — `ToastHost` from `src/components/planos` → from `src/ui` — import path only; toasts are asserted unchanged.
+- `mobile/android/__tests__/threads-screen.test.tsx:33-34` — mock of `src/components/SafeAreaModal` → mock of the kit's `ModalFrame` in `src/ui/Sheet` — the create sheet still renders inline under jest.
+- `tests/test_mobile_product_ui.py:10,12-15` — `AtmosphericBackground.tsx`, `components/Card|Button|Input|ModernBottomSheet.tsx` → `ui/WashBackground.tsx`, `ui/Card.tsx`, `ui/Button.tsx`, `ui/Form.tsx`, `ui/Sheet.tsx` — the shared surfaces now live in the kit.
+- `tests/test_mobile_product_ui.py:50-57` — `<AtmosphericBackground>` in App, flat `colors.bg` atmosphere, "no gradient, glow or blur" → App renders `<AppCanvas>` on `colors.canvas`; `WashBackground` uses bundled local WebP art (`assets/wash/*.webp`), fades to canvas, and honours `reduceDecoration`; still no base64, remote URL, polygon or clip-path landscape — the atmosphere is local, calm and switchable (G§6).
+- `tests/test_mobile_product_ui.py:81-96` — planos card (surface + border + radius 10), accent-fill primary button, canvas input, raised sheet with radius 10 → Wash card (surface + hairline + `radii.lg`, no shadow), ink-pill primary and surface/hairline-strong secondary on `radii.pill`, surface input with `controlBorder`, level-3 sheet with `radii.xl` top corners — shared surfaces stay quiet, now per G§9.1/§9.3/§9.5/§8.3.
+- `tests/test_mobile_safe_area_modals.py:14-15` — `SafeAreaModal.tsx` owns the modal-local SafeAreaProvider → `ui/Sheet.tsx` (`ModalFrame`) owns it with the same `initialWindowMetrics`, `navigationBarTranslucent = false`, default edges — same intent, one owner.
+- `tests/test_mobile_safe_area_modals.py:27,29` — raw `<Modal` allowed only in `SafeAreaModal.tsx` → only in `ui/Sheet.tsx`, matched as `<Modal[\s>]` so `<ModalFrame` is not a false positive — feature code never opens a raw native modal.
+- `tests/test_mobile_safe_area_modals.py:41` — `"SafeAreaModal" in source` → `"ModalFrame" in source or "<Sheet" in source` — full-height flows go through the safe-area wrapper.
+- `tests/test_mobile_safe_area_modals.py:46-55` — `ModernBottomSheet.tsx`/`BottomSheet.tsx` contain `SafeAreaModal` → `ui/Sheet.tsx` renders `<ModalFrame`; drawers and PromptHost use `ModalFrame` or `<Sheet` — sheets and drawers stay above the Android navigation bar.
+- `tests/test_mobile_shell_screen.py:96` — `"Badge" in src` → `"<Chip" in src` — the shell connection status is a status chip (Badge retired, G§9.2).

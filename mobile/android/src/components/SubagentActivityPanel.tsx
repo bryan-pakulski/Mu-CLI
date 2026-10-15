@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import type { LiveSubagent } from '../hooks/useChatSession';
-import { Text } from './Text';
 import { fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
+import { STATUS } from '../theme/status';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
 
@@ -36,13 +37,13 @@ function tokens(value: number): string {
   return String(value);
 }
 
-/** planos status glyph vocabulary: ✓ done · ✗ failed · ◆ needs attention · ● running. */
+/** Sub-agent status → the shared status vocabulary glyph (✓ done · ✗ failed · ◆ needs you · ● running). */
 function statusGlyph(status: string): string {
-  if (status === 'done') return '✓';
-  if (status === 'error' || status === 'killed') return '✗';
-  if (status === 'stuck' || status === 'stall') return '◆';
-  if (status === 'running') return '●';
-  return '○';
+  if (status === 'done') return STATUS.done.icon;
+  if (status === 'error' || status === 'killed') return STATUS.failed.icon;
+  if (status === 'stuck' || status === 'stall') return STATUS.waiting.icon;
+  if (status === 'running') return STATUS.active.icon;
+  return STATUS.pending.icon;
 }
 
 function taskTitle(agent: LiveSubagent): string {
@@ -126,7 +127,7 @@ export function SubagentActivityPanel({ agents }: Props) {
         },
       ]}
     >
-      <TouchableOpacity
+      <Pressable
         style={styles.header}
         activeOpacity={0.72}
         accessibilityRole="button"
@@ -147,7 +148,7 @@ export function SubagentActivityPanel({ agents }: Props) {
         </View>
         <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{duration(totalElapsed)}</Text>
         <Ionicons name={panelOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.ink3} />
-      </TouchableOpacity>
+      </Pressable>
 
       {panelOpen ? (
         <ScrollView
@@ -212,7 +213,7 @@ export function SubagentActivityPanel({ agents }: Props) {
                   text={colors.ink3}
                 />
               ) : null}
-              <TouchableOpacity
+              <Pressable
                 activeOpacity={0.72}
                 accessibilityRole="button"
                 accessibilityState={{ expanded: isExpanded }}
@@ -224,7 +225,7 @@ export function SubagentActivityPanel({ agents }: Props) {
                 <View style={[styles.countBadge, { backgroundColor: colors.sunken }]}>
                   <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{agent.actions.length}</Text>
                 </View>
-              </TouchableOpacity>
+              </Pressable>
 
               {isExpanded ? (
                 <View style={styles.activity}>

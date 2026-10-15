@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import type { CompletionItem } from '../hooks/useCommandCompletion';
 import { spacing, fonts, radii, fontWeights, touchTarget, elevation } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 interface CommandSuggestionBarProps {
   visible: boolean;

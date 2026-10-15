@@ -7,19 +7,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { ApiError } from '../api/client';
 import { isMissingEndpoint, jobCoreApi, type ActivityContainer, type ActivityJob, type ActivityLog, type ActivityVM } from '../api/jobCore';
 import { JobsNavBar, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { ModernBottomSheet } from '../components/ModernBottomSheet';
-import { Banner, Empty, Loading, Panel, Pill, PlanosButton, Pre, Sparkline, StatusIcon, useToast } from '../components/planos';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing } from '../theme/tokens';
 import { ACTIVE_STATES, bytes, duration, money, stateLabel, stateStatus } from '../theme/status';
+import { Banner, Button, Empty, Loading, Panel, Pill, Pre, Sheet, Sparkline, StatusIcon, StatusPill, Text, useToast } from '../ui';
 
 export type JobActivityScreenProps = NativeStackScreenProps<RootStackParamList, 'JobActivity'>;
 
-/** Samples kept per container for the CPU/memory sparklines (planos: last 60). */
+/** Samples kept per container for the CPU/memory sparklines (last 60). */
 export const SPARK_SAMPLES = 60;
-/** Poll interval while the screen is shown (planos 5 s docker poll). */
+/** Poll interval while the screen is shown (5 s docker poll). */
 export const ACTIVITY_POLL_MS = 5000;
 
 type Samples = Record<string, { cpu: Array<number | null>; mem: Array<number | null> }>;
@@ -41,7 +39,7 @@ const KIND_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   agent: 'hardware-chip-outline', checks: 'hammer-outline', provision: 'sync-outline', push: 'cloud-upload-outline', waiting: 'pause-circle-outline',
 };
 
-/** planos Activity: jobs → agent/checks/containers with CPU/mem sparklines, log viewer, remove container. */
+/** Wash Activity: jobs → agent/checks/containers with CPU/mem sparklines, log viewer, remove container. */
 export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
   const { colors } = useTheme();
   const toast = useToast();
@@ -145,7 +143,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
           </View>
         </View>
         <View style={styles.row}>
-          <PlanosButton small tone="danger" label="Remove" accessibilityLabel={`Remove container ${c.name}`} disabled={!removable} onPress={() => setRemoving(c)} testID={`remove-${c.name}`} />
+          <Button small tone="danger" label="Remove" accessibilityLabel={`Remove container ${c.name}`} disabled={!removable} onPress={() => setRemoving(c)} testID={`remove-${c.name}`} />
           {!removable && reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{reason}</Text> : null}
         </View>
       </View>
@@ -182,7 +180,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
                   title={<View style={[styles.row, { flex: 1 }]}>
                     <Ionicons name={KIND_ICON[job.kind] || 'ellipse-outline'} size={16} color={st === 'active' ? colors.running.ink : colors.attention.ink} accessibilityLabel={job.kind} />
                     <Text variant="sm" style={[styles.mono, { color: colors.accent.ink, fontWeight: fontWeights.semibold }]}>{job.key || `#${job.id.slice(0, 8)}`}</Text>
-                    <Pill tone={st === 'active' ? 'running' : st === 'waiting' ? 'warn' : 'muted'} glyph={st === 'active' ? '●' : '◆'}>{stateLabel(job.state)}</Pill>
+                    <StatusPill status={st} label={stateLabel(job.state)} />
                   </View>}
                   right={<Text variant="xs" style={styles.num}>{money(job.cost_usd)}</Text>}
                 >
@@ -193,8 +191,8 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
                   {job.last ? <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={2}>› {job.last}</Text> : null}
                   {(job.containers || []).map(c => containerRow(c, !active, active ? 'job is active' : ''))}
                   <View style={styles.wrap}>
-                    <PlanosButton small label="View log" onPress={() => void openLog(job)} testID={`activity-log-${job.id}`} />
-                    <PlanosButton small ghost label="Open job →" onPress={() => navigation.navigate('JobDetail', { jobId: job.id })} />
+                    <Button small label="View log" onPress={() => void openLog(job)} testID={`activity-log-${job.id}`} />
+                    <Button small ghost label="Open job →" onPress={() => navigation.navigate('JobDetail', { jobId: job.id })} />
                   </View>
                 </Panel>
               );
@@ -209,25 +207,25 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
         ) : null}
       </ScrollView>
 
-      <ModernBottomSheet visible={!!logJob} onClose={() => setLogJob(null)} title={logJob ? `Log · ${logJob.key || logJob.id.slice(0, 8)}` : 'Log'}>
+      <Sheet visible={!!logJob} onClose={() => setLogJob(null)} title={logJob ? `Log · ${logJob.key || logJob.id.slice(0, 8)}` : 'Log'}>
         {logBusy ? <Loading label="Loading log…" /> : (
           <View style={{ gap: spacing.sm }}>
             <View style={styles.row}>
               <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>{log?.source ? `${log.source} log` : ''}{log?.truncated ? ' · showing the tail' : ''}</Text>
-              {logJob ? <PlanosButton small label="Refresh" onPress={() => void openLog(logJob)} /> : null}
+              {logJob ? <Button small label="Refresh" onPress={() => void openLog(logJob)} /> : null}
             </View>
             <Pre testID="activity-log-text">{log?.text || 'No output yet.'}</Pre>
           </View>
         )}
-      </ModernBottomSheet>
+      </Sheet>
 
-      <ModernBottomSheet visible={!!removing} onClose={() => setRemoving(null)} title="Remove container">
+      <Sheet visible={!!removing} onClose={() => setRemoving(null)} title="Remove container">
         <Text variant="sm">Remove <Text variant="sm" style={styles.mono}>{removing?.name}</Text>? This runs docker rm -f; the job record and its artifacts are kept.</Text>
         <View style={styles.sheetActions}>
-          <PlanosButton label="Cancel" onPress={() => setRemoving(null)} />
-          <PlanosButton primary tone="danger" loading={busy} label="Remove" onPress={() => void remove()} testID="remove-confirm" />
+          <Button label="Cancel" onPress={() => setRemoving(null)} />
+          <Button primary tone="danger" loading={busy} label="Remove" onPress={() => void remove()} testID="remove-confirm" />
         </View>
-      </ModernBottomSheet>
+      </Sheet>
     </SafeAreaView>
   );
 }

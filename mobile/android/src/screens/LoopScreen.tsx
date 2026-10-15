@@ -3,9 +3,10 @@ import { RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Badge, Button, Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
+import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { loopApi, LoopEntry, LoopState } from '../api/loop';
 import { spacing, fontWeights, fonts, radii } from '../theme/tokens';
+import { Button, Card, Chip, EmptyState, ErrorState, Skeleton, Text } from '../ui';
 
 export function LoopScreen() {
   const { colors } = useTheme();
@@ -54,7 +55,7 @@ export function LoopScreen() {
         </ModeSection>}
 
         {workspaceView.shows('memory') && <ModeSection title="Checkpoints" count={state.memory.length}>
-          {state.memory.map(item => <Card key={item.id} style={{ marginBottom: spacing.sm }}><Text variant="sm" style={{ color: colors.ink2 }}>{item.content}</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>{item.tags.map(tag => <Badge key={tag} label={tag} variant="neutral" />)}</View>{!!item.source && <Text variant="xs" style={{ marginTop: spacing.xs, color: colors.ink3, fontFamily: fonts.mono }}>↳ {item.source}</Text>}</Card>)}
+          {state.memory.map(item => <Card key={item.id} style={{ marginBottom: spacing.sm }}><Text variant="sm" style={{ color: colors.ink2 }}>{item.content}</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>{item.tags.map(tag => <Chip key={tag} label={tag} tone="neutral" />)}</View>{!!item.source && <Text variant="xs" style={{ marginTop: spacing.xs, color: colors.ink3, fontFamily: fonts.mono }}>↳ {item.source}</Text>}</Card>)}
           {!state.memory.length && <EmptyLine text="No durable checkpoints recorded." />}
         </ModeSection>}
       </ScrollView>
@@ -64,5 +65,5 @@ export function LoopScreen() {
 
 function ModeSection({ title, count, children }: { title: string; count: number; children: React.ReactNode }) { const { colors } = useTheme(); return <View style={{ marginBottom: spacing.md }}><View style={{ flexDirection: 'row', marginBottom: spacing.sm }}><Text variant="xs" style={{ color: colors.ink2, fontWeight: fontWeights.semibold }}>{title}</Text><Text variant="xs" style={{ marginLeft: 'auto', color: colors.ink3, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{count}</Text></View>{children}</View>; }
 
-function QueueRow({ item }: { item: LoopEntry }) { const { colors } = useTheme(); const status = item.status || 'pending'; const variant = status === 'completed' ? 'success' : status === 'blocked' ? 'error' : status === 'in_progress' ? 'accent' : 'neutral'; return <Card style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm }}><Badge label={status.replace(/_/g, ' ')} variant={variant} /><Text variant="sm" style={{ flex: 1, color: colors.ink }}>{item.content}</Text></View>{!!item.source && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs, fontFamily: fonts.mono }}>↳ {item.source}</Text>}</Card>; }
+function QueueRow({ item }: { item: LoopEntry }) { const { colors } = useTheme(); const status = item.status || 'pending'; const variant = status === 'completed' ? 'ok' : status === 'blocked' ? 'danger' : status === 'in_progress' ? 'accent' : 'neutral'; return <Card style={{ marginBottom: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm }}><Chip label={status.replace(/_/g, ' ')} tone={variant} /><Text variant="sm" style={{ flex: 1, color: colors.ink }}>{item.content}</Text></View>{!!item.source && <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs, fontFamily: fonts.mono }}>↳ {item.source}</Text>}</Card>; }
 function EmptyLine({ text }: { text: string }) { const { colors } = useTheme(); return <Text variant="xs" style={{ color: colors.ink3, padding: spacing.md }}>{text}</Text>; }

@@ -1,19 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api } from '../api/client';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, fonts, radii, spacing, tracking } from '../theme/tokens';
+import { Text } from '../ui';
 
 export type JobAnalysisScreenProps = NativeStackScreenProps<RootStackParamList, 'JobAnalysis'>;
 

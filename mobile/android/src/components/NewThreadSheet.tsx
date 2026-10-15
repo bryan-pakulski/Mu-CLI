@@ -2,10 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 import { threadsApi, type CreateThreadResponse } from '../api/threads';
 import { useTheme } from '../theme/ThemeContext';
-import { Button } from './Button';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Text } from './Text';
 import { fontSizes, fontWeights, radii, spacing, typography } from '../theme/tokens';
+import { Button, Sheet, Text } from '../ui';
 
 export type NewThreadSheetProps = {
   visible: boolean;
@@ -52,7 +50,7 @@ export function NewThreadSheet({
   };
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="New thread">
+    <Sheet visible={visible} onClose={onClose} title="New thread">
       <View style={styles.content}>
         <Text variant="sm" dim style={styles.intro}>
           Start an independent agent conversation that shares the environment from{' '}
@@ -95,7 +93,7 @@ export function NewThreadSheet({
           />
         </View>
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

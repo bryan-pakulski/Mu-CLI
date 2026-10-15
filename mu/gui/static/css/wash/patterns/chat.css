@@ -14,3 +14,6 @@
 @import url("../../popouts.css") layer(legacy);
 @import url("../../pricing_settings.css") layer(legacy);
 @import url("../../pricing_rows.css") layer(legacy);
+@import url("panels.css") layer(patterns);
+@import url("settings.css") layer(patterns);
+@import url("welcome.css") layer(patterns);

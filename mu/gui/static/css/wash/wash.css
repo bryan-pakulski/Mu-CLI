@@ -43,6 +43,18 @@
 @import url("components/table.css") layer(components);
 @import url("components/progress.css") layer(components);
 @import url("components/stepper.css") layer(components);
+@import url("components/panel.css") layer(components);
+@import url("components/composer.css") layer(components);
+@import url("components/message.css") layer(components);
+@import url("components/markdown.css") layer(components);
+@import url("components/code.css") layer(components);
+@import url("components/toolcard.css") layer(components);
+@import url("components/approval.css") layer(components);
+@import url("components/prompt.css") layer(components);
+@import url("components/diff.css") layer(components);
+@import url("components/meter.css") layer(components);
+@import url("components/palette.css") layer(components);
+@import url("components/session-list.css") layer(components);
 @import url("hljs-wash.css");                    /* generated; declares @layer components itself */
 @import url("patterns/shell.css") layer(patterns);
 @import url("patterns/legacy-overrides.css") layer(patterns);

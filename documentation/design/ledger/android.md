@@ -113,3 +113,25 @@ characters in `src/`).
 - `tests/test_mobile_shell_screen.py:113` — `"terminal-outline" in workspace.ts` → `"icon: 'terminal'"` — the Shell entry still has the terminal icon.
 - `mobile/android/__tests__/plan-mode.test.tsx:85-86` — `getByText('🔒 Plan')` → `getByText('Plan')` plus the `plan-mode-badge-lock` icon — the badge still says Plan with a lock; the lock is a Wash line icon instead of an emoji (G§4 "the current 🔒 usages all go away").
 - `mobile/android/__tests__/plan-mode.test.tsx:100` (new assertion) — the composer strip renders the `plan-mode-strip-lock` icon beside "Plan mode" — same lock affordance in the strip.
+
+### Static font weights (G§2, spec §5.1)
+
+Android cannot pick weights inside a custom family loaded through expo-font,
+so `useFonts` now registers one static family per weight: `Inter`,
+`Inter-Medium`, `Inter-SemiBold`, `JetBrainsMono`, `JetBrainsMono-SemiBold`
+(TTFs instanced from the variable sources by
+`mobile/android/scripts/instance_fonts.py`; Inter at opsz 14). On Android
+`typeStyle()` selects the family for the token's weight and omits
+`fontWeight`, and the kit `Text`/`TextField` resolve a `fontWeight` override
+to the matching family (`withStaticWeight`). Markdown `strong`, `th` and h3
+use `fontStyle()`. No existing test changed; new coverage:
+`mobile/android/__tests__/wash-fonts.test.tsx`.
+
+### Header context ring (G§9.14)
+
+The chat session hook now routes the SSE `context_snapshot` event (already
+published by the server's `pre_provider_call` hook) into
+`src/store/contextFill.ts`; `ModernHeader`'s `useContextFill` reads it and
+polls `/api/memory/state` every 20 s only until the first snapshot for the
+open session arrives. No API or payload change and no existing test changed;
+new coverage: `mobile/android/__tests__/context-fill.test.tsx`.

@@ -328,9 +328,9 @@
             ${envPreview?.suggestion?.message && o === suggestion ? `<p>${esc(envPreview.suggestion.message)}</p>` : ''}
             <dl class="work-env-approval-facts">
                 <dt>Kind</dt><dd>${esc(o.kind === 'build' ? 'Dockerfile build' : o.kind === 'image' ? 'image' : (o.kind || 'image'))}</dd>
-                ${o.label ? `<dt>What</dt><dd class="mono">${esc(o.label)}</dd>` : ''}
-                ${o.ref ? `<dt>Image</dt><dd class="mono">${esc(o.ref)}</dd>` : ''}
-                <dt>Fingerprint</dt><dd class="mono">${esc(o.fingerprint)}</dd>
+                ${o.label ? `<dt>What</dt><dd class="work-mono">${esc(o.label)}</dd>` : ''}
+                ${o.ref ? `<dt>Image</dt><dd class="work-mono">${esc(o.ref)}</dd>` : ''}
+                <dt>Fingerprint</dt><dd class="work-mono">${esc(o.fingerprint)}</dd>
             </dl>
             <div class="work-toolbar"><button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-env-approve="${i}">Approve for this repository</button>
                 <span class="work-meta">Not approved: jobs on this repository park until you approve it or pick an environment under Advanced.</span></div></div></div>`).join('');

@@ -160,7 +160,7 @@
     };
     const tracker = (function buildTrackerSection() {
         const box = document.createElement('div');
-        box.className = 'work-jira-trackers stack';
+        box.className = 'work-jira-trackers';
         box.innerHTML = `
             <h3 class="work-jira-section">Jira deployment</h3>
             <label class="work-field work-field-wide"><span>Deployment</span>
@@ -466,7 +466,7 @@
                 <td><input type="checkbox" data-select-ticket="${escapeHtml(t.key)}"
                            aria-label="Select ${escapeHtml(t.key)}" ${live ? 'disabled title="Already has an active job"' : ''}
                            ${selected.has(t.key) ? 'checked' : ''}></td>
-                <td><a href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" class="mono">${escapeHtml(t.key)}</a></td>
+                <td><a href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" class="work-mono">${escapeHtml(t.key)}</a></td>
                 <td class="work-jira-summary">${escapeHtml(t.summary)}
                     ${t.issue_type ? `<small>${escapeHtml(t.issue_type)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</small>` : ''}</td>
                 <td><span class="work-jira-ticket-status" data-category="${escapeHtml(t.status_category)}">${escapeHtml(t.status || '—')}</span></td>
@@ -597,7 +597,9 @@
         if (!keys.length || !els.browseMsg) return;
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn sm';
+        btn.className = 'w-btn';
+        btn.dataset.variant = 'secondary';
+        btn.dataset.size = 'sm';
         btn.dataset.jiraRunAgain = '';
         btn.textContent = `Run again (${keys.length})`;
         btn.title = `Start a new job for ${keys.join(', ')}`;

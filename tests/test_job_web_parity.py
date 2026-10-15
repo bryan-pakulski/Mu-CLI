@@ -62,7 +62,8 @@ def test_push_opens_the_push_dialog():
 
 
 def test_checks_tab_matches_planos_checks_tab():
-    for header in ('<th scope="col">Trigger</th>', '<th scope="col" class="num">Duration</th>', '<th scope="col">Started</th>'):
+    # Wash: numeric columns are right-aligned tabular via the .w-table [data-num] hook (G§9.19).
+    for header in ('<th scope="col">Trigger</th>', '<th scope="col" data-num>Duration</th>', '<th scope="col">Started</th>'):
         assert header in VIEW
     assert "job.checks?.failed_cases" in VIEW and "job.checks?.history" in VIEW
     assert "Failed test cases" in VIEW and "data-failure-filter" in VIEW

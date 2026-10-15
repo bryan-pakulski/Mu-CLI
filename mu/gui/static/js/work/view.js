@@ -30,9 +30,9 @@
         const out = esc(text).replace(/\u001b\[([0-9;]*)m/g, (_, codes) => {
             let html = '</span>'.repeat(open); open = 0;
             for (const c of String(codes).split(';').map(Number)) {
-                if (map[c]) { html += `<span class="ansi-${map[c]}">`; open++; }
-                else if (c === 1) { html += '<span class="ansi-bold">'; open++; }
-                else if (c === 2) { html += '<span class="ansi-dim">'; open++; }
+                if (map[c]) { html += `<span class="work-ansi-${map[c]}">`; open++; }
+                else if (c === 1) { html += '<span class="work-ansi-bold">'; open++; }
+                else if (c === 2) { html += '<span class="work-ansi-dim">'; open++; }
             }
             return html;
         });
@@ -279,7 +279,7 @@
                 <div class="w-field"><div class="work-toolbar"><label class="w-field__label" for="work-push-body">PR description</label><span class="work-spacer"></span>
                     <div class="w-segmented" data-size="sm" role="group" aria-label="Description view"><button type="button" class="w-segmented__option" data-push-view="write" aria-pressed="true">Write</button><button type="button" class="w-segmented__option" data-push-view="preview" aria-pressed="false">Preview</button></div></div>
                     <textarea class="w-textarea" id="work-push-body" rows="8" maxlength="20000" placeholder="${preview.body ? '' : 'Default: composed from the plan, checks and review'}">${esc(preview.body)}</textarea>
-                    <div class="work-push-preview md" data-push-preview hidden></div>
+                    <div class="work-push-preview w-markdown work-markdown" data-push-preview hidden></div>
                     <p class="w-field__hint">Markdown. Leave blank to use the default text.</p></div>
                 <label class="w-check"><input class="w-check__input" type="checkbox" id="work-push-draft" ${preview.draft === false ? '' : 'checked'}><span>Open as a draft PR</span></label>
                 ${needsOverride ? `<div class="w-field"><div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">The review verdict blocks merging. Pushing anyway needs a reason; it is recorded in the job audit.</p></div>
@@ -294,7 +294,7 @@
             form.querySelectorAll('[data-push-view]').forEach(b => { b.onclick = () => {
                 const show = b.dataset.pushView === 'preview';
                 form.querySelectorAll('[data-push-view]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-                if (show) previewEl.innerHTML = body.value.trim() ? markdown(body.value) : '<p class="muted">Nothing to preview — the default description is used.</p>';
+                if (show) previewEl.innerHTML = body.value.trim() ? markdown(body.value) : '<p class="work-muted">Nothing to preview — the default description is used.</p>';
                 previewEl.hidden = !show; body.hidden = show;
             }; });
             foot.querySelector('[data-cancel]').onclick = () => d.close();
@@ -753,7 +753,7 @@
                 </div>
                 ${plan.diff_from_previous ? `<details class="work-details"><summary>Changes from the previous version</summary><pre class="work-log">${esc(plan.diff_from_previous)}</pre></details>` : ''}
                 ${(plan.errors || []).length ? banner('caution', '◆', plan.errors.map(esc).join('<br>')) : ''}
-                <article class="w-card work-doc"><div class="w-card__body md">${markdown(plan.markdown || plan.draft || '')}</div></article></div>`;
+                <article class="w-card work-doc"><div class="w-card__body w-markdown work-markdown">${markdown(plan.markdown || plan.draft || '')}</div></article></div>`;
             panel.querySelector('[data-plan-edit]')?.addEventListener('click', () => invoke('savePlanDraft'));
             panel.querySelector('[data-plan-version]')?.addEventListener('change', async e => {
                 const response = await api(`/api/jobs/vm/job/${encodeURIComponent(selectedId)}?parts=plan&plan_version=${e.target.value}`);
@@ -776,7 +776,7 @@
                 ${findings.length ? `<div class="work-toolbar" role="toolbar" aria-label="Fix review findings"><span class="work-meta work-grow">Pick findings to fix in one targeted implement run (checks and review follow); the plan stays as it is.</span>
                     <button type="button" class="w-btn" data-variant="primary" data-size="sm" data-fix-selected ${fix?.enabled && selectedFindings.size ? '' : 'disabled'} title="${esc(fix?.enabled ? 'Fix the selected findings' : fix?.reason || 'not available')}">Fix ${selectedFindings.size || ''} selected${fix?.shortcut ? `<kbd class="w-keycap" aria-hidden="true">${esc(fix.shortcut)}</kbd>` : ''}</button></div>` : ''}
                 <div class="work-grid-2">
-                    ${card({id:'rv-sum', eyebrow:'Review', title:'Summary', body:`<div class="md">${markdown(report.summary || '')}</div>`})}
+                    ${card({id:'rv-sum', eyebrow:'Review', title:'Summary', body:`<div class="w-markdown work-markdown">${markdown(report.summary || '')}</div>`})}
                     ${card({id:'rv-adh', eyebrow:'Plan', title:'Plan adherence', body:(report.plan_coverage || []).length ? `<ul class="work-list">${report.plan_coverage.map(c => `<li class="work-coverage">${statusIcon(coverageStatus(c.status), c.status)}<span class="work-mono work-nowrap">${esc(c.criterion_id)}</span><span class="work-grow">${esc(c.evidence || c.status)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No acceptance criteria were assessed.</p>'})}
                 </div>
                 ${(report.out_of_scope_changes || []).length ? banner('caution', '◆', `<strong>Out-of-scope changes</strong><ul>${report.out_of_scope_changes.map(x => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>`) : ''}
@@ -791,7 +791,7 @@
                                 <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-fix-one="${esc(f.id)}" ${fix?.enabled && !closed ? '' : 'disabled'} title="${esc(fix?.enabled ? 'Fix only this finding' : fix?.reason || 'not available')}">Fix</button>
                                 <span class="w-select work-disposition"><select class="w-select__control" data-disposition="${esc(f.id)}" aria-label="Disposition of ${esc(f.title)}" ${mark?.enabled ? '' : 'disabled'}>${['open', 'accepted', 'dismissed', 'fixed'].map(d => `<option ${d === (f.disposition || 'open') ? 'selected' : ''}>${d}</option>`).join('')}</select></span></div>
                             <div class="work-mono work-meta">${esc(f.file || 'no file')}${f.line_start ? `:${f.line_start}` : ''}${f.category ? ` · ${esc(f.category)}` : ''}${f.confidence != null ? ` · confidence ${esc(f.confidence)}` : ''}</div>
-                            ${f.detail ? `<div class="md">${markdown(f.detail)}</div>` : ''}${f.suggestion ? `<div><span class="work-meta">Suggestion</span><div class="md">${markdown(f.suggestion)}</div></div>` : ''}</div></li>`; }).join('')}</ul></section>`; }).join('')}</div>`;
+                            ${f.detail ? `<div class="w-markdown work-markdown">${markdown(f.detail)}</div>` : ''}${f.suggestion ? `<div><span class="work-meta">Suggestion</span><div class="w-markdown work-markdown">${markdown(f.suggestion)}</div></div>` : ''}</div></li>`; }).join('')}</ul></section>`; }).join('')}</div>`;
             panel.querySelectorAll('[data-finding]').forEach(c => { c.onchange = () => { c.checked ? selectedFindings.add(c.dataset.finding) : selectedFindings.delete(c.dataset.finding); renderPart('review', true); }; });
             panel.querySelector('[data-fix-selected]')?.addEventListener('click', () => invoke('reprompt'));
             panel.querySelectorAll('[data-fix-one]').forEach(b => { b.onclick = () => { selectedFindings.clear(); selectedFindings.add(b.dataset.fixOne); invoke('reprompt'); }; });
@@ -905,10 +905,10 @@
                     <span class="work-meta">fix attempts ${esc(job.fix_attempts || 0)} · checks come from the approved plan</span></div><span class="work-spacer"></span>
                     <div class="w-btn-row" role="toolbar" aria-label="Check actions">${recheck ? actionButton(recheck) : ''}</div></div>
                 ${liveLog}
-                ${runs.length ? `<div class="w-table-wrap"><table class="w-table work-runs" aria-label="Runs"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Result</th><th scope="col">Trigger</th><th scope="col" class="num">Duration</th><th scope="col">Started</th></tr></thead><tbody>${runs.map(r => { const k = total(r);
+                ${runs.length ? `<div class="w-table-wrap"><table class="w-table work-runs" aria-label="Runs"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Result</th><th scope="col">Trigger</th><th scope="col" data-num>Duration</th><th scope="col">Started</th></tr></thead><tbody>${runs.map(r => { const k = total(r);
                     return `<tr class="clickable" aria-selected="${r === selected}" data-run="${esc(r.run)}"><td><button type="button" class="work-link-btn" aria-pressed="${r === selected}">Run ${esc(r.run)}</button></td><td>${runPill(r)}</td>
                         <td class="work-result-cell">${k.total ? `<div class="work-toolbar">${resultBar(k.passed, k.failed, k.skipped)}<span class="work-nowrap work-meta">${k.passed}✓ ${k.failed ? `<span class="work-del">${k.failed}✗</span>` : ''}</span></div>` : ''}</td>
-                        <td class="work-meta">${esc(r.trigger || '')}</td><td class="num">${esc(dur(r))}</td><td class="work-meta work-nowrap">${esc(started(r))}</td></tr>`; }).join('')}</tbody></table></div>` : emptyState('No builds or test runs yet', 'Checks from the approved plan run here after implementing.', 'running', 'list-checks')}
+                        <td class="work-meta">${esc(r.trigger || '')}</td><td data-num>${esc(dur(r))}</td><td class="work-meta work-nowrap">${esc(started(r))}</td></tr>`; }).join('')}</tbody></table></div>` : emptyState('No builds or test runs yet', 'Checks from the approved plan run here after implementing.', 'running', 'list-checks')}
                 ${selected ? (() => { const k = total(selected), cases = failedCases(selected, latest);
                     const q = failureFilter.toLowerCase(), rows = cases.filter(f => !q || `${f.suite} ${f.name} ${f.message}`.toLowerCase().includes(q));
                     const hasJunit = (selected.suites || []).some(s => s.junit);
@@ -916,8 +916,8 @@
                     return `<section class="w-card work-card" aria-labelledby="run-h"><header class="w-card__head"><span class="w-eyebrow">Run</span><h2 class="w-card__title" id="run-h">Run ${esc(selected.run)}</h2>${runPill(selected)}<span class="w-card__meta">${esc([dur(selected), selected.trigger, selected.head_sha ? String(selected.head_sha).slice(0, 12) : ''].filter(Boolean).join(' · '))}</span></header>
                     <div class="w-card__body work-stack">
                         ${k.total ? `<div class="work-stack-tight">${resultBar(k.passed, k.failed, k.skipped, true)}<div class="work-toolbar work-meta"><span class="work-add">✓ ${k.passed} passed</span><span class="${k.failed ? 'work-del' : ''}">✗ ${k.failed} failed</span>${k.skipped ? `<span>– ${k.skipped} skipped</span>` : ''}<span>of ${k.total}</span></div></div>` : ''}
-                        ${(selected.suites || []).length ? `<div class="w-table-wrap"><table class="w-table work-suites" aria-label="Suites of run ${esc(selected.run)}"><thead><tr><th scope="col">Suite</th><th scope="col">Environment</th><th scope="col">Result</th><th scope="col" class="num">Duration</th></tr></thead><tbody>
-                            ${selected.suites.map(s => `<tr><td data-mono>${statusIcon(s.passed ? 'done' : 'failed')} ${esc(s.suite)}</td><td data-mono data-suite-env="${esc(s.environment || '')}">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : '<span class="work-meta">shared runtime</span>'}</td><td>${s.missing_executable ? pill('caution', `<span>${esc(s.missing_executable)} missing</span>`) : s.passed ? pill('ok', `${chipGlyph('✓')}<span>Passed</span>`) : pill('danger', `${chipGlyph('✗')}<span>Failed</span>`)}</td><td class="num work-meta">${s.duration_ms != null ? esc(duration(s.duration_ms)) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                        ${(selected.suites || []).length ? `<div class="w-table-wrap"><table class="w-table work-suites" aria-label="Suites of run ${esc(selected.run)}"><thead><tr><th scope="col">Suite</th><th scope="col">Environment</th><th scope="col">Result</th><th scope="col" data-num>Duration</th></tr></thead><tbody>
+                            ${selected.suites.map(s => `<tr><td data-mono>${statusIcon(s.passed ? 'done' : 'failed')} ${esc(s.suite)}</td><td data-mono data-suite-env="${esc(s.environment || '')}">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : '<span class="work-meta">shared runtime</span>'}</td><td>${s.missing_executable ? pill('caution', `<span>${esc(s.missing_executable)} missing</span>`) : s.passed ? pill('ok', `${chipGlyph('✓')}<span>Passed</span>`) : pill('danger', `${chipGlyph('✗')}<span>Failed</span>`)}</td><td class="work-meta" data-num>${s.duration_ms != null ? esc(duration(s.duration_ms)) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
                         ${cases.length ? `<section aria-labelledby="jf-h" class="work-stack-tight"><div class="work-toolbar"><h3 id="jf-h" class="work-subhead">Failed test cases <span class="w-count" data-tone="danger">${cases.length}</span></h3><span class="work-spacer"></span>
                             <input class="w-input work-filter" type="search" data-failure-filter aria-label="Filter failed tests" placeholder="Filter failures…" value="${esc(failureFilter)}"></div>
                             <div class="w-table-wrap"><table class="w-table work-failures"><thead><tr><th scope="col">Suite</th><th scope="col">Test</th><th scope="col">Message</th></tr></thead><tbody>
@@ -993,7 +993,7 @@
             const stick = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
             const item = it => {
                 switch (it.kind) {
-                    case 'assistant': return `<div class="work-msg-assistant md">${markdown(it.text)}</div>`;
+                    case 'assistant': return `<div class="work-msg-assistant w-markdown work-markdown">${markdown(it.text)}</div>`;
                     case 'user': return `<div class="work-msg-user"><span class="w-sr-only">You: </span><pre>${esc(it.text)}</pre></div>`;
                     case 'tool': case 'tool_result': { const multi = it.text && it.text !== it.summary;
                         return `<div class="work-fold-item"><button type="button" class="work-fold ${it.kind === 'tool' ? 'is-tool' : ''}" ${multi ? 'aria-expanded="false" data-fold' : 'disabled'}>${multi ? icon('chevron-right') : '<span class="work-fold-pad"></span>'}<span class="work-mono work-ellipsis">${it.kind === 'tool' ? '› ' : '↳ '}${esc(it.summary)}</span></button>${multi ? `<pre class="work-fold-body" hidden>${esc(it.text)}</pre>` : ''}</div>`; }

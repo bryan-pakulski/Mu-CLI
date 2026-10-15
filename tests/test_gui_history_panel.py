@@ -297,7 +297,7 @@ def test_app_js_panel_modes_includes_history():
 
 CSS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
-    "mu", "gui", "static", "css", "app.css",
+    "mu", "gui", "static", "css", "wash", "patterns", "panels.css",
 )
 
 
@@ -313,4 +313,4 @@ def test_css_has_history_panel_classes():
         ".history-anchor-badge",
         ".history-match-tag",
     ):
-        assert cls in content, f"CSS class {cls} not found in app.css"
+        assert cls in content, f"CSS class {cls} not found in patterns/panels.css"

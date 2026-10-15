@@ -245,7 +245,7 @@
             <div class="pricing-add-row-error" role="alert" hidden></div>
             <div class="pricing-add-row-actions">
                 <button type="button" class="pricing-add-cancel w-btn" data-variant="secondary">cancel</button>
-                <button type="submit" class="primary w-btn" data-variant="primary">add pricing row</button>
+                <button type="submit" class="w-btn" data-variant="primary">add pricing row</button>
             </div>
         `;
         list.parentNode.insertBefore(creator, list);

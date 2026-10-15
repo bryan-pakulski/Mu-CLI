@@ -21,7 +21,7 @@
 
     <header class="w-drawer__head inspector-titlebar">
         <h2 class="w-drawer__title" id="inspector-title">Settings</h2>
-        <button type="button" class="w-btn icon-btn" data-variant="icon"
+        <button type="button" class="w-btn" data-variant="icon"
                 @click="$store.inspector.close()"
                 aria-label="Close inspector" title="Close (Esc)">
             <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
@@ -63,7 +63,7 @@
                 <template x-for="p in $store.inspector.workspace.folders" :key="p">
                     <div class="kv-row">
                         <span class="kv-key mono" x-text="p" :title="p"></span>
-                        <button type="button" class="w-btn icon-btn" data-variant="icon"
+                        <button type="button" class="w-btn" data-variant="icon"
                                 @click="$store.confirm.ask('Detach \'' + p + '\'?', $event, () => $store.inspector.removeWorkspace(p))"
                                 aria-label="Detach folder"
                                 title="Detach this folder from the session (asks first)">
@@ -87,7 +87,7 @@
                 <button type="button" class="w-btn" data-variant="secondary"
                         @click="$store.fileBrowser.show('folder', (p) => { $store.inspector.workspace.newPath = p })"
                         title="Browse for a folder"><span>Browse</span></button>
-                <button type="submit" class="w-btn primary" data-variant="primary"
+                <button type="submit" class="w-btn" data-variant="primary"
                         title="Attach the folder (validates it exists)"><span>Attach</span></button>
             </form>
             <p class="inspector-note"
@@ -121,7 +121,7 @@
                             <span class="mem-hits mono"
                                   x-text="e.hits + ' hits'"
                                   :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"></span>
-                            <button type="button" class="w-btn icon-btn" data-variant="icon"
+                            <button type="button" class="w-btn" data-variant="icon"
                                     @click="$store.confirm.ask('Delete memory #' + e.id + '?', $event, () => $store.inspector.deleteMemory(e.id), {danger:true})"
                                     aria-label="Delete memory entry"
                                     title="Delete this memory entry (asks first)">
@@ -150,7 +150,7 @@
                             <span class="mem-hits mono"
                                   x-text="e.hits + ' hits'"
                                   :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"></span>
-                            <button type="button" class="w-btn icon-btn" data-variant="icon"
+                            <button type="button" class="w-btn" data-variant="icon"
                                     @click="$store.confirm.ask('Delete memory #' + e.id + '?', $event, () => $store.inspector.deleteMemory(e.id), {danger:true})"
                                     aria-label="Delete memory entry"
                                     title="Delete this memory entry (asks first)">
@@ -224,6 +224,29 @@
                         title="Manage skills — enable, disable, edit, create"><span>Manage skills</span></button>
             </div>
 
+            <div class="settings-appearance" role="group" aria-labelledby="settings-appearance-title">
+                <h4 class="settings-appearance-title" id="settings-appearance-title">Appearance</h4>
+                <div class="settings-appearance-row">
+                    <label class="w-field__label" for="settings-theme-select">Theme</label>
+                    <span class="w-select settings-theme-select"><select class="w-select__control" id="settings-theme-select" data-theme-select aria-describedby="settings-theme-hint"
+                            x-init="$nextTick(() => { if (window.MuTheme) $el.value = MuTheme.preference(); })">
+                        <option value="system">Follow system</option>
+                        <option value="paper">Paper</option>
+                        <option value="dusk">Dusk</option>
+                    </select></span>
+                    <p class="w-field__hint" id="settings-theme-hint">Paper and Dusk are full themes; System follows your OS.</p>
+                </div>
+                <div class="settings-appearance-row">
+                    <label class="w-switch">
+                        <span class="w-switch__label">Reduce decoration</span>
+                        <input class="w-switch__input" type="checkbox" role="switch" data-decoration-toggle
+                               x-init="if (window.MuDecoration) $el.checked = MuDecoration.reduced()"
+                               aria-describedby="settings-decoration-hint">
+                    </label>
+                    <p class="w-field__hint" id="settings-decoration-hint">Replaces the watercolour washes with flat colour on every page. Follows your OS "reduce transparency" setting until you change it.</p>
+                </div>
+            </div>
+
             <div class="settings-filter">
                 <input type="text" class="w-input"
                        x-model="$store.inspector.varFilter"
@@ -255,7 +278,7 @@
                                     <span class="var-key w-field__label" x-text="v.key"></span>
                                     <span class="var-type mono" x-text="v.type" :title="'type: ' + v.type"></span>
                                     <span class="var-help-glyph" x-show="v.help" aria-hidden="true" :title="v.help">?</span>
-                                    <button type="button" class="w-btn icon-btn" data-variant="icon" data-size="sm"
+                                    <button type="button" class="w-btn" data-variant="icon" data-size="sm"
                                             x-show="!v.is_default"
                                             @click="$store.confirm.ask('Reset ' + v.key + ' to ' + JSON.stringify(v.default) + '?', $event, () => $store.inspector.resetVariable(v.key))"
                                             aria-label="Reset to default"

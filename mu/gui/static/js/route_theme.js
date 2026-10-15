@@ -118,3 +118,63 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
     else bind();
 })();
+
+// "Reduce decoration" (G§6.2 rule 5) — one controller for every page.
+// Preference (localStorage `mucli-decoration`): "reduced" | "full"; unset
+// follows prefers-reduced-transparency. The resolved state is written to
+// html[data-decoration="reduced"] (the pre-paint bootstrap does the same),
+// and any `[data-decoration-toggle]` checkbox (the settings drawer switch)
+// stays in sync.
+(function () {
+    'use strict';
+    var KEY = 'mucli-decoration';
+    var media = window.matchMedia ? window.matchMedia('(prefers-reduced-transparency: reduce)') : null;
+
+    function preference() {
+        try {
+            var raw = localStorage.getItem(KEY);
+            return raw === 'reduced' || raw === 'full' ? raw : 'system';
+        } catch (_) { return 'system'; }
+    }
+    function reduced(pref) {
+        if (pref === 'reduced') return true;
+        if (pref === 'full') return false;
+        return !!(media && media.matches);
+    }
+    function apply(pref) {
+        var on = reduced(pref || preference());
+        var root = document.documentElement;
+        if (on) root.setAttribute('data-decoration', 'reduced');
+        else root.removeAttribute('data-decoration');
+        document.querySelectorAll('[data-decoration-toggle]').forEach(function (input) {
+            input.checked = on;
+            input.setAttribute('aria-checked', on ? 'true' : 'false');
+        });
+        window.dispatchEvent(new CustomEvent('mucli-decoration-change', { detail: { reduced: on, preference: pref || preference() } }));
+        return on;
+    }
+    function set(value) {
+        var pref = value === true || value === 'reduced' ? 'reduced' : 'full';
+        try { localStorage.setItem(KEY, pref); } catch (_) { /* private mode */ }
+        return apply(pref);
+    }
+
+    document.addEventListener('change', function (event) {
+        var input = event.target.closest && event.target.closest('[data-decoration-toggle]');
+        if (input) set(!!input.checked);
+    });
+    if (media) {
+        var onSystem = function () { if (preference() === 'system') apply('system'); };
+        if (media.addEventListener) media.addEventListener('change', onSystem);
+        else if (media.addListener) media.addListener(onSystem);
+    }
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(); });
+
+    window.MuDecoration = { KEY: KEY, preference: preference, reduced: function () { return reduced(preference()); }, set: set, apply: apply };
+
+    // Alpine renders the drawer switch after this script; sync once it exists.
+    function sync() { apply(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sync);
+    else sync();
+    document.addEventListener('alpine:initialized', sync);
+})();

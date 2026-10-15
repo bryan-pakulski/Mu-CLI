@@ -177,10 +177,16 @@ def test_container_management_allows_private_lan_but_shell_requires_loopback():
 
 def test_file_browser_is_cloaked_and_above_nested_creation_modals():
     html = (ROOT / "mu/gui/templates/fragments/file_browser.html").read_text()
-    css = (ROOT / "mu/gui/static/css/app.css").read_text()
+    from wash_css_helpers import css, decls
+    overlays = css("patterns/overlays.css")
+    modal = css("components/modal.css")
+    welcome = (ROOT / "mu/gui/templates/fragments/welcome.html").read_text()
     assert 'x-show="$store.fileBrowser.open"' in html
     assert "x-cloak" in html
-    browser_rule = css.split(".file-browser-backdrop {", 1)[1].split("}", 1)[0]
-    assert "z-index: var(--z-popover)" in browser_rule
-    assert "z-index:calc(var(--z-modal) - 50)" in css  # guided welcome modal
-    assert "z-index:var(--z-modal)" in css  # nested Docker/network editor
+    # The browser backdrop stacks one step above every other .w-modal
+    # (the guided welcome modal and the nested Docker/network editor).
+    assert 'class="file-browser-backdrop w-modal"' in html
+    assert decls(overlays, ".file-browser-backdrop.w-modal")["z-index"] == "calc(var(--wash-z-modal) + 10)"
+    assert decls(modal, ".w-modal")["z-index"] == "var(--wash-z-modal)"
+    assert 'class="welcome-modal-backdrop w-modal"' in welcome  # guided welcome modal
+    assert 'class="container-editor-backdrop w-modal"' in welcome  # nested Docker/network editor

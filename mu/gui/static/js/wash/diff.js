@@ -1,24 +1,38 @@
-/* Wash diff view (G§9.11) — one diff component for chat `diff` events,
- * approval previews and the /work Diff tab.
+/* Wash diff view (G§9.11) — the one diff renderer, shared by chat `diff`
+ * events, approval previews, the /design gallery and the /work Diff tab.
+ * Styles: static/css/wash/components/diff.css (the only diff stylesheet).
  *
  *   renderDiff(unifiedText, options)      → HTMLElement (div.w-diff)
  *   renderDiffHTML(unifiedText, options)  → the same markup as a string (x-html)
+ *   renderFile(file, options)             → one file's body (div.w-diff__body),
+ *                                           for pages that frame files themselves
+ *   renderTree(files, options)            → the changed-file tree (ul.w-diff__tree)
+ *   statusBadge(file)                     → the A/M/D/R letter (span.w-diff__status)
  *   diffContents(original, modified, {filename, context}) → unified text
- *   parseUnified(unifiedText)             → [{path, oldPath, added, removed, hunks}]
+ *   parseUnified(unifiedText)             → [{path, oldPath, status, binary,
+ *                                             added, removed, hunks}]
+ *   stats(unifiedText)                    → {files, added, removed}
+ *   STATUS_LABEL                          → A/M/D/R → added/modified/deleted/renamed
  *
- * options:
- *   mode        "unified" (default) | "split"; split is offered as a toggle on
- *               wide screens (≥1200px, CSS) and is otherwise shown unified
+ * options (renderDiffHTML; renderFile takes mode/highlight/findings/lineKeys):
+ *   mode        "unified" (default) | "split"; in renderDiffHTML split is a
+ *               toggle on wide screens (≥1200px, CSS), otherwise unified
  *   filename    fallback path when the text has no ---/+++ headers
  *   maxLines    truncate the body after N lines with an "N more lines" row
  *   collapsed   start with file bodies collapsed
  *   openHref    adds an "Open file" link to each file header
- *   highlight   false to skip per-line syntax highlighting (hljs)
+ *   highlight   false to skip per-line syntax highlighting (hljs), or a
+ *               function (text, path) → html
+ *   findings    review findings interleaved after the new-side line they
+ *               point at: an array of {file, line, html} or a function
+ *               (path, newLineNo) → html (rendered in a full-width row)
+ *   tree        true to lead with the changed-file tree (A/M/D + churn bar)
+ *   lineKeys    true to tag rows with data-line-key="path:newLineNo"
  *
  * Additions use the ok wash with a + gutter in ok ink, deletions the danger
  * wash with a − gutter in danger ink, hunk headers are sunken ink-3, and
  * intra-line changes are one step stronger. Exported as window.WashDiff and
- * window.renderDiff for /work to adopt.
+ * window.renderDiff.
  */
 (function () {
     'use strict';
@@ -41,7 +55,7 @@
         var oldNo = 0;
         var newNo = 0;
         function startFile(path, oldPath) {
-            file = { path: path || fallbackName || '', oldPath: oldPath || '', added: 0, removed: 0, hunks: [] };
+            file = { path: path || fallbackName || '', oldPath: oldPath || '', status: 'M', binary: false, added: 0, removed: 0, hunks: [] };
             files.push(file);
             hunk = null;
         }
@@ -61,6 +75,8 @@
                 var path = newPath === '/dev/null' ? oldPath : newPath;
                 if (!file || file.hunks.length) startFile(path, oldPath);
                 else { file.path = path || file.path; file.oldPath = oldPath; }
+                if (oldPath === '/dev/null') file.status = 'A';
+                else if (newPath === '/dev/null') file.status = 'D';
                 i += 1;
                 continue;
             }
@@ -73,7 +89,15 @@
                 file.hunks.push(hunk);
                 continue;
             }
-            if (/^(index |new file mode|deleted file mode|similarity index|rename (from|to) |old mode|new mode|Binary files)/.test(line) && !hunk) continue;
+            if (/^(index |new file mode|deleted file mode|similarity index|rename (from|to) |old mode|new mode|Binary files)/.test(line) && !hunk) {
+                if (file) {
+                    if (/^new file mode/.test(line)) file.status = 'A';
+                    else if (/^deleted file mode/.test(line)) file.status = 'D';
+                    else if (/^rename (from|to) /.test(line) && file.status === 'M') file.status = 'R';
+                    else if (/^Binary files/.test(line)) file.binary = true;
+                }
+                continue;
+            }
             if (!file) startFile(fallbackName || '', '');
             if (!hunk) {
                 hunk = { header: '', oldStart: 1, newStart: 1, lines: [] };
@@ -81,6 +105,7 @@
                 file.hunks.push(hunk);
             }
             var sign = line.charAt(0);
+            if (hunk.header && line === '' && i === lines.length - 1) continue;
             if (sign === '+') {
                 hunk.lines.push({ type: 'add', text: line.slice(1), oldNo: null, newNo: newNo++ });
                 file.added += 1;
@@ -196,8 +221,10 @@
         return m ? EXT_LANG[m[1]] || '' : '';
     }
 
-    function highlightLine(text, lang, enabled) {
+    function highlightLine(text, lang, enabled, path) {
+        if (typeof enabled === 'function') return text ? enabled(text, path) : '';
         if (!enabled || !lang || typeof window.hljs === 'undefined' || !text) return esc(text);
+        if (window.hljs.getLanguage && !window.hljs.getLanguage(lang)) return esc(text);
         try { return window.hljs.highlight(text, { language: lang, ignoreIllegals: true }).value; }
         catch (e) { return esc(text); }
     }
@@ -218,7 +245,7 @@
     }
 
     // Pair consecutive del/add runs for intra-line marks and split view.
-    function annotate(hunk, lang, hl) {
+    function annotate(hunk, lang, hl, path) {
         var rows = hunk.lines.map(function (l) { return { line: l, html: null }; });
         var i = 0;
         while (i < rows.length) {
@@ -234,31 +261,59 @@
                 adds[k].partner = dels[k];
             }
         }
-        rows.forEach(function (r) { if (r.html == null) r.html = highlightLine(r.line.text, lang, hl); });
+        rows.forEach(function (r) { if (r.html == null) r.html = highlightLine(r.line.text, lang, hl, path); });
         return rows;
     }
 
     var SIGN = { add: '+', del: '−', ctx: ' ', meta: ' ' };
 
-    function unifiedRows(rows) {
+    // Screen readers hear "added" / "removed"; the +/− glyph is decorative and
+    // the gutter is not selectable, so copied code stays clean.
+    var SR = { add: '<span class="w-sr-only">added</span>', del: '<span class="w-sr-only">removed</span>' };
+
+    // Review findings: a full-width row after the new-side line they name.
+    function findingFor(opts, path) {
+        var f = opts.findings;
+        if (!f) return function () { return ''; };
+        if (typeof f === 'function') return function (no) { return no == null ? '' : (f(path, no) || ''); };
+        var at = {};
+        f.forEach(function (x) {
+            if (!x || (x.file || '') !== path) return;
+            var k = Number(x.line != null ? x.line : x.line_start || 0);
+            (at[k] = at[k] || []).push(x.html || '');
+        });
+        return function (no) { return no != null && at[no] ? at[no].join('') : ''; };
+    }
+    function findingRow(html, cols) {
+        return html ? '<tr class="w-diff__finding-row"><td colspan="' + cols + '">' + html + '</td></tr>' : '';
+    }
+    function keyAttr(opts, path, no) {
+        return opts.lineKeys ? ' data-line-key="' + esc(path + ':' + (no != null ? no : '')) + '"' : '';
+    }
+
+    function unifiedRows(rows, opts, path) {
+        var finding = findingFor(opts || {}, path);
         return rows.map(function (r) {
             var l = r.line;
-            return '<tr class="w-diff__row" data-type="' + l.type + '">'
+            return '<tr class="w-diff__row" data-type="' + l.type + '"' + keyAttr(opts || {}, path, l.newNo) + '>'
                 + '<td class="w-diff__num">' + (l.oldNo != null ? l.oldNo : '') + '</td>'
                 + '<td class="w-diff__num">' + (l.newNo != null ? l.newNo : '') + '</td>'
-                + '<td class="w-diff__sign" aria-hidden="true">' + SIGN[l.type] + '</td>'
-                + '<td class="w-diff__code">' + (r.html || '&#8203;') + '</td></tr>';
+                + '<td class="w-diff__sign"><span aria-hidden="true">' + SIGN[l.type] + '</span>' + (SR[l.type] || '') + '</td>'
+                + '<td class="w-diff__code">' + (r.html || '&#8203;') + '</td></tr>'
+                + (l.type !== 'del' ? findingRow(finding(l.newNo), 4) : '');
         }).join('');
     }
 
-    function splitRows(rows) {
+    function splitRows(rows, opts, path) {
+        opts = opts || {};
+        var finding = findingFor(opts, path);
         var out = '';
         var i = 0;
         function cell(r, side) {
             if (!r) return '<td class="w-diff__num"></td><td class="w-diff__code" data-type="empty"></td>';
             var l = r.line;
             var no = side === 'old' ? l.oldNo : l.newNo;
-            return '<td class="w-diff__num">' + (no != null ? no : '') + '</td><td class="w-diff__code" data-type="' + l.type + '">' + (r.html || '&#8203;') + '</td>';
+            return '<td class="w-diff__num">' + (no != null ? no : '') + '</td><td class="w-diff__code" data-type="' + l.type + '">' + (SR[l.type] || '') + (r.html || '&#8203;') + '</td>';
         }
         while (i < rows.length) {
             var r = rows[i];
@@ -268,13 +323,17 @@
                 var adds = [];
                 while (i < rows.length && rows[i].line.type === 'add') { adds.push(rows[i]); i += 1; }
                 for (var k = 0; k < Math.max(dels.length, adds.length); k += 1) {
-                    out += '<tr class="w-diff__row">' + cell(dels[k], 'old') + cell(adds[k], 'new') + '</tr>';
+                    var newNo = adds[k] ? adds[k].line.newNo : null;
+                    out += '<tr class="w-diff__row"' + keyAttr(opts, path, newNo) + '>' + cell(dels[k], 'old') + cell(adds[k], 'new') + '</tr>'
+                        + findingRow(finding(newNo), 4);
                 }
             } else if (r.line.type === 'add') {
-                out += '<tr class="w-diff__row">' + cell(null, 'old') + cell(r, 'new') + '</tr>';
+                out += '<tr class="w-diff__row"' + keyAttr(opts, path, r.line.newNo) + '>' + cell(null, 'old') + cell(r, 'new') + '</tr>'
+                    + findingRow(finding(r.line.newNo), 4);
                 i += 1;
             } else {
-                out += '<tr class="w-diff__row">' + cell(r, 'old') + cell(r, 'new') + '</tr>';
+                out += '<tr class="w-diff__row"' + keyAttr(opts, path, r.line.newNo) + '>' + cell(r, 'old') + cell(r, 'new') + '</tr>'
+                    + findingRow(finding(r.line.newNo), 4);
                 i += 1;
             }
         }
@@ -292,16 +351,23 @@
         }
         var budget = opts.maxLines > 0 ? opts.maxLines : Infinity;
         var html = '<div class="w-diff" data-mode="' + mode + '">';
+        var first = uid + 1;
+        if (opts.tree) {
+            html += '<nav class="w-diff__nav" aria-label="Changed files">' + renderTree(files, {
+                href: function (file, index) { return '#w-diff-file-' + (first + index); },
+            }) + '</nav>';
+        }
         files.forEach(function (file) {
             uid += 1;
             var bodyId = 'w-diff-body-' + uid;
             var lang = languageFor(file.path);
             var hl = opts.highlight !== false;
             var collapsed = !!opts.collapsed;
-            html += '<section class="w-diff__file">'
+            html += '<section class="w-diff__file" id="w-diff-file-' + uid + '">'
                 + '<header class="w-diff__head">'
                 + '<button type="button" class="w-diff__toggle" aria-expanded="' + (collapsed ? 'false' : 'true') + '" aria-controls="' + bodyId + '">'
                 + '<span class="w-diff__caret" aria-hidden="true">›</span>'
+                + (opts.tree ? statusBadge(file) : '')
                 + '<span class="w-diff__path">' + esc(file.path || 'changes') + '</span></button>'
                 + '<span class="w-diff__stat"><span class="w-diff__added">+' + file.added + '</span> <span class="w-diff__removed">−' + file.removed + '</span>'
                 + '<span class="w-sr-only"> (' + file.added + ' added, ' + file.removed + ' removed)</span></span>'
@@ -324,20 +390,82 @@
                     hunk = { header: hunk.header, lines: lines.slice(0, budget) };
                 }
                 budget -= hunk.lines.length;
-                var rows = annotate(hunk, lang, hl);
+                var rows = annotate(hunk, lang, hl, file.path);
                 if (hunk.header) {
-                    unified += '<tr class="w-diff__row" data-type="hunk"><td class="w-diff__hunk" colspan="4">' + esc(hunk.header) + '</td></tr>';
-                    split += '<tr class="w-diff__row" data-type="hunk"><td class="w-diff__hunk" colspan="4">' + esc(hunk.header) + '</td></tr>';
+                    unified += hunkRow(hunk.header);
+                    split += hunkRow(hunk.header);
                 }
-                unified += unifiedRows(rows);
-                split += splitRows(rows);
+                unified += unifiedRows(rows, opts, file.path);
+                split += splitRows(rows, opts, file.path);
             });
             html += '<table class="w-diff__table" data-view="unified"><tbody>' + unified + '</tbody></table>'
-                + '<table class="w-diff__table" data-view="split"><tbody>' + split + '</tbody></table>';
+                + '<table class="w-diff__table" data-view="split">' + SPLIT_COLS + '<tbody>' + split + '</tbody></table>';
             if (hidden) html += '<p class="w-diff__more">' + hidden + ' more line' + (hidden === 1 ? '' : 's') + ' not shown' + (opts.moreLabel ? ' · ' + esc(opts.moreLabel) : '') + '</p>';
             html += '</div></section>';
         });
         return html + '</div>';
+    }
+
+    // Split tables use a fixed layout; the column widths come from here, not
+    // from the first row (often a full-width hunk header).
+    var SPLIT_COLS = '<colgroup><col class="w-diff__col-num"><col><col class="w-diff__col-num"><col></colgroup>';
+
+    function hunkRow(header) {
+        return '<tr class="w-diff__row" data-type="hunk"><td class="w-diff__hunk" colspan="4">' + esc(header) + '</td></tr>';
+    }
+
+    var STATUS_LABEL = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed' };
+
+    function statusBadge(file) {
+        var st = STATUS_LABEL[file.status] ? file.status : 'M';
+        return '<span class="w-diff__status" data-status="' + st + '" title="' + STATUS_LABEL[st] + '">' + st
+            + '<span class="w-sr-only"> ' + STATUS_LABEL[st] + '</span></span>';
+    }
+
+    // Churn bar: five blocks split between added and removed lines.
+    function churn(file) {
+        var total = file.added + file.removed, blocks = 5;
+        var a = total ? Math.round((file.added / total) * blocks) : 0;
+        var r = total ? Math.min(blocks - a, Math.max(file.removed ? 1 : 0, blocks - a)) : 0;
+        var out = '';
+        for (var i = 0; i < blocks; i += 1) out += '<span data-kind="' + (i < a ? 'add' : (i < a + r ? 'del' : 'none')) + '"></span>';
+        return '<span class="w-diff__churn" aria-hidden="true">' + out + '</span>';
+    }
+
+    /* The changed-file tree: status letter, file name, churn bar.
+     *   options.href(file, index)    link each entry (in-page anchors)
+     *   options.viewed(file) → bool  mark reviewed files (dimmed)
+     *   options.attrs(file, index)   extra attributes on each entry's button
+     */
+    function renderTree(files, options) {
+        var opts = options || {};
+        return '<ul class="w-diff__tree">' + files.map(function (file, index) {
+            var name = String(file.path || 'changes').split('/').pop();
+            var inner = statusBadge(file) + '<span class="w-diff__tree-name">' + esc(name) + '</span>';
+            var link = opts.href
+                ? '<a class="w-diff__tree-link" href="' + esc(opts.href(file, index)) + '" title="' + esc(file.path) + '">' + inner + '</a>'
+                : '<button type="button" class="w-diff__tree-link" title="' + esc(file.path) + '"' + (opts.attrs ? ' ' + opts.attrs(file, index) : '') + '>' + inner + '</button>';
+            var viewed = opts.viewed && opts.viewed(file) ? ' data-viewed' : '';
+            return '<li class="w-diff__tree-item"' + viewed + '>' + link + churn(file) + '</li>';
+        }).join('') + '</ul>';
+    }
+
+    /* One file's body for pages that frame files themselves (/work). Huge
+     * files (over 4000 lines) skip syntax highlighting. */
+    function renderFile(file, options) {
+        var opts = options || {};
+        var mode = opts.mode === 'split' ? 'split' : 'unified';
+        var lineCount = file.hunks.reduce(function (n, h) { return n + h.lines.length; }, 0);
+        var hl = lineCount > 4000 ? false : (opts.highlight != null ? opts.highlight : true);
+        var lang = languageFor(file.path);
+        var rows = '';
+        file.hunks.forEach(function (hunk) {
+            var annotated = annotate(hunk, lang, hl, file.path);
+            if (hunk.header) rows += hunkRow(hunk.header);
+            rows += mode === 'split' ? splitRows(annotated, opts, file.path) : unifiedRows(annotated, opts, file.path);
+        });
+        return '<div class="w-diff__body"><table class="w-diff__table" data-view="' + mode + '" data-only>'
+            + (mode === 'split' ? SPLIT_COLS : '') + '<tbody>' + rows + '</tbody></table></div>';
     }
 
     function renderDiff(text, options) {
@@ -380,8 +508,12 @@
         diffContents: diffContents,
         renderDiff: renderDiff,
         renderDiffHTML: renderDiffHTML,
+        renderFile: renderFile,
+        renderTree: renderTree,
+        statusBadge: statusBadge,
         stats: stats,
         languageFor: languageFor,
+        STATUS_LABEL: STATUS_LABEL,
     };
     window.WashDiff = api;
     window.renderDiff = renderDiff;

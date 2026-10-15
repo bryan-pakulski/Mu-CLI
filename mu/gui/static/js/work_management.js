@@ -173,9 +173,9 @@
                     </td>
                     <td>${statusPill(job.status)}${job.archived ? '<span class="w-chip work-management-archive-mark" data-tone="neutral" title="archived"><span>archived</span></span>' : ''}</td>
                     <td class="work-management-repo" title="${escapeHtml(job.repository || '')}">${escapeHtml(job.repository || '—')}</td>
-                    <td class="num" data-num>${fmtMoney(job.cost_usd)}</td>
-                    <td class="num" data-num>${Number(job.attempt_count || 0)}</td>
-                    <td class="num work-meta" data-num title="Worked ${escapeHtml(fmtDuration(job.elapsed_seconds))}">${escapeHtml(fmtDate(job.updated_at))}</td>
+                    <td data-num>${fmtMoney(job.cost_usd)}</td>
+                    <td data-num>${Number(job.attempt_count || 0)}</td>
+                    <td class="work-meta" data-num title="Worked ${escapeHtml(fmtDuration(job.elapsed_seconds))}">${escapeHtml(fmtDate(job.updated_at))}</td>
                     <td class="w-table__actions">${rowActions(job)}</td>
                 </tr>
             `).join('');

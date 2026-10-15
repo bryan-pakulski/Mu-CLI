@@ -14,6 +14,8 @@
 {% block head_scripts %}
     <script src="/static/js/trace.js" defer></script>
     <script src="/static/js/floating_popouts.js" defer></script>
+    <script src="/static/js/dialogs.js" defer></script>
+    <script src="/static/js/wash/confirm.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
 {% endblock %}
 {% block body_class %}trace-body{% endblock %}
@@ -124,8 +126,8 @@
                 <h2 class="w-card__title trace-h2" id="trace-h-overview">Overview</h2>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('overview')" :class="{open: infoOpen==='overview'}" :aria-expanded="infoOpen==='overview' ? 'true' : 'false'" aria-controls="trace-info-overview" aria-label="About Overview" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-overview" role="note" x-show="infoOpen==='overview'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Overview</div>
+                    <div class="trace-info-popout" id="trace-info-overview" role="dialog" aria-modal="true" x-dialog="infoOpen==='overview'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-overview-title" x-show="infoOpen==='overview'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-overview-title">Overview</div>
                     <p><b>Shows:</b> at-a-glance totals and peaks for the whole run.</p>
                     <p><b>Why:</b> the quickest read on whether the harness suspects fired — tokenizer drift, mechanical compaction fallbacks, nudges, redundant reads — actually happened, and how expensive the run was.</p>
                     <p><b>Read:</b> warn-tinted cards (amber) flag a suspect worth drilling into. <em>median drift</em> is more robust than mean — the drift formula blows up when the real prompt is small, so a few iters can reach ±2000% and drag the mean.</p>
@@ -169,8 +171,8 @@
                 <span class="trace-sub">ranked signals actually observed in this run</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('suspects')" :class="{open: infoOpen==='suspects'}" :aria-expanded="infoOpen==='suspects' ? 'true' : 'false'" aria-controls="trace-info-suspects" aria-label="About Harness suspects" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-suspects" role="note" x-show="infoOpen==='suspects'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Harness suspects</div>
+                    <div class="trace-info-popout" id="trace-info-suspects" role="dialog" aria-modal="true" x-dialog="infoOpen==='suspects'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-suspects-title" x-show="infoOpen==='suspects'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-suspects-title">Harness suspects</div>
                     <p><b>Shows:</b> the same ranked suspect digest the trace tools return — harness pathologies detected in the run data, most severe first, each with a suggested next drill-down.</p>
                     <p><b>Why:</b> answers "where do I start?" without cross-referencing every panel. Clean runs show nothing here.</p>
                     <p><b>Read:</b> severity badge (high = act now, medium = inspect, low = informational); the pointer names the panel or tool call that has the evidence.</p>
@@ -216,8 +218,8 @@
                 <span class="trace-sub">total_est vs actual prompt tokens, per iteration</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('ctx')" :class="{open: infoOpen==='ctx'}" :aria-expanded="infoOpen==='ctx' ? 'true' : 'false'" aria-controls="trace-info-ctx" aria-label="About Context growth" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-ctx" role="note" x-show="infoOpen==='ctx'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Context growth</div>
+                    <div class="trace-info-popout" id="trace-info-ctx" role="dialog" aria-modal="true" x-dialog="infoOpen==='ctx'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-ctx-title" x-show="infoOpen==='ctx'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-ctx-title">Context growth</div>
                     <p><b>Shows:</b> top — the harness's cl100k_base <em>estimate</em> (dashed) vs the provider's <em>reported</em> prompt tokens (solid) per iteration, with compaction events marked. Bottom — a heat strip of which context layer (L0–L5) dominates each iteration, plus a diverging drift strip.</p>
                     <p><b>Why:</b> suspect #1 lives here. If the estimate diverges from actual, the compaction budget (computed in cl100k tokens) fires at the wrong point. The heat strip shows <i>which layer</i> is eating the budget — usually L5 history ballooning.</p>
                     <p><b>Read:</b> the solid line is the provider's own count — it can never exceed the context window, so it is the honest "how full is the prompt." For Ollama in a warm loop the solid line is the non-cached prompt <i>delta</i> (near-zero = cache hit), not the full prompt; the dashed cl100k line is the harness's fill view in that case. The drift-corrected real estimate and drift ratio are in the hover tooltip; the drift chart carries the estimate-error diagnosis. Blue verticals = compaction.</p>
@@ -242,8 +244,8 @@
                 <span class="trace-sub">what is consuming the wire request, per iteration</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('attrib')" :class="{open: infoOpen==='attrib'}" :aria-expanded="infoOpen==='attrib' ? 'true' : 'false'" aria-controls="trace-info-attrib" aria-label="About Request context attribution" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-attrib" role="note" x-show="infoOpen==='attrib'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Request context attribution</div>
+                    <div class="trace-info-popout" id="trace-info-attrib" role="dialog" aria-modal="true" x-dialog="infoOpen==='attrib'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-attrib-title" x-show="infoOpen==='attrib'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-attrib-title">Request context attribution</div>
                     <p><b>Shows:</b> stacked estimated tokens for the system prompt, user and assistant text, tool calls, tool results, files/images, other message parts, and tool schemas. Red markers flag positive jumps from the previous request.</p>
                     <p><b>Why:</b> this identifies the payload responsible for a context spike. A growing <em>tool results</em> band points to oversized command/file output; a flat but large <em>tool schemas</em> band means too many or verbose tools; <em>system</em> points to repeatedly injected workspace/memory context.</p>
                     <p><b>Read:</b> hover or click a bar for the iteration. The table ranks the largest jumps and names both the fastest-growing component and the single largest message part. Older traces without per-part token telemetry are labelled approximate.</p>
@@ -283,8 +285,8 @@
                 <span class="trace-sub">(actual − est) / actual · 100 — gated to reliable full-prompt readings</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('drift')" :class="{open: infoOpen==='drift'}" :aria-expanded="infoOpen==='drift' ? 'true' : 'false'" aria-controls="trace-info-drift" aria-label="About Tokenizer drift" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-drift" role="note" x-show="infoOpen==='drift'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Tokenizer drift</div>
+                    <div class="trace-info-popout" id="trace-info-drift" role="dialog" aria-modal="true" x-dialog="infoOpen==='drift'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-drift-title" x-show="infoOpen==='drift'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-drift-title">Tokenizer drift</div>
                     <p><b>Shows:</b> per-iteration drift between the real prompt size and the harness estimate, centered at 0%. The ±15% band is shaded — inside it the estimate is "good enough".</p>
                     <p><b>Why:</b> this single chart decides suspect #1. Persistent drift outside the band means the compaction budget is systematically wrong for this model's tokenizer.</p>
                     <p><b>Caveat:</b> drift_pct is only computed when the provider reports a real <i>full-prompt</i> count. Ollama's <code>prompt_tokens_actual</code> is the non-cached prompt <i>delta</i> (near-zero in a warm loop) — those iterations are zeroed and flagged <code>drift_pct_reliable=false</code> (rendered as "drift unknown", not "0% = perfect"). The y-axis is clamped to keep the warn band visible; ▲▼ caps mark values beyond the clamp. Toggle <b>signed-log</b> to read the full range. Absolute drift is visible in Context growth.</p>
@@ -306,8 +308,8 @@
                 <h2 class="w-card__title trace-h2" id="trace-h-compaction-timeline">Compaction timeline</h2>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('comp')" :class="{open: infoOpen==='comp'}" :aria-expanded="infoOpen==='comp' ? 'true' : 'false'" aria-controls="trace-info-comp" aria-label="About Compaction timeline" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-comp" role="note" x-show="infoOpen==='comp'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Compaction timeline</div>
+                    <div class="trace-info-popout" id="trace-info-comp" role="dialog" aria-modal="true" x-dialog="infoOpen==='comp'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-comp-title" x-show="infoOpen==='comp'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-comp-title">Compaction timeline</div>
                     <p><b>Shows:</b> every compaction pass — kind (turn_start / auto_hook / emergency_preflight), tokens before→after, saved, summarizer mode, keep_recent, budget.</p>
                     <p><b>Why:</b> suspect #3. <i>mechanical</i> summarizer rows (amber) mean the LLM summarizer fell back to lossy per-part truncation — a silent quality loss. Many <i>emergency_preflight</i> rows with <i>keep_recent=2</i> point at suspect #2 (unbudgeted reasoning tokens forcing emergency compaction).</p>
                     <p><b>Read:</b> click a row to jump the conversation view to that iteration. Compactions also appear as blue verticals on Context growth.</p>
@@ -345,8 +347,8 @@
                 <h2 class="w-card__title trace-h2" id="trace-h-tool-histogram">Tool histogram</h2>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('tool')" :class="{open: infoOpen==='tool'}" :aria-expanded="infoOpen==='tool' ? 'true' : 'false'" aria-controls="trace-info-tool" aria-label="About Tool histogram" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-tool" role="note" x-show="infoOpen==='tool'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Tool histogram</div>
+                    <div class="trace-info-popout" id="trace-info-tool" role="dialog" aria-modal="true" x-dialog="infoOpen==='tool'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-tool-title" x-show="infoOpen==='tool'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-tool-title">Tool histogram</div>
                     <p><b>Shows:</b> per tool — call count (green = ok, red = errors), average latency, cache-hit rate, average result bytes, and the error codes when a tool failed.</p>
                     <p><b>Why:</b> finds tools that dominate wall-time, churn large results (context bloat), or fail repeatedly. A high cache-hit rate on read tools means the tool-result cache is saving re-reads.</p>
                     <p><b>Read:</b> click a row to plot that tool's per-iteration latency below (green bars ok, red errors, green cap = cache hit).</p>
@@ -397,8 +399,8 @@
                 <span class="trace-sub">store raw externally, observe compactly, retrieve on demand</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('eff')" :class="{open: infoOpen==='eff'}" :aria-expanded="infoOpen==='eff' ? 'true' : 'false'" aria-controls="trace-info-eff" aria-label="About Tool-output efficiency" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-eff" role="note" x-show="infoOpen==='eff'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Tool-output efficiency</div>
+                    <div class="trace-info-popout" id="trace-info-eff" role="dialog" aria-modal="true" x-dialog="infoOpen==='eff'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-eff-title" x-show="infoOpen==='eff'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-eff-title">Tool-output efficiency</div>
                     <p><b>Shows:</b> per iteration, raw tool-output tokens (amber, what the tool <em>would have</em> injected) vs. injected tokens (green, the compact observation actually placed in context). The amber band between them is tokens saved by storing raw externally.</p>
                     <p><b>Why:</b> the headline metric for tool-output management. A wide amber gap means large results (build logs, file reads, searches) are being observed rather than bloating context; a thin gap means results were small enough to stay verbatim. The cards total the run: compression ratio, tokens saved, results omitted/stored, and retrieval rate.</p>
                     <p><b>Read:</b> hover the chart for per-iter numbers. <b>compression ratio</b> = tokens_saved ÷ raw_tokens. <b>retrieval rate</b> = recall/result_* calls ÷ total tool calls — too low with many omitted results may mean stored output isn't being recalled before re-running. Cache counters (evictions/invalidations/disk hits/locator hits) come from the tool-result cache.</p>
@@ -445,8 +447,8 @@
                 <span class="trace-sub">re-reads with no intervening write</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('reads')" :class="{open: infoOpen==='reads'}" :aria-expanded="infoOpen==='reads' ? 'true' : 'false'" aria-controls="trace-info-reads" aria-label="About Read-state / redundant reads" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-reads" role="note" x-show="infoOpen==='reads'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Read-state / redundant reads</div>
+                    <div class="trace-info-popout" id="trace-info-reads" role="dialog" aria-modal="true" x-dialog="infoOpen==='reads'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-reads-title" x-show="infoOpen==='reads'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-reads-title">Read-state / redundant reads</div>
                     <p><b>Shows:</b> a path × iteration grid of read-tool calls (read_file, get_chunk, list_dir, search_…). Red cells are <i>redundant</i> — the same path was read again with no write in between.</p>
                     <p><b>Why:</b> quantifies the context-gathering stall the recoverage nudge reacts to, and separates re-reading caused by state loss (clusters after a compaction) from aimless re-reading.</p>
                     <p><b>Read:</b> a vertical red cluster = stuck re-reading one path. Rows are capped to the panel height; "+N more paths" appears when truncated. Click any other iter to highlight its column across panels.</p>
@@ -467,8 +469,8 @@
                 <h2 class="w-card__title trace-h2" id="trace-h-nudge-timeline-efficacy">Nudge timeline + efficacy</h2>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('nudge')" :class="{open: infoOpen==='nudge'}" :aria-expanded="infoOpen==='nudge' ? 'true' : 'false'" aria-controls="trace-info-nudge" aria-label="About Nudge timeline + efficacy" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-nudge" role="note" x-show="infoOpen==='nudge'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Nudge timeline + efficacy</div>
+                    <div class="trace-info-popout" id="trace-info-nudge" role="dialog" aria-modal="true" x-dialog="infoOpen==='nudge'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-nudge-title" x-show="infoOpen==='nudge'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-nudge-title">Nudge timeline + efficacy</div>
                     <p><b>Shows:</b> each corrective nudge the harness injected (empty_response, loop_watchdog, recoverage_stall, loop_detect, retryable_escalation, …) and whether it <i>broke</i> the pattern — a write or a novel tool call followed within 3 iterations.</p>
                     <p><b>Why:</b> the data to tune nudge text and thresholds. A nudge that rarely breaks the loop is wasted context; one that always does is doing real recovery work.</p>
                     <p><b>Read:</b> green rows broke the loop. Click a row to jump to that iteration.</p>
@@ -503,8 +505,8 @@
                 <h2 class="w-card__title trace-h2" id="trace-h-subagent-timeline">Subagent timeline</h2>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('sub')" :class="{open: infoOpen==='sub'}" :aria-expanded="infoOpen==='sub' ? 'true' : 'false'" aria-controls="trace-info-sub" aria-label="About Subagent timeline" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-sub" role="note" x-show="infoOpen==='sub'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Subagent timeline</div>
+                    <div class="trace-info-popout" id="trace-info-sub" role="dialog" aria-modal="true" x-dialog="infoOpen==='sub'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-sub-title" x-show="infoOpen==='sub'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-sub-title">Subagent timeline</div>
                     <p><b>Shows:</b> active child subagent count per iteration (bars), with stuck (rose) / stall (sun) markers stacked above the bar. Below, the children themselves — task id, depth, status, tool calls, elapsed.</p>
                     <p><b>Why:</b> long-running or stuck children burn context and wall-time in the parent. A child that stalls without producing wastes a whole sub-tree of work.</p>
                     <p><b>Read:</b> select an iteration (click any chart) to filter the children list to that iteration's active children; otherwise all children seen this run are listed.</p>
@@ -547,8 +549,8 @@
                 <span class="trace-sub">task_memory + scratchpad, with status mix</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('mem')" :class="{open: infoOpen==='mem'}" :aria-expanded="infoOpen==='mem' ? 'true' : 'false'" aria-controls="trace-info-mem" aria-label="About Memory &amp; scratchpad counts" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-mem" role="note" x-show="infoOpen==='mem'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Memory &amp; scratchpad counts</div>
+                    <div class="trace-info-popout" id="trace-info-mem" role="dialog" aria-modal="true" x-dialog="infoOpen==='mem'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-mem-title" x-show="infoOpen==='mem'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-mem-title">Memory &amp; scratchpad counts</div>
                     <p><b>Shows:</b> task-memory and scratchpad entry counts per iteration (lines), with a faint stacked area of the task-memory <i>status mix</i> (active / pending / stale / done / pruned) behind them.</p>
                     <p><b>Why:</b> the counts show <i>how much</i> memory the model is carrying; the status mix shows <i>whether it's going stale</i> — a growing stale/pruned share with no done entries means memory is accumulating without resolution.</p>
                     <p><b>Read:</b> solid green = task_memory, dashed amber = scratchpad. The colored bands = status composition.</p>
@@ -570,8 +572,8 @@
                 <span class="trace-sub">in / out / cached / reasoning per iter</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('tok')" :class="{open: infoOpen==='tok'}" :aria-expanded="infoOpen==='tok' ? 'true' : 'false'" aria-controls="trace-info-tok" aria-label="About Token breakdown" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-tok" role="note" x-show="infoOpen==='tok'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Token breakdown</div>
+                    <div class="trace-info-popout" id="trace-info-tok" role="dialog" aria-modal="true" x-dialog="infoOpen==='tok'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-tok-title" x-show="infoOpen==='tok'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-tok-title">Token breakdown</div>
                     <p><b>Shows:</b> input / output / cached / reasoning tokens per iteration.</p>
                     <p><b>Why:</b> suspect #2. Reasoning tokens (purple) that balloon mid-turn are not budgeted and force keep_recent=2 emergency compaction — visible as a reasoning spike followed by an emergency_preflight row in Compaction. Cached tokens (blue) show prompt-cache effectiveness.</p>
                     <p><b>Read:</b> hover for exact values; click to jump the conversation view.</p>
@@ -593,8 +595,8 @@
                 <span class="trace-sub">wall time per provider call</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('lat')" :class="{open: infoOpen==='lat'}" :aria-expanded="infoOpen==='lat' ? 'true' : 'false'" aria-controls="trace-info-lat" aria-label="About Iteration latency" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-lat" role="note" x-show="infoOpen==='lat'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Iteration latency</div>
+                    <div class="trace-info-popout" id="trace-info-lat" role="dialog" aria-modal="true" x-dialog="infoOpen==='lat'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-lat-title" x-show="infoOpen==='lat'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-lat-title">Iteration latency</div>
                     <p><b>Shows:</b> wall time (ms) of each agent-loop iteration — how long the provider call + tool dispatch took.</p>
                     <p><b>Why:</b> finds slow iterations that dominate total wall-time (the Overview "wall time" card is the sum). A spike often coincides with a long tool (see Tool histogram) or a big context (see Context growth).</p>
                     <p><b>Read:</b> the selected iteration is highlighted in the accent colour. Hover for the exact time; click to jump the conversation view.</p>
@@ -616,8 +618,8 @@
                 <span class="trace-sub">iter-aligned · click any iter above to jump</span>
                 <div class="trace-info">
                     <button type="button" class="w-btn trace-info-btn" data-variant="icon" data-size="sm" @click.stop="toggleInfo('conv')" :class="{open: infoOpen==='conv'}" :aria-expanded="infoOpen==='conv' ? 'true' : 'false'" aria-controls="trace-info-conv" aria-label="About Conversation" title="What this panel shows">{{ w.icon("info", size="sm") }}</button>
-                    <div class="trace-info-popout" id="trace-info-conv" role="note" x-show="infoOpen==='conv'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
-                    <div class="tip-title">Conversation</div>
+                    <div class="trace-info-popout" id="trace-info-conv" role="dialog" aria-modal="true" x-dialog="infoOpen==='conv'" @dialog-close="infoOpen=null" aria-labelledby="trace-info-conv-title" x-show="infoOpen==='conv'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title" id="trace-info-conv-title">Conversation</div>
                     <p><b>Shows:</b> the run as a chat transcript — <em>request → assistant turns → final output</em>. Each turn card groups the iters where the model spoke (prose at top) and the tool calls it then made (folded below).</p>
                     <p><b>Why:</b> ties every metric above to what the model actually did, in the order a person reads a conversation — not a flat iter dump. Tool result previews are folded by default so the skeleton of the run reads at a glance; expand a row or "expand N tools" to drill in.</p>
                     <p><b>Read:</b> <b>★ final</b> = the last turn (the answer). <b>acting only</b> = the model called tools without narrating. <b>↺ compacted</b> = a compaction fired in that turn. Click an iteration in any chart to jump to its turn; the containing turn is highlighted. Previews are truncated in the trace; full content lives in <code>session.json</code>.</p>

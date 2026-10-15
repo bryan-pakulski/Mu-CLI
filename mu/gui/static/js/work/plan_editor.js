@@ -74,12 +74,12 @@
             message('Unsaved edits — save the plan before approving.');
         }
         function draw() {
-            container.innerHTML = `<div class="col">
-                <div class="row wrap"><strong>Editing plan · v${plan.version || 0}</strong><span class="muted small">Save, then approve from the action bar to implement your version.</span><span class="spacer"></span>
-                    <div class="work-segmented" role="group" aria-label="Editor view"><button type="button" data-mode="markdown" aria-pressed="${mode === 'markdown'}">Markdown</button><button type="button" data-mode="structured" aria-pressed="${mode === 'structured'}">Structured</button></div>
-                    <button type="button" class="btn" data-plan-cancel>Cancel</button>
-                    ${editable ? `<button type="button" class="btn primary" data-plan-save ${dirty ? '' : 'disabled'}>Save plan <kbd aria-hidden="true">ctrl+s</kbd></button>` : ''}</div>
-                <p role="status" class="small tone-warn" data-plan-status></p>
+            container.innerHTML = `<div class="work-stack-tight">
+                <div class="work-toolbar"><strong>Editing plan · v${plan.version || 0}</strong><span class="work-meta">Save, then approve from the action bar to implement your version.</span><span class="work-spacer"></span>
+                    <div class="w-segmented" data-size="sm" role="group" aria-label="Editor view"><button type="button" class="w-segmented__option" data-mode="markdown" aria-pressed="${mode === 'markdown'}">Markdown</button><button type="button" class="w-segmented__option" data-mode="structured" aria-pressed="${mode === 'structured'}">Structured</button></div>
+                    <button type="button" class="w-btn" data-variant="secondary" data-plan-cancel>Cancel</button>
+                    ${editable ? `<button type="button" class="w-btn" data-variant="primary" data-plan-save ${dirty ? '' : 'disabled'}>Save plan <kbd class="w-keycap" aria-hidden="true">ctrl+s</kbd></button>` : ''}</div>
+                <p role="status" class="work-meta" data-tone="attention" data-plan-status></p>
                 <div data-fields></div></div>`;
             container.querySelectorAll('[data-mode]').forEach(button => { button.onclick = () => {
                 if (mode === 'markdown') doc = parse(markdown);
@@ -87,20 +87,20 @@
             }; });
             const fields = container.querySelector('[data-fields]');
             if (mode === 'markdown') {
-                fields.innerHTML = `<div class="work-editor"><label class="sr-only" for="work-plan-markdown">Plan markdown</label><textarea id="work-plan-markdown" data-markdown spellcheck="true" ${editable ? '' : 'readonly'}>${escape(markdown)}</textarea><div class="work-preview md" aria-label="Preview" data-plan-preview>${preview(markdown)}</div></div>`;
+                fields.innerHTML = `<div class="work-editor"><label class="w-sr-only" for="work-plan-markdown">Plan markdown</label><textarea id="work-plan-markdown" data-markdown spellcheck="true" ${editable ? '' : 'readonly'}>${escape(markdown)}</textarea><div class="work-preview w-markdown work-markdown" aria-label="Preview" data-plan-preview>${preview(markdown)}</div></div>`;
                 fields.querySelector('textarea').oninput = changed;
             } else {
-                fields.innerHTML = `<div class="work-plan-structured"><label class="field"><span class="label">Summary</span><textarea data-summary ${editable ? '' : 'readonly'}>${escape(doc.summary)}</textarea></label></div>`;
+                fields.innerHTML = `<div class="work-plan-structured"><label class="w-field"><span class="w-field__label">Summary</span><textarea data-summary ${editable ? '' : 'readonly'}>${escape(doc.summary)}</textarea></label></div>`;
                 const wrap = fields.firstElementChild;
                 fields.querySelector('[data-summary]').oninput = e => { doc.summary = e.target.value; changed(); };
                 for (const key of ['approach', 'acceptance', 'checks', 'files', 'risks']) {
-                    const section = document.createElement('section'); section.className = 'col';
+                    const section = document.createElement('section'); section.className = 'work-stack-tight';
                     section.innerHTML = `<h3>${sections[key]}</h3>`;
                     (doc[key] || []).forEach((item, i) => {
                         const row = document.createElement('div'); row.className = 'work-plan-row';
                         const keys = key === 'acceptance' ? ['id', 'text'] : key === 'checks' ? ['suite', 'cmd'] : ['value'];
                         row.innerHTML = keys.map(k => `<input type="text" aria-label="${escape(sections[key])} ${k}" value="${escape(k === 'value' ? item : item[k])}" ${editable ? '' : 'readonly'}>`).join('') +
-                            (editable ? '<button type="button" class="btn ghost icon sm" data-up aria-label="Move up">↑</button><button type="button" class="btn ghost icon sm" data-down aria-label="Move down">↓</button><button type="button" class="btn ghost icon sm tone-danger" data-remove aria-label="Remove">×</button>' : '');
+                            (editable ? '<button type="button" class="w-btn" data-variant="icon" data-size="sm" data-up aria-label="Move up" title="Move up">↑</button><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-down aria-label="Move down" title="Move down">↓</button><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-remove aria-label="Remove" title="Remove">×</button>' : '');
                         row.querySelectorAll('input').forEach((input, j) => { input.oninput = e => { if (keys[j] === 'value') doc[key][i] = e.target.value; else doc[key][i][keys[j]] = e.target.value; changed(); }; });
                         if (editable) {
                             row.querySelector('[data-remove]').onclick = () => { doc[key].splice(i, 1); changed(); draw(); };
@@ -111,7 +111,7 @@
                         }
                         section.append(row);
                     });
-                    if (editable) { const add = document.createElement('button'); add.type = 'button'; add.className = 'btn sm'; add.style.alignSelf = 'flex-start'; add.textContent = '+ Add'; add.onclick = () => {
+                    if (editable) { const add = document.createElement('button'); add.type = 'button'; add.className = 'w-btn work-plan-add'; add.dataset.variant = 'secondary'; add.dataset.size = 'sm'; add.textContent = '+ Add'; add.onclick = () => {
                         doc[key].push(key === 'acceptance' ? { id: `AC-${Date.now()}`, text: '' } : key === 'checks' ? { suite: `check-${Date.now()}`, cmd: '' } : ''); changed(); draw();
                     }; section.append(add); }
                     wrap.append(section);

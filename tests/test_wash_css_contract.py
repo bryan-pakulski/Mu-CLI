@@ -1,4 +1,4 @@
-"""Wash CSS contract (spec §4.1, §8.1), scoped to static/css/wash/.
+"""Wash CSS contract (spec §4.1, §8.1). static/css/ now holds only wash/.
 
 The generated tokens.css is the only place colour literals may live. Wash
 stylesheets use tokens, never `!important` outside utilities.css, only the
@@ -37,7 +37,8 @@ def test_wash_tree_has_the_expected_shape():
                  "toast", "banner", "empty", "table", "progress", "stepper", "icon"):
         assert (WASH / "components" / f"{name}.css").is_file(), name
     wash = (WASH / "wash.css").read_text(encoding="utf-8")
-    assert wash.startswith("@layer legacy, tokens, base, layout, components, patterns, utilities;")
+    # Wash final pass (spec §4.4 W4, §7 P7): the legacy layer is retired.
+    assert wash.startswith("@layer tokens, base, layout, components, patterns, utilities;")
 
 
 def test_signature_components_are_layered_and_imported():
@@ -154,25 +155,25 @@ def test_every_wash_custom_property_used_exists_in_tokens():
     assert not missing, missing
 
 
-def test_legacy_stylesheets_carry_no_important():
-    # Inside cascade layers `!important` reverses layer priority, so a legacy
-    # !important would beat every Wash rule (spec §4.1 migration mechanics).
-    legacy = ROOT / "mu" / "gui" / "static" / "css"
+def test_no_stylesheet_outside_wash_carries_important():
+    # Inside cascade layers `!important` reverses layer priority (spec §4.1);
+    # there are no stylesheets outside wash/ left to carry one.
+    css_root = ROOT / "mu" / "gui" / "static" / "css"
     offenders = [
-        p.name for p in sorted(legacy.glob("*.css"))
-        if "!important" in _strip_comments(p.read_text(encoding="utf-8"))
+        str(p.relative_to(css_root)) for p in sorted(css_root.rglob("*.css"))
+        if WASH not in p.parents and "!important" in _strip_comments(p.read_text(encoding="utf-8"))
     ]
     assert not offenders, offenders
 
 
-def test_legacy_token_file_has_no_hex_and_maps_onto_wash():
-    tokens = (ROOT / "mu" / "gui" / "static" / "css" / "tokens.css").read_text(encoding="utf-8")
-    assert re.search(r"#[0-9a-fA-F]{3,8}\b", _strip_comments(tokens)) is None
-    for legacy, wash in (("--accent", "--wash-accent-ink"), ("--warn", "--wash-attention-ink"),
-                         ("--running", "--wash-running-ink"), ("--viz-1", "--wash-layer-L0"),
-                         ("--viz-8", "--wash-layer-L5"), ("--surface", "--wash-surface"),
-                         ("--bg", "--wash-canvas"), ("--text", "--wash-ink")):
-        assert f"{legacy}: var({wash});" in tokens, legacy
+def test_legacy_alias_tokens_are_retired():
+    # Spec §7 P7: the W1 alias file (static/css/tokens.css: --accent, --surface,
+    # --viz-*, --st-*, …) is gone; every consumer reads --wash-* directly.
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "tokens.css").exists()
+    generated = TOKENS.read_text(encoding="utf-8")
+    for wash in ("--wash-accent-ink", "--wash-attention-ink", "--wash-running-ink", "--wash-layer-L0",
+                 "--wash-layer-L5", "--wash-surface", "--wash-canvas", "--wash-ink"):
+        assert f"{wash}:" in generated, wash
 
 
 def test_every_page_links_wash_css_through_the_layout_only():
@@ -223,7 +224,7 @@ def test_work_scripts_render_without_inline_styles():
     # Spec §4.3: the 18 inline style attributes in work/view.js and 10 in
     # work/rules.js are gone; proportional bars are SVG geometry instead.
     js = ROOT / "mu" / "gui" / "static" / "js"
-    for path in (js / "work" / "view.js", js / "work" / "rules.js", js / "wash" / "work_diff.js"):
+    for path in (js / "work" / "view.js", js / "work" / "rules.js", js / "wash" / "diff.js"):
         text = path.read_text(encoding="utf-8")
         assert "style=" not in text and ".style." not in text, path.name
 
@@ -232,3 +233,180 @@ def test_shared_analyzer_rules_load_into_the_patterns_layer():
     for name in ("trace.css", "job-trace.css"):
         text = (WASH / "patterns" / name).read_text(encoding="utf-8")
         assert '@import url("trace-common.css") layer(patterns);' in text, name
+
+
+# ------------------------------------------------------------ final pass: one Wash tree (spec §4.4 W4, §7 P7, §11)
+CSS_ROOT = ROOT / "mu" / "gui" / "static" / "css"
+GUI = ROOT / "mu" / "gui"
+LEGACY_ALIASES = frozenset((
+    "--accent", "--accent-fg", "--accent-hover", "--accent-line", "--accent-on", "--accent-soft",
+    "--accent-solid", "--accent-strong", "--accent-subtle", "--accent-text", "--alpine-green", "--backdrop",
+    "--bg", "--bg-active", "--bg-hover", "--bg-lift", "--bg-raised", "--bg-subtle", "--border",
+    "--border-focus", "--border-hover", "--border-strong", "--caution", "--caution-subtle", "--code-bg",
+    "--composer-bg", "--content-max", "--context-card-highlight", "--context-card-shadow",
+    "--context-card-surface", "--context-control-active", "--context-control-active-text",
+    "--context-control-surface", "--context-glow-primary", "--context-glow-secondary", "--context-live",
+    "--context-live-dot", "--context-plot-surface", "--context-positive", "--context-tooltip-shadow",
+    "--context-tooltip-surface", "--context-track-surface", "--control-border", "--control-h",
+    "--control-h-sm", "--danger", "--dur-large", "--dur-micro", "--dur-small", "--ease-in", "--ease-out",
+    "--ease-standard", "--err", "--error", "--error-subtle", "--err-soft", "--focus-ring", "--font-mono",
+    "--font-sans", "--fs-2xl", "--fs-base", "--fs-lg", "--fs-md", "--fs-sm", "--fs-xl", "--fs-xs",
+    "--fw-medium", "--fw-regular", "--fw-semibold", "--glacier-blue", "--glass", "--glass-strong",
+    "--hairline", "--hairline-color", "--hairline-w", "--header-bg", "--highlight", "--hover", "--info",
+    "--info-subtle", "--lh-body", "--lh-snug", "--lh-tight", "--mist-a", "--mist-b", "--mode-accent",
+    "--mode-debug", "--mode-feature", "--mode-good", "--mode-loop", "--mode-plan", "--mode-research",
+    "--mode-security", "--mode-teacher", "--mode-warn", "--mono", "--mono-font", "--muted", "--ok", "--pane",
+    "--plan", "--plan-subtle", "--radius", "--radius-full", "--radius-lg", "--radius-md", "--radius-pill",
+    "--radius-sm", "--radius-xl", "--radius-xs", "--raised", "--reading-max", "--risk-high", "--risk-low",
+    "--risk-medium", "--running", "--sans", "--scrim", "--serif", "--shadow", "--shadow-1", "--shadow-2",
+    "--shadow-card", "--shadow-modal", "--shadow-soft", "--sidebar-bg", "--sky-blue", "--snow-glow",
+    "--space-1", "--space-2", "--space-3", "--space-4", "--space-5", "--space-6", "--space-7", "--space-8",
+    "--space-9", "--st-active", "--st-done", "--st-failed", "--st-pending", "--st-skipped", "--st-waiting",
+    "--success", "--success-subtle", "--sunrise-peach", "--sunrise-pink", "--surface", "--surface-2",
+    "--surface-raised", "--surface-strong", "--text", "--text-dim", "--text-dimmer", "--text-on-accent",
+    "--text-primary", "--text-secondary", "--text-soft", "--text-tertiary", "--tool", "--touch-target",
+    "--tracking-caps", "--tracking-tight", "--viz-1", "--viz-2", "--viz-3", "--viz-4", "--viz-5", "--viz-6",
+    "--viz-7", "--viz-8", "--warn", "--warning", "--warning-subtle", "--z-base", "--z-dropdown", "--z-modal",
+    "--z-overlay", "--z-popover", "--z-raised", "--z-sticky", "--z-toast",
+))
+
+
+def _sources():
+    """Templates, page scripts and every stylesheet (vendored code excluded)."""
+    paths = list((GUI / "templates").rglob("*.html")) + list(CSS_ROOT.rglob("*.css"))
+    paths += [p for p in (GUI / "static" / "js").rglob("*.js") if "vendor" not in p.parts]
+    return sorted(paths)
+
+
+def test_static_css_holds_only_the_wash_tree():
+    assert sorted(p.name for p in CSS_ROOT.iterdir()) == ["wash"]
+    for retired in ("app.css", "theme.css", "floating_popouts.css", "tokens.css"):
+        assert not (CSS_ROOT / retired).exists(), retired
+    assert not (WASH / "patterns" / "legacy-overrides.css").exists()
+
+
+def test_no_legacy_cascade_layer_or_import_remains():
+    for path in sorted(CSS_ROOT.rglob("*.css")):
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        assert "layer(legacy)" not in text, path
+        assert not re.search(r"@layer[^;{]*\blegacy\b", text), path
+        for imported in re.findall(r'@import url\("([^"]+)"\)', text):
+            assert not imported.startswith("../"), (path, imported)
+    pattern = re.compile(r"/static/css/(?:app|theme|floating_popouts|tokens)\.css")
+    offenders = [str(p.relative_to(GUI)) for p in _sources() if pattern.search(p.read_text(encoding="utf-8"))]
+    assert not offenders, offenders
+
+
+def test_no_raw_px_font_sizes_anywhere_in_the_css_tree():
+    # Type sizes come from --wash-type-* (spec §4.1); calc() offsets from a
+    # token are allowed, a bare `font-size: 13px` is not.
+    offenders = []
+    for path in sorted(CSS_ROOT.rglob("*.css")):
+        if path == TOKENS:
+            continue
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        for match in re.finditer(r"font-size\s*:\s*-?\d*\.?\d+px", text):
+            offenders.append(f"{path.relative_to(CSS_ROOT)}: {match.group(0)}")
+        for match in re.finditer(r"\bfont\s*:([^;{}]*)", text):
+            value = re.sub(r"var\([^()]*\)", "", match.group(1))
+            value = re.sub(r"calc\([^()]*\)", "", value)
+            if re.search(r"(?<![\w.-])\d*\.?\d+px", value):
+                offenders.append(f"{path.relative_to(CSS_ROOT)}: font:{match.group(1).strip()}")
+    assert not offenders, offenders
+
+
+def test_no_colour_literals_anywhere_in_the_css_tree():
+    offenders = []
+    for path in sorted(CSS_ROOT.rglob("*.css")):
+        if path == TOKENS:
+            continue
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        for match in re.finditer(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(", text):
+            offenders.append(f"{path.relative_to(CSS_ROOT)}: {match.group(0)}")
+    assert not offenders, offenders
+
+
+def test_templates_scripts_and_css_reference_no_legacy_alias_variable():
+    # var(--accent), var(--surface), var(--viz-3), muCssToken("--st-done") …
+    # must all be the --wash-* equivalent now.
+    offenders = []
+    for path in _sources():
+        text = path.read_text(encoding="utf-8")
+        names = re.findall(r"var\(\s*(--[\w-]+)", text)
+        names += re.findall(r"""(?:muCssToken|getPropertyValue|css|traceToken|traceAlpha|muTokenAlpha)\(\s*['"`](--[\w-]+)""", text)
+        for name in names:
+            if name in LEGACY_ALIASES:
+                offenders.append(f"{path.relative_to(GUI)}: {name}")
+    assert not offenders, sorted(set(offenders))
+
+
+def test_context_charts_map_every_layer_through_its_wash_pigment():
+    # Canvas charts read --wash-layer-<id> (L1A and L4 included; the server
+    # sends them no hue) and redraw on mucli-theme-change.
+    app = (GUI / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assert 'const MU_LAYER_IDS = Object.freeze(["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"]);' in app
+    assert "return key ? `--wash-layer-${key}` : \"--wash-neutral-pigment\";" in app
+    assert 'window.addEventListener("mucli-theme-change", () => this._scheduleRender());' in app
+    assert "MU_LAYER_HUE_VIZ" not in app and "_rowHueMap" not in app
+
+
+def test_one_diff_renderer_and_one_diff_stylesheet():
+    # Spec §4.3: one diff module (static/js/wash/diff.js) and one stylesheet
+    # (components/diff.css) for chat, approvals, /design and the /work Diff
+    # tab; the interim /work renderer is gone.
+    js = GUI / "static" / "js"
+    assert (js / "wash" / "diff.js").is_file()
+    assert not (js / "wash" / "work_diff.js").exists()
+    scripts = [p for p in js.rglob("*.js") if "vendor" not in p.parts]
+    definers = [p.name for p in scripts if re.search(r"function (renderDiffHTML|renderFile|parseUnified)\b|window\.MuWorkDiff\s*=", p.read_text(encoding="utf-8"))]
+    assert definers == ["diff.js"], definers
+    api = (js / "wash" / "diff.js").read_text(encoding="utf-8")
+    for name in ("renderFile: renderFile", "renderTree: renderTree", "statusBadge: statusBadge", "STATUS_LABEL: STATUS_LABEL"):
+        assert name in api, name
+    assert "opts.findings" in api and "opts.tree" in api
+    for page, needle in (("index.html", '/static/js/wash/diff.js'), ("work.html", '/static/js/wash/diff.js'),
+                         ("design/gallery.html", '/static/js/wash/diff.js')):
+        assert needle in (GUI / "templates" / page).read_text(encoding="utf-8"), page
+    view = (js / "work" / "view.js").read_text(encoding="utf-8")
+    assert "const DIFF = window.WashDiff;" in view and "DIFF.renderFile(" in view and "DIFF.renderTree(" in view
+    # Diff rows, intra-line marks, findings and the file tree are styled once.
+    stylesheets = [p for p in CSS_ROOT.rglob("*.css") if p.name != "diff.css"]
+    for path in stylesheets:
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        assert not re.search(r"\.(?:w-diff__(?:row|num|sign|code|intra|tree|status|churn|finding)|work-diff-(?:table|intra|finding)|work-st\b|work-cbar)", text), path
+
+
+def test_one_command_palette_on_every_page():
+    # Spec §4.3 / G§9.17, §10.5: static/js/wash/palette.js is the only palette;
+    # _layout.html loads it for every page and each page registers its own
+    # navigation and actions. /work's local palette (work/ui.js) is gone.
+    js = GUI / "static" / "js"
+    templates = GUI / "templates"
+    scripts = [p for p in js.rglob("*.js") if "vendor" not in p.parts]
+    definers = [p.name for p in scripts if "window.WashPalette = {" in p.read_text(encoding="utf-8")]
+    assert definers == ["palette.js"], definers
+    ui = (js / "work" / "ui.js").read_text(encoding="utf-8")
+    assert "work-palette" not in ui and "role=\"listbox\"" not in ui
+    assert "window.WashPalette.register('work'" in ui and "function palette() { window.WashPalette?.open(); }" in ui
+    css = "".join(p.read_text(encoding="utf-8") for p in CSS_ROOT.rglob("*.css"))
+    assert ".work-palette" not in css
+    layout = (templates / "_layout.html").read_text(encoding="utf-8")
+    assert '<script src="/static/js/wash/palette.js"></script>' in layout
+    assert '{% include "partials/palette.html" %}' in layout
+    for page in ("index.html", "work.html", "containers.html", "trace.html", "job_trace.html", "model_costs.html"):
+        html = (templates / page).read_text(encoding="utf-8")
+        assert re.search(r'{% extends "(_layout|base)\.html" %}', html), page
+        assert "wash/palette.js" not in html, page  # loaded once, by the layout
+    registrations = {
+        "/": (js / "wash" / "chat_palette.js", "WashPalette.register('chat:actions'"),
+        "/work": (js / "work" / "ui.js", "window.WashPalette.register('work'"),
+        "/containers": (js / "containers.js", "window.WashPalette.register('containers'"),
+        "/trace": (js / "trace.js", 'window.WashPalette.register("trace"'),
+        "/jobs/trace": (js / "job_trace.js", "window.WashPalette.register('job-trace'"),
+        "/models/costs": (js / "model_costs.js", "window.WashPalette.register('model-costs'"),
+    }
+    for page, (path, needle) in registrations.items():
+        assert needle in path.read_text(encoding="utf-8"), page
+    palette = (js / "wash" / "palette.js").read_text(encoding="utf-8")
+    for href in ("'/'", "'/work'", "'/containers'", "'/trace'", "'/jobs/trace'", "'/models/costs'"):
+        assert f"href: {href}" in palette, href

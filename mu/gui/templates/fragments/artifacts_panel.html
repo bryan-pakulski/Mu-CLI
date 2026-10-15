@@ -11,7 +11,7 @@
             <p x-show="$store.artifacts.current.length">Visualizations, files, and your uploads, kept in separate registries.</p>
             <p x-show="!$store.artifacts.current.length">No artifacts yet — outputs the agent publishes will appear here.</p>
         </div>
-        <button type="button" class="icon-btn w-btn" data-variant="icon"
+        <button type="button" class="w-btn" data-variant="icon"
                 @click="$store.artifacts.load($store.chat.currentName, true); $store.attachments.load($store.chat.currentName)"
                 :disabled="$store.artifacts.loading || $store.attachments.loading || $store.attachments.uploading"
                 title="Refresh session files" aria-label="Refresh session files"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg></button>

@@ -1,0 +1,24 @@
+/* components/popout.css — viewport-aware anchored lists (G§9.15 menus).
+ *
+ * static/js/floating_popouts.js measures each open anchored list (slash
+ * command completions, trace info popouts, overflow menus, mode popouts),
+ * marks it `data-viewport-floating` and writes its top / left / width /
+ * max-height inline. These rules turn the marked layer into a fixed,
+ * scroll-contained surface. Never use an `inset` shorthand here: it would
+ * override the measured inline top/left. Surfaces that position the same
+ * element absolutely before it is measured guard that rule with
+ * `:not([data-viewport-floating])`.
+ */
+[data-viewport-floating] {
+    position: fixed;
+    right: auto;
+    bottom: auto;
+    margin: 0;
+    min-width: 0;
+    z-index: var(--wash-z-overlay);
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}

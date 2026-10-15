@@ -220,9 +220,9 @@
                                 <th scope="col">Job</th>
                                 <th scope="col">Status</th>
                                 <th scope="col">Repository</th>
-                                <th scope="col" class="num" data-num>Cost</th>
-                                <th scope="col" class="num" data-num>Attempts</th>
-                                <th scope="col" class="num" data-num>Updated</th>
+                                <th scope="col" data-num>Cost</th>
+                                <th scope="col" data-num>Attempts</th>
+                                <th scope="col" data-num>Updated</th>
                                 <th scope="col"><span class="w-sr-only">Actions</span></th>
                             </tr>
                         </thead>
@@ -446,11 +446,12 @@
 {% endblock %}
 
 {% block body_end %}
+<script src="/static/js/dialogs.js"></script>
 <script src="/static/js/work/ui.js"></script>
 <script src="/static/js/work/plan_editor.js"></script>
 <script src="/static/js/work/environments.js"></script>
 <script src="/static/js/work/agents.js"></script>
-<script src="/static/js/wash/work_diff.js"></script>
+<script src="/static/js/wash/diff.js"></script>
 <script src="/static/js/work/view.js"></script>
 <script src="/static/js/work/activity.js"></script>
 <script src="/static/js/work.js"></script>

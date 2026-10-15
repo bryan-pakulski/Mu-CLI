@@ -148,8 +148,9 @@ def test_product_css_covers_primary_web_surfaces():
     assert 'backdrop-filter' not in page
     assert '@media (width < 840px)' in page
     assert '@media (prefers-reduced-motion: reduce)' in page
-    # Body padding: the shared shell owns the page frame; no override needed.
-    assert 'body { padding: 0; }' not in OVERRIDES_CSS.read_text(encoding="utf-8")
+    # Body padding: the shared shell owns the page frame; no override needed
+    # (the legacy-overrides bridge file is gone).
+    assert not OVERRIDES_CSS.exists()
     assert '!important' not in page
 
 

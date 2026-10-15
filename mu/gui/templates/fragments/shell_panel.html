@@ -10,14 +10,14 @@
         </div>
         <!-- MUCLI_SHELL_QOL_V1 -->
         <div class="shell-panel-actions">
-            <button type="button" class="icon-btn w-btn" data-variant="ghost" data-size="sm"
+            <button type="button" class="w-btn" data-variant="ghost" data-size="sm"
                     x-show="!$store.shell.followOutput"
                     @click="$store.shell.jumpToEnd()"
                     title="Jump to latest output" aria-label="Jump to latest output"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-arrow-down"></use></svg><span>Latest</span></button>
-            <button type="button" class="icon-btn w-btn" data-variant="ghost" data-size="sm"
+            <button type="button" class="w-btn" data-variant="ghost" data-size="sm"
                     @click="$store.shell.clear()"
                     title="Clear output" aria-label="Clear output">Clear</button>
-            <button type="button" class="icon-btn w-btn" data-variant="secondary" data-size="sm"
+            <button type="button" class="w-btn" data-variant="secondary" data-size="sm"
                     @click="$store.shell.connected ? $store.shell.disconnect() : $store.shell.connect()"
                     :title="$store.shell.connected ? 'Disconnect' : 'Reconnect'"
                     aria-label="Toggle shell connection">

@@ -192,7 +192,13 @@
     }
 
     async function reset() {
-        if (!window.confirm('Remove the user pricing override and return to packaged defaults?')) return;
+        const confirmed = await window.WashConfirm({
+            title: 'Reset pricing to defaults?',
+            message: 'This removes your pricing override and returns every model to the packaged defaults.',
+            confirmLabel: 'Reset pricing',
+            tone: 'danger',
+        });
+        if (!confirmed) return;
         $('mc-status').textContent = 'Resetting…';
         const response = await fetch('/api/providers/pricing/reset', { method: 'POST' });
         const data = await response.json().catch(() => ({}));
@@ -215,6 +221,14 @@
         $('mc-add').addEventListener('click', addModel);
         $('mc-save').addEventListener('click', save);
         $('mc-reset').addEventListener('click', reset);
+        // Command palette (static/js/wash/palette.js): this page's actions.
+        if (window.WashPalette) {
+            window.WashPalette.register('model-costs', () => [
+                { id: 'mc:add', group: 'Actions', label: 'Add a model', icon: 'plus', run: addModel },
+                { id: 'mc:save', group: 'Actions', label: 'Save pricing', icon: 'check', enabled: !$('mc-save').disabled, run: save },
+                { id: 'mc:reset', group: 'Actions', label: 'Reset pricing to defaults…', icon: 'rotate-ccw', run: reset },
+            ], { priority: 10 });
+        }
         window.addEventListener('beforeunload', event => {
             if (!state.dirty) return;
             event.preventDefault();

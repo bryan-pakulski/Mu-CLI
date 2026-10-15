@@ -247,7 +247,13 @@ function traceApp() {
 
         async clearRun() {
             if (!this.runId || this.session) return;
-            if (!window.confirm("Clear this trace run? This deletes the JSONL file.")) return;
+            const confirmed = await window.WashConfirm({
+                title: "Clear this trace run?",
+                message: "This deletes the run's JSONL trace file. It cannot be undone.",
+                confirmLabel: "Delete trace",
+                tone: "danger",
+            });
+            if (!confirmed) return;
             try {
                 const r = await fetch("/api/traces/" + encodeURIComponent(this.runId), {
                     method: "DELETE",
@@ -1827,4 +1833,28 @@ function traceApp() {
                 : "iter " + this.hoverIter + " · no calls");
         },
     };
+}
+
+// Command palette (static/js/wash/palette.js): run selection, reload, clear,
+// and a jump to every analysis section on the page.
+if (window.WashPalette) {
+    window.WashPalette.register("trace", () => {
+        const app = window.Alpine && document.body ? window.Alpine.$data(document.body) : null;
+        const items = [
+            { id: "trace:run", group: "Actions", label: "Choose a trace run", icon: "list-checks",
+              run: () => document.getElementById("trace-run-select")?.focus() },
+            { id: "trace:reload", group: "Actions", label: "Reload trace runs", icon: "refresh-cw",
+              run: () => app && app.loadRuns() },
+        ];
+        if (app && app.runId && !app.session) {
+            items.push({ id: "trace:clear", group: "Actions", label: "Clear this trace run…", icon: "trash-2",
+                         run: () => app.clearRun() });
+        }
+        document.querySelectorAll(".trace-h2[id]").forEach((heading) => {
+            if (!heading.offsetParent) return;
+            items.push({ id: "trace:section:" + heading.id, group: "Navigate", label: "Jump to " + heading.textContent.trim(),
+                         icon: "arrow-down", run: () => heading.scrollIntoView({ block: "start" }) });
+        });
+        return items;
+    }, { priority: 10 });
 }

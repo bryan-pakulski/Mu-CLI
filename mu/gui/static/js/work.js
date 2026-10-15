@@ -328,9 +328,9 @@
             ${envPreview?.suggestion?.message && o === suggestion ? `<p>${esc(envPreview.suggestion.message)}</p>` : ''}
             <dl class="work-env-approval-facts">
                 <dt>Kind</dt><dd>${esc(o.kind === 'build' ? 'Dockerfile build' : o.kind === 'image' ? 'image' : (o.kind || 'image'))}</dd>
-                ${o.label ? `<dt>What</dt><dd class="mono">${esc(o.label)}</dd>` : ''}
-                ${o.ref ? `<dt>Image</dt><dd class="mono">${esc(o.ref)}</dd>` : ''}
-                <dt>Fingerprint</dt><dd class="mono">${esc(o.fingerprint)}</dd>
+                ${o.label ? `<dt>What</dt><dd class="work-mono">${esc(o.label)}</dd>` : ''}
+                ${o.ref ? `<dt>Image</dt><dd class="work-mono">${esc(o.ref)}</dd>` : ''}
+                <dt>Fingerprint</dt><dd class="work-mono">${esc(o.fingerprint)}</dd>
             </dl>
             <div class="work-toolbar"><button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-env-approve="${i}">Approve for this repository</button>
                 <span class="work-meta">Not approved: jobs on this repository park until you approve it or pick an environment under Advanced.</span></div></div></div>`).join('');
@@ -481,7 +481,9 @@
 
     async function openCreate() {
         createError.textContent = '';
-        backdrop.hidden = false;
+        // The shared dialog stack (dialogs.js): Tab stays inside, Esc sends
+        // `dialog-close`, focus returns to the opener. Focus is set below.
+        window.MuDialog.open(backdrop, { focus: false });
         const list = await loadSessions(true);
         if (!workspaceInput.dataset.touched) {
             const entry = list.find(s => s.name === entrySession) || list.find(s => s.current);
@@ -499,7 +501,7 @@
     }
 
     function closeCreate() {
-        backdrop.hidden = true;
+        window.MuDialog.close(backdrop);
         newBtn.focus();
     }
 
@@ -601,17 +603,8 @@
     document.getElementById('work-create-cancel').addEventListener('click', closeCreate);
     backdrop.addEventListener('click', e => { if (e.target === backdrop) closeCreate(); });
     createForm.addEventListener('submit', submitCreate);
-    // The New job modal (.w-modal): Esc closes, Tab stays inside while it is open.
-    window.addEventListener('keydown', e => {
-        if (backdrop.hidden) return;
-        if (e.key === 'Escape') { closeCreate(); return; }
-        if (e.key !== 'Tab') return;
-        const items = [...backdrop.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')].filter(x => x.offsetParent !== null);
-        if (!items.length) return;
-        const first = items[0], last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    });
+    // The New job modal (.w-modal) is on the shared dialog stack: Esc closes it.
+    backdrop.addEventListener('dialog-close', closeCreate);
     document.getElementById('work-palette-open').addEventListener('click', ui.palette);
     document.getElementById('work-help-open').addEventListener('click', ui.help);
     document.getElementById('work-density').addEventListener('click', toggleDensity);

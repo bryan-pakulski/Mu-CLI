@@ -28,12 +28,13 @@ def test_data_heavy_web_regions_have_visible_loading_motion():
         "mu/gui/templates/fragments/history_panel.html",
         "mu/gui/templates/trace.html",
     ))
-    css = read("mu/gui/static/css/app.css")
+    css = read("mu/gui/static/css/wash/patterns/overlays.css")
 
     assert sources.count("ui-loading-region") >= 6
     assert ".ui-loading-region::before" in css
     assert ".work-loading::before" in css
     assert "animation: container-create-spin" in css
+    assert "@keyframes container-create-spin" in css
 
 
 def test_mobile_large_history_loading_combines_spinner_and_skeletons():

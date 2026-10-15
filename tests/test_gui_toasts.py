@@ -1,15 +1,21 @@
 """Toast notification placement + styling.
 
-Toasts follow the planos design: a bottom-right stack (clear of every
-header control), raised notes with a 4px tone left border and a status glyph
-(✓ ● ◆ ✗) paired with the message text, rising in from the corner.
+Toasts are the one Wash toast component (G§9.16, components/toast.css): a
+bottom-right stack (clear of every header control), raised notes whose tone
+colours a status glyph (✓ ● ◆ ✗) paired with the message text, bleeding in
+from the corner. app.js's $store.toast and window.WashToast render the same
+markup.
 """
 
 import os
 
 CSS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
-    "mu", "gui", "static", "css", "app.css",
+    "mu", "gui", "static", "css", "wash", "components", "toast.css",
+)
+APP_JS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "mu", "gui", "static", "js", "app.js",
 )
 BASE_HTML_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
@@ -24,11 +30,12 @@ def test_toast_css_exists():
 def test_toast_container_is_bottom_right_clear_of_header():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         css = f.read()
-    # planos placement: bottom-right, never over the header controls.
-    assert ".toast-container" in css
-    block = css.split(".toast-container", 1)[1].split("}", 2)[0]
-    assert "right: var(--space-4)" in block
-    assert "bottom: var(--space-4)" in block
+    # Bottom-right placement, never over the header controls.
+    assert ".w-toast-region {" in css
+    block = css.split(".w-toast-region {", 1)[1].split("}", 1)[0]
+    assert "position: fixed" in block
+    assert "right: var(--wash-space-6)" in block
+    assert "bottom: var(--wash-space-6)" in block
     # Must NOT pin to the top (where it overlapped the header controls).
     assert "top:" not in block
 
@@ -36,19 +43,24 @@ def test_toast_container_is_bottom_right_clear_of_header():
 def test_toast_is_tone_bordered_note_with_type_glyph():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         css = f.read()
-    block = css.split("\n.toast {", 1)[1].split("}", 1)[0]
-    # planos toast: raised surface, 4px tone left border, control radius.
-    assert "background: var(--raised)" in block
-    assert "border-left-width: 4px" in block
-    assert "border-radius: var(--radius-sm)" in block
-    # Flat surface: no frosted backdrop blur anywhere in app.css.
+    block = css.split("\n.w-toast {", 1)[1].split("}", 1)[0]
+    # Raised note on the Wash surface with the component radius.
+    assert "background: var(--wash-raised)" in block
+    assert "border: 1px solid var(--wash-hairline)" in block
+    assert "border-radius: var(--wash-radius-md)" in block
+    # Flat surface: no frosted backdrop blur.
     assert "backdrop-filter" not in css
-    # Colored type glyphs give instant intent recognition.
-    assert '.toast--success::before' in css
-    assert '.toast--error::before' in css
-    assert '.toast--info::before' in css
+    # The tone colours the type glyph for instant intent recognition.
+    assert ".w-toast__glyph { flex: none; color: var(--w-tone-ink" in css
+    region = os.path.join(os.path.dirname(BASE_HTML_PATH), "partials", "toast_region.html")
+    with open(region, "r", encoding="utf-8") as f:
+        html = f.read()
+    assert ':data-tone="$store.toast.tone(m.type)"' in html
+    assert 'x-text="$store.toast.glyph(m.type)"' in html
     # Shared status vocabulary glyphs.
-    assert 'content: "✓"' in css and 'content: "✗"' in css
+    with open(APP_JS_PATH, "r", encoding="utf-8") as f:
+        app = f.read()
+    assert 'glyph(type) { return { ok: "✓", danger: "✗", attention: "◆" }[this._tone(type)] || "●"; }' in app
 
 
 def test_toast_template_wraps_message_and_dismisses():
@@ -60,21 +72,21 @@ def test_toast_template_wraps_message_and_dismisses():
     region = os.path.join(os.path.dirname(BASE_HTML_PATH), "partials", "toast_region.html")
     with open(region, "r", encoding="utf-8") as f:
         html = f.read()
-    assert 'class="toast"' in html
-    assert 'class="toast__msg"' in html
-    assert 'class="toast__close"' in html
+    assert 'class="w-toast"' in html
+    assert 'class="w-toast__msg"' in html
+    assert 'class="w-toast__close"' in html
     # Type is bound to the message type.
     assert "'toast--' + m.type" in html
     # Dismiss button wired to the store.
     assert "$store.toast.dismiss(m.id)" in html
-    # Slide-down enter/leave transition classes are declared.
-    assert "toast--enter-start" in html
-    assert "toast--leave-end" in html
+    # Leaving fades out (entering bleeds in through the component animation).
+    assert "x-transition:leave.opacity" in html
 
 
 def test_toast_css_has_transition_classes():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         css = f.read()
-    for cls in (".toast--enter", ".toast--enter-start", ".toast--enter-end",
-                ".toast--leave", ".toast--leave-start", ".toast--leave-end"):
-        assert cls in css, f"missing transition class {cls}"
+    # Toasts bleed in (blur → sharp) and fade when leaving (G§5).
+    assert "animation: w-toast-bleed" in css
+    assert "@keyframes w-toast-bleed" in css
+    assert ".w-toast[data-leaving]" in css

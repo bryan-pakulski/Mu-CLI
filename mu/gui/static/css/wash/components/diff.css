@@ -16,6 +16,16 @@
  *     </section>
  *   </div>
  *
+ * Pages that frame files themselves (/work) render bodies with renderFile()
+ * (one table, `data-only`), the file tree with renderTree() and status
+ * letters with statusBadge():
+ *
+ *   <ul class="w-diff__tree"><li class="w-diff__tree-item" [data-viewed]>
+ *     <button|a class="w-diff__tree-link"><span class="w-diff__status" data-status="A|M|D|R">A</span>
+ *       <span class="w-diff__tree-name">x.py</span></…>
+ *     <span class="w-diff__churn"><span data-kind="add|del|none"></span>×5</span>
+ *   review findings: <tr class="w-diff__finding-row"><td colspan="4"><div class="w-card w-diff__finding" data-tone>…
+ *
  * Additions: ok wash + "+" gutter in ok ink. Deletions: danger wash + "−"
  * gutter in danger ink. Context: canvas. Hunk headers: sunken ink-3.
  * Intra-line changes are one step stronger. Split view is a toggle on wide
@@ -81,10 +91,13 @@
     tab-size: 4;
 }
 .w-diff__table[data-view="split"] { display: none; table-layout: fixed; }
-.w-diff__row > td { padding: 0; vertical-align: top; }
+.w-diff__table[data-only] { display: table; }
+.w-diff__col-num { width: calc(4ch + 2 * var(--wash-space-2)); }
+.w-diff__row > td { vertical-align: top; }
 .w-diff__num {
-    width: 1%;
-    min-width: 3.5ch;
+    box-sizing: content-box;
+    width: 4ch;
+    min-width: 4ch;
     padding: 0 var(--wash-space-2);
     color: var(--wash-ink-3);
     text-align: right;
@@ -92,7 +105,7 @@
     user-select: none;
     font-variant-numeric: tabular-nums;
 }
-.w-diff__sign { width: 1.5ch; padding: 0 2px; color: var(--wash-ink-3); text-align: center; user-select: none; }
+.w-diff__sign { box-sizing: content-box; width: 1.5ch; padding: 0 var(--wash-space-1); color: var(--wash-ink-3); text-align: center; user-select: none; }
 .w-diff__code { padding: 0 var(--wash-space-3) 0 var(--wash-space-1); white-space: pre-wrap; overflow-wrap: anywhere; }
 .w-diff__row[data-type="add"],
 .w-diff__code[data-type="add"] { background: color-mix(in srgb, var(--wash-ok-wash) 80%, var(--wash-canvas)); }
@@ -117,6 +130,65 @@
     color: var(--wash-ink-3);
     font-size: var(--wash-type-caption-size);
 }
+/* review findings interleaved after the line they point at */
+.w-diff__finding-row > td {
+    padding: var(--wash-space-2) var(--wash-space-3);
+    background: var(--wash-sunken);
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    white-space: normal;
+}
+.w-diff__finding { position: relative; }
+.w-diff__finding::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--w-tone-pigment, var(--wash-attention-pigment)); }
+.w-diff__finding .w-card__body { padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) calc(var(--wash-space-4) + 4px); }
+.w-diff__finding + .w-diff__finding { margin-top: var(--wash-space-2); }
+.w-diff__finding p { margin: 0; white-space: pre-wrap; }
+
+/* changed-file tree: A ok, M accent, D danger, R plan (G§9.11) */
+.w-diff__nav { padding: var(--wash-space-2); border-bottom: 1px solid var(--wash-hairline); background: var(--wash-surface); }
+.w-diff__tree { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.w-diff__tree-item { display: flex; align-items: center; gap: var(--wash-space-2); padding: 2px var(--wash-space-1); border-radius: var(--wash-radius-xs); }
+.w-diff__tree-item:hover { background: var(--wash-sunken); }
+.w-diff__tree-link {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--wash-ink);
+    font: inherit;
+    font-size: var(--wash-type-caption-size);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.w-diff__tree-item[data-viewed] .w-diff__tree-link { color: var(--wash-ink-3); }
+.w-diff__tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-diff__status {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--wash-radius-xs);
+    background: var(--wash-accent-wash);
+    color: var(--wash-accent-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    font-weight: 600;
+}
+.w-diff__status[data-status="A"] { background: var(--wash-ok-wash); color: var(--wash-ok-ink); }
+.w-diff__status[data-status="D"] { background: var(--wash-danger-wash); color: var(--wash-danger-ink); }
+.w-diff__status[data-status="R"] { background: var(--wash-plan-wash); color: var(--wash-plan-ink); }
+.w-diff__churn { display: inline-flex; gap: 1px; flex: none; }
+.w-diff__churn > span { width: 6px; height: 8px; border-radius: 1px; background: var(--wash-hairline-strong); }
+.w-diff__churn > [data-kind="add"] { background: var(--wash-ok-pigment); }
+.w-diff__churn > [data-kind="del"] { background: var(--wash-danger-pigment); }
+
 .w-diff__empty { margin: 0; padding: var(--wash-space-3); color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
 
 /* wide screens: unified by default, split as a toggle */

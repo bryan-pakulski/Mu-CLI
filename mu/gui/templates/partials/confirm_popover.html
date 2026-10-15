@@ -18,7 +18,7 @@
     <div class="confirm-actions">
         <button type="button" class="w-btn" data-variant="secondary" data-size="sm"
                 @click="$store.confirm.cancel()"><span>Cancel</span></button>
-        <button type="button" class="w-btn primary" data-size="sm"
+        <button type="button" class="w-btn" data-size="sm"
                 :class="{ danger: $store.confirm.danger }"
                 :data-variant="$store.confirm.danger ? 'danger' : 'primary'"
                 @click="$store.confirm.confirm()"

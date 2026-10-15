@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PANEL = ROOT / "mu" / "gui" / "templates" / "fragments" / "feature_panel.html"
 SCRIPT = ROOT / "mu" / "gui" / "static" / "js" / "app.js"
-STYLES = ROOT / "mu" / "gui" / "static" / "css" / "app.css"
+STYLES = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "panels.css"
 MOBILE = (
     ROOT
     / "mobile"
@@ -57,8 +57,8 @@ def test_feature_library_surface_uses_real_light_dark_theme_tokens():
 
     assert "--bg-elevated" not in panel
     assert ".feature-browser" in styles
-    assert "var(--bg-subtle)" in styles
-    assert "var(--mode-feature)" in styles
+    assert "var(--wash-surface)" in styles
+    assert "var(--wash-mode-feature-ink)" in styles
     assert "color-mix(in srgb" in styles
 
 

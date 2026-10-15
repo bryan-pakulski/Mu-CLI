@@ -39,7 +39,7 @@
         const attrs = `id="${id}" data-rule="${esc(field.path)}" aria-describedby="${id}-hint"`;
         switch (field.kind) {
             case 'bool':
-                return `<button type="button" class="switch work-switch" role="switch" aria-checked="${Boolean(value)}" ${attrs} aria-label="${esc(field.label)}"></button>`;
+                return `<button type="button" class="work-switch" role="switch" aria-checked="${Boolean(value)}" ${attrs} aria-label="${esc(field.label)}"></button>`;
             case 'int': case 'float':
                 return `<span class="work-toolbar"><input class="w-input work-rule-number" type="number" ${attrs} value="${value ?? ''}" step="${field.kind === 'int' ? 1 : 'any'}"${field.min != null ? ` min="${field.min}"` : ''}${field.max != null ? ` max="${field.max}"` : ''} placeholder="${field.optional ? 'default' : ''}">${field.unit ? `<span class="work-meta">${esc(field.unit)}</span>` : ''}</span>`;
             case 'select':
@@ -82,7 +82,7 @@
                             ? `<span class="work-meta"><span class="work-accent">set</span> · default ${esc(fmt(f, f.default))} · <button type="button" class="work-link-btn" data-reset="${esc(f.path)}">Reset</button></span>`
                             : `<span class="work-meta">default</span>`;
                         return `<div class="work-field work-rule${errorSection === section.id && errorText.includes(f.label) ? ' has-error' : ''}">
-                            <span><label class="w-field__label" for="${id}">${esc(f.label)}</label>${f.hint ? `<small class="hint" id="${id}-hint">${esc(f.hint)}</small>` : `<small id="${id}-hint"></small>`}</span>
+                            <span><label class="w-field__label" for="${id}">${esc(f.label)}</label>${f.hint ? `<small class="w-field__hint" id="${id}-hint">${esc(f.hint)}</small>` : `<small id="${id}-hint"></small>`}</span>
                             <div class="work-stack-tight">${control(f, id)}${meta}</div></div>`;
                     }).join('')}
                     ${errorSection === section.id ? `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(errorText)}</p></div>` : ''}

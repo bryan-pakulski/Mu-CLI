@@ -654,7 +654,7 @@
         </div>
         <!-- Composer bar: attach, mode, effort, plan, settings · mic, Send/Stop -->
         <div class="composer-toolbar w-composer__bar">
-            <button type="button" class="icon-btn attach-btn w-btn" data-variant="icon"
+            <button type="button" class="attach-btn w-btn" data-variant="icon"
                     aria-label="Attach a file"
                     @click="$store.mode.setView('artifacts'); $store.layout.panelOpen = true; modeOpen = false; settingsOpen = false; $store.attachments.load($store.chat.currentName)"
                     :class="{ active: $store.attachments.selectedIds().length > 0 }"
@@ -726,7 +726,7 @@
                      x-init="$store.inspector.loadVariables()">
                     <div class="settings-header">
                         <span id="w-session-settings-title">Session settings</span>
-                        <button type="button" class="icon-btn settings-close-btn w-btn" data-variant="icon" data-size="sm"
+                        <button type="button" class="settings-close-btn w-btn" data-variant="icon" data-size="sm"
                                 @click="settingsOpen = false"
                                 aria-label="Close settings"
                                 title="Close settings"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
@@ -842,7 +842,7 @@
                 </div>
             </div>
             <!-- STT mic button (only when stt_enabled) -->
-            <button type="button" class="icon-btn mic-btn w-btn" data-variant="icon"
+            <button type="button" class="mic-btn w-btn" data-variant="icon"
                     x-show="$store.stt.enabled"
                     @click="$store.stt.toggleRecording()"
                     :class="{ recording: $store.stt.recording, loading: $store.stt.loading }"
@@ -862,7 +862,7 @@
                     title="Stop — pause execution (like Ctrl-C in TUI). Use /continue to resume. Esc also stops.">
                 <span class="w-composer__stop-glyph" aria-hidden="true"></span>
             </button>
-            <button type="submit" class="primary send-btn w-composer__send"
+            <button type="submit" class="send-btn w-composer__send"
                     x-show="!$store.chat.busy"
                     :disabled="$store.chat.busy && !$store.chat.isSlashCommand($refs.input.value)"
                     aria-label="Send"

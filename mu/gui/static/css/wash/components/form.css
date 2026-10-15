@@ -124,6 +124,14 @@
     padding-right: var(--wash-space-7);
     cursor: pointer;
 }
+.w-select[data-size="sm"] .w-select__control {
+    height: var(--wash-size-control-sm);
+    padding-left: var(--wash-space-2);
+    font-size: var(--wash-type-label-size);
+}
+@media (pointer: coarse) {
+    .w-select[data-size="sm"] .w-select__control { height: var(--wash-size-touch); }
+}
 .w-select::after {
     content: "";
     position: absolute;

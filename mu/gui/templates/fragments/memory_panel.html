@@ -36,15 +36,15 @@
                       @keydown.ctrl.enter.prevent="$store.memory.addMemory()"
                       placeholder="Remember something explicitly…"></textarea>
             <div class="memory-capture-controls">
-                <select class="w-select" x-model="$store.memory.durable.scope" aria-label="Memory scope">
+                <span class="w-select" data-size="sm"><select class="w-select__control" x-model="$store.memory.durable.scope" aria-label="Memory scope">
                     <option value="auto">Auto scope</option>
                     <option value="repository">Repository</option>
                     <option value="workspace">Workspace</option>
                     <option value="branch">Branch</option>
                     <option value="feature">Feature</option>
                     <option value="personal">Personal</option>
-                </select>
-                <select class="w-select" x-model="$store.memory.durable.kind" aria-label="Memory kind">
+                </select></span>
+                <span class="w-select" data-size="sm"><select class="w-select__control" x-model="$store.memory.durable.kind" aria-label="Memory kind">
                     <option value="observation">Observation</option>
                     <option value="decision">Decision</option>
                     <option value="finding">Finding</option>
@@ -53,7 +53,7 @@
                     <option value="convention">Convention</option>
                     <option value="procedure">Procedure</option>
                     <option value="lesson">Lesson</option>
-                </select>
+                </select></span>
                 <button type="button" class="w-btn" data-variant="primary" data-size="sm"
                         @click="$store.memory.addMemory()"
                         :disabled="!$store.memory.durable.newStatement.trim()">Remember</button>
@@ -408,12 +408,12 @@
                     </div>
                     <div class="context-resolution">
                         <label class="context-resolution-label" for="mem-res">Detail</label>
-                        <select id="mem-res" class="w-select" x-model.number="$store.memory.resolution"
+                        <span class="w-select" data-size="sm"><select class="w-select__control" id="mem-res" x-model.number="$store.memory.resolution"
                                 @change="$store.memory.loadContext()">
                             <option :value="64">64</option>
                             <option :value="128">128</option>
                             <option :value="256">256</option>
-                        </select>
+                        </select></span>
                     </div>
                 </div>
                 <div class="memory-canvas-wrap">

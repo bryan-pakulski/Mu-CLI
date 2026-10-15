@@ -22,46 +22,21 @@
     else console.warn(message);
   };
 
-  // Modals (.w-modal, toggled through `hidden`): remember the opener, focus the
-  // first control (or a preferred one), trap Tab inside the topmost dialog and
-  // restore focus on close (G§9.17).
-  const FOCUSABLE = 'button:not(:disabled):not([hidden]),a[href],input:not(:disabled):not([type="hidden"]),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
-  const openers = new Map();
-  const focusables = root => Array.from(root.querySelectorAll(FOCUSABLE)).filter(el => el.getClientRects().length > 0);
-  const topModal = () => Array.from(document.querySelectorAll('.manager-modal:not([hidden])')).pop() || null;
+  // Modals (.w-modal backdrops toggled through `hidden`) use the shared dialog
+  // stack in dialogs.js (MuDialog): it remembers the opener, focuses the first
+  // control (or a preferred one), traps Tab, routes Esc to `dialog-close` and
+  // restores focus on close (G§9.17). The dialog semantics live on the
+  // .w-modal__dialog surface, not the backdrop.
   const show = (id, preferred = null) => {
     const modal = $(id);
-    if (modal.hidden) openers.set(id, document.activeElement);
-    modal.hidden = false;
-    document.documentElement.classList.add('has-dialog');
-    requestAnimationFrame(() => {
-      const target = (preferred && $(preferred)) || focusables(modal)[0] || modal;
-      target.focus({preventScroll: true});
-    });
+    if (!modal.hidden && window.MuDialog.isOpen(modal)) return;
+    window.MuDialog.open(modal, {focus: preferred ? $(preferred) : null});
   };
   const hide = id => {
     const modal = $(id);
     if (modal.hidden) return;
-    modal.hidden = true;
-    if (!topModal()) document.documentElement.classList.remove('has-dialog');
-    const opener = openers.get(id);
-    openers.delete(id);
-    if (opener && opener.isConnected && opener.getClientRects().length) opener.focus({preventScroll: true});
+    window.MuDialog.close(modal);
   };
-  document.addEventListener('keydown', event => {
-    if (event.key !== 'Tab') return;
-    // The shared file browser (x-dialog, dialogs.js) traps focus itself while open.
-    if (window.Alpine && Alpine.store('fileBrowser') && Alpine.store('fileBrowser').open) return;
-    const modal = topModal();
-    if (!modal) return;
-    const items = focusables(modal);
-    if (!items.length) { event.preventDefault(); return; }
-    const index = items.indexOf(document.activeElement);
-    if (index < 0 || (event.shiftKey ? index === 0 : index === items.length - 1)) {
-      event.preventDefault();
-      items[event.shiftKey ? items.length - 1 : 0].focus({preventScroll: true});
-    }
-  });
 
   // ask(): the small Wash modal that replaces window.confirm / window.prompt.
   // Resolves true / the typed value, or null when cancelled.
@@ -674,15 +649,13 @@
     }
   });
 
-  // Esc closes the topmost open dialog through its own close control.
-  document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.defaultPrevented) return;
-    const open = Array.from(document.querySelectorAll('.manager-modal:not([hidden])')).pop();
-    if (!open) return;
-    const close = open.querySelector('[data-close], #close-shell, #close-progress:not([hidden]), #ask-cancel');
-    if (!close) return;
-    event.preventDefault();
-    close.click();
+  // Esc (dialogs.js dispatches `dialog-close` on the topmost backdrop) closes
+  // a dialog through its own close control, so cleanup handlers still run.
+  document.querySelectorAll('.manager-modal').forEach(modal => {
+    modal.addEventListener('dialog-close', () => {
+      const close = modal.querySelector('[data-close], #close-shell, #close-progress:not([hidden]), #ask-cancel');
+      if (close) close.click();
+    });
   });
 
   $('container-manager').addEventListener('keydown', async event => {
@@ -711,6 +684,20 @@
   });
   $('create-environment-button').addEventListener('click', () => openCreate());
   $('refresh-containers').addEventListener('click', load);
+
+  // Command palette (static/js/wash/palette.js): this page's actions and its
+  // environments, read live each time the palette draws.
+  if (window.WashPalette) {
+    window.WashPalette.register('containers', () => [
+      {id: 'env:new', group: 'Actions', label: 'New environment', icon: 'plus', run: () => openCreate()},
+      {id: 'env:refresh', group: 'Actions', label: 'Refresh environments', icon: 'refresh-cw', run: () => load()},
+      {id: 'env:templates', group: 'Navigate', label: 'Show templates', icon: 'layers', run: () => $('templates-title').scrollIntoView({block: 'start'})},
+      ...state.containers.map(ref => ({
+        id: `env:open:${ref.name}`, group: 'Environments', label: `Configure ${ref.name}`, icon: 'box',
+        keywords: `${ref.status || ''} environment container`, run: () => openEdit(ref.name, false),
+      })),
+    ], {priority: 10});
+  }
   $('environment-source').addEventListener('change', syncSource);
   $('add-environment-mount').addEventListener('click', addMountFromBrowser);
   $('add-environment-device').addEventListener('click', addDevice);

@@ -49,22 +49,26 @@ function muTokenAlpha(name, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${(a * alpha).toFixed(3)})`;
 }
 
-// Context layers arrive with a server-side HSL hue (LAYER_HUES). Map each to
-// a data-visualisation series token; unknown hues (and FREE) stay neutral.
-// Wash layer pigments (G§1.4): the same L0…L5 order on every chart.
-const MU_LAYER_HUE_VIZ = Object.freeze({
-    210: "--wash-layer-L0",    // L0  system prompt
-    168: "--wash-layer-L1B",   // L1B skills
-    280: "--wash-layer-L2",    // L2  summary
-    25: "--wash-layer-L3",     // L3  active goal
-    50: "--wash-layer-L4B",    // L4B retrieved snippets
-    358: "--wash-layer-L5",    // L5  live history
+// Context layer colours (G§1.4): every chart maps a layer through its own
+// Wash pigment, --wash-layer-<id>, so L1A and L4 (which the server sends
+// without a hue) are coloured like every other layer. The legacy server hue
+// map is only a fallback for payloads that carry no layer id; unknown layers
+// (and FREE) stay neutral.
+const MU_LAYER_IDS = Object.freeze(["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"]);
+const MU_LAYER_HUE_ID = Object.freeze({
+    210: "L0",    // L0  system prompt
+    168: "L1B",   // L1B skills
+    280: "L2",    // L2  summary
+    25: "L3",     // L3  active goal
+    50: "L4B",    // L4B retrieved snippets
+    358: "L5",    // L5  live history
 });
-function muLayerVizToken(hue) {
-    return MU_LAYER_HUE_VIZ[hue] || "--wash-neutral-pigment";
+function muLayerToken(id, hue) {
+    const key = MU_LAYER_IDS.includes(String(id)) ? String(id) : MU_LAYER_HUE_ID[hue];
+    return key ? `--wash-layer-${key}` : "--wash-neutral-pigment";
 }
-function muLayerColor(hue) {
-    return `var(${muLayerVizToken(hue)})`;
+function muLayerColor(id, hue) {
+    return `var(${muLayerToken(id, hue)})`;
 }
 
 // MuCLI session type icons — same Ionicons used by the mobile app.
@@ -2265,6 +2269,10 @@ ${problem.text}`, "error", 16000);
         _tone(type) {
             return { success: "ok", ok: "ok", error: "danger", danger: "danger", warn: "attention", warning: "attention", attention: "attention" }[type] || "info";
         },
+        // Fallback rendering (templates/partials/toast_region.html) uses the
+        // same Wash toast component as WashToast: tone + status glyph.
+        tone(type) { return this._tone(type); },
+        glyph(type) { return { ok: "✓", danger: "✗", attention: "◆" }[this._tone(type)] || "●"; },
         show(msg, type = "info", ms = 5000, options = {}) {
             const tone = this._tone(type);
             if (window.WashToast && typeof window.WashToast.show === "function") {
@@ -4264,12 +4272,12 @@ ${problem.text}`, "error", 16000);
         },
         severityColor(sev) {
             switch ((sev || "").toLowerCase()) {
-                case "critical": return "var(--error)";
-                case "high":     return "color-mix(in srgb, var(--error) 60%, var(--warning))";
-                case "medium":   return "var(--warning)";
-                case "low":      return "var(--success)";
-                case "info":     return "var(--text-tertiary)";
-                default:         return "var(--text-tertiary)";
+                case "critical": return "var(--wash-danger-ink)";
+                case "high":     return "color-mix(in srgb, var(--wash-danger-ink) 60%, var(--wash-attention-ink))";
+                case "medium":   return "var(--wash-attention-ink)";
+                case "low":      return "var(--wash-ok-ink)";
+                case "info":     return "var(--wash-ink-3)";
+                default:         return "var(--wash-ink-3)";
             }
         },
         formatTimestamp(unix) {
@@ -4517,15 +4525,13 @@ ${problem.text}`, "error", 16000);
         // pigment (--wash-layer-L0 … L5); older payloads fall back to the
         // server hue map.
         layerColor(hue, id) {
-            const key = String(id || "");
-            if (window.WASH && WASH.layer && WASH.layer[key]) return `var(--wash-layer-${key})`;
-            return muLayerColor(hue);
+            return muLayerColor(id, hue);
         },
         // Display-only view model for the Observatory's stacked layer bar and
         // compact ring. Never changes the L0–L5 contract: it orders and
         // proportions the layers the snapshot already reports against the
         // (drift-corrected) context limit.
-        _layerOrder: ["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"],
+        _layerOrder: MU_LAYER_IDS,
         layerSegments() {
             const layers = (this.layers || []).filter(layer => layer && layer.id !== "FREE" && Number(layer.tokens) > 0);
             const used = layers.reduce((sum, layer) => sum + Number(layer.tokens || 0), 0);
@@ -4849,16 +4855,16 @@ ${problem.text}`, "error", 16000);
             (window.requestAnimationFrame || setTimeout)(run);
         },
 
-        // row index → layer hue. Built once per render from the legend
-        // (each region carries row_start/row_end + hue). Regions include the
-        // neutral FREE band, so unallocated capacity is rendered rather than
-        // being mistaken for a tiny layer or omitted from the map.
-        _rowHueMap() {
+        // row index → layer colour token. Built once per render from the
+        // legend (each region carries row_start/row_end, its id and a hue).
+        // Regions include the neutral FREE band, so unallocated capacity is
+        // rendered rather than being mistaken for a tiny layer or omitted.
+        _rowLayerMap() {
             const m = new Array(this.rows);
             for (const l of this.regions) {
-                const hue = (typeof l.hue === "number") ? l.hue : 0;
+                const token = muLayerToken(l.id, (typeof l.hue === "number") ? l.hue : 0);
                 const end = Math.min(l.row_end || 0, this.rows);
-                for (let i = l.row_start || 0; i < end; i++) m[i] = hue;
+                for (let i = l.row_start || 0; i < end; i++) m[i] = token;
             }
             return m;
         },
@@ -4883,7 +4889,8 @@ ${problem.text}`, "error", 16000);
                 compaction: wash("accent-pigment"),
                 font,
                 fontEmpty: `${muCssToken("--wash-type-label-size", "13px")} ${mono}`,
-                layer: (hue, alpha) => muTokenAlpha(muLayerVizToken(hue), alpha),
+                // `token` is a --wash-layer-<id> name from muLayerToken().
+                layer: (token, alpha) => muTokenAlpha(token, alpha),
             };
         },
 
@@ -4898,26 +4905,26 @@ ${problem.text}`, "error", 16000);
                 canvas.height = rows;
             }
             ctx.clearRect(0, 0, cols, rows);
-            const rowHue = this._rowHueMap();
+            const rowLayer = this._rowLayerMap();
             const heat = this.view !== "layer";
             const palette = this._contextPalette();
             for (let ri = 0; ri < rows; ri++) {
                 const row = this.grid[ri];
                 if (!row) continue;
-                const hue = rowHue[ri];
-                if (hue == null) continue;       // outside any band → transparent
+                const layerToken = rowLayer[ri];
+                if (layerToken == null) continue;  // outside any band → transparent
                 for (let ci = 0; ci < cols; ci++) {
                     const v = row[ci];
                     if (!v) {
                         // Empty space is still space: a column with no text
                         // renders as a dim, desaturated layer hue so the
                         // band's full extent stays visible.
-                        ctx.fillStyle = palette.layer(hue, palette.light ? .08 : .1);
+                        ctx.fillStyle = palette.layer(layerToken, palette.light ? .08 : .1);
                     } else {
                         // v is 1..255: 1 = present & stable, 255 = churning.
                         const t = (v - 1) / 254;     // 0..1 change frequency
                         const alpha = heat ? .22 + .78 * t : .72;
-                        ctx.fillStyle = palette.layer(hue, alpha);
+                        ctx.fillStyle = palette.layer(layerToken, alpha);
                     }
                     ctx.fillRect(ci, ri, 1, 1);
                 }
@@ -4997,12 +5004,7 @@ ${problem.text}`, "error", 16000);
             const rows = this.layers.length || 8;
             const rowHeight = plotHeight / rows;
             const cellWidth = plotWidth / points.length;
-            const fallback = [
-                { id: "L0", hue: 210 },
-                { id: "L1B", hue: 168 },
-                { id: "L2", hue: 280 }, { id: "L3", hue: 25 },
-                { id: "L4B", hue: 50 }, { id: "L5", hue: 358 },
-            ];
+            const fallback = MU_LAYER_IDS.map(id => ({ id }));
             const legend = this.layers.length ? this.layers : fallback;
             for (let row = 0; row < legend.length; row++) {
                 const layerMeta = legend[row];
@@ -5019,7 +5021,7 @@ ${problem.text}`, "error", 16000);
                         ? Math.min(.96, (palette.light ? .38 : .28) + ratio * (palette.light ? .58 : .68))
                         : (occupied ? (palette.light ? .18 : .105) : (palette.light ? .055 : .035));
                     const inset = Math.min(1.5, cellWidth * .14);
-                    ctx.fillStyle = palette.layer(layerMeta.hue || 0, alpha);
+                    ctx.fillStyle = palette.layer(muLayerToken(layerMeta.id, layerMeta.hue || 0), alpha);
                     ctx.fillRect(
                         left + col * cellWidth + inset,
                         y + 1.5,
@@ -5033,9 +5035,7 @@ ${problem.text}`, "error", 16000);
         _drawContextStream(g, points) {
             const { ctx, left, top, plotWidth, plotHeight } = g;
             const palette = this._contextPalette();
-            const layerIds = ["L0", "L1B", "L2", "L3", "L4B", "L5"];
-            const hueById = {};
-            for (const layer of this.layers) hueById[layer.id] = layer.hue;
+            const layerIds = MU_LAYER_IDS;
             const peak = Math.max(1, ...points.map(point => point.total_tokens || 0));
             const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
             const cumulative = points.map(() => 0);
@@ -5056,8 +5056,7 @@ ${problem.text}`, "error", 16000);
                     ctx.lineTo(xAt(i), y);
                 }
                 ctx.closePath();
-                const hue = hueById[layerId] == null ? 210 : hueById[layerId];
-                ctx.fillStyle = palette.layer(hue, palette.light ? .55 : .6);
+                ctx.fillStyle = palette.layer(muLayerToken(layerId), palette.light ? .55 : .6);
                 ctx.fill();
             }
             ctx.fillStyle = palette.textDim;
@@ -8071,7 +8070,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <span class="pricing-settings-dirty" x-text="$store.pricingSettings.dirty ? 'Unsaved pricing changes' : ($store.pricingSettings.usingOverride ? 'Operator pricing override active' : 'Using packaged defaults')"></span>
                 <div class="pricing-settings-buttons">
                     <button type="button" class="w-btn" data-variant="secondary" @click="$store.confirm.ask('Reset all model pricing to packaged defaults?', $event, () => $store.pricingSettings.reset(), {danger:true})"><span>Reset</span></button>
-                    <button type="button" class="primary w-btn" data-variant="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'Saving…' : 'Save pricing'"></button>
+                    <button type="button" class="w-btn" data-variant="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'Saving…' : 'Save pricing'"></button>
                 </div>
             </div>
         `;

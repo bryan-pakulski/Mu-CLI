@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS_PANEL = ROOT / "mu/gui/templates/fragments/artifacts_panel.html"
 APP_JS = ROOT / "mu/gui/static/js/app.js"
-APP_CSS = ROOT / "mu/gui/static/css/app.css"
+APP_CSS = ROOT / "mu/gui/static/css/wash/patterns/panels.css"  # Wash: panel rules left app.css
 ARTIFACT_STRIP = ROOT / "mobile/android/src/components/ArtifactStrip.tsx"
 CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreenProduct.tsx"
 
@@ -84,8 +84,9 @@ def test_app_js_has_files_helper():
 
 
 def test_registry_section_flex_auto():
+    from wash_css_helpers import css, decls
     src = read(APP_CSS)
-    assert "flex:1 1 auto" in src, (
+    assert decls(css("patterns/panels.css"), ".registry-section").get("flex") == "1 1 auto", (
         "registry-section should use flex:1 1 auto so few entries "
         "don't force the panel to be too small"
     )

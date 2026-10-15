@@ -4,7 +4,7 @@
 
 import type { AuditEvent, CheckRun, CheckSuite, JobPR, JobVM } from '../api/jobCore';
 import { runInEnvironmentSummary } from '../api/environments';
-import { duration, money, stripAnsi } from '../theme/status';
+import { duration, money, stripAnsi, type Status } from '../theme/status';
 
 export type DiffLine = { kind: 'hunk' | 'add' | 'del' | 'ctx' | 'note'; text: string; oldNo?: number; newNo?: number };
 export type DiffFile = { path: string; status: 'A' | 'M' | 'D' | 'R'; lines: DiffLine[]; added: number; removed: number; binary: boolean };
@@ -38,7 +38,31 @@ export function parsePatch(patch: string | null | undefined): DiffFile[] {
 
 export type SessionItem =
   | { kind: 'assistant' | 'user' | 'sys' | 'error' | 'workbench'; text: string }
-  | { kind: 'tool' | 'tool_result'; summary: string; text: string };
+  | { kind: 'tool' | 'tool_result'; summary: string; text: string }
+  | { kind: 'setup'; summary: string; text: string; status: Status; label: string };
+
+/** `environment_setup` status → status vocabulary (running, passed, failed, skipped). */
+export function setupStatus(status: unknown, exitCode?: unknown): { status: Status; label: string } {
+  const s = String(status || '').toLowerCase();
+  if (['running', 'started', 'start'].includes(s)) return { status: 'active', label: 'running' };
+  if (['ok', 'passed', 'done', 'succeeded', 'success'].includes(s) || (s === 'finished' && Number(exitCode) === 0)) return { status: 'done', label: 'done' };
+  if (['failed', 'error', 'timeout', 'timed_out'].includes(s) || (s === 'finished' && exitCode != null)) return { status: 'failed', label: exitCode != null ? `failed · exit ${exitCode}` : 'failed' };
+  if (['skipped', 'cancelled'].includes(s)) return { status: 'skipped', label: s };
+  return { status: 'pending', label: s || 'queued' };
+}
+
+/** One job setup progress line (`environment_setup` event): `setup 2 · [node] npm ci`. */
+export function setupItem(payload: Record<string, any>): Extract<SessionItem, { kind: 'setup' }> {
+  const st = setupStatus(payload.status, payload.exit_code);
+  const index = Number(payload.index);
+  const step = Number.isFinite(index) ? ` ${index + 1}` : '';
+  const binding = payload.binding ? `[${payload.binding}] ` : '';
+  return {
+    kind: 'setup', status: st.status, label: st.label,
+    summary: `setup${step} · ${binding}${String(payload.command || '').trim() || 'command'}`,
+    text: stripAnsi(String(payload.output_tail || '')),
+  };
+}
 
 /** Transcript items for the live events (stage '') or a stored stage transcript. */
 export function sessionItems(session: JobVM['session'] | undefined, stage: string): SessionItem[] {
@@ -59,6 +83,8 @@ export function sessionItems(session: JobVM['session'] | undefined, stage: strin
     }
     return items;
   }
+  // Job setup commands report start and finish; one line per command, updated in place.
+  const setupAt = new Map<string, number>();
   for (const e of session.events || []) {
     const payload = (e.payload || {}) as Record<string, any>;
     const inner = (payload.payload || {}) as Record<string, any>;
@@ -88,6 +114,12 @@ export function sessionItems(session: JobVM['session'] | undefined, stage: strin
     else if (['build_environments_preparing', 'build_environment_progress', 'build_environments_recreated'].includes(e.event_type)) items.push({ kind: 'workbench', text: e.reason || e.event_type.replace(/_/g, ' ') });
     else if (e.event_type === 'build_environment_ready') items.push({ kind: 'workbench', text: `build environment ${payload.binding || ''} ready` });
     else if (e.event_type === 'build_environment_failed') items.push({ kind: 'error', text: `build environment${payload.binding ? ` ${payload.binding}` : ''} failed: ${e.reason || ''}` });
+    else if (e.event_type === 'environment_setup') {
+      const key = `${payload.binding || ''}:${payload.index ?? payload.command ?? ''}`;
+      const item = setupItem(payload);
+      const at = setupAt.get(key);
+      if (at === undefined) { setupAt.set(key, items.length); items.push(item); } else items[at] = item;
+    }
     else if (e.event_type === 'stage_message') items.push({ kind: 'assistant', text: inner.text || payload.text || e.reason || '' });
     else items.push({ kind: 'sys', text: stripAnsi(inner.text || payload.text || e.reason || kind) });
   }
@@ -100,9 +132,35 @@ export function runtimeStatus(events: AuditEvent[] | undefined): string {
   return stripAnsi(((e?.payload as Record<string, any>)?.payload?.text as string) || '');
 }
 
+/** A check that never really ran (`status: "unrunnable"`). */
+export function isUnrunnable(s: CheckSuite): boolean {
+  return s.status === 'unrunnable' || !!s.unrunnable;
+}
+
+/** Suite → status vocabulary: unrunnable is `unverified` (? caution), never failed. */
+export function suiteStatus(s: CheckSuite): { status: Status; label: string } {
+  if (isUnrunnable(s)) return { status: 'unverified', label: 'unverified' };
+  return s.passed ? { status: 'done', label: 'passed' } : { status: 'failed', label: 'failed' };
+}
+
+/** Verification summary of a run: unverified when any check could not run. */
+export function runVerification(r: CheckRun | null | undefined): { verified: boolean; unrunnable: number; suites: CheckSuite[] } {
+  const suites = (r?.suites || []).filter(isUnrunnable);
+  const unrunnable = typeof r?.unrunnable === 'number' ? r.unrunnable : suites.length;
+  return { verified: typeof r?.verified === 'boolean' ? r.verified : unrunnable === 0, unrunnable, suites };
+}
+
+/** Run → status chip: unverified wins over passed/failed. */
+export function runOutcome(r: CheckRun): { status: Status; label: string } {
+  if (!runVerification(r).verified) return { status: 'unverified', label: 'unverified' };
+  return r.passed ? { status: 'done', label: 'passed' } : { status: 'failed', label: 'failed' };
+}
+
 export type Counts = { passed: number; failed: number; skipped: number; total: number };
 export function suiteCounts(s: CheckSuite): Counts {
   const j = s.junit;
+  // An unrunnable check without test evidence counts as not run, not as a failure.
+  if (!j && isUnrunnable(s)) return { passed: 0, failed: 0, skipped: 1, total: 1 };
   return j ? { passed: j.passed || 0, failed: j.failed || 0, skipped: j.skipped || 0, total: j.total || 0 }
     : { passed: s.passed ? 1 : 0, failed: s.passed ? 0 : 1, skipped: 0, total: 1 };
 }

@@ -9,13 +9,13 @@ import { JobPlanEditor, PlanCriteriaCards } from './JobPlanEditor';
 import { planProse } from './planMarkdown';
 import { actionLabel } from './JobActions';
 import {
-  FILE_STATUS_LABEL, countOf, listOf, parsePatch, runCounts, runtimeStatus, sessionItems, suiteCounts,
+  FILE_STATUS_LABEL, countOf, isUnrunnable, listOf, parsePatch, runCounts, runOutcome, runVerification, runtimeStatus, sessionItems, suiteCounts, suiteStatus,
   type DiffFile, type SessionItem,
 } from './jobViews';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, toneInk, touchTarget } from '../theme/tokens';
 import {
-  COVERAGE, SEVERITY, SEVERITY_ORDER, duration, stateStatus, stripAnsi, verdictStyle, when,
+  COVERAGE, SEVERITY, SEVERITY_ORDER, STATUS, duration, stateStatus, stripAnsi, verdictStyle, when,
 } from '../theme/status';
 import { Banner, Button, CheckRow, CountBadge, Empty, Markdown, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
 import { useGlass } from '../ui/Glass';
@@ -100,6 +100,27 @@ export function TranscriptItem({ item }: { item: SessionItem }) {
             <Text variant="xs" style={[styles.mono, { color: item.kind === 'tool' ? colors.ink : colors.ink3, flex: 1 }]} numberOfLines={1}>
               {item.kind === 'tool' ? '› ' : '↳ '}{item.summary}
             </Text>
+          </Pressable>
+          {open && multi ? <Pre>{item.text}</Pre> : null}
+        </View>
+      );
+    }
+    case 'setup': {
+      const st = STATUS[item.status];
+      const multi = !!item.text;
+      return (
+        <View testID="job-setup-line">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Job setup: ${item.summary}, ${item.label}`}
+            accessibilityState={{ expanded: open, disabled: !multi }}
+            disabled={!multi}
+            onPress={() => setOpen(v => !v)}
+            style={({ pressed }) => [styles.fold, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}
+          >
+            <Text variant="xs" importantForAccessibility="no" style={{ color: toneInk(colors, st.tone), width: 12 }}>{st.icon}</Text>
+            <Text variant="xs" style={[styles.mono, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{item.summary}</Text>
+            <Text variant="xs" style={{ color: toneInk(colors, st.tone) }}>{item.label}</Text>
           </Pressable>
           {open && multi ? <Pre>{item.text}</Pre> : null}
         </View>
@@ -461,13 +482,27 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
   const failedCases = (job.checks?.failed_cases || []).filter(c => (!newOnly || c.new) &&
     (!caseFilter.trim() || `${c.suite} ${c.name} ${c.id} ${c.classname || ''} ${c.message}`.toLowerCase().includes(caseFilter.trim().toLowerCase())));
   const history = job.checks?.history || {};
+  const verification = runVerification(runs[0]);
+  const unverified = STATUS.unverified;
   return (
     <View style={styles.col}>
+      {runs[0] && !verification.verified ? (
+        <Banner tone={unverified.tone} glyph={unverified.icon} role="alert" testID="checks-unverified-banner"
+          title={`Unverified: ${verification.unrunnable} check${verification.unrunnable === 1 ? '' : 's'} couldn't run`}>
+          <Text variant="xs" style={{ color: colors.ink2 }}>These results are not failures and were not triaged as pre-existing. Fix the environment, then re-run the checks.</Text>
+          {verification.suites.map(s => (
+            <View key={s.suite} style={{ gap: 2 }} testID={`checks-unverified-${s.suite}`}>
+              <Text variant="xs"><Text variant="xs" style={[styles.mono, { fontWeight: fontWeights.semibold }]}>{s.unrunnable?.tool || s.suite}</Text>{s.unrunnable?.cause ? `: ${s.unrunnable.cause}` : ''}</Text>
+              {s.unrunnable?.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>Fix: {s.unrunnable.hint}</Text> : null}
+            </View>
+          ))}
+        </Banner>
+      ) : null}
       <View style={styles.wrap}>
         <View style={{ flex: 1, minWidth: 160 }}>
           <Text variant="sm">
             {running ? <Text variant="sm" style={{ color: colors.running.ink }}>● running · </Text> : null}
-            {runs[0] ? `last: run ${runs[0].run} ${runs[0].passed ? 'passed' : 'failed'}` : 'No checks have run yet.'}
+            {runs[0] ? `last: run ${runs[0].run} ${runOutcome(runs[0]).label}` : 'No checks have run yet.'}
           </Text>
           <Text variant="xs" style={{ color: colors.ink3 }}>fix attempts {job.fix_attempts || 0} · checks come from the approved plan</Text>
         </View>
@@ -484,13 +519,14 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
             const k = runCounts(r);
             const on = r === selected;
             const nf = countOf(r.new_failures);
+            const outcome = runOutcome(r);
             return (
-              <Pressable key={r.run} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`Run ${r.run}, ${r.passed ? 'passed' : 'failed'}`}
+              <Pressable key={r.run} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`Run ${r.run}, ${outcome.label}`}
                 onPress={() => setSelectedRun(r.run)} testID={`checks-run-${r.run}`}
                 style={({ pressed }) => [styles.runRow, { borderBottomColor: colors.hairline, backgroundColor: on ? colors.accent.wash : pressed ? colors.sunken : 'transparent' }]}>
                 <View style={styles.row}>
                   <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Run {r.run}</Text>
-                  <StatusPill status={r.passed ? 'done' : 'failed'} label={r.passed ? 'passed' : 'failed'} />
+                  <StatusPill status={outcome.status} label={outcome.label} />
                   {r.trigger ? <Pill tone="muted">{r.trigger}</Pill> : null}
                   <View style={{ flex: 1 }} />
                   <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{r.duration_ms != null ? duration(r.duration_ms) : ''}</Text>
@@ -512,7 +548,7 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
         const newList = listOf(selected.new_failures);
         const pre = listOf(selected.preexisting_failures);
         return (
-          <Panel title={`Run ${selected.run}`} right={<StatusPill status={selected.passed ? 'done' : 'failed'} label={selected.passed ? 'passed' : 'failed'} />} testID="checks-selected-run">
+          <Panel title={`Run ${selected.run}`} right={<StatusPill status={runOutcome(selected).status} label={runOutcome(selected).label} />} testID="checks-selected-run">
             <ResultBar large passed={k.passed} failed={k.failed} skipped={k.skipped} />
             <View style={styles.wrap}>
               <Text variant="xs" style={{ color: colors.ok.ink }}>✓ {k.passed} passed</Text>
@@ -584,20 +620,32 @@ function SuiteRow({ suite }: { suite: CheckSuite }) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(!suite.passed);
   const c = suiteCounts(suite);
+  const st = suiteStatus(suite);
+  const unrunnable = isUnrunnable(suite);
   const out = stripAnsi(String(suite.stdout || '') + (suite.stderr ? `\n${suite.stderr}` : ''));
   return (
     <View style={[styles.suite, { borderTopColor: colors.hairline }]}>
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget }]}>
-        <StatusIcon status={suite.passed ? 'done' : 'failed'} label={suite.passed ? 'passed' : 'failed'} />
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${suite.suite}, ${st.label}`} testID={`suite-${suite.suite}`}
+        onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget }]}>
+        <StatusIcon status={st.status} label={st.label} />
         <Text variant="sm" style={{ fontWeight: fontWeights.semibold, flex: 1 }} numberOfLines={1}>{suite.suite}</Text>
         {suite.environment ? <Pill tone="accent" glyph="⬢" accessibilityLabel={`build environment ${suite.environment}`} testID={`suite-env-${suite.suite}`}>{suite.environment}</Pill> : null}
-        {(suite.preexisting_failures || []).length ? <Pill tone="muted">pre-existing failures</Pill> : null}
+        {unrunnable ? <StatusPill status="unverified" testID={`suite-unverified-${suite.suite}`} /> : null}
+        {!unrunnable && (suite.preexisting_failures || []).length ? <Pill tone="muted">pre-existing failures</Pill> : null}
         <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{c.passed}/{c.total}{suite.duration_ms != null ? ` · ${duration(suite.duration_ms)}` : ''}</Text>
       </Pressable>
       <ResultBar passed={c.passed} failed={c.failed} skipped={c.skipped} />
       {open ? (
         <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
           {suite.command ? <Text variant="xs" style={styles.mono} selectable>{suite.command}</Text> : null}
+          {unrunnable ? (
+            <View style={{ gap: 2 }} testID={`suite-unrunnable-${suite.suite}`}>
+              <Text variant="xs" style={{ color: toneInk(colors, STATUS.unverified.tone) }}>
+                {STATUS.unverified.icon} Couldn't run{suite.unrunnable?.tool ? <Text variant="xs" style={styles.mono}> {suite.unrunnable.tool}</Text> : null}{suite.unrunnable?.cause ? `: ${suite.unrunnable.cause}` : ''}
+              </Text>
+              {suite.unrunnable?.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>Fix: {suite.unrunnable.hint}</Text> : null}
+            </View>
+          ) : null}
           <Pre>{out.trim() ? out.slice(-12000) : 'No output.'}</Pre>
         </View>
       ) : null}

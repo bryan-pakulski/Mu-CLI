@@ -67,8 +67,13 @@ export interface EnvironmentApproval {
 }
 /** Current worktree diff against the base commit while a job is active. */
 export interface LiveDiff { patch: string; files: string[]; untracked: string[]; untracked_total?: number; truncated: boolean; base_sha: string; generated_at: number; bytes: number }
+/** Why a check could not run (missing tool, project tool resolved globally, …) and the fix. */
+export interface CheckUnrunnable { tool: string; cause: string; hint: string }
 export interface CheckSuite {
   suite: string; command: string; passed: boolean; stdout: string; stderr: string; preexisting_failures: string[];
+  /** `unrunnable` when the check never really ran (job_templates.md §5); never triaged as pre-existing. */
+  status?: 'passed' | 'failed' | 'unrunnable' | string;
+  unrunnable?: CheckUnrunnable | null;
   duration_ms?: number;
   /** Build environment (binding name) that ran the suite; '' = shared runtime image. */
   environment?: string;
@@ -79,6 +84,10 @@ export interface CheckRun {
   new_failures: number | string[]; preexisting_failures: number | string[];
   suites: CheckSuite[];
   started_at?: number; duration_ms?: number; trigger?: 'auto' | 'recheck' | 'fix' | string; finished_at?: number;
+  /** Verification summary: false when any check was unrunnable (the run is unverified, not failed). */
+  verified?: boolean;
+  /** Number of unrunnable checks in the run. */
+  unrunnable?: number;
 }
 /** `suite` is the check-suite name (same key as history); the JUnit classname is in `classname`. */
 export interface FailedCase { run: number; suite: string; name: string; id: string; message: string; new: boolean; classname?: string }

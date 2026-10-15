@@ -165,3 +165,21 @@ mapping; one ambient image).
 - `tests/test_mobile_product_ui.py:119-124` — header `backgroundColor: colors.canvas, borderBottomColor: colors.hairline` → `<GlassChrome level={1} edges={false} testID="chat-header-glass"` with `borderBottomColor: glass.edge`; `borderBottomWidth: 1` unchanged — the top bar keeps one neutral bottom edge, now as glass over art (G§8.3).
 - `tests/test_mobile_product_ui.py:165-173` — drawers `backgroundColor: colors.raised` → `<GlassBackdrop level={1} testID="sessions-drawer-glass"` / `"mode-drawer-glass"`; the 1px `hairline` side edge is still asserted (now with its colour), and the active session row is `glass.activePill` — side panels stay flat with one neutral edge; selection is a glass-strong pill, not an accent fill (G§3.3 sidebar, G§9.20).
 - `tests/test_mobile_product_ui.py:188-195` — `"expo-blur" not in package` → `'"expo-blur"' in package` and `src/ui/Glass.tsx` is the only file importing it; `expo-linear-gradient` still absent — no gratuitous rendering dependency: the one the glass spec adds is confined to the kit's chrome helper, so lists never blur per row (spec §13).
+
+## Job templates (documentation/plans/job_templates.md §3.2, §4, §5)
+
+The New job sheet and the Jira import sheet gained the "Run in" picker
+(`src/ui/RunInPicker.tsx`, helpers in `src/api/runIn.ts`): Default runtime,
+templates and environments in one sheet, fit warnings with a confirmed Allow
+that PATCHes the template's egress, "Remember for this workspace", and
+Advanced… (New job only) opening the existing environments editor in place of
+the old "Build environments" summary row. The Checks tab renders `unrunnable`
+checks as unverified (`?`, caution) with an unverified banner, and the Session
+transcript folds `environment_setup` events into one progress line per
+command. `status.ts` falls back to the spec's `unverified` / `unrunnable` rows
+until the regenerated `wash.generated.ts` carries them. No existing test was
+rewritten, deleted or skipped. New coverage:
+`mobile/android/__tests__/job-templates.test.tsx` (grouping, preselection
+order, remember payload, fit warning + Allow PATCH, New job and Jira import
+payloads, unverified rendering, setup progress lines, 44dp targets, no side
+borders in the picker).

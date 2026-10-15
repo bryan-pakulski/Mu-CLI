@@ -10,6 +10,8 @@ import {
   type JobSessionOption, type TicketImportTarget,
 } from '../api/jobs';
 import { isMissingEndpoint } from '../api/jobCore';
+import { DEFAULT_RUN_IN, runInExecution, saveLastRunIn, type RunInSpec } from '../api/runIn';
+import { RunInPicker } from '../ui/RunInPicker';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
 import { Banner, Button, Empty, Field, Loading, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
@@ -157,7 +159,10 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
   const [touched, setTouched] = useState(false);
   const [force, setForce] = useState(initialForce);
   const [problem, setProblem] = useState('');
-  useEffect(() => { if (visible) { setTouched(false); setForce(initialForce); setProblem(''); } }, [visible, initialForce]);
+  // "Run in" for every ticket in the import, sent as defaults.execution (template by name).
+  const [runIn, setRunIn] = useState<RunInSpec>(DEFAULT_RUN_IN);
+  const [remember, setRemember] = useState(false);
+  useEffect(() => { if (visible) { setTouched(false); setForce(initialForce); setProblem(''); setRemember(false); } }, [visible, initialForce]);
   useEffect(() => { if (visible && !touched) setWorkspace(defaultWorkspace(sessions, defaultSession)); }, [visible, touched, sessions, defaultSession]);
   const fallbackSession = !supported ? defaultSession : null;
   const pick = (path: string) => { setTouched(true); setWorkspace(path); setProblem(''); };
@@ -165,13 +170,21 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
     const path = workspace.trim();
     if (!path && !fallbackSession) { setProblem('Choose a workspace or repository for the imported jobs.'); return; }
     const matched = path && !isRepositoryUrl(path) ? sessionForWorkspace(sessions, path)?.name : undefined;
-    onConfirm({ workspace: path || undefined, session: matched || (path ? null : fallbackSession), force });
+    const execution = runInExecution(runIn, remember);
+    if (path) void saveLastRunIn(path, runIn);
+    onConfirm({
+      workspace: path || undefined, session: matched || (path ? null : fallbackSession), force,
+      ...(Object.keys(execution).length ? { execution } : {}),
+    });
   };
+  const matchedSession = workspace.trim() && !isRepositoryUrl(workspace.trim()) ? sessionForWorkspace(sessions, workspace.trim()) : undefined;
   return (
     <Sheet visible={visible} onClose={onClose} title={title}>
       {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
       <WorkspaceField sessions={sessions} value={workspace} onChange={pick} testID="job-import-workspace"
         hint={workspaceHint(sessions, workspace, fallbackSession)} error={error} />
+      <RunInPicker active={visible} workspace={workspace} session={matchedSession?.name || fallbackSession} sessionEnvironment={matchedSession?.environment || null}
+        value={runIn} onChange={setRunIn} remember={remember} onRememberChange={setRemember} testID="job-import-run-in" />
       <SwitchRow label="Run again" testID="job-import-force" value={force} onValueChange={setForce}
         hint="Also start a new job for tickets whose latest job is done." />
       {problem ? <Banner tone="danger" glyph="✗" role="alert" title={problem} /> : null}

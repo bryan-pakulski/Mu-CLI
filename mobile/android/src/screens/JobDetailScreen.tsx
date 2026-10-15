@@ -11,7 +11,7 @@ import { stageAgentsLabel } from '../api/agents';
 import { ApprovalBanner, EnvironmentApprovalBanner, JobActionBar, LimitBanner, useJobCommands } from '../components/JobActions';
 import { budgetSummary } from '../components/jobViews';
 import { ChecksTab, DiffTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
-import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, defaultTab, eventTone, parsePatch, type JobTab } from '../components/jobViews';
+import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, defaultTab, eventTone, parsePatch, runOutcome, type JobTab } from '../components/jobViews';
 import { PrPill, jobKey } from '../components/JobsChrome';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
@@ -201,7 +201,13 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
       case 'plan': return job.plan?.draft || job.state === 'plan_review' ? <Text variant="xs" accessibilityLabel="needs you" style={{ color: colors.attention.ink }}>◆</Text> : null;
       case 'diff': return files.length ? <Text variant="xs"><Text variant="xs" style={{ color: colors.ok.ink }}>+{files.reduce((n, f) => n + f.added, 0)}</Text> <Text variant="xs" style={{ color: colors.danger.ink }}>−{files.reduce((n, f) => n + f.removed, 0)}</Text></Text> : null;
       case 'review': return job.review ? <CountBadge tone={openFindings.some(f => ['blocker', 'major'].includes(f.severity)) ? 'danger' : openFindings.some(f => f.severity === 'minor') ? 'warn' : 'muted'}>{openFindings.length}</CountBadge> : null;
-      case 'checks': return job.state === 'checking' ? <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running.ink }}>●</Text> : lastRun ? <Text variant="xs" accessibilityLabel={lastRun.passed ? 'passed' : 'failed'} style={{ color: lastRun.passed ? colors.ok.ink : colors.danger.ink }}>{lastRun.passed ? '✓' : '✗'}</Text> : null;
+      case 'checks': {
+        if (job.state === 'checking') return <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running.ink }}>●</Text>;
+        if (!lastRun) return null;
+        const outcome = runOutcome(lastRun);
+        const st = STATUS[outcome.status];
+        return <Text variant="xs" accessibilityLabel={outcome.label} style={{ color: toneInk(colors, st.tone) }}>{st.icon}</Text>;
+      }
       case 'diagnostics': return failed ? <CountBadge tone="danger">!</CountBadge> : null;
       default: return null;
     }

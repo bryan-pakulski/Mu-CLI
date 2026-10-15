@@ -7,10 +7,16 @@
 import { vocabulary } from './wash.generated';
 import type { Semantic, Tone } from './tokens';
 
-export type Status = keyof typeof vocabulary.status;
+export type Status = keyof typeof vocabulary.status | 'unverified';
 type StatusRow = { icon: string; tone: Semantic; label: string };
 
-const statusRows = vocabulary.status as Record<string, { glyph: string; semantic: string; label: string }>;
+// `unverified` (checks that could not run, job_templates.md §5) and the `unrunnable` check row
+// are vocabulary entries. A token file generated before they were added lacks them, so these
+// spec values stand in; when the generated vocabulary has the keys, its rows win.
+const UNVERIFIED_ROW = { glyph: '?', semantic: 'caution', label: 'unverified' };
+const UNRUNNABLE_CHECK_ROW = { status: 'unverified', label: 'unrunnable' };
+
+const statusRows = { unverified: UNVERIFIED_ROW, ...vocabulary.status } as Record<string, { glyph: string; semantic: string; label: string }>;
 const jobStates = vocabulary.job_state as Record<string, { status: string; label: string }>;
 
 /** Glyph (`icon`), semantic tone and label per status, read from the vocabulary. */
@@ -58,7 +64,7 @@ export function verdictStyle(verdict: string | null | undefined): [Tone, string]
 /** Plan-coverage status → status vocabulary. */
 export const COVERAGE = vocabulary.coverage as Record<string, Status>;
 
-const checkRows = vocabulary.check_status as Record<string, { status: string; label: string }>;
+const checkRows = { unrunnable: UNRUNNABLE_CHECK_ROW, ...vocabulary.check_status } as Record<string, { status: string; label: string }>;
 
 /** Build/test run status → status vocabulary. */
 export function runStatus(status: string): Status {

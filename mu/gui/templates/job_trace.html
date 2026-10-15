@@ -20,78 +20,143 @@
             <li><span class="w-chip jt-status-chip" data-tone="neutral" id="jt-job-status" title="Job status"></span></li>
 {% endblock %}
 {% block topbar_tools %}
-            <div class="job-trace-picker route-picker">
-                <select id="jt-job-select" class="jt-header-select route-select" aria-label="Select engineering job"><option value="">Select a job…</option></select>
-                <select id="jt-compare-select" class="jt-header-select jt-compare-select route-select w-optional" aria-label="Compare with another job"><option value="">Compare with…</option></select>
-            </div>
             <button type="button" class="w-btn" data-variant="icon" id="jt-refresh" title="Refresh analysis" aria-label="Refresh analysis">{{ w.icon("refresh-cw") }}</button>
             <a class="w-btn w-optional" data-variant="icon" id="jt-debug-export" href="#" download title="Export debug bundle" aria-label="Export debug bundle">{{ w.icon("download") }}</a>
 {% endblock %}
 {% block content %}
-<div class="job-trace-shell">
-    <div class="trace-empty" id="jt-loading">Loading engineering jobs…</div>
-    <div class="trace-empty" id="jt-empty" hidden>Select a job above to analyse its execution.</div>
-    <div class="trace-empty jt-error" id="jt-error" hidden></div>
+<div class="job-trace-shell"><div class="w-page" data-width="full">
+    <header class="w-page__head trace-page-head">
+        <div>
+            <span class="w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Insights</span>
+            <h1 class="w-page__title">Job Trace Analyzer</h1>
+            <p class="trace-lede">Where one engineering job spent its time: active work, waiting, verification and failures.</p>
+        </div>
+        <div class="job-trace-picker">
+            <div class="w-field">
+                <label class="w-field__label" for="jt-job-select">Job</label>
+                <span class="w-select"><select id="jt-job-select" class="w-select__control jt-header-select"><option value="">Select a job…</option></select></span>
+            </div>
+            <div class="w-field w-optional">
+                <label class="w-field__label" for="jt-compare-select">Compare</label>
+                <span class="w-select"><select id="jt-compare-select" class="w-select__control jt-header-select jt-compare-select" aria-label="Compare with another job"><option value="">Compare with…</option></select></span>
+            </div>
+        </div>
+    </header>
+    <div class="trace-loading" id="jt-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading engineering jobs…</div>
+    <div class="w-empty trace-empty" data-tone="accent" id="jt-empty" hidden>
+        <div class="w-empty__art" aria-hidden="true">{{ w.icon("bar-chart-3") }}</div>
+        <h2 class="w-empty__title">No job selected</h2>
+        <p class="w-empty__body">Select a job above to analyse its execution.</p>
+    </div>
+    <div class="w-banner jt-error" id="jt-error" data-tone="danger" role="alert" hidden></div>
 
     <div class="trace-main job-trace-main" id="jt-main" role="region" aria-label="Job analysis" hidden>
-        <section class="trace-section">
-            <h2 class="trace-h2">Overview <span class="trace-sub">outcome, active work, passive residence, autonomy and verification</span></h2>
-            <div class="trace-cards jt-overview-cards" id="jt-overview"></div>
-            <div class="jt-signal-strip" id="jt-signals"></div>
-        </section>
-
-        <section class="trace-section" id="jt-runtime-section">
-            <h2 class="trace-h2">Agent harness trace <span class="trace-sub">iteration-level provider, context, tool and compaction telemetry</span></h2>
-            <div id="jt-runtime-trace"></div>
-        </section>
-
-        <section class="trace-section" id="jt-compare-section" hidden>
-            <h2 class="trace-h2">Comparison <span class="trace-sub" id="jt-compare-caption"></span></h2>
-            <div class="jt-compare-grid" id="jt-comparison"></div>
-        </section>
-
-        <section class="trace-section">
-            <h2 class="trace-h2">Lifecycle <span class="trace-sub">state residence is separated from actual execution</span></h2>
-            <div class="trace-canvas-wrap jt-phase-wrap"><canvas id="jt-phase-canvas" class="trace-canvas" width="1200" height="230"></canvas></div>
-            <div class="jt-legend" id="jt-phase-legend"></div>
-            <div class="trace-scroll jt-table-wrap">
-                <table class="trace-table"><thead><tr><th>state</th><th>class</th><th>time</th><th>share</th><th>entries</th></tr></thead><tbody id="jt-phase-table"></tbody></table>
+        <section class="w-card trace-section" aria-labelledby="jt-h-overview">
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Summary</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-overview">Overview</h2>
+                <span class="trace-sub">outcome, active work, passive residence, autonomy and verification</span>
+            </header>
+            <div class="w-card__body">
+                <div class="trace-cards jt-overview-cards" id="jt-overview"></div>
+                <div class="jt-signal-strip" id="jt-signals"></div>
             </div>
-            <div class="jt-drill-head">
-                <strong>Lifecycle drill-down</strong>
-                <span>Expand an interval to inspect why the job entered the state, what happened while it was resident, and what caused it to leave.</span>
-            </div>
-            <div class="jt-intervals" id="jt-intervals"></div>
         </section>
 
-        <section class="trace-section">
-            <h2 class="trace-h2">Attempts & cost <span class="trace-sub">implementation passes, repair loops and configured/provider spend</span></h2>
-            <div class="trace-canvas-wrap"><canvas id="jt-attempt-canvas" class="trace-canvas" width="1200" height="260"></canvas></div>
-            <div class="trace-scroll jt-table-wrap"><table class="trace-table"><thead><tr><th>attempt</th><th>status</th><th>duration</th><th>cost</th><th>tools</th><th>messages</th><th>errors</th><th>tokens</th></tr></thead><tbody id="jt-attempt-table"></tbody></table></div>
+        <section class="w-card trace-section" id="jt-runtime-section" aria-labelledby="jt-h-runtime">
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Harness</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-runtime">Agent harness trace</h2>
+                <span class="trace-sub">iteration-level provider, context, tool and compaction telemetry</span>
+            </header>
+            <div class="w-card__body"><div id="jt-runtime-trace"></div></div>
         </section>
 
-        <section class="trace-section jt-two-column">
-            <div><h2 class="trace-h2">Tool profile <span class="trace-sub">what the agent spent actions on</span></h2><div class="jt-tool-bars" id="jt-tools"></div></div>
-            <div><h2 class="trace-h2">Verification <span class="trace-sub">deterministic quality-gate history</span></h2><div class="jt-verification-list" id="jt-verifications"></div></div>
+        <section class="w-card trace-section" id="jt-compare-section" aria-labelledby="jt-h-compare" hidden>
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Compare</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-compare">Comparison</h2>
+                <span class="trace-sub" id="jt-compare-caption"></span>
+            </header>
+            <div class="w-card__body"><div class="jt-compare-grid" id="jt-comparison"></div></div>
         </section>
 
-        <section class="trace-section">
-            <h2 class="trace-h2">Interventions & failures <span class="trace-sub">human gates, crashes, environment failures and recoveries</span></h2>
-            <div class="jt-incidents" id="jt-incidents"></div>
-        </section>
-
-        <section class="trace-section">
-            <div class="jt-section-toolbar">
-                <h2 class="trace-h2">Execution timeline <span class="trace-sub" id="jt-event-count"></span></h2>
-                <div class="jt-filter-row">
-                    <input id="jt-event-query" class="jt-inline-input" placeholder="Filter events…">
-                    <select id="jt-event-category" class="jt-inline-select"><option value="all">All categories</option><option value="lifecycle">Lifecycle</option><option value="attempt">Attempts</option><option value="worker">Worker</option><option value="git">Git / worktree</option><option value="verification">Verification</option><option value="human">Human</option><option value="agent">Agent</option><option value="tool">Tools</option><option value="runtime">Runtime</option><option value="system">System</option></select>
-                    <select id="jt-event-severity" class="jt-inline-select"><option value="all">All severity</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Info</option></select>
-                    <button class="jt-text-action btn sm" id="jt-export-analysis" type="button">Export analysis JSON</button>
+        <section class="w-card trace-section" aria-labelledby="jt-h-lifecycle">
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Lifecycle</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-lifecycle">Lifecycle</h2>
+                <span class="trace-sub">state residence is separated from actual execution</span>
+            </header>
+            <div class="w-card__body">
+                <div class="trace-canvas-wrap jt-phase-wrap"><canvas id="jt-phase-canvas" class="trace-canvas" role="img" aria-label="Job lifetime split into state residences; the table below lists the exact values" width="1200" height="230"></canvas></div>
+                <div class="jt-legend" id="jt-phase-legend"></div>
+                <div class="trace-scroll w-table-wrap jt-table-wrap">
+                    <table class="w-table trace-table"><thead><tr><th scope="col">state</th><th scope="col">class</th><th scope="col" data-num>time</th><th scope="col" data-num>share</th><th scope="col" data-num>entries</th></tr></thead><tbody id="jt-phase-table"></tbody></table>
                 </div>
+                <div class="jt-drill-head">
+                    <strong>Lifecycle drill-down</strong>
+                    <span>Expand an interval to inspect why the job entered the state, what happened while it was resident, and what caused it to leave.</span>
+                </div>
+                <div class="jt-intervals" id="jt-intervals"></div>
             </div>
-            <div class="jt-event-list" id="jt-events"></div>
+        </section>
+
+        <section class="w-card trace-section" aria-labelledby="jt-h-attempts">
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Cost</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-attempts">Attempts &amp; cost</h2>
+                <span class="trace-sub">implementation passes, repair loops and configured/provider spend</span>
+            </header>
+            <div class="w-card__body">
+                <div class="trace-canvas-wrap"><canvas id="jt-attempt-canvas" class="trace-canvas" role="img" aria-label="Duration bars and cost line per implementation attempt; the table below lists the exact values" width="1200" height="260"></canvas></div>
+                <div class="trace-scroll w-table-wrap jt-table-wrap"><table class="w-table trace-table"><thead><tr><th scope="col">attempt</th><th scope="col">status</th><th scope="col" data-num>duration</th><th scope="col" data-num>cost</th><th scope="col" data-num>tools</th><th scope="col" data-num>messages</th><th scope="col" data-num>errors</th><th scope="col">tokens</th></tr></thead><tbody id="jt-attempt-table"></tbody></table></div>
+            </div>
+        </section>
+
+        <div class="jt-two-column">
+            <section class="w-card trace-section" aria-labelledby="jt-h-tools">
+                <header class="w-card__head trace-head">
+                    <span class="w-eyebrow">Tools</span>
+                    <h2 class="w-card__title trace-h2" id="jt-h-tools">Tool profile</h2>
+                    <span class="trace-sub">what the agent spent actions on</span>
+                </header>
+                <div class="w-card__body"><div class="jt-tool-bars" id="jt-tools"></div></div>
+            </section>
+            <section class="w-card trace-section" aria-labelledby="jt-h-verification">
+                <header class="w-card__head trace-head">
+                    <span class="w-eyebrow">Checks</span>
+                    <h2 class="w-card__title trace-h2" id="jt-h-verification">Verification</h2>
+                    <span class="trace-sub">deterministic quality-gate history</span>
+                </header>
+                <div class="w-card__body"><div class="jt-verification-list" id="jt-verifications"></div></div>
+            </section>
+        </div>
+
+        <section class="w-card trace-section" aria-labelledby="jt-h-incidents">
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Interventions</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-incidents">Interventions &amp; failures</h2>
+                <span class="trace-sub">human gates, crashes, environment failures and recoveries</span>
+            </header>
+            <div class="w-card__body"><div class="jt-incidents" id="jt-incidents"></div></div>
+        </section>
+
+        <section class="w-card trace-section" aria-labelledby="jt-h-events">
+            <header class="w-card__head trace-head">
+                <span class="w-eyebrow">Timeline</span>
+                <h2 class="w-card__title trace-h2" id="jt-h-events">Execution timeline</h2>
+                <span class="trace-sub" id="jt-event-count"></span>
+            </header>
+            <div class="w-card__body">
+                <div class="jt-filter-row" role="group" aria-label="Filter events">
+                    <input id="jt-event-query" class="w-input jt-inline-input" type="search" placeholder="Filter events…" aria-label="Filter events">
+                    <span class="w-select"><select id="jt-event-category" class="w-select__control jt-inline-select" aria-label="Event category"><option value="all">All categories</option><option value="lifecycle">Lifecycle</option><option value="attempt">Attempts</option><option value="worker">Worker</option><option value="git">Git / worktree</option><option value="verification">Verification</option><option value="human">Human</option><option value="agent">Agent</option><option value="tool">Tools</option><option value="runtime">Runtime</option><option value="system">System</option></select></span>
+                    <span class="w-select"><select id="jt-event-severity" class="w-select__control jt-inline-select" aria-label="Event severity"><option value="all">All severity</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Info</option></select></span>
+                    <button class="w-btn jt-text-action" data-variant="secondary" id="jt-export-analysis" type="button">{{ w.icon("download", size="sm") }}<span>Export analysis JSON</span></button>
+                </div>
+                <div class="jt-event-list" id="jt-events"></div>
+            </div>
         </section>
     </div>
-</div>
+</div></div>
 {% endblock %}

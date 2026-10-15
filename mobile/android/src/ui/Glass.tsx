@@ -304,7 +304,7 @@ export function AmbientLayer({ art, testID = 'ambient-wash' }: { art: AmbientArt
   }
   return (
     <View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas }]}>
-      <Image testID={testID} source={ambientArt(art, name)} resizeMode="cover" fadeDuration={0} accessibilityIgnoresInvertColors style={StyleSheet.absoluteFill} />
+      <Image testID={testID} source={ambientArt(art, name)} resizeMode="cover" fadeDuration={0} accessibilityIgnoresInvertColors style={[StyleSheet.absoluteFill, styles.fill]} />
     </View>
   );
 }
@@ -339,4 +339,6 @@ export function AmbientBackground({ children, initialArt = 'dawn' }: { children:
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  // Explicit size: some Image backends otherwise keep the asset's intrinsic size.
+  fill: { width: '100%', height: '100%' },
 });

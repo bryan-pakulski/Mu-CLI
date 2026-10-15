@@ -35,7 +35,8 @@ export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'c
     strong: fontStyle(fonts.ui, '600'),
     em: { fontStyle: 'italic' },
     link: { color: colors.accent.ink, textDecorationLine: 'underline' },
-    blockquote: { ...glassStyle('subtle', colors, { solid: options.solid }), borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginLeft: 0, marginVertical: spacing.sm },
+    // borderLeftWidth 0 overrides the renderer's default 4px grey side rule (G§3.4).
+    blockquote: { ...glassStyle('subtle', colors, { solid: options.solid }), borderLeftWidth: 0, borderColor: 'transparent', borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginLeft: 0, marginVertical: spacing.sm },
     code_inline: { ...mono, color: colors.syntax.keyword, backgroundColor: colors.sunken, borderRadius: radii.xs, paddingHorizontal: spacing.xs },
     code_block: { ...mono, color: colors.ink, backgroundColor: colors.code, borderRadius: radii.sm, padding: spacing.base },
     fence: { ...mono, color: colors.ink, backgroundColor: colors.code, borderRadius: radii.sm, padding: spacing.base },

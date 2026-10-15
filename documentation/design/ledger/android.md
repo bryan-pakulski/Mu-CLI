@@ -135,3 +135,33 @@ published by the server's `pre_provider_call` hook) into
 polls `/api/memory/state` every 20 s only until the first snapshot for the
 open session arrives. No API or payload change and no existing test changed;
 new coverage: `mobile/android/__tests__/context-fill.test.tsx`.
+
+## Glass (spec §13, G§3.3, G§3.4, G§6.2)
+
+Android moved onto glass: a fixed ambient wash behind the navigator
+(`src/ui/Glass.tsx` `AmbientBackground`; Dawn for Chat, Lagoon for
+Work/Jobs/Trace, Meadow for the environment manager, Dawn elsewhere; flat
+canvas with Reduce decoration), screens on a level-1 glass stage, one
+`glassStyle(level)` helper for every kit surface, and `expo-blur` only for
+chrome (chat header, tab bar and tab headers, sheets, dialogs, toasts,
+drawers, the floating approval banner). Every coloured side accent was
+replaced by a tinted header strip (`stateTint`: about 70% of the semantic
+wash mixed into the glass), the status chip or glyph and semantic ink;
+active rows are glass-strong pills. No test was deleted or skipped. New
+coverage: `mobile/android/__tests__/wash-glass.test.tsx` (no side border
+wider than 1px or coloured other than hairline/transparent anywhere under
+`src/`, with the meter's tagged `wash-data-mark` budget tick as the one
+neutral exception; text-bearing glass levels at or above
+`glassEffect.min_alpha` in both themes, `subtle` only as a nested inset;
+glass edges never pigment; solid fallbacks; the Markdown blockquote overrides the renderer's default 4px grey side rule; the approval card and state
+card render a tinted header and chip with no side border; route → ambient
+mapping; one ambient image).
+
+- `tests/test_live_conversation_surfaces.py:133-142` — `backgroundColor: colors.raised` and `borderLeftColor: colors.attention.ink` in `PromptHost.tsx` → `glass.style(2), styles.pendingBanner`, `<GlassBackdrop level={2}`, `glass.tint('attention')`, the vocabulary ◆ glyph, and no `borderLeftWidth`/`borderLeftColor` — the input-required banner stays prominent in the attention state; the state now reads from the tinted glass and glyph, not a side rule (G§3.4, G§9.9 M).
+- `tests/test_mobile_product_ui.py:72-78` — navigation theme `card: colors.raised` → `card: 'transparent'` (background was already transparent), plus the stack `contentStyle: stage` (level-1 flat glass with the solid fallback), glass tab bar/header backgrounds and `setRouteArt(routeAmbient(…))` — chrome stays quiet; the ambient wash shows through glass (G§3.3, G§6.2).
+- `tests/test_mobile_product_ui.py:88-96` — card `backgroundColor: elevated ? colors.raised : colors.surface` / `borderColor: colors.hairline` → `glass.style(elevated ? 2 : 1), borderRadius: radii.lg` with no `borderLeftWidth: 4`, and `Glass.tsx` carries the glass edges (`borderColor: g.edge, borderTopColor: g.border`) and the solid `elevation(…)` fallback — cards stay quiet with a neutral edge and no shadow-heavy depth; `shadowOpacity not in card` unchanged (G§9.3).
+- `tests/test_mobile_product_ui.py:101-104` — text field `backgroundColor: colors.surface` → `backgroundColor: glass.solid ? colors.surface : glass.style('subtle').backgroundColor`; `colors.controlBorder` unchanged — fields stay legible with a ≥ 3:1 control border, now as a glass-subtle inset (G§9.5).
+- `tests/test_mobile_product_ui.py:105-110` — sheet `elevation(3, colors, isDark)` → `glassStyle(3, colors, { solid: reduceDecoration })` plus `<GlassBackdrop level={3}`; `borderTopLeftRadius: radii.xl` / `borderTopWidth: 1` unchanged — sheets stay level 3, now blurred glass with a solid raised fallback (G§8.3, G§9.17).
+- `tests/test_mobile_product_ui.py:119-124` — header `backgroundColor: colors.canvas, borderBottomColor: colors.hairline` → `<GlassChrome level={1} edges={false} testID="chat-header-glass"` with `borderBottomColor: glass.edge`; `borderBottomWidth: 1` unchanged — the top bar keeps one neutral bottom edge, now as glass over art (G§8.3).
+- `tests/test_mobile_product_ui.py:165-173` — drawers `backgroundColor: colors.raised` → `<GlassBackdrop level={1} testID="sessions-drawer-glass"` / `"mode-drawer-glass"`; the 1px `hairline` side edge is still asserted (now with its colour), and the active session row is `glass.activePill` — side panels stay flat with one neutral edge; selection is a glass-strong pill, not an accent fill (G§3.3 sidebar, G§9.20).
+- `tests/test_mobile_product_ui.py:188-195` — `"expo-blur" not in package` → `'"expo-blur"' in package` and `src/ui/Glass.tsx` is the only file importing it; `expo-linear-gradient` still absent — no gratuitous rendering dependency: the one the glass spec adds is confined to the kit's chrome helper, so lists never blur per row (spec §13).

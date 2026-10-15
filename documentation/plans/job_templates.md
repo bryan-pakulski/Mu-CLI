@@ -168,3 +168,56 @@ Notes and limits:
 - A stray global tool is detected for *failing* checks only (a passing check is never marked unrunnable).
 - "Remember for this workspace" replaces that repository's Toolchains rows with one whole-repository row.
 - Setup files that git does not ignore can still be included by an implement checkpoint; the job warns and lists them.
+
+## 7. Environment repair (2026-10-16, user request)
+
+> "If we do start failing checks because the environment is missing dependencies etc., we can
+> allow the agent to fix the environment."
+
+**Trigger.** A checks run where at least one suite is `unrunnable`. That covers a missing
+top-level executable (`missing_tools`), a missing nested tool (`vitest: not found`), a missing
+module, or a failed install. It replaces the remaining "missing tools" park: jobs never stop
+for this.
+
+**Repair step.** At most `jobs.repair.max_attempts` (default 2) per job. Each attempt:
+1. Start a **repair container** from the binding's current job image:
+   - the worktree read-write at `/workspace`, plus `/cache`;
+   - root inside the container with `--cap-drop ALL`, then `CHOWN`, `DAC_OVERRIDE`, `FOWNER`,
+     `SETUID`, `SETGID`, `FSETID` added back, plus `no-new-privileges`;
+   - a writable rootfs, so package managers work;
+   - no git or registry credentials; the model only through the relay.
+2. **Egress** is the binding's allowlist plus, when `jobs.repair.registries = "auto"` (the
+   default), the package registries `detect.py` finds for the repository, the OS package
+   mirrors and toolchain installers. This applies to the repair container only; implement and
+   checks keep their allowlist.
+3. The job's implement harness (mucli, Claude Code or Codex) runs unattended with a repair
+   prompt:
+   - **Goal:** make these check commands *runnable*, not passing. The prompt includes the
+     unrunnable list with output tails, the commands, `detect.py` findings, and CI files as
+     hints.
+   - **Rules:** don't modify tracked files; prefer project-local installs (`npm ci`,
+     `uv sync`, `cargo fetch`); system packages (apt) are allowed; finish by running the check
+     commands.
+   - **Output:** the list of commands that fixed it.
+   - **Budget:** `jobs.repair.max_cost_usd` (3), `max_runtime_s` (1200), `max_iterations` (40).
+4. **Afterwards, the host:**
+   - reverts any tracked-file changes (and reports them);
+   - chowns `/workspace` and `/cache` back to the host uid:gid;
+   - `docker commit`s the container as `mucli/job-<job12>-<binding>-repair<n>` (job-labelled,
+     cleaned with the job);
+   - points the binding's job image at it for every later stage and check;
+   - re-runs the checks.
+5. If checks are still unrunnable after the last attempt, the job continues **unverified**
+   (§5), as before.
+
+**Record and reuse.**
+- `metadata.environment_repairs[]` holds attempt, commands, image, cost, outcome and transcript.
+  `environment_repair` events stream to the job page.
+- **Non-blocking actions:**
+  - **Add to template setup** (project-level commands only, e.g. `npm ci`)
+  - **Save repaired image as template**, which creates a container template from the repaired
+    image with the binding's egress and setup
+- Future jobs then start ready instead of repairing again.
+
+**Settings:** `jobs.repair.enabled` (true), `jobs.repair.max_attempts`, `jobs.repair.registries`
+(`auto` | `template`), and the budgets.

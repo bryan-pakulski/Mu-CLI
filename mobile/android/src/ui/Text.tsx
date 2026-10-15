@@ -5,9 +5,12 @@
 // to 200% (never down below caption).
 
 import React from 'react';
-import { Text as RNText, type TextProps as RNTextProps, type TextStyle } from 'react-native';
+import { Platform, StyleSheet, Text as RNText, type StyleProp, type TextProps as RNTextProps, type TextStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { typeStyle, type TypeName, type WashColors } from '../theme/tokens';
+import { typeStyle, withStaticWeight, type TypeName, type WashColors } from '../theme/tokens';
+
+// Android selects font weight by family name (tokens.fontFamilies); a
+// caller's `fontWeight` override is resolved to the matching static family.
 
 export type WashTextVariant =
   | 'display' | 'title1' | 'title2' | 'title3' | 'bodyLg' | 'body' | 'label' | 'caption' | 'eyebrow' | 'mono' | 'monoSm';
@@ -58,11 +61,12 @@ export function textStyle(variant: TextVariant): TextStyle {
 export const Text = React.forwardRef<RNText, TextProps>(function Text({ variant = 'body', tone, dim, accent, numeric, style, maxFontSizeMultiplier = 2, ...rest }, ref) {
   const { colors } = useTheme();
   const resolved: TextTone = tone ?? (accent ? 'accent' : dim ? 'ink3' : TITLES.has(variant) ? 'plum' : 'ink');
+  const merged: StyleProp<TextStyle> = [textStyle(variant), { color: toneColor(colors, resolved) }, numeric ? { fontVariant: ['tabular-nums'] } : null, style];
   return (
     <RNText
       ref={ref}
       maxFontSizeMultiplier={maxFontSizeMultiplier}
-      style={[textStyle(variant), { color: toneColor(colors, resolved) }, numeric ? { fontVariant: ['tabular-nums'] } : null, style]}
+      style={Platform.OS === 'android' && style ? withStaticWeight(StyleSheet.flatten(merged)) : merged}
       {...rest}
     />
   );

@@ -4,9 +4,9 @@
 // track with an accent fill and labelled stops.
 
 import React, { useState } from 'react';
-import { Switch as RNSwitch, TextInput, View, type StyleProp, type TextInputProps, type TextStyle } from 'react-native';
+import { StyleSheet, Switch as RNSwitch, TextInput, View, type StyleProp, type TextInputProps, type TextStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { controlSize, fonts, radii, spacing, touchTarget, typeStyle } from '../theme/tokens';
+import { controlSize, fonts, radii, spacing, touchTarget, typeStyle, withStaticWeight } from '../theme/tokens';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Icon } from './Icon';
@@ -42,7 +42,7 @@ export function TextField({ style, multiline, mono, invalid, ...rest }: TextFiel
       {...rest}
       onFocus={e => { setFocused(true); rest.onFocus?.(e); }}
       onBlur={e => { setFocused(false); rest.onBlur?.(e); }}
-      style={[
+      style={withStaticWeight(StyleSheet.flatten([
         typeStyle(mono ? 'mono' : 'body'),
         {
           minHeight: touchTarget,
@@ -57,7 +57,7 @@ export function TextField({ style, multiline, mono, invalid, ...rest }: TextFiel
         multiline ? { minHeight: 96, textAlignVertical: 'top' } : null,
         mono ? { fontFamily: fonts.mono } : null,
         style as StyleProp<TextStyle>,
-      ]}
+      ]))}
     />
   );
 }

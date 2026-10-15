@@ -9,7 +9,7 @@ import { StyleSheet, Text } from 'react-native';
 import MarkdownRenderer from 'react-native-markdown-display';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
-import { fonts, radii, spacing, typeStyle, type WashColors } from '../theme/tokens';
+import { fonts, fontStyle, radii, spacing, typeStyle, type WashColors } from '../theme/tokens';
 import { CodeBlock } from '../components/CodeBlock';
 
 export type MarkdownVariant = 'chat' | 'compact' | 'document';
@@ -23,14 +23,14 @@ export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'c
     body: { ...bodyType, color: compact ? colors.ink2 : colors.ink, flexShrink: 1 },
     heading1: compact ? { ...typeStyle('label'), color: colors.ink2 } : heading('title-2'),
     heading2: compact ? { ...typeStyle('label'), color: colors.ink2 } : heading('title-3'),
-    heading3: compact ? { ...typeStyle('label'), color: colors.ink2 } : { ...heading('body-lg'), fontWeight: '600' },
+    heading3: compact ? { ...typeStyle('label'), color: colors.ink2 } : { ...heading('body-lg'), ...fontStyle(fonts.ui, '600') },
     paragraph: { marginTop: 0, marginBottom: compact ? spacing.xs : spacing.sm, flexWrap: 'wrap', flexDirection: 'row' },
     bullet_list: { marginBottom: spacing.sm },
     ordered_list: { marginBottom: spacing.sm },
     list_item: { flexDirection: 'row', marginTop: 2, marginBottom: 2 },
     bullet_list_icon: { color: colors.ink3, marginLeft: spacing.xs, marginRight: spacing.sm, width: 12 },
     ordered_list_icon: { color: colors.ink3, marginRight: spacing.sm, minWidth: 16, fontVariant: ['tabular-nums'] },
-    strong: { fontWeight: '600' },
+    strong: fontStyle(fonts.ui, '600'),
     em: { fontStyle: 'italic' },
     link: { color: colors.accent.ink, textDecorationLine: 'underline' },
     blockquote: { backgroundColor: 'transparent', borderLeftColor: colors.plan.pigment, borderLeftWidth: 3, paddingLeft: spacing.md, marginLeft: 0, marginVertical: spacing.sm },
@@ -40,7 +40,7 @@ export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'c
     hr: { backgroundColor: colors.hairline, height: 1, marginVertical: spacing.md },
     table: { borderColor: colors.hairline, borderWidth: 1, borderRadius: radii.sm, marginVertical: spacing.sm },
     thead: { backgroundColor: colors.sunken },
-    th: { padding: spacing.sm, flex: 1, fontWeight: '500', color: colors.ink2 },
+    th: { padding: spacing.sm, flex: 1, ...fontStyle(fonts.ui, '500'), color: colors.ink2 },
     td: { padding: spacing.sm, flex: 1 },
     tr: { borderBottomColor: colors.hairline, borderBottomWidth: 1, flexDirection: 'row' },
   });

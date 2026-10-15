@@ -47,3 +47,14 @@ legacy file's source formatting.
 ## /work legacy emitters moved onto Wash markup
 
 - tests/test_job_web_parity.py:66 — `'<th scope="col" class="num">Duration</th>'` → `'<th scope="col" data-num>Duration</th>'` — the Checks tab's numeric Duration column is right-aligned tabular (`.w-table [data-num]` hook, G§9.19).
+
+## One diff renderer
+
+- tests/test_job_browser.py:76 — harness injects `wash/work_diff.js` before work/view.js → injects `wash/diff.js` (the same order work.html loads them) — the browser round trip renders the Diff tab through the one Wash diff module.
+- tests/test_wash_css_contract.py:227 — `test_work_scripts_render_without_inline_styles` checks `wash/work_diff.js` → checks `wash/diff.js` (work_diff.js is deleted) — the diff renderer writes no inline styles.
+- (new) tests/test_wash_css_contract.py::test_one_diff_renderer_and_one_diff_stylesheet — one diff module (renderFile / renderTree / statusBadge / findings / tree), loaded by index, work and the gallery; only components/diff.css styles diff rows, marks, findings and the tree.
+
+## One command palette
+
+- tests/test_web_shell_components.py:296 — `INDEX.index("/static/js/wash/palette.js") < INDEX.index("/static/js/wash/chat_palette.js")` → `_layout.html` loads `<script src="/static/js/wash/palette.js"></script>` (not deferred) and index.html no longer links it but still loads chat_palette.js — the palette is on every page, before each page's own registrations.
+- (new) tests/test_wash_css_contract.py::test_one_command_palette_on_every_page — one palette module; /, /work, /containers, /trace, /jobs/trace and /models/costs each register their own sources; work/ui.js has no local palette and work.css no `.work-palette` rules.

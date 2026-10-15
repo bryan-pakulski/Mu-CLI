@@ -1,8 +1,10 @@
-/* Jobs mode UI primitives on the Wash components: Dialog (.w-modal markup with a
- * focus trap, Esc and focus restore), confirm/prompt, toasts (window.WashToast,
- * the shared polite/assertive regions), the command registry, the ctrl+k palette,
- * the "?" help overlay and the global keyboard handler (":" / ctrl+k, "?", "g x"
- * chords, single-key page actions).
+/* Jobs mode UI primitives on the Wash components: Dialog (.w-modal markup on
+ * the shared dialog stack, static/js/dialogs.js: focus trap, Esc and focus
+ * restore), confirm/prompt, toasts (window.WashToast, the shared
+ * polite/assertive regions), the command registry (fed to the shared Wash
+ * command palette, static/js/wash/palette.js, which owns ⌘/Ctrl+K), the "?"
+ * help overlay and the global keyboard handler (":", "?", "g x" chords,
+ * single-key page actions).
  */
 (() => {
     'use strict';
@@ -29,24 +31,19 @@
         let closed = false;
         const close = () => {
             if (closed) return; closed = true;
-            document.removeEventListener('keydown', onKey, true);
+            window.MuDialog.close(backdrop);
             backdrop.remove();
             if (opener && document.contains(opener)) opener.focus();
             onClose?.();
         };
-        const onKey = e => {
-            if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); return; }
-            if (e.key !== 'Tab') return;
-            const items = [...panel.querySelectorAll(FOCUSABLE)].filter(x => !x.hasAttribute('disabled') && x.offsetParent !== null);
-            if (!items.length) { e.preventDefault(); return; }
-            const first = items[0], last = items[items.length - 1];
-            if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(); }
-            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-        };
         backdrop.addEventListener('mousedown', e => { if (e.target === backdrop) close(); });
+        backdrop.addEventListener('dialog-close', close);
         panel.querySelector('[data-dialog-close]').onclick = close;
-        document.addEventListener('keydown', onKey, true);
+        backdrop.hidden = true;
         host().append(backdrop);
+        // The shared stack traps Tab and routes Esc to `dialog-close`; this
+        // function places the initial focus itself (below).
+        window.MuDialog.open(backdrop, { focus: false });
         const first = panel.querySelector('[data-autofocus]') || panel.querySelector('input:not([type=hidden]):not([disabled]), textarea, select') || panel.querySelector(FOCUSABLE);
         (first || panel).focus();
         return { el: panel, body: bodyEl, close };
@@ -114,50 +111,22 @@
     function commands() {
         return [...sources.values()].sort((a, b) => a.priority - b.priority).flatMap(s => s.items);
     }
-    function fuzzyScore(q, text) {
-        if (!q) return 0;
-        const t = text.toLowerCase(), needle = q.toLowerCase();
-        const at = t.indexOf(needle);
-        if (at >= 0) return 1000 - at;
-        let score = 0, pos = 0;
-        for (const ch of needle) { const i = t.indexOf(ch, pos); if (i < 0) return null; score += i === pos ? 5 : 1; pos = i + 1; }
-        return score;
-    }
 
-    function palette() {
-        if (document.querySelector('.work-dialog-backdrop')) return;
-        const listId = `work-palette-${++idSeq}`;
-        let sel = 0, results = [];
-        const body = document.createElement('div');
-        body.className = 'work-stack-tight work-palette';
-        body.innerHTML = `<div class="work-palette-search"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-search"></use></svg>
-            <input class="w-input" type="text" role="combobox" aria-expanded="true" aria-controls="${listId}" aria-label="Search commands" placeholder="Go to… or run an action" data-autofocus></div>
-            <ul class="work-palette-list" id="${listId}" role="listbox" aria-label="Commands"></ul>`;
-        const input = body.querySelector('input'), list = body.querySelector('ul');
-        const d = dialog({ title: 'Command palette', body });
-        const choose = item => { if (!item) return; d.close(); setTimeout(() => item.run(), 0); };
-        const draw = () => {
+    /* The page's commands live in the shared Wash command palette
+     * (static/js/wash/palette.js, loaded by _layout.html on every page). */
+    if (window.WashPalette) {
+        window.WashPalette.configure({ goKeys: false });   // /work owns its `g x` chords
+        window.WashPalette.register('work', () => {
             const seen = new Set();
-            results = commands().filter(i => i.enabled !== false && !seen.has(i.id) && seen.add(i.id))
-                .map(i => ({ i, s: fuzzyScore(input.value, `${i.label} ${i.group} ${i.keywords || ''}`) }))
-                .filter(x => x.s != null).sort((a, b) => (input.value ? b.s - a.s : 0)).slice(0, 50).map(x => x.i);
-            sel = Math.min(sel, Math.max(0, results.length - 1));
-            list.innerHTML = results.map((i, n) => `<li id="${listId}-${n}" role="option" aria-selected="${n === sel}" data-index="${n}" class="work-palette-item"><span class="work-palette-group">${esc(i.group)}</span><span class="work-grow">${esc(i.label)}</span>${i.key ? `<kbd class="w-keycap">${esc(i.key)}</kbd>` : ''}</li>`).join('') || '<li class="work-empty-line">No matching command</li>';
-            input.setAttribute('aria-activedescendant', results[sel] ? `${listId}-${sel}` : '');
-            list.querySelector(`[data-index="${sel}"]`)?.scrollIntoView({ block: 'nearest' });
-        };
-        list.addEventListener('mousemove', e => { const li = e.target.closest('[data-index]'); if (li && Number(li.dataset.index) !== sel) { sel = Number(li.dataset.index); draw(); } });
-        list.addEventListener('click', e => { const li = e.target.closest('[data-index]'); if (li) choose(results[Number(li.dataset.index)]); });
-        input.addEventListener('input', () => { sel = 0; draw(); });
-        input.addEventListener('keydown', e => {
-            if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(results.length - 1, sel + 1); draw(); }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); }
-            else if (e.key === 'Enter') { e.preventDefault(); choose(results[sel]); }
-        });
-        draw();
+            return commands().filter(i => !seen.has(i.id) && seen.add(i.id)).map(i => ({
+                id: `work:${i.id}`, group: i.group, label: i.label, key: i.key, keywords: i.keywords,
+                hint: i.enabled === false ? (i.reason || 'not available now') : '', enabled: i.enabled !== false, run: i.run,
+            }));
+        }, { priority: 5 });
     }
+    function palette() { window.WashPalette?.open(); }
 
-    const GLOBAL_KEYS = [['ctrl+k  or  :', 'command palette'], ['?', 'this help'], ['g h', 'dashboard'], ['g t', 'jobs'],
+    const GLOBAL_KEYS = [['⌘K / ctrl+k  or  :', 'command palette'], ['?', 'this help'], ['g h', 'dashboard'], ['g t', 'jobs'],
         ['g a', 'activity'], ['g b', 'tickets'], ['g r', 'history'], ['g s', 'settings'], ['g u', 'setup'], ['g d', 'setup → doctor'], ['n', 'new job'], ['Esc', 'close dialog'], ['← →', 'switch tabs (when a tab has focus)']];
     function help() {
         if (document.querySelector('.work-dialog-backdrop')) return;
@@ -175,7 +144,6 @@
     function installKeys() {
         window.addEventListener('keydown', e => {
             if (e.defaultPrevented) return;
-            if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); palette(); return; }
             if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
             if (document.querySelector('[aria-modal="true"]:not([hidden])') && [...document.querySelectorAll('[aria-modal="true"]')].some(m => m.offsetParent !== null)) return;
             if (e.key === ':') { e.preventDefault(); palette(); return; }

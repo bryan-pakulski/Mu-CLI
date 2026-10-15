@@ -291,7 +291,12 @@ def test_palette_is_page_agnostic_with_a_registration_api():
     # The chat page registers its own sources.
     for source in ("chat:sessions", "chat:views", "chat:actions", "chat:commands"):
         assert f"WashPalette.register('{source}'" in CHAT_PALETTE_JS
-    assert INDEX.index("/static/js/wash/palette.js") < INDEX.index("/static/js/wash/chat_palette.js")
+    # Wash final pass: _layout.html loads the palette (not deferred) for every
+    # page, ahead of each page's own registrations.
+    layout = (ROOT / "mu" / "gui" / "templates" / "_layout.html").read_text(encoding="utf-8")
+    assert '<script src="/static/js/wash/palette.js"></script>' in layout
+    assert "/static/js/wash/palette.js" not in INDEX
+    assert '{% extends "base.html" %}' in INDEX and "/static/js/wash/chat_palette.js" in INDEX
 
 
 # ------------------------------------------------------------------ gallery

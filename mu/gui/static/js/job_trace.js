@@ -242,6 +242,16 @@
     els.compareSelect.addEventListener('change', async () => { const url = new URL(window.location.href); if (els.compareSelect.value) url.searchParams.set('compare', els.compareSelect.value); else url.searchParams.delete('compare'); history.replaceState(null, '', url); await loadComparison(); });
     els.refresh.addEventListener('click', async () => { await loadJobs(); if (state.analysis) await loadJob(state.analysis.job.id, { updateUrl: false }); });
     window.addEventListener('mucli-theme-change', syncTheme); els.exportAnalysis.addEventListener('click', exportAnalysis);
+    // Command palette (static/js/wash/palette.js): this analyzer's actions.
+    if (window.WashPalette) {
+        window.WashPalette.register('job-trace', () => [
+            { id: 'jt:job', group: 'Actions', label: 'Choose a job to analyze', icon: 'list-checks', run: () => document.getElementById('jt-job-select')?.focus() },
+            { id: 'jt:refresh', group: 'Actions', label: 'Refresh job analysis', icon: 'refresh-cw', run: () => els.refresh.click() },
+            { id: 'jt:export', group: 'Actions', label: 'Export analysis as JSON', icon: 'download', enabled: !!state.analysis, run: exportAnalysis },
+            { id: 'jt:work', group: 'Navigate', label: 'Open this job in Work', icon: 'briefcase', enabled: !!state.analysis,
+              run: () => { location.href = `/work#/job/${encodeURIComponent(state.analysis.job.id)}`; } },
+        ], { priority: 10 });
+    }
     [els.eventQuery, els.eventCategory, els.eventSeverity].forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', renderEvents));
     window.addEventListener('resize', () => { clearTimeout(state.resizeTimer); state.resizeTimer = setTimeout(() => { if (state.analysis) { renderPhaseChart(state.analysis); renderAttemptChart(state.analysis); } }, 150); });
     init();

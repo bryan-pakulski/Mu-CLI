@@ -11,21 +11,24 @@
  *   WashPalette.unregister(sourceId)
  *   WashPalette.open(query?) / close() / toggle() / isOpen()
  *   WashPalette.commands()            → the flattened, enabled item list
- *   WashPalette.configure({ hotkey: false })   pages with their own ⌘K
+ *   WashPalette.configure({ goKeys: false })   pages with their own `g x` chords
  *
  * The palette mounts into #w-palette-root (templates/partials/palette.html)
  * or creates it. It is a level-3, 640px centred dialog with a combobox input
  * and a grouped listbox; focus is trapped, Esc closes, focus is restored.
- * Navigation commands (Chat, Work, Environments, Trace) are registered by
- * default. `g c` / `g w` / `g e` / `g t` jump between pages when focus is not
- * in a text field (G§10.5).
+ * It is loaded by templates/_layout.html on every page (/, /work,
+ * /containers, /trace, /jobs/trace, /models/costs, /design); each page adds
+ * its own sources. Navigation between pages (Chat, Work, Environments,
+ * Trace, Job analysis, Model pricing) is registered here. `g c` / `g w` /
+ * `g e` / `g t` jump between pages when focus is not in a text field
+ * (G§10.5) unless the page owns `g` chords (/work).
  */
 (function () {
     'use strict';
 
     var GROUP_ORDER = ['Navigate', 'Sessions', 'Actions', 'Commands'];
     var sources = new Map();
-    var settings = { hotkey: true };
+    var settings = { hotkey: true, goKeys: true };
     var state = { open: false, sel: 0, results: [], restore: null, root: null, input: null, list: null };
     var uid = 0;
 
@@ -255,7 +258,7 @@
             toggle();
             return;
         }
-        if (state.open || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) return;
+        if (!settings.goKeys || state.open || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) return;
         if (document.querySelector('[role="dialog"][aria-modal="true"]:not([hidden])') && document.querySelector('.w-modal:not([hidden]), .w-drawer:not([hidden])')) return;
         var key = String(event.key).toLowerCase();
         if (goPending && Date.now() - goPending < 1200 && GO_KEYS[key]) {
@@ -272,6 +275,8 @@
         { id: 'nav:work', group: 'Navigate', label: 'Work', icon: 'briefcase', href: '/work', key: 'g w' },
         { id: 'nav:environments', group: 'Navigate', label: 'Environments', icon: 'box', href: '/containers', key: 'g e' },
         { id: 'nav:trace', group: 'Navigate', label: 'Trace', icon: 'activity', href: '/trace', key: 'g t' },
+        { id: 'nav:job-analysis', group: 'Navigate', label: 'Job analysis', icon: 'bar-chart-3', href: '/jobs/trace' },
+        { id: 'nav:model-pricing', group: 'Navigate', label: 'Model pricing', icon: 'sliders-horizontal', href: '/models/costs' },
         { id: 'nav:theme', group: 'Actions', label: 'Toggle Paper / Dusk theme', icon: 'moon', run: function () { if (window.MuTheme) window.MuTheme.toggle(); } },
     ], { priority: 100 });
 

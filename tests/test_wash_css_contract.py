@@ -374,3 +374,39 @@ def test_one_diff_renderer_and_one_diff_stylesheet():
     for path in stylesheets:
         text = _strip_comments(path.read_text(encoding="utf-8"))
         assert not re.search(r"\.(?:w-diff__(?:row|num|sign|code|intra|tree|status|churn|finding)|work-diff-(?:table|intra|finding)|work-st\b|work-cbar)", text), path
+
+
+def test_one_command_palette_on_every_page():
+    # Spec §4.3 / G§9.17, §10.5: static/js/wash/palette.js is the only palette;
+    # _layout.html loads it for every page and each page registers its own
+    # navigation and actions. /work's local palette (work/ui.js) is gone.
+    js = GUI / "static" / "js"
+    templates = GUI / "templates"
+    scripts = [p for p in js.rglob("*.js") if "vendor" not in p.parts]
+    definers = [p.name for p in scripts if "window.WashPalette = {" in p.read_text(encoding="utf-8")]
+    assert definers == ["palette.js"], definers
+    ui = (js / "work" / "ui.js").read_text(encoding="utf-8")
+    assert "work-palette" not in ui and "role=\"listbox\"" not in ui
+    assert "window.WashPalette.register('work'" in ui and "function palette() { window.WashPalette?.open(); }" in ui
+    css = "".join(p.read_text(encoding="utf-8") for p in CSS_ROOT.rglob("*.css"))
+    assert ".work-palette" not in css
+    layout = (templates / "_layout.html").read_text(encoding="utf-8")
+    assert '<script src="/static/js/wash/palette.js"></script>' in layout
+    assert '{% include "partials/palette.html" %}' in layout
+    for page in ("index.html", "work.html", "containers.html", "trace.html", "job_trace.html", "model_costs.html"):
+        html = (templates / page).read_text(encoding="utf-8")
+        assert re.search(r'{% extends "(_layout|base)\.html" %}', html), page
+        assert "wash/palette.js" not in html, page  # loaded once, by the layout
+    registrations = {
+        "/": (js / "wash" / "chat_palette.js", "WashPalette.register('chat:actions'"),
+        "/work": (js / "work" / "ui.js", "window.WashPalette.register('work'"),
+        "/containers": (js / "containers.js", "window.WashPalette.register('containers'"),
+        "/trace": (js / "trace.js", 'window.WashPalette.register("trace"'),
+        "/jobs/trace": (js / "job_trace.js", "window.WashPalette.register('job-trace'"),
+        "/models/costs": (js / "model_costs.js", "window.WashPalette.register('model-costs'"),
+    }
+    for page, (path, needle) in registrations.items():
+        assert needle in path.read_text(encoding="utf-8"), page
+    palette = (js / "wash" / "palette.js").read_text(encoding="utf-8")
+    for href in ("'/'", "'/work'", "'/containers'", "'/trace'", "'/jobs/trace'", "'/models/costs'"):
+        assert f"href: {href}" in palette, href

@@ -8,7 +8,8 @@
 //   MuDialog.open(el, opts)    vanilla pages (/containers, /work, /models/costs)
 //   MuDialog.close(el)         that toggle a backdrop's `hidden` themselves.
 //       opts.focus: element or selector that receives focus on open
-//       (destructive confirms pass their Cancel button, G§9.17).
+//       (destructive confirms pass their Cancel button, G§9.17), or false
+//       when the caller places focus itself.
 //
 // The backdrop is the trap root; role="dialog" / aria-modal / aria-labelledby
 // belong on the dialog surface inside it (.w-modal__dialog, .w-drawer__panel),
@@ -68,6 +69,7 @@
         const entry = { el, previous: document.activeElement, frame: 0 };
         stack.push(entry);
         document.documentElement.classList.add('has-dialog');
+        if (preferred === false) return entry;
         entry.frame = requestAnimationFrame(() => {
             if (top() !== entry) return;
             const target = typeof preferred === 'string' ? el.querySelector(preferred) : preferred;

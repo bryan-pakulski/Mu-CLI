@@ -221,6 +221,14 @@
         $('mc-add').addEventListener('click', addModel);
         $('mc-save').addEventListener('click', save);
         $('mc-reset').addEventListener('click', reset);
+        // Command palette (static/js/wash/palette.js): this page's actions.
+        if (window.WashPalette) {
+            window.WashPalette.register('model-costs', () => [
+                { id: 'mc:add', group: 'Actions', label: 'Add a model', icon: 'plus', run: addModel },
+                { id: 'mc:save', group: 'Actions', label: 'Save pricing', icon: 'check', enabled: !$('mc-save').disabled, run: save },
+                { id: 'mc:reset', group: 'Actions', label: 'Reset pricing to defaults…', icon: 'rotate-ccw', run: reset },
+            ], { priority: 10 });
+        }
         window.addEventListener('beforeunload', event => {
             if (!state.dirty) return;
             event.preventDefault();

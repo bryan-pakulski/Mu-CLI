@@ -620,12 +620,6 @@
     .work-dialog-backdrop.is-sheet { place-items: stretch end; padding: 0; }
     .work-dialog-backdrop.is-sheet .w-modal__dialog { width: min(980px, 100vw); max-height: none; height: 100dvh; border-radius: var(--wash-radius-xl) 0 0 var(--wash-radius-xl); }
     .work-dialog .w-modal__foot > .w-btn-row { justify-content: flex-end; width: 100%; }
-    .work-palette-search { display: flex; align-items: center; gap: var(--wash-space-2); color: var(--wash-ink-3); }
-    .work-palette-search .w-input { height: var(--wash-size-control-lg); font-size: var(--wash-type-body-lg-size); }
-    .work-palette-list { max-height: 50dvh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
-    .work-palette-item { display: flex; align-items: center; gap: var(--wash-space-3); min-height: 36px; padding: 0 var(--wash-space-3); border-radius: var(--wash-radius-sm); cursor: pointer; }
-    .work-palette-item[aria-selected="true"] { background: var(--wash-accent-wash); }
-    .work-palette-group { min-width: 88px; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
     .work-keys { display: flex; flex-direction: column; gap: var(--wash-space-1); margin: var(--wash-space-2) 0 0; }
     .work-keys__row { display: flex; align-items: center; gap: var(--wash-space-3); }
     .work-keys__row dt { min-width: 120px; }

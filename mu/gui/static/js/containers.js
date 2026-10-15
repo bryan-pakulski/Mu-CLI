@@ -684,6 +684,20 @@
   });
   $('create-environment-button').addEventListener('click', () => openCreate());
   $('refresh-containers').addEventListener('click', load);
+
+  // Command palette (static/js/wash/palette.js): this page's actions and its
+  // environments, read live each time the palette draws.
+  if (window.WashPalette) {
+    window.WashPalette.register('containers', () => [
+      {id: 'env:new', group: 'Actions', label: 'New environment', icon: 'plus', run: () => openCreate()},
+      {id: 'env:refresh', group: 'Actions', label: 'Refresh environments', icon: 'refresh-cw', run: () => load()},
+      {id: 'env:templates', group: 'Navigate', label: 'Show templates', icon: 'layers', run: () => $('templates-title').scrollIntoView({block: 'start'})},
+      ...state.containers.map(ref => ({
+        id: `env:open:${ref.name}`, group: 'Environments', label: `Configure ${ref.name}`, icon: 'box',
+        keywords: `${ref.status || ''} environment container`, run: () => openEdit(ref.name, false),
+      })),
+    ], {priority: 10});
+  }
   $('environment-source').addEventListener('change', syncSource);
   $('add-environment-mount').addEventListener('click', addMountFromBrowser);
   $('add-environment-device').addEventListener('click', addDevice);

@@ -481,7 +481,9 @@
 
     async function openCreate() {
         createError.textContent = '';
-        backdrop.hidden = false;
+        // The shared dialog stack (dialogs.js): Tab stays inside, Esc sends
+        // `dialog-close`, focus returns to the opener. Focus is set below.
+        window.MuDialog.open(backdrop, { focus: false });
         const list = await loadSessions(true);
         if (!workspaceInput.dataset.touched) {
             const entry = list.find(s => s.name === entrySession) || list.find(s => s.current);
@@ -499,7 +501,7 @@
     }
 
     function closeCreate() {
-        backdrop.hidden = true;
+        window.MuDialog.close(backdrop);
         newBtn.focus();
     }
 
@@ -601,17 +603,8 @@
     document.getElementById('work-create-cancel').addEventListener('click', closeCreate);
     backdrop.addEventListener('click', e => { if (e.target === backdrop) closeCreate(); });
     createForm.addEventListener('submit', submitCreate);
-    // The New job modal (.w-modal): Esc closes, Tab stays inside while it is open.
-    window.addEventListener('keydown', e => {
-        if (backdrop.hidden) return;
-        if (e.key === 'Escape') { closeCreate(); return; }
-        if (e.key !== 'Tab') return;
-        const items = [...backdrop.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')].filter(x => x.offsetParent !== null);
-        if (!items.length) return;
-        const first = items[0], last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    });
+    // The New job modal (.w-modal) is on the shared dialog stack: Esc closes it.
+    backdrop.addEventListener('dialog-close', closeCreate);
     document.getElementById('work-palette-open').addEventListener('click', ui.palette);
     document.getElementById('work-help-open').addEventListener('click', ui.help);
     document.getElementById('work-density').addEventListener('click', toggleDensity);

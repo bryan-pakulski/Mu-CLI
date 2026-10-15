@@ -38,6 +38,10 @@
     <link rel="stylesheet" href="/static/css/wash/wash.css">
     {% block page_css %}{% endblock %}
     <script src="/static/js/wash_tokens.js"></script>
+    {#- The command palette (⌘/Ctrl+K) on every page; pages register their own
+        sources (WashPalette.register). Not deferred, so page scripts at the end
+        of <body> can register while they load. #}
+    <script src="/static/js/wash/palette.js"></script>
     <script src="/static/js/route_theme.js" defer></script>
     <script src="/static/js/wash_shell.js" defer></script>
     {% block head_scripts %}{% endblock %}

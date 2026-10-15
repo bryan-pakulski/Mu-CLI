@@ -17,6 +17,8 @@ MOBILE = ROOT / "mobile" / "android" / "src"
 TOKENS = MOBILE / "theme" / "tokens.ts"
 CODEBLOCK = MOBILE / "components" / "CodeBlock.tsx"
 CHATSCREEN = MOBILE / "screens" / "ChatScreenProduct.tsx"
+# Wash: the fence/code_block/code_inline rules live in the shared Markdown module.
+MARKDOWN = MOBILE / "ui" / "Markdown.tsx"
 INDEX = MOBILE / "components" / "index.ts"
 PKG = ROOT / "mobile" / "android" / "package.json"
 
@@ -168,8 +170,9 @@ def test_codeblock_no_new_native_deps():
 
 
 def test_chatscreen_imports_codeblock():
-    """ChatScreen must import CodeBlock."""
-    src = read(CHATSCREEN)
+    """The chat renders Markdown through the shared module, which imports CodeBlock."""
+    assert "import {\n  Chip," in read(CHATSCREEN) and "Markdown," in read(CHATSCREEN)
+    src = read(MARKDOWN)
     assert "CodeBlock" in src, "CodeBlock not referenced in ChatScreen"
     assert "import { CodeBlock }" in src or "import {CodeBlock}" in src, \
         "CodeBlock import statement not found"
@@ -177,7 +180,7 @@ def test_chatscreen_imports_codeblock():
 
 def test_chatscreen_fence_uses_codeblock():
     """ChatScreen fence rule must use CodeBlock component."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     # Find the fence rule
     fence_section = re.search(r"fence:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert fence_section, "fence rule not found in ChatScreen"
@@ -192,7 +195,7 @@ def test_chatscreen_fence_uses_codeblock():
 
 def test_chatscreen_code_block_uses_codeblock():
     """ChatScreen code_block rule must use CodeBlock component."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     # Find code_block rule
     cb_section = re.search(r"code_block:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert cb_section, "code_block rule not found in ChatScreen"
@@ -204,7 +207,7 @@ def test_chatscreen_code_block_uses_codeblock():
 
 def test_chatscreen_code_inline_uses_syntax_color():
     """code_inline must use colors.syntax.keyword (not colors.accent)."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     ci_section = re.search(r"code_inline:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert ci_section, "code_inline rule not found"
     start = ci_section.end()
@@ -216,7 +219,7 @@ def test_chatscreen_code_inline_uses_syntax_color():
 
 def test_chatscreen_no_old_plain_code_block():
     """Old plain Text code blocks should be removed from fence/code_block."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     # The old pattern was: <Text variant="sm" style={{ color: colors.textSoft, fontFamily: 'monospace' }}>
     # inside fence/code_block rules. Should be gone now.
     old_pattern = "colors.textSoft, fontFamily: 'monospace'"

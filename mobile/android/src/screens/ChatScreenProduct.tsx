@@ -1,10 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, FlatList, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
-import MarkdownRenderer from 'react-native-markdown-display';
-import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { modesApi, ModeInfo } from '../api/modes';
@@ -12,7 +9,6 @@ import { inspectorApi, InspectorVariableGroup } from '../api/inspector';
 import { EffortControl } from '../components/EffortControl';
 import { GeneratingIndicator } from '../components/GeneratingIndicator';
 import { ArtifactStrip } from '../components/ArtifactStrip';
-import { CodeBlock } from '../components/CodeBlock';
 import { VisualizationCard } from '../components/VisualizationCard';
 import { AttachmentSheet } from '../components/AttachmentSheet';
 import type { AttachmentDescriptor } from '../api/attachments';
@@ -25,29 +21,29 @@ import {
   ConversationStageRail,
   conversationStages,
 } from '../components/ConversationStageRail';
-import { easings, fontSizes, fontWeights, fonts, motion, radii, spacing, tracking, typography } from '../theme/tokens';
+import { easings, fontWeights, motion, radii, spacing } from '../theme/tokens';
 import { useMotionPreference } from '../hooks/useMotionPreference';
-import { EmptyState, ErrorState, Pressable, Sheet, Skeleton, Text } from '../ui';
+import {
+  Chip, ChoiceRow, EmptyState, ErrorState, Icon, IconButton, Markdown, Pressable, Sheet, Skeleton, Text, ToolCard, ToolGroup,
+  groupToolCalls, type ToolCallView,
+  textStyle,
+} from '../ui';
+import { mode as modePigments } from '../theme/wash.generated';
 
-const HIT = { top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm };
-const HIT_SM = { top: spacing.xs, bottom: spacing.xs, left: spacing.xs, right: spacing.xs };
 
 /**
- * Product presentation for the mobile conversation.
+ * Product presentation for the mobile conversation (Wash G§9.6–§9.8).
  *
  * Data/session behaviour remains owned by useChatSession. This component only
- * brings mobile presentation in line with the Wash session transcript:
- * assistant bubbles raised + border with a squared top-left corner, user
- * bubbles accent-tinted on the right, compact interim disclosures folded to one
- * mono line that expands, and one glass composer pane with utilities outside.
+ * renders it: assistant prose sits on canvas without a bubble, user turns are
+ * accent-wash bubbles on the right, tool calls are ToolCards (mobile chat
+ * shows tool calls), compact interim disclosures fold tool-heavy steps into
+ * one "Worked · N steps" row, and the composer is one pill with the mode
+ * chip, effort, attach and a 44dp send/stop.
  */
-// Completed messages keep their parsed Markdown while new tokens arrive in
-// another row. Streaming messages still use the lightweight Text path.
-const Markdown = React.memo(MarkdownRenderer);
 
 export function ChatScreenProduct() {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const activeProvider = useConnectionStore(state => state.activeProvider);
   const activeModel = useConnectionStore(state => state.activeModel);
@@ -296,53 +292,19 @@ export function ChatScreenProduct() {
     if (active) followOutputRef.current = false;
   }, []);
 
-  // Safe link handler: only http(s) URLs reach the OS. Everything else is
-  // blocked (with an alert) instead of being handed to Linking.
-  const handleMarkdownLinkPress = useCallback((url: string) => {
-    void openExternalUrl(url);
-    return false;
-  }, []);
-
-  const markdownRules = useMemo(() => ({
-    fence: (node: any) => (
-      <CodeBlock key={node.key} code={node.content} language={(node.sourceInfo || '').trim()} colors={colors} />
-    ),
-    code_block: (node: any) => (
-      <CodeBlock key={node.key} code={node.content} colors={colors} />
-    ),
-    code_inline: (node: any) => (
-      <Text
-        key={node.key}
-        style={{
-          color: colors.syntax.keyword,
-          fontFamily: fonts.mono,
-          fontSize: fontSizes.xs,
-          backgroundColor: colors.code,
-          borderRadius: radii.sm,
-          paddingHorizontal: spacing.xs,
-        }}
-      >
-        {node.content}
-      </Text>
-    ),
-  }), [colors]);
-  const mdStyles = useMemo(() => markdownStyles(colors), [colors]);
-  const compactMdStyles = useMemo(() => compactMarkdownStyles(colors), [colors]);
-
+  // Streaming text uses the lightweight Text path; completed messages are
+  // parsed once by the shared Markdown module (links go through the http(s)
+  // allow-list, code through the Wash CodeBlock).
   const renderAssistantBody = useCallback((message: ChatMessage, compact = false) => {
     if (message.streaming) {
       return (
-        <Text style={{ color: compact ? colors.ink2 : colors.ink, fontSize: compact ? fontSizes.xs : fontSizes.base, lineHeight: compact ? typography.xs.lineHeight : typography.base.lineHeight }}>
+        <Text variant={compact ? 'caption' : 'bodyLg'} tone={compact ? 'ink2' : 'ink'}>
           {message.text}
         </Text>
       );
     }
-    return (
-      <Markdown style={compact ? compactMdStyles : mdStyles} rules={markdownRules} onLinkPress={handleMarkdownLinkPress}>
-        {message.text}
-      </Markdown>
-    );
-  }, [colors, compactMdStyles, handleMarkdownLinkPress, markdownRules, mdStyles]);
+    return <Markdown variant={compact ? 'compact' : 'chat'}>{message.text}</Markdown>;
+  }, []);
 
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     if (item.role === 'visualization' && item.artifact && activeSessionName) {
@@ -365,6 +327,14 @@ export function ChatScreenProduct() {
       );
     }
 
+    if (item.role === 'tool' && item.tool) {
+      return (
+        <View style={styles.toolWrap}>
+          <ToolCard call={item.tool} testID={`tool-card-${item.id}`} />
+        </View>
+      );
+    }
+
     if (item.role === 'collapse') {
       const count = item.collapseCount || item.childTurns?.length || 0;
       return (
@@ -373,26 +343,27 @@ export function ChatScreenProduct() {
             onPress={() => setMessages(current => current.map(message =>
               message.id === item.id ? { ...message, collapseOpen: !message.collapseOpen } : message,
             ))}
-            style={[styles.interimHeader, { backgroundColor: colors.surface, borderColor: colors.hairline }]}
-            activeOpacity={0.7}
-            hitSlop={HIT}
-            accessibilityRole="button"
+            scale={false}
+            style={({ pressed }) => [styles.interimHeader, { backgroundColor: pressed ? colors.hairline : colors.sunken }]}
+            accessibilityLabel={`Worked · ${count} step${count !== 1 ? 's' : ''}`}
             accessibilityState={{ expanded: !!item.collapseOpen }}
           >
-            <Ionicons
-              name={item.collapseOpen ? 'chevron-down' : 'chevron-forward'}
-              size={13}
-              color={colors.ink3}
-            />
-            <Text variant="xs" numberOfLines={1} style={{ color: colors.ink3, fontFamily: fonts.mono, fontVariant: ['tabular-nums'], flexShrink: 1 }}>
-              › {count} interim update{count !== 1 ? 's' : ''}
+            <Text variant="label" tone="ink2" numberOfLines={1} numeric style={{ flexShrink: 1 }}>
+              Worked · {count} step{count !== 1 ? 's' : ''}
               {item.collapseElapsed ? ` · ${item.collapseElapsed}` : ''}
               {item.collapseTokens ? ` · ${item.collapseTokens}` : ''}
             </Text>
+            <Icon name={item.collapseOpen ? 'chevron-down' : 'chevron-right'} size="sm" color={colors.ink3} />
           </Pressable>
           {item.collapseOpen ? (
             <View style={[styles.interimBody, { borderLeftColor: colors.hairline }]}>
-              {item.childTurns?.map(child => {
+              {interimChildren(item.childTurns || []).map(child => {
+                if (Array.isArray(child)) {
+                  return <View key={child[0].id} style={styles.interimMessage}><ToolGroup calls={child} /></View>;
+                }
+                if ('status' in child) {
+                  return <View key={child.id} style={styles.interimMessage}><ToolCard call={child} /></View>;
+                }
                 if (child.role !== 'assistant') return null;
                 return (
                   <View key={child.id} style={styles.interimMessage}>
@@ -416,13 +387,12 @@ export function ChatScreenProduct() {
         <View
           style={[
             isUser ? styles.userMessage : styles.assistantMessage,
-            isUser
-              ? { backgroundColor: colors.accent.wash, borderColor: colors.accent.ink, borderRightColor: colors.accent.ink }
-              : { backgroundColor: colors.raised, borderColor: colors.hairline },
+            // Wash: the user turn is an accent-wash bubble; assistant prose sits on canvas.
+            isUser ? { backgroundColor: colors.accent.wash } : null,
           ]}
         >
           {isUser ? (
-            <Text style={{ color: colors.ink, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight }}>{item.text}</Text>
+            <Text variant="bodyLg">{item.text}</Text>
           ) : (
             renderAssistantBody(item)
           )}
@@ -430,10 +400,12 @@ export function ChatScreenProduct() {
           {isUser && item.attachments?.length ? (
             <View style={styles.messageAttachments}>
               {item.attachments.map(attachment => (
-                <View key={attachment.attachment_id} style={[styles.messageAttachment, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-                  <Ionicons name="document-outline" size={13} color={colors.ink3} />
-                  <Text variant="xs" numberOfLines={1} style={{ color: colors.ink2, maxWidth: 210 }}>{attachment.name}</Text>
-                </View>
+                <Chip key={attachment.attachment_id} variant="meta">
+                  <View style={styles.attachmentChip}>
+                    <Icon name="file" size="sm" color={colors.ink3} />
+                    <Text variant="caption" tone="ink2" numberOfLines={1} style={{ maxWidth: 210 }}>{attachment.name}</Text>
+                  </View>
+                </Chip>
               ))}
             </View>
           ) : null}
@@ -441,16 +413,9 @@ export function ChatScreenProduct() {
           {isAssistant && item.text.length > 0 ? (
             <View style={styles.assistantMeta}>
               {workedMs ? (
-                <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>{formatWorkedDuration(workedMs)}</Text>
+                <Text variant="caption" tone="ink3" numeric>{formatWorkedDuration(workedMs)}</Text>
               ) : <View />}
-              <Pressable
-                onPress={() => copyMessage(item.text)}
-                hitSlop={HIT}
-                style={styles.copyButton}
-                accessibilityLabel="Copy message"
-              >
-                <Ionicons name="copy-outline" size={13} color={colors.ink3} />
-              </Pressable>
+              <IconButton icon="copy" label="Copy message" onPress={() => copyMessage(item.text)} style={styles.copyButton} />
             </View>
           ) : null}
         </View>
@@ -471,11 +436,10 @@ export function ChatScreenProduct() {
   }, [hasMore, loadOlderHistory, loadingOlder]);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.bottom}
       >
         {/* Round-44 F13: match ChatScreen's list tuning so both chat
             surfaces behave identically at scale — bounded initial/batch
@@ -511,11 +475,11 @@ export function ChatScreenProduct() {
                 </View>
               ) : null}
               {error && messages.length > 0 ? (
-                <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: colors.danger.wash, borderColor: colors.danger.ink }]}>
-                  <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
-                  <Text variant="xs" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
-                  <Pressable onPress={retry} hitSlop={HIT}>
-                    <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
+                <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: colors.danger.wash, borderLeftColor: colors.danger.pigment }]}>
+                  <Text variant="body" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+                  <Text variant="caption" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
+                  <Pressable onPress={retry} accessibilityLabel="Retry">
+                    <Text variant="label" style={{ color: colors.danger.ink }}>Retry</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -534,8 +498,9 @@ export function ChatScreenProduct() {
             ) : (
               <EmptyState
                 icon="sparkles"
-                title="What are you working on?"
-                message="Ask MuCLI to inspect, explain, debug, or change your workspace."
+                pigment="apricot"
+                title="What are we building today?"
+                message="Ask Mucli to inspect, explain, debug, or change your workspace."
                 actionLabel={activeMode ? `Mode: ${activeMode}` : 'Select mode'}
                 onAction={() => { void loadModes(); setModeSheetOpen(true); }}
               />
@@ -581,7 +546,7 @@ export function ChatScreenProduct() {
           onAttachmentsPress={() => setAttachmentsOpen(true)}
           selectedAttachments={selectedAttachments}
           onRemoveAttachment={attachmentId => setSelectedAttachments(current => current.filter(item => item.attachment_id !== attachmentId))}
-          bottomInset={insets.bottom}
+          bottomInset={0}
           artifactsVisible={artifactsVisible}
           onToggleArtifacts={() => setArtifactsVisible(current => !current)}
         />
@@ -648,76 +613,73 @@ function Composer({
   const { colors } = useTheme();
   const planMode = useConnectionStore(state => state.planMode);
   const canSend = input.trim().length > 0 || selectedAttachments.length > 0;
+  const modeTone = colors.mode[(activeMode in modePigments ? activeMode : 'default') as keyof typeof modePigments];
   return (
     <View style={[styles.composerArea, { paddingBottom: Math.max(bottomInset, spacing.sm) }]}>
       <PlanModeStrip />
       {selectedAttachments.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.selectedAttachments}>
           {selectedAttachments.map(item => (
-            <View key={item.attachment_id} style={[styles.selectedAttachment, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
-              <Text variant="xs" numberOfLines={1} style={{ maxWidth: 180, color: colors.ink2 }}>{item.name}</Text>
-              <Pressable onPress={() => onRemoveAttachment(item.attachment_id)} hitSlop={HIT}>
-                <Ionicons name="close" size={14} color={colors.ink3} />
-              </Pressable>
-            </View>
+            <Chip key={item.attachment_id} variant="meta" label={item.name} onRemove={() => onRemoveAttachment(item.attachment_id)} removeLabel={`Remove ${item.name}`} />
           ))}
         </ScrollView>
       ) : null}
 
       <View style={styles.composerUtilities}>
-        <Pressable onPress={onModePress} style={styles.utilityButton} hitSlop={HIT_SM}>
-          <Text variant="xs" style={{ color: colors.ink3, textTransform: 'capitalize' }}>{activeMode}</Text>
-          <Ionicons name="chevron-down" size={13} color={colors.ink3} />
+        <Pressable onPress={onModePress} accessibilityLabel={`Mode: ${activeMode}`} accessibilityHint="Choose the agent mode"
+          style={[styles.utilityButton, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+          <View style={[styles.modeDot, { backgroundColor: modeTone.pigment }]} />
+          <Text variant="caption" tone="ink2" style={{ textTransform: 'capitalize' }}>{activeMode}</Text>
+          <Text variant="caption" tone="ink3" importantForAccessibility="no">▾</Text>
         </Pressable>
         <EffortControl variant="chip" />
-        <Pressable
+        <View style={{ flex: 1 }} />
+        <IconButton
+          icon={artifactsVisible ? 'eye' : 'eye-off'}
+          label={artifactsVisible ? 'Hide artifacts panel' : 'Show artifacts panel'}
           onPress={onToggleArtifacts}
-          style={styles.utilityIconButton}
-          hitSlop={HIT_SM}
-          accessibilityLabel={artifactsVisible ? 'Hide artifacts panel' : 'Show artifacts panel'}
-        >
-          <Ionicons
-            name={artifactsVisible ? 'eye' : 'eye-off'}
-            size={16}
-            color={artifactsVisible ? colors.accent.ink : colors.ink3}
-          />
-        </Pressable>
-        <Pressable onPress={onSettingsPress} style={styles.utilityIconButton} hitSlop={HIT_SM} accessibilityLabel="Session settings">
-          <Ionicons name="settings-outline" size={16} color={colors.ink3} />
-        </Pressable>
+          selected={artifactsVisible}
+        />
+        <IconButton icon="settings" label="Session settings" onPress={onSettingsPress} />
       </View>
 
-      <View style={[styles.composerPane, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
-        <Pressable
-          onPress={onAttachmentsPress}
-          style={styles.composerIconButton}
-          hitSlop={HIT_SM}
-          accessibilityLabel="Attach files"
-        >
-          <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent.ink : colors.ink3} />
-        </Pressable>
+      {/* Wash composer (G§9.6): one surface pill, a 3px wash glow in the mode
+          pigment along the top edge, plan mode adds a lilac dashed outline. */}
+      <View style={[
+        styles.composerPane,
+        {
+          backgroundColor: colors.surface,
+          borderColor: planMode ? colors.plan.pigment : colors.hairline,
+          borderStyle: planMode ? 'dashed' : 'solid',
+          borderTopColor: planMode ? colors.plan.pigment : modeTone.pigment,
+        },
+      ]}>
+        <IconButton icon="plus" label="Attach files" onPress={onAttachmentsPress} selected={selectedAttachments.length > 0} />
         {/* Keep focus and the draft keyboard open while a turn is running. */}
         <TextInput
           value={input}
           onChangeText={setInput}
-          placeholder={planMode ? PLAN_MODE_PLACEHOLDER : 'Message MuCLI'}
+          placeholder={planMode ? PLAN_MODE_PLACEHOLDER : 'Ask Mucli anything…'}
           placeholderTextColor={colors.ink3}
           multiline
-          style={[styles.input, { color: colors.ink }]}
+          maxFontSizeMultiplier={2}
+          accessibilityLabel="Message"
+          style={[styles.input, textStyle('bodyLg'), { color: colors.ink }]}
         />
         {streaming ? (
-          <Pressable onPress={onStop} style={styles.sendButton} hitSlop={HIT_SM} accessibilityLabel="Stop generation">
-            <Ionicons name="stop" size={16} color={colors.danger.ink} />
+          <Pressable onPress={onStop} accessibilityLabel="Stop generation" haptic="light"
+            style={[styles.sendButton, { backgroundColor: colors.surface, borderColor: colors.hairlineStrong, borderWidth: 1 }]}>
+            <View style={[styles.stopGlyph, { backgroundColor: colors.danger.ink }]} />
           </Pressable>
         ) : (
           <Pressable
             onPress={onSend}
             disabled={!canSend}
-            style={[styles.sendButton, canSend && { backgroundColor: colors.accent.ink }]}
-            hitSlop={HIT_SM}
+            haptic="light"
+            style={[styles.sendButton, { backgroundColor: canSend ? colors.ink : colors.sunken }]}
             accessibilityLabel="Send message"
           >
-            <Ionicons name="arrow-up" size={18} color={canSend ? colors.onInk : colors.ink3} />
+            <Icon name="arrow-up" color={canSend ? colors.onInk : colors.ink3} />
           </Pressable>
         )}
       </View>
@@ -743,18 +705,14 @@ function ModeSheet({
     <Sheet visible={visible} onClose={onClose} title="Mode">
       <View style={styles.optionList}>
         {modes.map(mode => (
-          <Pressable
+          <ChoiceRow
             key={mode.name}
-            onPress={() => onSelect(mode.name)}
+            label={mode.display_name}
+            description={mode.description || undefined}
+            selected={activeMode === mode.name}
             disabled={mode.disabled}
-            style={[styles.optionRow, { borderColor: activeMode === mode.name ? colors.accent.ink : colors.hairline, backgroundColor: activeMode === mode.name ? colors.accent.wash : colors.raised }, mode.disabled && styles.disabledOption]}
-          >
-            <View style={styles.optionCopy}>
-              <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{mode.display_name}</Text>
-              {mode.description ? <Text variant="xs" dim>{mode.description}</Text> : null}
-            </View>
-            {activeMode === mode.name ? <Ionicons name="checkmark" size={18} color={colors.accent.ink} /> : null}
-          </Pressable>
+            onPress={() => onSelect(mode.name)}
+          />
         ))}
       </View>
     </Sheet>
@@ -781,7 +739,7 @@ function SessionSettingsSheet({
   const { colors } = useTheme();
   return (
     <Sheet visible={visible} onClose={onClose} title="Session settings">
-      <View style={[styles.settingsSummary, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+      <View style={[styles.settingsSummary, { backgroundColor: colors.sunken }]}>
         <SettingLine label="Provider" value={provider || '—'} />
         <SettingLine label="Model" value={model || '—'} />
         <SettingLine label="Auto-approve" value={yolo ? 'On' : 'Off'} />
@@ -793,7 +751,7 @@ function SessionSettingsSheet({
         <Text variant="xs" dim style={styles.settingsLoading}>No variables configured</Text>
       ) : (
         groups.map(group => (
-          <View key={group.name} style={[styles.settingsGroup, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+          <View key={group.name} style={[styles.settingsGroup, { backgroundColor: colors.sunken }]}>
             <Text variant="sm" accessibilityRole="header" style={[styles.settingsGroupTitle, { borderBottomColor: colors.hairline }]}>{group.name}</Text>
             {group.variables.map(variable => (
               <View key={variable.key} style={styles.settingsVariable}>
@@ -873,31 +831,24 @@ function formatWorkedDuration(ms: number): string {
   return minutes > 0 ? `Worked for ${minutes}m ${remainder}s` : `Worked for ${remainder}s`;
 }
 
-function markdownStyles(colors: any) {
-  return {
-    body: { color: colors.ink, fontSize: fontSizes.base, lineHeight: typography.base.lineHeight },
-    paragraph: { marginTop: 0, marginBottom: spacing.sm },
-    heading1: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight, marginTop: spacing.md, marginBottom: spacing.sm },
-    heading2: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, marginTop: spacing.sm, marginBottom: spacing.xs },
-    heading3: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold, marginTop: spacing.sm, marginBottom: spacing.xs },
-    code_inline: { backgroundColor: colors.code, borderRadius: radii.sm, paddingHorizontal: spacing.xs, fontFamily: fonts.mono },
-    fence: { backgroundColor: colors.code, borderColor: colors.hairline, borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, fontFamily: fonts.mono },
-    code_block: { backgroundColor: colors.code, borderColor: colors.hairline, borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, fontFamily: fonts.mono },
-    link: { color: colors.accent.ink, textDecorationLine: 'underline' as const },
-    blockquote: { borderLeftWidth: 2, borderLeftColor: colors.hairline, paddingLeft: spacing.md, marginLeft: 0, marginTop: spacing.sm, marginBottom: spacing.sm },
-    list_item: { marginTop: 2, marginBottom: 2 },
+/** Interim children: assistant prose, single tool cards, and 3+ same-kind runs as groups. */
+function interimChildren(children: ChatMessage[]): Array<ChatMessage | ToolCallView | ToolCallView[]> {
+  const out: Array<ChatMessage | ToolCallView | ToolCallView[]> = [];
+  let run: ToolCallView[] = [];
+  const flush = () => {
+    if (run.length) out.push(...groupToolCalls(run));
+    run = [];
   };
-}
-
-function compactMarkdownStyles(colors: any) {
-  return {
-    ...markdownStyles(colors),
-    body: { color: colors.ink2, fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight },
-    paragraph: { marginTop: 0, marginBottom: spacing.xs },
-    heading1: { fontSize: fontSizes.base, fontWeight: fontWeights.semibold, marginTop: spacing.xs, marginBottom: spacing.xs },
-    heading2: { fontSize: fontSizes.base, fontWeight: fontWeights.semibold, marginTop: spacing.xs, marginBottom: spacing.xs },
-    heading3: { fontSize: fontSizes.sm, fontWeight: fontWeights.semibold, marginTop: spacing.xs, marginBottom: spacing.xs },
-  };
+  for (const child of children) {
+    if (child.role === 'tool' && child.tool) {
+      run.push(child.tool);
+      continue;
+    }
+    flush();
+    out.push(child);
+  }
+  flush();
+  return out;
 }
 
 const styles = StyleSheet.create({
@@ -909,42 +860,41 @@ const styles = StyleSheet.create({
   msgRow: { flexDirection: 'row', marginBottom: spacing.base },
   userRow: { justifyContent: 'flex-end' },
   assistantRow: { justifyContent: 'flex-start' },
-  // Wash transcript: user = accent-tinted bubble on the right; assistant =
-  // raised + border bubble with a squared top-left corner.
-  userMessage: { maxWidth: '86%', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderRightWidth: 1, borderRadius: radii.panel, borderTopRightRadius: 2 },
-  assistantMessage: { width: '100%', paddingTop: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.xs, borderWidth: 1, borderRadius: radii.panel, borderTopLeftRadius: 2 },
+  // Wash transcript (G§9.7): the user turn is an accent-wash bubble on the
+  // right, radius-lg with a 6px bottom-right corner, at most 80% wide; the
+  // assistant has no bubble — full-width body-lg prose on canvas.
+  userMessage: { maxWidth: '80%', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.lg, borderBottomRightRadius: 6 },
+  assistantMessage: { width: '100%', paddingTop: spacing.xs },
   assistantMeta: { minHeight: 26, marginTop: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  copyButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  copyButton: { marginRight: -spacing.sm },
   visualizationWrap: { marginBottom: spacing.base },
-  interimGroup: { marginTop: -1, marginBottom: spacing.md },
-  interimHeader: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, borderWidth: 1, borderRadius: radii.control, alignSelf: 'flex-start', maxWidth: '100%' },
-  interimBody: { marginLeft: spacing.xs, marginTop: spacing.xs, paddingLeft: spacing.md, borderLeftWidth: 1 },
-  interimMessage: { paddingVertical: spacing.xs, marginBottom: spacing.xs },
+  toolWrap: { marginBottom: spacing.sm },
+  // Compact interim disclosures: one "Worked · N steps" row (sunken, radius-md).
+  interimGroup: { marginBottom: spacing.md },
+  interimHeader: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.md, alignSelf: 'flex-start', maxWidth: '100%' },
+  interimBody: { marginLeft: spacing.xs, marginTop: spacing.sm, paddingLeft: spacing.md, borderLeftWidth: 1, gap: spacing.xs },
+  interimMessage: { paddingVertical: spacing.xs },
   messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
-  messageAttachment: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderWidth: 1, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
-  inlineError: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.md, borderWidth: 1, borderLeftWidth: 3, borderRadius: radii.control },
+  attachmentChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  inlineError: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.md, borderLeftWidth: 4, borderRadius: radii.md },
   historyLoading: { paddingTop: spacing.lg, paddingHorizontal: spacing.xs },
   loadingOlderIndicator: { paddingVertical: spacing.sm, alignItems: 'center' },
   listFooter: { minHeight: 10, paddingTop: 2 },
   composerArea: { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
-  composerUtilities: { minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.xs, paddingHorizontal: 2, marginBottom: spacing.sm },
-  utilityButton: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm },
-  utilityIconButton: { width: 36, height: 32, alignItems: 'center', justifyContent: 'center' },
-  composerPane: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, padding: spacing.xs, borderWidth: 1, borderRadius: radii.panel },
-  composerIconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 1 },
-  input: { flex: 1, borderWidth: 0, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, maxHeight: 130, minHeight: 40, fontSize: fontSizes.md, lineHeight: typography.md.lineHeight, textAlignVertical: 'top' },
-  sendButton: { width: 40, height: 40, borderRadius: radii.sm, justifyContent: 'center', alignItems: 'center', marginBottom: 1 },
+  composerUtilities: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: 2, marginBottom: spacing.xs },
+  utilityButton: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, borderWidth: 1, borderRadius: radii.pill },
+  modeDot: { width: 8, height: 8, borderRadius: 4 },
+  composerPane: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, padding: spacing.xs, borderWidth: 1, borderTopWidth: 3, borderRadius: radii.lg },
+  input: { flex: 1, borderWidth: 0, paddingHorizontal: spacing.xs, paddingVertical: 10, maxHeight: 288, minHeight: 44, textAlignVertical: 'top' },
+  sendButton: { width: 44, height: 44, borderRadius: radii.pill, justifyContent: 'center', alignItems: 'center' },
+  stopGlyph: { width: 14, height: 14, borderRadius: 3 },
   selectedAttachments: { paddingHorizontal: 2, paddingBottom: spacing.sm, gap: spacing.xs },
-  selectedAttachment: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderWidth: 1, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   optionList: { gap: spacing.xs },
-  optionRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderRadius: radii.control },
-  disabledOption: { opacity: 0.35 },
-  optionCopy: { flex: 1, paddingRight: spacing.md },
-  settingsSummary: { borderWidth: 1, borderRadius: radii.panel, paddingHorizontal: spacing.md },
+  settingsSummary: { borderRadius: radii.lg, paddingHorizontal: spacing.md },
   settingLine: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.base },
   settingsSectionLabel: { marginTop: spacing.lg, marginBottom: spacing.sm, fontWeight: fontWeights.medium },
   settingsLoading: { paddingVertical: spacing.base },
-  settingsGroup: { marginTop: spacing.md, borderWidth: 1, borderRadius: radii.panel, overflow: 'hidden' },
+  settingsGroup: { marginTop: spacing.md, borderRadius: radii.lg, overflow: 'hidden' },
   settingsGroupTitle: { paddingVertical: spacing.md, paddingHorizontal: spacing.md, fontWeight: fontWeights.semibold, borderBottomWidth: 1 },
   settingsVariable: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
   settingsVariableCopy: { flex: 1 },

@@ -87,9 +87,11 @@ def test_chatscreen_markdown_only_on_finalize():
     src = read(CHAT_SCREEN)
     # After the streaming Text branch, Markdown should be the else case
     assert "if (message.streaming) {" in src, "Streaming branch not found"
-    # Ensure Markdown import still exists (not removed)
-    assert "from 'react-native-markdown-display'" in src, \
-        "Markdown import missing — was it accidentally removed?"
+    # Markdown comes from the shared Wash module, which wraps the renderer.
+    assert "<Markdown variant={compact ? 'compact' : 'chat'}>" in src, \
+        "Markdown render missing — was it accidentally removed?"
+    markdown = (CHAT_SCREEN.parent.parent / "ui" / "Markdown.tsx").read_text(encoding="utf-8")
+    assert "from 'react-native-markdown-display'" in markdown
 
 
 # ── Fix 4: Skip session polling during active streaming ─────────────────────

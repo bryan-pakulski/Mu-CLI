@@ -118,18 +118,22 @@ def test_mobile_chat_is_flat_compact_and_single_pane():
     assert "compact interim disclosures" in text
     assert "styles.interimHeader" in text
     assert "borderLeftWidth: 1" in text
-    assert "backgroundColor: colors.raised" in text
-    # planos transcript bubbles: assistant squared top-left, user accent-tinted.
-    assert "borderTopLeftRadius: 2" in text
-    assert "backgroundColor: colors.accent.wash, borderColor: colors.accent.ink" in text
-    assert "fontFamily: fonts.mono" in text
+    # Wash transcript (G§9.7): user = accent-wash bubble, 6px bottom-right
+    # corner, <= 80% wide; assistant = no bubble, prose on canvas.
+    assert "isUser ? { backgroundColor: colors.accent.wash } : null" in text
+    assert "borderBottomRightRadius: 6" in text and "maxWidth: '80%'" in text
+    assert "assistantMessage: { width: '100%', paddingTop: spacing.xs }" in text
+    # Interim turns collapse to one "Worked · N steps" row; tool calls are ToolCards.
+    assert "Worked · {count} step" in text
+    assert "<ToolCard call={item.tool}" in text
     assert "styles.composerUtilities" in text
     assert "styles.composerPane" in text
     assert "onSettingsPress" in text
-    assert "settings-outline" in text
+    assert 'label="Session settings"' in text
     assert "formatWorkedDuration" in text
     assert "Worked for ${minutes}m ${remainder}s" in text
-    assert "borderRightWidth: 1" in text
+    # One composer pill with a 44dp send.
+    assert "sendButton: { width: 44, height: 44, borderRadius: radii.pill" in text
     assert "borderRadius: 24" not in text
 
 

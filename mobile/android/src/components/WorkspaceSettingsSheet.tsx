@@ -89,7 +89,7 @@ export function WorkspaceSettingsSheet({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={[styles.header, { paddingTop: spacing.base }]}>
-          <Pressable onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline }]}>
+          <Pressable accessibilityLabel="Close" onPress={onClose} style={[styles.iconButton, { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline }]}>
             <Ionicons name="close" size={20} color={colors.ink} />
           </Pressable>
           <View style={styles.headerCopy}>
@@ -126,7 +126,7 @@ export function WorkspaceSettingsSheet({
                       <Text variant="xs" style={styles.pathText} numberOfLines={2} ellipsizeMode="middle">
                         {path}
                       </Text>
-                      <Pressable onPress={() => removeWorkspace(path)} style={styles.removeButton}>
+                      <Pressable accessibilityLabel={`Remove workspace ${path}`} onPress={() => removeWorkspace(path)} style={styles.removeButton}>
                         <Ionicons name="close" size={17} color={colors.ink3} />
                       </Pressable>
                     </View>

@@ -149,7 +149,7 @@ export function ArtifactsScreen() {
         <View style={styles.sectionHeader}>
           <View style={{ flex: 1 }}>
             <Text variant="xs" style={{ fontWeight: fontWeights.semibold, color: colors.ink3 }}>
-              {item.title.toUpperCase()}
+              {item.title}
             </Text>
             <Text variant="xs" dim style={{ marginTop: 2 }}>
               {item.subtitle}
@@ -190,7 +190,7 @@ export function ArtifactsScreen() {
           >
             <Ionicons name="download-outline" size={18} color={colors.ink3} />
           </Pressable>
-          <Pressable
+          <Pressable accessibilityLabel="Delete artifact"
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
@@ -220,14 +220,14 @@ export function ArtifactsScreen() {
               {formatBytes(a.size)} · {a.mime_type || 'file'}
             </Text>
           </View>
-          <Pressable
+          <Pressable accessibilityLabel="Download artifact"
             onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
             <Ionicons name="download-outline" size={18} color={colors.ink3} />
           </Pressable>
-          <Pressable
+          <Pressable accessibilityLabel="Delete artifact"
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
@@ -257,14 +257,14 @@ export function ArtifactsScreen() {
             {formatBytes(u.size)} · {u.mime_type || 'file'}
           </Text>
         </View>
-        <Pressable
+        <Pressable accessibilityLabel="Download upload"
           onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
           <Ionicons name="download-outline" size={18} color={colors.ink3} />
         </Pressable>
-        <Pressable
+        <Pressable accessibilityLabel="Delete upload"
           onPress={() => removeUpload(u)}
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}

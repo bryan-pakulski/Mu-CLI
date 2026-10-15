@@ -503,7 +503,7 @@ export function MemoryScreen() {
                                 ? Math.min(0.96, (isDark ? 0.28 : 0.38) + ratio * (isDark ? 0.68 : 0.58))
                                 : (measured?.tokens ? (isDark ? 0.12 : 0.19) : (isDark ? 0.035 : 0.055));
                               return (
-                                <Pressable
+                                <Pressable accessibilityLabel={`Provider call ${point.id}`}
                                   key={point.id}
                                   onPress={() => setSelectedContextPoint(point)}
                                   style={{
@@ -527,7 +527,7 @@ export function MemoryScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={{ height: 150, flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, paddingTop: spacing.sm }}>
                       {contextPoints.map(point => (
-                        <Pressable
+                        <Pressable accessibilityLabel={`Provider call ${point.id}`}
                           key={point.id}
                           onPress={() => setSelectedContextPoint(point)}
                           style={{

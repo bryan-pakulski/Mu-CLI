@@ -1,13 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
-import Markdown from 'react-native-markdown-display';
 import { useTheme } from '../theme/ThemeContext';
 import type { ThemeColors } from '../theme/tokens';
 import {
-  type PlanRow, type PlanSection, planMarkdownStyles, planProse, replaceRows, rowsFrom,
+  type PlanRow, type PlanSection, planProse, replaceRows, rowsFrom,
 } from './planMarkdown';
 import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Markdown, Pressable, Text } from '../ui';
 
 const PLAN_SECTIONS: PlanSection[] = ['Acceptance criteria', 'Checks'];
 
@@ -56,7 +55,6 @@ function SectionTitle({ title, count, colors }: { title: string; count: number; 
 export function JobPlanEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const { colors } = useTheme();
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
-  const md = useMemo(() => planMarkdownStyles(colors), [colors]);
   const input = { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas };
   const prose = planProse(value);
   return <View style={styles.root}>
@@ -73,7 +71,7 @@ export function JobPlanEditor({ value, onChange }: { value: string; onChange: (v
     </View>
     {mode === 'preview'
       ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-          <Markdown style={md}>{prose || '_No plan text yet._'}</Markdown></View>
+          <Markdown variant="document">{prose || '_No plan text yet._'}</Markdown></View>
       : <TextInput accessibilityLabel="Plan Markdown" multiline value={value} onChangeText={onChange} autoCapitalize="none"
           style={[styles.editor, input]} />}
     {PLAN_SECTIONS.map(title => <RowsEditor key={title} title={title} value={value} onChange={onChange} />)}

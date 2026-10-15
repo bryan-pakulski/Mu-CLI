@@ -59,7 +59,7 @@ export function ArtifactStrip({
       {visualizations.length > 0 && (
         <View style={styles.section}>
           <View style={styles.heading}>
-            <Text variant="xs" dim style={styles.label}>VISUALIZATIONS</Text>
+            <Text variant="xs" dim style={styles.label}>Visualizations</Text>
             <Text variant="xs" dim>{visualizations.length}</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
@@ -89,7 +89,7 @@ export function ArtifactStrip({
       {files.length > 0 && (
         <View style={styles.section}>
           <View style={styles.heading}>
-            <Text variant="xs" dim style={styles.label}>FILES</Text>
+            <Text variant="xs" dim style={styles.label}>Files</Text>
             <Text variant="xs" dim>{files.length}</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>

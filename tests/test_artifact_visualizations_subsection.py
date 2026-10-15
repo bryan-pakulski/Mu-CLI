@@ -100,14 +100,14 @@ def test_registry_section_flex_auto():
 
 def test_artifact_strip_has_visualizations_section():
     src = read(ARTIFACT_STRIP)
-    assert "VISUALIZATIONS" in src, "Missing VISUALIZATIONS heading"
+    assert ">Visualizations<" in src, "Missing Visualizations heading (sentence case, G§2.2)"
     assert "visualizations" in src
     assert "a.kind === 'visualization'" in src
 
 
 def test_artifact_strip_has_files_section():
     src = read(ARTIFACT_STRIP)
-    assert "FILES" in src, "Missing FILES heading"
+    assert ">Files<" in src, "Missing Files heading (sentence case, G§2.2)"
     assert "a.kind !== 'visualization'" in src
 
 

@@ -283,7 +283,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
     <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
       <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}>
-          <Pressable onPress={mode === 'form' ? () => setMode('list') : onClose} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
+          <Pressable accessibilityLabel={mode === 'form' ? 'Back' : 'Close'} onPress={mode === 'form' ? () => setMode('list') : onClose} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
             <Ionicons name={mode === 'form' ? 'arrow-back' : 'close'} size={20} color={colors.ink} />
           </Pressable>
           <View style={styles.headerCopy}>
@@ -291,7 +291,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             <Text variant="xs" dim>{mode === 'list' ? 'Create, edit, clone, and snapshot host environments.' : 'Changes recreate the worker while retaining named volumes.'}</Text>
           </View>
           {mode === 'list' ? (
-            <Pressable onPress={() => openCreate()} style={[styles.iconButton, { backgroundColor: colors.accent.ink }]}>
+            <Pressable accessibilityLabel="Create environment" onPress={() => openCreate()} style={[styles.iconButton, { backgroundColor: colors.accent.ink }]}>
               <Ionicons name="add" size={20} color={colors.onInk} />
             </Pressable>
           ) : <View style={styles.iconButton} />}
@@ -348,7 +348,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
             )}
 
             <FieldLabel label="Folder mounts" optional />
-            {mounts.map((mount, index) => <View key={`${mount.host_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><View style={styles.cardCopy}><Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{mount.container_path}</Text><Text variant="xs" dim numberOfLines={1}>{mount.host_path} · {mount.mode}</Text></View><Pressable onPress={() => setMounts(current => current.filter((_, i) => i !== index))} style={styles.smallIcon}><Ionicons name="close" size={18} color={colors.danger.ink} /></Pressable></View>)}
+            {mounts.map((mount, index) => <View key={`${mount.host_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><View style={styles.cardCopy}><Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{mount.container_path}</Text><Text variant="xs" dim numberOfLines={1}>{mount.host_path} · {mount.mode}</Text></View><Pressable accessibilityLabel="Remove mount" onPress={() => setMounts(current => current.filter((_, i) => i !== index))} style={styles.smallIcon}><Ionicons name="close" size={18} color={colors.danger.ink} /></Pressable></View>)}
             <WorkspacePathField value={mountHost} onChangeText={value => { setMountHost(value); const base = value.split('/').filter(Boolean).pop(); if (base) setMountTarget(`/workspace/${base}`); }} placeholder="Browse a host folder" />
             <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline, marginTop: spacing.sm }]} />
             <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment selected={mountMode === 'rw'} label="RW" onPress={() => setMountMode('rw')} compact /><Segment selected={mountMode === 'ro'} label="RO" onPress={() => setMountMode('ro')} compact /></View><Pressable onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addButton, { borderColor: colors.hairline, opacity: mountHost.trim() && mountTarget.trim() ? 1 : 0.42 }]}><Ionicons name="add" size={18} color={colors.ink} /><Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Add folder</Text></Pressable></View>
@@ -380,7 +380,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
 
       <ModalFrame statusBarTranslucent={false} transparent={false} visible={editor !== null} animationType="slide" onRequestClose={() => setEditor(null)} containerStyle={{ backgroundColor: colors.canvas }}>
         <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.ink }]}>{editor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}</Text><Text variant="xs" dim>{editor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><Pressable onPress={() => setEditor(null)} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Ionicons name="close" size={20} color={colors.ink} /></Pressable></View>
+          <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.ink }]}>{editor === 'dockerfile' ? 'Dockerfile' : 'Network policy'}</Text><Text variant="xs" dim>{editor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><Pressable accessibilityLabel="Close editor" onPress={() => setEditor(null)} style={[styles.iconButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><Ionicons name="close" size={20} color={colors.ink} /></Pressable></View>
           {editor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.ink, backgroundColor: colors.code }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={allow} onChangeText={setAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.code, borderColor: colors.hairline }]} /><FieldLabel label="Blocklist" optional /><TextInput value={deny} onChangeText={setDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.code, borderColor: colors.hairline }]} /></ScrollView>}
         </KeyboardAvoidingView>
       </ModalFrame>
@@ -389,7 +389,7 @@ export function ContainerManagerSheet({ visible, onClose }: ContainerManagerShee
         <View style={[styles.overlay, { backgroundColor: colors.scrim }]}>
           <Pressable style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setActionContainer(null)} accessibilityLabel="Close environment actions" />
           <View style={[styles.actionSheet, elevation(1, colors, isDark)]}>
-            <View style={styles.actionSheetHead}><View style={styles.cardCopy}><Text style={[styles.title, { color: colors.ink }]}>{actionContainer?.name}</Text><Text variant="xs" dim>Environment actions</Text></View><Pressable onPress={() => setActionContainer(null)} style={styles.smallIcon}><Ionicons name="close" size={19} color={colors.ink3} /></Pressable></View>
+            <View style={styles.actionSheetHead}><View style={styles.cardCopy}><Text style={[styles.title, { color: colors.ink }]}>{actionContainer?.name}</Text><Text variant="xs" dim>Environment actions</Text></View><Pressable accessibilityLabel="Close actions" onPress={() => setActionContainer(null)} style={styles.smallIcon}><Ionicons name="close" size={19} color={colors.ink3} /></Pressable></View>
             {actionContainer ? <>
               <ActionRow icon="refresh-outline" label="Restart" onPress={() => { const item=actionContainer; setActionContainer(null); runAction(item, 'restart'); }} />
               <ActionRow icon="copy-outline" label="Clone configuration" onPress={() => { const item=actionContainer; setActionContainer(null); openEdit(item, true); }} />

@@ -337,7 +337,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
               </Pressable>
             </ScrollView>
           </View>
-          <Pressable style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+          <Pressable accessibilityLabel="Close sessions" style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         </View>
       </ModalFrame>
       <NewSessionSheet

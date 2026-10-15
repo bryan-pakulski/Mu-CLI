@@ -65,7 +65,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
   return (
     <ModalFrame statusBarTranslucent={false} visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <Pressable style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+        <Pressable accessibilityLabel="Close mode drawer" style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         <View
           {...swipeResponder.panHandlers}
           style={[

@@ -712,7 +712,7 @@ function StringList({ title, values }: { title: string; values: string[] }) {
   if (!values.length) return null;
   return (
     <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
+      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
       {values.map((value, index) => <Text key={`${value}-${index}`} variant="xs" style={styles.bulletLine}>• {value}</Text>)}
     </View>
   );
@@ -722,7 +722,7 @@ function TextBlock({ title, value, error = false }: { title: string; value: stri
   const { colors } = useTheme();
   return (
     <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
+      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
       <Text variant="xs" style={{ color: error ? colors.danger.ink : colors.ink }}>{value}</Text>
     </View>
   );
@@ -733,7 +733,7 @@ function JsonBlock({ title, value, raw = false }: { title: string; value: unknow
   const text = raw ? String(value) : safeJson(value);
   return (
     <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
+      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
       <View style={[styles.jsonBox, { backgroundColor: colors.canvas }]}>
         <Text variant="xs" style={styles.jsonText} selectable>{text}</Text>
       </View>

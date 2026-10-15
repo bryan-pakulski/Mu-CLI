@@ -126,7 +126,7 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
                   <Text variant="sm" numberOfLines={1} style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text>
                   <Text variant="xs" dim>{formatSize(item.size)} · {item.mime_type}</Text>
                 </View>
-                <Pressable onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
+                <Pressable accessibilityLabel="Remove attachment" onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
                   <Ionicons name="trash-outline" size={18} color={colors.ink3} />
                 </Pressable>
               </Pressable>

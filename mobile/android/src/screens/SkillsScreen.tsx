@@ -97,7 +97,7 @@ export function SkillsScreen() {
             <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
               <Button title="Details" variant="ghost" onPress={() => setSelected(item)} />
               <Button title={item.enabled ? 'Disable' : 'Enable'} onPress={() => toggle(item)} />
-              <Pressable onPress={() => remove(item.name)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ minHeight: 44, justifyContent: 'center' }}>
+              <Pressable accessibilityLabel={`Remove skill ${item.name}`} onPress={() => remove(item.name)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ minHeight: 44, justifyContent: 'center' }}>
                 <Ionicons name="trash-outline" size={20} color={colors.danger.ink} />
               </Pressable>
             </View>

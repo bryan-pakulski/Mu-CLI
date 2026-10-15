@@ -4,7 +4,7 @@
 ANDROID_DIR  = android
 GRADLEW      = $(ANDROID_DIR)/gradlew
 APK_DIR      = $(ANDROID_DIR)/app/build/outputs/apk/release
-APK_NAME     = mucli-mobile-0.4.2.apk
+APK_NAME     = mucli-mobile-0.5.0.apk
 DIST_DIR     = dist
 JAVA_HOME   ?= $(shell dirname $$(dirname $$(readlink -f $$(which javac) 2>/dev/null) 2>/dev/null) 2>/dev/null)
 

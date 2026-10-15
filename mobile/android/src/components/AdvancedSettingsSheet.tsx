@@ -209,7 +209,7 @@ export function AdvancedSettingsSheet({ visible, onClose }: AdvancedSettingsShee
               style={[styles.searchInput, { color: colors.ink }]}
             />
             {search ? (
-              <Pressable onPress={() => setSearch('')} style={styles.clearButton}>
+              <Pressable accessibilityLabel="Clear search" onPress={() => setSearch('')} style={styles.clearButton}>
                 <Ionicons name="close" size={17} color={colors.ink3} />
               </Pressable>
             ) : null}

@@ -127,7 +127,7 @@ export function ContainerHardwareSection({
             <Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{device.container_path}</Text>
             <Text variant="xs" dim numberOfLines={1}>{device.host_path} · {device.permissions}</Text>
           </View>
-          <Pressable onPress={() => onDevicesChange(devices.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
+          <Pressable accessibilityLabel="Remove device" onPress={() => onDevicesChange(devices.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
             <Ionicons name="close" size={18} color={colors.danger.ink} />
           </Pressable>
         </View>

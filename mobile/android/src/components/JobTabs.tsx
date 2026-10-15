@@ -3,11 +3,10 @@
 
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Markdown from 'react-native-markdown-display';
 
 import type { CheckSuite, Finding, JobAction, JobVM } from '../api/jobCore';
 import { JobPlanEditor, PlanCriteriaCards } from './JobPlanEditor';
-import { planMarkdownStyles, planProse } from './planMarkdown';
+import { planProse } from './planMarkdown';
 import { actionLabel } from './JobActions';
 import {
   FILE_STATUS_LABEL, countOf, listOf, parsePatch, runCounts, runtimeStatus, sessionItems, suiteCounts,
@@ -18,7 +17,7 @@ import { fontWeights, fonts, radii, spacing, toneInk, touchTarget } from '../the
 import {
   COVERAGE, SEVERITY, SEVERITY_ORDER, duration, stateStatus, stripAnsi, verdictStyle, when,
 } from '../theme/status';
-import { Banner, Button, CheckRow, CountBadge, Empty, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
+import { Banner, Button, CheckRow, CountBadge, Empty, Markdown, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
 
 type Invoke = (idOrAction: string | JobAction, extra?: Record<string, unknown>) => void;
 
@@ -69,13 +68,12 @@ export function SessionTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; 
  * user = accent tint, right-aligned; tool calls fold to one mono line. */
 export function TranscriptItem({ item }: { item: SessionItem }) {
   const { colors } = useTheme();
-  const md = useMemo(() => planMarkdownStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
   switch (item.kind) {
     case 'assistant':
       return (
         <View style={[styles.assistant, { backgroundColor: colors.raised, borderColor: colors.hairline }]}>
-          <Markdown style={md}>{item.text || ' '}</Markdown>
+          <Markdown variant="document">{item.text || ' '}</Markdown>
         </View>
       );
     case 'user':
@@ -130,7 +128,6 @@ export type PlanTabProps = {
 
 export function PlanTab({ job, editing, draft, dirty, historyVersion, busy, onEdit, onChangeDraft, onSave, onCancel, onVersion }: PlanTabProps) {
   const { colors } = useTheme();
-  const md = useMemo(() => planMarkdownStyles(colors), [colors]);
   const plan = job.plan;
   const editAction = job.actions.find(a => a.id === 'savePlanDraft');
   const latest = historyVersion === undefined;
@@ -168,7 +165,7 @@ export function PlanTab({ job, editing, draft, dirty, historyVersion, busy, onEd
           {plan?.diff_from_previous ? <Collapsible title="Changes from the previous version"><Pre>{plan.diff_from_previous}</Pre></Collapsible> : null}
           {(plan?.errors || []).length ? <Banner tone="warn" glyph="◆" title={(plan?.errors || []).join('\n')} /> : null}
           <Panel>
-            <Markdown style={md}>{planProse(markdown || plan?.draft || '') || '_Planning has not finished._'}</Markdown>
+            <Markdown variant="document">{planProse(markdown || plan?.draft || '') || '_Planning has not finished._'}</Markdown>
           </Panel>
           <PlanCriteriaCards markdown={markdown || plan?.draft || ''} />
         </>
@@ -357,7 +354,6 @@ export type ReviewTabProps = {
 
 export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, onDisposition, onJump, busy }: ReviewTabProps) {
   const { colors } = useTheme();
-  const md = useMemo(() => planMarkdownStyles(colors), [colors]);
   const report = job.review;
   const files = useMemo(() => new Set(parsePatch(job.diff?.patch).map(f => f.path)), [job.diff?.patch]);
   if (!report) return <Empty>Review report pending. The reviewer reports here after checks pass.</Empty>;
@@ -385,7 +381,7 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
         </View>
       ) : null}
       <Panel title="Summary">
-        <Markdown style={md}>{report.summary || '_No summary._'}</Markdown>
+        <Markdown variant="document">{report.summary || '_No summary._'}</Markdown>
       </Panel>
       <Panel title="Plan adherence">
         {(report.plan_coverage || []).length ? report.plan_coverage.map(c => (
@@ -423,8 +419,8 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
                     <Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{f.title}</Text>
                   </View>
                   <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{f.file || 'no file'}{f.line_start ? `:${f.line_start}` : ''}{f.category ? ` · ${f.category}` : ''}{f.confidence != null ? ` · confidence ${f.confidence}` : ''}</Text>
-                  {f.detail ? <Markdown style={md}>{f.detail}</Markdown> : null}
-                  {f.suggestion ? <View><Text variant="xs" style={{ color: colors.ink3 }}>Suggestion</Text><Markdown style={md}>{f.suggestion}</Markdown></View> : null}
+                  {f.detail ? <Markdown variant="document">{f.detail}</Markdown> : null}
+                  {f.suggestion ? <View><Text variant="xs" style={{ color: colors.ink3 }}>Suggestion</Text><Markdown variant="document">{f.suggestion}</Markdown></View> : null}
                   <View style={styles.wrap}>
                     {f.file && files.has(f.file)
                       ? <Button small label="◎ Jump to diff" onPress={() => onJump(f)} testID={`jump-${f.id}`} />

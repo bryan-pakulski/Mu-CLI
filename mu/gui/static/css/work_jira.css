@@ -7,7 +7,7 @@
 .work-jira-error { color: var(--danger); }
 .work-app .work-form .work-jira-inline,
 .work-jira-inline { display: flex; flex-direction: row; align-items: center; gap: var(--s-1); font-size: var(--fs-sm); font-weight: 400; }
-.work-jira-inline[hidden] { display: none !important; }
+/* W2: [hidden] always hides (wash/utilities.css). */
 .work-jira-row { display: flex; gap: var(--s-1); align-items: center; flex-wrap: wrap; }
 .work-jira-row input[type="search"], .work-jira-row input[type="text"] { flex: 1 1 180px; min-width: 0; }
 .work-jira-filters select { flex: 0 1 220px; min-width: 0; }

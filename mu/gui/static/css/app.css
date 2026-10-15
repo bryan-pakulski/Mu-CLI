@@ -281,8 +281,8 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
     transition: background-color var(--dur-micro) var(--ease-out);
 }
 .resize-handle-sidebar:hover::after { background: var(--accent-solid); }
-body.resizing { cursor: col-resize !important; user-select: none !important; }
-body.resizing * { cursor: col-resize !important; user-select: none !important; }
+body.resizing { /* W2: moved to wash/patterns/utilities.css */ }
+body.resizing * { /* W2: moved to wash/patterns/utilities.css */ }
 
 /* ------------------------------------------------------------ sidebar */
 
@@ -4136,7 +4136,7 @@ a.mode-option--ext { text-decoration: none; color: var(--text-primary); }
  * race the blocking agent thread.
  */
 
-[x-cloak] { display: none !important; }
+[x-cloak] { /* W2: moved to wash/patterns/utilities.css */ }
 
 .msg.prompt {
     background: var(--bg-subtle);
@@ -5701,26 +5701,20 @@ a.mode-option--ext { text-decoration: none; color: var(--text-primary); }
 
 /* ── CodeMirror theme: follow the app's light/dark tokens so the editor
  * matches the rest of the UI without a separate CM theme file.
- * !important is required to beat vendor/codemirror.min.css. ── */
+ * W2: the overrides moved to wash/patterns/legacy-overrides.css (a later
+ * cascade layer) so they still beat the editor's own defaults. ── */
 .CodeMirror {
-    background: var(--bg) !important;
-    color: var(--text-primary) !important;
     border: 0;
 }
-.CodeMirror-gutters {
-    background: var(--bg) !important;
-    border-right: 1px solid var(--hairline-color) !important;
-}
-.CodeMirror-linenumber { color: var(--text-tertiary) !important; }
-.CodeMirror-cursor { border-left-color: var(--accent-solid) !important; }
-.CodeMirror-selected { background: var(--accent-subtle) !important; }
+.CodeMirror-gutters { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.CodeMirror-linenumber { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.CodeMirror-cursor { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.CodeMirror-selected { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 .CodeMirror-line::selection,
 .CodeMirror-line > span::selection,
-.CodeMirror-line > span::span::selection {
-    background: var(--accent-subtle) !important;
-}
-.CodeMirror-activeline-background { background: var(--bg-hover) !important; }
-.CodeMirror-matchingbracket { color: var(--accent-fg) !important; border-bottom: 1px solid var(--accent-solid); }
+.CodeMirror-line > span::span::selection { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.CodeMirror-activeline-background { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.CodeMirror-matchingbracket { border-bottom: 1px solid var(--accent-solid); }
 /* Minimal syntax tint — kept subtle so it reads on both themes. */
 .cm-s-default .cm-keyword { color: var(--accent-fg); font-weight: var(--fw-semibold); }
 .cm-s-default .cm-string { color: var(--text-secondary); }
@@ -5844,7 +5838,7 @@ a.mode-option--ext { text-decoration: none; color: var(--text-primary); }
 .welcome-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4);padding:var(--space-5) var(--space-5) var(--space-4);border-bottom:1px solid var(--hairline-color)}
 .welcome-modal-head h2{margin:0;font-size:var(--fs-lg);letter-spacing:var(--tracking-tight)}.welcome-modal-body{flex:1;min-height:0;overflow:auto;padding:var(--space-4) var(--space-5)}.welcome-modal-foot{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2);padding:var(--space-3) var(--space-5) var(--space-4);border-top:1px solid var(--hairline-color);background:transparent}
 .session-modal-body{display:flex;flex-direction:column;gap:var(--space-2)}.welcome-session-row{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-3);border:0;border-radius:var(--radius-sm);background:transparent;transition:background-color var(--dur-small) var(--ease-out)}.welcome-session-row:hover{background:var(--bg-hover)}
-.session-kind{width:30px;height:30px;display:grid;place-items:center;border-radius:var(--radius-sm);background:var(--bg-hover);color:var(--text-secondary);font-family: var(--font-sans);}.welcome-session-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:var(--space-1)}.welcome-session-copy strong{overflow:hidden;text-overflow:ellipsis}.welcome-session-copy small{color:var(--text-tertiary);font-size:var(--fs-xs)}.danger-text{color:var(--error)!important}
+.session-kind{width:30px;height:30px;display:grid;place-items:center;border-radius:var(--radius-sm);background:var(--bg-hover);color:var(--text-secondary);font-family: var(--font-sans);}.welcome-session-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:var(--space-1)}.welcome-session-copy strong{overflow:hidden;text-overflow:ellipsis}.welcome-session-copy small{color:var(--text-tertiary);font-size:var(--fs-xs)}.danger-text { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 .welcome-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);min-height:160px;padding:var(--space-5);border:0;border-radius:var(--radius-sm);color:var(--text-tertiary);text-align:center}.welcome-empty strong{color:var(--text-primary)}
 .wizard-head{border-bottom:0;padding-bottom:var(--space-2)}.wizard-progress{display:flex;align-items:center;gap:var(--space-2);padding:0 var(--space-5) var(--space-4);border-bottom:1px solid var(--hairline-color)}.wizard-progress::before{content:'';position:absolute}.wizard-progress button{width:28px;height:28px;padding:0;border-radius:var(--radius-full);border:0;background:var(--bg-subtle);color:var(--text-tertiary);font:var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);font-variant-numeric:tabular-nums;transition:background-color var(--dur-small) var(--ease-out),color var(--dur-small) var(--ease-out)}.wizard-progress button.active{background:var(--accent-subtle);color:var(--accent-fg)}.wizard-progress button.complete{background:var(--accent-solid);color:var(--accent-on)}
 .wizard-body{padding-top:var(--space-5)}.wizard-intro{max-width:670px;margin:0 0 var(--space-5);color:var(--text-secondary);font-size:var(--fs-sm);line-height:var(--lh-body)}.wizard-field{display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)}.wizard-field>span{color:var(--text-secondary);font-size:var(--fs-sm);font-weight:var(--fw-medium)}.wizard-field input,.wizard-field select{width:100%;min-height:var(--touch-target);padding:var(--space-2) var(--space-3);border:1px solid var(--control-border);border-radius:var(--radius-sm);background:var(--bg-subtle);color:var(--text-primary)}.wizard-field small{color:var(--text-tertiary);font-size:var(--fs-xs)}

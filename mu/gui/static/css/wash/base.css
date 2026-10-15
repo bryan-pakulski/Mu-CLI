@@ -1,0 +1,143 @@
+/* Wash base layer — fonts, reset, element defaults, focus, selection,
+ * scrollbars and user-preference media queries (G§2, §3.4, §5, §11).
+ *
+ * Imported into `@layer base` by wash.css. Because every base rule beats
+ * every legacy rule regardless of specificity, this file deliberately sets
+ * only document-wide defaults that are safe on legacy markup: body type and
+ * colour, heading ink, the focus ring, selection and scrollbars. Component
+ * looks belong in components/*.css under `.w-*` names.
+ */
+
+/* ------------------------------------------------------------ fonts (G§2.1)
+ * Self-hosted, no network requests. Only the shell face is preloaded by
+ * templates/_layout.html. */
+@font-face {
+    font-family: "Inter";
+    src: url("/static/fonts/InterVariable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Inter";
+    src: url("/static/fonts/InterVariable-Italic.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/static/fonts/JetBrainsMono-Variable.woff2") format("woff2");
+    font-weight: 100 800;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* ------------------------------------------------------------ reset */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    background: var(--wash-canvas);
+}
+
+body {
+    margin: 0;
+    background: var(--wash-canvas);
+    color: var(--wash-ink);
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Display and title text use plum (G§2.2). Size stays with the component. */
+h1, h2, h3 { color: var(--wash-plum); }
+
+:where(code, kbd, samp, pre) {
+    font-family: var(--wash-font-mono);
+    font-variant-ligatures: none;
+}
+
+:where(time, .num, .tabular, [data-tabular]) { font-variant-numeric: tabular-nums; }
+
+:where(img, svg, video, canvas) { max-width: 100%; }
+
+/* ------------------------------------------------------------ tone channels
+ * Any element with data-tone exposes the three steps of its semantic as
+ * --w-tone-wash / --w-tone-ink / --w-tone-pigment; components read these
+ * (with their own fallbacks) so one attribute recolours chips, buttons,
+ * cards, banners and toasts consistently (G§1.3). */
+[data-tone="accent"] { --w-tone-wash: var(--wash-accent-wash); --w-tone-ink: var(--wash-accent-ink); --w-tone-pigment: var(--wash-accent-pigment); }
+[data-tone="running"] { --w-tone-wash: var(--wash-running-wash); --w-tone-ink: var(--wash-running-ink); --w-tone-pigment: var(--wash-running-pigment); }
+[data-tone="ok"] { --w-tone-wash: var(--wash-ok-wash); --w-tone-ink: var(--wash-ok-ink); --w-tone-pigment: var(--wash-ok-pigment); }
+[data-tone="attention"] { --w-tone-wash: var(--wash-attention-wash); --w-tone-ink: var(--wash-attention-ink); --w-tone-pigment: var(--wash-attention-pigment); }
+[data-tone="caution"] { --w-tone-wash: var(--wash-caution-wash); --w-tone-ink: var(--wash-caution-ink); --w-tone-pigment: var(--wash-caution-pigment); }
+[data-tone="danger"] { --w-tone-wash: var(--wash-danger-wash); --w-tone-ink: var(--wash-danger-ink); --w-tone-pigment: var(--wash-danger-pigment); }
+[data-tone="plan"] { --w-tone-wash: var(--wash-plan-wash); --w-tone-ink: var(--wash-plan-ink); --w-tone-pigment: var(--wash-plan-pigment); }
+[data-tone="info"] { --w-tone-wash: var(--wash-info-wash); --w-tone-ink: var(--wash-info-ink); --w-tone-pigment: var(--wash-info-pigment); }
+[data-tone="neutral"] { --w-tone-wash: var(--wash-neutral-wash); --w-tone-ink: var(--wash-neutral-ink); --w-tone-pigment: var(--wash-neutral-pigment); }
+
+/* ------------------------------------------------------------ focus (G§3.4)
+ * 2px accent outline with a 2px offset on every interactive element. Inputs
+ * use offset 0 plus a 3px accent wash halo. Never outline:none without a
+ * replacement. */
+:focus-visible {
+    outline: 2px solid var(--wash-accent-ink);
+    outline-offset: 2px;
+}
+:is(input, textarea, select):focus-visible {
+    outline: 2px solid var(--wash-accent-ink);
+    outline-offset: 0;
+    box-shadow: 0 0 0 3px var(--wash-accent-wash);
+}
+
+/* ------------------------------------------------------------ selection */
+::selection {
+    background: var(--wash-accent-wash);
+    color: var(--wash-ink);
+}
+
+/* ------------------------------------------------------------ scrollbars */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--wash-hairline-strong) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--wash-hairline-strong);
+    border: 2px solid transparent;
+    border-radius: var(--wash-radius-pill);
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--wash-control-border); }
+
+/* ------------------------------------------------------------ preferences (G§11)
+ * Reduced motion's global "everything instant" rule needs !important to beat
+ * component animations, so it lives in utilities.css. */
+
+/* Higher contrast: hairlines become ink-3 and washes get stronger. */
+@media (prefers-contrast: more) {
+    :root, [data-theme] {
+        --wash-hairline: var(--wash-ink-3);
+        --wash-hairline-strong: var(--wash-ink-2);
+        --wash-control-border: var(--wash-ink-2);
+        --wash-ink-3: var(--wash-ink-2);
+    }
+}
+
+/* Windows high-contrast / forced colours: let the system palette through. */
+@media (forced-colors: active) {
+    :focus-visible { outline: 2px solid CanvasText; }
+    ::selection { background: Highlight; color: HighlightText; }
+}
+
+/* No translucency: glass surfaces fall back to their solid colour. */
+@media (prefers-reduced-transparency: reduce) {
+    :root, [data-theme] { --w-glass-blur: 0px; --w-glass-alpha: 100%; }
+}

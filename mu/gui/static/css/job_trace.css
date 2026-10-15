@@ -10,7 +10,7 @@
 .jt-title-chip { max-width: 320px; color: var(--text); }
 .jt-status-chip:empty { display: none; }
 /* Theme glyph visibility is driven by the [hidden] attribute (job_trace.js). */
-#jt-theme [hidden] { display: none !important; }
+/* W2: [hidden] always hides (wash/utilities.css). */
 .job-trace-main { max-width: 1600px; }
 .jt-error { color: var(--error); }
 

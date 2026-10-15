@@ -49,11 +49,8 @@ button.primary:hover{background:var(--accent-hover);color:var(--accent-on)}
 .route-tools{display:flex;align-items:center;gap:2px;flex:none;min-width:0}
 .route-tools .btn.icon{color:var(--text)}
 .route-tools a.btn:hover{color:var(--text)}
-.route-tools [hidden]{display:none !important}
 .route-divider{width:1px;height:20px;margin:0 var(--space-1);background:var(--border);flex:none}
-/* Show the icon of the appearance you would switch to (sun in dark, moon in light). */
-html:not([data-theme="light"]) .route-shell [data-theme-icon="light"],
-html[data-theme="light"] .route-shell [data-theme-icon="dark"]{display:none}
+/* W2: theme toggle icons are the shared sprite button (wash/components/icon.css). */
 .route-picker{display:flex;align-items:center;gap:var(--space-2);min-width:0}
 .route-select{
     height:var(--control-h);min-height:var(--control-h);

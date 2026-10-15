@@ -5,17 +5,8 @@
  * timing for completed model turns without changing backend/API semantics.
  */
 (function () {
-    function installStylesheet(id, href) {
-        if (document.getElementById(id)) return;
-        const link = document.createElement('link');
-        link.id = id;
-        link.rel = 'stylesheet';
-        link.href = href;
-        document.head.appendChild(link);
-    }
-
-    installStylesheet('mucli-conversation-css', '/static/css/conversation.css');
-    installStylesheet('mucli-pricing-rows-css', '/static/css/pricing_rows.css');
+    // Conversation and pricing-row styles are imported by the chat page bundle
+    // (static/css/wash/patterns/chat.css); nothing is injected at runtime.
 
     function hasLiveTranscript(slot) {
         return (slot.turns || []).some(turn => (

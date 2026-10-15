@@ -1,0 +1,108 @@
+<!-- Feature: create feature modal -->
+<div class="modal-backdrop"
+     x-data
+     x-dialog="$store.feature.showCreateModal"
+     x-cloak
+     x-show="$store.feature.showCreateModal"
+     x-transition.opacity.duration.120ms
+     @dialog-close="$store.feature.showCreateModal && $store.feature.closeCreateModal()">
+    <div class="modal modal-lg" @click.stop role="dialog" aria-modal="true" aria-labelledby="feature-create-title">
+        <div class="modal-head">
+            <span class="modal-title" id="feature-create-title">new feature</span>
+            <button class="icon-btn" @click="$store.feature.closeCreateModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-field">
+                <label class="modal-label">name</label>
+                <input type="text"
+                       x-model="$store.feature.createForm.name"
+                       placeholder="Feature name"
+                       @keydown.stop />
+            </div>
+            <div class="modal-field">
+                <label class="modal-label">description</label>
+                <textarea x-model="$store.feature.createForm.request"
+                          placeholder="What should this feature do?"
+                          rows="3"
+                          @keydown.stop></textarea>
+            </div>
+            <div class="modal-field">
+                <label class="modal-label">directory</label>
+                <div style="display:flex;gap:var(--space-2)">
+                    <input type="text"
+                           x-model="$store.feature.createForm.directory"
+                           placeholder="Working directory (default: cwd)"
+                           style="flex:1"
+                           @keydown.stop />
+                    <button class="subtle"
+                            @click="$store.fileBrowser.show('folder', p => $store.feature.createForm.directory = p)">browse</button>
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <div class="modal-section-head">
+                    <span class="modal-label" style="margin-bottom:0">phases</span>
+                    <button class="modal-add-btn" @click="$store.feature.addPhase()">+ phase</button>
+                </div>
+                <template x-for="(phase, pi) in ($store.feature.createForm.phases || [])" :key="pi">
+                    <div class="modal-phase">
+                        <div class="modal-phase-head">
+                            <span class="modal-phase-num mono muted" x-text="'phase ' + (pi + 1)"></span>
+                            <button class="modal-remove-btn" @click="$store.feature.removePhase(pi)">&times;</button>
+                        </div>
+                        <div class="modal-field-row">
+                            <input type="text" x-model="phase.title" placeholder="Phase title" @keydown.stop />
+                            <input type="text" x-model="phase.goal" placeholder="Goal (optional)" @keydown.stop />
+                        </div>
+
+                        <div class="modal-tasks">
+                            <div class="modal-section-head small">
+                                <span class="modal-label" style="margin-bottom:0;font-size:var(--fs-xs)">tasks</span>
+                                <button class="modal-add-btn small" @click="$store.feature.addTask(pi)">+ task</button>
+                            </div>
+                            <template x-for="(task, ti) in (phase.tasks || [])" :key="ti">
+                                <div class="modal-task">
+                                    <div class="modal-task-head">
+                                        <span class="muted mono" style="font-size:var(--fs-xs)" x-text="'task ' + (ti + 1)"></span>
+                                        <button class="modal-remove-btn" @click="$store.feature.removeTask(pi, ti)">&times;</button>
+                                    </div>
+                                    <div class="modal-field">
+                                        <input type="text" x-model="task.title" placeholder="Task title" @keydown.stop />
+                                    </div>
+                                    <div class="modal-list-field">
+                                        <span class="modal-label" style="font-size:var(--fs-xs)">objectives</span>
+                                        <template x-for="(obj, oi) in (task.objectives || [])" :key="oi">
+                                            <div class="modal-list-row">
+                                                <input type="text" x-model="task.objectives[oi]" placeholder="Objective" @keydown.stop />
+                                                <button class="modal-remove-btn" @click="$store.feature.removeListItem(pi, ti, 'objectives', oi)">&times;</button>
+                                            </div>
+                                        </template>
+                                        <button class="modal-add-btn small" @click="$store.feature.addListItem(pi, ti, 'objectives')">+</button>
+                                    </div>
+                                    <div class="modal-list-field">
+                                        <span class="modal-label" style="font-size:var(--fs-xs)">exit criteria</span>
+                                        <template x-for="(crit, ci) in (task.exit_criteria || [])" :key="ci">
+                                            <div class="modal-list-row">
+                                                <input type="text" x-model="task.exit_criteria[ci]" placeholder="Criterion" @keydown.stop />
+                                                <button class="modal-remove-btn" @click="$store.feature.removeListItem(pi, ti, 'exit_criteria', ci)">&times;</button>
+                                            </div>
+                                        </template>
+                                        <button class="modal-add-btn small" @click="$store.feature.addListItem(pi, ti, 'exit_criteria')">+</button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <p class="muted" style="font-size:var(--fs-xs);margin-top:var(--space-2)"
+                   x-show="!($store.feature.createForm.phases || []).length">
+                    No phases — the agent can plan them later, or add them now.
+                </p>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button @click="$store.feature.closeCreateModal()">cancel</button>
+            <button class="primary" @click="$store.feature.submitCreateFeature()">create</button>
+        </div>
+    </div>
+</div>

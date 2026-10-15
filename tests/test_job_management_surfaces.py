@@ -15,7 +15,10 @@ def test_engineering_work_loads_management_and_trace_assets():
 
     assert 'id="work-manage"' in template
     assert 'id="work-management-backdrop"' in template
-    assert '/static/css/work_management.css' in template
+    # Wash W2: work_management.css is imported by the /work page bundle.
+    assert '/static/css/wash/patterns/work.css' in template
+    bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")
+    assert '@import url("../../work_management.css") layer(legacy);' in bundle
     assert '/static/js/work_trace.js' in template
     assert '/static/js/work_management.js' in template
     assert template.index('/static/js/work_trace.js') < template.index('/static/js/work_diagnostics.js')

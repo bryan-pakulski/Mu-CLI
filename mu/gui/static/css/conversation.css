@@ -5,13 +5,9 @@
  */
 
 /* ---------------------------------------------------------------- main timeline */
-.chat-history {
-    padding-top: var(--space-6) !important;
-}
+.chat-history { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 
-.chat-history > .turn-wrap > .msg {
-    margin-bottom: var(--space-3) !important;
-}
+.chat-history > .turn-wrap > .msg { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 .chat-history > .turn-wrap > .msg.assistant.interim-entering {
     animation: interim-handoff-in var(--dur-large) var(--ease-out) both;
 }
@@ -58,7 +54,6 @@
 
 /* ---------------------------------------------------------------- interim updates */
 .chat-history .collapse-group {
-    margin: var(--space-1) 0 var(--space-3) !important;
     padding: 0;
     border: 0;
     border-radius: 0;
@@ -71,7 +66,6 @@
     content: none;
 }
 .chat-history .collapse-header {
-    min-height: 28px !important;
     padding: 2px 0;
     gap: var(--space-2);
     border: 0;
@@ -99,7 +93,6 @@
     padding: var(--space-1) 0 2px var(--space-3);
     gap: var(--space-2);
     border: 0;
-    border-left: 1px solid var(--hairline) !important;
     border-radius: 0;
     background: transparent;
 }
@@ -107,7 +100,6 @@
     opacity: .85;
 }
 .chat-history .collapse-body .msg.assistant.collapsed-child {
-    padding: var(--space-1) var(--space-3) !important;
     border-radius: var(--radius-lg);
     border-top-left-radius: 2px;
 }
@@ -139,7 +131,6 @@
     margin: 2px 0 var(--space-2);
     padding: 0;
     border: 0;
-    border-top: 0 !important;
     border-bottom: 0;
     background: transparent;
     box-shadow: none;
@@ -186,7 +177,7 @@
 }
 
 @media (max-width: 760px) {
-    .chat-history { padding-top: var(--space-5) !important; }
-    .chat-history > .turn-wrap > .msg { margin-bottom: var(--space-3) !important; }
+    .chat-history { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+    .chat-history > .turn-wrap > .msg { /* W2: moved to wash/patterns/legacy-overrides.css */ }
     .chat-history .collapse-body { padding-left: var(--space-2); }
 }

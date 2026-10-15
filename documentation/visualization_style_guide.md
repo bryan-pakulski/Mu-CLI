@@ -102,10 +102,12 @@ reusable template. Do not copy colours from screenshots.
 
 The artifact view injects a bootstrap before visualization code runs:
 
-- the current client setting is passed as `?mucli_theme=light|dark`;
-- `<html data-theme="…">` is set before content executes;
+- the current client setting is passed as `?mucli_theme=light|dark` (the Wash
+  names `paper|dusk` are also accepted and mapped to `light|dark`);
+- `<html data-theme="…">` is set before content executes (`light` or `dark`);
 - `window.__MUCLI_THEME__` exposes the current value;
-- `mucli-theme-change` is dispatched with `{detail: {theme}}`;
+- `mucli-theme-change` is dispatched with `{detail: {theme, wash}}`, where
+  `theme` stays `light|dark` and `wash` is the Wash theme name `paper|dusk`;
 - web also posts live theme messages into already mounted frames;
 - mobile reloads the isolated WebView with its current `useTheme()` value.
 

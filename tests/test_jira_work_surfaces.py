@@ -13,7 +13,10 @@ WORK_JS = (ROOT / "mu/gui/static/js/work.js").read_text(encoding="utf-8")
 
 def test_assets_wired_into_work_page():
     assert '/static/js/work_jira.js' in TEMPLATE
-    assert '/static/css/work_jira.css' in TEMPLATE
+    # Wash W2: /work links its page bundle, which imports work_jira.css.
+    assert '/static/css/wash/patterns/work.css' in TEMPLATE
+    bundle = (ROOT / "mu/gui/static/css/wash/patterns/work.css").read_text(encoding="utf-8")
+    assert '@import url("../../work_jira.css") layer(legacy);' in bundle
     assert (ROOT / "mu/gui/static/css/work_jira.css").exists()
 
 

@@ -12,12 +12,12 @@
      x-transition.opacity.duration.120ms
      @click.self="$store.memory.closeLayer()"
      @dialog-close="$store.memory.layerModal.open && $store.memory.closeLayer()">
-    <div class="modal modal-lg memory-layer-modal">
+    <div class="modal modal-lg memory-layer-modal" role="dialog" aria-modal="true" aria-labelledby="memory-layer-title">
         <div class="modal-head">
             <div class="memory-layer-heading">
                 <span class="memory-layer-swatch"
                       :style="'background:' + $store.memory.layerColor($store.memory.layerModal.hue || 0)"></span>
-                <span class="modal-title"
+                <span class="modal-title" id="memory-layer-title"
                       x-text="$store.memory.layerModal.id + ' · ' + $store.memory.layerModal.name"></span>
             </div>
             <button class="icon-btn"

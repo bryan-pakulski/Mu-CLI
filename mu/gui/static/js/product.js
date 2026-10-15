@@ -7,19 +7,9 @@
     const FLOAT_MARGIN = 10;
     const FLOAT_GAP = 9;
 
-    function installPresentationStylesheet(id, href) {
-        if (document.getElementById(id)) return;
-        const link = document.createElement('link');
-        link.id = id;
-        link.rel = 'stylesheet';
-        link.href = href;
-        document.head.appendChild(link);
-    }
-
-    // product.js is loaded synchronously by the main web shell, so install late
-    // override sheets immediately and avoid first-open style flashes.
-    installPresentationStylesheet('mucli-popouts-css', '/static/css/popouts.css');
-    installPresentationStylesheet('mucli-pricing-settings-css', '/static/css/pricing_settings.css');
+    // Presentation stylesheets (popouts, pricing settings) are no longer
+    // injected at runtime: they are imported by the chat page bundle
+    // (static/css/wash/patterns/chat.css) behind the single wash.css link.
 
     function setText(selector, value) {
         const node = document.querySelector(selector);

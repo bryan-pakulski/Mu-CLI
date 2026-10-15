@@ -1,0 +1,19 @@
+<!-- Confirm popover (anchored near click) -->
+<div class="confirm-pop"
+     x-data
+     x-dialog="$store.confirm.open"
+     x-cloak
+     x-show="$store.confirm.open"
+     x-transition.opacity.duration.120ms
+     :style="`left:${$store.confirm.x}px; top:${$store.confirm.y}px;`"
+     @click.outside="$store.confirm.cancel()"
+     @dialog-close="$store.confirm.cancel()"
+     @keydown.enter.window="$store.confirm.open && $store.confirm.confirm()"
+     role="dialog" aria-modal="true" aria-labelledby="confirm-pop-message">
+    <div class="confirm-message" id="confirm-pop-message" x-text="$store.confirm.message"></div>
+    <div class="confirm-actions">
+        <button @click="$store.confirm.cancel()">cancel</button>
+        <button class="primary" :class="{ danger: $store.confirm.danger }"
+                @click="$store.confirm.confirm()">confirm</button>
+    </div>
+</div>

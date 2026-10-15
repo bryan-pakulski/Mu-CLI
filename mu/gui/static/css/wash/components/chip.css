@@ -1,0 +1,150 @@
+/* Chip, eyebrow, count badge (G§9.2)
+ *
+ *   status    <span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span>Needs you</span>
+ *   meta      <span class="w-chip" data-variant="meta">claude-opus · <span class="w-chip__caret">▾</span></span>
+ *   eyebrow   <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Plan</span>
+ *   filter    <button class="w-chip" data-variant="filter" aria-pressed="true">Running</button>
+ *   removable <span class="w-chip" data-variant="meta">file.py<button class="w-chip__remove" aria-label="Remove file.py">…</button></span>
+ *   count     <span class="w-count" data-tone="attention">3</span>
+ *
+ * Status chips always carry a glyph and a label (colour is never the only
+ * signal). data-tone: accent running ok attention caution danger plan info neutral.
+ * Plan adds a dashed outline so it stays distinct from research/lilac.
+ */
+.w-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    max-width: 100%;
+    margin: 0;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-tone-wash, var(--wash-sunken));
+    color: var(--w-tone-ink, var(--wash-ink-2));
+    font: inherit;
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-label-weight);
+    line-height: 1;
+    white-space: nowrap;
+    text-decoration: none;
+    vertical-align: middle;
+}
+.w-chip > :not(.w-chip__glyph, .w-chip__dot, .w-chip__remove, .w-chip__caret) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+a.w-chip:hover, button.w-chip:hover { text-decoration: none; filter: brightness(0.97); }
+.w-chip[data-tone="plan"] {
+    border: 1px dashed var(--wash-plan-ink);
+}
+.w-chip__glyph {
+    flex: none;
+    font-size: var(--wash-type-caption-size);
+    line-height: 1;
+}
+.w-chip__dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--w-dot, var(--w-tone-pigment, var(--wash-ink-3)));
+}
+.w-chip__caret { flex: none; color: var(--wash-ink-3); }
+
+/* meta: surface pill with a hairline — model, provider, branch */
+.w-chip[data-variant="meta"] {
+    border-color: var(--wash-hairline);
+    background: var(--wash-surface);
+    color: var(--wash-ink-2);
+}
+a.w-chip[data-variant="meta"]:hover,
+button.w-chip[data-variant="meta"]:hover { background: var(--wash-sunken); filter: none; }
+
+/* filter: meta look; selected = ink fill with a leading ✓ */
+.w-chip[data-variant="filter"] {
+    height: 28px;
+    padding: 0 12px;
+    border-color: var(--wash-hairline-strong);
+    background: var(--wash-surface);
+    color: var(--wash-ink-2);
+    cursor: pointer;
+}
+.w-chip[data-variant="filter"]:hover { background: var(--wash-sunken); filter: none; }
+.w-chip[data-variant="filter"][aria-pressed="true"] {
+    border-color: var(--wash-ink);
+    background: var(--wash-ink);
+    color: var(--wash-on-ink);
+}
+.w-chip[data-variant="filter"][aria-pressed="true"]::before { content: "✓"; }
+
+/* removable: trailing ✕ with a 24px hit area */
+.w-chip__remove {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    margin: 0 -8px 0 -2px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.w-chip__remove:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+.w-chip__remove :is(svg, .w-icon) { width: 12px; height: 12px; }
+@media (pointer: coarse) {
+    .w-chip__remove::after { content: ""; position: absolute; inset: -10px; }
+    .w-chip__remove { position: relative; }
+}
+
+/* eyebrow: sunken pill above section titles, optional pigment square */
+.w-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 10px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-eyebrow-size);
+    font-weight: var(--wash-type-eyebrow-weight);
+    letter-spacing: var(--wash-type-eyebrow-tracking);
+    line-height: var(--wash-type-eyebrow-line);
+    white-space: nowrap;
+}
+.w-eyebrow__swatch {
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
+    background: var(--w-tone-pigment, var(--wash-accent-pigment));
+}
+
+/* count badge: 18px-min tabular pill */
+.w-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-tone-wash, var(--wash-sunken));
+    color: var(--w-tone-ink, var(--wash-ink-2));
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+/* chip group */
+.w-chip-row {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+}

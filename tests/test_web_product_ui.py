@@ -18,15 +18,18 @@ TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "trace.css"
 CONTAINER_CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css"
 PRODUCT_JS = ROOT / "mu" / "gui" / "static" / "js" / "product.js"
 WEB_SHELL_JS = ROOT / "mu" / "gui" / "static" / "js" / "web_shell.js"
+OVERRIDES_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "legacy-overrides.css"
 
 
 def test_product_assets_are_loaded_by_main_web_shell():
     text = INDEX.read_text(encoding="utf-8")
-    for asset in (
-        '/static/css/product.css', '/static/css/crystal.css',
-        '/static/css/clarity.css', '/static/css/refinement.css',
-        '/static/js/product.js', '/static/js/web_shell.js',
-    ):
+    # Wash W2: the shell links one page bundle that imports the product
+    # stylesheets (in their historical order) into the legacy layer.
+    bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "chat.css").read_text(encoding="utf-8")
+    assert '/static/css/wash/patterns/chat.css' in text
+    order = [bundle.index(f'"../../{name}"') for name in ('product.css', 'crystal.css', 'clarity.css', 'refinement.css')]
+    assert order == sorted(order)
+    for asset in ('/static/js/product.js', '/static/js/web_shell.js'):
         assert asset in text
     assert 'class="app product-app"' in text
     assert 'class="panel-stage"' in text
@@ -97,7 +100,8 @@ def test_rhs_panel_uses_exactly_two_dropdowns_not_scrollable_tabs():
     assert '.panel-selector-label' in css
     assert 'border-bottom: 1px solid var(--hairline)' in css
     assert 'background-color: transparent' in css
-    assert 'inset: var(--panel-tabs-h) 0 0 0 !important' in css
+    # Wash W2: the override moved from `!important` to the patterns layer.
+    assert '.panel-stage .mode-panel { inset: var(--panel-tabs-h) 0 0 0; }' in OVERRIDES_CSS.read_text(encoding="utf-8")
 
 
 def test_product_css_covers_primary_web_surfaces():
@@ -115,7 +119,9 @@ def test_product_css_covers_primary_web_surfaces():
     assert 'backdrop-filter' not in combined
     assert '@media (max-width: 760px)' in combined
     assert '@media (prefers-reduced-motion: reduce)' in combined
-    assert 'padding: 0 !important;' in product
+    # Wash W2: body padding reset now wins from the patterns layer.
+    assert 'body { padding: 0; }' in OVERRIDES_CSS.read_text(encoding="utf-8")
+    assert '!important' not in product
 
 
 def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
@@ -142,8 +148,12 @@ def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
 
 def test_product_javascript_positions_overlays_and_is_presentation_only():
     js = PRODUCT_JS.read_text(encoding="utf-8")
-    assert 'installPresentationStylesheet' in js
-    assert "installPresentationStylesheet('mucli-popouts-css', '/static/css/popouts.css')" in js
+    # Wash W2: popouts.css is imported by the chat page bundle; product.js
+    # no longer injects stylesheets at runtime.
+    assert 'installPresentationStylesheet' not in js
+    assert '@import url("../../popouts.css") layer(legacy);' in (
+        ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "chat.css"
+    ).read_text(encoding="utf-8")
     assert 'polishWelcomeCopy' in js
     assert 'focusComposer' in js
     assert 'preserveOverlayGeometry' in js
@@ -166,17 +176,18 @@ def test_product_javascript_positions_overlays_and_is_presentation_only():
 
 def test_composer_is_single_pane_with_controls_outside_typing_surface():
     css = REFINEMENT_CSS.read_text(encoding="utf-8")
+    overrides = OVERRIDES_CSS.read_text(encoding="utf-8")
     assert '.composer::before' in css
-    assert 'content: none !important' in css
+    # Wash W2: these overrides win from the patterns layer, not `!important`.
+    assert '.composer::before { content: none; }' in overrides
     assert '.composer-toolbar {' in css
-    assert 'position: static !important' in css
+    assert '.composer-toolbar { position: static; }' in overrides
     assert 'margin: 0 0 var(--space-2)' in css
     assert 'justify-content: flex-end' in css
     assert '.composer form {' in css
     assert 'background: var(--bg-raised)' in css
     assert '.composer .hint {' in css
-    assert 'min-height: 0 !important' in css
-    assert 'background: transparent !important' in css
+    assert '.composer .hint { min-height: 0; background: transparent; }' in overrides
 
 
 def test_composer_feature_and_provider_popouts_fit_content_cleanly():
@@ -261,7 +272,7 @@ def test_settings_drawer_is_spacious_clean_and_consistent():
     assert '.settings-pane .var-error' in refinement
     assert 'class="switch" role="switch"' in template
     assert 'class="var-hint"' in template
-    assert 'background: transparent !important' in refinement
+    assert '.settings-pane .var-row { background: transparent; }' in OVERRIDES_CSS.read_text(encoding="utf-8")
     assert '.settings-pane .var-row > input' in refinement
     assert 'border-bottom: 1px solid var(--hairline)' in refinement
 
@@ -289,8 +300,11 @@ def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():
     template = CONTAINERS.read_text(encoding="utf-8")
-    assert '/static/css/route-product.css' in template
-    assert '/static/css/containers-crystal.css' in template
+    # Wash W2: /containers links its page bundle importing the route styles.
+    bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "containers.css").read_text(encoding="utf-8")
+    assert '/static/css/wash/patterns/containers.css' in template
+    assert '@import url("../../route-product.css") layer(legacy);' in bundle
+    assert '@import url("../../containers-crystal.css") layer(legacy);' in bundle
     for dom_id in (
         'container-list', 'template-list', 'create-environment-button',
         'create-modal', 'environment-name', 'shell-modal', 'shell-command',

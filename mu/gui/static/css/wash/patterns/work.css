@@ -1,0 +1,11 @@
+/* Page bundle — Engineering work (/work). Jobs mode keeps its scoped .work-app styles;
+ * theme.css is imported once, after them (it used to be linked twice).
+ *
+ * Linked after wash.css (which declares the layer order), so these imports
+ * land in the lowest-priority `legacy` layer. Wash rules for this page go
+ * in the `patterns` layer below. */
+@import url("../../work.css") layer(legacy);
+@import url("../../work_management.css") layer(legacy);
+@import url("../../work_polish.css") layer(legacy);
+@import url("../../work_jira.css") layer(legacy);
+@import url("../../theme.css") layer(legacy);

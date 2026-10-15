@@ -14,12 +14,12 @@
     }
 
     function syncHeaderAnalysisLink() {
-        const headerLink = document.querySelector('a.work-header-icon[href^="/static/job_trace.html"]');
+        const headerLink = document.querySelector('a.work-header-icon[href^="/jobs/trace"]');
         if (!headerLink) return;
         const jobId = selectedJobId();
         headerLink.href = jobId
-            ? `/static/job_trace.html?job=${encodeURIComponent(jobId)}`
-            : '/static/job_trace.html';
+            ? `/jobs/trace?job=${encodeURIComponent(jobId)}`
+            : '/jobs/trace';
         headerLink.title = jobId
             ? 'Analyze selected job'
             : 'Analyze jobs';
@@ -48,7 +48,7 @@
                 header.appendChild(link);
             }
         }
-        link.href = `/static/job_trace.html?job=${encodeURIComponent(jobId)}`;
+        link.href = `/jobs/trace?job=${encodeURIComponent(jobId)}`;
     }
 
     function costMetric() {

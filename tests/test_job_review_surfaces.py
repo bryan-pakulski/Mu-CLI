@@ -34,7 +34,11 @@ def test_gui_exposes_first_class_engineering_work_surface():
     assert "'/work?session='" in index
     assert 'aria-label="Open engineering work"' in index
 
-    assert '/static/css/work.css' in template
+    # Wash W2: /work links its page bundle, which imports work.css.
+    assert '/static/css/wash/patterns/work.css' in template
+    assert '@import url("../../work.css") layer(legacy);' in (
+        WORK_CSS.parent / "wash" / "patterns" / "work.css"
+    ).read_text(encoding="utf-8")
     assert '/static/js/work.js' in template
     assert 'id="work-board"' in template
     assert 'id="work-detail"' in template

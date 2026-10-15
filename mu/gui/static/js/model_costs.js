@@ -24,19 +24,6 @@
         $('mc-dirty').hidden = false;
         $('mc-status').textContent = '';
     }
-    function syncThemeIcon() {
-        const dark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-        document.querySelectorAll('.mc-theme-dark').forEach(node => { node.style.display = dark ? '' : 'none'; });
-        document.querySelectorAll('.mc-theme-light').forEach(node => { node.style.display = dark ? 'none' : ''; });
-    }
-    function toggleTheme() {
-        const current = document.documentElement.getAttribute('data-theme') || 'dark';
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        try { localStorage.setItem('mucli-theme', next); } catch (_) {}
-        syncThemeIcon();
-    }
-
     function billingSelect(value) {
         const options = [
             ['token', 'Token rates'],
@@ -212,9 +199,7 @@
     }
 
     async function init() {
-        syncThemeIcon();
         $('mc-search').addEventListener('input', render);
-        $('mc-theme').addEventListener('click', toggleTheme);
         $('mc-add').addEventListener('click', addModel);
         $('mc-save').addEventListener('click', save);
         $('mc-reset').addEventListener('click', reset);

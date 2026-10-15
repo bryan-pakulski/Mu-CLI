@@ -1,9 +1,11 @@
-"""Standalone web routes share the planos route shell.
+"""Standalone web routes share the Wash app shell.
 
-/trace, /containers, /static/job_trace.html and /static/model_costs.html all
-render the planos top bar (logo, crumbs, status chips, ghost icon tools with a
-theme toggle and links back to chat and jobs) over panelled content, and use
-the shared status vocabulary (glyph + label, never colour alone).
+/trace, /containers, /jobs/trace and /models/costs all extend
+templates/_layout.html: the shared top bar (wordmark, breadcrumb, status
+chips, tools and the sprite theme toggle) and sidebar navigation (Chat, Work,
+Environments, Trace) over panelled content, and use the shared status
+vocabulary (glyph + label, never colour alone). The old static job trace and
+model pricing URLs 308-redirect to the Jinja pages.
 """
 
 from pathlib import Path
@@ -14,8 +16,8 @@ GUI = ROOT / "mu" / "gui"
 PAGES = {
     "trace": GUI / "templates" / "trace.html",
     "containers": GUI / "templates" / "containers.html",
-    "job_trace": GUI / "static" / "job_trace.html",
-    "model_costs": GUI / "static" / "model_costs.html",
+    "job_trace": GUI / "templates" / "job_trace.html",
+    "model_costs": GUI / "templates" / "model_costs.html",
 }
 
 
@@ -23,31 +25,59 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_every_route_renders_the_planos_top_bar_and_navigation():
+def test_every_route_renders_the_shared_wash_shell_and_navigation():
+    # Intent (was: each page carried its own planos route-top bar): every
+    # standalone page renders the one shared top bar + sidebar from
+    # _layout.html, with a way back to chat and jobs and a theme toggle.
+    layout = _read(GUI / "templates" / "_layout.html")
+    base = _read(GUI / "templates" / "base.html")
+    sidebar = _read(GUI / "templates" / "partials" / "sidebar.html")
+    macros = _read(GUI / "templates" / "macros" / "wash.html")
+    assert '{% extends "_layout.html" %}' in base
     for name, path in PAGES.items():
         html = _read(path)
-        assert "route-shell" in html, name
-        assert "route-top" in html, name
-        assert 'class="route-logo' in html, name
-        assert 'class="route-crumbs"' in html, name
-        assert 'class="route-chips"' in html, name
-        # Ghost icon tools with a way back to chat and (except jobs pages' crumbs) jobs.
-        assert 'href="/"' in html, name
-        assert 'href="/work"' in html, name
-        assert "btn ghost icon" in html, name
-        assert 'aria-label="Toggle appearance"' in html or 'aria-label="Toggle theme"' in html, name
+        assert ('{% extends "_layout.html" %}' in html) or ('{% extends "base.html" %}' in html), name
+        # Standalone pages use the shared shell blocks, not their own chrome.
+        assert "{% block page %}" not in html, name
+        assert "{% block crumbs %}" in html, name
+        assert "{% block topbar_chips %}" in html, name
+        assert "route-top" not in html, name
+    assert '<header class="w-topbar">' in layout
+    assert '<a href="/" class="w-wordmark"' in layout
+    assert 'class="w-breadcrumb" aria-label="Breadcrumb"' in layout
+    assert 'class="w-topbar__chips" aria-label="Status"' in layout
+    assert '{{ w.theme_toggle() }}' in layout
+    assert '{% include "partials/sidebar.html" %}' in layout
+    assert '("chat", "/", ' in sidebar and '("work", "/work", ' in sidebar
+    assert 'aria-current="page"' in sidebar
+    assert 'data-variant="icon" data-route-theme' in macros
+    assert 'aria-label="Toggle theme"' in macros
 
 
-def test_route_shell_css_matches_planos_shell_geometry():
-    css = _read(GUI / "static" / "css" / "route-product.css")
-    assert ".route-shell > header.route-top" in css
-    assert "height:48px" in css
-    assert "background:var(--surface)" in css
-    assert "border-bottom:1px solid var(--border)" in css
-    assert '.route-crumbs li + li::before{content:"›"' in css
-    # model pricing does not import trace.css, so it links the shell directly.
-    assert "/static/css/route-product.css" in _read(PAGES["model_costs"])
+def test_route_shell_css_matches_wash_shell_geometry():
+    # Intent (was: route-product.css 48px bar on --surface): one top bar
+    # geometry from the Wash layout layer — the topbar height token on the
+    # canvas with a hairline — and "›" breadcrumb separators.
+    layout = _read(GUI / "static" / "css" / "wash" / "layout.css")
+    nav = _read(GUI / "static" / "css" / "wash" / "components" / "nav.css")
+    topbar = layout.split(".w-topbar {", 1)[1].split("}", 1)[0]
+    assert "height: var(--wash-size-topbar);" in topbar
+    assert "background: color-mix(in srgb, var(--wash-canvas)" in topbar
+    assert "border-bottom: 1px solid var(--wash-hairline);" in topbar
+    assert '.w-breadcrumb__item + .w-breadcrumb__item::before {\n    content: "›";' in nav
+    assert "--wash-size-topbar: 56px;" in _read(GUI / "static" / "css" / "wash" / "tokens.css")
+    # model pricing still gets the route primitives through its own bundle;
+    # trace.css keeps importing route-product.css.
+    assert "/static/css/wash/patterns/model-costs.css" in _read(PAGES["model_costs"])
     assert '@import url("/static/css/route-product.css")' in _read(GUI / "static" / "css" / "trace.css")
+
+
+def test_old_static_analyzer_urls_redirect_to_the_shared_layout_pages():
+    app = _read(GUI / "app.py")
+    assert 'app.add_api_route("/static/job_trace.html", _moved("/jobs/trace")' in app
+    assert 'app.add_api_route("/static/model_costs.html", _moved("/models/costs")' in app
+    assert not (GUI / "static" / "job_trace.html").exists()
+    assert not (GUI / "static" / "model_costs.html").exists()
 
 
 def test_analysis_sections_are_planos_panels_with_header_rows():
@@ -91,4 +121,7 @@ def test_container_dialogs_are_labelled_and_close_on_escape():
     script = _read(GUI / "static" / "js" / "containers.js")
     assert "event.key !== 'Escape'" in script
     assert "renderChips()" in script
-    assert "/static/js/route_theme.js" in html and "data-route-theme" in html
+    # Wash W2: the theme controller and toggle come from the shared layout.
+    layout = _read(GUI / "templates" / "_layout.html")
+    assert "/static/js/route_theme.js" in layout and "w.theme_toggle()" in layout
+    assert '{% extends "base.html" %}' in html

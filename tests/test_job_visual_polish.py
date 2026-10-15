@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -9,10 +10,10 @@ WORK = ROOT / "mu" / "gui" / "templates" / "work.html"
 WORK_POLISH = ROOT / "mu" / "gui" / "static" / "css" / "work_polish.css"
 WORK_ANALYSIS_LINK = ROOT / "mu" / "gui" / "static" / "js" / "work_analysis_link.js"
 ROUTE_THEME = ROOT / "mu" / "gui" / "static" / "js" / "route_theme.js"
-TRACE_HTML = ROOT / "mu" / "gui" / "static" / "job_trace.html"
+TRACE_HTML = ROOT / "mu" / "gui" / "templates" / "job_trace.html"
 TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace.js"
 TRACE_SINGLE_TASK = ROOT / "mu" / "gui" / "static" / "js" / "job_trace_signed_delta.js"
-MODEL_HTML = ROOT / "mu" / "gui" / "static" / "model_costs.html"
+MODEL_HTML = ROOT / "mu" / "gui" / "templates" / "model_costs.html"
 # Stage sessions run in the sandbox worker; their harness trace must be on.
 RUNNER = ROOT / "mu" / "jobs" / "sandbox" / "worker.py"
 PRICING = ROOT / "config" / "model_pricing.json"
@@ -27,17 +28,27 @@ def test_engineering_work_uses_planos_chrome_and_theme_switcher():
     # Jobs mode mirrors the planos shell: its own scoped design system, not the chat chrome.
     assert '/static/css/product.css' not in html
     assert '/static/css/clarity.css' not in html
-    assert '/static/css/work.css' in html
+    # Wash W2: /work links one page bundle importing the jobs stylesheets.
+    bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")
+    assert '/static/css/wash/patterns/work.css' in html
+    assert '@import url("../../work.css") layer(legacy);' in bundle
     assert 'class="work-side" aria-label="Main"' in html
     assert 'class="work-crumbs"' in html and 'id="work-chips"' in html
     assert '/static/js/work/ui.js' in html
-    for token in ('--accent: #7aa2f7', '--ok: #73c991', '--warn: #e0af68', '--danger: #f7768e',
-                  '--running: #7dcfff', '--accent: #2f5bd3', '[data-density="compact"]'):
-        assert token in work_css
-    assert '/static/css/work_polish.css' in html
-    assert '/static/js/route_theme.js' in html
+    # Wash W1: jobs mode no longer re-declares a palette; its names resolve to
+    # the Wash tokens (both themes) through tokens.css. Density stays local.
+    tokens = (ROOT / "mu" / "gui" / "static" / "css" / "tokens.css").read_text(encoding="utf-8")
+    assert '--accent:' not in work_css
+    assert re.search(r'#[0-9a-fA-F]{3,8}\b', work_css) is None
+    for name, wash in (('--accent', 'accent-ink'), ('--ok', 'ok-ink'), ('--warn', 'attention-ink'),
+                       ('--danger', 'danger-ink'), ('--running', 'running-ink')):
+        assert f'{name}: var(--wash-{wash});' in tokens
+    assert '[data-density="compact"]' in work_css
+    assert '@import url("../../work_polish.css") layer(legacy);' in bundle
+    # The shared theme controller loads on every page from the layout.
+    assert '/static/js/route_theme.js' in (ROOT / "mu" / "gui" / "templates" / "_layout.html").read_text(encoding="utf-8")
     assert 'work-header product-header' in html
-    assert 'data-route-theme' in html
+    assert 'w.theme_toggle(' in html
     assert 'product-icon-button work-header-icon' in html
     assert 'title="Analyze jobs"' in html
     assert 'title="Model pricing"' in html
@@ -91,12 +102,18 @@ def test_job_trace_and_model_pricing_share_product_visual_language():
     trace = TRACE_HTML.read_text(encoding="utf-8")
     pricing = MODEL_HTML.read_text(encoding="utf-8")
 
-    for html in (trace, pricing):
-        assert '/static/css/product.css' in html
-        assert '/static/css/clarity.css' in html
-        assert 'product-header' in html
-    assert 'id="jt-theme"' in trace
-    assert 'id="mc-theme"' in pricing
+    # Wash W2: both pages share the app's visual language through the shared
+    # layout (top bar, sidebar, theme toggle, wash.css) and no longer load the
+    # chat CSS stack; each links only its own page bundle.
+    css_dir = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
+    for html, bundle in ((trace, "job-trace.css"), (pricing, "model-costs.css")):
+        assert '{% extends "_layout.html" %}' in html
+        assert f'/static/css/wash/patterns/{bundle}' in html
+        assert '/static/css/product.css' not in html
+        bundle_css = (css_dir / bundle).read_text(encoding="utf-8")
+        for chat_css in ("product.css", "crystal.css", "clarity.css", "refinement.css"):
+            assert chat_css not in bundle_css
+    assert 'w.theme_toggle()' in (ROOT / "mu" / "gui" / "templates" / "_layout.html").read_text(encoding="utf-8")
     assert 'Pricing registry' in pricing
     assert 'Input / 1M' in pricing
     assert 'Output / 1M' in pricing
@@ -111,7 +128,7 @@ def test_job_trace_focuses_on_selected_individual_task_without_comparison_ui():
     single_task = TRACE_SINGLE_TASK.read_text(encoding="utf-8")
 
     assert 'syncHeaderAnalysisLink' in work_link
-    assert '/static/job_trace.html?job=${encodeURIComponent(jobId)}' in work_link
+    assert '/jobs/trace?job=${encodeURIComponent(jobId)}' in work_link
     assert "document.getElementById('jt-compare-select')?.remove()" in single_task
     assert "document.getElementById('jt-compare-section')?.remove()" in single_task
     assert "searchParams.delete('compare')" in single_task

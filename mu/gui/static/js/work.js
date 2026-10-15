@@ -209,7 +209,7 @@
 
     /* ------------------------------------------------------------ global commands */
     function registerGlobal() {
-        const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+        const dusk = window.MuTheme ? window.MuTheme.current() === 'dusk' : document.documentElement.getAttribute('data-theme') === 'dusk';
         ui.register('global', [
             { id: 'nav:dashboard', label: 'Go to Dashboard', group: 'Navigate', key: 'g h', run: () => go('#/') },
             { id: 'nav:jobs', label: 'Go to Jobs', group: 'Navigate', key: 'g t', run: () => go('#/jobs') },
@@ -219,11 +219,11 @@
             { id: 'nav:settings', label: 'Go to Settings', group: 'Navigate', key: 'g s', run: () => go('#/settings') },
             { id: 'nav:setup', label: 'Go to Setup (checklist)', group: 'Navigate', key: 'g u', run: () => go('#/setup') },
             { id: 'nav:doctor', label: 'Go to Setup → Doctor (check everything)', group: 'Navigate', key: 'g d', run: () => go('#/doctor') },
-            { id: 'nav:analysis', label: 'Open job analysis', group: 'Navigate', run: () => { location.href = '/static/job_trace.html'; } },
-            { id: 'nav:pricing', label: 'Open model pricing', group: 'Navigate', run: () => { location.href = '/static/model_costs.html'; } },
+            { id: 'nav:analysis', label: 'Open job analysis', group: 'Navigate', run: () => { location.href = '/jobs/trace'; } },
+            { id: 'nav:pricing', label: 'Open model pricing', group: 'Navigate', run: () => { location.href = '/models/costs'; } },
             { id: 'job:new', label: 'New job', group: 'Jobs', key: 'n', run: openCreate },
             { id: 'job:refresh', label: 'Refresh', group: 'Jobs', run: () => refreshBoard({ refreshSelected: true }).catch(e => toast(e.message, 'danger')) },
-            { id: 'pref:theme', label: `Switch to ${dark ? 'light' : 'dark'} theme`, group: 'Preferences', run: () => { root.querySelector('[data-route-theme]')?.click(); registerGlobal(); } },
+            { id: 'pref:theme', label: `Switch to ${dusk ? 'Paper' : 'Dusk'} theme`, group: 'Preferences', run: () => { root.querySelector('[data-route-theme]')?.click(); registerGlobal(); } },
             { id: 'pref:density', label: `Switch to ${prefs.density === 'compact' ? 'comfortable' : 'compact'} density`, group: 'Preferences', run: toggleDensity },
             { id: 'pref:notify', label: `${prefs.notify ? 'Disable' : 'Enable'} desktop notifications`, group: 'Preferences', run: () => void toggleNotify() },
             { id: 'help', label: 'Keyboard shortcuts', group: 'Help', key: '?', run: ui.help },

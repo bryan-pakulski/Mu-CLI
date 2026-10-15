@@ -52,7 +52,13 @@ def test_toast_is_tone_bordered_note_with_type_glyph():
 
 
 def test_toast_template_wraps_message_and_dismisses():
+    # Wash W2: the toast template moved from base.html into the shared toast
+    # region partial (rendered by _layout.html; base.html turns it on).
     with open(BASE_HTML_PATH, "r", encoding="utf-8") as f:
+        base = f.read()
+    assert "{% set alpine_toasts = true %}" in base
+    region = os.path.join(os.path.dirname(BASE_HTML_PATH), "partials", "toast_region.html")
+    with open(region, "r", encoding="utf-8") as f:
         html = f.read()
     assert 'class="toast"' in html
     assert 'class="toast__msg"' in html

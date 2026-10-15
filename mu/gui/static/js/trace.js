@@ -125,7 +125,7 @@ function traceApp() {
         hoverRef: null,         // canvas ref under the cursor (chip owner)
         session: "",            // session scope (?session=) — traces are per-session
         runBounds: [],           // per-run global [start,end] for the combined view
-        theme: "dark",          // current data-theme (for the toggle button glyph)
+        theme: "paper",         // current Wash theme (paper | dusk)
         expandedTools: {},      // toolKey -> true: that tool's result preview is expanded
         expandedCards: {},      // cardKey -> true: all tool previews in that turn expanded
         VIEW_CAP: 100,          // default iters in view (the "latest" window)
@@ -144,7 +144,13 @@ function traceApp() {
             // per-run picker.
             const qs = new URLSearchParams(window.location.search);
             this.session = (qs.get("session") || "").trim();
-            this.theme = document.documentElement.getAttribute("data-theme") || "dark";
+            this.theme = window.MuTheme ? window.MuTheme.current() : "paper";
+            // The shared top-bar toggle (route_theme.js) switches the theme;
+            // canvases cannot inherit CSS variables, so redraw on every change.
+            window.addEventListener("mucli-theme-change", (event) => {
+                this.theme = (event.detail && event.detail.wash) || "paper";
+                this.renderAll();
+            });
             // Re-render canvases on resize (debounced) — _setupCanvas reads
             // clientWidth at draw time, so a re-render picks up the new CSS size.
             this._resizeHandler = () => {
@@ -259,15 +265,9 @@ function traceApp() {
             this.infoOpen = (this.infoOpen === key) ? null : key;
         },
 
-        // Mirror the chat's $store.theme.toggle() (app.js): flip data-theme and
-        // persist to localStorage. app.css themes via html[data-theme=...], so
-        // setting the attribute is enough — no stylesheet swapping needed here
-        // (that's only for the chat's hljs code blocks).
+        // Kept for keyboard/legacy callers: delegate to the shared controller.
         toggleTheme() {
-            this.theme = (this.theme === "dark") ? "light" : "dark";
-            document.documentElement.setAttribute("data-theme", this.theme);
-            try { localStorage.setItem("mucli-theme", this.theme); } catch (e) {}
-            this.renderAll();   // re-render canvases against the new theme vars
+            if (window.MuTheme) window.MuTheme.toggle();
         },
 
         // ---- helpers ---------------------------------------------------
@@ -291,6 +291,10 @@ function traceApp() {
         },
         statusTone(status) {
             return ({done: "tone-ok", active: "tone-running", waiting: "tone-warn", failed: "tone-danger", pending: "tone-muted"})[this.statusKind(status)];
+        },
+        // Wash semantic for the shared vocabulary (data-tone on .w-chip).
+        washTone(status) {
+            return ({done: "ok", active: "running", waiting: "attention", failed: "danger", pending: "neutral"})[this.statusKind(status)] || "neutral";
         },
         attributionLabel(key) {
             return ({system: "system", user: "user", assistant: "assistant",

@@ -1,31 +1,17 @@
 {% extends "base.html" %}
 {% block title %}MuCLI — Environments{% endblock %}
-{% block body %}
-<link rel="stylesheet" href="/static/css/containers.css">
-<link rel="stylesheet" href="/static/css/route-product.css">
-<link rel="stylesheet" href="/static/css/containers-crystal.css">
-<div class="route-shell containers-shell">
-<header class="route-top containers-top">
-    <a href="/" class="route-logo" aria-label="mucli chat">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg>
-        <span>mucli</span>
-    </a>
-    <nav aria-label="Breadcrumb" class="route-crumbs"><ol><li><span aria-current="page">Environments</span></li></ol></nav>
-    <span class="route-spacer"></span>
-    <ul class="route-chips" aria-label="Status">
-        <li><span class="chip tone-muted" id="container-count-chip" title="Managed environments"><span aria-hidden="true" data-chip-glyph>○</span> <span data-chip-text>0 environments</span></span></li>
-        <li><span class="chip tone-muted" id="template-count-chip" title="Templates"><span data-chip-text>0 templates</span></span></li>
-    </ul>
-    <div class="route-tools">
-        <a class="btn ghost icon route-tool-optional" href="/" title="Back to chat" aria-label="Back to chat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </a>
-        <a class="btn ghost icon route-tool-optional" href="/work" title="Jobs" aria-label="Jobs">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg>
-        </a>
-        <button type="button" class="btn ghost icon" data-route-theme title="Toggle appearance" aria-label="Toggle appearance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-theme-icon="dark"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-theme-icon="light"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
-    </div>
-</header>
+{% import "macros/wash.html" as w %}
+{% block page_css %}
+<link id="mucli-containers-css" rel="stylesheet" href="/static/css/wash/patterns/containers.css">
+{% endblock %}
+{% block body_class %}containers-body{% endblock %}
+{% block crumbs %}<li class="w-breadcrumb__item"><span aria-current="page">Environments</span></li>{% endblock %}
+{% block topbar_chips %}
+        <li><span class="w-chip" data-tone="neutral" id="container-count-chip" title="Managed environments"><span class="w-chip__glyph" aria-hidden="true" data-chip-glyph>○</span> <span data-chip-text>0 environments</span></span></li>
+        <li class="w-optional"><span class="w-chip" data-variant="meta" id="template-count-chip" title="Templates"><span data-chip-text>0 templates</span></span></li>
+{% endblock %}
+{% block content %}
+<div class="containers-shell">
 <div class="container-manager" id="container-manager">
     <header class="container-manager-header">
         <div>
@@ -133,5 +119,4 @@
 </div>
 {% include "fragments/file_browser.html" %}
 <script src="/static/js/containers.js"></script>
-<script src="/static/js/route_theme.js"></script>
 {% endblock %}

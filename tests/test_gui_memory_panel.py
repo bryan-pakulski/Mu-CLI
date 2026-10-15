@@ -163,7 +163,8 @@ def test_app_js_context_canvases_are_theme_aware_and_redraw():
     with open(APP_JS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
     assert "_contextPalette()" in content
-    assert 'getAttribute("data-theme") === "light"' in content
+    # Wash themes: canvases ask for the resolved paper/dusk theme.
+    assert 'const light = muWashTheme() === "paper";' in content
     assert "palette.light" in content
     assert "memory._scheduleRender()" in content
 
@@ -282,7 +283,13 @@ def test_css_has_context_observatory_light_theme_palette():
     # The observatory palette resolves in tokens.css for both themes; app.css
     # carries no per-theme colour overrides for it.
     assert 'html[data-theme="light"] .context-observatory' not in content
-    assert 'html[data-theme="light"]' in tokens
+    # Wash W1: tokens.css aliases resolve through the per-theme --wash-*
+    # palette (declared on every [data-theme] scope), not per-theme blocks.
+    assert ":root,\n[data-theme] {" in tokens
+    wash_path = os.path.join(os.path.dirname(CSS_PATH), "wash", "tokens.css")
+    with open(wash_path, "r", encoding="utf-8") as f:
+        wash = f.read()
+    assert '[data-theme="paper"]' in wash and '[data-theme="dusk"]' in wash
     for token in (
         "--context-card-surface",
         "--context-control-surface",

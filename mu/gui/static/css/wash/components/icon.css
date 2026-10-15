@@ -1,0 +1,28 @@
+/* Icon (G§4) — sprite icons from /static/icons/wash.svg (symbols `i-<name>`,
+ * 24 grid, 1.5 stroke, currentColor). Use the `icon()` Jinja macro:
+ *
+ *   <svg class="w-icon" data-size="sm|md|lg" aria-hidden="true" focusable="false">
+ *     <use href="/static/icons/wash.svg#i-search"></use>
+ *   </svg>
+ *
+ * Sizes: sm 16 (inline), md 20 (buttons, default), lg 24 (navigation).
+ * Icons are decorative; the control that holds one carries the label.
+ */
+.w-icon {
+    display: inline-block;
+    flex: none;
+    width: var(--wash-size-icon);
+    height: var(--wash-size-icon);
+    color: inherit;
+    vertical-align: middle;
+    fill: none;
+    stroke: currentColor;
+    overflow: visible;
+}
+.w-icon[data-size="sm"] { width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); }
+.w-icon[data-size="lg"] { width: var(--wash-size-icon-lg); height: var(--wash-size-icon-lg); }
+
+/* Theme toggle: show the theme you would switch to (sun on Dusk, moon on Paper). */
+.w-theme-toggle [data-theme-icon] { display: none; }
+:root:not([data-theme="dusk"], [data-theme="dark"]) .w-theme-toggle [data-theme-icon="moon"],
+:root:is([data-theme="dusk"], [data-theme="dark"]) .w-theme-toggle [data-theme-icon="sun"] { display: inline-block; }

@@ -1,0 +1,9 @@
+/* Page bundle — Job trace analyzer (/jobs/trace). No chat CSS: the shared Wash shell
+ * replaces the product header it was loaded for.
+ *
+ * Linked after wash.css (which declares the layer order), so these imports
+ * land in the lowest-priority `legacy` layer. Wash rules for this page go
+ * in the `patterns` layer below. */
+@import url("../../trace.css") layer(legacy);
+@import url("../../job_trace.css") layer(legacy);
+@import url("../../theme.css") layer(legacy);

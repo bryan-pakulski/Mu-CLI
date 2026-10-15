@@ -9,82 +9,34 @@
  * theme (tokens.css); nothing here leaks outside `.work-app`.
  */
 
-/* ---------------------------------------------------------------- tokens */
+/* ---------------------------------------------------------------- tokens
+ * W1: the palette is no longer re-declared here. --accent, --ok, --warn,
+ * --danger, --running, --muted, --text, --surface, --border, --bg, --raised,
+ * --hover and the mucli base-layer names all come from tokens.css, which
+ * resolves them to the generated --wash-* tokens. Only jobs-mode geometry
+ * (spacing, density, type steps) stays local. */
 .work-app {
-    --accent: #7aa2f7;
-    --ok: #73c991;
-    --warn: #e0af68;
-    --danger: #f7768e;
-    --running: #7dcfff;
-    --muted: #8b93b8;
-    --text: #c0caf5;
-    --surface: #1a1b26;
-    --border: #2f3549;
-    --bg: #16161e;
-    --raised: #1f2335;
-    --hover: #292e42;
-
-    --font-ui: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-    --s-half: 4px;
-    --s-1: 8px;
-    --s-2: 16px;
-    --s-3: 24px;
-    --s-4: 32px;
-    --s-6: 48px;
-    --radius: 6px;
-    --radius-lg: 10px;
-    --fs: 14px;
-    --fs-sm: 12px;
-    --fs-lg: 16px;
+    --font-ui: var(--wash-font-sans);
+    --font-mono: var(--wash-font-mono);
+    --s-half: var(--wash-space-1);
+    --s-1: var(--wash-space-2);
+    --s-2: var(--wash-space-4);
+    --s-3: var(--wash-space-6);
+    --s-4: var(--wash-space-7);
+    --s-6: var(--wash-space-8);
+    --radius: var(--wash-radius-sm);
+    --radius-lg: var(--wash-radius-lg);
+    --fs: var(--wash-type-body-size);
+    --fs-sm: var(--wash-type-caption-size);
+    --fs-lg: var(--wash-type-body-lg-size);
     --fs-xl: 20px;
     --lh: 1.5;
     --ctl-h: 32px;
     --row-pad: 8px;
     --panel-pad: 16px;
     --topbar-h: 48px;
-    --shadow: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent);
-
-    /* mucli base-layer names resolve to the same palette inside jobs mode */
-    --text-primary: var(--text);
-    --text-secondary: var(--muted);
-    --text-tertiary: var(--muted);
-    --text-soft: var(--muted);
-    --text-dim: var(--muted);
-    --bg-subtle: var(--surface);
-    --bg-raised: var(--raised);
-    --bg-hover: var(--hover);
-    --bg-active: var(--hover);
-    --hairline-color: var(--border);
-    --hairline: var(--border);
-    --control-border: var(--border);
-    --accent-solid: var(--accent);
-    --accent-fg: var(--accent);
-    --accent-subtle: color-mix(in srgb, var(--accent) 15%, transparent);
-    --header-bg: var(--surface);
-    --code-bg: var(--bg);
-    --error: var(--danger);
-    --err: var(--danger);
-    --warning: var(--warn);
-    --success: var(--ok);
+    --shadow: var(--wash-elevation-2);
     --font-sans: var(--font-ui);
-    --mono: var(--font-mono);
-    color-scheme: dark;
-}
-html[data-theme="light"] .work-app {
-    --accent: #2f5bd3;
-    --ok: #1a7f37;
-    --warn: #9a6700;
-    --danger: #cf222e;
-    --running: #0969da;
-    --muted: #57606a;
-    --text: #1f2328;
-    --surface: #ffffff;
-    --border: #d0d7de;
-    --bg: #f6f8fa;
-    --raised: #ffffff;
-    --hover: #eaeef2;
-    color-scheme: light;
 }
 .work-app[data-density="compact"] {
     --fs: 13px;
@@ -96,8 +48,7 @@ html[data-theme="light"] .work-app {
 }
 
 /* ---------------------------------------------------------------- base */
-body:has(.work-app) { background: var(--bg, #16161e); overflow: hidden; }
-html[data-theme="light"] body:has(.work-app) { background: #f6f8fa; }
+body:has(.work-app) { background: var(--wash-canvas); overflow: hidden; }
 .work-app {
     position: fixed;
     inset: 0;
@@ -145,7 +96,6 @@ html[data-theme="light"] body:has(.work-app) { background: #f6f8fa; }
 .work-app :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
 .work-app .sr-only {
-    position: absolute !important;
     width: 1px; height: 1px;
     padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0);
@@ -211,10 +161,10 @@ html[data-theme="light"] body:has(.work-app) { background: #f6f8fa; }
 .work-app .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     height: var(--ctl-h);
-    padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--raised);
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--wash-radius-pill);
+    background: var(--surface);
     color: var(--text);
     font: inherit;
     font-weight: 500;
@@ -228,8 +178,8 @@ html[data-theme="light"] body:has(.work-app) { background: #f6f8fa; }
 .work-app .btn.icon { padding: 0; width: var(--ctl-h); }
 .work-app .btn.ghost { background: transparent; border-color: transparent; }
 .work-app .btn.ghost:hover:not(:disabled) { background: var(--hover); }
-.work-app .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
-.work-app .btn.primary:hover:not(:disabled):not([aria-disabled='true']) { background: color-mix(in srgb, var(--accent) 85%, var(--text)); }
+.work-app .btn.primary { background: var(--wash-ink); border-color: var(--wash-ink); color: var(--wash-on-ink); }
+.work-app .btn.primary:hover:not(:disabled):not([aria-disabled='true']) { background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas)); }
 .work-app .btn.tone-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
 .work-app .btn.tone-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
 .work-app .btn.tone-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
@@ -363,8 +313,8 @@ html[data-theme="light"] body:has(.work-app) { background: #f6f8fa; }
     border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 20;
 }
-.work-logo { display: inline-flex; align-items: center; gap: var(--s-1); color: var(--text) !important; font-weight: 700; font-size: var(--fs-lg); flex: none; }
-.work-logo:hover { text-decoration: none !important; }
+.work-logo { display: inline-flex; align-items: center; gap: var(--s-1); font-weight: 700; font-size: var(--fs-lg); flex: none; }
+.work-logo:hover { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 .work-logo .l1 { fill: var(--ok); } .work-logo .l2 { fill: var(--running); } .work-logo .l3 { fill: none; stroke: var(--accent); stroke-width: 2; }
 .work-crumbs { min-width: 0; overflow: hidden; }
 .work-crumbs ol { list-style: none; display: flex; gap: var(--s-1); margin: 0; padding: 0; white-space: nowrap; }
@@ -385,8 +335,7 @@ a.work-chip:hover { text-decoration: none; background: var(--hover); }
 .work-header-icon { color: var(--text); }
 .work-header-icon svg { width: 16px; height: 16px; }
 /* Show the icon of the theme you would switch to (planos: sun in dark, moon in light). */
-html:not([data-theme="light"]) .work-tools [data-theme-icon="light"],
-html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
+/* W2: theme toggle icons are the shared sprite button (wash/components/icon.css). */
 
 /* ---------------------------------------------------------------- shell: body + side nav */
 .work-body { flex: 1 1 auto; display: flex; min-height: 0; }
@@ -395,11 +344,10 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 .work-side ul + ul { margin-top: auto; padding-top: var(--s-1); border-top: 1px solid var(--border); }
 .work-side .work-navlink {
     display: flex; align-items: center; justify-content: flex-start; gap: var(--s-1); width: 100%; height: auto;
-    padding: 6px var(--s-1); border-radius: var(--radius);
-    color: var(--muted) !important; text-align: left; font: inherit;
+    padding: 6px var(--s-1); border-radius: var(--radius); text-align: left; font: inherit;
 }
-.work-side .work-navlink:hover { background: var(--hover); color: var(--text) !important; text-decoration: none !important; }
-.work-side .work-navlink[aria-current='page'] { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--text) !important; font-weight: 600; }
+.work-side .work-navlink:hover { background: var(--hover); }
+.work-side .work-navlink[aria-current='page'] { background: color-mix(in srgb, var(--accent) 15%, transparent); font-weight: 600; }
 .work-navlink[aria-current='page'] svg { color: var(--accent); }
 .work-navlink svg { width: 18px; height: 18px; flex: none; }
 .work-navlink .badge { margin-left: auto; }
@@ -415,7 +363,7 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
     border: 1px solid var(--border); border-radius: var(--radius-lg);
     background: var(--surface); text-align: left; width: 100%;
 }
-.work-stat:hover { text-decoration: none !important; background: var(--hover); }
+.work-stat:hover { background: var(--hover); }
 .work-stat-value { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
 .work-stat-label { color: var(--muted); font-size: var(--fs-sm); }
 .work-cards { display: flex; flex-direction: column; gap: var(--s-1); }
@@ -486,14 +434,13 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 .work-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; }
 .work-tab {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: var(--s-1) var(--s-2) !important;
-    border: 0; border-bottom: 2px solid transparent !important;
-    background: none; color: var(--muted) !important;
+    border: 0;
+    background: none;
     font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap;
     margin-bottom: -1px;
 }
-.work-tab:hover { color: var(--text) !important; background: var(--hover); }
-.work-tab[aria-selected='true'] { color: var(--text) !important; border-bottom-color: var(--accent) !important; }
+.work-tab:hover { background: var(--hover); }
+.work-tab[aria-selected='true'] { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 .work-tabpanel { padding-top: var(--s-2); min-width: 0; }
 .work-tabpanel:focus-visible { outline-offset: 4px; }
 
@@ -505,10 +452,10 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 }
 .work-msg-assistant { padding: var(--s-1) var(--s-2); background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-lg); border-top-left-radius: 2px; max-width: 92%; }
 .work-msg-user { align-self: flex-end; max-width: 80%; padding: var(--s-1) var(--s-2); border-radius: var(--radius-lg); border-top-right-radius: 2px; background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
-.work-fold { display: flex; align-items: center; gap: 4px; width: 100%; background: none; border: 0; color: var(--muted) !important; font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; padding: 1px 0 !important; min-width: 0; }
+.work-fold { display: flex; align-items: center; gap: 4px; width: 100%; background: none; border: 0; font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; min-width: 0; }
 .work-fold:disabled { cursor: default; }
-.work-fold:hover:not(:disabled) { color: var(--text) !important; }
-.work-fold.is-tool { color: var(--accent) !important; }
+.work-fold:hover:not(:disabled) { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.work-fold.is-tool { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 .work-fold-pad { width: 14px; flex: none; }
 .work-fold svg { width: 14px; height: 14px; flex: none; }
 .work-fold-body { margin: 2px 0 0 18px; padding: var(--s-1); background: var(--bg); border-radius: var(--radius); font-size: var(--fs-sm); max-height: 360px; overflow: auto; }
@@ -527,8 +474,8 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 .work-plan-row input { flex: 1 1 auto; }
 .work-plan-row input:first-child:not(:only-of-type) { flex: 0 0 120px; }
 .work-segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.work-segmented button { height: calc(var(--ctl-h) - 6px); padding: 0 10px !important; font-size: var(--fs-sm); color: var(--muted) !important; }
-.work-segmented button[aria-pressed='true'] { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--text) !important; }
+.work-segmented button { height: calc(var(--ctl-h) - 6px); font-size: var(--fs-sm); }
+.work-segmented button[aria-pressed='true'] { background: color-mix(in srgb, var(--accent) 15%, transparent); }
 
 /* review */
 .work-finding-card { border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: var(--radius); padding: var(--s-1) var(--s-2); background: var(--surface); display: flex; flex-direction: column; gap: var(--s-half); }
@@ -574,8 +521,8 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 .work-diff-tree-head { padding: 0 var(--s-half) var(--s-1); border-bottom: 1px solid var(--border); margin-bottom: var(--s-half); }
 .work-tree-item { display: flex; align-items: center; gap: 6px; padding: 2px var(--s-half); border-radius: 4px; }
 .work-tree-item:hover { background: var(--hover); }
-.work-tree-item.is-viewed .work-tree-link { color: var(--muted) !important; }
-.work-tree-link { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; background: none; border: 0; padding: 2px 0 !important; color: var(--text) !important; font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; }
+.work-tree-item.is-viewed .work-tree-link { /* W2: moved to wash/patterns/legacy-overrides.css */ }
+.work-tree-link { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; background: none; border: 0; font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; }
 .work-st { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; border-radius: 3px; font-size: 10px; font-weight: 700; font-family: var(--font-mono); }
 .work-st.st_A { color: var(--ok); background: color-mix(in srgb, var(--ok) 18%, transparent); }
 .work-st.st_M { color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }
@@ -643,7 +590,7 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 .work-dialog-body { padding: var(--s-2); overflow: auto; flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--s-2); }
 .work-dialog-foot, .work-modal-actions, .work-form-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--s-1); padding: var(--s-1) 0 0; border-top: 1px solid var(--border); margin-top: auto; }
 .work-dialog-foot { padding: var(--s-1) var(--s-2); margin: 0; }
-.work-icon-button { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--radius); color: var(--text); font-size: 18px; line-height: 1; }
+.work-icon-button { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--wash-radius-pill); color: var(--text); font-size: 18px; line-height: 1; }
 .work-icon-button:hover { background: var(--hover); }
 
 .work-form label, .work-form .work-field { display: flex; flex-direction: column; gap: var(--s-half); font-weight: 500; }
@@ -831,7 +778,7 @@ html[data-theme="light"] .work-tools [data-theme-icon="dark"] { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
     .work-app .status-icon.active, .work-app .spin, .work-stepper .active, .work-mini .active { animation: none; }
-    .work-app * { scroll-behavior: auto !important; transition: none !important; }
+    .work-app * { /* W2: moved to wash/patterns/utilities.css (reduced motion) */ }
 }
 
 /* Agent per stage (New job sheet) */

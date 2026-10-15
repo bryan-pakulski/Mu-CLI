@@ -1,0 +1,95 @@
+/* Navigation: nav item and breadcrumb (G§9.4)
+ *
+ *   <a class="w-nav__item" href="/work" aria-current="page">
+ *     <svg class="w-icon">…</svg><span class="w-nav__label">Work</span>
+ *     <span class="w-count" data-tone="attention">1</span>
+ *   </a>
+ *
+ *   <nav class="w-breadcrumb" aria-label="Breadcrumb"><ol class="w-breadcrumb__list">
+ *     <li class="w-breadcrumb__item"><a href="/work">Jobs</a></li>
+ *     <li class="w-breadcrumb__item"><span aria-current="page">Job trace</span></li>
+ *   </ol></nav>
+ *
+ * Active nav item: sunken fill, ink text and a 2px accent bar on the left.
+ */
+.w-nav__item {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    height: var(--wash-size-control);
+    min-width: 0;
+    padding: 0 var(--wash-space-3);
+    border: 0;
+    border-radius: var(--wash-radius-sm);
+    background: transparent;
+    color: var(--wash-ink-2);
+    font: inherit;
+    font-size: var(--wash-type-body-size);
+    font-weight: var(--wash-type-label-weight);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-nav__item:hover {
+    background: color-mix(in srgb, var(--wash-sunken) 60%, transparent);
+    color: var(--wash-ink);
+    text-decoration: none;
+}
+.w-nav__item[aria-current="page"],
+.w-nav__item[aria-current="true"] {
+    background: var(--wash-sunken);
+    color: var(--wash-ink);
+    box-shadow: inset 2px 0 var(--wash-accent-ink);
+}
+.w-nav__item :is(svg, .w-icon) {
+    flex: none;
+    width: var(--wash-size-icon);
+    height: var(--wash-size-icon);
+    color: var(--wash-ink-3);
+}
+.w-nav__item[aria-current] :is(svg, .w-icon) { color: var(--wash-accent-ink); }
+.w-nav__label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-nav__item .w-count { margin-left: auto; }
+
+/* breadcrumb */
+.w-breadcrumb { min-width: 0; }
+.w-breadcrumb__list {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-body-size);
+}
+.w-breadcrumb__item {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-width: 0;
+    white-space: nowrap;
+}
+.w-breadcrumb__item + .w-breadcrumb__item::before {
+    content: "›";
+    color: var(--wash-ink-3);
+}
+.w-breadcrumb__item > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.w-breadcrumb__item a { color: var(--wash-ink-3); text-decoration: none; }
+.w-breadcrumb__item a:hover { color: var(--wash-ink); text-decoration: underline; text-underline-offset: 2px; }
+.w-breadcrumb__item [aria-current] {
+    color: var(--wash-ink);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+}

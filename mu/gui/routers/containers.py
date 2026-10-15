@@ -154,7 +154,7 @@ async def _run_environment_creation(request: Request, job_id: str, payload: dict
 async def container_manager_page(request: Request):
     _require_local_client(request)
     return request.app.state.templates.TemplateResponse(
-        request, "containers.html", {}
+        request, "containers.html", {"nav_active": "environments"}
     )
 
 

@@ -1,0 +1,65 @@
+/* Pipeline stepper (G§9.13) — status glyph + label per step, joined by
+ * hairlines; the connector turns ok once the step is passed; the current
+ * step is a running wash pill; waiting is ◆ on an attention wash.
+ *
+ *   <ol class="w-stepper" aria-label="Job progress">
+ *     <li class="w-stepper__step" data-status="done"><span aria-hidden="true">✓</span>Preparing</li>
+ *     <li class="w-stepper__step" data-status="active" aria-current="step"><span aria-hidden="true">●</span>Implementing</li>
+ *     <li class="w-stepper__step" data-status="waiting"><span aria-hidden="true">◆</span>Plan review</li>
+ *     <li class="w-stepper__step" data-status="pending"><span aria-hidden="true">○</span>Checking</li>
+ *   </ol>
+ *
+ * data-status uses the shared vocabulary: pending active waiting done failed
+ * skipped (WASH.stateStyle(state).status / the `status()` Jinja macro).
+ * data-compact shows dots plus the current label only (mobile widths).
+ */
+.w-stepper {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.w-stepper__step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 26px;
+    padding: 0 2px;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-label-weight);
+    white-space: nowrap;
+}
+.w-stepper__step + .w-stepper__step::before {
+    content: "";
+    flex: 1 0 auto;
+    width: 28px;
+    height: 1px;
+    margin-right: var(--wash-space-2);
+    background: var(--wash-hairline-strong);
+}
+.w-stepper__step[data-status="done"] { color: var(--wash-ok-ink); }
+.w-stepper__step[data-status="done"] + .w-stepper__step::before { background: var(--wash-ok-pigment); }
+.w-stepper__step[data-status="failed"] { color: var(--wash-danger-ink); }
+.w-stepper__step[data-status="skipped"] { color: var(--wash-ink-3); text-decoration: line-through; text-decoration-color: var(--wash-hairline-strong); }
+.w-stepper__step:is([data-status="active"], [data-status="waiting"]) > :first-child,
+.w-stepper__step:is([data-status="active"], [data-status="waiting"]) { border-radius: var(--wash-radius-pill); }
+.w-stepper__step[data-status="active"] {
+    padding: 0 10px;
+    background: var(--wash-running-wash);
+    color: var(--wash-running-ink);
+}
+.w-stepper__step[data-status="waiting"] {
+    padding: 0 10px;
+    background: var(--wash-attention-wash);
+    color: var(--wash-attention-ink);
+}
+.w-stepper__step + .w-stepper__step:is([data-status="active"], [data-status="waiting"])::before { margin-right: var(--wash-space-2); }
+.w-stepper[data-compact] .w-stepper__step:not([aria-current]) { font-size: 0; gap: 0; }
+.w-stepper[data-compact] .w-stepper__step:not([aria-current]) > [aria-hidden] { font-size: var(--wash-type-caption-size); }
+.w-stepper[data-compact] .w-stepper__step + .w-stepper__step::before { width: 12px; margin-right: 4px; }

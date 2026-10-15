@@ -1,73 +1,48 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>μcli · Trace Analyzer</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>μ</text></svg>">
-    <script>
-    (function () {
-        try {
-            var saved = localStorage.getItem('mucli-theme');
-            var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)
-                ? 'light' : 'dark';
-            var theme = (saved === 'light' || saved === 'dark') ? saved : sys;
-            document.documentElement.setAttribute('data-theme', theme);
-        } catch (e) {
-            document.documentElement.setAttribute('data-theme', 'dark');
-        }
-    })();
-    </script>
-    <link rel="stylesheet" href="/static/css/tokens.css">
-    <link rel="stylesheet" href="/static/css/app.css">
-    <link rel="stylesheet" href="/static/css/trace.css">
-    <link rel="stylesheet" href="/static/css/floating_popouts.css">
-    <link rel="stylesheet" href="/static/css/theme.css">
-    <!-- trace.js MUST load before alpine.min.js: this build calls
-         Alpine.start() via a microtask queued at the end of the alpine
-         script, which runs before the next defer script. If alpine loads
-         first, start() walks the DOM while traceApp() is still undefined
-         and the component silently fails to initialize (empty run picker).
-         base.html does the same thing with app.js (non-defer, first). -->
+{#- Trace analyzer (/trace) on the shared Wash shell. The whole body is the
+    traceApp() Alpine scope, so the top-bar chips and run picker bind to it.
+    trace.js MUST load before alpine.min.js: this build calls Alpine.start()
+    via a microtask queued at the end of the alpine script, which runs before
+    the next defer script. If alpine loads first, start() walks the DOM while
+    traceApp() is still undefined and the component silently fails to
+    initialize (empty run picker). -#}
+{% extends "_layout.html" %}
+{% import "macros/wash.html" as w %}
+{% block title %}μcli · Trace Analyzer{% endblock %}
+{% block page_css %}
+    <link id="mucli-trace-css" rel="stylesheet" href="/static/css/wash/patterns/trace.css">
+{% endblock %}
+{% block head_scripts %}
     <script src="/static/js/trace.js" defer></script>
     <script src="/static/js/floating_popouts.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
-</head>
-<body class="trace-body" x-data="traceApp()" x-init="init()" @keydown.escape.window="infoOpen=null">
-<div class="route-shell trace-shell">
-    <header class="trace-header route-top">
-        <a href="/" class="route-logo trace-title" aria-label="mucli chat">
-            <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg>
-            <span>mucli</span>
-        </a>
-        <nav aria-label="Breadcrumb" class="route-crumbs">
-            <ol>
-                <li><span aria-current="page">Trace analyzer</span></li>
-                <li x-show="session"><span class="trace-session" x-text="session"></span></li>
-            </ol>
-        </nav>
-        <span class="route-spacer"></span>
-        <ul class="route-chips" aria-label="Status">
+{% endblock %}
+{% block body_class %}trace-body{% endblock %}
+{% block body_attrs %} x-data="traceApp()" x-init="init()" @keydown.escape.window="infoOpen=null"{% endblock %}
+{% block crumbs %}
+                <li class="w-breadcrumb__item"><span aria-current="page">Trace analyzer</span></li>
+                <li class="w-breadcrumb__item" x-show="session"><span class="trace-session" x-text="session"></span></li>
+{% endblock %}
+{% block topbar_chips %}
             <li x-show="session && runBounds.length">
-                <span class="chip tone-muted trace-session-count" title="Runs in this session">
-                    <span aria-hidden="true">○</span>
+                <span class="w-chip trace-session-count" data-tone="neutral" title="Runs in this session">
+                    <span class="w-chip__glyph" aria-hidden="true">○</span>
                     <span x-text="runBounds.length + ' run' + (runBounds.length === 1 ? '' : 's')"></span>
                 </span>
             </li>
             <li x-show="summary">
-                <span class="chip"
-                      :class="statusTone(summary && summary.status)"
+                <span class="w-chip"
+                      :data-tone="washTone(summary && summary.status)"
                       title="Run status">
-                    <span aria-hidden="true" x-text="statusGlyph(summary && summary.status)"></span>
+                    <span class="w-chip__glyph" aria-hidden="true" x-text="statusGlyph(summary && summary.status)"></span>
                     <span x-text="summary ? summary.status : ''"></span>
                 </span>
             </li>
-            <li x-show="summary">
-                <span class="chip tone-muted" title="Iterations"><span x-text="summary ? (summary.iters + ' iters') : ''"></span></span>
+            <li x-show="summary" class="w-optional">
+                <span class="w-chip" data-variant="meta" title="Iterations"><span x-text="summary ? (summary.iters + ' iters') : ''"></span></span>
             </li>
-        </ul>
-        <div class="trace-run-picker route-tools">
-            <div class="route-picker" x-show="!session">
+{% endblock %}
+{% block topbar_tools %}
+            <div class="trace-run-picker route-picker" x-show="!session">
                 <select x-model="runId" @change="loadRun()" class="trace-select route-select" aria-label="Select a trace run">
                     <option value="">— select a run —</option>
                     <template x-for="r in runs" :key="r.run_id">
@@ -76,28 +51,15 @@
                     </template>
                 </select>
             </div>
-            <button class="trace-btn btn ghost icon" @click="session ? loadSession() : loadRuns()" title="Refresh" aria-label="Refresh">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M19 11a7.5 7.5 0 1 0 .3 4.3"/></svg>
+            <button type="button" class="w-btn trace-btn" data-variant="icon" @click="session ? loadSession() : loadRuns()" title="Refresh" aria-label="Refresh">
+                {{ w.icon("refresh-cw") }}
             </button>
-            <button class="trace-btn btn ghost icon" @click="clearRun()" x-show="runId && !session" title="Clear this run" aria-label="Clear this run">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            <button type="button" class="w-btn trace-btn w-optional" data-variant="icon" @click="clearRun()" x-show="runId && !session" title="Clear this run" aria-label="Clear this run">
+                {{ w.icon("trash-2") }}
             </button>
-            <span class="route-divider route-tool-optional" aria-hidden="true"></span>
-            <a class="btn ghost icon route-tool-optional trace-back" href="/" title="Back to chat" aria-label="Back to chat">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            </a>
-            <a class="btn ghost icon route-tool-optional" href="/work" title="Jobs" aria-label="Jobs">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg>
-            </a>
-            <button class="trace-btn trace-theme-btn btn ghost icon" @click="toggleTheme()"
-                    :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-                    aria-label="Toggle theme">
-                <svg x-show="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-                <svg x-show="theme !== 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-            </button>
-        </div>
-    </header>
-
+{% endblock %}
+{% block content %}
+<div class="trace-shell">
     <!-- Loading / empty states -->
     <div class="trace-empty" x-show="!loading && !summary && (session ? !runBounds.length : runs.length === 0)">
         <span x-text="session ? ('No runs recorded for session “' + session + '” yet.') : 'No trace runs found.'"></span>
@@ -106,7 +68,7 @@
     <div class="trace-empty ui-loading-region" x-show="loading">Loading trace data…</div>
     <div class="trace-empty" x-show="!loading && runId && !summary">No data for this run.</div>
 
-    <main class="trace-main" x-show="!loading && summary" style="display:none;">
+    <div class="trace-main" role="region" aria-label="Trace analysis" x-show="!loading && summary" style="display:none;">
 
         <!-- Shared X window (pan + zoom): every chart draws the same
              [xStart, xStart+xCount) iter window through one scale, so they
@@ -147,29 +109,29 @@
                 </div>
             </h2>
             <div class="trace-cards">
-                <div class="trace-card"><div class="tc-label">iterations</div><div class="tc-val" x-text="summary.iters"></div></div>
-                <div class="trace-card"><div class="tc-label">status</div><div class="tc-val" x-text="summary.status"></div></div>
+                <div class="trace-card"><div class="tc-label">iterations</div><div class="tc-val" x-text="(summary || {}).iters"></div></div>
+                <div class="trace-card"><div class="tc-label">status</div><div class="tc-val" x-text="(summary || {}).status"></div></div>
                 <div class="trace-card"><div class="tc-label">tokens in / out</div>
-                    <div class="tc-val"><span x-text="fmtNum(summary.total_in)"></span> / <span x-text="fmtNum(summary.total_out)"></span></div></div>
-                <div class="trace-card"><div class="tc-label">cost</div><div class="tc-val" x-text="fmtCost(summary.total_cost)"></div></div>
-                <div class="trace-card"><div class="tc-label">wall time</div><div class="tc-val" x-text="fmtMs(summary.total_wall_ms)"></div></div>
-                <div class="trace-card"><div class="tc-label">peak context</div><div class="tc-val" x-text="fmtNum(summary.peak_context)"></div></div>
-                <div class="trace-card"><div class="tc-label">peak request estimate</div><div class="tc-val" x-text="fmtNum(summary.peak_request_estimate || 0)"></div></div>
-                <div class="trace-card" :class="{'trace-card--warn': (summary.peak_request_delta || 0) > 10000}"><div class="tc-label">largest context jump</div><div class="tc-val" x-text="fmtNum(summary.peak_request_delta || 0)"></div></div>
-                <div class="trace-card" :class="{'trace-card--warn': Math.abs(summary.peak_drift_abs) >= 15}">
-                    <div class="tc-label">peak |drift|</div><div class="tc-val" x-text="summary.peak_drift_abs + '%'"></div></div>
-                <div class="trace-card"><div class="tc-label">median drift</div><div class="tc-val" x-text="summary.median_drift + '%'"></div></div>
-                <div class="trace-card"><div class="tc-label">mean drift</div><div class="tc-val" x-text="summary.mean_drift + '%'"></div></div>
-                <div class="trace-card" :class="{'trace-card--warn': summary.mechanical_fallback_count > 0}">
-                    <div class="tc-label">mechanical fallbacks</div><div class="tc-val" x-text="summary.mechanical_fallback_count"></div></div>
-                <div class="trace-card"><div class="tc-label">compactions</div><div class="tc-val" x-text="summary.compaction_count"></div></div>
+                    <div class="tc-val"><span x-text="fmtNum((summary || {}).total_in)"></span> / <span x-text="fmtNum((summary || {}).total_out)"></span></div></div>
+                <div class="trace-card"><div class="tc-label">cost</div><div class="tc-val" x-text="fmtCost((summary || {}).total_cost)"></div></div>
+                <div class="trace-card"><div class="tc-label">wall time</div><div class="tc-val" x-text="fmtMs((summary || {}).total_wall_ms)"></div></div>
+                <div class="trace-card"><div class="tc-label">peak context</div><div class="tc-val" x-text="fmtNum((summary || {}).peak_context)"></div></div>
+                <div class="trace-card"><div class="tc-label">peak request estimate</div><div class="tc-val" x-text="fmtNum((summary || {}).peak_request_estimate || 0)"></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': ((summary || {}).peak_request_delta || 0) > 10000}"><div class="tc-label">largest context jump</div><div class="tc-val" x-text="fmtNum((summary || {}).peak_request_delta || 0)"></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': Math.abs((summary || {}).peak_drift_abs) >= 15}">
+                    <div class="tc-label">peak |drift|</div><div class="tc-val" x-text="(summary || {}).peak_drift_abs + '%'"></div></div>
+                <div class="trace-card"><div class="tc-label">median drift</div><div class="tc-val" x-text="(summary || {}).median_drift + '%'"></div></div>
+                <div class="trace-card"><div class="tc-label">mean drift</div><div class="tc-val" x-text="(summary || {}).mean_drift + '%'"></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': (summary || {}).mechanical_fallback_count > 0}">
+                    <div class="tc-label">mechanical fallbacks</div><div class="tc-val" x-text="(summary || {}).mechanical_fallback_count"></div></div>
+                <div class="trace-card"><div class="tc-label">compactions</div><div class="tc-val" x-text="(summary || {}).compaction_count"></div></div>
                 <div class="trace-card"><div class="tc-label">nudges / broke</div>
-                    <div class="tc-val"><span x-text="summary.nudge_count"></span> / <span x-text="summary.nudges_broken"></span></div></div>
-                <div class="trace-card" :class="{'trace-card--warn': summary.redundant_reads > 0}">
-                    <div class="tc-label">redundant reads</div><div class="tc-val" x-text="summary.redundant_reads"></div></div>
-                <div class="trace-card"><div class="tc-label">tool calls</div><div class="tc-val" x-text="summary.tool_calls"></div></div>
-                <div class="trace-card"><div class="tc-label">context delivered / discarded</div><div class="tc-val"><span x-text="(summary.context_artifact_counts || {}).delivered || 0"></span> / <span x-text="(summary.context_artifact_counts || {}).discarded || 0"></span></div></div>
-                <div class="trace-card"><div class="tc-label">subagent iters</div><div class="tc-val" x-text="summary.subagent_iters"></div></div>
+                    <div class="tc-val"><span x-text="(summary || {}).nudge_count"></span> / <span x-text="(summary || {}).nudges_broken"></span></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': (summary || {}).redundant_reads > 0}">
+                    <div class="tc-label">redundant reads</div><div class="tc-val" x-text="(summary || {}).redundant_reads"></div></div>
+                <div class="trace-card"><div class="tc-label">tool calls</div><div class="tc-val" x-text="(summary || {}).tool_calls"></div></div>
+                <div class="trace-card"><div class="tc-label">context delivered / discarded</div><div class="tc-val"><span x-text="((summary || {}).context_artifact_counts || {}).delivered || 0"></span> / <span x-text="((summary || {}).context_artifact_counts || {}).discarded || 0"></span></div></div>
+                <div class="trace-card"><div class="tc-label">subagent iters</div><div class="tc-val" x-text="(summary || {}).subagent_iters"></div></div>
             </div>
         </section>
 
@@ -186,12 +148,12 @@
             </h2>
             <div class="trace-suspects">
                 <template x-for="s in suspectsList()" :key="s.suspect">
-                    <div class="trace-suspect" :class="'trace-suspect--' + s.severity" @click="suspectJump(s)">
+                    <button type="button" class="trace-suspect" :class="'trace-suspect--' + s.severity" @click="suspectJump(s)">
                         <span class="ts-sev" x-text="s.severity"></span>
                         <span class="ts-name" x-text="s.suspect"></span>
                         <span class="ts-detail" x-text="s.detail"></span>
                         <span class="ts-next mono" x-text="s.next"></span>
-                    </div>
+                    </button>
                 </template>
             </div>
         </section>
@@ -323,14 +285,14 @@
             </h2>
             <div class="trace-hist" x-show="series.tool_histogram.length">
                 <template x-for="h in toolHistSorted()" :key="h.name">
-                    <div class="trace-hist-row" @click="selectTool(h.name)"
+                    <button type="button" class="trace-hist-row" @click="selectTool(h.name)"
                          :class="{'trace-hist-row--sel': selectedTool === h.name}">
-                        <div class="th-name" x-text="h.name"></div>
-                        <div class="th-bar">
-                            <div class="th-bar-ok" :style="`width:${(h.ok / maxToolCount()) * 100}%`"></div>
-                            <div class="th-bar-err" :style="`width:${(h.error / maxToolCount()) * 100}%`"></div>
-                        </div>
-                        <div class="th-stats">
+                        <span class="th-name" x-text="h.name"></span>
+                        <span class="th-bar">
+                            <span class="th-bar-ok" :style="`width:${(h.ok / maxToolCount()) * 100}%`"></span>
+                            <span class="th-bar-err" :style="`width:${(h.error / maxToolCount()) * 100}%`"></span>
+                        </span>
+                        <span class="th-stats">
                             <span x-text="h.count + ' calls'"></span>
                             <span x-text="h.error + ' err'"></span>
                             <span x-text="h.avg_latency_ms + 'ms'"></span>
@@ -343,8 +305,8 @@
                                   x-text="'stored ' + h.stored"
                                   title="Results written to the durable ResultStore, recallable via recall()/result_*"></span>
                             <span class="th-codes" x-show="h.error > 0" x-text="errorCodes(h).map(([k,v]) => k + '×' + v).join('  ')"></span>
-                        </div>
-                    </div>
+                        </span>
+                    </button>
                 </template>
             </div>
             <p class="trace-muted" x-show="!series.tool_histogram.length">No tool calls recorded.</p>
@@ -545,7 +507,7 @@
                     <span class="trace-conv-request-label"
                           x-text="(session ? session + ' · ' : '') + 'request'"></span>
                     <span class="trace-muted" x-show="runBounds.length"
-                          x-text="runBounds[0].model + ' · ' + runBounds[0].mode"></span>
+                          x-text="runBounds.length ? (runBounds[0].model + ' · ' + runBounds[0].mode) : ''"></span>
                 </div>
 
                 <template x-for="(c, ci) in turnCards()" :key="ci">
@@ -569,9 +531,9 @@
                              }">
                             <div class="trace-conv-turn-head">
                                 <span class="trace-conv-role">assistant</span>
-                                <span class="trace-conv-turn-iters"
+                                <button type="button" class="trace-conv-turn-iters"
                                       @click="selectIter(c.iters[0].iter)"
-                                      x-text="cardLabel(c)"></span>
+                                      x-text="cardLabel(c)"></button>
                                 <span class="trace-muted" x-text="fmtMs(cardWall(c)) + ' · ' + fmtNum(cardTokens(c)) + ' tok'"></span>
                                 <span class="trace-muted"
                                       :class="{'trace-conv-warn': cardMaxDrift(c) >= 100}"
@@ -588,7 +550,7 @@
                                  x-text="c.voice.assistant_preview"></div>
                             <div class="trace-conv-tools" x-show="c.toolList.length">
                                 <template x-for="(t, ti) in c.toolList" :key="c.iters[0].iter + '-' + ti">
-                                    <div class="trace-conv-tool" @click="toggleTool(c, ti)">
+                                    <button type="button" class="trace-conv-tool" @click="toggleTool(c, ti)" :aria-expanded="toolExpanded(c, ti) ? 'true' : 'false'">
                                         <span class="trace-conv-tool-glyph"
                                               x-text="toolExpanded(c, ti) ? '▾' : '▸'"></span>
                                         <span class="trace-conv-tool-name" x-text="t.name"></span>
@@ -598,10 +560,10 @@
                                               x-text="t.ok ? 'ok' : 'ERR'"></span>
                                         <span class="trace-muted" x-text="fmtMs(t.latency_ms)"></span>
                                         <span class="trace-muted" x-show="t.cache_hit">· cache</span>
-                                        <div class="trace-conv-tool-prev"
+                                        <span class="trace-conv-tool-prev"
                                              x-show="toolExpanded(c, ti)"
-                                             x-text="t.preview"></div>
-                                    </div>
+                                             x-text="t.preview"></span>
+                                    </button>
                                 </template>
                             </div>
                         </div>
@@ -610,7 +572,6 @@
             </div>
             <p class="trace-muted" x-show="!iters.length">No iterations recorded.</p>
         </section>
-    </main>
+    </div>
 </div>
-</body>
-</html>
+{% endblock %}

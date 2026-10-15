@@ -46,8 +46,9 @@ def test_composer_strip_and_placeholder():
 
 
 def test_plan_mode_has_its_own_colour_in_both_themes():
-    assert '--plan-mode: var(--viz-6' in PRODUCT_CSS
-    assert 'html[data-theme="light"] { --plan-mode' in PRODUCT_CSS
+    # Wash W1: plan mode is the `plan` semantic (lilac ink), which the
+    # generated tokens define per theme, so one declaration covers both.
+    assert ':root, [data-theme] { --plan-mode: var(--wash-plan-ink); }' in PRODUCT_CSS
     assert ".chip.plan-mode-pill" in PRODUCT_CSS and ".plan-mode-strip" in PRODUCT_CSS
     pill_rules = PRODUCT_CSS[PRODUCT_CSS.index(".chip.plan-mode-pill {"):]
     assert "var(--warn)" not in pill_rules.split("}")[0]

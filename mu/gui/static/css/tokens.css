@@ -1,277 +1,254 @@
-/* μcli design tokens — the single source of truth for every web surface.
+/* μcli legacy token names → Wash (W1 token reskin).
  *
- * Loaded first on every page. Components consume only these variables;
- * no stylesheet below this one may introduce raw colours, shadows,
- * durations, radii or font sizes.
+ * Every variable name the pre-Wash stylesheets and scripts consume is kept,
+ * but each one now resolves to a generated `--wash-*` token from
+ * `css/wash/tokens.css` (source: mu/design/tokens.json). There are no colour
+ * literals in this file: change a colour in tokens.json and re-run
+ * scripts/design/build_tokens.py.
  *
- * Theme switch: html[data-theme="light|dark"] is set before first paint
- * (inline bootstrap in each page head) from localStorage `mucli-theme`,
- * falling back to prefers-color-scheme. route_theme.js / app.js toggle it.
+ * Theme: html[data-theme="paper|dusk"] is set before first paint by the shared
+ * bootstrap in templates/partials/theme_bootstrap.html (legacy light/dark
+ * values are migrated on read). The `--wash-*` palette switches per theme, so
+ * these aliases need no theme blocks of their own. They are declared on
+ * every [data-theme] scope as well as :root so a subtree that sets its own
+ * data-theme (the /design gallery's side-by-side panels) re-resolves them.
  *
- * Neutrals are a cool, lightly tinted ramp. One accent (indigo).
- * Semantic colours exist only for state. Contrast ratios (WCAG 2.2) are
- * recorded next to every text tone, measured against --bg and --bg-hover.
+ * Semantic mapping (G§1.3): accent → lagoon, running → sky, ok → meadow,
+ * warn/attention → apricot, caution → sun, danger → rose, plan → lilac.
+ * Text-coloured names use the text-safe `ink` step; "-subtle" fills use the
+ * `wash` step. --viz-1…8 follow the context-layer order L0…L5 (G§1.4).
+ *
+ * Retired in W4 together with the legacy layer.
  */
 
-/* ------------------------------------------------------------ constants */
-:root {
-    /* Typography */
-    --font-sans: "Inter", "Geist", ui-sans-serif, system-ui, -apple-system,
-                 BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo,
-                 Consolas, "Liberation Mono", monospace;
+:root,
+[data-theme] {
+    /* ---------------------------------------------------------- type */
+    --font-sans: var(--wash-font-sans);
+    --font-mono: var(--wash-font-mono);
 
-    --fs-xs: 12px;
-    --fs-sm: 13px;
-    --fs-base: 14px;
-    --fs-md: 16px;
-    --fs-lg: 20px;
-    --fs-xl: 24px;
-    --fs-2xl: 32px;
+    --fs-xs: var(--wash-type-caption-size);
+    --fs-sm: var(--wash-type-label-size);
+    --fs-base: var(--wash-type-body-size);
+    --fs-md: var(--wash-type-body-lg-size);
+    --fs-lg: var(--wash-type-title-3-size);
+    --fs-xl: var(--wash-type-title-2-size);
+    --fs-2xl: var(--wash-type-title-1-size);
 
-    --fw-regular: 400;
-    --fw-medium: 500;
-    --fw-semibold: 600;
+    --fw-regular: var(--wash-type-body-weight);
+    --fw-medium: var(--wash-type-label-weight);
+    --fw-semibold: var(--wash-type-title-3-weight);
 
     --lh-tight: 1.25;
     --lh-snug: 1.4;
     --lh-body: 1.5;
-    --tracking-tight: -0.015em;
-    --tracking-caps: 0.04em;
+    --tracking-tight: var(--wash-type-title-3-tracking);
+    --tracking-caps: var(--wash-type-eyebrow-tracking);
 
-    /* Spacing — the only permitted steps */
-    --space-1: 4px;
-    --space-2: 8px;
-    --space-3: 12px;
-    --space-4: 16px;
-    --space-5: 24px;
-    --space-6: 32px;
-    --space-7: 48px;
-    --space-8: 64px;
-    --space-9: 96px;
+    /* ---------------------------------------------------------- spacing */
+    --space-1: var(--wash-space-1);
+    --space-2: var(--wash-space-2);
+    --space-3: var(--wash-space-3);
+    --space-4: var(--wash-space-4);
+    --space-5: var(--wash-space-6);
+    --space-6: var(--wash-space-7);
+    --space-7: var(--wash-space-8);
+    --space-8: var(--wash-space-9);
+    --space-9: var(--wash-space-10);
 
-    /* Layout */
-    --content-max: 1200px;
-    --reading-max: 720px;
+    /* ---------------------------------------------------------- layout */
+    --content-max: var(--wash-size-content);
+    --reading-max: var(--wash-size-reading);
     --control-h: 32px;
-    --control-h-sm: 28px;
-    --touch-target: 44px;
+    --control-h-sm: var(--wash-size-control-sm);
+    --touch-target: var(--wash-size-touch);
     --hairline-w: 1px;
 
-    /* Shape — controls and floating layers; full only for dots/pills */
-    --radius-sm: 6px;
-    --radius-lg: 10px;
-    --radius-full: 999px;
+    /* ---------------------------------------------------------- shape */
+    --radius-sm: var(--wash-radius-sm);
+    --radius-lg: var(--wash-radius-lg);
+    --radius-full: var(--wash-radius-pill);
 
-    /* Motion */
-    --dur-micro: 120ms;
-    --dur-small: 200ms;
-    --dur-large: 300ms;
-    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-    --ease-in: cubic-bezier(0.4, 0, 1, 1);
-    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    /* ---------------------------------------------------------- motion */
+    --dur-micro: var(--wash-motion-micro);
+    --dur-small: var(--wash-motion-small);
+    --dur-large: var(--wash-motion-medium);
+    --ease-out: var(--wash-ease-small);
+    --ease-in: var(--wash-ease-bleed);
+    --ease-standard: var(--wash-ease-micro);
 
-    /* Stacking — global layers; local stacking inside a component may use 1–3 */
-    --z-base: 0;
-    --z-raised: 1;
-    --z-dropdown: 100;
-    --z-sticky: 200;
-    --z-overlay: 1000;
-    --z-modal: 1400;
-    --z-popover: 2400;
-    --z-toast: 9000;
-}
+    /* ---------------------------------------------------------- stacking */
+    --z-base: var(--wash-z-base);
+    --z-raised: var(--wash-z-raised);
+    --z-dropdown: var(--wash-z-dropdown);
+    --z-sticky: var(--wash-z-sticky);
+    --z-overlay: var(--wash-z-overlay);
+    --z-modal: var(--wash-z-modal);
+    --z-popover: var(--wash-z-popover);
+    --z-toast: var(--wash-z-toast);
 
-/* ------------------------------------------------------------ dark (default) */
-/* ------------------------------------------------------------ dark (default)
- * planos palette (src/core/theme.ts TOKENS + WEB_EXTRA). Planos names
- * (--accent --ok --warn --danger --running --muted --text --surface --border
- * --bg --raised --hover) are canonical; mucli names below resolve to them. */
-:root,
-html[data-theme="dark"] {
-    color-scheme: dark;
+    /* ---------------------------------------------------------- canonical palette
+     * (planos names: --accent --ok --warn --danger --running --muted --text
+     * --surface --border --bg --raised --hover) */
+    --accent: var(--wash-accent-ink);
+    --ok: var(--wash-ok-ink);
+    --warn: var(--wash-attention-ink);
+    --danger: var(--wash-danger-ink);
+    --running: var(--wash-running-ink);
+    --muted: var(--wash-ink-3);
+    --text: var(--wash-ink);
+    --surface: var(--wash-surface);
+    --border: var(--wash-hairline);
+    --bg: var(--wash-canvas);
+    --raised: var(--wash-raised);
+    --hover: var(--wash-sunken);
 
-    --accent: #7aa2f7;
-    --ok: #73c991;
-    --warn: #e0af68;
-    --danger: #f7768e;
-    --running: #7dcfff;
-    --muted: #8b93b8;     /* 5.97:1 on bg */
-    --text: #c0caf5;      /* 11.4:1 on bg */
-    --surface: #1a1b26;
-    --border: #2f3549;
-    --bg: #16161e;
-    --raised: #1f2335;
-    --hover: #292e42;
+    --bg-subtle: var(--wash-surface);
+    --bg-raised: var(--wash-raised);
+    --bg-hover: var(--wash-sunken);
+    --bg-active: var(--wash-accent-wash);
 
-    --bg-subtle: var(--surface);
-    --bg-raised: var(--raised);
-    --bg-hover: var(--hover);
-    --bg-active: color-mix(in srgb, var(--accent) 15%, transparent);
+    --text-primary: var(--wash-ink);
+    --text-secondary: var(--wash-ink-2);
+    --text-tertiary: var(--wash-ink-3);
+    --text-on-accent: var(--wash-on-ink);
 
-    --text-primary: var(--text);
-    --text-secondary: #a9b1d6;
-    --text-tertiary: var(--muted);
-    --text-on-accent: var(--surface);
+    --hairline-color: var(--wash-hairline);
+    --control-border: var(--wash-control-border);
 
-    --hairline-color: var(--border);
-    --control-border: var(--border);
+    --accent-solid: var(--wash-accent-ink);
+    --accent-hover: color-mix(in srgb, var(--wash-accent-ink) 85%, var(--wash-ink));
+    --accent-subtle: var(--wash-accent-wash);
+    --accent-fg: var(--wash-accent-ink);
+    --accent-on: var(--wash-on-ink);
 
-    --accent-solid: var(--accent);
-    --accent-hover: color-mix(in srgb, var(--accent) 85%, var(--text));
-    --accent-subtle: color-mix(in srgb, var(--accent) 15%, transparent);
-    --accent-fg: var(--accent);
-    --accent-on: var(--surface);
+    --error: var(--wash-danger-ink);
+    --error-subtle: var(--wash-danger-wash);
+    --warning: var(--wash-attention-ink);
+    --warning-subtle: var(--wash-attention-wash);
+    --success: var(--wash-ok-ink);
+    --success-subtle: var(--wash-ok-wash);
+    --info: var(--wash-info-ink);
+    --info-subtle: var(--wash-info-wash);
+    --caution: var(--wash-caution-ink);
+    --caution-subtle: var(--wash-caution-wash);
+    --plan: var(--wash-plan-ink);
+    --plan-subtle: var(--wash-plan-wash);
 
-    --error: var(--danger);
-    --error-subtle: color-mix(in srgb, var(--danger) 12%, transparent);
-    --warning: var(--warn);
-    --warning-subtle: color-mix(in srgb, var(--warn) 12%, transparent);
-    --success: var(--ok);
-    --success-subtle: color-mix(in srgb, var(--ok) 12%, transparent);
-    --info: var(--running);
-    --info-subtle: color-mix(in srgb, var(--running) 12%, transparent);
+    --scrim: var(--wash-scrim);
+    --code-bg: var(--wash-code);
 
-    --scrim: color-mix(in srgb, var(--bg) 65%, transparent);
-    --code-bg: var(--bg);
+    --shadow-1: var(--wash-elevation-2);
+    --shadow-2: var(--wash-elevation-3);
 
-    --shadow-1: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent);
-    --shadow-2: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent);
+    /* Categorical series = context layers L0…L5 (G§1.4) */
+    --viz-1: var(--wash-layer-L0);
+    --viz-2: var(--wash-layer-L1A);
+    --viz-3: var(--wash-layer-L1B);
+    --viz-4: var(--wash-layer-L2);
+    --viz-5: var(--wash-layer-L3);
+    --viz-6: var(--wash-layer-L4);
+    --viz-7: var(--wash-layer-L4B);
+    --viz-8: var(--wash-layer-L5);
 
-    --viz-1: var(--accent);
-    --viz-2: var(--ok);
-    --viz-3: var(--warn);
-    --viz-4: var(--danger);
-    --viz-5: var(--running);
-    --viz-6: #bb9af7;
-    --viz-7: #2ac3de;
-    --viz-8: var(--muted);
-}
+    /* ---------------------------------------------------------- aliases
+     * Legacy names consumed across the existing stylesheets and JS. */
+    --sans: var(--wash-font-sans);
+    --serif: var(--wash-font-sans);
+    --mono: var(--wash-font-mono);
+    --mono-font: var(--wash-font-mono);
 
-/* ------------------------------------------------------------ light */
-html[data-theme="light"] {
-    color-scheme: light;
+    --radius: var(--wash-radius-sm);
+    --radius-xs: var(--wash-radius-xs);
+    --radius-md: var(--wash-radius-md);
+    --radius-xl: var(--wash-radius-xl);
+    --radius-pill: var(--wash-radius-pill);
 
-    --accent: #2f5bd3;
-    --ok: #1a7f37;
-    --warn: #9a6700;
-    --danger: #cf222e;
-    --running: #0969da;
-    --muted: #57606a;     /* 5.94:1 on bg */
-    --text: #1f2328;
-    --surface: #ffffff;
-    --border: #d0d7de;
-    --bg: #f6f8fa;
-    --raised: #ffffff;
-    --hover: #eaeef2;
+    --bg-lift: var(--wash-surface);
+    --surface-2: var(--wash-surface);
+    --surface-strong: var(--wash-sunken);
+    --surface-raised: var(--wash-raised);
+    --glass: var(--wash-canvas);
+    --glass-strong: var(--wash-raised);
+    --pane: var(--wash-canvas);
+    --sidebar-bg: var(--wash-surface);
+    --header-bg: var(--wash-canvas);
+    --composer-bg: var(--wash-surface);
 
-    --text-secondary: #424a53;
-    --viz-6: #8250df;
-    --viz-7: #1b7c83;
-}
+    --text-soft: var(--wash-ink-2);
+    --text-dim: var(--wash-ink-3);
+    --text-dimmer: var(--wash-ink-3);
 
-/* ------------------------------------------------------------ aliases
- * Legacy variable names consumed across the existing stylesheets and JS.
- * They resolve to the tokens above so every surface moves at once.
- * New code should use the canonical names. */
-:root,
-html[data-theme="dark"],
-html[data-theme="light"] {
-    --sans: var(--font-sans);
-    --serif: var(--font-sans);
-    --mono: var(--font-mono);
-    --mono-font: var(--font-mono);
-
-    --radius: var(--radius-sm);
-    --radius-xs: var(--radius-sm);
-    --radius-md: var(--radius-sm);
-    --radius-xl: var(--radius-lg);
-    --radius-pill: var(--radius-full);
-
-    --bg-lift: var(--bg-subtle);
-    --surface-2: var(--bg-subtle);
-    --surface-strong: var(--bg-subtle);
-    --surface-raised: var(--bg-raised);
-    --glass: var(--bg);
-    --glass-strong: var(--bg-raised);
-    --pane: var(--bg);
-    --sidebar-bg: var(--bg-subtle);
-    --header-bg: var(--bg);
-    --composer-bg: var(--bg-raised);
-
-    --text-soft: var(--text-secondary);
-    --text-dim: var(--text-tertiary);
-    --text-dimmer: var(--text-tertiary);
-
-    --border-strong: var(--hairline-color);
-    --hairline: var(--hairline-color);
-    --border-hover: var(--control-border);
-    --border-focus: var(--accent-solid);
+    --border-strong: var(--wash-hairline-strong);
+    --hairline: var(--wash-hairline);
+    --border-hover: var(--wash-control-border);
+    --border-focus: var(--wash-accent-ink);
 
     --accent-strong: var(--accent-hover);
-    --accent-soft: var(--accent-subtle);
-    --accent-line: var(--accent-solid);
-    --accent-text: var(--accent-on);
-    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-solid);
+    --accent-soft: var(--wash-accent-wash);
+    --accent-line: var(--wash-accent-ink);
+    --accent-text: var(--wash-on-ink);
+    --focus-ring: 0 0 0 2px var(--wash-canvas), 0 0 0 4px var(--wash-accent-ink);
 
-    --err: var(--error);
-    --err-soft: var(--error-subtle);
-    --highlight: var(--warning);
-    --tool: var(--text-secondary);
+    --err: var(--wash-danger-ink);
+    --err-soft: var(--wash-danger-wash);
+    --highlight: var(--wash-caution-ink);
+    --tool: var(--wash-ink-2);
 
-    --shadow: var(--shadow-1);
-    --shadow-soft: none;
-    --shadow-card: none;
-    --shadow-modal: var(--shadow-2);
-    --backdrop: var(--scrim);
+    --shadow: var(--wash-elevation-2);
+    --shadow-soft: var(--wash-elevation-0);
+    --shadow-card: var(--wash-elevation-1);
+    --shadow-modal: var(--wash-elevation-3);
+    --backdrop: var(--wash-scrim);
 
-    /* Mode identity — neutral; the active mode is carried by label + accent */
-    --mode-accent: var(--accent-solid);
-    --mode-feature: var(--accent-solid);
-    --mode-debug: var(--text-secondary);
-    --mode-loop: var(--text-secondary);
-    --mode-research: var(--text-secondary);
-    --mode-security: var(--text-secondary);
-    --mode-teacher: var(--text-secondary);
-    --mode-good: var(--success);
-    --mode-warn: var(--warning);
+    /* Mode identity — each mode keeps its pigment everywhere (G§1.4) */
+    --mode-accent: var(--wash-mode-default-ink);
+    --mode-feature: var(--wash-mode-feature-ink);
+    --mode-debug: var(--wash-mode-debug-ink);
+    --mode-loop: var(--wash-mode-loop-ink);
+    --mode-research: var(--wash-mode-research-ink);
+    --mode-security: var(--wash-mode-security-ink);
+    --mode-teacher: var(--wash-mode-teacher-ink);
+    --mode-plan: var(--wash-mode-plan-ink);
+    --mode-good: var(--wash-ok-ink);
+    --mode-warn: var(--wash-caution-ink);
 
-    /* Job step states */
-    --st-pending: var(--text-tertiary);
-    --st-active: var(--accent-solid);
-    --st-waiting: var(--warning);
-    --st-done: var(--success);
-    --st-failed: var(--error);
-    --st-skipped: var(--text-tertiary);
+    /* Job step states (G§4 status vocabulary) */
+    --st-pending: var(--wash-neutral-ink);
+    --st-active: var(--wash-running-ink);
+    --st-waiting: var(--wash-attention-ink);
+    --st-done: var(--wash-ok-ink);
+    --st-failed: var(--wash-danger-ink);
+    --st-skipped: var(--wash-neutral-ink);
 
     /* Risk levels */
-    --risk-low: var(--success);
-    --risk-medium: var(--warning);
-    --risk-high: var(--error);
+    --risk-low: var(--wash-ok-ink);
+    --risk-medium: var(--wash-attention-ink);
+    --risk-high: var(--wash-danger-ink);
 
     /* Context observatory */
-    --context-live: var(--success);
-    --context-live-dot: var(--success);
-    --context-positive: var(--success);
-    --context-card-surface: var(--bg);
-    --context-card-shadow: none;
+    --context-live: var(--wash-ok-ink);
+    --context-live-dot: var(--wash-ok-pigment);
+    --context-positive: var(--wash-ok-ink);
+    --context-card-surface: var(--wash-surface);
+    --context-card-shadow: var(--wash-elevation-1);
     --context-card-highlight: transparent;
-    --context-plot-surface: var(--bg-subtle);
-    --context-track-surface: var(--bg-hover);
+    --context-plot-surface: var(--wash-sunken);
+    --context-track-surface: var(--wash-sunken);
     --context-control-surface: transparent;
-    --context-control-active: var(--accent-subtle);
-    --context-control-active-text: var(--accent-fg);
-    --context-tooltip-surface: var(--bg-raised);
-    --context-tooltip-shadow: var(--shadow-2);
+    --context-control-active: var(--wash-accent-wash);
+    --context-control-active-text: var(--wash-accent-ink);
+    --context-tooltip-surface: var(--wash-raised);
+    --context-tooltip-shadow: var(--wash-elevation-2);
     --context-glow-primary: transparent;
     --context-glow-secondary: transparent;
 
     /* Retired atmosphere — kept as names so nothing resolves to `unset` */
-    --sky-blue: var(--bg);
-    --glacier-blue: var(--bg);
-    --sunrise-pink: var(--bg);
-    --sunrise-peach: var(--bg);
-    --alpine-green: var(--bg);
+    --sky-blue: var(--wash-canvas);
+    --glacier-blue: var(--wash-canvas);
+    --sunrise-pink: var(--wash-canvas);
+    --sunrise-peach: var(--wash-canvas);
+    --alpine-green: var(--wash-canvas);
     --snow-glow: transparent;
     --mist-a: transparent;
     --mist-b: transparent;

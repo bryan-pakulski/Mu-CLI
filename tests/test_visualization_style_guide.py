@@ -68,7 +68,9 @@ def test_web_and_mobile_forward_the_actual_mucli_theme():
     tool = read("mu/tools/artifact/handlers.py")
 
     assert "visualizationThemeUrl(t.artifact.view_url, $store.theme.current)" in chat
-    assert 'frame.contentWindow?.postMessage({ type: "mucli-theme", theme }, "*")' in web
+    # Wash: frames keep the light/dark `theme` contract and also get `wash`.
+    assert 'frame.contentWindow?.postMessage({ type: "mucli-theme", theme, wash }, "*")' in web
+    assert 'const theme = wash === "dusk" ? "dark" : "light";' in web
     assert 'url.searchParams.set("mucli_theme"' in web
     assert "const { colors, isDark } = useTheme()" in mobile
     assert "?mucli_theme=${isDark ? 'dark' : 'light'}" in mobile

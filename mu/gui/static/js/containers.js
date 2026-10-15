@@ -30,13 +30,13 @@
     startStatsPolling();
   }
 
-  // Top-bar status chips (planos shell): count + glyph + label.
+  // Top-bar status chips (Wash shell, .w-chip): count + glyph + label.
   function renderChips() {
     const envChip = document.getElementById('container-count-chip');
     if (envChip) {
       const running = state.containers.filter(ref => ref.status === 'running').length;
       const total = state.containers.length;
-      envChip.className = `chip ${running ? 'tone-running' : 'tone-muted'}`;
+      envChip.dataset.tone = running ? 'running' : 'neutral';
       envChip.querySelector('[data-chip-glyph]').textContent = running ? '●' : '○';
       envChip.querySelector('[data-chip-text]').textContent = running
         ? `${running} of ${total} running`

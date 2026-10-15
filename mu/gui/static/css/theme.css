@@ -74,7 +74,7 @@ body {
     font-weight: var(--fw-medium);
     line-height: var(--lh-tight);
     color: var(--text-primary);
-    border-radius: var(--radius-sm);
+    border-radius: var(--wash-radius-pill);
     cursor: pointer;
     transition:
         background-color var(--dur-micro) var(--ease-out),
@@ -91,15 +91,15 @@ button:disabled, .btn:disabled, button[aria-disabled="true"] {
 
 button.send-btn, button.feature-primary-action, button.feature-row-control-primary,
 button.approve, :is(button, a).btn-primary, :is(button, a).primary {
-    background: var(--accent-solid);
-    color: var(--accent-on);
+    background: var(--wash-ink);
+    color: var(--wash-on-ink);
     border-color: transparent;
 }
 button.send-btn:not(:disabled):hover, button.feature-primary-action:not(:disabled):hover,
 button.feature-row-control-primary:not(:disabled):hover, button.approve:not(:disabled):hover,
 :is(button, a).btn-primary:not(:disabled):hover, :is(button, a).primary:not(:disabled):hover {
-    background: var(--accent-hover);
-    color: var(--accent-on);
+    background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas));
+    color: var(--wash-on-ink);
 }
 
 :is(button, a):is(.danger, .work-danger, .is-danger, .row-action-danger) { color: var(--error); }
@@ -182,12 +182,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 
 /* ------------------------------------------------------------ reduced motion */
 @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-        animation-duration: 1ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 1ms !important;
-        scroll-behavior: auto !important;
-    }
+    *, *::before, *::after { /* W2: moved to wash/patterns/utilities.css (reduced motion) */ }
 }
 
 /* ============================================================ planos primitives
@@ -225,10 +220,10 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
     justify-content: center;
     gap: 6px;
     height: var(--control-h);
-    padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--raised);
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--wash-radius-pill);
+    background: var(--surface);
     color: var(--text);
     font: inherit;
     font-size: var(--fs-base);
@@ -245,8 +240,8 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 :where(html:not(:has(.work-app))) .btn.sm.icon { width: calc(var(--control-h) - 6px); }
 :where(html:not(:has(.work-app))) .btn.ghost { background: transparent; border-color: transparent; }
 :where(html:not(:has(.work-app))) .btn.ghost:hover:not(:disabled) { background: var(--hover); }
-:where(html:not(:has(.work-app))) .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
-:where(html:not(:has(.work-app))) .btn.primary:hover:not(:disabled):not([aria-disabled="true"]) { background: color-mix(in srgb, var(--accent) 85%, var(--text)); color: var(--surface); }
+:where(html:not(:has(.work-app))) .btn.primary { background: var(--wash-ink); border-color: var(--wash-ink); color: var(--wash-on-ink); }
+:where(html:not(:has(.work-app))) .btn.primary:hover:not(:disabled):not([aria-disabled="true"]) { background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas)); color: var(--wash-on-ink); }
 :where(html:not(:has(.work-app))) .btn.tone-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
 :where(html:not(:has(.work-app))) .btn.tone-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
 :where(html:not(:has(.work-app))) .btn.tone-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
@@ -368,10 +363,10 @@ html[data-density="compact"] {
 :where(html:not(:has(.work-app))) button:where(:not([class])),
 :where(html:not(:has(.work-app))) :is(button.subtle, button.primary, button.danger, .modal-actions button, .confirm-actions button) {
     min-height: var(--control-h);
-    padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--raised);
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--wash-radius-pill);
+    background: var(--surface);
     color: var(--text);
     font-size: var(--fs-base);
     font-weight: var(--fw-medium);
@@ -384,13 +379,13 @@ html[data-density="compact"] {
     color: var(--text);
 }
 :where(html:not(:has(.work-app))) :is(button.primary, .modal-actions button.primary, .confirm-actions button.primary) {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--surface);
+    background: var(--wash-ink);
+    border-color: var(--wash-ink);
+    color: var(--wash-on-ink);
 }
 :where(html:not(:has(.work-app))) :is(button.primary, .modal-actions button.primary, .confirm-actions button.primary):hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 85%, var(--text));
-    color: var(--surface);
+    background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas));
+    color: var(--wash-on-ink);
 }
 :where(html:not(:has(.work-app))) :is(button.danger, .modal-actions button.danger) {
     color: var(--danger);
@@ -399,7 +394,7 @@ html[data-density="compact"] {
 :where(html:not(:has(.work-app))) :is(button.primary.danger, .confirm-actions button.primary.danger) {
     background: var(--danger);
     border-color: var(--danger);
-    color: var(--surface);
+    color: var(--wash-on-ink);
 }
 :where(html:not(:has(.work-app))) :is(button.primary.danger, .confirm-actions button.primary.danger):hover:not(:disabled) {
     background: color-mix(in srgb, var(--danger) 85%, var(--text));

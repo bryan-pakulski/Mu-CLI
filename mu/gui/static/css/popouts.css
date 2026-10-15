@@ -29,8 +29,8 @@
 
 /* ---------------------------------------------------------------- mode / Feature menu */
 .composer-mode-popout {
-    /* Content-sized: wins over the inline width positionFloatingLayer measures with. */
-    width: auto !important;
+    /* Content-sized: `width: auto` lives in wash/utilities.css so it wins over
+     * the inline width positionFloatingLayer measures with. */
     min-width: min(310px, calc(100vw - 20px));
     max-width: min(420px, calc(100vw - 20px));
     padding: var(--space-1);
@@ -108,7 +108,6 @@
 
 /* ---------------------------------------------------------------- provider / settings menu */
 .composer-settings-popout {
-    width: auto !important;
     min-width: min(460px, calc(100vw - 20px));
     max-width: min(590px, calc(100vw - 20px));
     padding: 0;

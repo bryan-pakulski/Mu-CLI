@@ -64,9 +64,7 @@
 .panel-select-nav .panel-view-select:hover {
     background-color: var(--bg-hover);
 }
-.panel-stage .mode-panel {
-    inset: var(--panel-tabs-h) 0 0 0 !important;
-}
+.panel-stage .mode-panel { /* W2: moved to wash/patterns/legacy-overrides.css */ }
 /* Legacy strip markup is gone; keep the hooks hidden if a cached template renders. */
 .panel-tabs-strip,
 .panel-tab,
@@ -91,14 +89,12 @@
 /* ---------------------------------------------------------------- composer
  * One input pane only; no pseudo-surface behind the real form. */
 .composer::before {
-    content: none !important;
     display: none;
 }
 
 /* Mode + session settings are a separate utility line. Keep them in normal
  * flow so textarea growth can never overlap the controls. */
 .composer-toolbar {
-    position: static !important;
     inset: auto;
     width: 100%;
     min-height: 28px;
@@ -121,12 +117,10 @@
 
 /* Status remains available when needed, but never reads as another pane. */
 .composer .hint {
-    min-height: 0 !important;
     margin-top: var(--space-2);
     padding: 0 var(--space-1);
     border: 0;
     border-radius: 0;
-    background: transparent !important;
     box-shadow: none;
 }
 
@@ -256,7 +250,6 @@
     align-items: stretch;
     border: 0;
     border-radius: 0;
-    background: transparent !important;
     box-shadow: none;
 }
 .settings-pane .var-head {

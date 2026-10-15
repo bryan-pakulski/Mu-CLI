@@ -1,0 +1,36 @@
+<!-- Loop: add backlog item modal -->
+<div class="modal-backdrop"
+     x-data
+     x-dialog="$store.loop.showAddItem"
+     x-cloak
+     x-show="$store.loop.showAddItem"
+     x-transition.opacity.duration.120ms
+     @dialog-close="$store.loop.showAddItem && $store.loop.closeAddItem()">
+    <div class="modal" @click.stop role="dialog" aria-modal="true" aria-labelledby="loop-add-item-title">
+        <div class="modal-head">
+            <span class="modal-title" id="loop-add-item-title">add backlog item</span>
+            <button class="icon-btn" @click="$store.loop.closeAddItem()" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-field">
+                <label class="modal-label">content</label>
+                <textarea x-model="$store.loop.newItemContent"
+                          placeholder="What needs to be done?"
+                          rows="3"
+                          @keydown.stop></textarea>
+            </div>
+            <div class="modal-field">
+                <label class="modal-label">status</label>
+                <select x-model="$store.loop.newItemStatus">
+                    <option value="pending">pending</option>
+                    <option value="in_progress">in progress</option>
+                    <option value="blocked">blocked</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button @click="$store.loop.closeAddItem()">cancel</button>
+            <button class="primary" @click="$store.loop.addBacklogItem()">add</button>
+        </div>
+    </div>
+</div>

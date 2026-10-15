@@ -1,0 +1,19 @@
+<!-- Pre-paint theme bootstrap (Wash). Runs before any stylesheet paints so a
+     stored Dusk preference never flashes Paper. Preference values are
+     system | paper | dusk; legacy light/dark values are migrated on read. -->
+<script>
+(function () {
+    var root = document.documentElement, pref = 'system';
+    try {
+        var saved = localStorage.getItem('mucli-theme');
+        if (saved === 'light') pref = 'paper';
+        else if (saved === 'dark') pref = 'dusk';
+        else if (saved === 'paper' || saved === 'dusk' || saved === 'system') pref = saved;
+        if (saved && saved !== pref) localStorage.setItem('mucli-theme', pref);
+    } catch (e) { /* storage unavailable: follow the OS */ }
+    var dark = false;
+    try { dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (e) {}
+    root.setAttribute('data-theme', pref === 'system' ? (dark ? 'dusk' : 'paper') : pref);
+    root.setAttribute('data-theme-pref', pref);
+})();
+</script>

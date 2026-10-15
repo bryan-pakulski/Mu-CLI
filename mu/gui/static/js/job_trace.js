@@ -13,18 +13,18 @@
         attemptCanvas: document.getElementById('jt-attempt-canvas'), attemptTable: document.getElementById('jt-attempt-table'),
         tools: document.getElementById('jt-tools'), verifications: document.getElementById('jt-verifications'), incidents: document.getElementById('jt-incidents'),
         eventCount: document.getElementById('jt-event-count'), eventQuery: document.getElementById('jt-event-query'), eventCategory: document.getElementById('jt-event-category'), eventSeverity: document.getElementById('jt-event-severity'), events: document.getElementById('jt-events'),
-        refresh: document.getElementById('jt-refresh'), theme: document.getElementById('jt-theme'), debugExport: document.getElementById('jt-debug-export'), exportAnalysis: document.getElementById('jt-export-analysis'),
+        refresh: document.getElementById('jt-refresh'), debugExport: document.getElementById('jt-debug-export'), exportAnalysis: document.getElementById('jt-export-analysis'),
     };
 
     const state = { jobs: [], analysis: null, comparison: null, resizeTimer: null };
     // Phase colours are design tokens (tokens.css): canvas resolves them at draw
     // time via phaseColor(); HTML swatches reference the custom property directly.
     const PHASE_TOKENS = {
-        queued: '--viz-8', preparing: '--viz-5', running: '--viz-1', needs_human: '--viz-3', verifying: '--viz-7',
+        queued: '--wash-neutral-pigment', preparing: '--viz-5', running: '--viz-1', needs_human: '--viz-3', verifying: '--viz-7',
         ready_for_review: '--viz-2', recovering: '--viz-6', conflicted: '--viz-4', failed: '--error', timed_out: '--warning',
-        budget_exceeded: '--warning', environment_error: '--error', cancelled: '--viz-8', merged: '--viz-2',
+        budget_exceeded: '--warning', environment_error: '--error', cancelled: '--wash-neutral-pigment', merged: '--viz-2',
     };
-    const PHASE_FALLBACK = '--viz-8';
+    const PHASE_FALLBACK = '--wash-neutral-pigment';
     const STOPPED = new Set(['failed', 'environment_error', 'timed_out', 'budget_exceeded', 'conflicted']);
     const WAITING = new Set(['queued', 'needs_human']);
 
@@ -32,13 +32,15 @@
     // Shared status vocabulary: done ✓ ok · active ● running · waiting ◆ warn ·
     // failed ✗ danger · skipped – muted · pending ○ muted. Glyph + label, never colour alone.
     const STATUS_KIND = { merged: 'done', ready_for_review: 'done', queued: 'pending', needs_human: 'waiting', conflicted: 'waiting', cancelled: 'skipped', failed: 'failed', timed_out: 'failed', budget_exceeded: 'failed', environment_error: 'failed' };
-    const KIND_GLYPH = { done: ['✓', 'tone-ok'], active: ['●', 'tone-running'], waiting: ['◆', 'tone-warn'], failed: ['✗', 'tone-danger'], skipped: ['–', 'tone-muted'], pending: ['○', 'tone-muted'] };
+    // Shared status vocabulary → glyph + Wash semantic (data-tone on .w-chip).
+    const KIND_GLYPH = { done: ['✓', 'ok'], active: ['●', 'running'], waiting: ['◆', 'attention'], failed: ['✗', 'danger'], skipped: ['–', 'neutral'], pending: ['○', 'neutral'] };
     function applyStatusChip(node, status, archived) {
         if (!node) return;
         const [glyph, tone] = KIND_GLYPH[STATUS_KIND[String(status || '')] || (status ? 'active' : 'pending')];
-        node.className = `chip ${tone} jt-status-chip`;
+        node.className = 'w-chip jt-status-chip';
+        node.dataset.tone = tone;
         node.replaceChildren();
-        const g = document.createElement('span'); g.setAttribute('aria-hidden', 'true'); g.textContent = glyph;
+        const g = document.createElement('span'); g.className = 'w-chip__glyph'; g.setAttribute('aria-hidden', 'true'); g.textContent = glyph;
         const label = document.createElement('span'); label.textContent = `${statusLabel(status)}${archived ? ' · archived' : ''}`;
         node.append(g, label);
     }
@@ -216,14 +218,15 @@
         try { const data = await api(`/api/jobs/${encodeURIComponent(jobId)}/analysis?timeline_limit=10000`); els.jobSelect.value = jobId; if (updateUrl) { const url = new URL(window.location.href); url.searchParams.set('job', jobId); if (els.compareSelect.value) url.searchParams.set('compare', els.compareSelect.value); else url.searchParams.delete('compare'); history.replaceState(null, '', url); } renderAll(data.analysis); if (els.compareSelect.value) await loadComparison(); } catch (error) { showError(error.message); }
     }
     function exportAnalysis() { if (!state.analysis) return; const blob = new Blob([JSON.stringify(state.analysis, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `mucli-job-${state.analysis.job.id.slice(0, 12)}-analysis.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-    function syncTheme() { const dark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark'; els.theme.querySelector('[data-theme-dark]')?.toggleAttribute('hidden', !dark); els.theme.querySelector('[data-theme-light]')?.toggleAttribute('hidden', dark); }
-    function toggleTheme() { const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', next); try { localStorage.setItem('mucli-theme', next); } catch (_) {} syncTheme(); if (state.analysis) { renderPhaseChart(state.analysis); renderAttemptChart(state.analysis); } }
-    async function init() { syncTheme(); try { await loadJobs(); const qs = new URLSearchParams(window.location.search); const jobId = (qs.get('job') || '').trim(); const compareId = (qs.get('compare') || '').trim(); if (compareId) els.compareSelect.value = compareId; if (jobId) await loadJob(jobId, { updateUrl: false }); else { els.loading.hidden = true; els.empty.hidden = false; } } catch (error) { showError(error.message); } }
+    // Theme: the shared top-bar toggle (route_theme.js, window.MuTheme) owns the
+    // paper/dusk preference; canvases redraw on every mucli-theme-change.
+    function syncTheme() { if (state.analysis) { renderPhaseChart(state.analysis); renderAttemptChart(state.analysis); } }
+    async function init() { try { await loadJobs(); const qs = new URLSearchParams(window.location.search); const jobId = (qs.get('job') || '').trim(); const compareId = (qs.get('compare') || '').trim(); if (compareId) els.compareSelect.value = compareId; if (jobId) await loadJob(jobId, { updateUrl: false }); else { els.loading.hidden = true; els.empty.hidden = false; } } catch (error) { showError(error.message); } }
 
     els.jobSelect.addEventListener('change', () => loadJob(els.jobSelect.value));
     els.compareSelect.addEventListener('change', async () => { const url = new URL(window.location.href); if (els.compareSelect.value) url.searchParams.set('compare', els.compareSelect.value); else url.searchParams.delete('compare'); history.replaceState(null, '', url); await loadComparison(); });
     els.refresh.addEventListener('click', async () => { await loadJobs(); if (state.analysis) await loadJob(state.analysis.job.id, { updateUrl: false }); });
-    els.theme.addEventListener('click', toggleTheme); els.exportAnalysis.addEventListener('click', exportAnalysis);
+    window.addEventListener('mucli-theme-change', syncTheme); els.exportAnalysis.addEventListener('click', exportAnalysis);
     [els.eventQuery, els.eventCategory, els.eventSeverity].forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', renderEvents));
     window.addEventListener('resize', () => { clearTimeout(state.resizeTimer); state.resizeTimer = setTimeout(() => { if (state.analysis) { renderPhaseChart(state.analysis); renderAttemptChart(state.analysis); } }, 150); });
     init();

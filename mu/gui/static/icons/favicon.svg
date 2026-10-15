@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Wash drop mark (mu/design/icons/drop.svg) painted with the apricot →
+       rose → lilac pigments from mu/design/tokens.json. -->
+  <defs>
+    <radialGradient id="g" cx="38%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#F2A36B"/>
+      <stop offset=".55" stop-color="#E58A9E"/>
+      <stop offset="1" stop-color="#B39DDB"/>
+    </radialGradient>
+  </defs>
+  <path d="M16 3.5c4.6 5 8.6 9.4 8.6 14.1a8.6 8.6 0 0 1-17.2 0C7.4 12.9 11.4 8.5 16 3.5z" fill="url(#g)"/>
+</svg>

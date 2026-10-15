@@ -51,16 +51,17 @@ function muTokenAlpha(name, alpha) {
 
 // Context layers arrive with a server-side HSL hue (LAYER_HUES). Map each to
 // a data-visualisation series token; unknown hues (and FREE) stay neutral.
+// Wash layer pigments (G§1.4): the same L0…L5 order on every chart.
 const MU_LAYER_HUE_VIZ = Object.freeze({
-    210: "--viz-1",   // L0  system prompt
-    168: "--viz-7",   // L1B skills
-    280: "--viz-6",   // L2  summary
-    25: "--viz-3",    // L3  active goal
-    50: "--viz-2",    // L4B retrieved snippets
-    358: "--viz-4",   // L5  live history
+    210: "--wash-layer-L0",    // L0  system prompt
+    168: "--wash-layer-L1B",   // L1B skills
+    280: "--wash-layer-L2",    // L2  summary
+    25: "--wash-layer-L3",     // L3  active goal
+    50: "--wash-layer-L4B",    // L4B retrieved snippets
+    358: "--wash-layer-L5",    // L5  live history
 });
 function muLayerVizToken(hue) {
-    return MU_LAYER_HUE_VIZ[hue] || "--viz-8";
+    return MU_LAYER_HUE_VIZ[hue] || "--wash-neutral-pigment";
 }
 function muLayerColor(hue) {
     return `var(${muLayerVizToken(hue)})`;
@@ -3229,18 +3230,29 @@ ${problem.text}`, "error", 16000);
     });
 
     Alpine.store("theme", {
-        // Initialised from the data-theme attribute the pre-paint
-        // script in base.html set. Toggling it updates the DOM,
-        // localStorage, and (via subscribers) the highlight.js link.
-        current: document.documentElement.getAttribute("data-theme") || "dark",
+        // Wash themes. `current` is the resolved theme ("paper" | "dusk") the
+        // pre-paint bootstrap wrote to html[data-theme]; `preference` is the
+        // stored choice ("system" | "paper" | "dusk"). route_theme.js
+        // (window.MuTheme) owns persistence and the mucli-theme-change event.
+        current: muWashTheme(),
+        preference: window.MuTheme ? window.MuTheme.preference() : "system",
+        get legacy() { return this.current === "dusk" ? "dark" : "light"; },
         toggle() {
-            this.current = this.current === "dark" ? "light" : "dark";
-            try { localStorage.setItem("mucli-theme", this.current); } catch (e) {}
-            applyTheme(this.current);
-            // Re-highlight existing code blocks after the stylesheet swap.
+            if (window.MuTheme) window.MuTheme.toggle();
+            else toggleTheme();
+        },
+        set(preference) {
+            if (window.MuTheme) window.MuTheme.set(preference);
+        },
+        _sync(detail) {
+            this.current = detail.wash;
+            this.preference = detail.preference;
+            applyTheme(detail.wash);
+            // Re-highlight existing code blocks after the theme switch.
             queueMicrotask(rehighlightAll);
         },
     });
+    if (window.MuTheme) window.MuTheme.onChange((detail) => Alpine.store("theme")._sync(detail));
 
     Alpine.store("layout", {
         sidebarOpen: true,
@@ -4668,7 +4680,7 @@ ${problem.text}`, "error", 16000);
         },
 
         _contextPalette() {
-            const light = document.documentElement.getAttribute("data-theme") === "light";
+            const light = muWashTheme() === "paper";
             const font = `${muCssToken("--fs-xs", "12px")} ${muCssToken("--font-mono", "monospace")}`;
             return {
                 light,
@@ -7251,19 +7263,26 @@ function autoSize(el) {
 
 // ---------- theme ----------------------------------------------------------
 //
-// The early-load script in base.html sets data-theme before first paint.
-// These helpers run after DOM ready to (a) sync the highlight.js stylesheet
-// to the current theme and (b) flip the theme on user toggle.
+// The pre-paint bootstrap (templates/partials/theme_bootstrap.html) sets
+// html[data-theme] to "paper" or "dusk" before first paint. route_theme.js
+// (window.MuTheme) persists the preference and fires mucli-theme-change;
+// these helpers forward the theme to visualization frames and redraw canvases.
+// Code highlighting uses the token-driven Wash hljs theme, so no stylesheet swap.
 
-function applyTheme(theme) {
-    document.documentElement.setAttribute("data-theme", theme);
-    const dark = document.getElementById("hljs-dark");
-    const light = document.getElementById("hljs-light");
-    if (dark)  dark.disabled  = (theme === "light");
-    if (light) light.disabled = (theme === "dark");
+function muWashTheme() {
+    const t = document.documentElement.getAttribute("data-theme");
+    return (t === "dusk" || t === "dark") ? "dusk" : "paper";
+}
+
+function applyTheme(wash) {
+    wash = (wash === "dusk" || wash === "dark") ? "dusk" : "paper";
+    document.documentElement.setAttribute("data-theme", wash);
+    // Visualization artifacts keep the legacy light/dark contract in `theme`
+    // and receive the Wash name in `wash`.
+    const theme = wash === "dusk" ? "dark" : "light";
     document.querySelectorAll("iframe.visualization-frame").forEach((frame) => {
         try {
-            frame.contentWindow?.postMessage({ type: "mucli-theme", theme }, "*");
+            frame.contentWindow?.postMessage({ type: "mucli-theme", theme, wash }, "*");
         } catch (e) { /* Sandboxed frames may be between navigations. */ }
     });
     // Canvas pixels do not inherit CSS variables. Redraw observability
@@ -7281,7 +7300,8 @@ function visualizationThemeUrl(value, theme) {
     if (!value) return "";
     try {
         const url = new URL(value, window.location.origin);
-        url.searchParams.set("mucli_theme", theme === "light" ? "light" : "dark");
+        const light = theme === "light" || theme === "paper";
+        url.searchParams.set("mucli_theme", light ? "light" : "dark");
         return url.origin === window.location.origin
             ? `${url.pathname}${url.search}${url.hash}`
             : url.toString();
@@ -7291,8 +7311,8 @@ function visualizationThemeUrl(value, theme) {
 }
 
 function toggleTheme() {
-    const cur = document.documentElement.getAttribute("data-theme") || "dark";
-    const next = cur === "dark" ? "light" : "dark";
+    if (window.MuTheme) { window.MuTheme.toggle(); return; }
+    const next = muWashTheme() === "dusk" ? "paper" : "dusk";
     try { localStorage.setItem("mucli-theme", next); } catch (e) {}
     applyTheme(next);
 }
@@ -7307,7 +7327,7 @@ function rehighlightAll() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+    applyTheme(muWashTheme());
     Alpine.store("layout").init();
     bootSSE();
     Alpine.store("chat").loadHistory();
@@ -7532,7 +7552,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <h3 class="pricing-settings-title">Model pricing</h3>
                     <p class="pricing-settings-copy">Edit the per-million token rates MuCLI uses for cost accounting. OpenAI, Gemini, Anthropic, and Ollama Cloud all use this registry. Local Ollama remains $0 attributable provider/API cost; host compute is intentionally separate.</p>
                 </div>
-                <a class="pricing-settings-advanced" href="/static/model_costs.html">Advanced registry</a>
+                <a class="pricing-settings-advanced" href="/models/costs">Advanced registry</a>
             </div>
 
             <div class="pricing-settings-meta" x-show="$store.pricingSettings.loaded">

@@ -1,3 +1,4 @@
+{% import "macros/wash.html" as w %}
 <div class="welcome welcome-launcher" x-data="welcomeView()" x-init="load()">
     <header class="welcome-hero">
         <div class="welcome-mark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 32 32"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg><span>mucli</span></div>
@@ -37,7 +38,7 @@
 
     <footer class="welcome-footnote">
         <span>Providers use credentials configured on the MuCLI host.</span>
-        <button class="subtle" @click="$store.theme.toggle()">toggle theme</button>
+        {{ w.theme_toggle() }}
     </footer>
 
     <!-- Sessions -->
@@ -47,9 +48,10 @@
          x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
          @dialog-close="modal === 'sessions' && closeModal()">
         <section class="welcome-modal welcome-modal-medium" @click.stop
+                 role="dialog" aria-modal="true" aria-labelledby="welcome-sessions-title"
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head">
-                <div><span class="welcome-modal-eyebrow">Saved work</span><h2>Sessions</h2></div>
+                <div><span class="welcome-modal-eyebrow">Saved work</span><h2 id="welcome-sessions-title">Sessions</h2></div>
                 <button class="icon-btn" @click="closeModal()" aria-label="Close">×</button>
             </header>
             <div class="welcome-modal-body session-modal-body">
@@ -98,9 +100,10 @@
          x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
          @dialog-close="modal === 'create' && !creating && closeModal()">
         <section class="welcome-modal welcome-wizard" @click.stop
+                 role="dialog" aria-modal="true" aria-labelledby="welcome-create-title"
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head wizard-head">
-                <div><span class="welcome-modal-eyebrow">New session</span><h2 x-text="stepTitle"></h2></div>
+                <div><span class="welcome-modal-eyebrow">New session</span><h2 id="welcome-create-title" x-text="stepTitle"></h2></div>
                 <button class="icon-btn" @click="closeModal()" :disabled="creating" aria-label="Close">×</button>
             </header>
 
@@ -286,8 +289,8 @@
     <!-- Editors -->
     <div class="container-editor-backdrop" x-dialog="editorModal"
          x-show="editorModal" x-cloak @dialog-close="editorModal && (editorModal = null)">
-        <section class="container-editor-modal" @click.stop>
-            <header class="container-editor-header"><div><strong x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button class="icon-btn" @click="editorModal = null">×</button></header>
+        <section class="container-editor-modal" @click.stop role="dialog" aria-modal="true" aria-labelledby="welcome-editor-title">
+            <header class="container-editor-header"><div><strong id="welcome-editor-title" x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button class="icon-btn" @click="editorModal = null" aria-label="Close">×</button></header>
             <div class="container-editor-body" :class="{'container-network-editor': editorModal === 'network'}">
                 <textarea x-show="editorModal === 'dockerfile'" x-model="form.dockerfile" spellcheck="false"></textarea>
                 <template x-if="editorModal === 'network'"><label>Allowlist<small>One domain or IPv4 address per line.</small><textarea x-model="form.egressAllow" spellcheck="false"></textarea></label></template>

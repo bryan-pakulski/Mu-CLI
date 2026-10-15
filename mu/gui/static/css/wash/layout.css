@@ -1,0 +1,335 @@
+/* Wash layout layer — the shared app shell (G§8.1, §8.2).
+ *
+ *   .w-shell             grid: top bar over sidebar + stage
+ *   .w-topbar            56px sticky bar: menu, wordmark, breadcrumb, chips, tools
+ *   .w-wordmark/.w-drop  μcli wordmark with the watercolour drop mark
+ *   .w-sidebar           264px nav; 64px icon rail below 1200; drawer below 840
+ *   .w-stage             the page content region
+ *   .w-page              centred content column (max 1200, gutters 24/16)
+ *   .w-hero              page hero band: art that dissolves into the canvas
+ *   .w-scrim             backdrop behind the off-canvas sidebar
+ *
+ * Responsive visibility (.w-optional hides below 840; the menu button shows
+ * only below 840) lives in utilities.css so it beats component display rules.
+ *
+ * Breakpoints (the only ones allowed): 600, 840, 1200, 1600.
+ */
+
+/* ------------------------------------------------------------ shell */
+.w-shell {
+    --w-sidebar-w: var(--wash-size-sidebar);
+    display: grid;
+    grid-template-columns: var(--w-sidebar-w) minmax(0, 1fr);
+    grid-template-rows: var(--wash-size-topbar) minmax(0, 1fr);
+    grid-template-areas:
+        "top top"
+        "side stage";
+    height: 100dvh;
+    min-height: 0;
+    background: var(--wash-canvas);
+    color: var(--wash-ink);
+}
+.w-shell[data-shell="bare"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+        "top"
+        "stage";
+}
+
+/* ------------------------------------------------------------ top bar */
+.w-topbar {
+    --w-glass-blur: 16px;
+    --w-glass-alpha: 78%;
+    grid-area: top;
+    position: sticky;
+    top: 0;
+    z-index: var(--wash-z-sticky);
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    min-width: 0;
+    height: var(--wash-size-topbar);
+    padding: 0 var(--wash-space-6);
+    border-bottom: 1px solid var(--wash-hairline);
+    background: color-mix(in srgb, var(--wash-canvas) var(--w-glass-alpha), transparent);
+    backdrop-filter: blur(var(--w-glass-blur));
+    -webkit-backdrop-filter: blur(var(--w-glass-blur));
+}
+@supports not (backdrop-filter: blur(1px)) {
+    .w-topbar { background: var(--wash-canvas); }
+}
+.w-topbar__spacer { flex: 1 1 auto; min-width: var(--wash-space-2); }
+.w-topbar__chips {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+}
+.w-topbar__chips > li { display: flex; min-width: 0; }
+.w-topbar__tools {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    flex: none;
+}
+.w-topbar__divider {
+    width: 1px;
+    height: 20px;
+    margin: 0 var(--wash-space-1);
+    background: var(--wash-hairline);
+}
+
+/* ------------------------------------------------------------ wordmark */
+.w-wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    flex: none;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    font-weight: var(--wash-type-display-weight);
+    letter-spacing: var(--wash-type-display-tracking);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.w-wordmark:hover { text-decoration: none; }
+.w-drop {
+    display: inline-block;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50% 50% 50% 12%;
+    transform: rotate(-45deg);
+    background: radial-gradient(circle at 35% 35%,
+        var(--wash-apricot-pigment),
+        var(--wash-rose-pigment) 55%,
+        var(--wash-lilac-pigment));
+}
+.w-drop[data-state="working"] { animation: w-drop-swell 1.6s var(--wash-ease-bleed) infinite; }
+@keyframes w-drop-swell {
+    50% { transform: rotate(-45deg) scale(1.18); filter: saturate(1.3); }
+}
+
+/* ------------------------------------------------------------ sidebar */
+.w-sidebar {
+    grid-area: side;
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-1);
+    min-height: 0;
+    padding: var(--wash-space-4) var(--wash-space-3);
+    overflow-y: auto;
+    border-right: 1px solid var(--wash-hairline);
+    background: var(--wash-surface);
+}
+.w-sidebar__section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.w-sidebar__heading {
+    margin: var(--wash-space-4) var(--wash-space-3) var(--wash-space-1);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-eyebrow-weight);
+    line-height: var(--wash-type-caption-line);
+}
+.w-sidebar__foot { margin-top: auto; }
+
+/* ------------------------------------------------------------ stage */
+.w-stage {
+    grid-area: stage;
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: var(--wash-canvas);
+}
+.w-stage:focus { outline: none; }
+.w-page {
+    width: 100%;
+    max-width: var(--wash-size-content);
+    margin: 0 auto;
+    padding: var(--wash-space-7) var(--wash-space-6) var(--wash-space-8);
+}
+.w-page[data-width="reading"] { max-width: var(--wash-size-reading); }
+.w-page[data-width="full"] { max-width: none; }
+.w-page__head {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--wash-space-4);
+    flex-wrap: wrap;
+    margin-bottom: var(--wash-space-6);
+}
+.w-page__title {
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-1-size);
+    line-height: var(--wash-type-title-1-line);
+    font-weight: var(--wash-type-title-1-weight);
+    letter-spacing: var(--wash-type-title-1-tracking);
+}
+.w-page__lede {
+    max-width: 64ch;
+    margin: var(--wash-space-2) 0 0;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+}
+.w-section + .w-section {
+    margin-top: var(--wash-space-8);
+}
+
+/* ------------------------------------------------------------ hero (G§6) */
+.w-hero {
+    --w-hero-art: var(--wash-art-work);
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: flex-start;
+    gap: var(--wash-space-2);
+    min-height: 220px;
+    padding: var(--wash-space-8) var(--wash-space-6) var(--wash-space-6);
+    overflow: hidden;
+}
+.w-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background: var(--w-hero-art) center top / cover no-repeat;
+    animation: w-bleed-in var(--wash-motion-bleed) var(--wash-ease-bleed) both;
+}
+/* Art never has a hard bottom edge and fades to ≥80% paper under text. */
+.w-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+        radial-gradient(ellipse 70% 60% at 30% 85%,
+            color-mix(in srgb, var(--wash-canvas) 80%, transparent), transparent 75%),
+        linear-gradient(to bottom, transparent 35%, var(--wash-canvas));
+    pointer-events: none;
+}
+.w-hero[data-art="hero"] { --w-hero-art: var(--wash-art-hero); }
+.w-hero[data-art="work"] { --w-hero-art: var(--wash-art-work); }
+.w-hero[data-art="env"] { --w-hero-art: var(--wash-art-env); }
+.w-hero[data-size="lg"] { min-height: 420px; align-items: center; text-align: center; }
+.w-hero__title {
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-1-size);
+    line-height: var(--wash-type-title-1-line);
+    font-weight: var(--wash-type-title-1-weight);
+    letter-spacing: var(--wash-type-title-1-tracking);
+}
+.w-hero[data-size="lg"] .w-hero__title {
+    font-size: var(--wash-type-display-size);
+    line-height: var(--wash-type-display-line);
+    letter-spacing: var(--wash-type-display-tracking);
+}
+.w-hero__lede {
+    max-width: 60ch;
+    margin: 0;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+}
+@keyframes w-bleed-in {
+    from { opacity: 0; filter: blur(8px); }
+    to { opacity: 1; filter: none; }
+}
+/* "Reduce decoration" and no-transparency: a flat wash instead of art. */
+:root[data-decoration="reduced"] .w-hero::before { background: var(--wash-accent-wash); }
+@media (prefers-reduced-transparency: reduce) {
+    .w-hero::before { background: var(--wash-accent-wash); }
+}
+
+/* ------------------------------------------------------------ scrim */
+.w-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: var(--wash-z-overlay);
+    background: var(--wash-scrim);
+    animation: w-fade-in var(--wash-motion-small) var(--wash-ease-small) both;
+}
+@keyframes w-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ------------------------------------------------------------ skip link */
+.w-skip-link {
+    position: absolute;
+    left: var(--wash-space-2);
+    top: -100px;
+    z-index: var(--wash-z-toast);
+    padding: var(--wash-space-2) var(--wash-space-4);
+    border-radius: var(--wash-radius-pill);
+    background: var(--wash-ink);
+    color: var(--wash-on-ink);
+    font-weight: var(--wash-type-label-weight);
+}
+.w-skip-link:focus { top: var(--wash-space-2); }
+
+/* ------------------------------------------------------------ breakpoints */
+@media (width >= 1600px) {
+    .w-page { padding-left: var(--wash-space-7); padding-right: var(--wash-space-7); }
+}
+
+/* lg: the sidebar collapses to a 64px icon rail. */
+@media (width < 1200px) {
+    .w-shell { --w-sidebar-w: var(--wash-size-rail); }
+    .w-sidebar { padding: var(--wash-space-3) var(--wash-space-2); align-items: center; }
+}
+@media (840px <= width < 1200px) {
+    .w-sidebar .w-sidebar__heading { display: none; }
+}
+
+/* md: the sidebar becomes an off-canvas drawer opened from the top bar. */
+@media (width < 840px) {
+    .w-shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "top"
+            "stage";
+    }
+    .w-topbar { padding: 0 var(--wash-space-4); gap: var(--wash-space-2); }
+    .w-sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: var(--wash-z-modal);
+        width: min(var(--wash-size-sidebar), 86vw);
+        align-items: stretch;
+        padding: var(--wash-space-4) var(--wash-space-3);
+        box-shadow: var(--wash-elevation-3);
+        transform: translateX(-104%);
+        visibility: hidden;
+        transition: transform var(--wash-motion-medium) var(--wash-ease-medium),
+            visibility 0s linear var(--wash-motion-medium);
+    }
+    .w-shell[data-sidebar-open] .w-sidebar {
+        transform: none;
+        visibility: visible;
+        transition: transform var(--wash-motion-medium) var(--wash-ease-medium);
+    }
+    .w-page { padding: var(--wash-space-6) var(--wash-space-4) var(--wash-space-7); }
+    .w-hero { padding: var(--wash-space-7) var(--wash-space-4) var(--wash-space-5); min-height: 180px; }
+    .w-hero[data-size="lg"] .w-hero__title {
+        font-size: var(--wash-type-title-1-size);
+        line-height: var(--wash-type-title-1-line);
+    }
+}
+
+/* How components sit inside the shell at each breakpoint (icon rail nav
+ * items, phone breadcrumb) is in patterns/shell.css: those rules restyle
+ * component classes, so they must live in a layer above `components`. */

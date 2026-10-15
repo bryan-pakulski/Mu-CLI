@@ -1,4 +1,5 @@
-// Shared modal focus management. x-dialog follows the same condition as
+// Shared modal focus management — the only modal mechanism (Wash .w-modal /
+// .w-drawer markup, see static/css/wash/components/modal.css). x-dialog follows the same condition as
 // x-show; a dialog-close event lets the owning component decide how to close.
 (function () {
     const stack = [];
@@ -40,7 +41,7 @@
             surface.setAttribute('role', 'dialog');
             surface.setAttribute('aria-modal', 'true');
             if (!surface.hasAttribute('aria-label') && !surface.hasAttribute('aria-labelledby')) {
-                const title = surface.querySelector('.modal-title,.fb-title,.confirm-message,h2');
+                const title = surface.querySelector('.w-modal__title,.w-drawer__title,.modal-title,.fb-title,.confirm-message,h2');
                 if (title) {
                     if (!title.id) title.id = `mucli-dialog-title-${++nextDialogId}`;
                     surface.setAttribute('aria-labelledby', title.id);

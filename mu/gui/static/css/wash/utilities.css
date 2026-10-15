@@ -1,0 +1,65 @@
+/* Wash utilities layer — the last layer, and the only place `!important`
+ * is allowed (tests/test_wash_css_contract.py).
+ *
+ * These are the overrides that must beat everything, including inline style
+ * attributes and Wash components: hiding, reduced motion, and the
+ * content-sized popouts whose inline width floating_popouts.js measures.
+ * Most moved here from legacy stylesheets in W2 (see spec §4.1).
+ */
+
+/* Alpine: never flash un-initialised templates. */
+[x-cloak] { display: none !important; }
+
+/* The hidden attribute always hides. The one legacy exception keeps a hidden
+ * stage-provider select in the grid flow (work.css, visibility:hidden). */
+[hidden]:not(select[data-stage-provider]) { display: none !important; }
+
+/* Panel resizing: one cursor everywhere, no accidental text selection. */
+body.resizing,
+body.resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+/* Content-sized composer popouts win over the inline width that
+ * positionFloatingLayer measures with (legacy popouts.css). */
+.composer-mode-popout,
+.composer-settings-popout { width: auto !important; }
+
+/* Responsive visibility for the shared shell (layout.css): the top-bar menu
+ * button only exists below 840px, where the sidebar becomes a drawer, and
+ * anything marked .w-optional drops out of the top bar there. */
+@media (width >= 840px) {
+    .w-topbar__menu { display: none !important; }
+}
+@media (width < 840px) {
+    .w-optional { display: none !important; }
+}
+
+/* Visually hidden but available to assistive technology. */
+.w-visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* Reduced motion (G§5, §11): every animation and transition becomes an
+ * instant state change. The ink drop stays visible as a static dot. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important;
+        scroll-behavior: auto !important;
+    }
+    .w-inkdrop,
+    .w-drop,
+    .w-skeleton,
+    .w-progress__bar { animation: none !important; }
+}

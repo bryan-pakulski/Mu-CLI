@@ -278,7 +278,7 @@
                     <div class="work-push-preview w-markdown work-markdown" data-push-preview hidden></div>
                     <p class="w-field__hint">Markdown. Leave blank to use the default text.</p></div>
                 <label class="w-check"><input class="w-check__input" type="checkbox" id="work-push-draft" ${preview.draft === false ? '' : 'checked'}><span>Open as a draft PR</span></label>
-                ${needsOverride ? `<div class="w-field"><div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">The review verdict blocks merging. Pushing anyway needs a reason; it is recorded in the job audit.</p></div>
+                ${needsOverride ? `<div class="w-field"><div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${action.args?.unverified || preview.unverified ? 'Some checks could not run, so this change is unverified.' : 'The review verdict blocks merging.'} Pushing anyway needs a reason; it is recorded in the job audit.</p></div>
                     <label class="w-field__label" for="work-push-override">Reason for overriding the blocking review</label>
                     <textarea class="w-textarea" id="work-push-override" rows="3" required aria-required="true"></textarea><p class="w-field__error" data-push-error></p></div>` : ''}`;
             const foot = document.createElement('div');
@@ -887,15 +887,33 @@
             const latest = runs[0];
             const selected = runs.find(r => r.run === selectedRun) || runs[0];
             const total = r => (r.suites || []).map(suiteCounts).reduce((a, c) => ({passed:a.passed + c.passed, failed:a.failed + c.failed, skipped:a.skipped + c.skipped, total:a.total + c.total}), {passed:0, failed:0, skipped:0, total:0});
-            const runPill = r => r.passed ? pill('ok', `${chipGlyph('✓')}<span>Passed</span>`) : pill('danger', `${chipGlyph('✗')}<span>Failed</span>`);
+            const unverifiedStatus = statusOf('unverified');
+            const isUnverified = r => r && (r.verified === false || Number(r.unrunnable || 0) > 0);
+            const runPill = r => isUnverified(r) ? pill(unverifiedStatus.tone, `${chipGlyph(unverifiedStatus.glyph)}<span>Unverified</span>`, `${r.unrunnable || 0} check(s) could not run`)
+                : r.passed ? pill('ok', `${chipGlyph('✓')}<span>Passed</span>`) : pill('danger', `${chipGlyph('✗')}<span>Failed</span>`);
+            const suiteStatus = x => x.status === 'unrunnable' ? 'unverified' : x.passed ? 'done' : 'failed';
+            const unverifiedCard = r => {
+                if (!isUnverified(r)) return '';
+                const rows = (r.unrunnable_suites || []).length ? r.unrunnable_suites
+                    : (r.suites || []).filter(x => x.status === 'unrunnable').map(x => ({suite:x.suite, command:x.command, ...(x.unrunnable || {})}));
+                const tpl = (job.build_environments?.bindings || []).find(b => b.source === 'template');
+                const cont = job.actions.find(a => a.id === 'continueUnverified');
+                const prepare = tpl ? `<a class="w-btn" data-variant="secondary" data-size="sm" data-prepare-template="${esc(tpl.ref)}" href="/containers#template-${encodeURIComponent(tpl.ref)}">Edit template ${esc(tpl.ref)}</a>`
+                    : `<a class="w-btn" data-variant="secondary" data-size="sm" data-prepare-template="" href="/containers#templates-title">Prepare a template</a>`;
+                return `<section class="w-card work-card work-unverified" data-unverified aria-labelledby="unverified-h"><header class="w-card__head">${statusIcon('unverified')}<h2 class="w-card__title" id="unverified-h">Unverified · ${esc(rows.length || r.unrunnable || 0)} check${(rows.length || r.unrunnable) === 1 ? '' : 's'} could not run</h2></header>
+                    <div class="w-card__body work-stack-tight"><p class="work-meta">These checks never ran the project's own tools, so their results are not evidence. They are not counted as pre-existing failures; the review verdict is capped at needs work and pushing needs an override.</p>
+                    <ul class="work-unverified__list">${rows.map(x => `<li data-unrunnable="${esc(x.suite || '')}"><strong class="work-mono">${esc(x.suite || '')}</strong>${x.tool ? ` · <code>${esc(x.tool)}</code>` : ''}${x.cause ? ` — ${esc(x.cause)}` : ''}${x.hint ? `<div class="work-meta">${esc(x.hint)}</div>` : ''}</li>`).join('')}</ul>
+                    <div class="w-btn-row" role="toolbar" aria-label="Unverified checks">${prepare}${cont && !cont.hidden ? actionButton(cont) : ''}</div></div></section>`;
+            };
             const started = r => r.started_at ? when(r.started_at).slice(5, 16) : '';
             const dur = r => { const ms = runDuration(r); return ms == null ? '' : duration(ms); };
             const liveLog = live.length && running ? card({id:'live-h', eyebrow:'Live', title:'Live log', meta:'running now', body:`<pre class="work-log" data-live-log role="log" aria-live="off">${ansi(live.map(e => `[${e.payload?.suite || 'check'}${e.payload?.baseline ? ' · baseline' : ''}] ${e.payload?.text || ''}`).join(''))}</pre>`}) : '';
             panel.innerHTML = `<div class="work-stack">
-                <div class="work-toolbar"><div class="work-checks-summary"><span>${running ? '<span class="w-status" data-tone="running"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>Running · </span>' : ''}${latest ? `Last: run ${latest.run} ${latest.passed ? 'passed' : 'failed'}` : 'No checks have run yet.'}</span>
+                <div class="work-toolbar"><div class="work-checks-summary"><span>${running ? '<span class="w-status" data-tone="running"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>Running · </span>' : ''}${latest ? `Last: run ${latest.run} ${isUnverified(latest) ? 'unverified' : latest.passed ? 'passed' : 'failed'}` : 'No checks have run yet.'}</span>
                     <span class="work-meta">fix attempts ${esc(job.fix_attempts || 0)} · checks come from the approved plan</span></div><span class="work-spacer"></span>
                     <div class="w-btn-row" role="toolbar" aria-label="Check actions">${recheck ? actionButton(recheck) : ''}</div></div>
                 ${liveLog}
+                ${unverifiedCard(latest)}
                 ${runs.length ? `<div class="w-table-wrap"><table class="w-table work-runs" aria-label="Runs"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Result</th><th scope="col">Trigger</th><th scope="col" data-num>Duration</th><th scope="col">Started</th></tr></thead><tbody>${runs.map(r => { const k = total(r);
                     return `<tr class="clickable" aria-selected="${r === selected}" data-run="${esc(r.run)}"><td><button type="button" class="work-link-btn" aria-pressed="${r === selected}">Run ${esc(r.run)}</button></td><td>${runPill(r)}</td>
                         <td class="work-result-cell">${k.total ? `<div class="work-toolbar">${resultBar(k.passed, k.failed, k.skipped)}<span class="work-nowrap work-meta">${k.passed}✓ ${k.failed ? `<span class="work-del">${k.failed}✗</span>` : ''}</span></div>` : ''}</td>
@@ -908,7 +926,7 @@
                     <div class="w-card__body work-stack">
                         ${k.total ? `<div class="work-stack-tight">${resultBar(k.passed, k.failed, k.skipped, true)}<div class="work-toolbar work-meta"><span class="work-add">✓ ${k.passed} passed</span><span class="${k.failed ? 'work-del' : ''}">✗ ${k.failed} failed</span>${k.skipped ? `<span>– ${k.skipped} skipped</span>` : ''}<span>of ${k.total}</span></div></div>` : ''}
                         ${(selected.suites || []).length ? `<div class="w-table-wrap"><table class="w-table work-suites" aria-label="Suites of run ${esc(selected.run)}"><thead><tr><th scope="col">Suite</th><th scope="col">Environment</th><th scope="col">Result</th><th scope="col" data-num>Duration</th></tr></thead><tbody>
-                            ${selected.suites.map(s => `<tr><td data-mono>${statusIcon(s.passed ? 'done' : 'failed')} ${esc(s.suite)}</td><td data-mono data-suite-env="${esc(s.environment || '')}">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : '<span class="work-meta">shared runtime</span>'}</td><td>${s.missing_executable ? pill('caution', `<span>${esc(s.missing_executable)} missing</span>`) : s.passed ? pill('ok', `${chipGlyph('✓')}<span>Passed</span>`) : pill('danger', `${chipGlyph('✗')}<span>Failed</span>`)}</td><td class="work-meta" data-num>${s.duration_ms != null ? esc(duration(s.duration_ms)) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                            ${selected.suites.map(s => `<tr data-suite-status="${esc(s.status || '')}"><td data-mono>${statusIcon(suiteStatus(s))} ${esc(s.suite)}</td><td data-mono data-suite-env="${esc(s.environment || '')}">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : '<span class="work-meta">shared runtime</span>'}</td><td>${s.status === 'unrunnable' ? pill(unverifiedStatus.tone, `${chipGlyph(unverifiedStatus.glyph)}<span>Unrunnable${s.unrunnable?.tool ? ` · ${esc(s.unrunnable.tool)}` : ''}</span>`, s.unrunnable?.cause || '') : s.missing_executable ? pill('caution', `<span>${esc(s.missing_executable)} missing</span>`) : s.passed ? pill('ok', `${chipGlyph('✓')}<span>Passed</span>`) : pill('danger', `${chipGlyph('✗')}<span>Failed</span>`)}</td><td class="work-meta" data-num>${s.duration_ms != null ? esc(duration(s.duration_ms)) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
                         ${cases.length ? `<section aria-labelledby="jf-h" class="work-stack-tight"><div class="work-toolbar"><h3 id="jf-h" class="work-subhead">Failed test cases <span class="w-count" data-tone="danger">${cases.length}</span></h3><span class="work-spacer"></span>
                             <input class="w-input work-filter" type="search" data-failure-filter aria-label="Filter failed tests" placeholder="Filter failures…" value="${esc(failureFilter)}"></div>
                             <div class="w-table-wrap"><table class="w-table work-failures"><thead><tr><th scope="col">Suite</th><th scope="col">Test</th><th scope="col">Message</th></tr></thead><tbody>
@@ -920,7 +938,7 @@
                         ${suitesWithHistory.map(([suite, h]) => durationChart(suite, h, selected.run)).join('')}
                         <section aria-labelledby="log-h" class="work-stack-tight"><h3 id="log-h" class="work-subhead">Log</h3>
                         ${(selected.suites || []).map(s => { const c = suiteCounts(s);
-                            return `<details class="work-details work-suite-log" ${s.passed ? '' : 'open'}><summary>${statusIcon(s.passed ? 'done' : 'failed')}<strong>${esc(s.suite)}</strong><span class="work-suite-env work-meta work-mono" title="build environment that ran it">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : 'shared runtime'}</span>${(s.preexisting_failures || []).length ? pill('neutral', '<span>pre-existing failures</span>') : ''}<span class="work-spacer"></span>${s.duration_ms != null ? `<span class="work-meta work-num">${esc(duration(s.duration_ms))}</span>` : ''}<span class="work-suite-bar">${resultBar(c.passed, c.failed, c.skipped)}</span><span class="work-nowrap work-num">${c.passed}/${c.total}</span></summary>
+                            return `<details class="work-details work-suite-log" ${s.passed ? '' : 'open'}><summary>${statusIcon(suiteStatus(s))}<strong>${esc(s.suite)}</strong><span class="work-suite-env work-meta work-mono" title="build environment that ran it">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : 'shared runtime'}</span>${(s.preexisting_failures || []).length ? pill('neutral', '<span>pre-existing failures</span>') : ''}<span class="work-spacer"></span>${s.duration_ms != null ? `<span class="work-meta work-num">${esc(duration(s.duration_ms))}</span>` : ''}<span class="work-suite-bar">${resultBar(c.passed, c.failed, c.skipped)}</span><span class="work-nowrap work-num">${c.passed}/${c.total}</span></summary>
                                 <div class="work-stack-tight work-suite-out"><code class="work-meta">${esc(s.command || '')}</code><pre class="work-log">${ansi(String(s.stdout || '') + (s.stderr ? '\n' + s.stderr : '')) || '<span class="work-meta">No output.</span>'}</pre></div></details>`; }).join('') || '<p class="work-empty-line">No suite output.</p>'}</section>
                     </div></section>`; })() : ''}</div>`;
             bindCommands(panel);
@@ -958,6 +976,11 @@
                         text:`run_in_environment · ${p.env || ''}${p.cwd && p.cwd !== '.' ? ` · in ${p.cwd}` : ''}\n$ ${p.command || ''}\nexit ${p.return_code ?? '?'}${p.duration_ms != null ? ` · ${duration(p.duration_ms)}` : ''}${p.image ? `\nimage ${p.image}` : ''}`}); }
                 else if (['build_environments_preparing', 'build_environment_progress'].includes(e.event_type)) items.push({kind:'workbench', text:e.reason || 'Preparing build environments…'});
                 else if (e.event_type === 'build_environment_ready') items.push({kind:'workbench', text:`build environment ${e.payload?.binding || ''} ready`});
+                else if (e.event_type === 'environment_setup') { const p = e.payload || {};
+                    items.push({kind:p.status === 'failed' ? 'error' : 'workbench', text:`job setup [${p.binding || '?'}] ${Number(p.index ?? 0) + 1}. ${p.command || ''} · ${p.status || ''}${p.exit_code != null && p.status !== 'running' ? ` (exit ${p.exit_code})` : ''}${p.status === 'failed' && p.output_tail ? `\n${stripAnsi(String(p.output_tail)).slice(-1200)}` : ''}`}); }
+                else if (e.event_type === 'environment_setup_log') continue; // the panel and the failure tail carry the output
+                else if (['environment_setup_started', 'environment_setup_finished'].includes(e.event_type)) items.push({kind:'workbench', text:e.reason || 'job setup'});
+                else if (['environment_setup_dirty', 'environment_setup_skipped'].includes(e.event_type)) items.push({kind:'sys', text:e.reason || e.event_type});
                 else if (e.event_type === 'build_environments_recreated') items.push({kind:'sys', text:e.reason || 'Build environment images are being re-created.'});
                 else if (e.event_type === 'build_environment_failed') items.push({kind:'error', text:`build environment ${e.payload?.binding || ''} failed: ${e.reason || ''}`});
                 else if (e.event_type === 'sandbox_stopped') items.push({kind:'workbench', text:`sandbox stopped${stage ? ` · ${stage}` : ''}`});

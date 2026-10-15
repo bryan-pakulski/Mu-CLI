@@ -34,6 +34,15 @@
     const envHintEl = document.getElementById('job-environments-hint');
     const envResetBtn = document.getElementById('job-environments-reset');
     let envOverride = null, envPreview = null, envRequest = 0;
+    // "Run in" (job_templates.md §3.1): default runtime, a template, an environment or Advanced….
+    const runInHost = document.getElementById('job-run-in');
+    const runIn = runInHost && window.MuRunInPicker ? window.MuRunInPicker.create(runInHost, { api, ui, toast: (t, k) => toast(t, k),
+        idPrefix: 'job-run-in-trigger', onChange: () => { syncRunIn(); } }) : null;
+    function syncRunIn() {
+        const v = runIn?.value();
+        envOverride = v?.kind === 'advanced' && v.bindings?.length ? v.bindings : null;
+        renderEnvField();
+    }
     // Agent per stage (mucli / Claude Code / Codex) on the New job sheet.
     let agentPicker = null;
     const lines = value => String(value || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean);
@@ -300,7 +309,19 @@
     function renderEnvField() {
         const E = window.MuJobEnvironments;
         if (!envSummaryEl || !E) return;
-        envResetBtn.hidden = !envOverride;
+        const choice = runIn?.value() || { kind: 'default' };
+        envResetBtn.hidden = !envOverride && choice.kind === 'default';
+        if (choice.kind === 'template') {
+            const t = (runIn.templates() || []).find(x => x.name === choice.template);
+            envSummaryEl.textContent = `template:${choice.template}`;
+            envHintEl.textContent = `Every stage runs in a snapshot of ${choice.template}, taken at start.${(t?.job_setup || []).length ? ` Its job setup (${t.job_setup.length} command${t.job_setup.length === 1 ? '' : 's'}) runs before planning.` : ''}`;
+            return;
+        }
+        if (choice.kind === 'environment') {
+            envSummaryEl.textContent = choice.spec;
+            envHintEl.textContent = 'Every stage runs in a snapshot of this environment, taken at start.';
+            return;
+        }
         if (envOverride) {
             envSummaryEl.textContent = envOverride.length ? E.summary(envOverride) : 'shared runtime image';
             envHintEl.textContent = 'Set for this job (overrides repo config, session and settings).';
@@ -349,15 +370,23 @@
     async function refreshEnvPreview() {
         const path = chosenWorkspace();
         envPreview = null; renderEnvField(); renderEnvApproval();
-        if (path && isRepoUrl(path)) { if (envSummaryEl) envSummaryEl.textContent = 'Resolved from the repository after it is cloned.'; return; }
+        if (path && isRepoUrl(path)) { void runIn?.refresh({ workspace: path, session: '' }); if (envSummaryEl) envSummaryEl.textContent = 'Resolved from the repository after it is cloned.'; return; }
+        if (!path) void runIn?.refresh({ workspace: '', session: '' });
         if (!path || !window.MuJobEnvironments) return;
         const request = ++envRequest;
         try {
-            const data = await window.MuJobEnvironments.sources(api, { repository: path, session: sessionForWorkspace(path)?.name || '', images: false });
+            let data;
+            if (runIn) {
+                await runIn.refresh({ workspace: path, session: sessionForWorkspace(path)?.name || '' });
+                data = runIn.info() || {};
+            } else {
+                data = await window.MuJobEnvironments.sources(api, { repository: path, session: sessionForWorkspace(path)?.name || '', images: false });
+            }
             if (request === envRequest) { envPreview = data.resolved || { bindings: [], source: 'default' }; renderEnvField(); renderEnvApproval(); }
         } catch (error) { if (request === envRequest) { envPreview = { error: error.message, bindings: [] }; renderEnvField(); } }
     }
     async function changeEnvironments() {
+        if (runIn) { await runIn.advanced(); syncRunIn(); return; }  // "Advanced…": the multi-environment editor
         const E = window.MuJobEnvironments;
         const path = chosenWorkspace();
         const result = await E.editor({ api, ui, title: 'Build environments for the new job',
@@ -388,6 +417,9 @@
                 <div class="w-chip-row work-workspace-recent" role="group" aria-label="Recent workspaces">${recent.map(w =>
                     `<button type="button" class="w-chip work-mono" data-variant="filter" data-import-workspace="${esc(w)}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('')}</div>
                 <p class="w-field__hint" data-import-hint></p></div>
+                <div class="w-field" id="work-import-run-in-field"><span class="w-field__label" id="work-import-run-in-label">Run in</span>
+                <div class="work-runin-host" data-import-run-in role="group" aria-labelledby="work-import-run-in-label"></div>
+                <p class="w-field__hint">Applies to every ticket in this import.</p></div>
                 <div class="w-field"><label class="w-field__label" for="work-import-session">Session (optional)</label>
                 <span class="w-select"><select class="w-select__control" id="work-import-session"><option value="">Match by workspace</option>${list.map(s =>
                     `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(describeSession(s))}</option>`).join('')}</select></span></div>
@@ -398,6 +430,14 @@
             const d = ui.dialog({ title, body: form, onClose: () => resolve(result) });
             const input = form.querySelector('#work-import-workspace'), hint = form.querySelector('[data-import-hint]');
             const sessionSelect = form.querySelector('#work-import-session');
+            const importRunIn = window.MuRunInPicker ? window.MuRunInPicker.create(form.querySelector('[data-import-run-in]'),
+                { api, ui, toast: (t, k) => toast(t, k), idPrefix: 'work-import-run-in' }) : null;
+            let runInTimer = 0;
+            const refreshRunIn = () => {
+                const path = input.value.trim();
+                const s = sessionSelect.value || (path && !isRepoUrl(path) ? (sessionForWorkspace(path)?.name || '') : '');
+                void importRunIn?.refresh({ workspace: path, session: s });
+            };
             const sync = () => {
                 const path = input.value.trim();
                 form.querySelectorAll('[data-import-workspace]').forEach(b => b.setAttribute('aria-pressed', String(sameWorkspace(b.dataset.importWorkspace, path))));
@@ -407,8 +447,9 @@
                     : chosen ? `Runs in ${path} with the model, mode and environment of session ${chosen.name}.`
                     : `Runs in ${path}. Models come from Settings → Stage models (or the current session).`;
             };
-            form.querySelectorAll('[data-import-workspace]').forEach(b => { b.onclick = () => { input.value = b.dataset.importWorkspace; sync(); }; });
-            input.addEventListener('input', sync); sessionSelect.addEventListener('change', sync); sync();
+            form.querySelectorAll('[data-import-workspace]').forEach(b => { b.onclick = () => { input.value = b.dataset.importWorkspace; sync(); refreshRunIn(); }; });
+            input.addEventListener('input', () => { sync(); clearTimeout(runInTimer); runInTimer = setTimeout(refreshRunIn, 400); });
+            sessionSelect.addEventListener('change', () => { sync(); refreshRunIn(); }); sync(); refreshRunIn();
             form.querySelector('[data-cancel]').onclick = () => d.close();
             form.onsubmit = e => {
                 e.preventDefault();
@@ -417,6 +458,10 @@
                 const session = sessionSelect.value || (isRepoUrl(path) ? '' : (sessionForWorkspace(path)?.name || ''));
                 result = { workspace: path, session, force: form.querySelector('#work-import-force').checked,
                            defaults: isRepoUrl(path) ? { repository: path } : { workspace_root: path } };
+                // "Run in" for every imported ticket: defaults.execution.template (+ remember_template).
+                const runInPayload = importRunIn ? importRunIn.payload() : {};
+                if (Object.keys(runInPayload).length) result.defaults.execution = runInPayload;
+                importRunIn?.commit();
                 d.close();
             };
         });
@@ -509,6 +554,7 @@
         createForm.reset();
         createForm.querySelectorAll('[data-touched]').forEach(el => { delete el.dataset.touched; });
         envOverride = null;
+        runIn?.setDefault();
         agentPicker?.reset();
         workspaceInput.dataset.chosen = workspace;
         syncTitleHint();
@@ -538,6 +584,8 @@
         const stages = agentPicker?.collectModels() || {};
         if (Object.keys(stages).length) execution.stages = stages;
         if (envOverride && envOverride.length) execution.environments = envOverride.map(({ label, ...binding }) => binding);
+        // Run in: execution.template (+ remember_template) or an environment spec (server normalises).
+        if (runIn) Object.assign(execution, runIn.payload());
         const stageAgents = agentPicker?.collect();
         if (stageAgents) execution.stage_agents = stageAgents;
         common.execution = execution;
@@ -562,6 +610,7 @@
                 const response = await api('/api/jobs', { method: 'POST', body: payload });
                 jobId = response.job.id; label = `Queued: ${response.job.title}`;
             }
+            runIn?.commit();
             resetCreate(workspace);
             closeCreate();
             toast(label, 'ok');
@@ -591,7 +640,7 @@
     document.getElementById('job-title').addEventListener('input', syncTitleHint);
     document.getElementById('job-auto-approve').addEventListener('input', e => { e.target.dataset.touched = '1'; });
     document.getElementById('job-environments-change')?.addEventListener('click', () => void changeEnvironments());
-    envResetBtn?.addEventListener('click', () => { envOverride = null; renderEnvField(); });
+    envResetBtn?.addEventListener('click', () => { envOverride = null; if (runIn) runIn.setDefault(); else renderEnvField(); });
     ['job-retries', 'job-cost', 'job-runtime'].forEach(id => document.getElementById(id)?.addEventListener('input', e => { e.target.dataset.touched = '1'; }));
     document.getElementById('job-cost')?.addEventListener('input', syncCostHint);
     syncSessionHints();

@@ -89,10 +89,14 @@ def test_web_sheet_is_workspace_first_with_one_title_or_key_field():
     assert sheet.index('id="job-workspace"') < sheet.index('id="job-title"')
     assert "Title or ticket key" in sheet and 'id="job-session"' not in sheet
     assert "Run unattended in sandbox" in sheet and 'id="job-auto-approve"' in sheet
-    # Models, environments, retries and budgets sit under one Advanced section with one picker.
+    # Models, retries and budgets sit under one Advanced section with one picker. The build
+    # environment is the visible "Run in" picker (job_templates.md §3.2: it replaces the old
+    # Build environments summary row; the multi-environment editor is its Advanced… action).
     advanced = sheet[sheet.index('id="work-advanced-details"'):]
-    for field in ('id="job-agents"', 'id="job-retries"', 'id="job-cost"', 'id="job-environments-field"'):
+    for field in ('id="job-agents"', 'id="job-retries"', 'id="job-cost"'):
         assert field in advanced, field
+    assert sheet.index('id="job-workspace"') < sheet.index('id="job-environments-field"') < sheet.index('id="work-advanced-details"')
+    assert 'id="job-run-in"' in sheet and ">Run in<" in sheet and ">Advanced…<" in sheet
     for gone in ('id="job-provider"', 'id="job-model"', 'id="work-stage-details"', 'id="work-execution-details"'):
         assert gone not in html, gone
     assert "/^[A-Z][A-Z0-9_]+-\\d+$/" in work and "'/api/jobs/jira/import'" in work

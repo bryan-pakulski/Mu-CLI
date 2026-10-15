@@ -83,11 +83,19 @@ export interface CheckRun {
   run: number; passed: boolean; head_sha: string;
   new_failures: number | string[]; preexisting_failures: number | string[];
   suites: CheckSuite[];
-  started_at?: number; duration_ms?: number; trigger?: 'auto' | 'recheck' | 'fix' | string; finished_at?: number;
+  started_at?: number; duration_ms?: number; trigger?: 'auto' | 'recheck' | 'fix' | 'repair' | string; finished_at?: number;
   /** Verification summary: false when any check was unrunnable (the run is unverified, not failed). */
   verified?: boolean;
   /** Number of unrunnable checks in the run. */
   unrunnable?: number;
+}
+/** One environment repair attempt (job_templates.md §7): an unattended repair stage made checks runnable. */
+export interface EnvironmentRepair {
+  attempt: number; binding: string; source?: string; template?: string;
+  trigger_suites?: Array<{ suite?: string; command?: string; kind?: string; tool?: string; cause?: string }>;
+  commands?: string[]; project_commands?: string[]; image?: string; cost_usd?: number;
+  outcome: 'running' | 'committed' | 'repaired' | 'unresolved' | 'failed' | 'timed_out' | 'budget_exhausted' | 'error' | string;
+  error?: string; reverted_files?: string[]; agent?: string; transcript?: string; started_at?: number; finished_at?: number | null;
 }
 /** `suite` is the check-suite name (same key as history); the JUnit classname is in `classname`. */
 export interface FailedCase { run: number; suite: string; name: string; id: string; message: string; new: boolean; classname?: string }
@@ -102,7 +110,7 @@ export interface JobVM extends JobSummary {
   environment_approval?: EnvironmentApproval | null;
   /** Jobs run unattended: a failed template job setup is a warning (the job continued). */
   setup_warning?: { binding: string; command?: string; index?: number; exit_code?: number | null; template?: string; message?: string; error?: string } | null;
-  checks?: { live?: AuditEvent[]; runs: CheckRun[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]> };
+  checks?: { live?: AuditEvent[]; runs: CheckRun[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]>; repairs?: EnvironmentRepair[] };
   session?: { session_name?: string; approval?: { tool_name: string; tool_args: Record<string, unknown> | string; reason?: string; detail?: string } | null; live: boolean; events: AuditEvent[]; stages: Record<string, Array<{ role: string; parts: TranscriptPart[] }>> };
   costs?: { total_usd: number; by_stage: Record<string, number>; events: AuditEvent[] };
   /** Per-binding build environment state (job environments panel). */

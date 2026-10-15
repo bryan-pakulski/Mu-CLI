@@ -1375,6 +1375,9 @@ def cleanup_job(job_id: str, *, service=None, docker: Optional[Docker] = None, r
         try:
             job = service.get(job_id)
             states = job_states(job)
+            if images and (job.metadata or {}).get("runtime_repair_image"):
+                # The repaired shared-runtime image (job_templates.md §7) went with the job's images.
+                save_meta(service, job_id, runtime_repair_image=None)
             if images and states:
                 for state in states:
                     if state.get("status") in ("ready", "preparing"):
@@ -1680,8 +1683,12 @@ def describe(job: Any) -> Dict[str, Any]:
                      "secret_paths": list(state.get("secret_paths") or [])[:50],
                      "engine": "sysbox" if state.get("docker") else "", "job_image": state.get("job_image") or "",
                      "label": binding_label(state), "job_setup": list(state.get("job_setup") or []),
-                     "setup": describe_setup(job, str(state.get("name") or ""))})
+                     "setup": describe_setup(job, str(state.get("name") or "")),
+                     "repaired_from": state.get("repaired_from") or "", "repair_attempt": state.get("repair_attempt")})
+    # Environment repair (job_templates.md §7): every attempt, for the environments panel's card.
+    from .repair import describe_repairs
     return {"source": str(meta.get("build_environments_source") or ("default" if not states else "")),
+            "repairs": describe_repairs(job), "runtime_repair_image": str(meta.get("runtime_repair_image") or ""),
             "kept": bool(meta.get("environments_kept")), "refresh_pending": bool(meta.get("environments_refresh_requested")),
             "bindings": rows, "count": len(rows), "bytes": sum(r["image_bytes"] for r in rows if r["status"] == "ready"),
             "summary": " · ".join(r["label"] for r in rows)}

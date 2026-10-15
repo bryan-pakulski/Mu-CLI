@@ -102,8 +102,11 @@ python3 -m pytest tests/ -q
   calls are never prompted. Implement/checks auto-approve inside the sandbox;
   plan/review are read-only and deny writes automatically; agent questions are
   auto-answered. Container isolation, egress allowlists, the secret scan and the
-  plan/push pipeline gates are the controls. Interactive chat keeps its approval
-  gates.
+  plan/push pipeline gates are the controls. When checks can't run, an
+  unattended repair stage may install dependencies in a repair container (wider
+  package-registry egress, root inside the container with dropped
+  capabilities); its result is committed as a job-scoped image. Interactive
+  chat keeps its approval gates.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.
 - Runtime state defaults to `~/.mucli/`; `MUCLI_HOME` overrides that root.
 - Saved sessions are under `~/.mucli/sessions/`.

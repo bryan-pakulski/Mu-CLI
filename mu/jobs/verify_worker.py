@@ -129,6 +129,32 @@ def _template_of(job) -> str:
     return ""
 
 
+def _repair_note(service, job_id: str) -> str:
+    """Why the repair stage didn't help (appended to the unverified message), '' without repairs."""
+    from .sandbox.repair import repair_records
+    records = repair_records(service.get(job_id))
+    if not records:
+        return ""
+    last = records[-1]
+    outcome = str(last.get("outcome") or "").replace("_", " ")
+    return (f"Environment repair: {len(records)} attempt(s); the last ended {outcome}"
+            + (f" ({str(last.get('error'))[:300]})" if last.get("error") else "") + ".")
+
+
+def _continue_unverified(service, job_id: str, run: VerificationRun, feedback: dict, message: str, *,
+                         unrunnable: list, missing: list) -> None:
+    message = " ".join(p for p in (message, _repair_note(service, job_id)) if p)
+    service.store.patch_metadata(job_id, {"checks_unverified": True})
+    service.store.append_event(job_id, "checks_unverified",
+                               reason=("Checks could not run (unverified); the job continues to review with the "
+                                       "verdict capped at needs work. " + message)[:2000],
+                               payload={"unrunnable": unrunnable, "missing_tools": missing, "verified": False,
+                                        "missing_tool_environments": run.summary.get("missing_tool_environments") or {}})
+    service.transition(job_id, JobStatus.REVIEWING, reason="checks unverified; review next (verdict capped)",
+                       payload={**feedback, "missing_tools": missing, "unverified": True, "unrunnable": unrunnable})
+    _refresh_receipt(service, job_id)
+
+
 def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
     """Only new failures enter the bounded implementation repair loop."""
     current = service.get(job_id)
@@ -145,23 +171,16 @@ def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
     unrunnable = list(run.summary.get("unrunnable_suites") or [])
     if missing or unrunnable:
         # Honest gate (job_templates.md §5): checks that could not run prove nothing. The
-        # implementer cannot install toolchains or dependencies, so a repair loop would be wasted
-        # spend. Jobs run unattended: the run is recorded unverified and the job continues to
-        # review, whose verdict is capped at needs_work; a published PR says so.
+        # implementer cannot install toolchains or dependencies, so a fix loop would be wasted
+        # spend; the environment repair stage (§7) has already had its attempts by now. Jobs run
+        # unattended: the run is recorded unverified and the job continues to review, whose
+        # verdict is capped at needs_work; a published PR says so.
         message = missing_tool_message(run.summary) if missing else ""
         extra = [u for u in unrunnable if u.get("kind") != "missing_tool" or u.get("tool") not in missing]
         if extra:
             from .checks import unverified_message
             message = " ".join(p for p in (message, unverified_message(extra, template=_template_of(current))) if p)
-        service.store.patch_metadata(job_id, {"checks_unverified": True})
-        service.store.append_event(job_id, "checks_unverified",
-                                   reason=("Checks could not run (unverified); the job continues to review with the "
-                                           "verdict capped at needs work. " + message)[:2000],
-                                   payload={"unrunnable": unrunnable, "missing_tools": missing, "verified": False,
-                                            "missing_tool_environments": run.summary.get("missing_tool_environments") or {}})
-        service.transition(job_id, JobStatus.REVIEWING, reason="checks unverified; review next (verdict capped)",
-                           payload={**feedback, "missing_tools": missing, "unverified": True, "unrunnable": unrunnable})
-        _refresh_receipt(service, job_id)
+        _continue_unverified(service, job_id, run, feedback, message, unrunnable=unrunnable, missing=missing)
         return 0
     if (current.metadata or {}).get("checks_unverified"):
         service.store.patch_metadata(job_id, remove=("checks_unverified",))
@@ -173,9 +192,10 @@ def apply_checks_result(service, job_id: str, run: VerificationRun) -> int:
     if futile:
         service.store.append_event(job_id, "fix_attempt_skipped", reason=futile, payload=feedback)
         if futile.startswith("environment"):
-            service.require_human(job_id, AttentionReason.VERIFICATION_REQUIRED, futile, payload=feedback)
-            _refresh_receipt(service, job_id)
-            return 22
+            # Every new failure is an environment symptom: the repair stage (§7) already had its
+            # attempts. Jobs never park for this; the run counts as unverified.
+            _continue_unverified(service, job_id, run, feedback, futile[len("environment: "):], unrunnable=[], missing=[])
+            return 0
     if run.summary.get("new_failures", 0) > 0 and core.fix_attempts < maximum and not futile:
         service.store.set_fix_attempts(job_id, core.fix_attempts + 1)
         meta = dict(service.get(job_id).metadata or {})
@@ -203,6 +223,12 @@ def _verify(service, job, lease) -> int:
     try:
         from .checks import ChecksStage
         run = ChecksStage(service).verify(job)
+        if lease.owned():
+            # Environment repair (job_templates.md §7): checks that could not run first get an
+            # unattended repair of the build environment and a re-run; never a park.
+            from .sandbox.repair import repair_and_recheck
+            run = repair_and_recheck(service, job_id, run, verify=lambda fresh: ChecksStage(service).verify(fresh),
+                                     owned=lease.owned)
         if not lease.owned():
             # Lease expired mid-run: a retried verifier takes over. Do not
             # apply results this worker no longer owns.

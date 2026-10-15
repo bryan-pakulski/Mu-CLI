@@ -2,7 +2,7 @@
 
 A stage never prompts anyone and never parks on an in-stage prompt:
 
-* implement / checks: every tool call is approved automatically. The sandbox (container
+* implement / checks / repair: every tool call is approved automatically. The sandbox (container
   isolation, read-only rootfs outside the worktree, egress allowlist, no credentials) is the
   control.
 * plan / review: read-only. Write or side-effecting tool calls are denied automatically with
@@ -19,7 +19,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Tuple
 
 READ_ONLY_STAGES = frozenset({"plan", "review"})
-WRITE_STAGES = frozenset({"implement", "checks"})
+# ``repair``: the environment-repair stage (job_templates.md §7), treated like implement.
+WRITE_STAGES = frozenset({"implement", "checks", "repair"})
 
 AUTO_ANSWER = ("No one is available to answer during an automated job stage. Proceed with your best judgement, "
                "state the assumption in your summary, and continue.")

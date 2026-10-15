@@ -60,6 +60,14 @@ export function verdictStyle(verdict: string | null | undefined): [Tone, string]
 /** Plan-coverage status → status vocabulary. */
 export const COVERAGE = vocabulary.coverage as Record<string, Status>;
 
+const repairRows = vocabulary.repair_outcome as Record<string, { status: string; label: string }>;
+
+/** Environment repair outcome (job_templates.md §7) → status vocabulary + canonical label. */
+export function repairOutcome(outcome: string | null | undefined): { status: Status; label: string } {
+  const row = repairRows[String(outcome || '')];
+  return row ? { status: asStatus(row.status), label: row.label } : { status: 'pending', label: String(outcome || '').replace(/_/g, ' ') };
+}
+
 const checkRows = vocabulary.check_status as Record<string, { status: string; label: string }>;
 
 /** Build/test run status → status vocabulary. */

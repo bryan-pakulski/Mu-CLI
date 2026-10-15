@@ -70,7 +70,7 @@
         message: {label:'Message for the agent', optional:false, multiline:true},
     };
     /* which command arg receives the text typed into an action's input */
-    const INPUT_ARG = {rejectPlan:'feedback', denyTool:'message', resume:'guidance', reprompt:'guidance', message:'text', rejectEnvironment:'reason'};
+    const INPUT_ARG = {rejectPlan:'feedback', denyTool:'message', resume:'guidance', reprompt:'guidance', message:'text', rejectEnvironment:'reason', saveRepairedTemplate:'name'};
     // The approval banners own these buttons; they stay out of the action bar.
     const LIVE_DIFF_MS = 5000;
     const BANNER_ACTIONS = new Set(['approveTool', 'denyTool', 'approveEnvironment', 'rejectEnvironment']);
@@ -87,6 +87,8 @@
     /* Build environments (work/environments.js): panel + editor; the commands live in the panel. */
     const ENV = window.MuJobEnvironments || null;
     const ENV_ACTIONS = new Set(['setEnvironments', 'refreshEnvironments', 'keepEnvironments']);
+    /* Environment repair (job_templates.md §7): the repair card's actions. */
+    const REPAIR_ACTIONS = ['addRepairToTemplate', 'saveRepairedTemplate'];
 
     /* data-tone for Wash components; server ActionVM tones still say warn/muted. */
     const washTone = tone => ({warn:'attention', muted:'neutral'}[tone] || tone || '');
@@ -338,7 +340,19 @@
                 .map(type => job.actions.find(a => a.id === type)).filter(Boolean)
                 .map(a => actionButton({...a, label:a.id === 'setEnvironments' ? 'Change' : a.label}, {size:'sm'})).join('');
             host.innerHTML = ENV.panel(job.build_environments, buttons);
+            // The repair card (environment repair, §7) gets its actions in its own toolbar.
+            host.querySelectorAll('[data-repair-actions]').forEach(slot => { slot.insertAdjacentHTML('beforeend', repairButtons()); });
             bindCommands(host);
+            bindRepairTranscript(host);
+        }
+        /* Environment repair actions (non-blocking, never required): offered on the repair card. */
+        function repairButtons() {
+            return REPAIR_ACTIONS.map(type => job.actions.find(a => a.id === type))
+                .filter(a => a && (a.enabled || a.reason !== 'no committed environment repair'))
+                .map(a => actionButton({...a, primary:false}, {size:'sm', variant:'secondary'})).join('');
+        }
+        function bindRepairTranscript(root) {
+            root.querySelectorAll('[data-repair-transcript]').forEach(b => { b.onclick = () => { sessionStage = 'repair'; selectTab('session'); renderPart('session', true); }; });
         }
         async function runById(id, type) {
             if (await select(id) !== true) return;
@@ -929,6 +943,7 @@
                     <ul class="work-unverified__list">${rows.map(x => `<li data-unrunnable="${esc(x.suite || '')}"><strong class="work-mono">${esc(x.suite || '')}</strong>${x.tool ? ` · <code>${esc(x.tool)}</code>` : ''}${x.cause ? ` — ${esc(x.cause)}` : ''}${x.hint ? `<div class="work-meta">${esc(x.hint)}</div>` : ''}</li>`).join('')}</ul>
                     <div class="w-btn-row" role="toolbar" aria-label="Unverified checks">${prepare}${cont && !cont.hidden ? actionButton(cont) : ''}</div></div></section>`;
             };
+            const repair = ENV ? ENV.repairCard(job.checks?.repairs, {buttons:repairButtons()}) : '';
             const started = r => r.started_at ? when(r.started_at).slice(5, 16) : '';
             const dur = r => { const ms = runDuration(r); return ms == null ? '' : duration(ms); };
             const liveLog = live.length && running ? card({id:'live-h', eyebrow:'Live', title:'Live log', meta:'running now', body:`<pre class="work-log" data-live-log role="log" aria-live="off">${ansi(live.map(e => `[${e.payload?.suite || 'check'}${e.payload?.baseline ? ' · baseline' : ''}] ${e.payload?.text || ''}`).join(''))}</pre>`}) : '';
@@ -937,6 +952,7 @@
                     <span class="work-meta">fix attempts ${esc(job.fix_attempts || 0)} · checks come from the approved plan</span></div><span class="work-spacer"></span>
                     <div class="w-btn-row" role="toolbar" aria-label="Check actions">${recheck ? actionButton(recheck) : ''}</div></div>
                 ${liveLog}
+                ${repair}
                 ${unverifiedCard(latest)}
                 ${runs.length ? `<div class="w-table-wrap"><table class="w-table work-runs" aria-label="Runs"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Result</th><th scope="col">Trigger</th><th scope="col" data-num>Duration</th><th scope="col">Started</th></tr></thead><tbody>${runs.map(r => { const k = total(r);
                     return `<tr class="clickable" aria-selected="${r === selected}" data-run="${esc(r.run)}"><td><button type="button" class="work-link-btn" aria-pressed="${r === selected}">Run ${esc(r.run)}</button></td><td>${runPill(r)}</td>
@@ -966,6 +982,7 @@
                                 <div class="work-stack-tight work-suite-out"><code class="work-meta">${esc(s.command || '')}</code><pre class="work-log">${ansi(String(s.stdout || '') + (s.stderr ? '\n' + s.stderr : '')) || '<span class="work-meta">No output.</span>'}</pre></div></details>`; }).join('') || '<p class="work-empty-line">No suite output.</p>'}</section>
                     </div></section>`; })() : ''}</div>`;
             bindCommands(panel);
+            bindRepairTranscript(panel);
             panel.querySelectorAll('tr[data-run]').forEach(tr => { tr.onclick = () => { selectedRun = Number(tr.dataset.run); renderPart('checks', true); }; });
             const filter = panel.querySelector('[data-failure-filter]');
             if (filter) filter.oninput = () => { failureFilter = filter.value; const pos = filter.selectionStart; renderPart('checks', true); const f = panel.querySelector('[data-failure-filter]'); f?.focus(); f?.setSelectionRange(pos, pos); };
@@ -1002,6 +1019,9 @@
                 else if (e.event_type === 'build_environment_ready') items.push({kind:'workbench', text:`build environment ${e.payload?.binding || ''} ready`});
                 else if (e.event_type === 'environment_setup') { const p = e.payload || {};
                     items.push({kind:p.status === 'failed' ? 'error' : 'workbench', text:`job setup [${p.binding || '?'}] ${Number(p.index ?? 0) + 1}. ${p.command || ''} · ${p.status || ''}${p.exit_code != null && p.status !== 'running' ? ` (exit ${p.exit_code})` : ''}${p.status === 'failed' && p.output_tail ? `\n${stripAnsi(String(p.output_tail)).slice(-1200)}` : ''}`}); }
+                else if (e.event_type === 'environment_repair') { const p = e.payload || {};
+                    if (p.phase === 'command') items.push({kind:'tool', summary:`repair [${p.binding || '?'}] ${p.command || ''}`, text:`environment repair · ${p.binding || ''}\n$ ${p.command || ''}`});
+                    else items.push({kind:p.phase === 'finished' && !['repaired', 'unresolved'].includes(p.outcome) ? 'error' : 'workbench', text:e.reason || `environment repair ${p.phase || ''}`}); }
                 else if (e.event_type === 'environment_setup_log') continue; // the panel and the failure tail carry the output
                 else if (['environment_setup_started', 'environment_setup_finished'].includes(e.event_type)) items.push({kind:'workbench', text:e.reason || 'job setup'});
                 else if (['environment_setup_dirty', 'environment_setup_skipped'].includes(e.event_type)) items.push({kind:'sys', text:e.reason || e.event_type});
@@ -1040,7 +1060,8 @@
                     default: return `<div class="work-msg-sys">${esc(it.text)}</div>`;
                 }
             };
-            const stages = [['', 'Live'], ['plan', 'Plan'], ['implement', 'Implement'], ['review', 'Review']];
+            const stages = [['', 'Live'], ['plan', 'Plan'], ['implement', 'Implement'], ['review', 'Review'],
+                ...((data.stages?.repair || []).length || sessionStage === 'repair' ? [['repair', 'Repair']] : [])];
             panel.innerHTML = `<div class="work-stack-tight">
                 <div class="work-toolbar">${job.state === 'needs_input' ? '<span class="w-status" data-tone="attention"><span class="w-status__glyph" aria-hidden="true">◆</span>Waiting for you</span>' : live ? '<span class="w-status" data-tone="running"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>Live session · the agent is working</span>' : `<span class="work-meta">${sessionStage ? `Transcript of the ${sessionStage} stage` : 'Recent stage activity'}</span>`}
                     <div class="w-segmented" data-size="sm" role="group" aria-label="Session source">${stages.map(([v, l]) => `<button type="button" class="w-segmented__option" data-session-stage="${v}" aria-pressed="${v === sessionStage}">${l}</button>`).join('')}</div>

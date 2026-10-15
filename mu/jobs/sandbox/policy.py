@@ -7,7 +7,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 IMAGE = "mucli-job-runtime:latest"
-STAGES = ("plan", "implement", "review", "checks")
+STAGES = ("plan", "implement", "review", "checks", "repair")
+# Environment repair (documentation/plans/job_templates.md §7): root inside the container with
+# every capability dropped except these, a writable rootfs, still ``no-new-privileges``.
+REPAIR_CAPS = ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "FSETID")
+# The repair container's entrypoint: run the stage worker, then hand everything it wrote in the
+# bind mounts back to the host user (``MUCLI_REPAIR_CHOWN``) before the host commits the image.
+REPAIR_WRAPPER = ('py="$0"; mod="$1"; shift; for kv in "$@"; do export "$kv"; done; '
+                  '"$py" -m "$mod" & pid=$!; trap \'kill -TERM "$pid" 2>/dev/null\' TERM INT; wait "$pid"; rc=$?; '
+                  'wait "$pid" 2>/dev/null; for d in /workspace /cache /output /harness/state; do '
+                  '[ -d "$d" ] && chown -R "$MUCLI_REPAIR_CHOWN" "$d" 2>/dev/null; done; '
+                  ': > /output/.chowned 2>/dev/null; exit $rc')
 
 # Committed dotenv templates (`.env.example`, `.env.inference.example`,
 # `.env.sample`, ...) hold placeholders, not secrets. Real dotenv files
@@ -77,7 +87,7 @@ class SandboxPolicy:
             image=image, cpu=max(.1, min(64, float(raw.get("cpu", 4)))), memory=memory,
             timeout=max(1, min(86400, int((raw.get("stage_timeout_s") or {}).get(
                 stage, 3600)))),
-            egress_extra=tuple(extra) if stage in ("implement", "checks") else (),
+            egress_extra=tuple(extra) if stage in ("implement", "checks", "repair") else (),
             max_file_bytes=max(1, int(raw.get("max_file_bytes", 20 * 1024 * 1024))),
             max_tokens=max(1, int(raw.get("max_tokens", 50_000_000))),
             max_cost_usd=max(0, float(raw.get("max_cost_usd", 50))),
@@ -95,12 +105,16 @@ def with_build_environment(policy: "SandboxPolicy", job, state, *, stage: str = 
     allow = tuple(dict.fromkeys((*policy.allow_paths, *repository_allow_paths(job))))
     egress = tuple(dict.fromkeys((*policy.egress_extra, *repository_egress(job, stage))))
     if not state:
+        # An environment repair of the shared runtime (job_templates.md §7) gives the job its own
+        # committed image; cleanup removes it with the job and drops this key.
+        repaired = str((getattr(job, "metadata", None) or {}).get("runtime_repair_image") or "")
+        image = repaired if repaired and re.fullmatch(r"[\w./:@-]+", repaired) else policy.image
         return replace(policy, job_id=str(getattr(job, "id", "") or ""), allow_paths=allow, egress_extra=egress,
-                       cache_dir=stage_cache_dir(job, None, stage, settings))
+                       cache_dir=stage_cache_dir(job, None, stage, settings), image=image)
     from ..job_settings import rule
     from .environments import filter_model_hosts
     from .toolchain import VENV_PYTHON
-    if stage in ("implement", "checks") and rule("environments.inherit_egress", settings):
+    if stage in ("implement", "checks", "repair") and rule("environments.inherit_egress", settings):
         egress = tuple(dict.fromkeys((*egress, *filter_model_hosts(state.get("egress_allow") or []))))
     gpus = str(state.get("gpus") or "") if rule("sandbox.gpus_enabled", settings) else ""
     return replace(policy, image=str(state["job_image"]), python=str(state.get("python") or VENV_PYTHON),
@@ -151,15 +165,26 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
     Only the disposable output directory is writable apart from implement's
     worktree. The gitdir crosses the boundary read-only (see ``git_vcs_mounts``);
     credentials, remotes and hooks never do.
+
+    ``repair`` (environment repair, job_templates.md §7) differs only where package managers
+    need it: root inside the container with ``--cap-drop ALL`` plus :data:`REPAIR_CAPS`, a
+    writable rootfs, and an entrypoint that chowns the bind mounts back to the host user when
+    the worker exits. Still ``no-new-privileges``, network none (egress bridge), no Docker
+    socket, no GPUs, no credentials.
     """
     if stage not in STAGES:
         raise ValueError("unknown stage")
     from .cli import bind_mount, is_podman, selinux_enforcing, user_args
     podman, selinux = is_podman(), selinux_enforcing()
+    repair = stage == "repair"
+    if repair and (policy.docker_socket or policy.gpus):
+        raise ValueError("the repair container gets no Docker socket and no GPUs")
+    caps = [arg for cap in REPAIR_CAPS for arg in ("--cap-add", cap)] if repair else []
+    users = ["--user", "0:0"] if repair else user_args(podman=podman)
     args = ["create", "--name", name, "--pull", "never", "--network", "none",
-            "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-            "--read-only", "--pids-limit", str(int(policy.pids_limit)), "--cpus", str(policy.cpu),
-            "--memory", policy.memory, *user_args(podman=podman),
+            "--cap-drop", "ALL", *caps, "--security-opt", "no-new-privileges:true",
+            *([] if repair else ["--read-only"]), "--pids-limit", str(int(policy.pids_limit)), "--cpus", str(policy.cpu),
+            "--memory", policy.memory, *users,
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
             "--workdir", "/workspace", "--label", f"io.mucli.role={role}"]
     if policy.job_id:
@@ -170,7 +195,7 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
         args += ["--label", f"io.mucli.binding={policy.binding}"]
     if policy.gpus:
         args += ["--gpus", gpus_arg(policy.gpus), "--label", f"io.mucli.gpus={policy.gpus}"]
-    mounts = [(workspace, "/workspace", stage not in ("implement", "checks")),
+    mounts = [(workspace, "/workspace", stage not in ("implement", "checks", "repair")),
               (inputs, "/artifacts", True), (output, "/output", False), (relay, "/relay", True)]
     if policy.cache_dir:
         mounts.append((policy.cache_dir, "/cache", False))
@@ -223,7 +248,31 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
         args += ["-e", "DOCKER_HOST=unix:///var/run/docker.sock"]
     if module not in ("mu.jobs.sandbox.worker", "mu.jobs.sandbox.harness_worker"):
         raise ValueError(f"unsupported stage worker {module}")
+    if repair:
+        # The stage environment travels as wrapper arguments, not ``-e``: the host commits this
+        # container as an image, and ``docker commit`` keeps the container's Env (the relay token,
+        # stage paths) but its entrypoint/command are replaced by the base image's.
+        # IS_SANDBOX: Claude Code refuses to skip permissions as root unless told it is sandboxed.
+        env = ["IS_SANDBOX=1", f"MUCLI_REPAIR_CHOWN={repair_owner(podman=podman)}"]
+        kept: list[str] = []
+        index = 0
+        while index < len(args):
+            if args[index] == "-e" and index + 1 < len(args):
+                env.append(args[index + 1])
+                index += 2
+                continue
+            kept.append(args[index])
+            index += 1
+        return kept + ["--entrypoint", "/bin/sh", policy.image, "-c", REPAIR_WRAPPER, policy.python, module, *env]
     return args + ["--entrypoint", policy.python, policy.image, "-m", module]
+
+
+def repair_owner(*, podman: bool = False) -> str:
+    """``uid:gid`` the repair container chowns the bind mounts to: the host user, or ``0:0`` under
+    rootless Podman (where the container's root already maps to the host user)."""
+    if podman and os.getuid() != 0:
+        return "0:0"
+    return f"{os.getuid()}:{os.getgid()}"
 
 
 # In-container layout of the read-only git metadata (see git_vcs_mounts).
@@ -469,7 +518,7 @@ def repository_egress(job, stage: str) -> tuple[str, ...]:
     """``[sandbox] egress`` from the base commit: implement and checks only (plan and review
     reach nothing but the model relay), and only once the user approved it for the repository
     (unapproved, it is not applied; see ``repo_config.egress_approval``)."""
-    if stage not in ("implement", "checks") or not str(getattr(job, "base_sha", "") or ""):
+    if stage not in ("implement", "checks", "repair") or not str(getattr(job, "base_sha", "") or ""):
         return ()
     from .repo_config import approved_repository_egress
     return approved_repository_egress(job)

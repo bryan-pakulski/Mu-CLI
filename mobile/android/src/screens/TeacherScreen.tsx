@@ -2,12 +2,11 @@ import React, { useState, useCallback } from 'react';
 import { FlatList, View, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { teacherApi, TeacherState, TeacherModule, TeacherLesson } from '../api/teacher';
 import { spacing, fontWeights, fonts } from '../theme/tokens';
-import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
 
 export function TeacherScreen() {
   const { colors } = useTheme();
@@ -171,7 +170,7 @@ function ModuleCard({ module, expanded, onToggle, colors }: {
             </Text>
           </View>
           {module.status && <Chip label={module.status} tone={module.status === 'completed' ? 'ok' : 'neutral'} />}
-          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.ink3} />
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
         </View>
       </Pressable>
       {expanded && (

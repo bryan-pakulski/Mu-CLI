@@ -110,7 +110,7 @@ def test_shell_in_runtime_category():
     src = read(WORKSPACE_TS)
     # Find the runtime category block and verify Shell is in it.
     assert "screen: 'Shell'" in src, "Shell item not in any category"
-    assert "terminal-outline" in src, "Shell icon not set"
+    assert "icon: 'terminal'" in src, "Shell icon not set"
 
 
 # ── AppNavigator.tsx ─────────────────────────────────────────────────

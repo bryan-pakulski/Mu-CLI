@@ -2,11 +2,10 @@ import React, { useState, useCallback } from 'react';
 import { FlatList, View, RefreshControl, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { modesApi, ModeInfo } from '../api/modes';
 import { spacing, fontWeights, radii, tracking } from '../theme/tokens';
-import { EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
 
 const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: string }> = {
   default: { title: 'General workspace', lenses: ['plan', 'tools', 'verification'], purpose: 'Flexible coding and codebase assistance.' },
@@ -141,8 +140,8 @@ export function ModesScreen() {
                 <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{surface.purpose}</Text>
                 <Text variant="xs" style={[styles.lenses, { color: colors.ink3 }]}>{surface.lenses.join('  ·  ')}</Text>
               </View>
-              {isActive && <Ionicons name="checkmark" size={18} color={accent} />}
-              {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={17} color={colors.ink3} />}
+              {isActive && <Icon name="check" size="md" color={accent} />}
+              {selecting === item.name && !isActive && <Icon name="hourglass" size="sm" color={colors.ink3} />}
             </Pressable>
           );
         }}

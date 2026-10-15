@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PanResponder, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { modesApi, ModeInfo } from '../api/modes';
 import { useTheme } from '../theme/ThemeContext';
 import { DebugScreen } from '../screens/DebugScreen';
@@ -10,7 +9,7 @@ import { ResearchScreen } from '../screens/ResearchScreen';
 import { SecurityScreen } from '../screens/SecurityScreen';
 import { TeacherScreen } from '../screens/TeacherScreen';
 import { elevation, fontSizes, fontWeights, spacing, touchTarget, typography } from '../theme/tokens';
-import { Button, ModalFrame, Pressable, Text } from '../ui';
+import { Button, ModalFrame, Pressable, Text, Icon } from '../ui';
 
 export type ModeDrawerProps = {
   visible: boolean;
@@ -91,7 +90,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               </Text>
             </View>
             <Pressable onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
-              <Ionicons name="close" size={20} color={colors.ink3} />
+              <Icon name="x" size="md" color={colors.ink3} />
             </Pressable>
           </View>
 
@@ -100,7 +99,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               <ModeContent />
             ) : (
               <View style={styles.emptyState}>
-                <Ionicons name="options-outline" size={24} color={colors.ink3} />
+                <Icon name="sliders-horizontal" size="lg" color={colors.ink3} />
                 <Text variant="lg" style={styles.emptyTitle}>No mode explorer</Text>
                 <Text variant="sm" dim style={styles.emptyBody}>
                   Select Feature, Research, Debug, Security, Loop, or Teacher mode to expose its dedicated controls here.

@@ -194,11 +194,72 @@ export function washOf(colors: WashColors, tone: Tone | string | null | undefine
 
 /* ------------------------------------------------------------ type */
 
-/** Families registered by `useFonts` in App.tsx (assets/fonts). */
+/**
+ * Base families registered by `useFonts` in App.tsx (assets/fonts). Each
+ * name is the regular (400) cut, so `fontFamily: fonts.mono` alone is always
+ * a real face.
+ */
 export const fonts = {
   ui: 'Inter',
   mono: 'JetBrainsMono',
 } as const;
+
+export type FontBase = (typeof fonts)[keyof typeof fonts];
+
+/**
+ * Static weight families, one TTF per weight, instanced from the variable
+ * fonts with fontTools (Inter at opsz 14). Android does not pick weights
+ * inside a custom family loaded by expo-font (it fakes bold from the regular
+ * face), so each weight is registered as its own family and selected by name.
+ */
+export const fontFamilies = {
+  Inter: { 400: 'Inter', 500: 'Inter-Medium', 600: 'Inter-SemiBold' },
+  JetBrainsMono: { 400: 'JetBrainsMono', 600: 'JetBrainsMono-SemiBold' },
+} as const;
+
+const BASE_OF: Record<string, FontBase> = Object.fromEntries(
+  (Object.keys(fontFamilies) as FontBase[]).flatMap(base => Object.values(fontFamilies[base]).map(family => [family, base])),
+);
+
+function weightNumber(weight: TextStyle['fontWeight'] | number | undefined): number {
+  if (weight == null || weight === 'normal') return 400;
+  if (weight === 'bold') return 700;
+  const n = Number(weight);
+  return Number.isFinite(n) ? n : 400;
+}
+
+/** The static family for a base family at a weight (nearest bundled cut). */
+export function fontFamilyFor(base: FontBase, weight?: TextStyle['fontWeight'] | number): string {
+  const n = weightNumber(weight);
+  if (base === fonts.mono) return n >= 500 ? fontFamilies.JetBrainsMono[600] : fontFamilies.JetBrainsMono[400];
+  if (n >= 550) return fontFamilies.Inter[600];
+  if (n >= 450) return fontFamilies.Inter[500];
+  return fontFamilies.Inter[400];
+}
+
+/**
+ * Family and weight for text. On Android the weight is carried by the family
+ * name alone (no `fontWeight`, which would add synthetic bold); elsewhere
+ * the numeric weight is kept alongside the matching static family.
+ */
+export function fontStyle(base: FontBase, weight?: TextStyle['fontWeight'] | number): TextStyle {
+  const fontFamily = fontFamilyFor(base, weight);
+  if (Platform.OS === 'android') return { fontFamily };
+  return { fontFamily, fontWeight: String(weightNumber(weight)) as TextStyle['fontWeight'] };
+}
+
+/**
+ * Resolve a flattened text style that pairs a Wash family with a
+ * `fontWeight` override (`style={{ fontWeight: fontWeights.semibold }}`) to
+ * the static family for that weight on Android. Other styles pass through.
+ */
+export function withStaticWeight<T extends TextStyle>(style: T): T {
+  if (Platform.OS !== 'android' || style.fontWeight == null) return style;
+  const base = BASE_OF[style.fontFamily ?? ''];
+  if (!base) return style;
+  const { fontWeight, ...rest } = style;
+  return { ...rest, fontFamily: fontFamilyFor(base, fontWeight) } as T;
+}
 
 export type TypeName = keyof typeof washType;
 
@@ -206,10 +267,9 @@ export type TypeName = keyof typeof washType;
 export function typeStyle(name: TypeName): TextStyle {
   const t = washType[name];
   return {
-    fontFamily: name === 'mono' || name === 'mono-sm' ? fonts.mono : fonts.ui,
+    ...fontStyle(name === 'mono' || name === 'mono-sm' ? fonts.mono : fonts.ui, t.weight),
     fontSize: t.size,
     lineHeight: t.line,
-    fontWeight: String(t.weight) as TextStyle['fontWeight'],
     letterSpacing: Number((t.tracking * t.size).toFixed(2)),
   };
 }

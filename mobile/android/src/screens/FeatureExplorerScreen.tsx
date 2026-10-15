@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import {
   featureApi,
   FeatureDiffProposal,
@@ -17,7 +16,7 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { spacing, fontWeights, fonts, radii, tracking, touchTarget, typography } from '../theme/tokens';
-import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon, type IconName } from '../ui';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
 
@@ -359,7 +358,7 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
           <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Loaded</Text>
         </View>
       ) : null}
-      <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
+      <Icon name="chevron-right" size="md" color={colors.ink3} />
     </Pressable>
   );
 }
@@ -403,21 +402,21 @@ function FeatureOverview({
 
       {plan.directory ? (
         <View style={styles.pathBox}>
-          <Ionicons name="folder-outline" size={16} color={colors.ink3} />
+          <Icon name="folder" size="sm" color={colors.ink3} />
           <Text variant="xs" style={styles.pathText} numberOfLines={2}>{plan.directory}</Text>
         </View>
       ) : null}
 
       <View style={styles.actionRow}>
-        {!plan.approved && !item?.archived ? <ActionButton label="Approve" icon="checkmark-circle-outline" onPress={onApprove} primary /> : null}
+        {!plan.approved && !item?.archived ? <ActionButton label="Approve" icon="circle-check" onPress={onApprove} primary /> : null}
         {item?.is_active ? (
-          <ActionButton label="Unload" icon="pause-circle-outline" onPress={onUnload} />
+          <ActionButton label="Unload" icon="pause" onPress={onUnload} />
         ) : item?.archived ? (
-          <ActionButton label="Restore" icon="archive-outline" onPress={onUnarchive} primary />
+          <ActionButton label="Restore" icon="archive" onPress={onUnarchive} primary />
         ) : (
-          <ActionButton label="Load" icon="play-circle-outline" onPress={onLoad} primary={plan.approved} />
+          <ActionButton label="Load" icon="play" onPress={onLoad} primary={plan.approved} />
         )}
-        {!item?.is_active && !item?.archived ? <ActionButton label="Archive" icon="archive-outline" onPress={onArchive} /> : null}
+        {!item?.is_active && !item?.archived ? <ActionButton label="Archive" icon="archive" onPress={onArchive} /> : null}
       </View>
     </Card>
   );
@@ -450,7 +449,7 @@ function PhaseDetail({
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
         </View>
         <StatusPill label={phase.status || 'pending'} />
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.ink3} />
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
       </Pressable>
 
       {expanded ? (
@@ -491,7 +490,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.verified_exit_criteria?.length || 0}/{task.exit_criteria?.length || 0} criteria verified</Text>
         </View>
         <StatusPill label={task.status} />
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={colors.ink3} />
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="sm" color={colors.ink3} />
       </Pressable>
 
       {expanded ? (
@@ -505,7 +504,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
                 const verified = task.verified_exit_criteria?.includes(criterion);
                 return (
                   <View key={`${criterion}-${index}`} style={styles.criteriaRow}>
-                    <Ionicons name={verified ? 'checkmark-circle-outline' : 'ellipse-outline'} size={17} color={verified ? colors.ok.ink : colors.ink3} />
+                    <Icon name={verified ? 'circle-check' : 'circle'} size="sm" color={verified ? colors.ok.ink : colors.ink3} />
                     <Text variant="xs" style={{ flex: 1, color: verified ? colors.ink2 : colors.ink }}>{criterion}</Text>
                   </View>
                 );
@@ -516,7 +515,7 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           {task.blocked_reason ? <TextBlock title="Blocked reason" value={task.blocked_reason} error /> : null}
           {activeFeature && normalizeStatus(task.status) === 'in_progress' ? (
             <Pressable onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent.ink }]}>
-              <Ionicons name="checkmark" size={16} color={colors.onInk} />
+              <Icon name="check" size="sm" color={colors.onInk} />
               <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Mark completed</Text>
             </Pressable>
           ) : null}
@@ -637,7 +636,7 @@ function ExpandableRecord({ title, subtitle, expanded, onToggle, children }: {
           <Text variant="sm" style={styles.recordTitle}>{title}</Text>
           <Text variant="xs" dim numberOfLines={2} style={{ fontVariant: ['tabular-nums'] }}>{subtitle}</Text>
         </View>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.ink3} />
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
       </Pressable>
       {expanded ? <View style={styles.recordBody}>{children}</View> : null}
     </Card>
@@ -680,7 +679,7 @@ function StatusPill({ label }: { label: string }) {
 
 function ActionButton({ label, icon, onPress, primary = false }: {
   label: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   onPress: () => void;
   primary?: boolean;
 }) {
@@ -693,7 +692,7 @@ function ActionButton({ label, icon, onPress, primary = false }: {
         ? { backgroundColor: colors.accent.ink, borderColor: colors.accent.ink }
         : { backgroundColor: 'transparent', borderColor: colors.hairline }]}
     >
-      <Ionicons name={icon} size={16} color={primary ? colors.onInk : colors.ink} />
+      <Icon name={icon} size="sm" color={primary ? colors.onInk : colors.ink} />
       <Text variant="xs" style={{ color: primary ? colors.onInk : colors.ink, fontWeight: fontWeights.medium }}>{label}</Text>
     </Pressable>
   );

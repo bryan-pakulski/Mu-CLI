@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import type { LiveSubagent } from '../hooks/useChatSession';
 import { fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 import { STATUS } from '../theme/status';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
@@ -136,7 +135,7 @@ export function SubagentActivityPanel({ agents }: Props) {
         onPress={() => setPanelOpen(value => !value)}
       >
         <View style={[styles.headerIcon, { backgroundColor: colors.sunken }]}>
-          <Ionicons name="git-network-outline" size={16} color={colors.ink2} />
+          <Icon name="network" size="sm" color={colors.ink2} />
         </View>
         <View style={styles.headerCopy}>
           <Text variant="xs" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>
@@ -147,7 +146,7 @@ export function SubagentActivityPanel({ agents }: Props) {
           </Text>
         </View>
         <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{duration(totalElapsed)}</Text>
-        <Ionicons name={panelOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.ink3} />
+        <Icon name={panelOpen ? 'chevron-down' : 'chevron-right'} size="sm" color={colors.ink3} />
       </Pressable>
 
       {panelOpen ? (
@@ -220,7 +219,7 @@ export function SubagentActivityPanel({ agents }: Props) {
                 onPress={() => toggleExpanded(agent.task_id)}
                 style={styles.activityToggle}
               >
-                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.ink3} />
+                <Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} size="sm" color={colors.ink3} />
                 <Text variant="xs" style={{ color: colors.ink2 }}>{isExpanded ? 'Hide activity' : 'View activity'}</Text>
                 <View style={[styles.countBadge, { backgroundColor: colors.sunken }]}>
                   <Text variant="xs" style={[{ color: colors.ink3 }, NUM]}>{agent.actions.length}</Text>

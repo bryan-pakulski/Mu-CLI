@@ -1,10 +1,9 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import type { ContainerStats } from '../api/containers';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Text } from '../ui';
+import { Text, Icon } from '../ui';
 
 const MUCLI_CONTAINER_MONITOR_V1 = true;
 
@@ -25,19 +24,19 @@ export function ContainerStatsPanel({ stats, status }: Props) {
 
   const metrics = [
     {
-      icon: 'speedometer-outline' as const,
+      icon: 'gauge' as const,
       label: 'CPU',
       value: running && stats ? formatPercent(stats.cpu_percent) : '—',
       progress: running ? stats?.cpu_percent : undefined,
     },
     {
-      icon: 'hardware-chip-outline' as const,
+      icon: 'cpu' as const,
       label: 'Memory',
       value: stats ? `${formatBytes(stats.memory_used_bytes)} / ${formatBytes(stats.memory_limit_bytes)}` : '—',
       progress: running ? stats?.memory_percent : undefined,
     },
     {
-      icon: 'flash-outline' as const,
+      icon: 'zap' as const,
       label: 'GPU',
       value: gpuValue,
       progress: gpu?.utilization_percent ?? undefined,
@@ -46,7 +45,7 @@ export function ContainerStatsPanel({ stats, status }: Props) {
         : undefined,
     },
     {
-      icon: 'swap-vertical-outline' as const,
+      icon: 'arrow-up-down' as const,
       label: 'Network',
       value: stats
         ? `↓ ${formatRate(stats.network_rx_bytes_per_second)}  ↑ ${formatRate(stats.network_tx_bytes_per_second)}`
@@ -56,13 +55,13 @@ export function ContainerStatsPanel({ stats, status }: Props) {
         : undefined,
     },
     {
-      icon: 'server-outline' as const,
+      icon: 'server' as const,
       label: 'Storage',
       value: stats ? formatBytes(stats.storage_writable_bytes) : '—',
       detail: stats ? `Writable layer · rootfs ${formatBytes(stats.storage_rootfs_bytes)}` : 'Writable container layer',
     },
     {
-      icon: 'disc-outline' as const,
+      icon: 'hard-drive' as const,
       label: 'Block I/O',
       value: stats
         ? `R ${formatBytes(stats.block_read_bytes)} · W ${formatBytes(stats.block_write_bytes)}`
@@ -88,7 +87,7 @@ export function ContainerStatsPanel({ stats, status }: Props) {
         {metrics.map(metric => (
           <View key={metric.label} style={styles.metric}>
             <View style={styles.metricHead}>
-              <Ionicons name={metric.icon} size={14} color={colors.ink3} />
+              <Icon name={metric.icon} size="sm" color={colors.ink3} />
               <Text variant="xs" dim>{metric.label}</Text>
             </View>
             <Text variant="xs" style={[styles.value, { color: colors.ink }]} numberOfLines={1}>{metric.value}</Text>

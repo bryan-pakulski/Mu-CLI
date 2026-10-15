@@ -75,7 +75,7 @@ mobile/android/
 ├── App.tsx                  # Fonts (useFonts + held splash), SafeAreaProvider, ThemeProvider, AppNavigator, PromptHost
 ├── app.json                 # Expo config (android.package=com.mucli.mobile); Paper/Dusk splash
 ├── Makefile                 # Local APK build (make apk / make install)
-├── assets/fonts/            # InterVariable.ttf, JetBrainsMono-Variable.ttf (+ OFL licences)
+├── assets/fonts/            # Static Inter 400/500/600 + JetBrains Mono 400/600 TTFs (scripts/instance_fonts.py, from the variable sources; OFL licences)
 ├── assets/wash/             # Watercolour art: dawn/lagoon/meadow + spot washes, Paper and Dusk
 ├── src/
 │   ├── api/                 # Typed HTTP/SSE client modules (1:1 with mucli GUI routers)

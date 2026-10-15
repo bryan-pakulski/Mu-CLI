@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, FlatList, Modal, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { WebView } from 'react-native-webview';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
@@ -10,7 +9,7 @@ import { attachmentsApi, type AttachmentDescriptor, type PickedDocument } from '
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, paperColors, radii, spacing, touchTarget } from '../theme/tokens';
-import { EmptyState, ModalFrame, Pressable, Text } from '../ui';
+import { EmptyState, ModalFrame, Pressable, Text, Icon } from '../ui';
 
 type UnifiedItem =
   | { kind: 'visualization'; artifact: ArtifactDescriptor }
@@ -171,7 +170,7 @@ export function ArtifactsScreen() {
           activeOpacity={0.7}
         >
           <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-            <Ionicons name="analytics-outline" size={20} color={colors.ink2} />
+            <Icon name="bar-chart-3" size="md" color={colors.ink2} />
           </View>
           <View style={styles.rowCopy}>
             <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
@@ -188,14 +187,14 @@ export function ArtifactsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Download visualization"
           >
-            <Ionicons name="download-outline" size={18} color={colors.ink3} />
+            <Icon name="download" size="md" color={colors.ink3} />
           </Pressable>
           <Pressable accessibilityLabel="Delete artifact"
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
-            <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
+            <Icon name="trash-2" size="md" color={colors.danger.ink} />
           </Pressable>
         </Pressable>
       );
@@ -210,7 +209,7 @@ export function ArtifactsScreen() {
           activeOpacity={0.7}
         >
           <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-            <Ionicons name="document-attach-outline" size={20} color={colors.ink2} />
+            <Icon name="paperclip" size="md" color={colors.ink2} />
           </View>
           <View style={styles.rowCopy}>
             <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
@@ -225,14 +224,14 @@ export function ArtifactsScreen() {
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
-            <Ionicons name="download-outline" size={18} color={colors.ink3} />
+            <Icon name="download" size="md" color={colors.ink3} />
           </Pressable>
           <Pressable accessibilityLabel="Delete artifact"
             onPress={() => removeArtifact(a)}
             style={styles.rowAction}
             hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
           >
-            <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
+            <Icon name="trash-2" size="md" color={colors.danger.ink} />
           </Pressable>
         </Pressable>
       );
@@ -247,7 +246,7 @@ export function ArtifactsScreen() {
         activeOpacity={0.7}
       >
         <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-          <Ionicons name="cloud-upload-outline" size={20} color={colors.ink2} />
+          <Icon name="cloud-upload" size="md" color={colors.ink2} />
         </View>
         <View style={styles.rowCopy}>
           <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
@@ -262,14 +261,14 @@ export function ArtifactsScreen() {
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
-          <Ionicons name="download-outline" size={18} color={colors.ink3} />
+          <Icon name="download" size="md" color={colors.ink3} />
         </Pressable>
         <Pressable accessibilityLabel="Delete upload"
           onPress={() => removeUpload(u)}
           style={styles.rowAction}
           hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
         >
-          <Ionicons name="trash-outline" size={18} color={colors.danger.ink} />
+          <Icon name="trash-2" size="md" color={colors.danger.ink} />
         </Pressable>
       </Pressable>
     );
@@ -309,7 +308,7 @@ export function ArtifactsScreen() {
             {uploading ? (
               <ActivityIndicator color={colors.onInk} size="small" />
             ) : (
-              <Ionicons name="cloud-upload-outline" size={18} color={colors.onInk} />
+              <Icon name="cloud-upload" size="md" color={colors.onInk} />
             )}
             <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.semibold, marginLeft: spacing.xs }}>
               {uploading ? 'Uploading' : 'Upload'}
@@ -365,7 +364,7 @@ export function ArtifactsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Download visualization"
               >
-                <Ionicons name="download-outline" size={18} color={colors.ink3} />
+                <Icon name="download" size="md" color={colors.ink3} />
               </Pressable>
             )}
             <Pressable
@@ -374,7 +373,7 @@ export function ArtifactsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Close visualization"
             >
-              <Ionicons name="close" size={24} color={colors.ink} />
+              <Icon name="x" size="lg" color={colors.ink} />
             </Pressable>
           </View>
           {sessionName && viewingArtifact && (

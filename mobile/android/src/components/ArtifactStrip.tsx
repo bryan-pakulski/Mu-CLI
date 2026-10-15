@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppState, ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 
 export function ArtifactStrip({
   sessionName,
@@ -71,14 +70,14 @@ export function ArtifactStrip({
                   onPress={() => openExternalUrl(artifactsApi.viewUrl(sessionName, artifact.artifact_id))}
                   style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
                 >
-                  <Ionicons name="stats-chart-outline" size={16} color={colors.ink2} />
+                  <Icon name="bar-chart-3" size="sm" color={colors.ink2} />
                   <View style={styles.copy}>
                     <Text variant="xs" style={styles.name} numberOfLines={1}>
                       {artifact.title || artifact.name}
                     </Text>
                     <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                   </View>
-                  <Ionicons name="open-outline" size={17} color={colors.ink3} />
+                  <Icon name="external-link" size="sm" color={colors.ink3} />
                 </Pressable>
               );
             })}
@@ -99,12 +98,12 @@ export function ArtifactStrip({
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, artifact.artifact_id))}
                 style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
               >
-                <Ionicons name="document-attach-outline" size={16} color={colors.ink2} />
+                <Icon name="paperclip" size="sm" color={colors.ink2} />
                 <View style={styles.copy}>
                   <Text variant="xs" style={styles.name} numberOfLines={1}>{artifact.name}</Text>
                   <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                 </View>
-                <Ionicons name="arrow-down-circle-outline" size={17} color={colors.ink3} />
+                <Icon name="download" size="sm" color={colors.ink3} />
               </Pressable>
             ))}
           </ScrollView>

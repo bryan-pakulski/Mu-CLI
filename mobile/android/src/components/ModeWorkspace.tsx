@@ -1,11 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { ModeWorkspaceContract, ModeWorkspaceTone } from '../api/modeWorkspace';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, touchTarget, tracking, typography } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 
 const VIEW_STORAGE_PREFIX = 'mucli.mode-workspace.view.v1.';
 
@@ -143,7 +142,7 @@ export function ModeWorkspaceHeader({
         style={({ pressed }) => ({ minHeight: touchTarget, marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.hairline, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', opacity: pressed ? 0.7 : 1 })}
       >
         <Text variant="xs" style={{ color: colors.ink3 }}>How accuracy, relevance, and evidence are assessed</Text>
-        <Ionicons name={qualityOpen ? 'chevron-up' : 'chevron-down'} size={15} color={colors.ink3} />
+        <Icon name={qualityOpen ? 'chevron-up' : 'chevron-down'} size="sm" color={colors.ink3} />
       </Pressable>
       {qualityOpen && (
         <View style={{ paddingTop: spacing.sm }}>

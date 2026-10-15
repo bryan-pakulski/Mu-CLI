@@ -2,14 +2,13 @@ import React, { useMemo, useState } from 'react';
 
 const MUCLI_CONTAINER_HARDWARE_V1 = true;
 import { StyleSheet, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import type {
   ContainerDevice,
   ContainerHardwareCapabilities,
 } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, fonts } from '../theme/tokens';
-import { Pressable, Text } from '../ui';
+import { Pressable, Text, Icon } from '../ui';
 
 interface Props {
   capabilities?: ContainerHardwareCapabilities | null;
@@ -82,7 +81,7 @@ export function ContainerHardwareSection({
           <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Hardware</Text>
           <Text variant="xs" dim>GPU acceleration and explicit host device passthrough.</Text>
         </View>
-        <Ionicons name="hardware-chip-outline" size={20} color={colors.ink2} />
+        <Icon name="cpu" size="md" color={colors.ink2} />
       </View>
 
       <Text variant="xs" style={styles.label}>GPU access</Text>
@@ -108,7 +107,7 @@ export function ContainerHardwareSection({
                 accessibilityState={{ checked: active }}
                 style={[styles.detectedRow, { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline }]}
               >
-                <Ionicons name={active ? 'checkbox-outline' : 'square-outline'} size={18} color={active ? colors.accent.ink : colors.ink3} />
+                <Icon name={active ? 'square-check' : 'square'} size="md" color={active ? colors.accent.ink : colors.ink3} />
                 <View style={styles.copy}>
                   <Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{item.name || `GPU ${id}`}</Text>
                   <Text variant="xs" dim style={styles.mono}>{item.uuid || `index ${id}`}</Text>
@@ -122,13 +121,13 @@ export function ContainerHardwareSection({
       <Text variant="xs" style={[styles.label, { marginTop: spacing.md }]}>Attached devices</Text>
       {devices.map((device, index) => (
         <View key={`${device.host_path}-${index}`} style={[styles.deviceRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-          <Ionicons name="hardware-chip-outline" size={17} color={colors.ink3} />
+          <Icon name="cpu" size="sm" color={colors.ink3} />
           <View style={styles.copy}>
             <Text variant="xs" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>{device.container_path}</Text>
             <Text variant="xs" dim numberOfLines={1}>{device.host_path} · {device.permissions}</Text>
           </View>
           <Pressable accessibilityLabel="Remove device" onPress={() => onDevicesChange(devices.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
-            <Ionicons name="close" size={18} color={colors.danger.ink} />
+            <Icon name="x" size="md" color={colors.danger.ink} />
           </Pressable>
         </View>
       ))}
@@ -180,7 +179,7 @@ export function ContainerHardwareSection({
           disabled={!deviceHost.trim()}
           style={[styles.addButton, { borderColor: colors.hairline, opacity: deviceHost.trim() ? 1 : 0.42 }]}
         >
-          <Ionicons name="add" size={18} color={colors.ink} />
+          <Icon name="plus" size="md" color={colors.ink} />
           <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Add device</Text>
         </Pressable>
       </View>

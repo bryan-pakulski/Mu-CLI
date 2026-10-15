@@ -7,6 +7,7 @@ import {
 } from '../api/sessions';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
+import { useContextFillStore } from '../store/contextFill';
 import { revisionToken } from '../api/offlineQueue';
 import { isPlanModeBlocked, refreshPlanMode } from '../api/planMode';
 import type { ArtifactDescriptor } from '../api/artifacts';
@@ -1219,6 +1220,13 @@ export function useChatSession(activeSessionName: string | null) {
 
     if (kind === 'plan_mode_changed') {
       useConnectionStore.getState().setPlanMode(Boolean(event.plan_mode));
+      return;
+    }
+
+    if (kind === 'context_snapshot') {
+      // Feeds the header context ring; replaces its periodic polling.
+      const owner = typeof event.session_name === 'string' ? event.session_name : activeSessionName;
+      useContextFillStore.getState().report(owner, event.fill_pct);
       return;
     }
 

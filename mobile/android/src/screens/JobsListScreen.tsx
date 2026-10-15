@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 
 import { jobsApi } from '../api/jobs';
 import type { JobSummary } from '../api/jobCore';
@@ -12,7 +11,7 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
 import { stateLabel, stateStatus } from '../theme/status';
-import { Banner, Button, CheckRow, Empty, Loading, Panel, Pressable, Sheet, Text, TextField, useToast } from '../ui';
+import { Banner, Button, CheckRow, Empty, Loading, Panel, Pressable, Sheet, Text, TextField, useToast, Icon } from '../ui';
 
 export type JobsListScreenProps = NativeStackScreenProps<RootStackParamList, 'JobsList'>;
 
@@ -93,9 +92,9 @@ export function JobsListScreen({ navigation }: JobsListScreenProps) {
                   right={(
                     <View style={styles.rowActions}>
                       <Button small ghost iconOnly label={`Archive ${jobKey(row)}`} testID={`archive-${row.id}`}
-                        icon={<Ionicons name="archive-outline" size={18} color={colors.ink3} />} onPress={() => setArchiveRow(row)} />
+                        icon={<Icon name="archive" size="md" color={colors.ink3} />} onPress={() => setArchiveRow(row)} />
                       <Button small ghost iconOnly label={`Delete ${jobKey(row)}`} testID={`delete-${row.id}`} disabled={!deleteAction?.enabled}
-                        icon={<Ionicons name="trash-outline" size={18} color={colors.danger.ink} />} onPress={() => { setDeleteRow(row); if (deleteAction) setTimeout(() => del.invoke(deleteAction), 0); }} />
+                        icon={<Icon name="trash-2" size="md" color={colors.danger.ink} />} onPress={() => { setDeleteRow(row); if (deleteAction) setTimeout(() => del.invoke(deleteAction), 0); }} />
                     </View>
                   )}
                 />

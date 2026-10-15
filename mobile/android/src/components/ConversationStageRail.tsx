@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import type { ChatMessage } from '../hooks/useChatSession';
 import { radii, spacing } from '../theme/tokens';
-import { Pressable } from '../ui';
+import { Pressable, Icon } from '../ui';
 
 interface Props {
   messages: ChatMessage[];
@@ -78,9 +77,9 @@ export function ConversationStageRail({
             style={styles.marker}
           >
             <View style={styles.moreBadge}>
-              <Ionicons
-                name={loadingHistory ? 'hourglass-outline' : 'chevron-up'}
-                size={13}
+              <Icon
+                name={loadingHistory ? 'hourglass' : 'chevron-up'}
+                size="sm"
                 color={colors.ink2}
               />
             </View>

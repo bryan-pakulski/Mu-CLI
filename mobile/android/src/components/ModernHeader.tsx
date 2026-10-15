@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { memoryApi } from '../api/memory';
+import { normaliseFill, useContextFillStore } from '../store/contextFill';
 import { PlanModeBadge } from './PlanModeIndicator';
 import { radii, spacing } from '../theme/tokens';
 import { Chip, ContextRing, IconButton, Pressable, Text } from '../ui';
@@ -23,29 +24,39 @@ export type ModernHeaderProps = {
   onOpenContext: () => void;
 };
 
-/** Poll the context fill while a session is open (display only; G§9.14). */
-const CONTEXT_POLL_MS = 20_000;
+/**
+ * Context fill for the header ring (display only; G§9.14). The SSE
+ * `context_snapshot` event, reported by the chat session hook, is the
+ * source; /api/memory/state is polled only until the first snapshot for the
+ * open session arrives (for example a freshly opened, idle session).
+ */
+export const CONTEXT_POLL_MS = 20_000;
 
-function useContextFill(sessionName: string | null, isConnected: boolean): number | null {
-  const [fill, setFill] = useState<number | null>(null);
+export function useContextFill(sessionName: string | null, isConnected: boolean): number | null {
+  const [polledFill, setPolledFill] = useState<number | null>(null);
+  const snapshotFill = useContextFillStore(s => (sessionName && s.sessionName === sessionName ? s.fill : null));
+  const hasSnapshot = snapshotFill != null;
   useEffect(() => {
-    setFill(null);
-    if (!sessionName || !isConnected) return undefined;
+    setPolledFill(null);
+  }, [sessionName]);
+  useEffect(() => {
+    if (!sessionName || !isConnected || hasSnapshot) return undefined;
     let cancelled = false;
     const load = () => {
       memoryApi.getState(8, 4)
         .then(state => {
           if (cancelled || !state || !state.active) return;
-          const pct = Number(state.fill_pct);
-          if (Number.isFinite(pct)) setFill(pct > 1 ? pct / 100 : pct);
+          const fill = normaliseFill(state.fill_pct);
+          if (fill != null) setPolledFill(fill);
         })
         .catch(() => undefined);
     };
     load();
     const timer = setInterval(load, CONTEXT_POLL_MS);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [isConnected, sessionName]);
-  return fill;
+  }, [hasSnapshot, isConnected, sessionName]);
+  if (!sessionName || !isConnected) return null;
+  return snapshotFill ?? polledFill;
 }
 
 export function ModernHeader({

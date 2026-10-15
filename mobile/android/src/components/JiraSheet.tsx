@@ -14,7 +14,7 @@ import {
 import { JobImportSheet } from './JobSessionPicker';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Banner, Button, Field, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
+import { Banner, Button, Field, Icon, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 export type JiraSheetProps = {
   visible: boolean;
@@ -315,7 +315,7 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
                   onPress={() => setSelected(prev => (picked ? prev.filter(k => k !== ticket.key) : [...prev, ticket.key]))}
                   style={[styles.ticket, { backgroundColor: picked ? colors.accent.wash : colors.canvas, borderColor: picked ? colors.accent.ink : colors.hairline }]}>
                   <View style={styles.row}>
-                    <Text variant="xs" style={{ color: picked ? colors.accent.ink : colors.ink3 }}>{picked ? '☑' : '☐'}</Text>
+                    <Icon name={picked ? 'square-check' : 'square'} size="sm" color={picked ? colors.accent.ink : colors.ink3} />
                     <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono, fontWeight: fontWeights.semibold }}>{ticket.key}</Text>
                     <Text variant="xs" style={{ color: colors.ink3, flex: 1 }} numberOfLines={1}>{ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ''}</Text>
                   </View>

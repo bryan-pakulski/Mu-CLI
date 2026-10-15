@@ -13,9 +13,14 @@ import { refreshPendingMutations, useConnectionStore } from './src/store/connect
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function App() {
+  // One static family per weight (theme/tokens.ts `fontFamilies`): Android
+  // cannot select weights inside a variable or multi-weight custom family.
   const [fontsLoaded, fontError] = useFonts({
-    Inter: require('./assets/fonts/InterVariable.ttf'),
-    JetBrainsMono: require('./assets/fonts/JetBrainsMono-Variable.ttf'),
+    Inter: require('./assets/fonts/Inter-Regular.ttf'),
+    'Inter-Medium': require('./assets/fonts/Inter-Medium.ttf'),
+    'Inter-SemiBold': require('./assets/fonts/Inter-SemiBold.ttf'),
+    JetBrainsMono: require('./assets/fonts/JetBrainsMono-Regular.ttf'),
+    'JetBrainsMono-SemiBold': require('./assets/fonts/JetBrainsMono-SemiBold.ttf'),
   });
   const fontsReady = fontsLoaded || !!fontError;
   const loadFromStorage = useConnectionStore((s) => s.loadFromStorage);

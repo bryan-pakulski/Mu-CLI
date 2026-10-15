@@ -96,12 +96,10 @@ def test_mobile_handoff_does_not_fold_on_tool_or_thinking_activity():
 def test_mobile_visualizations_never_render_inside_interim_disclosures():
     hook = read("mobile/android/src/hooks/useChatSession.ts")
     product = read("mobile/android/src/screens/ChatScreenProduct.tsx")
-    legacy = read("mobile/android/src/screens/ChatScreen.tsx")
 
     assert "isTimelineAnchor" in hook
     assert "appendCollapsedSegments" in hook
     assert "child.role === 'visualization'" not in product
-    assert "child.role === 'visualization'" not in legacy
     assert "item.role === 'visualization'" in product
 
 

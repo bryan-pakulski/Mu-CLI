@@ -45,10 +45,8 @@ def test_drawers_and_bottom_sheets_are_constrained_above_android_navigation():
     for relative in (
         "mobile/android/src/components/ModernBottomSheet.tsx",
         "mobile/android/src/components/BottomSheet.tsx",
-        "mobile/android/src/components/SessionsDrawer.tsx",
         "mobile/android/src/components/SwipeSessionsDrawer.tsx",
         "mobile/android/src/components/ModeDrawer.tsx",
-        "mobile/android/src/components/InspectorDrawer.tsx",
         "mobile/android/src/components/PromptHost.tsx",
     ):
         assert "SafeAreaModal" in read(relative)

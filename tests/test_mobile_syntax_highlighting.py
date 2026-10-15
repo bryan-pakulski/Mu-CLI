@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile" / "android" / "src"
 TOKENS = MOBILE / "theme" / "tokens.ts"
 CODEBLOCK = MOBILE / "components" / "CodeBlock.tsx"
-CHATSCREEN = MOBILE / "screens" / "ChatScreen.tsx"
+CHATSCREEN = MOBILE / "screens" / "ChatScreenProduct.tsx"
 INDEX = MOBILE / "components" / "index.ts"
 PKG = ROOT / "mobile" / "android" / "package.json"
 
@@ -177,7 +177,7 @@ def test_chatscreen_fence_uses_codeblock():
     """ChatScreen fence rule must use CodeBlock component."""
     src = read(CHATSCREEN)
     # Find the fence rule
-    fence_section = re.search(r"fence:\s*\(node\)\s*=>\s*{", src)
+    fence_section = re.search(r"fence:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert fence_section, "fence rule not found in ChatScreen"
     # Get text from fence rule to next rule
     start = fence_section.end()
@@ -192,7 +192,7 @@ def test_chatscreen_code_block_uses_codeblock():
     """ChatScreen code_block rule must use CodeBlock component."""
     src = read(CHATSCREEN)
     # Find code_block rule
-    cb_section = re.search(r"code_block:\s*\(node\)\s*=>\s*{", src)
+    cb_section = re.search(r"code_block:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert cb_section, "code_block rule not found in ChatScreen"
     start = cb_section.end()
     end = src.find("},", start)
@@ -203,7 +203,7 @@ def test_chatscreen_code_block_uses_codeblock():
 def test_chatscreen_code_inline_uses_syntax_color():
     """code_inline must use colors.syntax.keyword (not colors.accent)."""
     src = read(CHATSCREEN)
-    ci_section = re.search(r"code_inline:\s*\(node\)\s*=>\s*{", src)
+    ci_section = re.search(r"code_inline:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert ci_section, "code_inline rule not found"
     start = ci_section.end()
     end = src.find("},", start)
@@ -224,7 +224,7 @@ def test_chatscreen_no_old_plain_code_block():
     # markdownStyles has fence + code_block style entries but those use
     # backgroundColor, not textSoft. So the old plain-text pattern should
     # be gone from the fence/code_block *render* functions.
-    fence_section = re.search(r"fence:\s*\(node\)\s*=>\s*{(.*?)},", src, re.DOTALL)
+    fence_section = re.search(r"fence:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({](.*?)[})],", src, re.DOTALL)
     assert fence_section, "fence rule not found"
     assert "colors.textSoft, fontFamily: 'monospace'" not in fence_section.group(1), \
         "Old plain text pattern still in fence rule"

@@ -23,7 +23,7 @@ def test_mobile_handles_terminal_artifact_and_history_events():
 
 
 def test_artifacts_are_visible_above_the_mobile_composer():
-    source = read("mobile/android/src/screens/ChatScreen.tsx")
+    source = read("mobile/android/src/screens/ChatScreenProduct.tsx")
     artifact = source.index('<ArtifactStrip sessionName={activeSessionName} refreshKey={artifactRevision} />')
     composer = source.index('<Composer', artifact)
     assert artifact < composer

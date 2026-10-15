@@ -102,6 +102,9 @@ export function ChatScreenProduct() {
   const checkpointJumpAttemptsRef = useRef(0);
   const olderCheckpointAnchorRef = useRef<string | null | undefined>(undefined);
   const followOutputRef = useRef(true);
+  // Streaming grows the list many times per second; scrollToEnd is throttled
+  // so the list follows the output without one native scroll per token.
+  const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visualizationActiveRef = useRef(false);
   const previousStreamingRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
@@ -189,6 +192,20 @@ export function ChatScreenProduct() {
 
   useEffect(() => () => {
     if (checkpointRetryTimerRef.current) clearTimeout(checkpointRetryTimerRef.current);
+    if (scrollThrottleRef.current) clearTimeout(scrollThrottleRef.current);
+  }, []);
+
+  const streamingRef = useRef(streaming);
+  streamingRef.current = streaming;
+  const scrollToBottom = useCallback(() => {
+    if (!streamingRef.current || !followOutputRef.current || visualizationActiveRef.current) return;
+    if (scrollThrottleRef.current) return;
+    scrollThrottleRef.current = setTimeout(() => {
+      scrollThrottleRef.current = null;
+      if (streamingRef.current && followOutputRef.current && !visualizationActiveRef.current) {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }
+    }, 48);
   }, []);
 
   const copyMessage = useCallback((text: string) => {
@@ -494,11 +511,8 @@ export function ChatScreenProduct() {
           onScrollToIndexFailed={onCheckpointScrollFailed}
           scrollEventThrottle={32}
           onScrollBeginDrag={() => { followOutputRef.current = false; }}
-          onContentSizeChange={() => {
-            if (streaming && followOutputRef.current && !visualizationActiveRef.current) {
-              flatListRef.current?.scrollToEnd({ animated: false });
-            }
-          }}
+          onContentSizeChange={scrollToBottom}
+          onLayout={scrollToBottom}
           ListHeaderComponent={
             <View>
               {loadingOlder ? (
@@ -692,6 +706,7 @@ function Composer({
         >
           <Ionicons name="attach" size={19} color={selectedAttachments.length ? colors.accent : colors.textDim} />
         </TouchableOpacity>
+        {/* Keep focus and the draft keyboard open while a turn is running. */}
         <TextInput
           value={input}
           onChangeText={setInput}

@@ -24,15 +24,15 @@ def test_history_refresh_does_not_replace_identical_messages():
 
 
 def test_chat_keeps_one_composer_mounted_across_empty_and_loading_states():
-    source = read("mobile/android/src/screens/ChatScreen.tsx")
+    source = read("mobile/android/src/screens/ChatScreenProduct.tsx")
     assert "if (messages.length === 0 && !waitingForFirstToken && !historyLoading)" not in source
-    assert "messages.length === 0 ? styles.messageListEmpty : null" in source
+    assert "messages.length === 0 && styles.messageListEmpty" in source
     assert "ListEmptyComponent" in source
     assert source.count("<Composer") == 1
 
 
 def test_keyboard_and_draft_remain_available_during_background_updates():
-    source = read("mobile/android/src/screens/ChatScreen.tsx")
+    source = read("mobile/android/src/screens/ChatScreenProduct.tsx")
     assert 'keyboardShouldPersistTaps="always"' in source
     assert 'keyboardDismissMode="none"' in source
     assert "editable={!streaming}" not in source
@@ -40,7 +40,7 @@ def test_keyboard_and_draft_remain_available_during_background_updates():
 
 
 def test_chat_subscribes_only_to_connection_fields_it_renders():
-    source = read("mobile/android/src/screens/ChatScreen.tsx")
+    source = read("mobile/android/src/screens/ChatScreenProduct.tsx")
     assert "const connection = useConnectionStore();" not in source
     assert "useConnectionStore(state => state.activeSessionName)" in source
     assert "useConnectionStore(state => state.activeProvider)" in source

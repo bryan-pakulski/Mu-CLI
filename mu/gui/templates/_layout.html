@@ -5,6 +5,8 @@
       page_css       the page's bundle <link> (static/css/wash/patterns/*.css)
       head_scripts   page / vendor scripts (defer where possible)
       body_class, body_attrs
+      shell_attrs    extra attributes on .w-shell (e.g. Alpine bindings)
+      drop_attrs     extra attributes on the wordmark drop (data-state="working")
       page           the whole body content; defaults to the app shell below.
                      Pages with their own chrome (chat, work) replace it.
       crumbs         <li class="w-breadcrumb__item"> items after "μcli"
@@ -37,14 +39,14 @@
 </head>
 <body class="{% block body_class %}{% endblock %}"{% block body_attrs %}{% endblock %}>
 {% block page %}
-<div class="w-shell" id="w-shell" data-shell>
+<div class="w-shell" id="w-shell" data-shell{% block shell_attrs %}{% endblock %}>
     <a class="w-skip-link" href="#w-main">Skip to content</a>
     <header class="w-topbar">
         <button type="button" class="w-btn w-topbar__menu" data-variant="icon" data-shell-menu
                 aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
             {{ w.icon("menu") }}
         </button>
-        <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-drop" aria-hidden="true"></span>μcli</a>
+        <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-drop" aria-hidden="true"{% block drop_attrs %}{% endblock %}></span>μcli</a>
         <nav class="w-breadcrumb" aria-label="Breadcrumb">
             <ol class="w-breadcrumb__list">{% block crumbs %}{% endblock %}</ol>
         </nav>

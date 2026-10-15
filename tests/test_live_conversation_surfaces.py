@@ -141,7 +141,9 @@ def test_mobile_input_required_banner_is_centered_and_prominent():
 
 
 def test_handoff_animations_exist_on_both_clients():
-    css = read("mu/gui/static/css/conversation.css")
+    # Wash W4: conversation.css is retired; the hand-off motion lives in the
+    # chat page patterns.
+    css = read("mu/gui/static/css/wash/patterns/chat.css")
     mobile = read("mobile/android/src/screens/ChatScreenProduct.tsx")
 
     assert "interim-handoff-in" in css

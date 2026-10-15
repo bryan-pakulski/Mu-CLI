@@ -218,6 +218,13 @@ document.addEventListener("alpine:init", () => {
             // filter, or the newly focused session silently receives no
             // live events while the connection looks healthy. Guard: only
             // reconnect on an actual session change.
+            if ((prev || null) !== (this.currentName || null)) {
+                try {
+                    const context = Alpine.store("context");
+                    context.reset();
+                    if (this.currentName) context.prime(this.currentName);
+                } catch (e) { /* context meter is display-only */ }
+            }
             if ((prev || null) !== (this.currentName || null)
                 && typeof window.__muReconnectWithFocus === "function") {
                 // bootSSE owns the stream; it publishes its reconnect hook
@@ -741,6 +748,7 @@ document.addEventListener("alpine:init", () => {
                 id: this._id("ev"),
                 kind: "tool_call",
                 name: toolName || "(unknown)",
+                args,
                 jsonHtml: renderJSON(args),
                 at: Date.now(),
             });
@@ -848,6 +856,40 @@ document.addEventListener("alpine:init", () => {
                 at: Date.now(),
             });
             if (!name || name === this.currentName) this.scroll();
+        },
+        addDiff(filename, original, modified, name) {
+            const slot = this._slot(name);
+            const file = String(filename || "file");
+            const unified = window.WashDiff
+                ? window.WashDiff.diffContents(original || "", modified || "", { filename: file })
+                : "";
+            if (!unified) {
+                this.addInfo(`diff proposed: ${file}`, null, name);
+                return;
+            }
+            const stats = window.WashDiff.stats(unified);
+            const turn = {
+                id: this._id("df"),
+                role: "diff",
+                filename: file,
+                unified,
+                added: stats.added,
+                removed: stats.removed,
+                at: Date.now(),
+            };
+            slot.recentDiffs = [turn, ...(slot.recentDiffs || []).filter(d => d.filename !== file)].slice(0, 12);
+            this._closeStreamingAssistants(slot);
+            slot.turns.push(turn);
+            if (!name || name === this.currentName) this.scroll();
+        },
+        // Latest proposed diff whose filename matches `path` (approval preview).
+        diffFor(path, name) {
+            const target = String(path || "");
+            if (!target) return null;
+            const diffs = this._slot(name).recentDiffs || [];
+            return diffs.find(d => d.filename === target
+                || target.endsWith("/" + d.filename)
+                || d.filename.endsWith("/" + target)) || null;
         },
         addError(text, name) {
             const slot = this._slot(name);
@@ -980,6 +1022,10 @@ document.addEventListener("alpine:init", () => {
                 id: this._id("pr"),
                 role: "prompt_resolved",
                 cancelled,
+                // `auto`: approved without asking (YOLO). Rendered tagged
+                // "auto" in sun so auto-approval stays visible (G§9.9).
+                auto: !!(record && record.auto),
+                target: (record && record.target) || "",
                 shape: (record && record.shape) || "",
                 toolName: (record && record.toolName) || "",
                 title,
@@ -1583,6 +1629,7 @@ document.addEventListener("alpine:init", () => {
                             id: `h-ev-${turn.index}-${stablePartIndex}`,
                             kind: "tool_call",
                             name: part.tool_name || "(unknown)",
+                            args: part.tool_args,
                             jsonHtml: renderJSON(part.tool_args),
                             at: 0,
                         });
@@ -2206,13 +2253,28 @@ ${problem.text}`, "error", 16000);
     });
 
     // ── Toast notifications ──────────────────────────────────
+    // Toasts render through window.WashToast (static/js/wash_shell.js) into
+    // the shared live regions (partials/toast_region.html): info/success go
+    // to the polite region and auto-dismiss after 5s, errors go to the
+    // assertive region and persist until dismissed (G§9.16, §11). The
+    // `messages` list only backs the legacy Alpine template when WashToast is
+    // unavailable.
     Alpine.store("toast", {
         messages: [],
         _nextId: 0,
-        show(msg, type = "info", ms = 4000) {
+        _tone(type) {
+            return { success: "ok", ok: "ok", error: "danger", danger: "danger", warn: "attention", warning: "attention", attention: "attention" }[type] || "info";
+        },
+        show(msg, type = "info", ms = 5000, options = {}) {
+            const tone = this._tone(type);
+            if (window.WashToast && typeof window.WashToast.show === "function") {
+                const timeout = tone === "danger" ? 0 : (ms > 0 ? Math.max(ms, 5000) : 0);
+                return window.WashToast.show(msg, tone, { timeout, action: options.action });
+            }
             const id = this._nextId++;
             this.messages.push({ id, msg, type });
-            if (ms > 0) setTimeout(() => this.dismiss(id), ms);
+            if (ms > 0 && tone !== "danger") setTimeout(() => this.dismiss(id), ms);
+            return null;
         },
         dismiss(id) {
             this.messages = this.messages.filter(m => m.id !== id);
@@ -2891,6 +2953,40 @@ ${problem.text}`, "error", 16000);
                 return !name || !cur || name === cur;
             });
         },
+        // Approval queue (G§9.9): one card shows at a time with "1 of N" and
+        // previous/next controls; `cursor` indexes visibleQueue.
+        cursor: 0,
+        get cursorIndex() {
+            const n = this.visibleQueue.length;
+            return n ? Math.min(Math.max(0, this.cursor), n - 1) : 0;
+        },
+        step(delta) {
+            const n = this.visibleQueue.length;
+            if (!n) return;
+            this.cursor = (this.cursorIndex + delta + n) % n;
+            queueMicrotask(() => this.focusCard());
+        },
+        // Move focus to the current card's heading. Only called from user
+        // actions (the top-bar attention chip, previous/next), so it arms the
+        // card's keyboard shortcuts. Never focuses Approve.
+        focusCard() {
+            requestAnimationFrame(() => {
+                const card = document.querySelector(".w-approval[data-current]");
+                if (!card) return;
+                card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                const heading = card.querySelector("[data-approval-heading]");
+                if (heading) {
+                    card.dataset.armed = "true";
+                    heading.focus({ preventScroll: true });
+                }
+            });
+        },
+        // Assertive live-region text for the newest prompt (G§9.9, §11).
+        announcement: "",
+        announce(text) {
+            this.announcement = "";
+            requestAnimationFrame(() => { this.announcement = String(text || ""); });
+        },
         push(payload) { this.queue.push(payload); },
         // Remove a specific id from the queue (used after answer/cancel
         // since the head isn't always the right one with cross-session
@@ -2943,6 +3039,47 @@ ${problem.text}`, "error", 16000);
     });
 
     Alpine.store("tokens", { input: 0, output: 0, total: 0, total_cost: 0 });
+
+    // Live context fill for the top-bar meter (G§9.14). Display only: fed by
+    // every focused-session `context_snapshot` (the pre_provider_call hook)
+    // and primed once per session load. Never feeds back into budgets.
+    Alpine.store("context", {
+        fillPct: 0,
+        totalTokens: 0,
+        contextLimit: 0,
+        layers: [],
+        at: 0,
+        get known() { return this.at > 0 && this.contextLimit > 0; },
+        get level() {
+            const pct = Number(this.fillPct) || 0;
+            return pct >= 85 ? "danger" : (pct >= 65 ? "caution" : "");
+        },
+        get label() {
+            if (!this.known) return "Context not measured yet";
+            return `Context ${Math.round(Number(this.fillPct) || 0)}% · ${_fmtTok(this.totalTokens)} of ${_fmtTok(this.contextLimit)} tokens`;
+        },
+        apply(snap) {
+            if (!snap) return;
+            this.fillPct = Number(snap.fill_pct) || 0;
+            this.totalTokens = Number(snap.total_tokens) || 0;
+            this.contextLimit = Number(snap.context_limit) || 0;
+            this.layers = Array.isArray(snap.layers) ? snap.layers.map(layer => ({
+                id: layer.id, label: layer.label || layer.name || layer.id,
+                tokens: Number(layer.tokens) || 0,
+            })) : [];
+            this.at = Date.now();
+        },
+        reset() { this.fillPct = 0; this.totalTokens = 0; this.contextLimit = 0; this.layers = []; this.at = 0; },
+        async prime(name) {
+            try {
+                const target = name || Alpine.store("chat").currentName;
+                const suffix = target ? `&session_name=${encodeURIComponent(target)}` : "";
+                const r = await fetch(`/api/memory/state?cols=4&rows=4${suffix}`);
+                if (!r.ok) return;
+                this.apply(await r.json());
+            } catch (e) { /* the meter stays empty until the first snapshot */ }
+        },
+    });
 
     // Model effort for agent turns (`reasoning_effort`; "" = provider default). Each
     // provider maps the neutral levels: Anthropic effort, OpenAI reasoning_effort,
@@ -3085,6 +3222,8 @@ ${problem.text}`, "error", 16000);
                     title: "approve tool call",
                     answer: `auto-approved \`${item.prompt.tool_name || "tool"}\` (yolo)`,
                     toolName: item.prompt.tool_name || "",
+                    target: window.WashToolCard ? window.WashToolCard.primaryArg(item.prompt.tool_args) : "",
+                    auto: true,
                     cancelled: false,
                 }, item.session_name);
                 prompts.answer(item.id, { approved: true, remember: false });
@@ -4369,8 +4508,53 @@ ${problem.text}`, "error", 16000);
         timelineHover: { visible: false, x: 0, y: 0, point: null, layer: null },
         cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
         _hoverTimer: null,
-        // Layer swatch colour: server hue -> --viz-N data-vis token.
-        layerColor(hue) { return muLayerColor(hue); },
+        // Wash colours are CSS variables; canvas pixels are redrawn whenever
+        // the theme changes (route_theme.js fires mucli-theme-change).
+        init() {
+            window.addEventListener("mucli-theme-change", () => this._scheduleRender());
+        },
+        // Layer swatch colour (G§1.4): the layer id picks its Wash layer
+        // pigment (--wash-layer-L0 … L5); older payloads fall back to the
+        // server hue map.
+        layerColor(hue, id) {
+            const key = String(id || "");
+            if (window.WASH && WASH.layer && WASH.layer[key]) return `var(--wash-layer-${key})`;
+            return muLayerColor(hue);
+        },
+        // Display-only view model for the Observatory's stacked layer bar and
+        // compact ring. Never changes the L0–L5 contract: it orders and
+        // proportions the layers the snapshot already reports against the
+        // (drift-corrected) context limit.
+        _layerOrder: ["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"],
+        layerSegments() {
+            const layers = (this.layers || []).filter(layer => layer && layer.id !== "FREE" && Number(layer.tokens) > 0);
+            const used = layers.reduce((sum, layer) => sum + Number(layer.tokens || 0), 0);
+            const denom = Math.max(1, Number(this.contextLimit) || 0, used);
+            const rank = id => {
+                const index = this._layerOrder.indexOf(String(id));
+                return index < 0 ? this._layerOrder.length : index;
+            };
+            return layers
+                .slice()
+                .sort((a, b) => rank(a.id) - rank(b.id))
+                .map(layer => {
+                    const pct = (Number(layer.tokens) / denom) * 100;
+                    const names = (window.WASH && WASH.layerNames) || {};
+                    return {
+                        id: layer.id,
+                        hue: layer.hue,
+                        name: layer.name || names[layer.id] || layer.id,
+                        tokens: Number(layer.tokens) || 0,
+                        pct,
+                        labelled: pct >= 6,
+                        color: this.layerColor(layer.hue, layer.id),
+                    };
+                });
+        },
+        ringLevel() {
+            const pct = Number(this.fillPct) || 0;
+            return pct >= 85 ? "danger" : (pct >= 65 ? "caution" : "");
+        },
         durable: {
             items: [],
             stats: {},
@@ -4681,19 +4865,24 @@ ${problem.text}`, "error", 16000);
 
         _contextPalette() {
             const light = muWashTheme() === "paper";
-            const font = `${muCssToken("--fs-xs", "12px")} ${muCssToken("--font-mono", "monospace")}`;
+            // Wash tokens (CSS custom properties), with the generated WASH
+            // palette as the fallback when a variable is not resolvable.
+            const wash = (name) => muCssToken(`--wash-${name}`,
+                (window.WASH && WASH.color(name, light ? "paper" : "dusk")) || "");
+            const mono = muCssToken("--wash-font-mono", "monospace");
+            const font = `${muCssToken("--wash-type-caption-size", "12px")} ${mono}`;
             return {
                 light,
-                text: muCssToken("--text-primary"),
-                textDim: muCssToken("--text-tertiary"),
-                plot: muCssToken("--bg-subtle"),
-                grid: muCssToken("--hairline-color"),
-                selection: muCssToken("--text-secondary"),
-                churnFill: muTokenAlpha("--viz-4", light ? .16 : .22),
-                churnLine: muCssToken("--viz-4"),
-                compaction: muCssToken("--viz-7"),
+                text: wash("ink"),
+                textDim: wash("ink-3"),
+                plot: wash("sunken"),
+                grid: wash("hairline"),
+                selection: wash("ink-2"),
+                churnFill: muTokenAlpha("--wash-running-pigment", light ? .16 : .22),
+                churnLine: wash("running-pigment"),
+                compaction: wash("accent-pigment"),
                 font,
-                fontEmpty: `${muCssToken("--fs-sm", "13px")} ${muCssToken("--font-mono", "monospace")}`,
+                fontEmpty: `${muCssToken("--wash-type-label-size", "13px")} ${mono}`,
                 layer: (hue, alpha) => muTokenAlpha(muLayerVizToken(hue), alpha),
             };
         },
@@ -6289,16 +6478,48 @@ function escapeHtml(s) {
         .replace(/"/g, "&quot;");
 }
 
+// DOMPurify allowlist for model-authored markdown (spec §4.3, §9). It keeps
+// what marked emits today — headings, lists, tables, links, images, inline
+// SVG — and drops scripts, event handlers and javascript: URLs. MathJax runs
+// AFTER sanitising (typesetMath on the rendered node), so its SVG output is
+// never filtered.
+const MUCLI_PURIFY_CONFIG = Object.freeze({
+    USE_PROFILES: { html: true, svg: true, svgFilters: true, mathMl: true },
+    FORBID_TAGS: ["style", "form", "button", "textarea", "select", "iframe", "object", "embed"],
+    FORBID_ATTR: ["style"],
+    ALLOW_DATA_ATTR: false,
+});
+
+function sanitizeHtml(html) {
+    if (typeof DOMPurify === "undefined" || typeof DOMPurify.sanitize !== "function") {
+        // Never hand unsanitised model output to x-html.
+        return null;
+    }
+    return DOMPurify.sanitize(String(html || ""), MUCLI_PURIFY_CONFIG);
+}
+
+// Wrap each fenced block in the Wash code component (G§9.12): a header row
+// with the language and a copy button. Runs on SANITISED markup and only
+// inserts our own static markup around it.
+function wrapCodeBlocks(html) {
+    return html.replace(/<pre><code([^>]*)>/g, (match, attrs) => {
+        const lang = (/class="[^"]*language-([\w+#.-]+)/.exec(attrs) || [])[1] || "";
+        const label = lang ? escapeHtml(lang) : "code";
+        return `<div class="w-code" data-lang="${escapeHtml(lang)}"><div class="w-code__head"><span class="w-code__lang">${label}</span>`
+            + '<button class="w-code__copy code-copy-btn" type="button" title="Copy code" aria-label="Copy code"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-copy"></use></svg><span class="w-code__copy-label">Copy</span></button></div>'
+            + `<pre class="code-block w-code__pre"><code${attrs}>`;
+    }).replace(/<\/code><\/pre>/g, "</code></pre></div>");
+}
+
 function renderMarkdown(text) {
     if (typeof marked === "undefined") return escapeHtml(text);
     try {
-        const html = marked.parse(text, { breaks: true, gfm: true });
+        const raw = marked.parse(String(text || ""), { breaks: true, gfm: true });
+        const clean = sanitizeHtml(raw);
+        if (clean === null) return escapeHtml(text);
         // x-html content is not compiled by Alpine, so a delegated listener
-        // handles these controls after each streamed markdown re-render.
-        return html.replace(
-            /<pre><code([^>]*)>/g,
-            '<pre class="code-block"><button class="code-copy-btn" type="button" title="Copy code" aria-label="Copy code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></button><code$1>'
-        );
+        // handles the copy controls after each re-render.
+        return wrapCodeBlocks(clean);
     } catch {
         return escapeHtml(text);
     }
@@ -6326,13 +6547,19 @@ async function copyToClipboard(text) {
 document.addEventListener("click", async (event) => {
     const button = event.target.closest(".code-copy-btn");
     if (!button) return;
-    const code = button.parentElement && button.parentElement.querySelector("code");
+    const block = button.closest(".w-code") || button.parentElement;
+    const code = block && block.querySelector("code");
     if (!code || !(await copyToClipboard(code.textContent || ""))) return;
+    const label = button.querySelector(".w-code__copy-label");
     button.classList.add("copied");
+    button.setAttribute("data-copied", "");
     button.title = "Copied";
+    if (label) label.textContent = "✓ Copied";
     setTimeout(() => {
         button.classList.remove("copied");
+        button.removeAttribute("data-copied");
         button.title = "Copy code";
+        if (label) label.textContent = "Copy";
     }, 1500);
 });
 
@@ -6346,7 +6573,8 @@ function renderMarkdownBlock(text) { return renderMarkdown(text); }
 function renderMarkdownInline(text) {
     if (typeof marked === "undefined") return escapeHtml(text);
     try {
-        return marked.parseInline(String(text || ""), { gfm: true });
+        const clean = sanitizeHtml(marked.parseInline(String(text || ""), { gfm: true }));
+        return clean === null ? escapeHtml(text) : clean;
     } catch {
         return escapeHtml(text);
     }
@@ -6627,9 +6855,10 @@ function routeEvent(ev) {
             break;
         case "context_snapshot": {
             // Live Context Observatory push from the pre_provider_call hook —
-            // one per iteration. Only act when the Memory view is the
-            // active panel for the focused session, so background turns
-            // and other views pay nothing.
+            // one per iteration. The top-bar meter takes the summary numbers
+            // for the focused session; the full grid only renders when the
+            // Memory view is the active panel, so other views pay nothing.
+            if (isFocused) Alpine.store("context").apply(ev);
             const mode = Alpine.store("mode");
             if (isFocused && mode && mode.active === "memory") {
                 Alpine.store("memory").applySnapshot(ev);
@@ -6781,6 +7010,21 @@ function routeEvent(ev) {
             prompts.push({ id: ev.id, prompt: ev.prompt, session_name: name });
             break;
         case "prompt_resolved":
+            // Server-side YOLO auto-approvals carry the additive `auto: true`
+            // flag (mu/gui/web_ui.py notify_auto_approved). Prompts a person
+            // answered are recorded by the card itself on submit.
+            if (ev.auto) {
+                chat.addPromptResolved({
+                    shape: "tool_approval",
+                    title: "approve tool call",
+                    answer: "approved",
+                    toolName: ev.tool_name || "",
+                    target: ev.target || "",
+                    auto: true,
+                    cancelled: false,
+                }, name);
+            }
+            break;
         case "prompt_cancelled": break;
         case "turn_complete":
             // A terminal error is carried on turn_complete as well as the
@@ -6844,7 +7088,9 @@ function routeEvent(ev) {
             }
             break;
         case "diff":
-            chat.addInfo(`diff proposed: ${ev.filename}`, null, name);
+            // Rendered through the shared Wash diff (static/js/wash/diff.js);
+            // approval cards look the latest diff up by filename.
+            chat.addDiff(ev.filename, ev.original, ev.new, name);
             break;
         case "session_updated":
             slot.externalActive = true;
@@ -6931,6 +7177,55 @@ function summarizeTrace(t, _tick) {
             ? `${((Date.now() - t.startedAt) / 1000).toFixed(1)}s`
             : null);
     return dur ? `${label} · ${dur}` : label;
+}
+
+// "Worked for 2m 4s · 14 steps" — the interim-turn collapse row (G§9.7).
+function summarizeCollapse(t) {
+    const children = (t && t.childTurns) || [];
+    let steps = 0;
+    for (const child of children) {
+        if (child.role === "trace") {
+            steps += (child.events || []).filter(ev => ev.kind === "tool_call").length;
+        } else if (child.role !== "assistant") {
+            steps += 1;
+        }
+    }
+    if (!steps) steps = children.length;
+    const stepText = `${steps} step${steps === 1 ? "" : "s"}`;
+    const seconds = parseFloat(t && t.elapsed);
+    if (!(seconds > 0)) return stepText;
+    const minutes = Math.floor(seconds / 60);
+    const rest = Math.round(seconds % 60);
+    const worked = minutes > 0 ? `${minutes}m ${rest}s` : `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+    return `Worked for ${worked} · ${stepText}`;
+}
+
+// Resolved-prompt breadcrumb helpers (G§9.9 "✓ Approved · write_file routes.py · 14:02").
+function resolvedIsApproval(t) {
+    return !!t && (t.shape === "tool_approval" || t.shape === "diff");
+}
+function resolvedVerb(t) {
+    if (!t) return "";
+    if (resolvedIsApproval(t)) {
+        if (t.cancelled) return "Denied";
+        return t.auto ? "Auto-approved" : "Approved";
+    }
+    return t.cancelled ? "Cancelled" : "Answered";
+}
+function resolvedSubject(t) {
+    if (!t) return "";
+    if (resolvedIsApproval(t)) {
+        const target = String(t.target || "").split("/").pop();
+        return [t.toolName || (t.shape === "diff" ? "change" : "tool"), target].filter(Boolean).join(" ");
+    }
+    return "";
+}
+function formatClock(ms) {
+    const value = Number(ms) || 0;
+    if (!value) return "";
+    try {
+        return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch (e) { return ""; }
 }
 
 function _fmtTok(n) {
@@ -7027,7 +7322,7 @@ function isPlanModeBlockedResult(value) {
 }
 
 function eventLabel(ev) {
-    if (ev.kind === "tool_result" && ev.planBlocked) return "🔒 Blocked by plan mode";
+    if (ev.kind === "tool_result" && ev.planBlocked) return "Blocked by plan mode";
     switch (ev.kind) {
         case "tool_call":   return "› tool";
         case "tool_result": return "↳ result";
@@ -7087,6 +7382,9 @@ function promptModal() {
             this.otherText = "";
             this.answers = {};
             this.remember = false;
+            // Announce the new prompt assertively (G§9.9). Focus is NOT moved
+            // to Approve; see focusOnAppear().
+            try { Alpine.store("prompts").announce(this.announcement()); } catch (e) { /* no store */ }
             // Apply syntax highlighting to any code fences in the
             // freshly-rendered title/description/options.
             queueMicrotask(() => highlightInScope(".modal"));
@@ -7111,6 +7409,130 @@ function promptModal() {
         // of a single line of plaintext.
         titleHtml() { return renderMarkdownBlock(this.title()); },
         descriptionHtml() { return renderMarkdownBlock(this.description); },
+
+        // ---------- Wash approval card (G§9.9, §9.10) -----------------
+        // Presentation helpers only; submit()/cancel() payloads are unchanged.
+        isApproval() { return ["tool_approval", "diff"].includes(this.shape); },
+        target() {
+            if (this.shape === "diff") return String(this.prompt.filename || this.prompt.path || "");
+            return window.WashToolCard ? window.WashToolCard.primaryArg(this.prompt.tool_args) : "";
+        },
+        toolKind() {
+            return window.WashToolCard ? window.WashToolCard.kindOf(this.prompt.tool_name) : "tool";
+        },
+        // A high-risk call escalates the card from attention to danger:
+        // a server-supplied risk, an always-human policy, deletes, pushes and
+        // shell commands that reach the network.
+        risky() {
+            if (!this.isApproval()) return false;
+            if (this.prompt.risk) return true;
+            if (this.prompt.approval_policy === "always_human") return true;
+            const name = String(this.prompt.tool_name || "").toLowerCase();
+            if (/(delete|remove|rm_|drop|push|force|destroy|kill)/.test(name)) return true;
+            const command = this.shape === "tool_approval" && this.toolKind() === "shell" ? this.target() : "";
+            return /\b(rm\s+-[a-z]*[rf]|git\s+push|curl|wget|ssh|scp|rsync|nc\s|sudo|mkfs|dd\s+if=|chmod\s+-R|docker\s+(rm|push))/i.test(command);
+        },
+        tone() {
+            if (this.risky()) return "danger";
+            return this.isApproval() ? "attention" : "accent";
+        },
+        chipLabel() { return this.isApproval() ? "Needs you" : "Question"; },
+        // The human sentence in the card heading ("Edit 1 file", "Run `pytest -q`").
+        headline() {
+            if (this.shape === "diff") return `Review the change to ${this.target() || "a file"}`;
+            if (this.shape !== "tool_approval") return this.title();
+            const tool = String(this.prompt.tool_name || "a tool");
+            const target = this.target();
+            switch (this.toolKind()) {
+                case "edit": return target ? `Permission to edit ${target.split("/").pop()}` : "Permission to edit files";
+                case "shell": return target ? `Run \`${target.length > 80 ? target.slice(0, 79) + "…" : target}\`` : "Permission to run a command";
+                case "web": return "Permission to reach the web";
+                case "agent": return "Permission to start a sub-agent";
+                default: return `Permission to use ${tool}`;
+            }
+        },
+        headlineHtml() {
+            return this.shape === "tool_approval" || this.shape === "diff"
+                ? renderMarkdownInline(this.headline())
+                : renderMarkdownBlock(this.title());
+        },
+        announcement() {
+            if (this.isApproval()) return `Mucli needs your approval: ${this.headline().replace(/`/g, "")}`;
+            return `Mucli has a question: ${String(this.title() || "").slice(0, 160)}`;
+        },
+        // Diff for the preview: the prompt's own diff, else the latest
+        // proposed diff for the same file (the server publishes `diff`
+        // events just before edit approvals), else a patch argument.
+        previewDiff() {
+            if (this.shape === "diff") return String(this.prompt.diff || "");
+            const args = this.prompt.tool_args;
+            if (args && typeof args === "object") {
+                for (const key of ["patch", "diff", "unified_diff"]) {
+                    if (typeof args[key] === "string" && /^(---|\+\+\+|@@|diff --git)/m.test(args[key])) return args[key];
+                }
+            }
+            const recent = Alpine.store("chat").diffFor(this.target(), this.prompt.session_name);
+            return recent ? recent.unified : "";
+        },
+        previewHtml() {
+            const diff = this.previewDiff();
+            if (diff && window.WashDiff) return window.WashDiff.renderDiffHTML(diff, { maxLines: 16, moreLabel: "the full arguments are below" });
+            return "";
+        },
+        diffStats() {
+            const diff = this.previewDiff();
+            return diff && window.WashDiff ? window.WashDiff.stats(diff) : null;
+        },
+        commandPreview() {
+            return this.shape === "tool_approval" && this.toolKind() === "shell" ? this.target() : "";
+        },
+        riskText() {
+            if (this.prompt.risk) return String(this.prompt.risk);
+            if (this.prompt.approval_policy === "always_human") return "Always asks a person";
+            if (this.risky()) return "High-risk action";
+            if (this.toolKind() === "edit") return "Modifies files";
+            if (this.toolKind() === "shell") return "Runs a shell command";
+            return "";
+        },
+        // Focus the heading when the card appears, unless the person is
+        // typing somewhere else (then the live region announces it and the
+        // top-bar ◆ chip jumps here). Programmatic focus does not arm the
+        // ⏎ / a / d shortcuts; a pointer or keyboard move into the card does.
+        focusOnAppear(el) {
+            const active = document.activeElement;
+            const typing = active && active !== document.body
+                && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+            if (typing) return;
+            requestAnimationFrame(() => {
+                const heading = el.querySelector("[data-approval-heading]");
+                if (heading && el.hasAttribute("data-current")) heading.focus({ preventScroll: true });
+            });
+        },
+        arm(el) { el.dataset.armed = "true"; },
+        // Card-scoped shortcuts: only when focus is on the card or its heading
+        // (never inside a field or on another control) and the card is armed.
+        onCardKey(event, el) {
+            const t = event.target;
+            if (!(t === el || (t && t.hasAttribute && t.hasAttribute("data-approval-heading")))) return;
+            if (event.metaKey || event.ctrlKey || event.altKey) return;
+            if (el.dataset.armed !== "true") {
+                if (event.key === "Tab") this.arm(el);
+                return;
+            }
+            const key = event.key;
+            if (key === "Enter") { event.preventDefault(); this.submit(); return; }
+            if (this.isApproval() && (key === "a" || key === "A")) { event.preventDefault(); this.submit(); return; }
+            if (this.isApproval() && (key === "d" || key === "D")) { event.preventDefault(); this.cancel(); return; }
+            if (/^[1-9]$/.test(key) && ["choice", "choices"].includes(this.shape)) {
+                const options = this.prompt.options || this.prompt.choices || [];
+                const opt = options[Number(key) - 1];
+                if (opt !== undefined) {
+                    event.preventDefault();
+                    const value = this.optValue(opt);
+                    this.setChoice(value, this.multi ? !this.isChoiceSelected(value) : true);
+                }
+            }
+        },
 
         okLabel() {
             switch (this.shape) {
@@ -7533,7 +7955,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const tab = document.createElement('button');
         tab.type = 'button';
+        tab.className = 'w-nav__item';
         tab.setAttribute(':class', "{ active: $store.inspector.tab === 'pricing' }");
+        tab.setAttribute(':aria-selected', "$store.inspector.tab === 'pricing' ? 'true' : 'false'");
         tab.setAttribute('@click', "$store.inspector.setTab('pricing'); $store.pricingSettings.load()");
         tab.setAttribute('role', 'tab');
         tab.textContent = 'pricing';
@@ -7552,79 +7976,80 @@ document.addEventListener("DOMContentLoaded", () => {
                     <h3 class="pricing-settings-title">Model pricing</h3>
                     <p class="pricing-settings-copy">Edit the per-million token rates MuCLI uses for cost accounting. OpenAI, Gemini, Anthropic, and Ollama Cloud all use this registry. Local Ollama remains $0 attributable provider/API cost; host compute is intentionally separate.</p>
                 </div>
-                <a class="pricing-settings-advanced" href="/models/costs">Advanced registry</a>
+                <a class="pricing-settings-advanced w-btn" data-variant="ghost" data-size="sm" href="/models/costs"><span>Advanced registry</span><span class="w-btn__chevron" aria-hidden="true">›</span></a>
             </div>
 
             <div class="pricing-settings-meta" x-show="$store.pricingSettings.loaded">
                 <span class="pricing-settings-source" x-text="$store.pricingSettings.sourceLabel()" :title="$store.pricingSettings.activeConfigPath || $store.pricingSettings.configPath"></span>
-                <span class="pricing-settings-state"
+                <span class="pricing-settings-state w-chip"
+                      :data-tone="$store.pricingSettings.usingOverride ? 'accent' : 'neutral'"
                       :class="{ 'is-override': $store.pricingSettings.usingOverride }"
                       x-text="$store.pricingSettings.usingOverride ? 'override active' : 'defaults'"></span>
             </div>
 
-            <div class="pricing-provider-filter" x-show="$store.pricingSettings.loaded">
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'all' }" @click="$store.pricingSettings.provider = 'all'">all</button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'openai' }" @click="$store.pricingSettings.provider = 'openai'">OpenAI <span x-text="$store.pricingSettings.providerCount('openai')"></span></button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'gemini' }" @click="$store.pricingSettings.provider = 'gemini'">Gemini <span x-text="$store.pricingSettings.providerCount('gemini')"></span></button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'anthropic' }" @click="$store.pricingSettings.provider = 'anthropic'">Anthropic <span x-text="$store.pricingSettings.providerCount('anthropic')"></span></button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'ollama' }" @click="$store.pricingSettings.provider = 'ollama'">Ollama <span x-text="$store.pricingSettings.providerCount('ollama')"></span></button>
-                <button type="button" @click="$store.pricingSettings.load(true)">refresh</button>
+            <div class="pricing-provider-filter w-tabs" role="tablist" aria-label="Pricing providers" x-show="$store.pricingSettings.loaded">
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'all' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'all' }" @click="$store.pricingSettings.provider = 'all'">all</button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'openai' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'openai' }" @click="$store.pricingSettings.provider = 'openai'">OpenAI <span class="w-count" x-text="$store.pricingSettings.providerCount('openai')"></span></button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'gemini' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'gemini' }" @click="$store.pricingSettings.provider = 'gemini'">Gemini <span class="w-count" x-text="$store.pricingSettings.providerCount('gemini')"></span></button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'anthropic' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'anthropic' }" @click="$store.pricingSettings.provider = 'anthropic'">Anthropic <span class="w-count" x-text="$store.pricingSettings.providerCount('anthropic')"></span></button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'ollama' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'ollama' }" @click="$store.pricingSettings.provider = 'ollama'">Ollama <span class="w-count" x-text="$store.pricingSettings.providerCount('ollama')"></span></button>
+                <button type="button" class="pricing-refresh-button w-btn" data-variant="ghost" data-size="sm" @click="$store.pricingSettings.load(true)"><span>Refresh</span></button>
             </div>
 
-            <div class="pricing-settings-error" x-show="$store.pricingSettings.error" x-text="$store.pricingSettings.error"></div>
+            <div class="pricing-settings-error" role="alert" x-show="$store.pricingSettings.error" x-text="$store.pricingSettings.error"></div>
             <div class="pricing-settings-empty" x-show="$store.pricingSettings.loading">Loading model pricing…</div>
 
             <div class="pricing-model-list" x-show="$store.pricingSettings.loaded && !$store.pricingSettings.loading">
                 <template x-for="row in $store.pricingSettings.filteredModels()" :key="row.provider + ':' + row.key">
                     <article class="pricing-model-row">
                         <div class="pricing-model-head">
-                            <span class="pricing-provider-badge" x-text="row.provider"></span>
+                            <span class="pricing-provider-badge w-chip" data-variant="meta" x-text="row.provider"></span>
                             <span class="pricing-model-name" x-text="row.key" :title="row.key"></span>
-                            <select class="pricing-billing-select" :value="row.billing" @change="$store.pricingSettings.setBilling(row, $event.target.value)">
+                            <span class="w-select pricing-billing-wrap"><select class="pricing-billing-select w-select__control" aria-label="Billing mode" :value="row.billing" @change="$store.pricingSettings.setBilling(row, $event.target.value)">
                                 <option value="token">token priced</option>
                                 <option value="estimated_token">estimated token</option>
                                 <option value="local">local / $0 API</option>
                                 <option value="unknown">unpriced</option>
-                            </select>
+                            </select></span>
                         </div>
                         <div class="pricing-capability-map">
                             <div class="pricing-capability-line">
                                 <span class="pricing-capability-label">inputs</span>
                                 <template x-for="modality in (row.input_modalities || ['text'])" :key="'in:' + modality">
-                                    <span class="pricing-capability-chip is-input" x-text="modality"></span>
+                                    <span class="pricing-capability-chip is-input w-chip" data-tone="accent" x-text="modality"></span>
                                 </template>
                             </div>
                             <div class="pricing-capability-line">
                                 <span class="pricing-capability-label">outputs</span>
                                 <template x-for="modality in (row.output_modalities || ['text'])" :key="'out:' + modality">
-                                    <span class="pricing-capability-chip" x-text="modality"></span>
+                                    <span class="pricing-capability-chip w-chip" data-variant="meta" x-text="modality"></span>
                                 </template>
                             </div>
                             <div class="pricing-capability-line" x-show="(row.capabilities || []).length">
                                 <span class="pricing-capability-label">features</span>
                                 <template x-for="capability in (row.capabilities || [])" :key="'cap:' + capability">
-                                    <span class="pricing-capability-chip is-feature" x-text="String(capability).replaceAll('_', ' ')"></span>
+                                    <span class="pricing-capability-chip is-feature w-chip" x-text="String(capability).replaceAll('_', ' ')"></span>
                                 </template>
                             </div>
                         </div>
                         <div class="pricing-rate-grid">
-                            <label class="pricing-rate-field">
-                                <span>Input / 1M</span>
-                                <input type="number" min="0" step="0.001"
+                            <label class="pricing-rate-field w-field">
+                                <span class="w-field__label">Input / 1M</span>
+                                <input type="number" class="w-input" data-mono min="0" step="0.001"
                                        :disabled="row.billing === 'local' || row.billing === 'unknown'"
                                        :value="$store.pricingSettings.displayRate(row.input_per_million)"
                                        @input="$store.pricingSettings.setRate(row, 'input_per_million', $event.target.value)">
                             </label>
-                            <label class="pricing-rate-field">
-                                <span>Cached input / 1M</span>
-                                <input type="number" min="0" step="0.001"
+                            <label class="pricing-rate-field w-field">
+                                <span class="w-field__label">Cached input / 1M</span>
+                                <input type="number" class="w-input" data-mono min="0" step="0.001"
                                        :disabled="row.billing === 'local' || row.billing === 'unknown'"
                                        :value="$store.pricingSettings.displayRate(row.cached_input_per_million)"
                                        @input="$store.pricingSettings.setRate(row, 'cached_input_per_million', $event.target.value)">
                             </label>
-                            <label class="pricing-rate-field">
-                                <span>Output / 1M</span>
-                                <input type="number" min="0" step="0.001"
+                            <label class="pricing-rate-field w-field">
+                                <span class="w-field__label">Output / 1M</span>
+                                <input type="number" class="w-input" data-mono min="0" step="0.001"
                                        :disabled="row.billing === 'local' || row.billing === 'unknown'"
                                        :value="$store.pricingSettings.displayRate(row.output_per_million)"
                                        @input="$store.pricingSettings.setRate(row, 'output_per_million', $event.target.value)">
@@ -7642,8 +8067,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="pricing-settings-actions" x-show="$store.pricingSettings.loaded">
                 <span class="pricing-settings-dirty" x-text="$store.pricingSettings.dirty ? 'Unsaved pricing changes' : ($store.pricingSettings.usingOverride ? 'Operator pricing override active' : 'Using packaged defaults')"></span>
                 <div class="pricing-settings-buttons">
-                    <button type="button" @click="$store.confirm.ask('Reset all model pricing to packaged defaults?', $event, () => $store.pricingSettings.reset(), {danger:true})">reset</button>
-                    <button type="button" class="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'saving…' : 'save pricing'"></button>
+                    <button type="button" class="w-btn" data-variant="secondary" @click="$store.confirm.ask('Reset all model pricing to packaged defaults?', $event, () => $store.pricingSettings.reset(), {danger:true})"><span>Reset</span></button>
+                    <button type="button" class="primary w-btn" data-variant="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'Saving…' : 'Save pricing'"></button>
                 </div>
             </div>
         `;

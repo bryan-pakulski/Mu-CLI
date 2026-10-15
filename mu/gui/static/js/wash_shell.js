@@ -2,8 +2,8 @@
 //
 // - Sidebar drawer (below 840px): the top-bar menu button toggles
 //   #w-shell[data-sidebar-open]; Esc, the scrim, or following a link closes it.
-// - window.WashToast.show(message, tone, {timeout}) for pages without the
-//   Alpine toast store. Errors go to the assertive region and persist;
+// - window.WashToast.show(message, tone, {timeout, action: {label, run}}) —
+//   every page's toasts, including app.js's $store.toast (which delegates here). Errors go to the assertive region and persist;
 //   info/success go to the polite region and auto-dismiss after 5s (G§9.16).
 (function () {
     'use strict';
@@ -67,7 +67,21 @@
         dismiss.setAttribute('aria-label', 'Dismiss notification');
         dismiss.textContent = '×';
         dismiss.addEventListener('click', function () { toast.remove(); });
-        toast.append(glyph, msg, dismiss);
+        toast.append(glyph, msg);
+        if (options && options.action && options.action.label) {
+            var action = document.createElement('button');
+            action.type = 'button';
+            action.className = 'w-btn';
+            action.setAttribute('data-variant', 'ghost');
+            action.setAttribute('data-size', 'sm');
+            action.textContent = String(options.action.label);
+            action.addEventListener('click', function () {
+                try { if (typeof options.action.run === 'function') options.action.run(); }
+                finally { toast.remove(); }
+            });
+            toast.append(action);
+        }
+        toast.append(dismiss);
         region.appendChild(toast);
         var timeout = options && options.timeout != null ? options.timeout : (assertive ? 0 : 5000);
         if (timeout > 0) setTimeout(function () { toast.remove(); }, timeout);

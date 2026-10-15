@@ -30,9 +30,14 @@ def test_gui_exposes_first_class_engineering_work_surface():
 
     assert '@app.get("/work"' in app
     assert "work.html" in app
-    assert "product-work-button" in index
-    assert "'/work?session='" in index
-    assert 'aria-label="Open engineering work"' in index
+    # Wash W4: Work is primary sidebar navigation; the session-scoped Work
+    # link lives in the stage view menu (fragments/panel_tabs.html), which
+    # index.html includes.
+    tabs = (INDEX.parent / "fragments" / "panel_tabs.html").read_text(encoding="utf-8")
+    assert "fragments/panel_tabs.html" in index
+    assert "product-work-button" in tabs
+    assert "'/work?session='" in tabs
+    assert 'aria-label="Open engineering work"' in tabs
 
     # Wash W2: /work links its page bundle, which imports work.css.
     assert '/static/css/wash/patterns/work.css' in template

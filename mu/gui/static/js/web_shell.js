@@ -178,7 +178,9 @@
 
         const addButton = document.createElement('button');
         addButton.type = 'button';
-        addButton.className = 'pricing-add-model-button';
+        addButton.className = 'pricing-add-model-button w-btn';
+        addButton.dataset.variant = 'ghost';
+        addButton.dataset.size = 'sm';
         addButton.textContent = '+ model';
         filter.appendChild(addButton);
 
@@ -188,62 +190,62 @@
         creator.innerHTML = `
             <div class="pricing-add-row-head">
                 <span class="pricing-add-row-title">Add model pricing</span>
-                <button type="button" class="pricing-add-cancel" aria-label="Cancel adding model">×</button>
+                <button type="button" class="pricing-add-cancel w-btn" data-variant="icon" aria-label="Cancel adding model" title="Cancel adding model"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </div>
             <div class="pricing-add-row-grid">
-                <label class="pricing-add-field">
-                    <span>Provider</span>
-                    <select name="provider">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Provider</span>
+                    <span class="w-select"><select class="w-select__control" name="provider">
                         <option value="openai">OpenAI</option>
                         <option value="gemini">Gemini</option>
                         <option value="anthropic">Anthropic</option>
                         <option value="ollama">Ollama</option>
-                    </select>
+                    </select></span>
                 </label>
-                <label class="pricing-add-field">
-                    <span>Model</span>
-                    <input name="key" type="text" autocomplete="off" placeholder="model-name or model:cloud" required>
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Model</span>
+                    <input class="w-input" data-mono name="key" type="text" autocomplete="off" placeholder="model-name or model:cloud" required>
                 </label>
-                <label class="pricing-add-field">
-                    <span>Billing</span>
-                    <select name="billing">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Billing</span>
+                    <span class="w-select"><select class="w-select__control" name="billing">
                         <option value="token">token priced</option>
                         <option value="estimated_token">estimated token</option>
                         <option value="local">local / $0 API</option>
                         <option value="unknown">unpriced</option>
-                    </select>
+                    </select></span>
                 </label>
-                <label class="pricing-add-field">
-                    <span>Native inputs</span>
-                    <input name="input_modalities" type="text" value="text" placeholder="text, image, audio">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Native inputs</span>
+                    <input class="w-input" data-mono name="input_modalities" type="text" value="text" placeholder="text, image, audio">
                 </label>
-                <label class="pricing-add-field">
-                    <span>Outputs</span>
-                    <input name="output_modalities" type="text" value="text" placeholder="text">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Outputs</span>
+                    <input class="w-input" data-mono name="output_modalities" type="text" value="text" placeholder="text">
                 </label>
-                <label class="pricing-add-field">
-                    <span>Capabilities</span>
-                    <input name="capabilities" type="text" placeholder="reasoning, tool_calling">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Capabilities</span>
+                    <input class="w-input" data-mono name="capabilities" type="text" placeholder="reasoning, tool_calling">
                 </label>
             </div>
             <div class="pricing-add-row-rates">
-                <label class="pricing-add-field">
-                    <span>Input / 1M</span>
-                    <input name="input_per_million" type="number" min="0" step="0.001" placeholder="0.000">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Input / 1M</span>
+                    <input class="w-input" data-mono name="input_per_million" type="number" min="0" step="0.001" placeholder="0.000">
                 </label>
-                <label class="pricing-add-field">
-                    <span>Cached input / 1M</span>
-                    <input name="cached_input_per_million" type="number" min="0" step="0.001" placeholder="optional">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Cached input / 1M</span>
+                    <input class="w-input" data-mono name="cached_input_per_million" type="number" min="0" step="0.001" placeholder="optional">
                 </label>
-                <label class="pricing-add-field">
-                    <span>Output / 1M</span>
-                    <input name="output_per_million" type="number" min="0" step="0.001" placeholder="0.000">
+                <label class="pricing-add-field w-field">
+                    <span class="w-field__label">Output / 1M</span>
+                    <input class="w-input" data-mono name="output_per_million" type="number" min="0" step="0.001" placeholder="0.000">
                 </label>
             </div>
-            <div class="pricing-add-row-error" hidden></div>
+            <div class="pricing-add-row-error" role="alert" hidden></div>
             <div class="pricing-add-row-actions">
-                <button type="button" class="pricing-add-cancel">cancel</button>
-                <button type="submit" class="primary">add pricing row</button>
+                <button type="button" class="pricing-add-cancel w-btn" data-variant="secondary">cancel</button>
+                <button type="submit" class="primary w-btn" data-variant="primary">add pricing row</button>
             </div>
         `;
         list.parentNode.insertBefore(creator, list);

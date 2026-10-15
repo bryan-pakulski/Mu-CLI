@@ -11,35 +11,10 @@
  * Delete each block when the legacy selector it serves is retired (W3/W4).
  */
 
-/* ------------------------------------------------ conversation.css (transcript density) */
-.chat-history { padding-top: var(--space-6); }
-.chat-history > .turn-wrap > .msg { margin-bottom: var(--space-3); }
-.chat-history .collapse-group { margin: var(--space-1) 0 var(--space-3); }
-.chat-history .collapse-header { min-height: 28px; }
-.chat-history .collapse-body { border-left: 1px solid var(--hairline); }
-.chat-history .collapse-body .msg.assistant.collapsed-child { padding: var(--space-1) var(--space-3); }
-.chat-history .collapse-body .trace,
-.chat-history .collapse-body .subagent-panel,
-.chat-history .collapse-body .msg.command,
-.chat-history .collapse-body .msg.info,
-.chat-history .collapse-body .msg.error,
-.chat-history .collapse-body .msg.prompt-resolved { border-top: 0; }
-@media (width < 840px) {
-    .chat-history { padding-top: var(--space-5); }
-    .chat-history > .turn-wrap > .msg { margin-bottom: var(--space-3); }
-}
-
-/* ------------------------------------------------ refinement.css / crystal.css (stage + composer) */
-.panel-stage .mode-panel { inset: var(--panel-tabs-h) 0 0 0; }
-.app .panel-stage .mode-panel,
-.panel-stage .mode-panel { max-height: none; flex: none; }
-.composer::before { content: none; }
-.composer-toolbar { position: static; }
-.composer .hint { min-height: 0; background: transparent; }
-.settings-pane .var-row { background: transparent; }
-
-/* ------------------------------------------------ product.css */
-body { padding: 0; }
+/* The chat page's conversation / refinement / crystal / product overrides
+ * were retired with those stylesheets (W4, web-shell track): the transcript,
+ * composer, stage and settings now have real Wash rules in components/ and
+ * patterns/{chat,panels,settings,welcome}.css. */
 
 /* ------------------------------------------------ app.css (CodeMirror follows the tokens) */
 .CodeMirror { background: var(--bg); color: var(--text-primary); }

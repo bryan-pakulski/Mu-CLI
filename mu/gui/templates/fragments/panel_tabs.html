@@ -1,35 +1,92 @@
-<nav class="panel-tabs panel-select-nav" aria-label="Workspace views">
-    <div class="panel-selectors">
-        <label class="panel-selector">
-            <span class="panel-selector-label">Modes</span>
-            <select class="panel-view-select panel-mode-select"
-                    :value="$store.mode.modes.some(item => item.name === $store.mode.active) ? $store.mode.active : ''"
-                    @change="$event.target.value && $store.mode.setView($event.target.value)"
-                    aria-label="Select view mode">
-                <option value="">Select mode</option>
-                <template x-for="m in $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name))" :key="'panel-mode-select-' + m.name">
-                    <option :value="m.name" :disabled="m.disabled" x-text="m.display_name"></option>
+{#- The single stage header (G§8.1, §9.3 "Panel (stage)"): the active view's
+    title over a mode-tint band, a segmented control for the everyday views
+    (the session's mode panel, Context, Files, Artifacts) and a menu for every
+    other mode panel and tool, plus close. Replaces the two selects. -#}
+<header class="panel-tabs panel-select-nav w-panel__head w-stage-head" aria-label="Workspace views"
+        :data-mode-tint="$store.mode.active"
+        x-data="{
+            menuOpen: false,
+            label(name) {
+                const all = [...$store.mode.modes, ...$store.mode.views];
+                const hit = all.find(item => item.name === name);
+                if (hit) return hit.display_name || hit.name;
+                return ({ memory: 'Context', systemPrompts: 'System prompts' })[name] || String(name || '').replace(/^./, c => c.toUpperCase());
+            },
+            get quick() {
+                const panel = $store.mode.panelModes;
+                const views = [];
+                if (panel.includes($store.mode.realMode)) views.push($store.mode.realMode);
+                for (const name of ['memory', 'files', 'artifacts']) {
+                    if (!views.includes(name) && panel.includes(name)) views.push(name);
+                }
+                return views;
+            },
+            get panelModeList() { return $store.mode.modes.filter(item => $store.mode.panelModes.includes(item.name)); },
+            get toolList() { return $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name)); },
+        }"
+        @keydown.escape="menuOpen = false">
+    <span class="w-stage-head__eyebrow">Workspace</span>
+    <h2 class="w-panel__title" x-text="label($store.mode.active)">Workspace</h2>
+    <div class="w-panel__actions">
+        <div class="w-segmented panel-segmented" data-size="sm" role="group" aria-label="Quick views">
+            <template x-for="name in quick" :key="'panel-quick-' + name">
+                <button type="button" class="w-segmented__option"
+                        :aria-pressed="$store.mode.active === name ? 'true' : 'false'"
+                        @click="$store.mode.setView(name); $store.layout.panelOpen = true"
+                        x-text="label(name)"></button>
+            </template>
+        </div>
+        <div class="w-stage-head__menu" @click.outside="menuOpen = false">
+            <button type="button" class="w-btn panel-view-menu-button" data-variant="icon" data-size="sm"
+                    aria-haspopup="menu" :aria-expanded="menuOpen ? 'true' : 'false'"
+                    aria-label="More views" title="More views"
+                    @click="menuOpen = !menuOpen">
+                <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-layers"></use></svg>
+            </button>
+            <div class="w-menu panel-view-menu" role="menu" aria-label="Workspace views" x-show="menuOpen" x-cloak
+                 x-transition.opacity.duration.120ms>
+                <div class="w-menu__heading">Modes</div>
+                <template x-for="m in panelModeList" :key="'panel-mode-' + m.name">
+                    <button type="button" class="w-menu__item" role="menuitemradio"
+                            :data-mode-tint="m.name"
+                            :aria-checked="$store.mode.active === m.name ? 'true' : 'false'"
+                            :disabled="m.disabled"
+                            @click="if (!m.disabled) { $store.mode.setView(m.name); $store.layout.panelOpen = true; menuOpen = false }">
+                        <span class="w-composer__mode-dot" aria-hidden="true"></span>
+                        <span class="w-menu__label" x-text="m.display_name"></span>
+                    </button>
                 </template>
-            </select>
-        </label>
-
-        <label class="panel-selector">
-            <span class="panel-selector-label">Tools</span>
-            <select class="panel-view-select panel-tool-select"
-                    :value="$store.mode.views.some(item => !item.external && item.name === $store.mode.active) ? $store.mode.active : ''"
-                    @change="$event.target.value && $store.mode.setView($event.target.value)"
-                    aria-label="Select tooling view">
-                <option value="">Select tool</option>
-                <template x-for="v in $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name))" :key="'panel-tool-select-' + v.name">
-                    <option :value="v.name" :disabled="v.disabled" x-text="v.display_name"></option>
+                <hr class="w-menu__separator">
+                <div class="w-menu__heading">Tools</div>
+                <template x-for="v in toolList" :key="'panel-tool-' + v.name">
+                    <button type="button" class="w-menu__item" role="menuitemradio"
+                            :aria-checked="$store.mode.active === v.name ? 'true' : 'false'"
+                            :disabled="v.disabled"
+                            @click="if (!v.disabled) { $store.mode.setView(v.name); $store.layout.panelOpen = true; menuOpen = false }">
+                        <span class="w-menu__label" x-text="v.display_name"></span>
+                    </button>
                 </template>
-            </select>
-        </label>
+                <hr class="w-menu__separator">
+                <a class="w-menu__item product-work-button" role="menuitem"
+                   :href="'/work?session=' + encodeURIComponent($store.chat.currentName || '')"
+                   aria-label="Open engineering work">
+                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-briefcase"></use></svg>
+                    <span class="w-menu__label">Work for this session</span>
+                </a>
+                <a class="w-menu__item" role="menuitem"
+                   :href="'/trace?session=' + encodeURIComponent($store.chat.currentName || '')"
+                   target="_blank" rel="noopener"
+                   aria-label="Open Trace Analyzer">
+                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-activity"></use></svg>
+                    <span class="w-menu__label">Trace for this session</span>
+                    <span class="w-menu__shortcut" aria-hidden="true">↗</span>
+                </a>
+            </div>
+        </div>
+        <button type="button"
+                class="panel-tabs-close w-btn" data-variant="icon" data-size="sm"
+                @click="$store.layout.panelOpen = false"
+                title="Close panel"
+                aria-label="Close workspace panel"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
     </div>
-
-    <button type="button"
-            class="panel-tabs-close"
-            @click="$store.layout.panelOpen = false"
-            title="Close panel"
-            aria-label="Close workspace panel">×</button>
-</nav>
+</header>

@@ -53,6 +53,25 @@ _DELTAS_FLUSH_MS = 50.0
 _DELTAS_MAX_CHARS = 8192
 
 
+_APPROVAL_TARGET_KEYS = ("path", "file_path", "filename", "command", "cmd", "query", "url", "pattern")
+
+
+def _approval_target(tool_args: Any) -> str:
+    """Short human target for an auto-approval breadcrumb (path / command).
+
+    Only a single scalar argument is surfaced, truncated to 120 characters;
+    the full arguments already appear in the tool_call trace event.
+    """
+    if not isinstance(tool_args, dict):
+        return ""
+    for key in _APPROVAL_TARGET_KEYS:
+        value = tool_args.get(key)
+        if isinstance(value, str) and value.strip():
+            text = " ".join(value.split())
+            return text if len(text) <= 120 else text[:119] + "…"
+    return ""
+
+
 class WebUI(BaseUI):
     def __init__(
         self,
@@ -377,6 +396,26 @@ class WebUI(BaseUI):
                 "filename": str(filename),
                 "original": str(original_content or ""),
                 "new": str(new_content or ""),
+            }
+        )
+
+    def notify_auto_approved(self, tool_name=None, tool_args=None) -> None:
+        """Publish a resolved-approval breadcrumb for a call YOLO auto-approved.
+
+        Nothing is asked and nothing waits: the agent already decided. The
+        browser renders it like any other ``prompt_resolved`` breadcrumb,
+        tagged ``auto`` (G§9.9 "auto-approval is always visible after the
+        fact"). ``auto: True`` is the additive field; it is only ever set
+        here, never on prompts a person answered.
+        """
+        self._publish(
+            {
+                "kind": "prompt_resolved",
+                "id": f"auto-{uuid.uuid4()}",
+                "auto": True,
+                "shape": "tool_approval",
+                "tool_name": str(tool_name or ""),
+                "target": _approval_target(tool_args),
             }
         )
 

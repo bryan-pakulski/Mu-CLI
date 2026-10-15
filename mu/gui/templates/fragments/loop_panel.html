@@ -6,54 +6,59 @@
     {% include "fragments/mode_workspace_header.html" %}
 
     <!-- empty state -->
-    <div class="panel-empty" x-show="!$store.loop.loopGoal && !$store.loop.backlog.length">
-        <h3>no loop active</h3>
-        <p class="muted">Set a goal with <code>/goal &lt;text&gt;</code> then let the agent loop autonomously.</p>
+    <div class="panel-empty w-empty" data-size="sm" data-tone="ok" x-show="!$store.loop.loopGoal && !$store.loop.backlog.length">
+        <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-repeat"></use></svg></div>
+        <h3 class="w-empty__title">No loop active</h3>
+        <p class="w-empty__body">Set a goal with <code>/goal &lt;text&gt;</code>, then let the agent loop autonomously.</p>
     </div>
 
     <!-- header: goal + active status -->
     <div class="panel-head" x-show="$store.loop.loopGoal || $store.loop.backlog.length">
         <div class="panel-subject" x-text="$store.loop.loopGoal || '(no goal set)'"></div>
-        <div class="panel-meta mono muted">
-            <span class="tag"
-                  :style="$store.loop.loopActive ? 'background: var(--accent-subtle); color: var(--accent-fg)' : ''"
-                  x-text="$store.loop.loopActive ? 'active' : 'paused'"></span>
+        <div class="panel-meta">
+            <span class="tag w-chip" :data-tone="$store.loop.loopActive ? 'running' : 'neutral'">
+                <span class="w-chip__glyph" aria-hidden="true" x-text="$store.loop.loopActive ? '●' : '–'"></span>
+                <span x-text="$store.loop.loopActive ? 'Active' : 'Paused'"></span>
+            </span>
             <span x-text="$store.loop.backlog.length + ' tasks'"></span>
-            <button class="mode-control-btn"
+            <button class="mode-control-btn w-btn" data-variant="ghost" data-size="sm"
                     x-show="$store.loop.loopGoal"
                     @click="$store.loop.setActive(!$store.loop.loopActive)"
-                    x-text="$store.loop.loopActive ? 'pause' : 'resume'"></button>
+                    x-text="$store.loop.loopActive ? 'Pause' : 'Resume'"></button>
         </div>
     </div>
 
     <!-- backlog (todos) -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="($store.loop.backlog.length || $store.loop.loopGoal) && $store.modeWorkspace.shows('backlog')"
              :class="{ open: $store.loop.openSections.backlog }">
         <div class="panel-section-header-row">
-            <button class="panel-section-head"
+            <button class="panel-section-head w-panel__section-head"
                     @click="$store.loop.toggleSection('backlog')"
                     :aria-expanded="$store.loop.openSections.backlog">
-                <span class="caret">›</span>
-                <span class="panel-section-name">backlog</span>
-                <span class="panel-section-count mono muted"
+                <span class="caret w-panel__caret" aria-hidden="true">›</span>
+                <span class="panel-section-name w-panel__section-title">Backlog</span>
+                <span class="panel-section-count w-count"
                       x-text="$store.loop.backlog.length"></span>
             </button>
-            <span class="panel-add-btn"
-                  @click.stop="$store.loop.openAddItem()"
-                  title="Add backlog item">+</span>
+            <button type="button" class="panel-add-btn w-btn" data-variant="icon" data-size="sm"
+                    @click.stop="$store.loop.openAddItem()"
+                    title="Add backlog item" aria-label="Add backlog item"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg></button>
         </div>
-        <div class="panel-section-body" x-show="$store.loop.openSections.backlog"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.loop.openSections.backlog"
              x-transition.opacity.duration.120ms>
             <template x-for="item in $store.loop.filteredBacklog()" :key="item.id">
                 <div class="loop-todo-item"
                      :class="{ expanded: $store.loop.isItemExpanded(item.id) }">
-                    <div class="loop-todo-row"
-                         @click="$store.loop.toggleItem(item.id)">
-                        <span class="status-glyph"
+                    <div class="loop-todo-row" role="button" tabindex="0"
+                         :aria-expanded="$store.loop.isItemExpanded(item.id)"
+                         @click="$store.loop.toggleItem(item.id)"
+                         @keydown.enter.prevent="$store.loop.toggleItem(item.id)"
+                         @keydown.space.prevent="$store.loop.toggleItem(item.id)">
+                        <span class="status-glyph" aria-hidden="true"
                               x-text="$store.loop.statusGlyph(item.status)"></span>
                         <span class="loop-todo-text" x-text="item.content"></span>
-                        <span class="tag mono muted" x-text="item.status"></span>
+                        <span class="tag w-chip" data-variant="meta" x-text="item.status"></span>
                     </div>
                     <div class="loop-todo-detail"
                          x-show="$store.loop.isItemExpanded(item.id)"
@@ -62,7 +67,7 @@
                         <div class="loop-todo-content" x-text="item.content"></div>
                         <div class="loop-todo-meta" x-show="(item.tags || []).length">
                             <template x-for="(tag, ti) in (item.tags || [])" :key="ti">
-                                <span class="tag" x-text="tag"></span>
+                                <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
                             </template>
                         </div>
                         <div class="loop-todo-timestamps muted mono">
@@ -75,24 +80,23 @@
                     </div>
                 </div>
             </template>
-            <div class="loop-empty muted mono" x-show="!$store.loop.backlog.length"
-                 style="font-size:var(--fs-xs);padding:var(--space-1) 0;">no items yet</div>
+            <div class="loop-empty" x-show="!$store.loop.backlog.length">No items yet.</div>
         </div>
     </section>
 
     <!-- spawned features -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="$store.loop.loopFeatures.length && $store.modeWorkspace.shows('features')"
              :class="{ open: $store.loop.openSections.features }">
-        <button class="panel-section-head"
+        <button class="panel-section-head w-panel__section-head"
                 @click="$store.loop.toggleSection('features')"
                 :aria-expanded="$store.loop.openSections.features">
-            <span class="caret">›</span>
-            <span class="panel-section-name">spawned features</span>
-            <span class="panel-section-count mono muted"
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="panel-section-name w-panel__section-title">Spawned features</span>
+            <span class="panel-section-count w-count"
                   x-text="$store.loop.loopFeatures.length"></span>
         </button>
-        <div class="panel-section-body" x-show="$store.loop.openSections.features"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.loop.openSections.features"
              x-transition.opacity.duration.120ms>
             <template x-for="(feat, i) in $store.loop.loopFeatures" :key="i">
                 <div class="loop-feature-row">
@@ -103,25 +107,25 @@
     </section>
 
     <!-- memory snapshot -->
-    <section class="panel-section"
+    <section class="panel-section w-panel__section"
              x-show="$store.loop.memory.length && $store.modeWorkspace.shows('memory')"
              :class="{ open: $store.loop.openSections.memory }">
-        <button class="panel-section-head"
+        <button class="panel-section-head w-panel__section-head"
                 @click="$store.loop.toggleSection('memory')"
                 :aria-expanded="$store.loop.openSections.memory">
-            <span class="caret">›</span>
-            <span class="panel-section-name">memory</span>
-            <span class="panel-section-count mono muted"
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="panel-section-name w-panel__section-title">Memory</span>
+            <span class="panel-section-count w-count"
                   x-text="$store.loop.memory.length"></span>
         </button>
-        <div class="panel-section-body" x-show="$store.loop.openSections.memory"
+        <div class="panel-section-body w-panel__section-body" x-show="$store.loop.openSections.memory"
              x-transition.opacity.duration.120ms>
             <template x-for="m in $store.loop.filteredMemory()" :key="m.id">
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + m.id"></span>
                         <template x-for="tag in (m.tags || [])" :key="tag">
-                            <span class="tag" x-text="tag"></span>
+                            <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
                         </template>
                     </div>
                     <div class="finding-body" x-text="m.content"></div>
@@ -131,7 +135,7 @@
     </section>
 
     <!-- footnote -->
-    <div class="panel-footnote muted mono" x-show="$store.loop.loaded">
+    <div class="panel-footnote" x-show="$store.loop.loaded">
         <span x-text="$store.loop.backlog.length + ' todos'"></span>
         <span x-show="$store.loop.loopFeatures.length"
               x-text="' · ' + $store.loop.loopFeatures.length + ' features'"></span>

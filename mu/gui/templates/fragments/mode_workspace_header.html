@@ -1,11 +1,18 @@
-<!-- Shared Mode OS chrome. Domain content stays in the surrounding mode
-     fragment. This header deliberately uses type, space, and hairlines rather
-     than nested surfaces so the parent panel remains the single glass plane. -->
-<header class="mode-os" x-show="$store.modeWorkspace.current()">
+<!-- Shared Mode OS chrome (Wash). Domain content stays in the surrounding mode
+     fragment. Quiet type, space and hairlines — no nested surfaces — so the
+     stage panel remains the single plane: eyebrow + status chip, a title-3
+     heading in plum, an ink-2 objective, a compact stat strip, lenses as
+     tabs and a search field. Mode-OS tones (active/good/warn/risk) map onto
+     Wash semantics (running/ok/caution/danger). -->
+<header class="mode-os" x-show="$store.modeWorkspace.current()"
+        x-data="{ washTone(t) { return ({ active: 'running', good: 'ok', warn: 'caution', risk: 'danger' })[t] || 'neutral'; } }">
     <div class="mode-os-topline">
-        <span class="mode-os-mark">mode</span>
-        <span class="mode-os-status"
-              :data-tone="($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral'">
+        <span class="mode-os-mark w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Mode</span>
+        <span class="mode-os-status w-chip"
+              :data-tone="washTone(($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral')"
+              :data-mode-tone="($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral'">
+            <span class="w-chip__glyph" aria-hidden="true"
+                  x-text="(($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral') === 'active' ? '●' : ((($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) === 'risk') ? '✗' : '○')"></span>
             <span x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().status.label"></span>
         </span>
         <span class="mode-os-provenance"
@@ -31,20 +38,22 @@
     </dl>
 
     <div class="mode-os-commandbar">
-        <nav class="mode-os-lenses" aria-label="Workspace views">
+        <nav class="mode-os-lenses w-tabs" aria-label="Workspace views">
             <template x-for="view in (($store.modeWorkspace.current() && $store.modeWorkspace.current().views) || [])"
                       :key="view.id">
-                <button type="button"
+                <button type="button" class="w-tabs__tab"
                         :class="{ active: $store.modeWorkspace.selectedView() === view.id }"
+                        :aria-current="$store.modeWorkspace.selectedView() === view.id ? 'page' : null"
                         @click="$store.modeWorkspace.select(view.id)">
                     <span x-text="view.label"></span>
-                    <span class="count" x-show="view.count !== undefined" x-text="view.count"></span>
+                    <span class="count w-count" x-show="view.count !== undefined" x-text="view.count"></span>
                 </button>
             </template>
         </nav>
         <label class="mode-os-search">
-            <span aria-hidden="true">⌕</span>
-            <input type="search"
+            <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-search"></use></svg>
+            <input type="search" class="w-input"
+                   aria-label="Search this workspace"
                    :placeholder="$store.modeWorkspace.current() && $store.modeWorkspace.current().search_placeholder"
                    :value="$store.modeWorkspace.query()"
                    @input="$store.modeWorkspace.setQuery($event.target.value)" />
@@ -52,11 +61,11 @@
     </div>
 
     <section class="mode-os-quality" :class="{ open: $store.modeWorkspace.isQualityOpen() }">
-        <button type="button" class="mode-os-quality-toggle"
+        <button type="button" class="mode-os-quality-toggle w-panel__section-head"
                 @click="$store.modeWorkspace.toggleQuality()"
                 :aria-expanded="$store.modeWorkspace.isQualityOpen()">
-            <span>How to read confidence, accuracy, and relevance</span>
-            <span class="caret">›</span>
+            <span class="caret w-panel__caret" aria-hidden="true">›</span>
+            <span class="w-panel__section-title">How to read confidence, accuracy, and relevance</span>
         </button>
         <div class="mode-os-quality-grid" x-show="$store.modeWorkspace.isQualityOpen()"
              x-transition.opacity.duration.120ms>

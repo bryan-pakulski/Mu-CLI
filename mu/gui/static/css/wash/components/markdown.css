@@ -1,1 +1,78 @@
-/* markdown (Wash) — rules land with the component. */
+/* Markdown prose (G§9.7) — model output rendered by renderMarkdown()
+ * (marked → DOMPurify → .w-code wrappers) inside an element with
+ * class="w-markdown".
+ *
+ * Headings use the title scale (never oversized), lists indent 24px,
+ * blockquotes carry a 3px lilac rule, tables are hairline tables with a
+ * sunken header, links are accent ink (underlined on hover) and inline code
+ * is sunken / radius-xs / mono.
+ */
+.w-markdown { min-width: 0; overflow-wrap: anywhere; }
+.w-markdown > :first-child { margin-top: 0; }
+.w-markdown > :last-child { margin-bottom: 0; }
+.w-markdown :where(p, ul, ol, blockquote, table, .w-code, pre, hr, dl) { margin: 0 0 var(--wash-space-3); }
+.w-markdown :where(h1, h2, h3, h4, h5, h6) {
+    margin: var(--wash-space-5) 0 var(--wash-space-2);
+    color: var(--wash-plum);
+    font-weight: var(--wash-type-title-3-weight);
+}
+.w-markdown h1 {
+    font-size: var(--wash-type-title-2-size);
+    line-height: var(--wash-type-title-2-line);
+    letter-spacing: var(--wash-type-title-2-tracking);
+    font-weight: var(--wash-type-title-2-weight);
+}
+.w-markdown h2 {
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    letter-spacing: var(--wash-type-title-3-tracking);
+}
+.w-markdown :where(h3, h4, h5, h6) {
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+}
+.w-markdown :where(ul, ol) { padding-left: var(--wash-space-6); }
+.w-markdown li + li { margin-top: var(--wash-space-1); }
+.w-markdown li > :where(ul, ol) { margin: var(--wash-space-1) 0 0; }
+.w-markdown li::marker { color: var(--wash-ink-3); }
+.w-markdown input[type="checkbox"] { margin-right: var(--wash-space-2); accent-color: var(--wash-accent-ink); }
+.w-markdown a { color: var(--wash-accent-ink); text-decoration: none; }
+.w-markdown a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.w-markdown strong { font-weight: 600; color: var(--wash-ink); }
+.w-markdown blockquote {
+    padding: var(--wash-space-1) 0 var(--wash-space-1) var(--wash-space-4);
+    border-left: 3px solid var(--wash-lilac-pigment);
+    color: var(--wash-ink-2);
+}
+.w-markdown hr { height: 1px; border: 0; background: var(--wash-hairline); }
+.w-markdown :not(pre) > code {
+    padding: 1px 5px;
+    border-radius: var(--wash-radius-xs);
+    background: var(--wash-sunken);
+    color: var(--wash-ink);
+    font-family: var(--wash-font-mono);
+    font-size: 0.85em;
+}
+.w-markdown table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.w-markdown :where(th, td) {
+    padding: var(--wash-space-2) var(--wash-space-3);
+    border-bottom: 1px solid var(--wash-hairline);
+    text-align: left;
+    vertical-align: top;
+}
+.w-markdown th {
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+}
+.w-markdown img { max-width: 100%; height: auto; border-radius: var(--wash-radius-md); }
+.w-markdown mjx-container[display="true"] { overflow-x: auto; overflow-y: hidden; }

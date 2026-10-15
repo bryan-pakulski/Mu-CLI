@@ -17,25 +17,11 @@
     }
 
     function polishWelcomeCopy() {
-        setText('.welcome-kicker', 'AI workspace');
-        setText('.welcome-hero h1', 'What are you working on?');
-        setText('.welcome-hero .lede', 'Start a new workspace or pick up where you left off.');
-
-        const entries = Array.from(document.querySelectorAll('.welcome-entry'));
-        const copy = [
-            ['Continue a session', 'Open recent work and keep going'],
-            ['Start something new', 'Create a chat, workspace, or isolated environment'],
-            ['Environments', 'Manage isolated development environments'],
-        ];
-        entries.slice(0, copy.length).forEach((entry, index) => {
-            const strong = entry.querySelector('.welcome-entry-copy strong');
-            const small = entry.querySelector('.welcome-entry-copy small');
-            if (strong) strong.textContent = copy[index][0];
-            if (small && !small.hasAttribute('x-text')) small.textContent = copy[index][1];
-        });
-
-        const footnote = document.querySelector('.welcome-footnote > span');
-        if (footnote) footnote.textContent = 'Your model, workspace, and execution environment stay under your control.';
+        // The Wash welcome (templates/fragments/welcome.html) carries the
+        // guide's copy (G§9.18) in markup; only fill gaps if an older
+        // fragment is served.
+        const heading = document.querySelector('.welcome-hero h1');
+        if (heading && !heading.textContent.trim()) setText('.welcome-hero h1', 'What are we building today?');
     }
 
     function focusComposer() {
@@ -114,11 +100,13 @@
         const layerRect = layer.getBoundingClientRect();
         const viewport = window.visualViewport;
         const viewportLeft = viewport ? viewport.offsetLeft : 0;
-        const viewportTop = viewport ? viewport.offsetTop : 0;
+        // Keep floating layers below the sticky Wash top bar.
+        const topbar = document.querySelector('.w-topbar');
+        const viewportTop = Math.max(viewport ? viewport.offsetTop : 0, topbar ? topbar.getBoundingClientRect().bottom : 0);
         const viewportWidth = viewport ? viewport.width : window.innerWidth;
         const viewportHeight = viewport ? viewport.height : window.innerHeight;
         const viewportRight = viewportLeft + viewportWidth;
-        const viewportBottom = viewportTop + viewportHeight;
+        const viewportBottom = (viewport ? viewport.offsetTop : 0) + viewportHeight;
         const viewportMaxWidth = Math.max(1, viewportWidth - FLOAT_MARGIN * 2);
         const effectiveMaxWidth = Math.min(profile.maxWidth, viewportMaxWidth);
         const effectiveMinWidth = Math.min(profile.minWidth, effectiveMaxWidth);
@@ -229,6 +217,9 @@
     });
 
     document.addEventListener('keydown', (event) => {
+        // ⌘K opens the Wash command palette (static/js/wash/palette.js) when
+        // it is loaded; this composer-focus shortcut is only the fallback.
+        if (window.WashPalette) return;
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
             const active = document.activeElement;
             const isEditable = active && (

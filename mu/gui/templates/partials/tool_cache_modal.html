@@ -1,5 +1,5 @@
-<!-- Tool result cache popup -->
-<div class="modal-backdrop"
+<!-- Tool result cache popup (.w-modal, G§9.17) -->
+<div class="modal-backdrop w-modal"
      x-data
      x-dialog="$store.chat.cachePopup.open"
      x-cloak
@@ -7,25 +7,27 @@
      x-transition.opacity.duration.120ms
      @dialog-close="$store.chat.cachePopup.open && $store.chat.closeCachePopup()"
      @click="$store.chat.closeCachePopup()">
-    <div class="modal" @click.stop style="max-width: 800px;" role="dialog" aria-modal="true" aria-labelledby="tool-cache-title">
-        <div class="modal-head">
-            <span class="modal-title" id="tool-cache-title">
-                Tool result:
-                <span class="mono" x-text="$store.chat.cachePopup.toolName"></span>
-            </span>
-            <button class="icon-btn" @click="$store.chat.closeCachePopup()">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div x-show="$store.chat.cachePopup.loading" class="cache-popup-loading">
-                Loading cached result…
+    <section class="modal w-modal__dialog" data-size="lg" @click.stop role="dialog" aria-modal="true" aria-labelledby="tool-cache-title">
+        <header class="modal-head w-modal__head">
+            <h2 class="modal-title w-modal__title" id="tool-cache-title">
+                Tool result
+                <span class="tool-cache-name mono" x-text="$store.chat.cachePopup.toolName"></span>
+            </h2>
+            <button type="button" class="w-btn" data-variant="icon" @click="$store.chat.closeCachePopup()" aria-label="Close" title="Close">
+                <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+            </button>
+        </header>
+        <div class="modal-body w-modal__body">
+            <div x-show="$store.chat.cachePopup.loading" class="cache-popup-loading" role="status">
+                <span class="w-inkdrop" data-size="sm" aria-hidden="true"></span> Loading cached result…
             </div>
             <div x-show="!$store.chat.cachePopup.loading && $store.chat.cachePopup.error"
-                 class="cache-popup-error"
+                 class="cache-popup-error" role="alert"
                  x-text="$store.chat.cachePopup.error"></div>
             <div x-show="!$store.chat.cachePopup.loading && !$store.chat.cachePopup.error && $store.chat.cachePopup.result"
                  class="cache-popup-result">
                 <pre class="te-json" x-html="renderJSON($store.chat.cachePopup.result)"></pre>
             </div>
         </div>
-    </div>
+    </section>
 </div>

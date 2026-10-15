@@ -49,7 +49,7 @@ def test_interim_updates_are_compact_and_do_not_stack_horizontal_rules():
     html = CHAT_HTML.read_text(encoding="utf-8")
     row = css.split(".w-worked__row {", 1)[1].split("}", 1)[0]
     assert "min-height: 36px" in row
-    assert "background: var(--wash-sunken)" in row
+    assert "background: var(--w-glass-fill-subtle)" in row
     assert "border-radius: var(--wash-radius-md)" in row
     body = css.split(".w-worked__body {", 1)[1].split("}", 1)[0]
     assert "border-left: 1px solid var(--wash-hairline)" in body

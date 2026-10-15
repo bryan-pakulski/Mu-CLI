@@ -13,6 +13,7 @@
     <script src="/static/vendor/marked.min.js" defer></script>
     <script src="/static/vendor/highlight.min.js" defer></script>
 {% endblock %}
+{% block ambient %}lagoon{% endblock %}
 {% block body_class %}work-app work-product-app{% endblock %}
 {% block body_attrs %} id="work-app" data-session="{{ session_name or '' }}"{% endblock %}
 

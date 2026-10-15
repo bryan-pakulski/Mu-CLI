@@ -26,8 +26,23 @@
         "side stage";
     height: 100dvh;
     min-height: 0;
-    background: var(--wash-canvas);
+    background: transparent;
     color: var(--wash-ink);
+}
+/* The stage's glass plane (G§3.3 level 1). It is a pseudo-element grid item
+ * in the stage's own cell rather than a backdrop-filter on .w-stage: a
+ * filtered element becomes the containing block of position:fixed
+ * descendants, and the stage holds the page's modals, drawers and floating
+ * popouts. The plane does not scroll, so the blur stays put under content. */
+.w-shell::before {
+    content: "";
+    grid-area: stage;
+    min-width: 0;
+    min-height: 0;
+    background: var(--w-glass-fill);
+    backdrop-filter: var(--w-glass-filter);
+    -webkit-backdrop-filter: var(--w-glass-filter);
+    pointer-events: none;
 }
 .w-shell[data-shell="bare"] {
     grid-template-columns: minmax(0, 1fr);
@@ -38,8 +53,6 @@
 
 /* ------------------------------------------------------------ top bar */
 .w-topbar {
-    --w-glass-blur: 16px;
-    --w-glass-alpha: 78%;
     grid-area: top;
     position: sticky;
     top: 0;
@@ -50,13 +63,11 @@
     min-width: 0;
     height: var(--wash-size-topbar);
     padding: 0 var(--wash-space-6);
-    border-bottom: 1px solid var(--wash-hairline);
-    background: color-mix(in srgb, var(--wash-canvas) var(--w-glass-alpha), transparent);
-    backdrop-filter: blur(var(--w-glass-blur));
-    -webkit-backdrop-filter: blur(var(--w-glass-blur));
-}
-@supports not (backdrop-filter: blur(1px)) {
-    .w-topbar { background: var(--wash-canvas); }
+    border-bottom: 1px solid var(--wash-glass-edge);
+    background: var(--w-glass-fill);
+    box-shadow: var(--wash-glass-highlight);
+    backdrop-filter: var(--w-glass-filter);
+    -webkit-backdrop-filter: var(--w-glass-filter);
 }
 .w-topbar__spacer { flex: 1 1 auto; min-width: var(--wash-space-2); }
 .w-topbar__chips {
@@ -123,8 +134,10 @@
     min-height: 0;
     padding: var(--wash-space-4) var(--wash-space-3);
     overflow-y: auto;
-    border-right: 1px solid var(--wash-hairline);
-    background: var(--wash-surface);
+    border-right: 1px solid var(--wash-glass-edge);
+    background: var(--w-glass-fill);
+    backdrop-filter: var(--w-glass-filter);
+    -webkit-backdrop-filter: var(--w-glass-filter);
 }
 .w-sidebar__section {
     display: flex;
@@ -150,7 +163,7 @@
     min-width: 0;
     min-height: 0;
     overflow: auto;
-    background: var(--wash-canvas);
+    background: transparent;
 }
 .w-stage:focus { outline: none; }
 .w-page {
@@ -207,9 +220,12 @@
     inset: 0;
     z-index: -2;
     background: var(--w-hero-art) center top / cover no-repeat;
+    -webkit-mask-image: linear-gradient(to bottom, black 35%, transparent);
+    mask-image: linear-gradient(to bottom, black 35%, transparent);
     animation: w-bleed-in var(--wash-motion-bleed) var(--wash-ease-bleed) both;
 }
-/* Art never has a hard bottom edge and fades to ≥80% paper under text. */
+/* Art never has a hard bottom edge: it dissolves into the glass plane
+ * beneath (the mask above) and fades to ≥80% paper under text. */
 .w-hero::after {
     content: "";
     position: absolute;
@@ -217,8 +233,7 @@
     z-index: -1;
     background:
         radial-gradient(ellipse 70% 60% at 30% 85%,
-            color-mix(in srgb, var(--wash-canvas) 80%, transparent), transparent 75%),
-        linear-gradient(to bottom, transparent 35%, var(--wash-canvas));
+            color-mix(in srgb, var(--wash-canvas) 80%, transparent), transparent 75%);
     pointer-events: none;
 }
 .w-hero[data-art="hero"] { --w-hero-art: var(--wash-art-hero); }
@@ -311,7 +326,10 @@
         width: min(var(--wash-size-sidebar), 86vw);
         align-items: stretch;
         padding: var(--wash-space-4) var(--wash-space-3);
-        box-shadow: var(--wash-elevation-3);
+        background: var(--w-glass-fill-strong);
+        box-shadow: var(--w-glass-lift-3);
+        backdrop-filter: var(--w-glass-filter-strong);
+        -webkit-backdrop-filter: var(--w-glass-filter-strong);
         transform: translateX(-104%);
         visibility: hidden;
         transition: transform var(--wash-motion-medium) var(--wash-ease-medium),

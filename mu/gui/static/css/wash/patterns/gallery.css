@@ -15,9 +15,14 @@
     .g-theme {
         min-width: 0;
         padding: var(--wash-space-6);
-        background: var(--wash-canvas);
+        /* Each theme column shows its own ambient wash under a glass sheet,
+         * so both themes preview glass over watercolour at the 62% floor. */
+        background:
+            linear-gradient(var(--w-glass-fill), var(--w-glass-fill)),
+            var(--wash-canvas) var(--wash-art-ambient-dawn) center / cover no-repeat;
         color: var(--wash-ink);
     }
+    :root[data-decoration="reduced"] .g-theme { background: var(--wash-canvas); }
     .g-theme + .g-theme { border-left: 1px solid var(--wash-hairline); }
     .g-theme__label {
         margin: 0 0 var(--wash-space-4);
@@ -58,7 +63,7 @@
         overflow: hidden;
         border: 1px solid var(--wash-hairline);
         border-radius: var(--wash-radius-md);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
     }
     .g-swatch b, .g-swatch i { display: block; height: 22px; }
     .g-swatch i { height: 12px; }
@@ -78,7 +83,7 @@
         padding: var(--wash-space-3);
         border: 1px solid var(--wash-hairline);
         border-radius: var(--wash-radius-lg);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
     }
     /* Static overlay previews: the fixed-position surfaces sit in a frame. */
     .g-frame {
@@ -87,7 +92,7 @@
         overflow: hidden;
         border: 1px solid var(--wash-hairline);
         border-radius: var(--wash-radius-lg);
-        background: var(--wash-canvas);
+        background: var(--w-glass-fill-subtle);
     }
     .g-frame :is(.w-modal, .w-drawer) { position: absolute; z-index: auto; animation: none; }
     .g-frame :is(.w-modal__dialog, .w-drawer__panel) { animation: none; }
@@ -114,7 +119,7 @@
         text-align: center;
         overflow-wrap: anywhere;
     }
-    .g-icons li:hover { background: var(--wash-sunken); }
+    .g-icons li:hover { background: var(--w-glass-fill-subtle); }
     .gallery-body .w-hero code { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
 
     @media (width < 1200px) {
@@ -131,7 +136,7 @@
     .g-composer { width: 100%; padding: 0; }
     .g-composer .w-composer__slash.g-static { position: static; margin-bottom: var(--wash-space-2); box-shadow: none; }
     .g-transcript { padding: 0; overflow: visible; }
-    .g-sessions { max-width: 280px; margin-top: var(--wash-space-4); padding: var(--wash-space-2); border-radius: var(--wash-radius-md); background: var(--wash-surface); }
+    .g-sessions { max-width: 280px; margin-top: var(--wash-space-4); padding: var(--wash-space-2); border-radius: var(--wash-radius-md); background: var(--w-glass-fill); }
     .g-chat { padding: var(--wash-space-7) var(--wash-space-6); border-top: 1px solid var(--wash-hairline); }
     /* The replay frame lays the chat column out like the chat page (patterns/
      * chat.css .w-chat / __main / __column): a flex column whose transcript

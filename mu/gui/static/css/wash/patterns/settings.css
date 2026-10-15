@@ -66,7 +66,7 @@
     font-size: var(--wash-type-caption-size);
 }
 .inspector .tag:where(:not(.w-chip)) {
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
     border-radius: var(--wash-radius-pill);
     padding: 2px var(--wash-space-2);
@@ -132,7 +132,7 @@
     width: 14px;
     height: 14px;
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     border: 0;
     color: var(--wash-ink-3);
     font-size: var(--wash-type-caption-size);
@@ -181,7 +181,7 @@
     padding: var(--wash-space-3) var(--wash-space-2);
     border: 0;
     border-right: 1px solid var(--wash-hairline);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     overflow-y: auto;
 }
 .inspector .inspector-tabs {
@@ -198,9 +198,9 @@
     text-transform: capitalize;
 }
 .inspector .inspector-tabs > button:is([aria-selected="true"], .active) {
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-strong);
     color: var(--wash-ink);
-    box-shadow: inset 2px 0 0 var(--wash-accent-ink);
+    box-shadow: var(--w-glass-lift-2);
 }
 .inspector .inspector-body {
     min-width: 0;
@@ -521,7 +521,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     box-shadow: 0 1px 2px color-mix(in srgb, var(--wash-ink) 25%, transparent);
     transform: none;
     transition: transform var(--wash-motion-small) var(--wash-ease-small);
@@ -529,7 +529,7 @@
 .inspector .switch[aria-checked="true"],
 .skill-toggle-sw.on { background: var(--wash-accent-ink); }
 .inspector .switch[aria-checked="true"]::after,
-.skill-toggle-sw.on::after { transform: translateX(16px); background: var(--wash-surface); }
+.skill-toggle-sw.on::after { transform: translateX(16px); background: var(--w-glass-fill); }
 
 /* ================================================================ pricing
  * Model pricing pane (installPricingSettings in app.js) and the row creator
@@ -567,7 +567,7 @@
     margin-bottom: var(--wash-space-3);
     padding: var(--wash-space-2) var(--wash-space-4);
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .pricing-settings-source {
     overflow: hidden;
@@ -679,7 +679,9 @@
     margin-top: var(--wash-space-4);
     padding: var(--wash-space-3) 0 calc(var(--wash-space-3) + env(safe-area-inset-bottom));
     border-top: 1px solid var(--wash-hairline);
-    background: var(--wash-raised);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter);
+    -webkit-backdrop-filter: var(--w-glass-filter);
 }
 .pricing-settings-dirty {
     color: var(--wash-caution-ink);
@@ -693,7 +695,7 @@
     padding: var(--wash-space-4);
     border: 0;
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .pricing-add-row[hidden] { display: none; }
 .pricing-add-row-head {
@@ -781,7 +783,7 @@
     padding: var(--wash-space-3) var(--wash-space-4);
     border: 0;
     border-radius: var(--wash-radius-md);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .w-modal .modal-phase-head,
 .w-modal .modal-task-head {
@@ -873,7 +875,7 @@
     margin: 0;
     padding: var(--wash-space-4);
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);
     line-height: var(--wash-type-mono-sm-line);
@@ -915,7 +917,7 @@
     margin: 0 var(--wash-space-6);
     padding: var(--wash-space-2) var(--wash-space-2) var(--wash-space-2) var(--wash-space-1);
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .file-browser .fb-current {
     min-width: 0;
@@ -953,7 +955,7 @@
     cursor: pointer;
 }
 .file-browser .fb-entry:hover,
-.file-browser .fb-entry:focus-visible { background: var(--wash-sunken); color: var(--wash-ink); }
+.file-browser .fb-entry:focus-visible { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
 .file-browser .fb-entry.is-dir { color: var(--wash-ink); }
 .file-browser .fb-icon { flex: none; width: var(--wash-size-icon-sm); color: var(--wash-ink-3); }
 .file-browser .fb-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

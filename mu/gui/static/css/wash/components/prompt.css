@@ -28,7 +28,7 @@
     cursor: pointer;
     transition: background-color var(--wash-motion-micro) var(--wash-ease-micro);
 }
-.w-prompt__option:hover { background: var(--wash-sunken); }
+.w-prompt__option:hover { background: var(--w-glass-fill-subtle); }
 .w-prompt__option:has(.w-prompt__input:checked),
 .w-prompt__option[data-selected] { background: var(--wash-accent-wash); }
 .w-prompt__option:has(.w-prompt__input:focus-visible) { outline: 2px solid var(--wash-accent-ink); outline-offset: -2px; }
@@ -48,18 +48,18 @@
     height: 22px;
     padding: 0 4px;
     border-radius: var(--wash-radius-xs);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-2);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);
 }
-.w-prompt__option:hover .w-prompt__key { background: var(--wash-surface); }
+.w-prompt__option:hover .w-prompt__key { background: var(--w-glass-fill); }
 .w-prompt__label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .w-prompt__label :where(p) { margin: 0; }
 .w-prompt__label code {
     padding: 1px 5px;
     border-radius: var(--wash-radius-xs);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     font-family: var(--wash-font-mono);
     font-size: 0.9em;
 }

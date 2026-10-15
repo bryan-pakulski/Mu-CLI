@@ -26,9 +26,11 @@
     flex-direction: column;
     width: min(420px, 100%);
     height: 100%;
-    background: var(--wash-raised);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
     color: var(--wash-ink);
-    box-shadow: var(--wash-elevation-3);
+    box-shadow: var(--w-glass-lift-3);
     animation: w-drawer-in-right var(--wash-motion-medium) var(--wash-ease-medium) both;
 }
 .w-drawer[data-side="left"] .w-drawer__panel { animation-name: w-drawer-in-left; }

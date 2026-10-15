@@ -128,7 +128,7 @@
     }
     .jt-interval > summary > * { min-width: 0; }
     .jt-interval > summary::-webkit-details-marker { display: none; }
-    .jt-interval > summary:hover { background: var(--wash-sunken); }
+    .jt-interval > summary:hover { background: var(--w-glass-fill-subtle); }
     .jt-interval-index { color: var(--wash-ink-3); font-family: var(--wash-font-mono); font-variant-numeric: tabular-nums; }
     .jt-interval-state { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
     .jt-interval-class { color: var(--wash-ink-3); }
@@ -160,7 +160,7 @@
     .jt-tool-bars { display: flex; flex-direction: column; gap: var(--wash-space-2); }
     .jt-tool-row { display: grid; grid-template-columns: minmax(120px, 0.6fr) minmax(160px, 1fr) 56px; align-items: center; gap: var(--wash-space-3); }
     .jt-tool-name { min-width: 0; overflow: hidden; color: var(--wash-ink-2); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); text-overflow: ellipsis; white-space: nowrap; }
-    .jt-tool-track { height: 8px; overflow: hidden; border-radius: var(--wash-radius-pill); background: var(--wash-sunken); }
+    .jt-tool-track { height: 8px; overflow: hidden; border-radius: var(--wash-radius-pill); background: var(--w-glass-fill-subtle); }
     .jt-tool-fill { height: 100%; border-radius: inherit; background: var(--wash-series-1); }
     .jt-tool-value { color: var(--wash-ink-2); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); text-align: right; font-variant-numeric: tabular-nums; }
     .jt-verification-list { display: flex; flex-direction: column; }
@@ -205,7 +205,7 @@
     }
     .jt-event > summary > * { min-width: 0; }
     .jt-event > summary::-webkit-details-marker { display: none; }
-    .jt-event > summary:hover { background: var(--wash-sunken); }
+    .jt-event > summary:hover { background: var(--w-glass-fill-subtle); }
     .jt-event-elapsed,
     .jt-event-time { color: var(--wash-ink-3); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); font-variant-numeric: tabular-nums; }
     .jt-event-category { color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); }

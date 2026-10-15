@@ -94,7 +94,9 @@ def test_approval_card_is_a_state_card_with_danger_escalation():
     risky = _func(APP_JS, "risky() {")
     assert "this.prompt.risk" in risky and '"always_human"' in risky
     css = (GUI / "static/css/wash/components/approval.css").read_text(encoding="utf-8")
-    assert "box-shadow: inset 4px 0 var(--w-approval-pigment);" in css
+    # State shows in a tone-wash header strip, not a side stripe (G§3.4, §9.9).
+    assert "background: color-mix(in srgb, var(--w-approval-wash) 72%, var(--w-glass-fill));" in css
+    assert "inset 4px 0" not in css and "--w-approval-pigment" not in css
 
 
 def test_approval_payloads_are_unchanged():

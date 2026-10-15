@@ -20,7 +20,10 @@
         padding: var(--wash-space-2) var(--wash-space-4);
         border: 1px solid var(--wash-hairline);
         border-radius: var(--wash-radius-md);
-        background: var(--wash-surface);
+        /* sticky over scrolling charts: strong glass with its own blur */
+        background: var(--w-glass-fill-strong);
+        backdrop-filter: var(--w-glass-filter);
+        -webkit-backdrop-filter: var(--w-glass-filter);
         color: var(--wash-ink-3);
         font-size: var(--wash-type-caption-size);
     }
@@ -61,14 +64,14 @@
         padding: 0 var(--wash-space-2);
         border: 1px solid var(--wash-hairline-strong);
         border-radius: var(--wash-radius-pill);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
         color: var(--wash-ink);
         font: inherit;
         font-size: var(--wash-type-caption-size);
         line-height: 1;
         cursor: pointer;
     }
-    .trace-zoom-btn:hover:not(:disabled) { background: var(--wash-sunken); }
+    .trace-zoom-btn:hover:not(:disabled) { background: var(--w-glass-fill-subtle); }
     .trace-zoom-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .trace-zoom-level {
         min-width: 32px;
@@ -92,19 +95,24 @@
         padding: var(--wash-space-2) var(--wash-space-3) var(--wash-space-2) var(--wash-space-4);
         border: 1px solid var(--wash-hairline);
         border-radius: var(--wash-radius-md);
-        background: var(--wash-surface);
-        box-shadow: inset 4px 0 0 var(--w-suspect, var(--wash-caution-pigment));
+        background: var(--w-glass-fill);
+        box-shadow: var(--w-glass-lift-flat);
         color: inherit;
         font: inherit;
         text-align: left;
         cursor: pointer;
     }
-    button.trace-suspect:hover { background: var(--wash-sunken); }
+    button.trace-suspect:hover { background: var(--w-glass-fill-subtle); }
     .trace-suspect > * { min-width: 0; }
-    .trace-suspect--high { --w-suspect: var(--wash-danger-pigment); --w-suspect-ink: var(--wash-danger-ink); }
-    .trace-suspect--medium { --w-suspect: var(--wash-attention-pigment); --w-suspect-ink: var(--wash-attention-ink); }
-    .trace-suspect--low { --w-suspect: var(--wash-neutral-pigment); --w-suspect-ink: var(--wash-ink-3); }
+    /* Severity is a tinted chip with semantic ink; no side stripe (G§3.4). */
+    .trace-suspect--high { --w-suspect-wash: var(--wash-danger-wash); --w-suspect-ink: var(--wash-danger-ink); }
+    .trace-suspect--medium { --w-suspect-wash: var(--wash-attention-wash); --w-suspect-ink: var(--wash-attention-ink); }
+    .trace-suspect--low { --w-suspect-wash: var(--wash-neutral-wash); --w-suspect-ink: var(--wash-ink-3); }
     .ts-sev {
+        justify-self: start;
+        padding: 0 var(--wash-space-2);
+        border-radius: var(--wash-radius-pill);
+        background: var(--w-suspect-wash, var(--wash-caution-wash));
         color: var(--w-suspect-ink, var(--wash-ink-2));
         font-size: var(--wash-type-caption-size);
         font-weight: var(--wash-type-label-weight);
@@ -141,7 +149,7 @@
         text-align: left;
         cursor: pointer;
     }
-    button.trace-hist-row:hover { background: var(--wash-sunken); }
+    button.trace-hist-row:hover { background: var(--w-glass-fill-subtle); }
     .trace-hist-row > * { min-width: 0; }
     .trace-hist-row--sel,
     button.trace-hist-row[aria-pressed="true"] { background: var(--wash-accent-wash); }
@@ -156,7 +164,7 @@
         height: 6px;
         overflow: hidden;
         border-radius: var(--wash-radius-pill);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
     }
     .th-bar-ok { height: 100%; background: var(--wash-ok-pigment); }
     .th-bar-err { height: 100%; background: var(--wash-danger-pigment); }
@@ -209,10 +217,10 @@
     }
     .trace-conv-turn {
         padding: var(--wash-space-3) 0 var(--wash-space-3) var(--wash-space-4);
-        border-left: 2px solid var(--wash-hairline);
+        border-left: 1px solid var(--wash-hairline);
     }
-    .trace-conv-turn--sel { border-left-color: var(--wash-accent-pigment); background: color-mix(in srgb, var(--wash-accent-wash) 40%, transparent); }
-    .trace-conv-turn--final { border-left-color: var(--wash-ok-pigment); }
+    .trace-conv-turn--sel { border-radius: 0 var(--wash-radius-sm) var(--wash-radius-sm) 0; background: color-mix(in srgb, var(--wash-accent-wash) 55%, transparent); }
+    .trace-conv-turn--final .trace-conv-turn-head { color: var(--wash-ok-ink); }
     .trace-conv-turn--acting { border-left-style: dashed; }
     .trace-conv-turn-head {
         display: flex;
@@ -255,7 +263,7 @@
         font: inherit;
         cursor: pointer;
     }
-    .trace-conv-toolcount:hover { background: var(--wash-sunken); color: var(--wash-ink); }
+    .trace-conv-toolcount:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
     .trace-conv-prose {
         margin: var(--wash-space-2) 0;
         max-width: 76ch;
@@ -282,7 +290,7 @@
         text-align: left;
         cursor: pointer;
     }
-    button.trace-conv-tool:hover { background: var(--wash-sunken); }
+    button.trace-conv-tool:hover { background: var(--w-glass-fill-subtle); }
     .trace-conv-tool-glyph { width: 12px; color: var(--wash-ink-3); }
     .trace-conv-tool-name { color: var(--wash-ink); font-family: var(--wash-font-mono); }
     .trace-conv-tool-status { font-family: var(--wash-font-mono); }

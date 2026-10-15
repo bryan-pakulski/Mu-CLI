@@ -69,7 +69,7 @@
         min-height: 0;
         height: 100%;
         grid-template: none;
-        background: var(--wash-canvas);
+        background: transparent;
     }
     .w-chat__banners { flex: none; display: flex; flex-direction: column; }
     .w-chat__banners .w-banner { min-height: 40px; padding-left: var(--wash-space-6); }
@@ -114,9 +114,11 @@
         flex: 0 0 clamp(360px, var(--panel-w, 520px), 62vw);
         min-width: 0;
         min-height: 0;
-        border-left: 1px solid var(--wash-hairline);
-        background: var(--wash-surface);
+        border-left: 1px solid var(--wash-glass-edge);
+        background: var(--w-glass-fill);
     }
+    /* The aside is the panel's glass; the panels inside it are not glassed again. */
+    .w-chat__stage .w-panel { background: transparent; }
     .w-chat.has-panel:not(.panel-hidden) .w-chat__stage { display: flex; }
     .w-chat__panels { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
     .w-chat__panels > .mode-panel {
@@ -127,7 +129,7 @@
         max-height: none;
         overflow-y: auto;
         border-left: 0;
-        background: var(--wash-surface);
+        background: transparent;
         opacity: 1;
         transform: none;
     }
@@ -155,7 +157,12 @@
             bottom: 0;
             z-index: var(--wash-z-overlay);
             width: min(560px, 100%);
-            box-shadow: var(--wash-elevation-3);
+            /* overlays the transcript: level-3 strong glass with its own blur
+             * (panels hold no fixed-position popouts) */
+            background: var(--w-glass-fill-strong);
+            box-shadow: var(--w-glass-lift-3);
+            backdrop-filter: var(--w-glass-filter-strong);
+            -webkit-backdrop-filter: var(--w-glass-filter-strong);
         }
         .w-chat__resize { display: none; }
     }
@@ -179,11 +186,13 @@
         max-width: calc(100% - var(--wash-space-5));
         margin: 0;
         padding: var(--wash-space-2) var(--wash-space-3);
-        border: 1px solid var(--wash-hairline);
+        border: 1px solid var(--w-glass-line);
         border-radius: var(--wash-radius-pill);
-        background: var(--wash-raised);
+        background: var(--w-glass-fill-strong);
+        backdrop-filter: var(--w-glass-filter-strong);
+        -webkit-backdrop-filter: var(--w-glass-filter-strong);
         color: var(--wash-ink-3);
-        box-shadow: var(--wash-elevation-2);
+        box-shadow: var(--w-glass-lift-2);
         font-size: var(--wash-type-caption-size);
     }
     .chat-history .ui-loading-spinner.w-inkdrop { border: 0; }
@@ -215,7 +224,7 @@
         overflow: auto;
         border: 0;
         border-radius: var(--wash-radius-sm);
-        background: var(--wash-sunken);
+        background: var(--w-glass-fill-subtle);
         color: var(--wash-ink);
         font-family: var(--wash-font-mono);
         font-size: var(--wash-type-mono-sm-size);
@@ -223,7 +232,8 @@
         white-space: pre-wrap;
     }
     .chat-history .msg.command .cmd-body { margin-top: var(--wash-space-2); }
-    .chat-history .msg.command.cmd-err { box-shadow: inset 3px 0 var(--wash-danger-pigment); }
+    .chat-history .msg.command.cmd-err { background: color-mix(in srgb, var(--wash-danger-wash) 78%, var(--w-glass-fill)); }
+    .chat-history .msg.command.cmd-err .cmd-head { color: var(--wash-danger-ink); }
     .chat-history .prompt-resolved .resolved-q,
     .chat-history .prompt-resolved .resolved-a { margin: 2px 0 0 calc(16px + var(--wash-space-2)); color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); }
     .chat-history .prompt-resolved .resolved-q :where(p),
@@ -233,7 +243,7 @@
     .chat-history .visualization-head .w-eyebrow { margin-bottom: var(--wash-space-1); }
     .chat-history .visualization-head strong { color: var(--wash-plum); font-size: var(--wash-type-title-3-size); font-weight: 600; }
     .chat-history .visualization-actions { display: flex; gap: var(--wash-space-1); }
-    .chat-history .visualization-frame { width: 100%; border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-md); background: var(--wash-canvas); }
+    .chat-history .visualization-frame { width: 100%; border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-md); background: var(--w-glass-fill); }
 
     /* sub-agent card internals (app.js renders the sap-* hooks) */
     .w-subagents .sap-header { border-radius: var(--wash-radius-md); }
@@ -247,7 +257,7 @@
         padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-3) var(--wash-space-4);
         border: 0;
         border-radius: var(--wash-radius-sm);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
         opacity: 1;
     }
     .w-subagents .sap-row::before { display: none; }
@@ -273,7 +283,7 @@
     .w-subagents .sap-activity-head { display: flex; justify-content: space-between; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
     .w-subagents .sap-empty { margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-style: italic; }
     .w-subagents .sap-action { display: block; padding: 0; border: 0; background: none; }
-    .w-subagents .sap-action .w-toolcard { background: var(--wash-sunken); }
+    .w-subagents .sap-action .w-toolcard { background: var(--w-glass-fill-subtle); }
 
     /* stage rail: dots for each prompt (G§10.1 keep your place) */
     .conversation-stage-rail {
@@ -312,7 +322,7 @@
         color: var(--wash-ink-3);
         cursor: pointer;
     }
-    .conversation-stage-marker:hover:not(:disabled) { background: var(--wash-sunken); }
+    .conversation-stage-marker:hover:not(:disabled) { background: var(--w-glass-fill-subtle); }
     .conversation-stage-marker:focus-visible { outline-offset: -2px; }
     .conversation-stage-dot {
         width: 5px;
@@ -334,8 +344,9 @@
     .conversation-stage-chevron {
         width: 7px;
         height: 7px;
-        border-right: 1.5px solid var(--wash-accent-ink);
-        border-bottom: 1.5px solid var(--wash-accent-ink);
+        color: var(--wash-accent-ink);
+        border-right: 1.5px solid currentColor;
+        border-bottom: 1.5px solid currentColor;
     }
     .conversation-stage-chevron.up { transform: translateY(2px) rotate(225deg); }
     @media (width < 840px) { .conversation-stage-rail { display: none; } }
@@ -394,7 +405,7 @@
         margin: 0 calc(var(--wash-space-4) * -1) var(--wash-space-2);
         padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-3) var(--wash-space-4);
         border-bottom: 1px solid var(--wash-hairline);
-        background: var(--wash-raised);
+        background: var(--w-glass-fill-strong);
         color: var(--wash-plum);
         font-size: var(--wash-type-title-3-size);
         font-weight: 600;
@@ -438,7 +449,7 @@
         padding: 0 var(--wash-space-2);
         border: 1px solid var(--wash-control-border);
         border-radius: var(--wash-radius-sm);
-        background: var(--wash-surface);
+        background: var(--w-glass-fill);
         color: var(--wash-ink);
         font: inherit;
         font-size: var(--wash-type-body-size);

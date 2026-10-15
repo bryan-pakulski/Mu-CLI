@@ -62,8 +62,9 @@ def test_route_shell_css_matches_wash_shell_geometry():
     nav = _read(GUI / "static" / "css" / "wash" / "components" / "nav.css")
     topbar = layout.split(".w-topbar {", 1)[1].split("}", 1)[0]
     assert "height: var(--wash-size-topbar);" in topbar
-    assert "background: color-mix(in srgb, var(--wash-canvas)" in topbar
-    assert "border-bottom: 1px solid var(--wash-hairline);" in topbar
+    assert "background: var(--w-glass-fill);" in topbar
+    assert "backdrop-filter: var(--w-glass-filter);" in topbar
+    assert "border-bottom: 1px solid var(--wash-glass-edge);" in topbar
     assert '.w-breadcrumb__item + .w-breadcrumb__item::before {\n    content: "›";' in nav
     assert "--wash-size-topbar: 56px;" in _read(GUI / "static" / "css" / "wash" / "tokens.css")
     # model pricing and the trace analyzer link their own pattern bundles;
@@ -86,9 +87,9 @@ def test_analysis_sections_are_planos_panels_with_header_rows():
     # radius-lg from components/card.css) with a header row: eyebrow + title.
     card = _read(GUI / "static" / "css" / "wash" / "components" / "card.css")
     section = card.split(".w-card {", 1)[1].split("}", 1)[0]
-    assert "border: 1px solid var(--wash-hairline);" in section
+    assert "border: 1px solid var(--w-glass-line);" in section
     assert "border-radius: var(--wash-radius-lg);" in section
-    assert "background: var(--wash-surface);" in section
+    assert "background: var(--w-glass-fill);" in section
     for page in ("trace", "job_trace"):
         html = _read(PAGES[page])
         assert html.count('<section class="w-card trace-section"') >= 6, page

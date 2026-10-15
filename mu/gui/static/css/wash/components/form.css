@@ -74,7 +74,7 @@
     padding: 0 var(--wash-space-3);
     border: 1px solid var(--wash-control-border);
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink);
     font: inherit;
     font-size: var(--wash-type-body-size);
@@ -106,7 +106,7 @@
 :is(.w-input, .w-textarea, .w-select__control):disabled {
     opacity: 0.4;
     cursor: not-allowed;
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 @media (pointer: coarse) {
     .w-input, .w-select__control { height: var(--wash-size-touch); }
@@ -140,8 +140,9 @@
     width: 7px;
     height: 7px;
     margin-top: -6px;
-    border-right: 1.5px solid var(--wash-ink-3);
-    border-bottom: 1.5px solid var(--wash-ink-3);
+    color: var(--wash-ink-3);
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
     transform: rotate(45deg);
     pointer-events: none;
 }
@@ -210,7 +211,7 @@
     padding: 0;
     border: 1.5px solid var(--wash-control-border);
     border-radius: var(--wash-radius-xs);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     appearance: none;
     cursor: pointer;
 }
@@ -224,8 +225,9 @@
     width: 5px;
     height: 9px;
     margin-top: -2px;
-    border-right: 2px solid var(--wash-on-ink);
-    border-bottom: 2px solid var(--wash-on-ink);
+    color: var(--wash-on-ink);
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
     transform: rotate(45deg);
 }
 .w-check__input[type="checkbox"]:indeterminate {
@@ -269,7 +271,7 @@
 .w-slider::-moz-range-track {
     height: 4px;
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .w-slider::-moz-range-progress {
     height: 4px;

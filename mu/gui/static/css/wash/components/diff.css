@@ -36,7 +36,7 @@
     overflow: hidden;
     border: 1px solid var(--wash-hairline);
     border-radius: var(--wash-radius-sm);
-    background: var(--wash-canvas);
+    background: var(--w-glass-fill);
     color: var(--wash-ink);
 }
 .w-diff__file + .w-diff__file { border-top: 1px solid var(--wash-hairline); }
@@ -46,7 +46,7 @@
     gap: var(--wash-space-3);
     min-height: 36px;
     padding: 0 var(--wash-space-2) 0 var(--wash-space-2);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     border-bottom: 1px solid var(--wash-hairline);
 }
 .w-diff__toggle {
@@ -108,16 +108,16 @@
 .w-diff__sign { box-sizing: content-box; width: 1.5ch; padding: 0 var(--wash-space-1); color: var(--wash-ink-3); text-align: center; user-select: none; }
 .w-diff__code { padding: 0 var(--wash-space-3) 0 var(--wash-space-1); white-space: pre-wrap; overflow-wrap: anywhere; }
 .w-diff__row[data-type="add"],
-.w-diff__code[data-type="add"] { background: color-mix(in srgb, var(--wash-ok-wash) 80%, var(--wash-canvas)); }
+.w-diff__code[data-type="add"] { background: color-mix(in srgb, var(--wash-ok-wash) 80%, var(--w-glass-fill)); }
 .w-diff__row[data-type="del"],
-.w-diff__code[data-type="del"] { background: color-mix(in srgb, var(--wash-danger-wash) 80%, var(--wash-canvas)); }
+.w-diff__code[data-type="del"] { background: color-mix(in srgb, var(--wash-danger-wash) 80%, var(--w-glass-fill)); }
 .w-diff__row[data-type="add"] .w-diff__sign { color: var(--wash-ok-ink); font-weight: 600; }
 .w-diff__row[data-type="del"] .w-diff__sign { color: var(--wash-danger-ink); font-weight: 600; }
-.w-diff__code[data-type="empty"] { background: var(--wash-sunken); }
+.w-diff__code[data-type="empty"] { background: var(--w-glass-fill-subtle); }
 .w-diff__row[data-type="meta"] .w-diff__code { color: var(--wash-ink-3); font-style: italic; }
 .w-diff__hunk {
     padding: 2px var(--wash-space-3);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink-3);
 }
 .w-diff__intra { border-radius: 3px; background: color-mix(in srgb, var(--wash-ok-pigment) 32%, transparent); color: inherit; }
@@ -126,30 +126,37 @@
     margin: 0;
     padding: var(--wash-space-2) var(--wash-space-3);
     border-top: 1px solid var(--wash-hairline);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
     color: var(--wash-ink-3);
     font-size: var(--wash-type-caption-size);
 }
 /* review findings interleaved after the line they point at */
 .w-diff__finding-row > td {
     padding: var(--wash-space-2) var(--wash-space-3);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     font-family: var(--wash-font-sans);
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
     white-space: normal;
 }
+/* Findings are state cards: the tone tints the head strip and the chip
+ * carries the severity; no side rule (G§3.4). */
 .w-diff__finding { position: relative; }
-.w-diff__finding::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--w-tone-pigment, var(--wash-attention-pigment)); }
-.w-diff__finding .w-card__body { padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) calc(var(--wash-space-4) + 4px); }
+.w-diff__finding .w-card__body { padding: var(--wash-space-3) var(--wash-space-4); }
+.w-diff__finding .w-card__body > :first-child {
+    margin: calc(var(--wash-space-3) * -1) calc(var(--wash-space-4) * -1) 0;
+    padding: var(--wash-space-2) var(--wash-space-4);
+    border-bottom: 1px solid var(--wash-hairline);
+    background: color-mix(in srgb, var(--w-tone-wash, var(--wash-attention-wash)) 72%, var(--w-glass-fill));
+}
 .w-diff__finding + .w-diff__finding { margin-top: var(--wash-space-2); }
 .w-diff__finding p { margin: 0; white-space: pre-wrap; }
 
 /* changed-file tree: A ok, M accent, D danger, R plan (G§9.11) */
-.w-diff__nav { padding: var(--wash-space-2); border-bottom: 1px solid var(--wash-hairline); background: var(--wash-surface); }
+.w-diff__nav { padding: var(--wash-space-2); border-bottom: 1px solid var(--wash-hairline); background: var(--w-glass-fill); }
 .w-diff__tree { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
 .w-diff__tree-item { display: flex; align-items: center; gap: var(--wash-space-2); padding: 2px var(--wash-space-1); border-radius: var(--wash-radius-xs); }
-.w-diff__tree-item:hover { background: var(--wash-sunken); }
+.w-diff__tree-item:hover { background: var(--w-glass-fill-subtle); }
 .w-diff__tree-link {
     display: flex;
     align-items: center;

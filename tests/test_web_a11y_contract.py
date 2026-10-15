@@ -251,3 +251,35 @@ def test_gallery_chat_replay_frame_fits_the_composer():
     assert "display: flex;" in frame and "flex-direction: column;" in frame and "overflow: hidden;" in frame
     assert ".g-chat__frame .w-transcript { flex: 1 1 auto; min-height: 0; }" in gallery
     assert ".g-chat__frame .w-composer { flex: none; }" in gallery
+
+
+# ------------------------------------------------------------ glass restructure (spec §13, G§3.4, §9.9)
+
+def test_approval_card_keeps_its_tinted_header_and_status_chip():
+    # With the coloured side rule gone, the approval card must still be
+    # unmistakable: a header strip tinted with the tone wash (≥70% into the
+    # glass, attention by default, danger for risky tools) carrying the
+    # "◆ Needs you" status chip, on glass, with no inset stripe.
+    import sys
+    sys.path.insert(0, str(ROOT / "tests"))
+    from wash_css_helpers import css, decls
+
+    approval = css("components/approval.css")
+    card = decls(approval, ".w-approval")
+    assert card["--w-approval-wash"] == "var(--w-tone-wash, var(--wash-attention-wash))"
+    assert card["background"] == "var(--w-glass-fill)"
+    assert "inset" not in card.get("box-shadow", "").replace("var(--w-glass-lift)", "")
+    head = decls(approval, ".w-approval__head")
+    mix = re.fullmatch(r"color-mix\(in srgb, var\(--w-approval-wash\) (\d+)%, var\(--w-glass-fill\)\)", head["background"])
+    assert mix and int(mix.group(1)) >= 70, head["background"]
+    # The tone channel escalates the strip: data-tone="danger" maps the wash.
+    base = css("base.css")
+    assert decls(base, '[data-tone="danger"]')["--w-tone-wash"] == "var(--wash-danger-wash)"
+    # Live card (chat) and the /design sample both put the status chip in the head.
+    chat = (TEMPLATES / "fragments" / "chat.html").read_text(encoding="utf-8")
+    head_html = chat.split('<header class="w-approval__head">', 1)[1].split("</header>", 1)[0]
+    assert '<span class="w-chip" :data-tone="tone()">' in head_html
+    assert "◆" in head_html and ">Needs you</span>" in head_html
+    sample = (TEMPLATES / "design" / "_chat_components.html").read_text(encoding="utf-8")
+    first = sample.split('<header class="w-approval__head">', 1)[1].split("</header>", 1)[0]
+    assert "w-chip" in first and "Needs you" in first

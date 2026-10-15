@@ -67,7 +67,7 @@
     position: relative;
     margin-left: auto;
 }
-.trace-info-btn.open { background: var(--wash-sunken); color: var(--wash-ink); }
+.trace-info-btn.open { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
 /* Anchored under its info button until floating_popouts.js measures it
  * (components/popout.css takes over the geometry then). */
 .trace-info-popout:not([data-viewport-floating]) {
@@ -79,10 +79,12 @@
 .trace-info-popout {
     width: min(400px, calc(100vw - var(--wash-space-7)));
     padding: var(--wash-space-4);
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-md);
-    background: var(--wash-raised);
-    box-shadow: var(--wash-elevation-2);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    box-shadow: var(--w-glass-lift-2);
     color: var(--wash-ink-2);
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
@@ -97,7 +99,7 @@
 .trace-info-popout code {
     padding: 0 var(--wash-space-1);
     border-radius: var(--wash-radius-xs);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);
 }
@@ -171,10 +173,9 @@
 }
 .trace-table tbody tr:hover td { color: var(--wash-ink); }
 .trace-table tbody tr:has(.trace-iter-link) { cursor: pointer; }
-.trace-row--mech td { color: var(--wash-attention-ink); }
-.trace-row--mech td:first-child { box-shadow: inset 3px 0 0 var(--wash-attention-pigment); }
+/* Row state is semantic ink plus a faint wash, never a side stripe (G§3.4). */
+.trace-row--mech td { color: var(--wash-attention-ink); background: color-mix(in srgb, var(--wash-attention-wash) 45%, transparent); }
 .trace-row--good td { color: var(--wash-ok-ink); }
-.trace-row--good td:first-child { box-shadow: inset 3px 0 0 var(--wash-ok-pigment); }
 .trace-iter-link {
     padding: 0 var(--wash-space-1);
     border: 0;

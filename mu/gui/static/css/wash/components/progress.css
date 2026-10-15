@@ -47,7 +47,7 @@
     height: 4px;
     overflow: hidden;
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .w-progress__bar {
     position: absolute;

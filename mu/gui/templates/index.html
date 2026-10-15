@@ -22,6 +22,7 @@
     <script src="/static/js/web_shell.js" defer></script>
     <script src="/static/js/history_hydration.js" defer></script>
 {% endblock %}
+{% block ambient %}dawn{% endblock %}
 {% block body_class %}chat-body{% if not session_active %} welcome-body{% endif %}{% endblock %}
 {% block body_attrs %} x-data{% endblock %}
 {% block shell_attrs %}{% if session_active %} :data-sidebar-collapsed="$store.layout.sidebarOpen ? null : ''"{% endif %}{% endblock %}

@@ -16,9 +16,10 @@
 .w-table-wrap {
     max-width: 100%;
     overflow: auto;
-    border: 1px solid var(--wash-hairline);
+    border: 1px solid var(--w-glass-line);
     border-radius: var(--wash-radius-md);
-    background: var(--wash-surface);
+    background: var(--w-glass-fill);
+    box-shadow: var(--w-glass-lift-flat);
 }
 .w-table {
     width: 100%;
@@ -34,7 +35,10 @@
     height: 36px;
     padding: 0 var(--wash-space-3);
     border-bottom: 1px solid var(--wash-hairline);
-    background: var(--wash-sunken);
+    /* sticky: rows scroll beneath, so the head is strong glass with its own blur */
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter);
+    -webkit-backdrop-filter: var(--w-glass-filter);
     color: var(--wash-ink-2);
     font-size: var(--wash-type-label-size);
     font-weight: var(--wash-type-label-weight);
@@ -50,7 +54,7 @@
 .w-table tbody tr:last-child td { border-bottom: 0; }
 .w-table :is(th, td)[data-num] { text-align: right; font-variant-numeric: tabular-nums; }
 .w-table td[data-mono] { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
-.w-table tbody tr:hover td { background: color-mix(in srgb, var(--wash-sunken) 55%, transparent); }
+.w-table tbody tr:hover td { background: var(--w-glass-fill-subtle); }
 .w-table tbody tr[aria-selected="true"] td { background: var(--wash-accent-wash); }
 .w-table__actions { width: 1%; white-space: nowrap; text-align: right; }
 .w-table__actions > * { opacity: 0; transition: opacity var(--wash-motion-micro) var(--wash-ease-micro); }

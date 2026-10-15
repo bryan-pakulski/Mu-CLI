@@ -99,7 +99,7 @@
     height: 14px;
     margin-top: var(--wash-space-5);  /* room for direct labels above */
     border-radius: var(--wash-radius-pill);
-    background: var(--wash-sunken);
+    background: var(--w-glass-fill-subtle);
 }
 .w-layerbar__seg {
     --w-seg: 0%;
@@ -138,7 +138,8 @@ button.w-layerbar__seg:hover { filter: saturate(1.25) brightness(0.96); }
     bottom: -4px;
     left: min(var(--w-tick), calc(100% - 2px));
     width: 0;
-    border-left: 2px solid var(--wash-ink);
+    color: var(--wash-ink);
+    border-left: 2px solid currentColor;
     pointer-events: none;
 }
 .w-layerbar__tick[data-kind="cap"] { border-left-style: dashed; border-left-width: 1px; }

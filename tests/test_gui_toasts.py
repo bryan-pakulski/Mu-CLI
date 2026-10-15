@@ -44,12 +44,16 @@ def test_toast_is_tone_bordered_note_with_type_glyph():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         css = f.read()
     block = css.split("\n.w-toast {", 1)[1].split("}", 1)[0]
-    # Raised note on the Wash surface with the component radius.
-    assert "background: var(--wash-raised)" in block
-    assert "border: 1px solid var(--wash-hairline)" in block
+    # A level-2 glass note (G§3.3): strong glass, light glass edge and the
+    # component radius.
+    assert "background: var(--w-glass-fill-strong)" in block
+    assert "border: 1px solid var(--w-glass-line)" in block
     assert "border-radius: var(--wash-radius-md)" in block
-    # Flat surface: no frosted backdrop blur.
-    assert "backdrop-filter" not in css
+    # Its blur comes only from the shared glass recipe (so the solid
+    # fallbacks reach it), never an ad hoc frosted filter.
+    assert "backdrop-filter: var(--w-glass-filter-strong);" in block
+    assert "-webkit-backdrop-filter: var(--w-glass-filter-strong);" in block
+    assert "backdrop-filter: blur(" not in css
     # The tone colours the type glyph for instant intent recognition.
     assert ".w-toast__glyph { flex: none; color: var(--w-tone-ink" in css
     region = os.path.join(os.path.dirname(BASE_HTML_PATH), "partials", "toast_region.html")

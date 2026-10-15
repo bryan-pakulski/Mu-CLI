@@ -4,7 +4,7 @@
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import type { CheckSuite, Finding, JobAction, JobVM } from '../api/jobCore';
+import type { CheckSuite, EnvironmentRepair, Finding, JobAction, JobVM } from '../api/jobCore';
 import { JobPlanEditor, PlanCriteriaCards } from './JobPlanEditor';
 import { planProse } from './planMarkdown';
 import { actionLabel } from './JobActions';
@@ -15,7 +15,7 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, toneInk, touchTarget } from '../theme/tokens';
 import {
-  COVERAGE, SEVERITY, SEVERITY_ORDER, STATUS, duration, stateStatus, stripAnsi, verdictStyle, when,
+  COVERAGE, SEVERITY, SEVERITY_ORDER, STATUS, duration, money, repairOutcome, stateStatus, stripAnsi, verdictStyle, when,
 } from '../theme/status';
 import { Banner, Button, CheckRow, CountBadge, Empty, Markdown, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
 import { useGlass } from '../ui/Glass';
@@ -469,6 +469,31 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
 
 /* ================================================================ Checks */
 
+const REPAIR_TITLE: Record<string, string> = {
+  running: 'Repairing environment', committed: 'Environment repaired · re-running checks', repaired: 'Environment repaired',
+  unresolved: 'Environment repaired · checks still can’t run',
+};
+
+/** Environment repair (job_templates.md §7), read-only: outcome, commands and error of the latest attempt.
+ * The template actions are offered on the web job page. */
+function RepairSummary({ repairs }: { repairs: EnvironmentRepair[] }) {
+  const { colors } = useTheme();
+  const last = repairs[repairs.length - 1];
+  const outcome = repairOutcome(last.outcome);
+  const where = last.binding === 'runtime' ? 'shared runtime' : last.binding;
+  const meta = [`attempt ${last.attempt || repairs.length}`, where, last.cost_usd ? money(last.cost_usd) : ''].filter(Boolean).join(' · ');
+  return (
+    <Panel title={REPAIR_TITLE[last.outcome] || 'Repair failed'} right={<StatusPill status={outcome.status} label={outcome.label} testID="checks-repair-status" />} testID="checks-repair">
+      <Text variant="xs" style={{ color: colors.ink3 }}>{meta}</Text>
+      {(last.commands || []).map((c, i) => (
+        <Text key={`${i}-${c}`} variant="xs" style={styles.mono} testID={`checks-repair-command-${i}`}>$ {c}</Text>
+      ))}
+      {last.error ? <Text variant="xs" style={{ color: toneInk(colors, STATUS[outcome.status].tone) }}>{last.error}{outcome.status === 'failed' ? ' The job continued unverified.' : ''}</Text> : null}
+      {(last.reverted_files || []).length ? <Text variant="xs" style={{ color: colors.ink3 }}>Reverted tracked files: {(last.reverted_files || []).slice(0, 6).join(', ')}</Text> : null}
+    </Panel>
+  );
+}
+
 export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; busy: boolean }) {
   const { colors } = useTheme();
   const runs = useMemo(() => (job.checks?.runs || []).slice().reverse(), [job.checks?.runs]);
@@ -484,8 +509,10 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
   const history = job.checks?.history || {};
   const verification = runVerification(runs[0]);
   const unverified = STATUS.unverified;
+  const repairs = job.checks?.repairs || [];
   return (
     <View style={styles.col}>
+      {repairs.length ? <RepairSummary repairs={repairs} /> : null}
       {runs[0] && !verification.verified ? (
         <Banner tone={unverified.tone} glyph={unverified.icon} role="alert" testID="checks-unverified-banner"
           title={`Unverified: ${verification.unrunnable} check${verification.unrunnable === 1 ? '' : 's'} couldn't run`}>

@@ -175,3 +175,29 @@ from `node_modules` that isn't installed, a registry it couldn't reach) is
 to review without stopping. The review is told the checks could not run and its
 verdict is capped at *needs work*. Pushing needs no override; the PR body starts
 with "⚠ Checks could not run (unverified): <tools/causes>".
+
+**Environment repair.** Before a run is recorded unverified, the job tries to fix
+the environment itself (Settings → Environment repair, on by default). An
+unattended **repair** stage runs your implement agent in a repair container from
+the build environment's job image (or the shared runtime image): root inside the
+container with dropped capabilities, a writable filesystem, and egress widened to
+the package registries detected for the repository, the OS package mirrors and
+toolchain installers (never model-provider hosts). Its goal is to make the check
+commands *runnable*, preferring project-local installs such as `npm ci` or
+`uv sync`. Afterwards mucli reverts any tracked file the repair changed, commits
+the container as a job-scoped image (`mucli/job-<id>-<binding>-repair<n>`, removed
+with the job), points the build environment at it and re-runs the checks (trigger
+`repair`). At most two attempts per job, each with a $3 / 20 minute / 40
+iteration budget that counts toward the job's cost. A repair that fails, times out
+or runs out of budget is recorded and the job continues unverified; it never
+waits for you.
+
+The Checks tab and the environments panel show an **Environment repaired** (or
+**Repair failed**) card with the commands, the outcome and a link to the
+transcript, plus two optional actions so future jobs start ready:
+**Add to template setup** (appends the project-level commands, such as `npm ci`,
+to the template's job setup; templates only) and **Save repaired image as
+template** (a new container template from the repaired image, keeping the
+environment's network allowlist plus the registries used, and its setup). The
+terminal jobs dashboard shows a repair line in the checks view, and the Android
+Checks tab shows the repair summary.

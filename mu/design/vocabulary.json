@@ -357,6 +357,40 @@
       "label": "cleaned"
     }
   },
+  "repair_outcome": {
+    "running": {
+      "status": "active",
+      "label": "repairing environment"
+    },
+    "committed": {
+      "status": "active",
+      "label": "re-running checks"
+    },
+    "repaired": {
+      "status": "done",
+      "label": "environment repaired"
+    },
+    "unresolved": {
+      "status": "unverified",
+      "label": "repaired, checks still can't run"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "repair failed"
+    },
+    "timed_out": {
+      "status": "failed",
+      "label": "repair timed out"
+    },
+    "budget_exhausted": {
+      "status": "failed",
+      "label": "repair out of budget"
+    },
+    "error": {
+      "status": "failed",
+      "label": "repair stopped"
+    }
+  },
   "coverage": {
     "met": "done",
     "partial": "waiting",

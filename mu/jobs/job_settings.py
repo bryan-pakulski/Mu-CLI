@@ -391,6 +391,30 @@ for _section in RULES_SCHEMA:
         ]
 # --- end W8 block
 
+# --- Environment repair (documentation/plans/job_templates.md §7), owned by mu/jobs/sandbox/repair.py.
+RULES_SCHEMA += [
+    {"id": "repair", "title": "Environment repair",
+     "hint": "When checks can't run because the build environment lacks tools or dependencies, an unattended repair "
+             "stage (the job's implement agent) installs them in a repair container: root inside the container with "
+             "dropped capabilities and wider package-registry egress. The result is committed as a job-scoped image "
+             "that later stages and checks use. A failed repair never pauses the job; it continues unverified.",
+     "fields": [
+        _f("jobs.repair.enabled", "Repair the environment", "bool", True,
+           "Off: checks that can't run are reported unverified straight away."),
+        _f("jobs.repair.max_attempts", "Repair attempts per job", "int", 2, "", min=0, max=10),
+        _f("jobs.repair.registries", "Repair egress", "select", "auto",
+           "Auto: the build environment's allowlist plus the package registries detected for the repository, the OS "
+           "package mirrors and toolchain installers. Template: the allowlist plus mirrors and installers only. "
+           "Model-provider hosts are always dropped.",
+           options=[["auto", "Auto (detected registries)"], ["template", "Template allowlist"]]),
+        _f("jobs.repair.max_cost_usd", "Cost budget per repair", "float", 3.0,
+           "Counts toward the job's cost.", min=0, max=1000, unit="USD"),
+        _f("jobs.repair.max_runtime_s", "Time limit per repair", "int", 1200, "", min=60, max=86_400, unit="seconds"),
+        _f("jobs.repair.max_iterations", "Iterations per repair", "int", 40, "", min=1, max=10_000),
+     ]},
+]
+# --- end environment repair block
+
 FIELD_BY_PATH = {f["path"]: f for section in RULES_SCHEMA for f in section["fields"]}
 
 

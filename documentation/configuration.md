@@ -227,6 +227,17 @@ the table is stale).
 | `jobs.git_timeout_seconds` | 120 seconds | Git command timeout. Limit for one local git command on a job repository (raise for very large repositories). |
 | `jobs.clone.submodules` | on | Clone submodules. Initialise submodules when a job clones a repository by URL and in every job worktree. |
 | `jobs.clone.lfs` | `auto` | Git LFS. auto: run git lfs pull when the repository uses LFS and git-lfs is installed (otherwise warn). |
+
+**Environment repair**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `jobs.repair.enabled` | on | Repair the environment. Off: checks that can't run are reported unverified straight away. |
+| `jobs.repair.max_attempts` | 2 | Repair attempts per job. |
+| `jobs.repair.registries` | `auto` | Repair egress. Auto: the build environment's allowlist plus the package registries detected for the repository, the OS package mirrors and toolchain installers. Template: the allowlist plus mirrors and installers only. Model-provider hosts are always dropped. |
+| `jobs.repair.max_cost_usd` | 3 USD | Cost budget per repair. Counts toward the job's cost. |
+| `jobs.repair.max_runtime_s` | 1,200 seconds | Time limit per repair. |
+| `jobs.repair.max_iterations` | 40 | Iterations per repair. |
 <!-- job-settings:end -->
 
 ## Configuration files

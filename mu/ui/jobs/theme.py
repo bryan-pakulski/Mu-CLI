@@ -77,6 +77,9 @@ STATUS: Dict[str, Dict[str, str]] = {
 _STATE_STATUS: Dict[str, str] = {k: v["status"] for k, v in _VOCAB["job_state"].items()}
 _STATE_LABEL: Dict[str, str] = {k: v["label"] for k, v in _VOCAB["job_state"].items()}
 
+# Environment repair outcome → {status, label} (job_templates.md §7).
+REPAIR_OUTCOME: Dict[str, Dict[str, str]] = {k: dict(v) for k, v in (_VOCAB.get("repair_outcome") or {}).items()}
+
 # severity → (token, rank). Tokens are the Wash semantics: major = attention.
 SEVERITY: Dict[str, Tuple[str, int]] = {
     name: ("muted" if spec["semantic"] == "neutral" else spec["semantic"], int(spec["rank"]))

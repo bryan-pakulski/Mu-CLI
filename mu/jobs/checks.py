@@ -507,7 +507,7 @@ class ChecksStage:
         baseline_entries = set(status_entries(job.worktree))
         byproducts = []
         trigger = str((self.service.get(job.id).metadata or {}).get("checks_trigger") or "auto")
-        if trigger not in ("auto", "recheck", "fix"):
+        if trigger not in ("auto", "recheck", "fix", "repair"):
             trigger = "auto"
         results = []
         batched = self._run_batched(job, suites) if self._sandboxed else {}
@@ -617,9 +617,11 @@ class ChecksStage:
 
 
 def _without_setup_files(job, porcelain):
-    """``git status --porcelain`` text minus entries produced by template job setup (§4)."""
+    """``git status --porcelain`` text minus entries produced by template job setup (§4) or by
+    an environment repair (§7: untracked files the repair container left)."""
     from .sandbox.job_setup import setup_files
-    produced = set(setup_files(job))
+    from .sandbox.repair import repair_files
+    produced = set(setup_files(job)) | set(repair_files(job))
     if not produced or not porcelain:
         return porcelain
     kept = []

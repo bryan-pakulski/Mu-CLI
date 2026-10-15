@@ -207,7 +207,18 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         unverified_pending=core.state == JobState.NEEDS_INPUT and bool(meta.get("checks_unverified"))
         and str(getattr(job.attention_reason, "value", job.attention_reason) or "") == "verification_required",
         setup_failed=_setup_failed(job, core),
+        environment_repair=_environment_repair(job),
     )
+
+
+def _environment_repair(job) -> Optional[Dict[str, Any]]:
+    """The latest repair that committed an image (the repair card's actions)."""
+    from ..sandbox.repair import latest_repair
+    record = latest_repair(job, committed=True)
+    if not record:
+        return None
+    return {k: record.get(k) for k in ("attempt", "binding", "source", "template", "project_commands", "image",
+                                       "outcome")}
 
 
 def _checks_unverified(art) -> bool:
@@ -445,6 +456,8 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         out["review"] = _review(job)
     if "checks" in wanted:
         out["checks"] = _checks_part(service, job)
+        from ..sandbox.repair import describe_repairs
+        out["checks"]["repairs"] = describe_repairs(job)
     if "costs" in wanted:
         art = artifacts_for(job)
         out["costs"] = {"total_usd": max(float(job.cost_usd or 0.0), sum(art.stage_costs().values())),
@@ -463,6 +476,10 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
     if "session" in wanted:
         art = artifacts_for(job)
         stages = {s: art.read_json(f"logs/{s}-transcript.json", []) or [] for s in ("plan", "implement", "review")}
+        # Environment repair (job_templates.md §7): the latest attempt's conversation.
+        repair = art.read_json("logs/repair-transcript.json", []) if art.exists() else []
+        if repair:
+            stages["repair"] = repair
         events = [e.to_dict() for e in service.store.recent_events(job.id) if e.event_type in
                   ("sandbox_event", "stage_message", "sandbox_starting", "sandbox_stopped", "runtime_error",
                    "build_environments_preparing", "build_environment_progress", "build_environment_ready",
@@ -470,7 +487,7 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
                    "environment_command", "environment_setup", "environment_setup_dirty", "environment_setup_skipped",
                    # Jobs run unattended: automatic decisions and non-blocking fallbacks.
                    "auto_permission", "auto_answered", "environment_setup_failed", "repository_environment_skipped",
-                   "build_environment_skipped", "checks_unverified")
+                   "build_environment_skipped", "checks_unverified", "environment_repair")
                   # The stage's own copy of an automatic decision is shown once, as the job event.
                   and not (e.event_type == "sandbox_event"
                            and (e.payload or {}).get("event") in ("auto_permission", "auto_answered"))]

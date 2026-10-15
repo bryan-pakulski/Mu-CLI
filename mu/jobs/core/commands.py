@@ -583,6 +583,39 @@ def _reject_environment(service, job, facts, args):
     return ["state", "session"], {"rejected": pending["fingerprint"]}
 
 
+def _add_repair_to_template(service, job, facts, args):
+    """Environment repair (job_templates.md §7), non-blocking: append the repair's project-level
+    commands (e.g. ``npm ci``) to the binding's template job setup, so future jobs start ready."""
+    from ..sandbox.repair import add_repair_to_template
+    try:
+        result = add_repair_to_template(job, args.get("attempt"))
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    added = result["added"]
+    service.store.append_event(job.id, "environment_repair_saved", reason=(
+        f"Added {', '.join(f'`{c}`' for c in added)} to template `{result['template']}`'s job setup." if added else
+        f"Template `{result['template']}`'s job setup already has the repair's commands."),
+        payload={"action": "addRepairToTemplate", **result})
+    return ["state", "checks"], result
+
+
+def _save_repaired_template(service, job, facts, args):
+    """Environment repair (job_templates.md §7), non-blocking: create a container template from the
+    repaired image with the binding's egress plus the registries the repair used, and its setup."""
+    from ..sandbox.repair import save_repaired_template
+    name = args.get("name")
+    if name is not None and not isinstance(name, str):
+        raise CommandError("name must be a string")
+    try:
+        result = save_repaired_template(service, job, name or "", args.get("attempt"))
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    service.store.append_event(job.id, "environment_repair_saved",
+                               reason=f"Saved the repaired environment as template `{result['template']}`.",
+                               payload={"action": "saveRepairedTemplate", **result})
+    return ["state", "checks"], result
+
+
 def facts_for_job(service, job):
     from .vm import facts_for
     return facts_for(service, job, archived=_archived(service, job.id))
@@ -666,6 +699,7 @@ _HANDLERS = {
     "markMerged": _mark_merged, "discard": _discard, "delete": _delete,
     "setEnvironments": _set_environments, "refreshEnvironments": _refresh_environments,
     "keepEnvironments": _keep_environments,
+    "addRepairToTemplate": _add_repair_to_template, "saveRepairedTemplate": _save_repaired_template,
     "approveEnvironment": _approve_environment, "rejectEnvironment": _reject_environment,
 }
 

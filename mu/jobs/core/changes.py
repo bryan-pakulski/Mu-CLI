@@ -139,6 +139,10 @@ def collect_durable_changes(service, bus: ChangeBus, cursor: int) -> int:
             parts.add("checks")
         if kind.startswith(("sandbox_", "stage_", "agent_", "tool_", "runtime_")):
             parts.add("session")
+        if kind.startswith("environment_repair"):
+            # Environment repair (job_templates.md §7): the repair card (Checks tab, environments
+            # panel, state) and the session view.
+            parts.update(("checks", "session", "state"))
         if kind == "checkpoint_created":
             parts.add("diff")
         if kind == "command":

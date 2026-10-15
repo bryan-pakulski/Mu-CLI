@@ -146,6 +146,8 @@
     /* Job page panel: one row per binding plus Refresh (E) / Keep (K) / Change. */
     function panel(info, buttons) {
         const b = info || {bindings:[]};
+        // Environment repair (§7): the job page adds the card's actions into [data-repair-actions].
+        const repair = repairCard(b.repairs, {id:'work-env-repair-h', compact:true});
         const rows = (b.bindings || []).map(x => {
             const [tone, glyph, word] = STATUS[x.status] || ['muted', '○', x.status || 'not prepared'];
             const probe = (x.probed_env || []).length ? `probed ${x.probed_env.join(', ')}` : '';
@@ -165,7 +167,47 @@
                 ${b.kept ? pill('accent', '<span aria-hidden="true">⬢</span> kept', 'Exempt from idle retention') : ''}${b.refresh_pending ? pill('warn', 'refresh pending') : ''}
                 ${b.bytes ? `<span class="work-meta work-num">${esc(bytes(b.bytes))}</span>` : ''}<span class="work-spacer"></span>
                 <div class="work-toolbar" role="toolbar" aria-label="Build environment actions">${buttons || ''}</div></header>
-            <div class="w-card__body">${rows ? `<ul class="work-list">${rows}</ul>` : '<div class="w-empty work-empty-inline"><p class="w-empty__body">No build environments: stages run in the shared <code>mucli-job-runtime</code> image. Use Change to pick environments.</p></div>'}</div></section>`;
+            <div class="w-card__body work-stack">${repair}${rows ? `<ul class="work-list">${rows}</ul>` : '<div class="w-empty work-empty-inline"><p class="w-empty__body">No build environments: stages run in the shared <code>mucli-job-runtime</code> image. Use Change to pick environments.</p></div>'}</div></section>`;
+    }
+
+    /* Environment repair (job_templates.md §7): the "Environment repaired" / "Repair failed" card
+     * shown in the Checks tab and the environments panel. Statuses and labels come from the
+     * shared vocabulary (repair_outcome → status). ``buttons``: the addRepairToTemplate /
+     * saveRepairedTemplate action buttons (non-blocking; rendered by the job page). */
+    const REPAIR_TITLE = {running:'Repairing environment', committed:'Environment repaired · re-running checks',
+        repaired:'Environment repaired', unresolved:'Environment repaired · checks still can’t run'};
+    function repairOutcome(outcome) {
+        const vocab = (window.WASH && window.WASH.vocabulary) || {};
+        const row = (vocab.repair_outcome || {})[outcome] || {status:'pending', label:String(outcome || '').replace(/_/g, ' ')};
+        const status = (vocab.status || {})[row.status] || {glyph:'○', semantic:'neutral'};
+        return {status:row.status, label:row.label, glyph:status.glyph, tone:status.semantic};
+    }
+    function repairCard(repairs, {buttons = '', id = 'repair-h', compact = false} = {}) {
+        const list = Array.isArray(repairs) ? repairs.filter(Boolean) : [];
+        if (!list.length) return '';
+        const last = list[list.length - 1];
+        const o = repairOutcome(last.outcome);
+        const title = REPAIR_TITLE[last.outcome] || 'Repair failed';
+        const active = o.status === 'active';
+        const meta = [`attempt ${last.attempt || list.length}`, last.binding === 'runtime' ? 'shared runtime' : last.binding,
+            last.agent && last.agent !== 'mucli' ? (last.agent === 'claude' ? 'Claude Code' : 'Codex') : '',
+            last.cost_usd ? `$${Number(last.cost_usd).toFixed(2)}` : ''].filter(Boolean).join(' · ');
+        const commands = (last.commands || []).length
+            ? `<ol class="work-setup-cmds" aria-label="Commands that repaired the environment">${last.commands.map(c => `<li class="work-setup-cmd"><code>${esc(c)}</code></li>`).join('')}</ol>` : '';
+        const suites = (last.trigger_suites || []).map(s => `<code>${esc(s.suite || s.command || '')}</code>`).join(', ');
+        const earlier = list.length > 1 ? `<p class="work-meta">${list.length} repair attempts: ${list.map(r => `#${esc(r.attempt)} ${esc(repairOutcome(r.outcome).label)}`).join(' · ')}</p>` : '';
+        return `<section class="w-card work-card work-repair" data-repair-card data-repair-outcome="${esc(last.outcome || '')}" aria-labelledby="${esc(id)}">
+            <header class="w-card__head"><span class="w-status" data-tone="${esc(o.tone)}" title="${esc(o.label)}">${active ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${o.glyph}</span>`}<span class="w-sr-only">${esc(o.label)}</span></span>
+                <h2 class="w-card__title" id="${esc(id)}">${esc(title)}</h2><span class="w-card__meta">${esc(meta)}</span></header>
+            <div class="w-card__body work-stack-tight">
+                ${suites ? `<p class="work-meta">Checks that could not run: ${suites}</p>` : ''}
+                ${commands}
+                ${last.error ? `<div class="w-banner work-banner-sm" data-tone="${o.status === 'failed' ? 'danger' : 'caution'}" role="status"><span class="w-banner__glyph" aria-hidden="true">${o.glyph}</span><p class="w-banner__msg">${esc(last.error)}${o.status === 'failed' ? ' The job continued unverified.' : ''}</p></div>` : ''}
+                ${(last.reverted_files || []).length ? `<p class="work-meta" data-tone="attention">The repair changed tracked files; they were reverted: ${esc(last.reverted_files.slice(0, 8).join(', '))}${last.reverted_files.length > 8 ? '…' : ''}</p>` : ''}
+                ${last.image && !compact ? `<p class="work-meta">Image <code>${esc(last.image)}</code> — later stages and checks use it; it is removed with the job.</p>` : ''}
+                ${earlier}
+                <div class="w-btn-row" role="toolbar" aria-label="Environment repair" data-repair-actions>${last.transcript ? '<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-repair-transcript>View transcript</button>' : ''}${buttons}</div>
+            </div></section>`;
     }
 
     /* Session tab: ``› [node-build] npm test`` for run_in_environment calls. */
@@ -177,5 +219,6 @@
         return `[${a.env || '?'}] ${a.command || ''}${a.cwd && a.cwd !== '.' ? `  (in ${a.cwd})` : ''}`;
     }
 
-    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow, setupBlock};
+    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow, setupBlock,
+        repairCard, repairOutcome};
 })();

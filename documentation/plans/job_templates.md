@@ -221,3 +221,23 @@ for this.
 
 **Settings:** `jobs.repair.enabled` (true), `jobs.repair.max_attempts`, `jobs.repair.registries`
 (`auto` | `template`), and the budgets.
+
+### 7.1 Implementation notes (2026-10-16, branch `jobs/env-repair`)
+
+| Spec | Where |
+|---|---|
+| Trigger | `mu/jobs/sandbox/repair.py` `trigger_suites` / `plan_repair`: every unrunnable suite (missing top-level executables included), or a run whose new failures are all environment symptoms. Called from `verify_worker._verify` through `repair_and_recheck` before `apply_checks_result`. The former parks are gone: the environment-symptom park (`fix_attempt_skipped` + `verification_required`) now continues unverified like unrunnable checks. |
+| Target | The binding that owns most trigger suites (`ready` with a `job_image`); a job without bindings repairs the shared runtime (`binding` `runtime`, image `metadata.runtime_repair_image`, applied by `policy.with_build_environment` and dropped by `cleanup_job`). |
+| Container | `policy.container_args(stage="repair")`: `--user 0:0`, `--cap-drop ALL` + `REPAIR_CAPS`, `no-new-privileges`, no `--read-only`, tmpfs `/tmp`, network none + egress bridge, worktree rw, `/cache`; Docker socket and GPUs refused; role `job-repair`; `IS_SANDBOX=1` (Claude Code as root); entrypoint `REPAIR_WRAPPER` runs the worker, then `chown -R $MUCLI_REPAIR_CHOWN` on `/workspace /cache /output /harness/state` (a helper container does it when the repair was stopped first). Stage name `repair` is in `policy.STAGES` and `unattended.WRITE_STAGES` (auto-approve). |
+| Egress | `repair_egress`: binding allowlist (the checks policy: Settings extra ∪ approved repository egress ∪ inherited environment egress) ∪ `detect.py` registries (`auto`) ∪ `OS_MIRRORS` ∪ `TOOLCHAIN_INSTALLERS`, then `filter_model_hosts`. Claude Code / Codex add their own provider hosts afterwards, exactly as in implement (their model is not relayed). |
+| Agent and budget | `harness.stage_agent(job, "implement")`; mucli via `ModelRelay`, Claude Code / Codex via `HarnessRelay`, relay stage `repair` (cost ledger stage `repair`, synced into `job.cost_usd`). Per attempt: `max_cost_usd` (above earlier repair spend; the job cost cap still applies), `max_runtime_s` (container deadline, capped by the job runtime left), `max_iterations` (request). |
+| Host steps | `_snapshot` + `revert_tracked_changes` (only paths the repair changed; implement-modified files are restored to their pre-repair bytes); `_commit`: `docker commit` with the base image's env restored for every `-e` key (no relay token baked in), user/entrypoint/cmd restored, labels `io.mucli.job/binding/home`, `io.mucli.role=job-image`, `io.mucli.repair`; secret scan (a hit discards the image); binding `job_image` / `repaired_from` / `repair_attempt` updated and the template-setup record moved to the new image so setup is not re-run; checks re-run with trigger `repair`. |
+| Records | `metadata.environment_repairs[]`, `environment_repair` events (`started` / `command` / `reverted` / `finished`), `logs/repair-<n>-transcript.json` and `logs/repair-transcript.json` (session view source **Repair**). Untracked files a repair leaves are ignored by the dirty-worktree rule like setup files. |
+| Actions | `addRepairToTemplate` / `saveRepairedTemplate` in `core/commands.py`, availability in `core/actions.py` (hidden from action bars, `JobFacts.environment_repair`). The saved template gets its own image (`FROM` the repaired image with `io.mucli.job=""`), so job cleanup never removes it. |
+| UI | Web: `MuJobEnvironments.repairCard` in the Checks tab and the environments panel (Wash card, vocabulary `repair_outcome`), transcript link, the two actions. Terminal: `content.repair_lines` in the checks view, repair events in the session. Android: `RepairSummary` in the Checks tab (read-only), `repairOutcome` in `theme/status.ts`. |
+| Settings | Section `repair` in `RULES_SCHEMA`: `jobs.repair.enabled`, `max_attempts`, `registries`, `max_cost_usd`, `max_runtime_s`, `max_iterations`. |
+
+Known limits:
+- Re-creating a job's images (`refreshEnvironments`, idle cleanup) drops the repaired image; the next unrunnable checks repair again if attempts remain.
+- "Project-level" commands are picked by a heuristic (known package-manager commands without `-g`/`--global`/`sudo`/system paths).
+- With Docker's classic builder (not BuildKit), the template saved from a repaired image is a child image and can keep the repaired image from being removed until the template is deleted.

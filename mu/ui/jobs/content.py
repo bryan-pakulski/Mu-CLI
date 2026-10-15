@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .primitives import (Line, clean, cwidth, duration, fit, fit_line, money, pad, progress_text,
                          stacked_bar, status_icon, wrap_text)
-from .theme import SEVERITY, STATUS
+from .theme import REPAIR_OUTCOME, SEVERITY, STATUS
 
 # ---------------------------------------------------------------- markdown (light)
 
@@ -231,6 +231,15 @@ def session_items(session: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
             items.append({"kind": "chip", "text": str(ev.get("reason") or etype)})
         elif etype == "environment_setup_failed":
             items.append({"kind": "error", "text": str(ev.get("reason") or "job setup failed")})
+        elif etype == "environment_repair":
+            # Environment repair (job_templates.md §7): started / command / finished.
+            phase = payload.get("phase")
+            if phase == "command":
+                items.append({"kind": "chip", "text": f"repair [{payload.get('binding') or ''}] $ {payload.get('command') or ''}"})
+            elif phase == "finished" and payload.get("outcome") not in ("repaired", "unresolved"):
+                items.append({"kind": "error", "text": str(ev.get("reason") or "environment repair failed")})
+            else:
+                items.append({"kind": "chip", "text": str(ev.get("reason") or f"environment repair {phase or ''}")})
     return items
 
 
@@ -591,6 +600,33 @@ def live_tail(live: Sequence[Dict[str, Any]], n: int) -> List[str]:
     return lines[-n:]
 
 
+def repair_lines(checks: Optional[Dict[str, Any]], width: int) -> List[Line]:
+    """Environment repair (job_templates.md §7): one line for the latest attempt, its commands and
+    any error. ``[]`` without repairs."""
+    repairs = [r for r in ((checks or {}).get("repairs") or []) if isinstance(r, dict)]
+    if not repairs:
+        return []
+    w = max(30, width)
+    last = repairs[-1]
+    outcome = str(last.get("outcome") or "")
+    row = REPAIR_OUTCOME.get(outcome) or {"status": "pending", "label": outcome.replace("_", " ")}
+    status = row["status"] if row["status"] in STATUS else "pending"
+    where = "shared runtime" if last.get("binding") == "runtime" else str(last.get("binding") or "")
+    meta = " · ".join(x for x in (f"attempt {last.get('attempt') or len(repairs)}", where,
+                                   money(last.get("cost_usd")) if last.get("cost_usd") else "") if x)
+    out: List[Line] = [fit_line([("", "  "), _status_seg(status), (_status_token(status) + " bold", f" {row['label']}"),
+                                 ("muted", f" · {meta}")], w, pad_to=False)]
+    for command in (last.get("commands") or [])[:6]:
+        out.append(fit_line([("muted", "      $ "), ("", clean(str(command)))], w, pad_to=False))
+    if last.get("error"):
+        for l in wrap_text(clean(str(last["error"])), w - 8)[:2]:
+            out.append([(_status_token(status), "      " + l)])
+    if last.get("reverted_files"):
+        out.append(fit_line([("warn", "      reverted tracked files: "),
+                             ("muted", ", ".join(str(x) for x in last["reverted_files"][:6]))], w, pad_to=False))
+    return out
+
+
 def checks_lines(checks: Optional[Dict[str, Any]], state: str, width: int, run_cursor: int,
                  now: float, tick: Optional[int] = None) -> List[Line]:
     w = max(30, width)
@@ -624,6 +660,11 @@ def checks_lines(checks: Optional[Dict[str, Any]], state: str, width: int, run_c
         out.append([(s + " inverse", t) for s, t in line] if sel else line)
     if not runs and state != "checking":
         out.append([("muted", "  no check runs yet")])
+    repair = repair_lines(checks, w)
+    if repair:
+        out.append([])
+        out.append([("accent bold", "Environment repair")])
+        out.extend(repair)
     history = checks.get("history") or {}
     if history:
         out.append([])

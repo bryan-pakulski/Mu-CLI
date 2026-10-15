@@ -20,7 +20,9 @@ export const BAR_HIDDEN = new Set(['markFindings', 'markViewed', 'approveTool', 
   // Repository image/devcontainer approval lives in the environment approval banner.
   'approveEnvironment', 'rejectEnvironment',
   // Build environments live in the job's environments sheet (header pill).
-  'setEnvironments', 'refreshEnvironments', 'keepEnvironments']);
+  'setEnvironments', 'refreshEnvironments', 'keepEnvironments',
+  // Environment repair actions (job_templates.md §7) are offered on the web job page's repair card.
+  'addRepairToTemplate', 'saveRepairedTemplate']);
 
 export function actionTone(a: JobAction): Tone {
   if (a.tone) return a.tone;

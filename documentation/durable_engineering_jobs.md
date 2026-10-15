@@ -122,6 +122,10 @@ Configured suites also run: `[[checks.suites]]` in the repository's
 `checks.suites` in job settings. Commands are validated again at execution and
 run without a shell. Pytest suites produce JUnit evidence automatically.
 
+Checks that could not run first get an unattended environment repair (see
+Build environments → Environment repair) and a re-run; only then is the run
+recorded unverified.
+
 A failed suite runs again on the job's base commit in a disposable worktree.
 Failures that also happen there are reported as preexisting. Only new failures
 start the repair loop, which is capped by `checks.max_fix_attempts` (default 2).
@@ -477,6 +481,48 @@ devices, host namespaces and other jobs' containers, and enforces
 only from registries on the job's egress allowlist. Services that tests start
 themselves (testcontainers, compose) need DinD. Running such checks inside the
 job engine is not supported yet.
+
+**Environment repair** (`documentation/plans/job_templates.md` §7,
+`mu/jobs/sandbox/repair.py`). When a checks run has suites that could not run
+(unrunnable: a missing top-level executable, a missing nested tool, a missing
+module, a failed install), or every new failure is an environment symptom, the
+verify worker runs an unattended **repair** stage before it records the run:
+
+- the job's **implement** agent (mucli, Claude Code or Codex) with a repair
+  prompt (the unrunnable commands with output tails, `detect.py` findings, CI
+  files as hints; goal: make the commands *runnable*; don't modify tracked
+  files; prefer project-local installs; finish with the commands that fixed it);
+- in a repair container from the binding's current job image (or the shared
+  runtime image): root inside with `--cap-drop ALL` plus `CHOWN`,
+  `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, `FSETID`,
+  `no-new-privileges`, a writable rootfs, tmpfs `/tmp`, the worktree read-write
+  and `/cache`, no git or registry credentials, no Docker socket, no GPUs, the
+  model through the relay;
+- egress = the binding's allowlist ∪ (with `jobs.repair.registries = auto`) the
+  detected package registries ∪ OS mirrors ∪ toolchain installers, model hosts
+  dropped. Implement and checks keep their own allowlist.
+
+The container's entrypoint chowns `/workspace` and `/cache` back to the host
+uid:gid when the agent exits. The host then reverts tracked files the repair
+changed (`git status` before and after; never the implement stage's work),
+commits the container as `mucli/job-<job12>-<binding>-repair<n>` (job-labelled,
+removed with the job; the relay token and repair-only variables are reset, and
+the image is secret-scanned), points the binding's job image (or
+`metadata.runtime_repair_image` for the shared runtime) at it and re-runs the
+checks with trigger `repair`. At most `jobs.repair.max_attempts` (2) per job,
+each within `jobs.repair.max_cost_usd` ($3), `max_runtime_s` (1200) and
+`max_iterations` (40); the spend is the cost-ledger stage `repair`. A failure,
+timeout or exhausted budget is recorded and the job continues unverified; jobs
+never park for missing tools or dependencies. Records:
+`metadata.environment_repairs[]` (`attempt, binding, trigger_suites, commands,
+image, cost_usd, outcome, reverted_files, started_at, finished_at`, plus
+`project_commands`, `registries`, `error`, `transcript`) and
+`environment_repair` events (`phase` started / command / finished); the
+transcript is the session view's **Repair** source. Two non-blocking commands
+offer reuse: `addRepairToTemplate` (append the project-level commands to the
+binding's template `job_setup`; templates only) and `saveRepairedTemplate`
+(`{name}`, default `<template>-repaired`: a container template from the repaired
+image with the binding's egress plus the registries used, and its setup).
 
 ## Surfaces
 

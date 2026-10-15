@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "mu" / "gui" / "app.py"
 INDEX = ROOT / "mu" / "gui" / "templates" / "index.html"
 WORK_TEMPLATE = ROOT / "mu" / "gui" / "templates" / "work.html"
-WORK_CSS = ROOT / "mu" / "gui" / "static" / "css" / "work.css"
+# Wash W4: /work's styles are the Wash rules in its page bundle.
+WORK_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css"
 WORK_JS = ROOT / "mu" / "gui" / "static" / "js" / "work.js"
 JOBS_ROUTER = ROOT / "mu" / "gui" / "routers" / "jobs.py"
 TUI_JOB = ROOT / "mu" / "commands" / "job.py"
@@ -34,17 +35,15 @@ def test_gui_exposes_first_class_engineering_work_surface():
     assert "'/work?session='" in index
     assert 'aria-label="Open engineering work"' in index
 
-    # Wash W2: /work links its page bundle, which imports work.css.
+    # Wash W4: /work links its page bundle; the legacy work.css is retired.
     assert '/static/css/wash/patterns/work.css' in template
-    assert '@import url("../../work.css") layer(legacy);' in (
-        WORK_CSS.parent / "wash" / "patterns" / "work.css"
-    ).read_text(encoding="utf-8")
+    assert not (WORK_CSS.parents[2] / "work.css").exists()
     assert '/static/js/work.js' in template
     assert 'id="work-board"' in template
     assert 'id="work-detail"' in template
     assert 'id="work-create-form"' in template
 
-    assert ".work-layout" in css
+    assert ".work-main {" in css and 'class="work-main work-layout"' in template
     assert ".work-job-card" in css
     assert ".work-action-panel" in css
     assert "clip-path" not in css

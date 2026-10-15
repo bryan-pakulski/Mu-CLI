@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "mu/gui/templates/work.html").read_text(encoding="utf-8")
 JS = (ROOT / "mu/gui/static/js/work.js").read_text(encoding="utf-8")
-CSS = (ROOT / "mu/gui/static/css/work.css").read_text(encoding="utf-8")
+CSS = (ROOT / "mu/gui/static/css/wash/patterns/work.css").read_text(encoding="utf-8")  # Wash W4: /work page bundle
 
 STAGES = ("plan", "implement", "review")
 
@@ -42,5 +42,9 @@ def test_job_detail_renders_stage_rows():
 
 
 def test_stage_inputs_have_focus_ring_and_narrow_layout():
-    assert ".work-stage-grid input:focus-visible" in CSS
-    assert ".work-stage-grid { grid-template-columns: 1fr 1fr; }" in CSS
+    # Wash W4: inputs and selects in the stage grid keep the accent focus ring;
+    # the grid is two columns and collapses to one below the md breakpoint.
+    assert ".work-stage-grid :is(input, select):focus-visible" in CSS
+    grid = CSS.split(".work-stage-grid {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: 1fr 1fr;" in grid
+    assert ".work-stage-grid, .work-stage-model-row { grid-template-columns: 1fr; }" in CSS

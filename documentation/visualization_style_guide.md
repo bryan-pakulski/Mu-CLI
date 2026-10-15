@@ -70,7 +70,7 @@ Use this order unless the visualization is intentionally immersive:
 5. compact source/method/freshness note;
 6. optional details or exact-value table.
 
-Use a single glass frame. Nested panes are reserved for genuinely independent
+Use a single card frame (see Surface). Nested panes are reserved for genuinely independent
 views, not decoration. Whitespace and alignment should establish most grouping;
 hairlines only clarify boundaries that spacing cannot.
 
@@ -86,17 +86,44 @@ hairlines only clarify boundaries that spacing cannot.
 
 ### Colour
 
-Neutral scaffolding plus one MuCLI blue accent is the default. Semantic colours
-are limited to success, warning, and error. Multi-series categorical palettes
-must remain distinguishable under common colour-vision deficiencies and should
-use direct labels or secondary shape/dash encoding.
+Colour comes from the Wash design system
+(`documentation/design/wash_design_guide.md` §1). Never hard-code hex values or
+copy colours from screenshots: read the generated tokens.
 
-Do not use rainbow scales for ordered data. Sequential data uses a monotonic
-lightness scale; diverging data has a meaningful centre; categorical data uses
-separable hues without implying order.
+- **Scaffolding is paper and ink.** Plot backgrounds are `--wash-surface` (or
+  `--wash-sunken` for an inset strip); gridlines and axes are `--wash-hairline`;
+  axis labels and captions are `--wash-ink-3`; values and titles are
+  `--wash-ink` (`--wash-plum` only for a page-level display title).
+- **Marks use the pigment step, text uses the ink step.** A pigment
+  (`--wash-*-pigment`, `--wash-series-N`, `--wash-layer-*`) is for fills,
+  lines, bars and dots. A label coloured to match its series uses the
+  corresponding `-ink` token (`--wash-layer-L5-ink`, `--wash-ok-ink`, …) so it
+  clears 4.5:1. Never set text in a pigment.
+- **Context layers L0–L5** always use `--wash-layer-L0`, `L1A`, `L1B`, `L2`,
+  `L3`, `L4`, `L4B`, `L5` (plum, lagoon, meadow, lilac, sun, sky, rose,
+  apricot), ordered deep/cool → live/warm in every chart, with direct `L0…`
+  labels so colour is never the only key. Area charts fill at 60% opacity.
+- **Categorical series** cycle `--wash-series-1` … `--wash-series-7` (lagoon,
+  apricot, lilac, meadow, rose, sky, sun). Past seven series, group or facet
+  instead of reusing hues. Pair colour with direct labels or a dash/shape
+  encoding.
+- **Semantic marks** use the semantic pigments only for their meaning:
+  `--wash-ok-pigment` (passed, saved), `--wash-danger-pigment` (failed, error,
+  over budget), `--wash-attention-pigment` (needs a decision),
+  `--wash-caution-pigment` (warn band, soft threshold), `--wash-running-pigment`
+  (in progress), `--wash-accent-pigment` (selection, the single highlighted
+  series), `--wash-neutral-pigment` (idle, skipped, missing).
+- **Ordered data** uses a monotonic ramp of one pigment (its `-wash` → pigment
+  → `-ink`), never a rainbow. Diverging data uses two pigments around a
+  meaningful neutral centre (for example lagoon ↔ rose for tokenizer drift).
+- Washes (`--wash-*-wash`) are for bands, selected rows and highlighted ranges
+  behind marks, not for marks that must be read.
 
-The canonical tokens and theme event are embedded in the built-in skill and its
-reusable template. Do not copy colours from screenshots.
+Canvas and WebGL cannot read `var()`. Resolve tokens with
+`getComputedStyle(document.documentElement).getPropertyValue("--wash-…")` (or
+`window.WASH.color(name)` on Mucli pages) at draw time, and resolve again on
+`mucli-theme-change`. Standalone artifacts use the `--mu-*` aliases from the
+skill template, which map onto the same Paper and Dusk values.
 
 ## Theme contract
 
@@ -115,19 +142,24 @@ CSS and SVG use `[data-theme]` plus `--mu-*` variables. Canvas/WebGL resolves
 CSS variables again on `mucli-theme-change` and redraws without losing filters,
 zoom, or selection.
 
-## Glass aesthetic
+## Surface (formerly "glass aesthetic")
 
-The glass treatment is quiet environmental depth:
+Wash replaces the old glass panes with calm paper (design guide §3.3, §6):
 
-- translucent neutral surface with a solid-colour fallback;
-- subtle backdrop blur where supported;
-- one hairline that remains visible in both themes;
-- low-amplitude background atmosphere, never behind fine labels;
-- no neon outlines, excessive glows, glossy bevels, or decorative gradients;
-- no card-per-metric layout when one aligned strip or table is clearer.
+- a chart lives in one card: `--wash-surface`, a 1px `--wash-hairline`
+  border, `--wash-radius-lg`, and no shadow (elevation level 1);
+- an eyebrow chip (`.w-eyebrow`) and a short title label the card; the
+  subtitle states the measure in `--wash-ink-3`;
+- inset strips (heat strips, sparklines) may sit on `--wash-sunken`;
+- backdrop blur is reserved for the sticky top bar over art; **no glass on
+  chart cards**, no neon outlines, glows, bevels or decorative gradients;
+- watercolour art never sits behind data, labels or tables; it belongs to
+  hero bands and empty states only;
+- no card-per-metric layout: use one stat strip (`.w-stats`) or table when an
+  aligned row is clearer.
 
-Glass must not lower contrast. Text and data marks are evaluated against the
-actual composited surface, not just their nominal colour values.
+Contrast is measured against the real composited surface in both Paper and
+Dusk, not against nominal token values.
 
 ## Accessibility and input
 
@@ -160,7 +192,7 @@ details, and do not run a permanent animation loop on static data.
 - [ ] Light and dark modes were inspected, not assumed.
 - [ ] The layout works at 320px and with large text.
 - [ ] Keyboard, touch, focus, contrast, and reduced motion are supported.
-- [ ] The visual uses one restrained glass frame and one primary accent.
+- [ ] The visual sits in one quiet Wash card, uses tokens (no hex) and one primary accent.
 - [ ] Data source, freshness, and transformations are traceable.
 - [ ] The HTML is bounded, self-contained where practical, and secret-free.
 

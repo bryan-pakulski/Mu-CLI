@@ -66,10 +66,11 @@ def test_route_shell_css_matches_wash_shell_geometry():
     assert "border-bottom: 1px solid var(--wash-hairline);" in topbar
     assert '.w-breadcrumb__item + .w-breadcrumb__item::before {\n    content: "›";' in nav
     assert "--wash-size-topbar: 56px;" in _read(GUI / "static" / "css" / "wash" / "tokens.css")
-    # model pricing still gets the route primitives through its own bundle;
-    # trace.css keeps importing route-product.css.
+    # model pricing and the trace analyzer link their own pattern bundles;
+    # the legacy route-product.css they used to share is gone (W4).
     assert "/static/css/wash/patterns/model-costs.css" in _read(PAGES["model_costs"])
-    assert '@import url("/static/css/route-product.css")' in _read(GUI / "static" / "css" / "trace.css")
+    assert "/static/css/wash/patterns/trace.css" in _read(PAGES["trace"])
+    assert not (GUI / "static" / "css" / "route-product.css").exists()
 
 
 def test_old_static_analyzer_urls_redirect_to_the_shared_layout_pages():
@@ -81,13 +82,19 @@ def test_old_static_analyzer_urls_redirect_to_the_shared_layout_pages():
 
 
 def test_analysis_sections_are_planos_panels_with_header_rows():
-    css = _read(GUI / "static" / "css" / "trace.css")
-    section = css.split(".trace-section {", 1)[1].split("}", 1)[0]
-    assert "border: 1px solid var(--border)" in section
-    assert "border-radius: var(--radius-lg)" in section
-    assert "background: var(--surface)" in section
-    header = css.split(".trace-h2 {", 1)[1].split("}", 1)[0]
-    assert "border-bottom: 1px solid var(--border)" in header
+    # Wash W4: every analysis section is a Wash card (surface, hairline,
+    # radius-lg from components/card.css) with a header row: eyebrow + title.
+    card = _read(GUI / "static" / "css" / "wash" / "components" / "card.css")
+    section = card.split(".w-card {", 1)[1].split("}", 1)[0]
+    assert "border: 1px solid var(--wash-hairline);" in section
+    assert "border-radius: var(--wash-radius-lg);" in section
+    assert "background: var(--wash-surface);" in section
+    for page in ("trace", "job_trace"):
+        html = _read(PAGES[page])
+        assert html.count('<section class="w-card trace-section"') >= 6, page
+        assert '<header class="w-card__head trace-head">' in html
+        assert '<span class="w-eyebrow">' in html
+        assert 'class="w-card__title trace-h2"' in html
 
 
 def test_routes_use_the_shared_status_vocabulary():
@@ -101,11 +108,11 @@ def test_routes_use_the_shared_status_vocabulary():
     for glyph in ("✓", "●", "◆", "✗", "–", "○"):
         assert glyph in job_trace_js
 
-    crystal = _read(GUI / "static" / "css" / "containers-crystal.css")
-    assert '.manager-status.running::before{content:"●"}' in crystal
-    assert '.manager-status.missing::before{content:"✗"}' in crystal.replace(
-        '.manager-status.error::before,', ''
-    )
+    # Wash W4: environment status renders as a .w-chip with glyph + label.
+    containers_js = _read(GUI / "static" / "js" / "containers.js")
+    assert "running: {glyph: '●', tone: 'running', label: 'Running'}" in containers_js
+    assert "missing: {glyph: '✗', tone: 'danger', label: 'Missing'}" in containers_js
+    assert '<span class="w-chip__glyph" aria-hidden="true">${style.glyph}</span>' in containers_js
 
 
 def test_container_dialogs_are_labelled_and_close_on_escape():

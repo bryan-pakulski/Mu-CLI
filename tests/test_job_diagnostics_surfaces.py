@@ -6,13 +6,16 @@ WORK_TEMPLATE = ROOT / "mu" / "gui" / "templates" / "work.html"
 WORK_DIAGNOSTICS = ROOT / "mu" / "gui" / "static" / "js" / "work_diagnostics.js"
 WORK_TRACE = ROOT / "mu" / "gui" / "static" / "js" / "work_trace.js"
 WORK_ANALYSIS_LINK = ROOT / "mu" / "gui" / "static" / "js" / "work_analysis_link.js"
-WORK_POLISH = ROOT / "mu" / "gui" / "static" / "css" / "work_polish.css"
+# Wash W4: /work's rules live in its page bundle (work_polish.css and
+# work_management.css are retired).
+WORK_BUNDLE = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css"
+WORK_LAYOUT = ROOT / "mu" / "gui" / "templates" / "_layout.html"
 WORK_MANAGEMENT = ROOT / "mu" / "gui" / "static" / "js" / "work_management.js"
-WORK_MANAGEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "work_management.css"
+WORK_MANAGEMENT_CSS = WORK_BUNDLE
 JOB_TRACE_HTML = ROOT / "mu" / "gui" / "templates" / "job_trace.html"
 JOB_TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace.js"
 JOB_TRACE_DELTA_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace_signed_delta.js"
-JOB_TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "job_trace.css"
+JOB_TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "job-trace.css"
 JOB_ANALYSIS_ROUTER = ROOT / "mu" / "gui" / "routers" / "job_analysis.py"
 JOB_PERFORMANCE = ROOT / "mu" / "jobs" / "performance.py"
 JOB_ANALYSIS_DETAIL = ROOT / "mu" / "jobs" / "analysis_detail.py"
@@ -49,12 +52,16 @@ def test_web_work_page_loads_shared_structured_job_diagnostics():
 def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
     template = WORK_TEMPLATE.read_text(encoding="utf-8")
     script = WORK_ANALYSIS_LINK.read_text(encoding="utf-8")
-    css = WORK_POLISH.read_text(encoding="utf-8")
+    css = WORK_BUNDLE.read_text(encoding="utf-8")
+    layout = WORK_LAYOUT.read_text(encoding="utf-8")
 
-    assert 'work-header product-header' in template
-    assert 'product-icon-button work-header-icon' in template
-    # Wash W2: the theme switch is the shared sprite icon button macro.
-    assert 'w.theme_toggle(extra_class="product-icon-button work-header-icon")' in template
+    # Wash W4: /work no longer has its own header; it fills the shared top
+    # bar (status chips + tool icons) of _layout.html, whose theme switch is
+    # the shared sprite icon button.
+    assert '{% extends "_layout.html" %}' in template
+    assert '{% block page %}' not in template and 'work-header product-header' not in template
+    assert '{% block topbar_tools %}' in template and 'work-header-icon' in template
+    assert '{{ w.theme_toggle() }}' in layout
     assert 'data-route-theme' in (ROOT / "mu" / "gui" / "templates" / "macros" / "wash.html").read_text(encoding="utf-8")
     assert 'title="Analyze jobs"' in template
     assert 'title="Model pricing"' in template
@@ -62,9 +69,10 @@ def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
     assert 'id="work-refresh"' in template
     assert 'enhanceChrome' not in script
     assert 'installPolishStyles' not in script
-    assert '.work-product-app::before' in css
-    assert 'var(--header-bg)' in css
-    assert '.work-header-icon' in css
+    # Flat surfaces on Wash tokens: the bundle paints no atmosphere layer of
+    # its own and styles the tool group in the top bar.
+    assert '.work-product-app::before' not in css and 'var(--header-bg)' not in css
+    assert '.work-tools {' in css
 
 
 def test_engineering_work_exposes_split_model_cost_evidence():
@@ -98,9 +106,10 @@ def test_web_job_management_queries_archives_reports_and_exports():
 
     assert 'id="work-manage"' in template
     assert 'id="work-management-backdrop"' in template
-    # Wash W2: work_management.css is imported by the /work page bundle.
+    # Wash W4: the /work page bundle carries the History page rules itself.
     assert '/static/css/wash/patterns/work.css' in template
-    assert 'work_management.css' in (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")
+    assert '.work-management-query {' in WORK_BUNDLE.read_text(encoding="utf-8")
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "work_management.css").exists()
     assert '/static/js/work_management.js' in template
     assert '/api/jobs/history?' in script
     assert '/api/jobs/report?' in script

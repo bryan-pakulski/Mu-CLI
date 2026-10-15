@@ -493,6 +493,7 @@ def test_no_monokai_anywhere_in_the_terminal():
         assert "monokai" not in path.read_text(encoding="utf-8"), rel
 
 
+_ASSET_SUFFIX = re.compile(r"\.(svg|css|js|json|png|webp|woff2|ttf|html)$")
 _STYLE_REF = re.compile(r"""(?<![\w{])(wash\.[a-z0-9_]+(?:\.[a-zA-Z0-9_]+)*)(?=[\]"' ])""")
 
 
@@ -505,6 +506,8 @@ def test_every_referenced_wash_style_exists():
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for name in _STYLE_REF.findall(line):
                 if name.endswith(".") or name in known:
+                    continue
+                if _ASSET_SUFFIX.search(name):  # e.g. the web icon sprite "wash.svg"
                     continue
                 if any(name.startswith(prefix) for prefix in ("wash.mode.", "wash.layer.", "wash.series.",
                                                                   "wash.status.", "wash.severity.", "wash.pigment.")) and name.count(".") >= 2 and name.split(".")[2] == "":

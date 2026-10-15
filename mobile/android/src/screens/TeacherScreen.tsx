@@ -39,7 +39,7 @@ export function TeacherScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           <Skeleton height={120} style={{ marginBottom: spacing.sm }} />
           <Skeleton height={80} style={{ marginBottom: spacing.sm }} />
@@ -51,7 +51,7 @@ export function TeacherScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -59,7 +59,7 @@ export function TeacherScreen() {
 
   if (!state || (!state.active && state.courses.length === 0)) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No courses" message="No teacher courses available" />
       </SafeAreaView>
     );
@@ -73,7 +73,7 @@ export function TeacherScreen() {
   const reviews = (course?.scheduled_reviews || []) as Array<Record<string, any>>;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <FlatList
         data={modules}
         keyExtractor={item => String(item.module_id)}

@@ -1,6 +1,7 @@
 // One Markdown rules-and-styles module (spec §5.2) for chat, interim turns
 // and job documents (G§9.7): headings on the title scale, 24px list indents,
-// lilac blockquote rule, hairline tables with a sunken header, accent links,
+// blockquotes as a `glass-subtle` inset with italic ink-2 text and no
+// coloured side rule (G§3.4), hairline tables with a sunken header, accent links,
 // inline code on sunken with radius-xs, and fenced code through the Wash
 // CodeBlock. Links only reach the OS through the http(s) allow-list.
 
@@ -11,10 +12,11 @@ import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
 import { fonts, fontStyle, radii, spacing, typeStyle, type WashColors } from '../theme/tokens';
 import { CodeBlock } from '../components/CodeBlock';
+import { glassStyle, useGlass } from './Glass';
 
 export type MarkdownVariant = 'chat' | 'compact' | 'document';
 
-export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'chat') {
+export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'chat', options: { solid?: boolean } = {}) {
   const bodyType = variant === 'chat' ? typeStyle('body-lg') : variant === 'compact' ? typeStyle('caption') : typeStyle('body');
   const mono = { fontFamily: fonts.mono, fontSize: typeStyle('mono').fontSize, lineHeight: typeStyle('mono').lineHeight };
   const heading = (name: 'title-2' | 'title-3' | 'body-lg') => ({ ...typeStyle(name), color: colors.plum, marginTop: spacing.md, marginBottom: spacing.sm });
@@ -33,7 +35,8 @@ export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'c
     strong: fontStyle(fonts.ui, '600'),
     em: { fontStyle: 'italic' },
     link: { color: colors.accent.ink, textDecorationLine: 'underline' },
-    blockquote: { backgroundColor: 'transparent', borderLeftColor: colors.plan.pigment, borderLeftWidth: 3, paddingLeft: spacing.md, marginLeft: 0, marginVertical: spacing.sm },
+    // borderLeftWidth 0 overrides the renderer's default 4px grey side rule (G§3.4).
+    blockquote: { ...glassStyle('subtle', colors, { solid: options.solid }), borderLeftWidth: 0, borderColor: 'transparent', borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginLeft: 0, marginVertical: spacing.sm },
     code_inline: { ...mono, color: colors.syntax.keyword, backgroundColor: colors.sunken, borderRadius: radii.xs, paddingHorizontal: spacing.xs },
     code_block: { ...mono, color: colors.ink, backgroundColor: colors.code, borderRadius: radii.sm, padding: spacing.base },
     fence: { ...mono, color: colors.ink, backgroundColor: colors.code, borderRadius: radii.sm, padding: spacing.base },
@@ -77,7 +80,8 @@ const Renderer = React.memo(MarkdownRenderer);
 
 export function Markdown({ children, variant = 'chat' }: { children: string; variant?: MarkdownVariant }) {
   const { colors } = useTheme();
-  const style = useMemo(() => markdownStyles(colors, variant), [colors, variant]);
+  const { solid } = useGlass();
+  const style = useMemo(() => markdownStyles(colors, variant, { solid }), [colors, variant, solid]);
   const rules = useMemo(() => markdownRules(colors), [colors]);
   // Safe link handler: only http(s) URLs reach the OS.
   const onLinkPress = useCallback((url: string) => {

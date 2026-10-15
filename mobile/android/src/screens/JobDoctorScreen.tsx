@@ -71,7 +71,7 @@ export function DoctorPanel({ onOpenChecklist }: { onOpenChecklist: () => void }
 export function JobDoctorScreen({ navigation }: JobDoctorScreenProps) {
   const { colors } = useTheme();
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Doctor</Text>
         <DoctorPanel onOpenChecklist={() => navigation.navigate('JobSetup')} />

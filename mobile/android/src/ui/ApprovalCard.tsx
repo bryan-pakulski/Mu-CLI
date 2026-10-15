@@ -1,8 +1,9 @@
 // Approval card and prompt frame (G§9.9, G§9.10) — safety-critical.
 //
-// A state card in `attention`: 4px apricot rule, apricot wash header strip,
-// and the "◆ Needs you" status chip. High-risk tools escalate the rule and
-// risk chip to `danger`. Approve is `primary`, Deny is `secondary` (danger
+// A state card in `attention` on glass: an apricot-wash header strip (the
+// wash mixed into the glass) and the "◆ Needs you" status chip, with no side
+// rule (G§3.4). High-risk tools escalate the header tint and risk chip to
+// `danger`. Approve is `primary`, Deny is `secondary` (danger
 // only when the action itself is destructive), Edit is `ghost`. Approve is
 // never auto-focused: when the card appears, screen-reader focus moves to the
 // heading. Questions (choice, quiz, input, confirm) share the frame in
@@ -19,6 +20,7 @@ import { Button } from './Button';
 import { CheckRow, ChoiceRow } from './Form';
 import { DiffView, looksLikeDiff } from './DiffView';
 import { InkDrop } from './Progress';
+import { useGlass } from './Glass';
 
 export type PromptQueue = { index: number; total: number; onPrev?: () => void; onNext?: () => void };
 
@@ -46,15 +48,16 @@ function useHeadingFocus(ref: React.RefObject<RNText>, key: string) {
 
 export function PromptFrame({ tone = 'attention', chip, title, queue, children, actions, testID }: PromptFrameProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const t = toneOf(colors, tone);
   const heading = useRef<RNText>(null);
   useHeadingFocus(heading, title);
   const waiting = vocabulary.status.waiting;
   return (
-    <View testID={testID} style={{ borderRadius: radii.lg, borderWidth: 1, borderColor: colors.hairline, borderLeftWidth: 4, borderLeftColor: t.pigment, backgroundColor: colors.surface, overflow: 'hidden' }}>
-      <View style={{ backgroundColor: t.wash, paddingHorizontal: spacing.base, paddingVertical: spacing.md, gap: spacing.xs }}>
+    <View testID={testID} style={[glass.style(1), { borderRadius: radii.lg, overflow: 'hidden' }]}>
+      <View testID={testID ? `${testID}-header` : undefined} style={{ backgroundColor: glass.tint(tone), paddingHorizontal: spacing.base, paddingVertical: spacing.md, gap: spacing.xs }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-          {chip ? <Chip tone={tone} glyph={tone === 'attention' || tone === 'danger' ? waiting.glyph : undefined} style={{ backgroundColor: colors.surface }}>{chip}</Chip> : null}
+          {chip ? <Chip testID={testID ? `${testID}-chip` : undefined} tone={tone} glyph={tone === 'attention' || tone === 'danger' ? waiting.glyph : undefined} style={{ backgroundColor: glass.solid ? colors.surface : glass.style(2, { flat: true }).backgroundColor }}>{chip}</Chip> : null}
           <View style={{ flex: 1 }} />
           {queue && queue.total > 1 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>

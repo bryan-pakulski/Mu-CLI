@@ -7,8 +7,9 @@ import { useTheme } from '../theme/ThemeContext';
 import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
-import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
+import { fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
 import { ModalFrame, Pressable, Text, Icon, type IconName } from '../ui';
+import { GlassBackdrop, useGlass } from '../ui/Glass';
 
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
@@ -23,7 +24,8 @@ function threadStatusLabel(status: ThreadStatus): string {
 }
 
 export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }: SwipeSessionsDrawerProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
+  const glass = useGlass();
   const { activeSessionName, setActiveSession, setActiveProviderModel } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
@@ -192,16 +194,18 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
             {...swipeResponder.panHandlers}
             style={[
               styles.drawer,
-              elevation(2, colors, isDark),
+              // Side panel = level-1 glass chrome (G§3.3) with a neutral 1px edge.
               {
                 borderWidth: 0,
                 borderRightWidth: 1,
-                backgroundColor: colors.raised,
+                backgroundColor: 'transparent',
+                overflow: 'hidden',
                 borderRightColor: colors.hairline,
                 paddingTop: spacing.base,
               },
             ]}
           >
+            <GlassBackdrop level={1} testID="sessions-drawer-glass" />
             <View style={[styles.header, { borderBottomColor: colors.hairline }] }>
               <View style={styles.headerCopy}>
                 <Text style={[styles.title, { color: colors.ink }]}>Threads</Text>
@@ -247,7 +251,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                       activeOpacity={0.7}
                       style={[
                         styles.row,
-                        activeSessionName === thread.session_name && { backgroundColor: colors.accent.wash },
+                        activeSessionName === thread.session_name && glass.activePill,
                       ]}
                     >
                       <View style={styles.typeIconWrap}>
@@ -304,7 +308,7 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     activeOpacity={0.7}
                     style={[
                       styles.row,
-                      activeSessionName === session.name && { backgroundColor: colors.accent.wash },
+                      activeSessionName === session.name && glass.activePill,
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
@@ -424,6 +428,9 @@ const styles = StyleSheet.create({
     minHeight: 58,
     paddingHorizontal: spacing.sm,
     borderRadius: radii.sm,
+    // Same box as the active glass-strong pill, so selection never shifts layout.
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   typeIconWrap: { width: 28, alignItems: 'flex-start', justifyContent: 'center', marginRight: spacing.sm },
   threadDot: { width: 8, height: 8, borderRadius: radii.pill },

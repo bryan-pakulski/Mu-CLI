@@ -133,9 +133,14 @@ def test_mobile_input_required_banner_is_centered_and_prominent():
     assert "top: '50%'" in style
     assert "transform: [{ translateY: -38 }]" in style
     assert "bottom:" not in style
-    # planos approval banner: raised surface with a warn-tone left border + ◆.
-    assert "backgroundColor: colors.raised" in source
-    assert "borderLeftColor: colors.attention.ink" in source
+    # Wash glass (G§3.3, G§3.4, G§9.9 M): the banner keeps the attention
+    # styling as level-2 glass chrome with the attention wash mixed into the
+    # glass and the ◆ glyph, and no coloured side rule.
+    assert "glass.style(2), styles.pendingBanner" in source
+    assert "<GlassBackdrop level={2}" in source
+    assert "glass.tint('attention')" in source
+    assert "vocabulary.status.waiting.glyph" in source
+    assert "borderLeftWidth" not in style and "borderLeftColor" not in source
 
 
 def test_handoff_animations_exist_on_both_clients():

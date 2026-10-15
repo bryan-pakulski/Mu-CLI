@@ -54,6 +54,7 @@ import { MoreScreen } from '../screens/MoreScreen';
 import { fontSizes, fontWeights, radii } from '../theme/tokens';
 import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
 import { Icon, Pressable, Text, ToastHost, textStyle, type IconName } from '../ui';
+import { GlassChrome, Stage, glassStyle, routeAmbient, useAmbientController, useGlass } from '../ui/Glass';
 
 /** Bottom tabs (G§8.3): Chat, Work, Workspace, More. */
 export type TabParamList = {
@@ -206,17 +207,19 @@ function ChatScreenWithChrome() {
           onOpenSettings={() => navigateTo('Settings')}
           onOpenContext={() => navigateTo('Memory')}
         />
-        {!isConnected ? (
-          <ConnectionPrompt onConnect={() => navigateTo('Connection')} />
-        ) : activeSessionName ? (
-          <ChatScreenProduct />
-        ) : (
-          <SessionStartPrompt
-            onLoadSession={openSessions}
-            onCreateSession={createSession}
-            onManageContainers={() => setContainersOpen(true)}
-          />
-        )}
+        <Stage>
+          {!isConnected ? (
+            <ConnectionPrompt onConnect={() => navigateTo('Connection')} />
+          ) : activeSessionName ? (
+            <ChatScreenProduct />
+          ) : (
+            <SessionStartPrompt
+              onLoadSession={openSessions}
+              onCreateSession={createSession}
+              onManageContainers={() => setContainersOpen(true)}
+            />
+          )}
+        </Stage>
         <SwipeSessionsDrawer
           visible={sessionsOpen}
           onClose={() => setSessionsOpen(false)}
@@ -240,6 +243,21 @@ const TAB_ICONS: Record<keyof TabParamList, IconName> = {
   More: 'more-horizontal',
 };
 
+/** Tab screens other than Chat sit on a full-bleed glass stage (Chat draws its own below the header). */
+function staged<P extends object>(Screen: React.ComponentType<P>) {
+  const StagedScreen = (props: P) => <Stage><Screen {...props} /></Stage>;
+  StagedScreen.displayName = `Staged(${Screen.displayName || Screen.name || 'Screen'})`;
+  return StagedScreen;
+}
+
+const WorkTab = staged(WorkScreen);
+const WorkspaceTab = staged(WorkspaceScreen);
+const MoreTab = staged(MoreScreen);
+
+/** Glass chrome behind the tab bar and tab headers (G§3.3 level 1, blurred). */
+const TabBarGlass = () => <GlassChrome level={1} edges={false} style={{ flex: 1 }} testID="tab-bar-glass" />;
+const HeaderGlass = () => <GlassChrome level={1} edges={false} style={{ flex: 1 }} />;
+
 /** Tab bar item (G§9.4 M): 24 icon, 12 label; active = accent icon, ink label, wash pill behind the icon. */
 function TabIcon({ name, focused }: { name: keyof TabParamList; focused: boolean }) {
   const { colors } = useTheme();
@@ -252,40 +270,60 @@ function TabIcon({ name, focused }: { name: keyof TabParamList; focused: boolean
 
 function MainTabs() {
   const { colors } = useTheme();
+  const glass = useGlass();
   return (
     <Tab.Navigator
-      sceneContainerStyle={{ backgroundColor: colors.canvas }}
+      sceneContainerStyle={{ backgroundColor: 'transparent' }}
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused }) => <TabIcon name={route.name} focused={focused} />,
         tabBarActiveTintColor: colors.ink,
         tabBarInactiveTintColor: colors.ink3,
         tabBarLabelStyle: { ...textStyle('caption'), marginBottom: 2 },
-        tabBarStyle: { backgroundColor: colors.canvas, borderTopColor: colors.hairline, minHeight: 64, paddingTop: 6 },
+        tabBarStyle: { backgroundColor: 'transparent', borderTopColor: glass.edge, minHeight: 64, paddingTop: 6, elevation: 0 },
+        tabBarBackground: TabBarGlass,
         tabBarItemStyle: { minHeight: 44 },
         tabBarHideOnKeyboard: true,
-        headerStyle: { backgroundColor: colors.canvas },
+        headerStyle: { backgroundColor: 'transparent' },
+        headerBackground: HeaderGlass,
         headerTintColor: colors.ink,
         headerShadowVisible: false,
         headerTitleStyle: { ...textStyle('title3'), color: colors.plum },
       })}
     >
       <Tab.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false, tabBarAccessibilityLabel: 'Chat', tabBarTestID: 'tab-chat' }} />
-      <Tab.Screen name="Work" component={WorkScreen} options={{ title: 'Engineering work', tabBarLabel: 'Work', tabBarAccessibilityLabel: 'Work', tabBarTestID: 'tab-work' }} />
-      <Tab.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace', tabBarAccessibilityLabel: 'Workspace', tabBarTestID: 'tab-workspace' }} />
-      <Tab.Screen name="More" component={MoreScreen} options={{ title: 'More', tabBarAccessibilityLabel: 'More', tabBarTestID: 'tab-more' }} />
+      <Tab.Screen name="Work" component={WorkTab} options={{ title: 'Engineering work', tabBarLabel: 'Work', tabBarAccessibilityLabel: 'Work', tabBarTestID: 'tab-work' }} />
+      <Tab.Screen name="Workspace" component={WorkspaceTab} options={{ title: 'Workspace', tabBarAccessibilityLabel: 'Workspace', tabBarTestID: 'tab-workspace' }} />
+      <Tab.Screen name="More" component={MoreTab} options={{ title: 'More', tabBarAccessibilityLabel: 'More', tabBarTestID: 'tab-more' }} />
     </Tab.Navigator>
   );
 }
 
+/** The deepest focused route name (tabs included) for the ambient wash. */
+function focusedRouteName(state: { index?: number; routes: Array<{ name: string; state?: unknown }> } | undefined): string | null {
+  if (!state || !state.routes?.length) return null;
+  const route = state.routes[state.index ?? state.routes.length - 1];
+  const nested = route.state as typeof state | undefined;
+  return (nested ? focusedRouteName(nested) : null) || route.name;
+}
+
 export function AppNavigator() {
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, reduceDecoration } = useTheme();
+  const { setRouteArt } = useAmbientController();
   const baseTheme = isDark ? DarkTheme : DefaultTheme;
+  // Glass (G§3.3): the navigator is transparent so the ambient wash behind it
+  // shows through; screens sit on a level-1 glass stage, headers on glass.
+  const stage = glassStyle(1, colors, { flat: true, solid: reduceDecoration });
+  const headerGlass = glassStyle(2, colors, { flat: true, solid: reduceDecoration });
+  const syncAmbient = useCallback(() => {
+    const state = navRef.current?.getRootState() as Parameters<typeof focusedRouteName>[0];
+    setRouteArt(routeAmbient(focusedRouteName(state) || 'Chat'));
+  }, [setRouteArt]);
   const navTheme = {
     ...baseTheme,
     colors: {
       ...baseTheme.colors,
       background: 'transparent',
-      card: colors.raised,
+      card: 'transparent',
       border: colors.hairline,
       text: colors.ink,
       primary: colors.accent.ink,
@@ -295,19 +333,19 @@ export function AppNavigator() {
   return (
     <ToastHost>
     <NeedsYouNotifier />
-    <NavigationContainer ref={navRef} theme={navTheme}>
+    <NavigationContainer ref={navRef} theme={navTheme} onReady={syncAmbient} onStateChange={syncAmbient}>
       <Stack.Navigator
         screenOptions={{
           animation: 'slide_from_right',
-          contentStyle: { backgroundColor: colors.canvas },
-          headerStyle: { backgroundColor: colors.surface },
+          contentStyle: stage,
+          headerStyle: { backgroundColor: headerGlass.backgroundColor as string },
           headerTintColor: colors.ink,
           headerShadowVisible: false,
           headerBackTitle: '',
           headerTitleStyle: { fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
         }}
       >
-        <Stack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false }} />
+        <Stack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
         <Stack.Screen
           name="JobDetail"

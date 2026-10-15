@@ -64,7 +64,7 @@ export function SecurityScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3].map(i => <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -74,7 +74,7 @@ export function SecurityScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -82,7 +82,7 @@ export function SecurityScreen() {
 
   if (!state || (!state.report && state.findings.length === 0)) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No security findings" message="No security scan or findings available" />
       </SafeAreaView>
     );
@@ -95,7 +95,7 @@ export function SecurityScreen() {
   });
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <FlatList
         data={findings}
         keyExtractor={item => item.finding_id}

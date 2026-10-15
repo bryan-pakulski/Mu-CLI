@@ -1,8 +1,11 @@
-// Cards (G§9.3): `default` (surface, radius-lg, hairline), `sunken`
-// (feature/settings group: sunken fill, no border) and `state` (a 4px left
-// rule in the semantic pigment with a wash header strip; attention, danger,
-// plan and ok only). Plus the stat strip, key/value rows, pre blocks and the
-// small inline empty/loading rows.
+// Cards (G§9.3): `default` (level-1 glass, radius-lg, light glass edge),
+// `sunken` (feature/settings group: `glass-subtle` fill, no border) and
+// `state` (a glass card whose header strip is tinted with the semantic wash
+// mixed into the glass and carries the glyph or status chip; attention,
+// danger, plan and ok only). There is no coloured side rule (G§3.4). With
+// "Reduce decoration" the glass falls back to solid surface/sunken. Plus the
+// stat strip, key/value rows, pre blocks and the small inline empty/loading
+// rows.
 
 import React from 'react';
 import { View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
@@ -13,6 +16,7 @@ import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { CountBadge, Eyebrow, StatusIcon } from './Chip';
 import { InkDrop } from './Progress';
+import { useGlass } from './Glass';
 
 export type CardProps = {
   variant?: 'default' | 'sunken' | 'state';
@@ -45,21 +49,15 @@ export function Card({
   children, flush, elevated, onPress, style, bodyStyle, testID, accessibilityLabel,
 }: CardProps) {
   const { colors } = useTheme();
-  const t = toneOf(colors, tone);
+  const glass = useGlass();
   const isState = variant === 'state';
   const frame: ViewStyle = variant === 'sunken'
-    ? { backgroundColor: colors.sunken, borderRadius: radii.lg }
-    : {
-      backgroundColor: elevated ? colors.raised : colors.surface,
-      borderWidth: 1,
-      borderColor: colors.hairline,
-      borderRadius: radii.lg,
-      ...(isState ? { borderLeftWidth: 4, borderLeftColor: t.pigment } : null),
-    };
+    ? { ...glass.style('subtle'), borderRadius: radii.lg }
+    : { ...glass.style(elevated ? 2 : 1), borderRadius: radii.lg };
   const head = title != null || right != null || eyebrow ? (
-    <View style={[
+    <View testID={isState && testID ? `${testID}-header` : undefined} style={[
       { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: children != null ? spacing.sm : spacing.md },
-      isState ? { backgroundColor: t.wash, paddingBottom: spacing.md } : null,
+      isState ? { backgroundColor: glass.tint(tone), paddingBottom: spacing.md } : null,
     ]}>
       {glyph ? <Text variant="body" importantForAccessibility="no" style={{ color: toneOf(colors, glyphTone || (isState ? tone : 'neutral')).ink, fontWeight: '600' }}>{glyph}</Text> : null}
       <View style={{ flexShrink: 1, gap: spacing.xs }}>
@@ -93,11 +91,13 @@ export const Panel = Card;
 
 export type StatItem = { value: number | string; label: string; tone?: Tone; glyph?: string; onPress?: () => void; testID?: string };
 
-/** A row of big tabular numbers with captions and hairline dividers (G§9.3). */
+/** A row of big tabular numbers with captions and hairline dividers on one glass strip (G§9.3). */
 export function StatStrip({ items, testID }: { items: StatItem[]; testID?: string }) {
   const { colors } = useTheme();
+  const glass = useGlass();
+  // One level-1 glass strip (the numbers never sit directly on art, G§6.2).
   return (
-    <View testID={testID} style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: spacing.md }}>
+    <View testID={testID} style={[glass.style(1), { flexDirection: 'row', flexWrap: 'wrap', rowGap: spacing.md, borderRadius: radii.lg, paddingVertical: spacing.md }]}>
       {items.map((item, i) => {
         const tone = item.tone && item.tone !== 'neutral' && item.tone !== 'muted' && Number(item.value) > 0 ? toneOf(colors, item.tone).ink : colors.plum;
         const body = (

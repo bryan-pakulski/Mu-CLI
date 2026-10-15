@@ -5,6 +5,7 @@ import { useConnectionStore } from '../store/connection';
 import { PLAN_MODE_TOOLTIP, setPlanModeRemote } from '../api/planMode';
 import { fontWeights, radii, spacing } from '../theme/tokens';
 import { Icon, Pressable, Text } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 export const PLAN_MODE_PLACEHOLDER = 'Plan mode: read-only — writing is blocked';
 
@@ -72,6 +73,7 @@ export function PlanModeBadge() {
 /** Persistent strip above the composer — rendered only while plan mode is on. */
 export function PlanModeStrip() {
   const { colors } = useTheme();
+  const glass = useGlass();
   const { planMode, busy, turnOff } = usePlanMode();
   if (!planMode) return null;
   return (
@@ -79,7 +81,9 @@ export function PlanModeStrip() {
       testID="plan-mode-strip"
       accessibilityRole="summary"
       accessibilityLabel="Plan mode, read-only. Writing is blocked."
-      style={[styles.strip, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
+      // Lilac state strip (G§9.16): the plan wash mixed into glass with plan
+      // mode's dashed outline (G§3.4); no side rule.
+      style={[styles.strip, { backgroundColor: glass.tint('plan'), borderColor: colors.plan.ink }]}
     >
       <Icon name="lock" size="sm" color={colors.plan.ink} testID="plan-mode-strip-lock" />
       <Text variant="xs" style={[styles.stripText, { color: colors.ink }]}>
@@ -120,7 +124,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     marginBottom: spacing.sm,
     borderWidth: 1,
-    borderLeftWidth: 3,
+    borderStyle: 'dashed',
     borderRadius: radii.sm,
   },
   stripText: { flex: 1 },

@@ -16,7 +16,7 @@ export function WorkspaceCategoryScreen({ navigation, route }: WorkspaceCategory
   const category = getWorkspaceCategory(route.params.categoryId);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
         <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Tools</Text>
         <Text variant="sm" dim style={[styles.intro, { borderBottomColor: colors.hairline }]}>{category.description}</Text>

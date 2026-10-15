@@ -24,12 +24,12 @@ export function DebugScreen() {
   }, []);
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
-  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><View style={{ padding: spacing.base }}><Skeleton height={280} /><Skeleton height={110} style={{ marginTop: spacing.sm }} /></View></SafeAreaView>;
-  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
-  if (!state || !state.active) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><EmptyState title="No debug case" message="Start debugging to build a hypothesis-and-evidence board." /></SafeAreaView>;
+  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><View style={{ padding: spacing.base }}><Skeleton height={280} /><Skeleton height={110} style={{ marginTop: spacing.sm }} /></View></SafeAreaView>;
+  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
+  if (!state || !state.active) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><EmptyState title="No debug case" message="Start debugging to build a hypothesis-and-evidence board." /></SafeAreaView>;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />} contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}>
         <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
 

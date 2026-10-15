@@ -195,7 +195,7 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const stepTitle = ['','Choose a boundary','Select a provider','Configure access','Review and create'][step];
 
   return (
-    <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
+    <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}>
           <Pressable accessibilityLabel="Close" onPress={onClose} disabled={creating} style={[styles.iconButton, { backgroundColor: colors.sunken }]}><Icon name="x" size="md" color={colors.ink} /></Pressable>
@@ -275,7 +275,7 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
         </View>
       </KeyboardAvoidingView>
 
-      <ModalFrame statusBarTranslucent={false} transparent={false} visible={containerEditor !== null} animationType="slide" onRequestClose={() => setContainerEditor(null)} containerStyle={{ backgroundColor: colors.canvas }}>
+      <ModalFrame statusBarTranslucent={false} transparent={false} visible={containerEditor !== null} animationType="slide" onRequestClose={() => setContainerEditor(null)}>
         <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.ink }]}>{containerEditor === 'dockerfile' ? 'Worker image template' : 'Network policy'}</Text><Text variant="xs" dim>{containerEditor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><Pressable accessibilityLabel="Close editor" onPress={() => setContainerEditor(null)} style={[styles.iconButton, { backgroundColor: colors.sunken }]}><Icon name="x" size="md" color={colors.ink} /></Pressable></View>
           {containerEditor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={egressAllow} onChangeText={setEgressAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /><FieldLabel label="Blocklist" optional /><TextInput value={egressDeny} onChangeText={setEgressDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /></ScrollView>}

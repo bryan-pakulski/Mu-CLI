@@ -1,13 +1,15 @@
 // Watercolour atmosphere (G§6): pre-rendered Wash art behind hero areas
-// (Connect, Session start, the Work dashboard), dissolving into canvas at
-// the bottom edge. Dusk has its own paintings (never a darkened Paper wash).
-// "Reduce decoration" replaces the art with a flat wash band. Art never sits
-// behind body text: content placed over it must sit where the fade has
-// reached paper, or on a solid surface.
+// (Connect, Session start, the Work dashboard). With glass on, the hero band
+// is transparent around its edges and dissolves (an alpha mask) into the
+// glass stage and ambient wash behind it, so it never ends in a hard edge.
+// Dusk has its own paintings (never a darkened Paper wash). "Reduce
+// decoration" replaces the art with a flat wash band that fades into a solid
+// canvas. Art never sits behind body text: content placed over it must sit
+// where the fade has reached the stage, or on glass.
 
 import React from 'react';
-import { Image, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
+import Svg, { Defs, Image as SvgImage, LinearGradient, Mask, Rect, Stop } from 'react-native-svg';
 import { useTheme } from '../theme/ThemeContext';
 import type { ThemeName } from '../theme/ThemeContext';
 
@@ -54,14 +56,36 @@ export type WashBackgroundProps = {
  */
 export function WashBackground({ art = 'dawn', height = 280, children, style, testID }: WashBackgroundProps) {
   const { colors, name, reduceDecoration } = useTheme();
+  if (!reduceDecoration) {
+    // Glass: no canvas fill; the art fades out by alpha into whatever is behind.
+    return (
+      <View testID={testID} style={[styles.root, { backgroundColor: 'transparent' }, style]}>
+        <View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[styles.band, { height }]}>
+          <View testID="wash-art" style={StyleSheet.absoluteFill}>
+            <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+              <Defs>
+                <LinearGradient id="wash-alpha" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor="#fff" stopOpacity={1} />
+                  <Stop offset="0.4" stopColor="#fff" stopOpacity={0.7} />
+                  <Stop offset="0.75" stopColor="#fff" stopOpacity={0.15} />
+                  <Stop offset="1" stopColor="#fff" stopOpacity={0} />
+                </LinearGradient>
+                <Mask id="wash-mask" x="0" y="0" width="100%" height="100%">
+                  <Rect x="0" y="0" width="100%" height="100%" fill="url(#wash-alpha)" />
+                </Mask>
+              </Defs>
+              <SvgImage href={washArt(art, name)} x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" mask="url(#wash-mask)" />
+            </Svg>
+          </View>
+        </View>
+        <View style={styles.content}>{children}</View>
+      </View>
+    );
+  }
   return (
     <View testID={testID} style={[styles.root, { backgroundColor: colors.canvas }, style]}>
       <View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[styles.band, { height }]}>
-        {reduceDecoration ? (
-          <View testID="wash-flat" style={[StyleSheet.absoluteFill, { backgroundColor: colors.pigment[FLAT[art]].wash }]} />
-        ) : (
-          <Image testID="wash-art" source={washArt(art, name)} resizeMode="cover" accessibilityIgnoresInvertColors style={StyleSheet.absoluteFill} />
-        )}
+        <View testID="wash-flat" style={[StyleSheet.absoluteFill, { backgroundColor: colors.pigment[FLAT[art]].wash }]} />
         <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" preserveAspectRatio="none">
           <Defs>
             <LinearGradient id="wash-fade" x1="0" y1="0" x2="0" y2="1">

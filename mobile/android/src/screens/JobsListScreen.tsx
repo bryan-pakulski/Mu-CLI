@@ -71,7 +71,7 @@ export function JobsListScreen({ navigation }: JobsListScreenProps) {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <JobsNavBar current="JobsList" onNavigate={go} home={home} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await reload(true); setRefreshing(false); }} tintColor={colors.ink3} />}>

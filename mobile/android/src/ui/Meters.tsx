@@ -77,7 +77,8 @@ export function LayerBar({ layers, limit, budget, testID }: { layers: LayerSegme
           <View key={l.id} style={{ width: `${(l.tokens / total) * 100}%`, backgroundColor: layerTone(colors, l.id, i).pigment }} />
         ))}
         {budget && limit ? (
-          <View style={{ position: 'absolute', left: `${Math.min(1, budget / total) * 100}%`, top: 0, bottom: 0, borderLeftWidth: 1, borderStyle: 'dashed', borderLeftColor: colors.ink }} />
+          // Budget tick: a neutral 1px data mark inside the meter (wash-data-mark), not a side accent.
+          <View style={{ position: 'absolute', left: `${Math.min(1, budget / total) * 100}%`, top: 0, bottom: 0, borderLeftWidth: 1, borderStyle: 'dashed', borderLeftColor: colors.ink }} /* wash-data-mark */ />
         ) : null}
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md, rowGap: 2 }}>

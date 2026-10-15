@@ -95,7 +95,7 @@ export function SessionTraceScreenV2() {
 
   if (loading) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <View style={styles.loadingWrap}>
           <Skeleton height={96} style={styles.loadingBlock} />
           <Skeleton height={190} style={styles.loadingBlock} />
@@ -107,7 +107,7 @@ export function SessionTraceScreenV2() {
 
   if (error && !dashboard) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <ErrorState message={error} onRetry={() => load(selectedRunId)} />
       </SafeAreaView>
     );
@@ -115,7 +115,7 @@ export function SessionTraceScreenV2() {
 
   if (!dashboard) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <EmptyState
           icon="activity"
           title="No session traces"
@@ -141,7 +141,7 @@ export function SessionTraceScreenV2() {
   const spikes = series.top_context_spikes || [];
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(selectedRunId); }} />}
         contentContainerStyle={styles.content}

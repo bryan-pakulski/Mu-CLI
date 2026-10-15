@@ -57,7 +57,7 @@ export function FilesScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} height={44} style={{ marginBottom: spacing.xs }} />)}
         </View>
@@ -67,7 +67,7 @@ export function FilesScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={() => load(currentPath)} />
       </SafeAreaView>
     );
@@ -75,7 +75,7 @@ export function FilesScreen() {
 
   if (entries.length === 0 && !fileContent) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No files" message="No files found in workspace" />
       </SafeAreaView>
     );
@@ -83,7 +83,7 @@ export function FilesScreen() {
 
   if (fileContent) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
           <Pressable onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
             <Icon name="arrow-left" size="lg" color={colors.ink} />
@@ -102,7 +102,7 @@ export function FilesScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {currentPath && (
           <Pressable onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">

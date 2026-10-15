@@ -186,7 +186,7 @@ export function FeatureExplorerScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <View style={styles.loadingWrap}>
           <Skeleton height={52} style={styles.loadingBlock} />
           <Skeleton height={112} style={styles.loadingBlock} />
@@ -198,14 +198,14 @@ export function FeatureExplorerScreen() {
 
   if (error && !state) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <ErrorState message={error} onRetry={() => load(false)} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />}
         contentContainerStyle={styles.content}

@@ -17,6 +17,7 @@ import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
 import { EmptyState, Pressable, Skeleton, Text, Icon } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 export type ThreadsScreenProps = NativeStackScreenProps<RootStackParamList, 'Threads'>;
 
@@ -69,6 +70,7 @@ function formatTime(timestamp: number): string {
 
 export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) {
   const { colors, spacing } = useTheme();
+  const glass = useGlass();
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const setActiveSession = useConnectionStore(state => state.setActiveSession);
   const [groupId, setGroupId] = useState('');
@@ -180,7 +182,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
 
   if (!activeSessionName) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }] }>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }] }>
         <EmptyState
           title="No active session"
           message="Load a session before creating or reviewing agent threads."
@@ -193,7 +195,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
   }
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }] }>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }] }>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
         contentContainerStyle={[styles.content, { padding: spacing.base }]}
@@ -241,7 +243,7 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
             activeOpacity={0.7}
             style={[
               styles.threadRow,
-              thread.thread_id === currentThreadId && { backgroundColor: colors.accent.wash },
+              thread.thread_id === currentThreadId && glass.activePill,
             ]}
           >
             <View style={[styles.statusDot, { backgroundColor: statusColor(thread.status) }]} />
@@ -303,10 +305,12 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
               key={event.event_id}
               style={[
                 styles.eventRow,
-                conflict && { borderLeftColor: colors.danger.ink, borderLeftWidth: 2, paddingLeft: spacing.md },
+                // Conflicts: danger wash in glass + ✗ glyph, no side rule (G§3.4).
+                conflict && { backgroundColor: glass.tint('danger'), borderRadius: radii.md, paddingHorizontal: spacing.md },
               ]}
             >
               <View style={styles.eventMeta}>
+                {conflict ? <Text variant="xs" accessibilityLabel="conflict" style={{ color: colors.danger.ink }}>✗</Text> : null}
                 <Text variant="xs" dim numberOfLines={1} style={styles.eventActors}>
                   {actor}{target ? ` → ${target}` : ''}
                 </Text>
@@ -369,6 +373,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radii.sm,
     flexDirection: 'row',
+    // Same box as the active glass-strong pill, so selection never shifts layout.
+    borderWidth: 1,
+    borderColor: 'transparent',
     alignItems: 'center',
   },
   statusDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },

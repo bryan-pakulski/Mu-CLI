@@ -84,7 +84,7 @@ export function JobHistoryScreen({ navigation }: JobHistoryScreenProps) {
   const pct = (v: number) => `${Math.round((v || 0) * 100)}%`;
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <JobsNavBar current="JobHistory" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(0); setRefreshing(false); }} tintColor={colors.ink3} />}>

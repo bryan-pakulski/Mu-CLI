@@ -2,7 +2,9 @@
 //
 // Collapsed: status glyph (or a running ink drop), tool-kind icon + label,
 // the primary argument in mono (middle-truncated), duration and a chevron,
-// on sunken with radius-md, 36 high (44 touch). Tap to expand: arguments as
+// on a `glass-subtle` inset with radius-md, 36 high (44 touch). A failed
+// call shows ✗ in danger ink on a danger-wash header tint; there is no
+// coloured side rule (G§3.4). Tap to expand: arguments as
 // a key/value grid and a result preview (first 20 lines) with "Show all" in a
 // bottom sheet. Done shows ✓ in ok ink for 1.2s, then settles to ink-3 so a
 // long transcript does not turn into a field of green ticks. Three or more
@@ -19,6 +21,7 @@ import { Icon, type IconName } from './Icon';
 import { InkDrop } from './Progress';
 import { Sheet } from './Sheet';
 import { DiffView, looksLikeDiff } from './DiffView';
+import { useGlass } from './Glass';
 
 export type ToolKind = keyof typeof vocabulary.tool_kind;
 export type ToolCallStatus = 'running' | 'done' | 'failed';
@@ -99,6 +102,7 @@ const PREVIEW_LINES = 20;
 
 export function ToolCard({ call, testID }: { call: ToolCallView; testID?: string }) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
   const kind = toolKind(call.name);
@@ -132,14 +136,15 @@ export function ToolCard({ call, testID }: { call: ToolCallView; testID?: string
   const statusWord = call.status === 'running' ? 'running' : failed ? 'failed' : 'done';
 
   return (
-    <View testID={testID} style={{ borderRadius: radii.md, backgroundColor: colors.sunken, overflow: 'hidden', borderLeftWidth: failed ? 3 : 0, borderLeftColor: colors.danger.pigment }}>
+    <View testID={testID} style={[glass.style('subtle'), { borderRadius: radii.md, overflow: 'hidden' }]}>
       <Pressable
         accessibilityLabel={`${toolKindLabel(kind)} ${target || call.name}, ${statusWord}${elapsed ? `, ${fmtDuration(elapsed)}` : ''}`}
         accessibilityState={{ expanded: open, busy: call.status === 'running' || undefined }}
         accessibilityHint={open ? 'Collapses the tool details' : 'Shows the tool arguments and result'}
         scale={false}
         onPress={() => setOpen(o => !o)}
-        style={({ pressed }) => ({ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, backgroundColor: pressed ? colors.hairline : 'transparent' })}
+        testID={testID ? `${testID}-row` : undefined}
+        style={({ pressed }) => ({ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, backgroundColor: pressed ? colors.hairline : failed ? glass.tint('danger') : 'transparent' })}
       >
         <View style={{ width: 14, alignItems: 'center' }}>
           {glyph ? <Text variant="label" importantForAccessibility="no" style={{ color: glyphColor }}>{glyph}</Text> : <InkDrop tone="running" size={8} />}
@@ -196,6 +201,7 @@ export function groupSummary(kind: ToolKind, count: number): string {
 /** Three or more consecutive same-kind calls: "Read 6 files ›". */
 export function ToolGroup({ calls, testID }: { calls: ToolCallView[]; testID?: string }) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const [open, setOpen] = useState(false);
   const kind = toolKind(calls[0]?.name || '');
   const running = calls.some(c => c.status === 'running');
@@ -204,7 +210,7 @@ export function ToolGroup({ calls, testID }: { calls: ToolCallView[]; testID?: s
   return (
     <View testID={testID} style={{ gap: spacing.xs }}>
       <Pressable accessibilityLabel={label} accessibilityState={{ expanded: open }} scale={false} onPress={() => setOpen(o => !o)}
-        style={({ pressed }) => ({ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.md, backgroundColor: pressed ? colors.hairline : colors.sunken })}>
+        style={({ pressed }) => ({ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.md, ...glass.style('subtle'), ...(pressed ? { backgroundColor: colors.hairline } : null) })}>
         <View style={{ width: 14, alignItems: 'center' }}>
           {running ? <InkDrop tone="running" size={8} /> : <Text variant="label" style={{ color: failed ? colors.danger.ink : colors.ink3 }}>{failed ? '✗' : '✓'}</Text>}
         </View>

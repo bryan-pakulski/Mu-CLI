@@ -98,7 +98,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
   );
   if (tab === 'doctor') {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
         <ScrollView contentContainerStyle={styles.content} testID="job-setup-doctor-tab">
           <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Setup</Text>
           {tabs}
@@ -110,7 +110,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
 
   if (!vm) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
         {error ? <View style={styles.content}><Banner tone="danger" glyph="✗" title="Could not load setup" role="alert"><Text variant="xs">{error}</Text></Banner>
           <Button label="Try again" onPress={() => void load()} /></View> : <Loading label="Checking your machine…" />}
       </SafeAreaView>
@@ -119,7 +119,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
 
   const job = vm.job;
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" testID="job-setup">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Setup</Text>
         {tabs}

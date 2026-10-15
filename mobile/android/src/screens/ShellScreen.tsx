@@ -281,7 +281,7 @@ export function ShellScreen() {
   }, []);
 
   const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.canvas },
+    container: { flex: 1, backgroundColor: 'transparent' },
     header: {
       flexDirection: 'row',
       alignItems: 'center',

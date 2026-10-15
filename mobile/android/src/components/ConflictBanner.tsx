@@ -3,6 +3,7 @@ import { View, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { Text, Button } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 /**
  * Round-31 F40: visible banner when offline-queue items are parked as
@@ -13,6 +14,7 @@ import { Text, Button } from '../ui';
  */
 export function ConflictBanner({ style }: { style?: ViewStyle }) {
   const { colors, spacing, radii } = useTheme();
+  const glass = useGlass();
   const conflictIds = useConnectionStore(state => state.conflictIds);
   const requeueConflict = useConnectionStore(state => state.requeueConflict);
   const discardConflict = useConnectionStore(state => state.discardConflict);
@@ -70,10 +72,11 @@ export function ConflictBanner({ style }: { style?: ViewStyle }) {
       style={[
         styles.banner,
         {
-          backgroundColor: colors.danger.wash,
+          // Danger state: the danger wash in glass, the ✗ glyph and a neutral
+          // edge; no coloured side rule or outline (G§3.4).
+          backgroundColor: glass.tint('danger'),
           borderWidth: 1,
-          borderLeftWidth: 3,
-          borderColor: colors.danger.ink,
+          borderColor: glass.edge,
           borderRadius: radii.control,
           padding: spacing.md,
           gap: spacing.sm,

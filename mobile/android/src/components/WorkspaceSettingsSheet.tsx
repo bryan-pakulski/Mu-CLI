@@ -5,6 +5,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { WorkspacePathField } from './WorkspacePathField';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
 import { ModalFrame, Pressable, Text, Icon } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 export type WorkspaceSettingsSheetProps = {
   visible: boolean;
@@ -20,6 +21,7 @@ export function WorkspaceSettingsSheet({
   onSaved,
 }: WorkspaceSettingsSheetProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const [workspaces, setWorkspaces] = useState<string[]>([]);
   const [candidate, setCandidate] = useState('');
   const [loading, setLoading] = useState(false);
@@ -82,7 +84,7 @@ export function WorkspaceSettingsSheet({
   }, [workspaces.length]);
 
   return (
-    <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose} containerStyle={{ backgroundColor: colors.canvas }}>
+    <ModalFrame statusBarTranslucent={false} transparent={false} visible={visible} animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -149,7 +151,7 @@ export function WorkspaceSettingsSheet({
           )}
 
           {error ? (
-            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: colors.danger.wash, borderColor: colors.danger.ink }]}>
+            <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: glass.tint('danger'), borderColor: glass.edge }]}>
               <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
               <Text variant="xs" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
             </View>
@@ -190,7 +192,8 @@ const styles = StyleSheet.create({
   pathText: { flex: 1, lineHeight: typography.xs.lineHeight },
   removeButton: { width: touchTarget, minHeight: touchTarget, alignItems: 'center', justifyContent: 'center' },
   addButton: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.control, marginTop: spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
-  errorBox: { flexDirection: 'row', gap: spacing.sm, borderWidth: 1, borderLeftWidth: 3, borderRadius: radii.control, padding: spacing.md, marginTop: spacing.base },
+  // Error: danger wash in glass + ✗ glyph; neutral edge, no side rule (G§3.4).
+  errorBox: { flexDirection: 'row', gap: spacing.sm, borderWidth: 1, borderRadius: radii.control, padding: spacing.md, marginTop: spacing.base },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.base, paddingTop: spacing.md, borderTopWidth: 1 },
   saveButton: { minHeight: 48, borderWidth: 1, borderRadius: radii.control, alignItems: 'center', justifyContent: 'center' },
 });

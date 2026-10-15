@@ -28,6 +28,7 @@ import {
   groupToolCalls, type ToolCallView,
   textStyle,
 } from '../ui';
+import { useGlass } from '../ui/Glass';
 import { mode as modePigments } from '../theme/wash.generated';
 
 
@@ -44,6 +45,7 @@ import { mode as modePigments } from '../theme/wash.generated';
 
 export function ChatScreenProduct() {
   const { colors } = useTheme();
+  const glass = useGlass();
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const activeProvider = useConnectionStore(state => state.activeProvider);
   const activeModel = useConnectionStore(state => state.activeModel);
@@ -436,7 +438,7 @@ export function ChatScreenProduct() {
   }, [hasMore, loadOlderHistory, loadingOlder]);
 
   return (
-    <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -475,7 +477,7 @@ export function ChatScreenProduct() {
                 </View>
               ) : null}
               {error && messages.length > 0 ? (
-                <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: colors.danger.wash, borderLeftColor: colors.danger.pigment }]}>
+                <View accessibilityRole="alert" style={[styles.inlineError, { backgroundColor: glass.tint('danger'), borderColor: glass.edge }]}>
                   <Text variant="body" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
                   <Text variant="caption" style={{ color: colors.ink, flex: 1 }}>{error}</Text>
                   <Pressable onPress={retry} accessibilityLabel="Retry">
@@ -611,6 +613,7 @@ function Composer({
   onToggleArtifacts: () => void;
 }) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const planMode = useConnectionStore(state => state.planMode);
   const canSend = input.trim().length > 0 || selectedAttachments.length > 0;
   const modeTone = colors.mode[(activeMode in modePigments ? activeMode : 'default') as keyof typeof modePigments];
@@ -643,12 +646,13 @@ function Composer({
         <IconButton icon="settings" label="Session settings" onPress={onSettingsPress} />
       </View>
 
-      {/* Wash composer (G§9.6): one surface pill, a 3px wash glow in the mode
-          pigment along the top edge, plan mode adds a lilac dashed outline. */}
+      {/* Wash composer (G§9.6): one level-1 glass pill, a 3px wash glow in
+          the mode pigment along the top edge, plan mode adds a lilac dashed
+          outline. */}
       <View style={[
         styles.composerPane,
         {
-          backgroundColor: colors.surface,
+          backgroundColor: glass.style(1).backgroundColor,
           borderColor: planMode ? colors.plan.pigment : colors.hairline,
           borderStyle: planMode ? 'dashed' : 'solid',
           borderTopColor: planMode ? colors.plan.pigment : modeTone.pigment,
@@ -876,7 +880,7 @@ const styles = StyleSheet.create({
   interimMessage: { paddingVertical: spacing.xs },
   messageAttachments: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
   attachmentChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  inlineError: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.md, borderLeftWidth: 4, borderRadius: radii.md },
+  inlineError: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.md, borderWidth: 1, borderRadius: radii.md },
   historyLoading: { paddingTop: spacing.lg, paddingHorizontal: spacing.xs },
   loadingOlderIndicator: { paddingVertical: spacing.sm, alignItems: 'center' },
   listFooter: { minHeight: 10, paddingTop: 2 },

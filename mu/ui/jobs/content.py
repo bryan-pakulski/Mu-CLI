@@ -225,6 +225,12 @@ def session_items(session: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 items.append({"kind": "error", "text": f"{label} failed (exit {payload.get('exit_code')})"})
         elif etype in ("environment_setup_dirty", "environment_setup_skipped"):
             items.append({"kind": "chip", "text": str(ev.get("reason") or etype)})
+        elif etype in ("auto_permission", "auto_answered", "repository_environment_skipped",
+                       "build_environment_skipped", "checks_unverified"):
+            # Jobs run unattended: automatic decisions and non-blocking fallbacks.
+            items.append({"kind": "chip", "text": str(ev.get("reason") or etype)})
+        elif etype == "environment_setup_failed":
+            items.append({"kind": "error", "text": str(ev.get("reason") or "job setup failed")})
     return items
 
 

@@ -615,7 +615,7 @@ def _parse_create(raw: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
             continue
         name = token[2:]
         if name in {"auto-approve", "no-auto-approve"}:
-            execution["auto_approve_writes"] = name == "auto-approve"
+            # Retired 2026-10-15: jobs always run unattended (mu.jobs.unattended). Accepted, ignored.
             index += 1
             continue
         if name == "remember":

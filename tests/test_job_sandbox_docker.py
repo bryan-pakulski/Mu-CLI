@@ -83,18 +83,10 @@ def test_real_plan_stage_reaches_scoped_relay_without_provider_keys(docker, tmp_
         return ModelRelay(*args, **kwargs, provider_factory=lambda *a: Implementer())
 
     from pathlib import Path
-    from mu.jobs.core.commands import dispatch
-    from mu.jobs.core.vm import job_vm
     service.transition(job.id, "preparing")
     service.transition(job.id, "running")
-    paused = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.", relay_factory=implement_relay)
-    assert paused["kind"] == "needs_human", paused
-    assert not (Path(service.get(job.id).worktree) / "widget.txt").exists()
-    service.require_human(job.id, paused["attention_reason"], paused["error"], payload=paused["attention_payload"])
-    action = next(a for a in job_vm(service, job.id)["actions"] if a["id"] == "approveTool")
-    assert action["enabled"]
-    dispatch(service, {"type":"approveTool", "job_id":job.id, "args":action["args"]})
+    # Jobs run unattended: the implement write runs inside the sandbox without parking.
     finished = run_stage_in_container(service, service.get(job.id), "implement", "Write widget.txt.", relay_factory=implement_relay)
     assert finished["kind"] == "completed", finished
     assert (Path(service.get(job.id).worktree) / "widget.txt").read_text() == "approved write"
-    assert not (repo / "widget.txt").exists()
+    assert not (repo / "widget.txt").exists()  # only the job's worktree is writable

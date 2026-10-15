@@ -13,8 +13,11 @@ credentials and no model relay. The commands are authored by the template owner 
 Toolchains rows); they are never read from the repository.
 
 Progress is recorded as ``environment_setup`` events ``{binding, command, index, status:
-running|ok|failed, exit_code?, output_tail?}`` (output chunks as ``environment_setup_log``). A
-failing command parks the job (``ENVIRONMENT_FAILURE``) with the command and its log tail.
+running|ok|failed, exit_code?, output_tail?}`` (output chunks as ``environment_setup_log``). Jobs
+run unattended (``mu.jobs.unattended``): a failing command never parks the job. The binding's
+setup is recorded ``failed`` (not re-run for the same image), the job carries a ``setup_failed``
+warning in its metadata (shown in every UI) plus an ``environment_setup_failed`` event, and the
+job continues to planning; checks that need the missing dependencies report unverified.
 Files that setup leaves in ``git status`` are listed (``environment_setup_dirty``) and ignored
 by the checks' dirty-worktree rule.
 """
@@ -49,13 +52,14 @@ def setup_records(job: Any) -> Dict[str, Dict[str, Any]]:
 
 
 def needs_setup(job: Any, state: Dict[str, Any]) -> bool:
-    """True when the binding has setup commands not yet run (ok or skipped) for its job image."""
+    """True when the binding has setup commands not yet run for its job image (a run that
+    finished ok, failed or was skipped is not repeated; a new image re-runs it)."""
     commands = list(state.get("job_setup") or [])
     if not commands or state.get("status") != "ready" or not state.get("job_image"):
         return False
     record = setup_records(job).get(str(state.get("name"))) or {}
     return not (record.get("image") == state.get("job_image") and record.get("digest") == commands_digest(commands)
-                and record.get("status") in ("ok", "skipped"))
+                and record.get("status") in ("ok", "skipped", "failed"))
 
 
 def setup_files(job: Any) -> List[str]:
@@ -111,8 +115,9 @@ def _status_entries(worktree: str) -> set:
 
 def run_job_setup(service, job: Any, states: Iterable[Dict[str, Any]], *, runner: Optional[CommandRunner] = None,
                   settings: Optional[Dict[str, Any]] = None) -> List[str]:
-    """Run pending setup for every ready binding. Returns the bindings set up; raises
-    ``EnvironmentBlocked`` (the job parks) when a command fails. No-op without a worktree."""
+    """Run pending setup for every ready binding. Returns the bindings set up. A failing
+    command never raises: the job records a ``setup_failed`` warning and continues. No-op
+    without a worktree."""
     worktree = str(getattr(job, "worktree", "") or "")
     if not worktree or not os.path.isdir(worktree):
         return []
@@ -127,7 +132,6 @@ def run_job_setup(service, job: Any, states: Iterable[Dict[str, Any]], *, runner
 def run_binding_setup(service, job: Any, state: Dict[str, Any], *, runner: Optional[CommandRunner] = None,
                       settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from .cli import container_cli
-    from .environments import EnvironmentBlocked
     runner = runner or CommandRunner()
     name = str(state["name"])
     commands = list(state.get("job_setup") or [])
@@ -159,13 +163,13 @@ def run_binding_setup(service, job: Any, state: Dict[str, Any], *, runner: Optio
             record.update(status="failed", finished_at=time.time(), error=tail[-2000:], failed_command=command,
                           failed_index=index)
             _save(service, job.id, name, record)
-            message = (f"Job setup for build environment `{name}` failed: `{command}` {why}.\n\n{tail[-1500:]}\n\n"
-                       "Retry, edit the template's job setup (Environments → template → Used for jobs), "
-                       "or continue without setup.")
-            error = EnvironmentBlocked(message)
-            error.setup_failure = {"binding": name, "command": command, "index": index, "exit_code": code,  # type: ignore[attr-defined]
-                                   "output_tail": tail, "template": record["template"]}
-            raise error
+            message = (f"Job setup for build environment `{name}` failed: `{command}` {why}. The job continues "
+                       "without it; checks that need the missing dependencies will show unverified. Fix the "
+                       "template's job setup (Environments → template → Used for jobs), then refresh environments.")
+            _warn_failed(service, job.id, {"binding": name, "command": command, "index": index, "exit_code": code,
+                                           "template": record["template"], "message": message,
+                                           "error": tail[-2000:]})
+            return record
     after = _status_entries(job.worktree)
     new_files = sorted({path for _code, path in after - before})[:500]
     record.update(status="ok", finished_at=time.time(), files=new_files)
@@ -179,6 +183,35 @@ def run_binding_setup(service, job: Any, state: Dict[str, Any], *, runner: Optio
     service.store.append_event(job.id, "environment_setup_finished", reason=f"Job setup for `{name}` finished.",
                                payload={"binding": name, "commands": len(commands)})
     return record
+
+
+def _warn_failed(service, job_id: str, failure: Dict[str, Any]) -> None:
+    """A failed setup never parks the job: record the job warning (``metadata.setup_failed``)
+    and an ``environment_setup_failed`` event."""
+    from .environments import save_meta
+    try:
+        warnings = dict((service.get(job_id).metadata or {}).get("setup_failed") or {})
+        warnings[str(failure["binding"])] = {**failure, "at": time.time()}
+        save_meta(service, job_id, setup_failed=warnings)
+        service.store.append_event(job_id, "environment_setup_failed", reason=str(failure.get("message") or "")[:2000],
+                                   payload={k: v for k, v in failure.items() if k != "message"})
+    except Exception:  # noqa: BLE001 - the warning is informational; the job continues
+        pass
+
+
+def setup_warning(job: Any) -> Optional[Dict[str, Any]]:
+    """The job's setup warning: the first failed binding ``{binding, command, index, exit_code,
+    template, message, error}`` from ``metadata.setup_failed``, or None."""
+    raw = dict(getattr(job, "metadata", None) or {}).get("setup_failed") or {}
+    if not isinstance(raw, dict) or not raw:
+        return None
+    for name, record in raw.items():
+        current = setup_records(job).get(str(name)) or {}
+        if current.get("status") in ("ok", "skipped"):
+            continue  # setup re-ran successfully (refreshed image) or was skipped
+        if isinstance(record, dict):
+            return {"binding": str(name), **{k: v for k, v in record.items() if k != "at"}}
+    return None
 
 
 def _run_one(service, job: Any, state: Dict[str, Any], policy, docker: str, runner, command: str,

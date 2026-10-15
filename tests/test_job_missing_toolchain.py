@@ -1,5 +1,6 @@
-"""A check whose command is not installed in the sandbox image parks the job with a clear
-message instead of crashing the stage or sending the implementer into a repair loop."""
+"""A check whose command is not installed in the sandbox image is recorded unverified with a clear
+message (jobs run unattended: the job continues to review) instead of crashing the stage or
+sending the implementer into a repair loop."""
 from dataclasses import replace
 
 import pytest
@@ -29,7 +30,7 @@ def test_older_runtime_crash_is_recognised_as_a_missing_tool():
     assert _missing_executable("some other docker failure") is None
 
 
-def test_missing_tool_parks_the_job_without_a_fix_loop_or_baseline_rerun(tmp_path):
+def test_missing_tool_continues_unverified_without_a_fix_loop_or_baseline_rerun(tmp_path):
     from mu.jobs.verify_worker import apply_checks_result
     service, _, job, _, _ = running_job(tmp_path)
     job = replace(job, validation_commands=["cargo test --workspace"])
@@ -44,8 +45,10 @@ def test_missing_tool_parks_the_job_without_a_fix_loop_or_baseline_rerun(tmp_pat
     assert len(calls) == 1  # no baseline re-run on the base commit
     assert run.summary["missing_tools"] == ["cargo"] and run.summary["new_failures"] == 0
     service.transition(job.id, JobStatus.VERIFYING, reason="test")
-    assert apply_checks_result(service, job.id, run) == 22
-    parked = service.get(job.id)
-    assert parked.status == JobStatus.NEEDS_HUMAN
-    assert "Checks need `cargo`" in parked.attention_detail and "Settings → Sandbox" in parked.attention_detail
+    assert apply_checks_result(service, job.id, run) == 0
+    reviewed = service.get(job.id)
+    assert reviewed.status == JobStatus.REVIEWING  # no park: review next, verdict capped there
+    note = [e for e in service.events(job.id) if e.event_type == "checks_unverified"][-1]
+    assert "Checks need `cargo`" in note.reason and "Settings → Sandbox" in note.reason
+    assert note.payload["verified"] is False and note.payload["missing_tools"] == ["cargo"]
     assert service.store.core_state(job.id).fix_attempts == 0

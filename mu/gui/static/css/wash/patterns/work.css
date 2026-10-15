@@ -634,8 +634,6 @@
     .work-form-error:not(:empty) { display: block; }
     .work-workspace-recent { margin-top: var(--wash-space-1); }
     .work-workspace-recent:empty { display: none; }
-    .work-unattended-field .w-card__body { gap: var(--wash-space-1); padding-top: var(--wash-space-4); }
-    .work-unattended-field:has(input:checked) { background: var(--wash-caution-wash); }
     .work-advanced { border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-md); }
     .work-advanced > summary { padding: var(--wash-space-3) var(--wash-space-4); color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
     .work-advanced__body { display: flex; flex-direction: column; gap: var(--wash-space-5); padding: 0 var(--wash-space-4) var(--wash-space-4); }

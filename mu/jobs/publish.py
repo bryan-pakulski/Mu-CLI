@@ -269,8 +269,9 @@ def _pr_text(job: Job) -> Tuple[str, str]:
     return title, "\n".join(lines).strip()
 
 
-def _publish_text(job: Job) -> Tuple[str, str, bool]:
-    """PR title/body/draft: push-dialog overrides over ``_pr_text`` defaults."""
+def _publish_text(job: Job, *, unverified: str = "") -> Tuple[str, str, bool]:
+    """PR title/body/draft: push-dialog overrides over ``_pr_text`` defaults. ``unverified``
+    (:func:`unverified_note`) heads the body, even an edited one."""
     title, body = _pr_text(job)
     override = (job.metadata or {}).get("publish_override")
     draft = True
@@ -282,6 +283,8 @@ def _publish_text(job: Job) -> Tuple[str, str, bool]:
         draft = override.get("draft") is not False
         if not draft and not str(override.get("body") or "").strip():
             body = body.replace(f"`{job.id[:12]}` (draft).", f"`{job.id[:12]}`.")
+    if unverified and unverified not in body:
+        body = f"{unverified}\n\n{body}"
     return title, body, draft
 
 
@@ -579,13 +582,14 @@ def publish_preview(service, job: Job) -> Dict[str, Any]:
         reason = push_check_reason(service, job, run=run, allow_unverified=True)
     except Exception as exc:  # noqa: BLE001
         reason = str(exc)[:300] or "cannot verify checks"
+    note = unverified_note(run)
     return {
-        "title": title, "body": body,
+        "title": title, "body": f"{note}\n\n{body}" if note else body,
         "branch": str(job.branch or meta.get("review_branch") or ""),
         "base": base,
         "mode": mode, "remote": _redact(remote_url), "draft": True,
-        # Unverified checks (job_templates.md §5) need the same override reason as do_not_merge.
-        "requires_override": verdict == "do_not_merge" or unverified, "verdict": verdict,
+        # Unverified checks (job_templates.md §5) need no override; the PR body warns instead.
+        "requires_override": verdict == "do_not_merge", "verdict": verdict,
         "head_sha": str(run.head_sha or "") if run is not None and (run.passed or unverified) else "",
         "reason": reason,
         # The token the PR/MR step will use (never the value), so the dialog can warn before pushing.
@@ -619,9 +623,22 @@ def _is_equivalent_squash(run: RunFn, repo: str, remote: str, branch: str, remot
     return bool(tree) and tree == squash.get("tree") and parents == [squash.get("base")]
 
 
+UNVERIFIED_PREFIX = "⚠ Checks could not run (unverified)"
+
+
+def unverified_note(run: Any) -> str:
+    """``⚠ Checks could not run (unverified): <tools/causes>`` for an unverified check run, else ''."""
+    if run is None or getattr(run, "verified", True):
+        return ""
+    from .checks import unverified_causes
+    causes = unverified_causes(dict(getattr(run, "summary", None) or {}))
+    return f"{UNVERIFIED_PREFIX}: {causes or 'some checks could not run'}"
+
+
 def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str], verified_head: str,
                   get: Optional[GetFn] = None, base_sha: str = "",
-                  on_pushed: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+                  on_pushed: Optional[Callable[[Dict[str, Any]], None]] = None,
+                  unverified: str = "") -> Dict[str, Any]:
     meta = dict(job.metadata or {})
     repo = str(meta.get("repository_root") or job.repository or "")
     branch = str(job.branch or "")
@@ -685,7 +702,7 @@ def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str], ve
         on_pushed({"pushed_sha": sha, "verified_sha": verified_head})
 
     mode = _resolve_mode(job, remote["kind"])
-    title, body, draft = _publish_text(job)
+    title, body, draft = _publish_text(job, unverified=unverified)
     pr: Dict[str, Any] = {"provider": mode, "draft": draft, "branch": branch, "base": base,
                           "head_sha": sha, "verified_sha": verified_head, "tree": squash["tree"],
                           "squashed": squash["squashed"] == "true"}
@@ -727,16 +744,14 @@ def publish_job(service, job_id: str, *, run: Optional[RunFn] = None,
         from .checks import push_check_reason
         from .verification import VerificationStore
         checked = VerificationStore(service.store).latest(job.id)
-        # An unverified run (unrunnable checks) publishes only with the push override recorded
-        # for exactly that check run (job_templates.md §5).
-        override = dict((job.metadata or {}).get("unverified_override") or {})
-        allow_unverified = bool(checked is not None and override.get("reason")
-                                and override.get("verification_id") == checked.id)
-        check_reason = push_check_reason(service, job, run=checked, allow_unverified=allow_unverified)
+        # An unverified run (unrunnable checks) publishes without an override (jobs run
+        # unattended); the PR body states that the checks could not run (job_templates.md §5).
+        check_reason = push_check_reason(service, job, run=checked, allow_unverified=True)
         if check_reason:
             raise PublishError(check_reason)
         pr = open_draft_pr(job, run=run or _default_run, post=post or _default_post,
                            env=with_tokens(env), verified_head=checked.head_sha,
+                           unverified=unverified_note(checked),
                            get=get, base_sha=str(checked.base_sha or ""),
                            on_pushed=lambda info: merge_metadata(service, job_id, **info))
     except Exception as exc:  # noqa: BLE001 - any publish failure parks on a human

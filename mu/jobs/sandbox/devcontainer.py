@@ -15,9 +15,10 @@ Approval: a repository decides what runs as the job's environment, and a Dockerf
 its ``RUN`` steps on the host's container engine with network access. So every
 repository-declared image or build needs the user's explicit approval, recorded per repository
 and *fingerprint* (image ref, or the Dockerfile blob + context tree ids at the base commit):
-change the Dockerfile and it needs approving again. Unapproved, an explicit ``[sandbox] image``
-parks the job (``EnvironmentBlocked`` carrying ``.approval``); an implicit devcontainer is only
-suggested.
+change the Dockerfile and it needs approving again. Jobs run unattended: unapproved, an explicit
+``[sandbox] image`` is skipped (the job falls back to the next environment source and records a
+``repository_environment_skipped`` event carrying the approval request, approvable for future
+jobs); an implicit devcontainer is only suggested.
 """
 from __future__ import annotations
 

@@ -412,15 +412,6 @@
                     <textarea class="w-textarea" id="job-validation" rows="3" data-mono placeholder="pytest tests/auth&#10;npm run typecheck"></textarea>
                     <small class="w-field__hint">Optional. The planner proposes checks from the repository; commands listed here are added to them.</small>
                 </label>
-                <div class="w-card work-unattended-field" data-variant="sunken">
-                    <div class="w-card__body work-card-body">
-                        <label class="w-switch work-check-field">
-                            <span class="w-switch__label">Run unattended in sandbox</span>
-                            <input class="w-switch__input" id="job-auto-approve" type="checkbox" role="switch" aria-describedby="job-auto-approve-hint">
-                        </label>
-                        <small class="w-field__hint" id="job-auto-approve-hint">On: the implement stage auto-approves its writes inside the job’s disposable container. Off: each write waits for your approval. Default from Settings → New job defaults; never taken from the chat session.</small>
-                    </div>
-                </div>
                 <details class="work-advanced" id="work-advanced-details">
                     <summary>Advanced</summary>
                     <div class="work-advanced__body">

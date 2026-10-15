@@ -279,6 +279,7 @@
                     <div class="work-push-preview w-markdown work-markdown" data-push-preview hidden></div>
                     <p class="w-field__hint">Markdown. Leave blank to use the default text.</p></div>
                 <label class="w-check"><input class="w-check__input" type="checkbox" id="work-push-draft" ${preview.draft === false ? '' : 'checked'}><span>Open as a draft PR</span></label>
+                ${(action.args?.unverified || preview.unverified) && !needsOverride ? `<div class="w-banner" data-tone="caution" role="status" data-push-unverified><span class="w-banner__glyph" aria-hidden="true">?</span><p class="w-banner__msg">Some checks could not run, so this change is unverified. The PR body says so.</p></div>` : ''}
                 ${needsOverride ? `<div class="w-field"><div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${action.args?.unverified || preview.unverified ? 'Some checks could not run, so this change is unverified.' : 'The review verdict blocks merging.'} Pushing anyway needs a reason; it is recorded in the job audit.</p></div>
                     <label class="w-field__label" for="work-push-override">Reason for overriding the blocking review</label>
                     <textarea class="w-textarea" id="work-push-override" rows="3" required aria-required="true"></textarea><p class="w-field__error" data-push-error></p></div>` : ''}`;
@@ -609,7 +610,7 @@
             if (!ea || !approve?.enabled) return '';
             const kind = ea.kind === 'build' ? 'Dockerfile build' : ea.kind === 'egress' ? 'network egress' : 'image';
             return stateCard({id:'work-env-approval-h', glyph:'⬢', data:'data-env-approval',
-                title:ea.kind === 'egress' ? 'The repository asks for network egress (stages run without it until approved)' : `The repository asks to ${ea.kind === 'build' ? 'build and use' : 'use'} a build environment`,
+                title:ea.kind === 'egress' ? 'The repository asks for network egress (stages run without it until approved)' : `The repository asks to ${ea.kind === 'build' ? 'build and use' : 'use'} a build environment${ea.blocking === false ? ' (this job runs without it; approving applies to future jobs)' : ''}`,
                 body:`<dl class="work-env-approval-facts">
                     <dt>Kind</dt><dd>${esc(kind)}${ea.origin ? ` <span class="work-meta">(${esc(ea.origin === 'devcontainer' ? 'devcontainer.json' : '.mucli/jobs.toml')})</span>` : ''}</dd>
                     ${ea.label ? `<dt>What</dt><dd class="work-mono">${esc(ea.label)}</dd>` : ''}
@@ -618,6 +619,14 @@
                     ${(ea.ignored_features || []).length ? `<dt>Ignored</dt><dd>devcontainer features: ${esc(ea.ignored_features.join(', '))}</dd>` : ''}
                 </dl>${ea.message ? `<p class="work-meta">${esc(ea.message)}</p>` : ''}`,
                 foot:`${reject ? actionButton({...reject, primary:false}, {variant:'secondary'}) : ''}${actionButton({...approve, primary:true})}`});
+        }
+        /* Jobs run unattended: a failed template job setup is a warning, never a park. */
+        function renderSetupWarning() {
+            const w = job.setup_warning;
+            if (!w) return '';
+            return `<section class="w-card work-approval" data-state="caution" role="status" aria-labelledby="work-setup-warning-h" data-setup-warning>
+                <header class="w-card__head"><span class="w-chip" data-tone="caution">${chipGlyph('?')}<span>Warning</span></span><h2 class="w-card__title" id="work-setup-warning-h">Job setup failed; the job continued without it</h2></header>
+                <div class="w-card__body"><p class="work-meta">${esc(w.message || `\`${w.command || ''}\` failed in ${w.binding || 'the build environment'}.`)}</p></div></section>`;
         }
         function renderLimitBanner() {
             const lim = job.limit;
@@ -650,7 +659,7 @@
             if (envHtml && !(job.environment_approval?.blocking === false && job.session?.approval)) { host.dataset.eventId = ''; host.innerHTML = envHtml; bindCommands(host); return; }
             const ap = job.session?.approval;
             const approve = job.actions.find(a => a.id === 'approveTool'), deny = job.actions.find(a => a.id === 'denyTool');
-            if (!ap || (!approve?.enabled && !deny?.enabled)) { host.innerHTML = ''; return; }
+            if (!ap || (!approve?.enabled && !deny?.enabled)) { host.dataset.eventId = ''; host.innerHTML = renderSetupWarning(); return; }
             // planos ApprovalBanner: Approve · optional reason for the agent · Deny. Keep a typed reason across re-renders.
             const prev = host.querySelector('[data-deny-reason]');
             const reason = prev && host.dataset.eventId === String(ap.event_id ?? '') ? prev.value : '';
@@ -916,7 +925,7 @@
                 const prepare = tpl ? `<a class="w-btn" data-variant="secondary" data-size="sm" data-prepare-template="${esc(tpl.ref)}" href="/containers#template-${encodeURIComponent(tpl.ref)}">Edit template ${esc(tpl.ref)}</a>`
                     : `<a class="w-btn" data-variant="secondary" data-size="sm" data-prepare-template="" href="/containers#templates-title">Prepare a template</a>`;
                 return `<section class="w-card work-card work-unverified" data-unverified aria-labelledby="unverified-h"><header class="w-card__head">${statusIcon('unverified')}<h2 class="w-card__title" id="unverified-h">Unverified · ${esc(rows.length || r.unrunnable || 0)} check${(rows.length || r.unrunnable) === 1 ? '' : 's'} could not run</h2></header>
-                    <div class="w-card__body work-stack-tight"><p class="work-meta">These checks never ran the project's own tools, so their results are not evidence. They are not counted as pre-existing failures; the review verdict is capped at needs work and pushing needs an override.</p>
+                    <div class="w-card__body work-stack-tight"><p class="work-meta">These checks never ran the project's own tools, so their results are not evidence. They are not counted as pre-existing failures; the review verdict is capped at needs work, and a published PR states that the checks could not run.</p>
                     <ul class="work-unverified__list">${rows.map(x => `<li data-unrunnable="${esc(x.suite || '')}"><strong class="work-mono">${esc(x.suite || '')}</strong>${x.tool ? ` · <code>${esc(x.tool)}</code>` : ''}${x.cause ? ` — ${esc(x.cause)}` : ''}${x.hint ? `<div class="work-meta">${esc(x.hint)}</div>` : ''}</li>`).join('')}</ul>
                     <div class="w-btn-row" role="toolbar" aria-label="Unverified checks">${prepare}${cont && !cont.hidden ? actionButton(cont) : ''}</div></div></section>`;
             };

@@ -127,9 +127,6 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
             if stages:
                 execution["stages"] = stages
         if workspace:
-            from mu.jobs.core.vm import unattended_default
-
-            execution.setdefault("auto_approve_writes", unattended_default())
             value["execution"] = execution
         return value
     session = resolver(session_name) if callable(resolver) else None
@@ -166,11 +163,7 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
             execution["stages"] = stages
     execution.setdefault("agent_mode", str(variables.get("agent_mode", "default") or "default"))
     execution.setdefault("session_type", str(variables.get("session_type", "workspace") or "workspace"))
-    # Unattended sandbox writes are an explicit per-job choice (Settings default off);
-    # the session's YOLO is never inherited.
-    from mu.jobs.core.vm import unattended_default
-
-    execution.setdefault("auto_approve_writes", unattended_default())
+    # Jobs always run unattended (mu.jobs.unattended); a client's auto_approve_writes is ignored.
     value["execution"] = execution
     return value
 

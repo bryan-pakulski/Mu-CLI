@@ -125,11 +125,12 @@ CONFIRMS = {
     "restartStage": "Restart the current stage? Its in-progress work is discarded.",
     "refreshEnvironments": "Re-snapshot the build environments for this job? Stages started after this use the new images.",
     "approveEnvironment": "Approve this repository-declared build environment? mucli will use (or build) it for "
-                          "jobs on this repository and requeue this job.",
+                          "jobs on this repository (a job still waiting on it is requeued; a job that ran without it keeps its "
+                          "current environment).",
     "skipSetup": "Continue without the template's job setup? Checks that need the missing dependencies will be "
                  "reported as unrunnable.",
     "continueUnverified": "Review this job although some checks could not run? The review verdict is capped at "
-                          "needs work, and pushing needs an override reason.",
+                          "needs work.",
 }
 INPUTS: Dict[str, Dict[str, Any]] = {
     "rejectPlan": {"label": "What should the planner change?", "optional": False, "multiline": True},
@@ -184,8 +185,7 @@ def _rule(cmd: str, f: JobFacts) -> Optional[str]:
         # (terminal ``/job raise-limit``; kept out of action bars).
         return "job is archived" if f.archived else None
     if cmd == "resume":
-        if f.pending_approval:
-            return "approve or deny the pending tool request first"
+        # A pending tool approval (parked before jobs ran unattended) is resolved automatically.
         if f.limit_reached:
             return "the job reached a limit: approve more to continue, or cancel"
         return None if s == JobState.NEEDS_INPUT else "job is not paused"
@@ -279,8 +279,7 @@ def available_actions(facts: JobFacts) -> List[ActionVM]:
         if cid == "push" and facts.verdict == "do_not_merge":
             args["requires_override"] = True
         if cid == "push" and facts.checks_unverified:
-            args["requires_override"] = True
-            args["unverified"] = True
+            args["unverified"] = True  # the push dialog warns; no override needed
         if cid == "keepEnvironments" and facts.environments_kept:
             label = "Unkeep environments"
         if cid == "markMerged" and facts.pr_closed:

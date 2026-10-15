@@ -19,10 +19,12 @@ import time
 from pathlib import Path
 
 from mu.jobs import harness_cli as cli
+from mu.jobs.unattended import (AUTO_ANSWER, READ_ONLY_STAGES, answered_event, decide, deny_message, event_reason,
+                                permission_event)
 
 CREDS = Path("/harness/creds")
 STATE = Path("/harness/state")
-PENDING = STATE / "pending_approval.json"
+PENDING = STATE / "pending_approval.json"  # legacy: an approval parked before jobs ran unattended
 DELIVERED = STATE / "delivered_messages.json"   # ids of "Message agent" messages already given to the CLI
 MESSAGE_POLL_S = 3.0
 IDLE_CLOSE_S = 120.0   # after a result, close an idle session even if a turn looks unanswered
@@ -92,11 +94,10 @@ class Run:
     def __init__(self, agent, request):
         self.agent, self.request = agent, request
         self.stage = os.environ["MUCLI_JOB_STAGE"]
-        self.read_only = self.stage != "implement"
+        self.read_only = self.stage in READ_ONLY_STAGES
         self.state = cli.Translation(agent=agent, model=str(request.get("model") or ""))
         self.proc = None
         self.lock = threading.Lock()
-        self.parked = None       # approval the stage is waiting on
         self.stopped = ""        # budget / time-limit stop reason
         self.seen_messages = set()
         self.last_ids = []
@@ -116,20 +117,32 @@ class Run:
         resume = str(harness.get("resume_session") or "") if resume is None else resume
         if self.agent == "claude":
             return cli.claude_args(model=harness.get("model") or "", effort=harness.get("effort") or "",
-                                   read_only=self.read_only, auto_approve=bool(harness.get("auto_approve")),
-                                   resume=resume, system=cli.stage_system(self.stage, self.read_only))
+                                   read_only=self.read_only, resume=resume,
+                                   system=cli.stage_system(self.stage, self.read_only))
         return cli.codex_args(model=harness.get("model") or "", effort=harness.get("effort") or "",
-                              read_only=self.read_only, auto_approve=bool(harness.get("auto_approve")), resume=resume)
+                              read_only=self.read_only, resume=resume)
 
     def prompt(self):
         text = str(self.request.get("prompt") or "")
         if self.request.get("resume_session") and PENDING.is_file():
+            # A stage parked on an approval before jobs ran unattended: it now resumes with the
+            # automatic decision instead of a human one.
             try:
                 pending = json.loads(PENDING.read_text())
             except (OSError, ValueError):
                 pending = {}
-            text = (f"A human has now decided on your pending {pending.get('tool_name', 'tool')} call. Retry that exact call "
-                    "with the same arguments to continue; if it is denied, follow the reason given.\n\n" + text)
+            tool = pending.get("tool_name", "tool")
+            if self.read_only:
+                text = (f"Your pending {tool} call was denied automatically: {deny_message(self.stage)}\n\n" + text)
+            else:
+                text = (f"Your pending {tool} call is now approved automatically (this job runs unattended). Retry "
+                        "that exact call with the same arguments to continue.\n\n" + text)
+            decided = permission_event(self.stage, tool, allow=not self.read_only, source="resume")
+            emit("auto_permission", decided, event_reason("auto_permission", decided))
+            try:
+                PENDING.unlink()
+            except OSError:
+                pass
         pending_messages = self.new_messages()
         if pending_messages:
             text += "\n\n" + self.message_text(pending_messages)
@@ -234,36 +247,20 @@ class Run:
             self.write(cli.claude_control_error(request_id, f"unsupported control request {request.get('subtype')!r}"))
             return
         name, tool_input = str(request.get("tool_name") or ""), request.get("input") or {}
-        if self.read_only:
-            self.write(cli.claude_permission_reply(request_id, allow=False, message="This job stage is read-only."))
+        # Jobs run unattended: the permission modes keep requests from arriving at all; one that
+        # still does is decided here, never parked and never sent to the host.
+        if name in cli.NO_QUESTION_TOOLS:
+            answered = answered_event(self.stage, "choice", json.dumps(tool_input)[:2000])
+            emit("auto_answered", answered, event_reason("auto_answered", answered))
+            self.write(cli.claude_permission_reply(request_id, allow=False, message=AUTO_ANSWER))
             return
-        try:
-            response = relay_post("/interaction", {"kind": "approval_required", "tool_name": name, "tool_args": tool_input})
-            response = response.get("response")
-        except Exception as exc:  # noqa: BLE001
-            self.write(cli.claude_permission_reply(request_id, allow=False, message=f"Approval unavailable: {exc}"))
-            return
-        if response is None:
-            # No human decision yet: deny this attempt, park the stage and resume the session later.
-            self.parked = {"tool_name": name, "tool_args": tool_input, "tool_use_id": request.get("tool_use_id") or "",
-                           "can_approve": True, "harness": "claude"}
-            PENDING.write_text(json.dumps(self.parked))
-            self.write(cli.claude_permission_reply(request_id, allow=False, message=(
-                "Paused for human approval of this call. Do not retry it or work around it now; this session "
-                "will be resumed after the decision.")))
-            threading.Thread(target=self._park_after_result, daemon=True).start()
-            return
-        decision = str(response.get("decision") or "").lower()
-        detail = str(response.get("detail") or "").strip()
-        if decision == "approve":
+        allow, message = decide(self.stage)
+        decided = permission_event(self.stage, name, allow=allow, source="claude")
+        emit("auto_permission", decided, event_reason("auto_permission", decided))
+        if allow:
             self.write(cli.claude_permission_reply(request_id, allow=True, tool_input=tool_input))
         else:
-            self.write(cli.claude_permission_reply(request_id, allow=False, message=(
-                f"The human denied this call. Reason: {detail}" if detail else "The human denied this call.")))
-        try:
-            PENDING.unlink()
-        except OSError:
-            pass
+            self.write(cli.claude_permission_reply(request_id, allow=False, message=message))
 
     def _close_if_idle(self, results):
         with self.lock:
@@ -274,10 +271,6 @@ class Run:
                 except (OSError, ValueError):
                     pass
 
-    def _park_after_result(self):
-        time.sleep(3)  # let Claude record the denial in its transcript before stopping
-        self.stop("approval")
-
     # ------------------------------------------------------------ main
 
     def run(self, env):
@@ -287,7 +280,7 @@ class Run:
         code, stderr = self._run_once(full_env, self.prompt(), None)
         # Codex takes no input mid-turn: messages sent meanwhile resume its thread afterwards.
         for _ in range(20):
-            if self.agent != "codex" or code != 0 or self.parked or self.stopped or self.state.is_error:
+            if self.agent != "codex" or code != 0 or self.stopped or self.state.is_error:
                 break
             texts = self.new_messages()
             if not texts or not self.state.session_id:
@@ -363,9 +356,6 @@ class Run:
     def result(self, code, stderr):
         state = self.state
         base = {"text": state.final_text, "harness": state.result()}
-        if self.parked:
-            return {**base, "kind": "needs_human", "status": "needs_input", "error": f"Approval required for {self.parked['tool_name']}",
-                    "attention_reason": "approval_required", "attention_payload": self.parked}
         if self.stopped:
             return {**base, "kind": "needs_human", "status": "paused", "error": self.stopped}
         if state.usage_limit:
@@ -390,8 +380,7 @@ def main():
     request = json.loads(Path("/artifacts/request.json").read_text())
     harness = dict(request.get("harness") or {})
     agent = str(harness.get("agent") or "")
-    harness.update(prompt=request.get("prompt"), tool_timeout_s=request.get("tool_timeout_s"),
-                   auto_approve=bool(request.get("auto_approve_writes")))
+    harness.update(prompt=request.get("prompt"), tool_timeout_s=request.get("tool_timeout_s"))
     result = {"kind": "failed", "status": "error", "error": "harness did not run"}
     run = None
     signal.signal(signal.SIGTERM, lambda signum, frame: run.stop("stage time limit") if run else None)

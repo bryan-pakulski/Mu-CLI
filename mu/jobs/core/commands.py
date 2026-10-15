@@ -271,7 +271,10 @@ def _message(service, job, facts, args):
 
 def _resume(service, job, facts, args):
     if facts.pending_approval:
-        raise CommandRejected("Approve or deny the pending tool request before resuming")
+        # Jobs run unattended: the parked call is decided automatically and the stage resumes.
+        from ..unattended import resume_parked_approval
+        resume_parked_approval(service, job)
+        return ["state", "pipeline", "session"], {"auto_resolved": True}
     guidance = str(args.get("guidance") or "").strip()
     if guidance:
         _merge_meta(service, job.id, resume_guidance=guidance)
@@ -364,8 +367,9 @@ def _skip_setup(service, job, facts, args):
 
 
 def _continue_unverified(service, job, facts, args):
-    """Review a job whose checks could not all run (job_templates.md §5). The review verdict is
-    capped at needs_work and pushing needs an override reason."""
+    """Legacy alias: jobs run unattended, so unverified checks continue to review on their own.
+    Only a job parked on unverified checks before that rule can use it (the review verdict is
+    capped at needs_work)."""
     _merge_meta(service, job.id, checks_unverified=None, continued_unverified=True)
     service.store.append_event(job.id, "continue_unverified", reason="human continued with unverified checks",
                                payload={"reason": str(args.get("reason") or "")[:2000]})
@@ -441,17 +445,15 @@ def _push(service, job, facts, args):
     override = str(args.get("override_reason") or "").strip()
     if facts.verdict == "do_not_merge" and not override:
         raise CommandRejected("verdict is do_not_merge: push requires override_reason")
+    # Unverified checks (some could not run) need no override: the review verdict is capped and
+    # the PR body states that the checks could not run.
     unverified = run is not None and not run.verified
-    if unverified and not override:
-        raise CommandRejected("checks are unverified (some could not run): push requires override_reason")
     publish_override = _publish_override(args)
     if override:
         service.store.append_event(job.id, "push_override", reason="human override",
                                    payload={"verdict": facts.verdict, "reason": override[:2000], "unverified": unverified})
     # Always (re)written so a stale override from an earlier push never leaks.
-    _merge_meta(service, job.id, publish_override=publish_override,
-                unverified_override={"head_sha": run.head_sha, "verification_id": run.id, "reason": override[:2000]}
-                if unverified else None)
+    _merge_meta(service, job.id, publish_override=publish_override, unverified_override=None)
     service.store.transition_core(job.id, JobState.PUSHING, reason="human push")
     return ["state", "pipeline"], {"publish_override": publish_override}
 
@@ -551,8 +553,10 @@ def _environment_target(facts, args):
 
 
 def _approve_environment(service, job, facts, args):
-    """Explicit human approval of a repository-declared image/Dockerfile (then requeue the parked
-    job) or of repository egress (recorded only; a running job keeps running)."""
+    """Explicit human approval of a repository-declared image/Dockerfile or of repository egress.
+    Jobs run unattended, so the job normally never waited on it (the image was skipped, the egress
+    left out): the approval is recorded for future jobs. A job parked on it before that rule is
+    requeued."""
     from ..sandbox.devcontainer import approve
     pending = _environment_target(facts, args)
     approve(pending["repository"], pending["fingerprint"], kind=pending.get("kind", ""), ref=pending.get("ref", ""))

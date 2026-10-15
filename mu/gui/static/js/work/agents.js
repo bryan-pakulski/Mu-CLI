@@ -29,7 +29,7 @@
     // mucli the model is a provider + model (execution.stages); for an external agent it is that
     // agent's model (execution.stage_agents). Blank = Settings → Stage models, then the session.
     // host: element to render into. Returns { collect(), collectModels(), refresh(), reset() }.
-    function sheet(host, { api, autoApprove }) {
+    function sheet(host, { api }) {
         if (!host) return null;
         let data = null, touched = false, providers = [], stageDefaults = {};
         const modelLists = {};
@@ -40,12 +40,10 @@
             <select id="job-stage-${stage}-provider" data-stage-provider="${stage}" aria-label="${STAGE_LABEL[stage]} stage provider"><option value="">provider</option></select>
             <input id="job-agent-${stage}-model" data-agent-model="${stage}" list="job-agent-${stage}-models" placeholder="model" aria-label="${STAGE_LABEL[stage]} stage model">
             <datalist id="job-agent-${stage}-models"></datalist>
-            <small class="work-agent-hint work-tone" id="job-agent-${stage}-hint"></small>`).join('')}</div>
-            <p class="work-caption" data-tone="attention" data-codex-warning hidden></p>`;
+            <small class="work-agent-hint work-tone" id="job-agent-${stage}-hint"></small>`).join('')}</div>`;
         const select = stage => host.querySelector(`[data-agent-stage="${stage}"]`);
         const provider = stage => host.querySelector(`[data-stage-provider="${stage}"]`);
         const model = stage => host.querySelector(`[data-agent-model="${stage}"]`);
-        const warning = host.querySelector('[data-codex-warning]');
 
         async function fillModels(stage) {
             const list = host.querySelector(`#job-agent-${stage}-models`);
@@ -73,10 +71,6 @@
                     o.textContent = label(o.value) + (ready ? '' : ' (not set up)');
                 });
             });
-            const codexGated = select('implement').value === 'codex' && !autoApprove()?.checked;
-            warning.hidden = !codexGated;
-            warning.textContent = codexGated ? `⚠ ${data?.codex?.warnings?.find(w => w.includes('approval review')) ||
-                'Codex implement without unattended mode sends every command through Codex’s automatic approval review, which may refuse to run tests.'}` : '';
         }
         host.addEventListener('change', e => {
             const stage = e.target.dataset.agentStage || e.target.dataset.stageProvider;
@@ -85,7 +79,6 @@
             sync();
         });
         host.addEventListener('input', e => { if (e.target.matches('[data-agent-stage]') && e.target.value) touched = true; });
-        autoApprove()?.addEventListener('change', sync);
 
         async function refresh() {
             const [agentsData, providerData, settings] = await Promise.all([

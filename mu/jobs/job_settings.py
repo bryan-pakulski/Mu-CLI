@@ -195,9 +195,7 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
            min=0, max=1_000_000, unit="USD"),
         _f("defaults.max_runtime_seconds", "Job runtime limit", "int", None, "Active (worker) time for the whole job. Reaching it pauses the running stage and asks you to approve more time or cancel. Blank = none.",
            min=1, max=7 * 24 * 3600, unit="seconds", optional=True),
-        _f("defaults.run_unattended", "Run unattended in sandbox", "bool", False,
-           "Default for the New job toggle. On: the implement stage auto-approves its writes inside the job's disposable "
-           "container. Off: each write waits for your approval. Never inherited from a chat session's auto-approve."),
+        # defaults.run_unattended retired 2026-10-15: jobs always run unattended (mu.jobs.unattended).
      ]},
     {"id": "iterations", "title": "Agent iterations", "hint": "How many agent loop turns one stage run may take; reaching it pauses the job and asks you to approve more or cancel. A job's own limit wins.",
      "fields": [

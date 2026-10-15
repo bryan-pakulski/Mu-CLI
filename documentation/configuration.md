@@ -107,7 +107,6 @@ the table is stale).
 | `defaults.max_retries` | 2 | Repair retries. Automatic re-attempts after a failed stage. |
 | `defaults.max_cost_usd` | 100 USD | Job cost limit. Total spend for the whole job (every stage, run and fix attempt). Reaching it pauses the job and asks you to approve more or cancel. 0 = no cap (stage budgets still apply). |
 | `defaults.max_runtime_seconds` | — | Job runtime limit. Active (worker) time for the whole job. Reaching it pauses the running stage and asks you to approve more time or cancel. Blank = none. |
-| `defaults.run_unattended` | off | Run unattended in sandbox. Default for the New job toggle. On: the implement stage auto-approves its writes inside the job's disposable container. Off: each write waits for your approval. Never inherited from a chat session's auto-approve. |
 
 **Agent iterations**
 

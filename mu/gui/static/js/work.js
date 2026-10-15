@@ -532,9 +532,6 @@
             if (costInput) costInput.placeholder = costPlaceholder(values['defaults.max_cost_usd']);
             syncCostHint();
             fill('job-runtime', values['defaults.max_runtime_seconds']);
-            // "Run unattended in sandbox" starts from the Settings default (off unless turned on there).
-            const unattended = document.getElementById('job-auto-approve');
-            if (!unattended.dataset.touched) { unattended.checked = values['defaults.run_unattended'] === true; unattended.dispatchEvent(new Event('change')); }
         } catch (_) { /* older server: keep the form's own defaults */ }
     }
 
@@ -554,7 +551,7 @@
         void refreshEnvPreview();
         void prefillDefaults();
         if (!agentPicker && window.MuJobAgents) agentPicker = window.MuJobAgents.sheet(document.getElementById('job-agents'),
-            { api, autoApprove: () => document.getElementById('job-auto-approve') });
+            { api });
         void agentPicker?.refresh();
         (chosenWorkspace() ? document.getElementById('job-title') : workspaceInput).focus();
     }
@@ -592,8 +589,8 @@
         // 0 is sent explicitly (unlimited); blank lets the server apply the Settings default.
         if (cost !== undefined) common.max_cost_usd = cost;
         if (runtime > 0) common.max_runtime_seconds = runtime;
-        // Unattended sandbox writes are always sent explicitly: the job never inherits session YOLO.
-        const execution = { auto_approve_writes: document.getElementById('job-auto-approve').checked };
+        // Jobs always run unattended inside their sandbox: there is no per-job auto-approve choice.
+        const execution = {};
         if (mode) execution.agent_mode = mode;
         const stages = agentPicker?.collectModels() || {};
         if (Object.keys(stages).length) execution.stages = stages;
@@ -652,7 +649,6 @@
         syncSessionHints(); void refreshEnvPreview();
     });
     document.getElementById('job-title').addEventListener('input', syncTitleHint);
-    document.getElementById('job-auto-approve').addEventListener('input', e => { e.target.dataset.touched = '1'; });
     document.getElementById('job-environments-change')?.addEventListener('click', () => void changeEnvironments());
     envResetBtn?.addEventListener('click', () => { envOverride = null; if (runIn) runIn.setDefault(); else renderEnvField(); });
     ['job-retries', 'job-cost', 'job-runtime'].forEach(id => document.getElementById(id)?.addEventListener('input', e => { e.target.dataset.touched = '1'; }));

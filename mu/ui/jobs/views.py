@@ -313,8 +313,10 @@ def _approval_box(approval: Dict[str, Any], width: int) -> List[Line]:
 
 def _environment_approval_box(approval: Dict[str, Any], width: int) -> List[Line]:
     rows = content.environment_approval_lines(approval)
-    body: List[Line] = [[("warn bold", "◆ Build environment needs approval"),
-                         ("muted", "  ·  A approve · X reject (optional reason)")]]
+    title = ("◆ Build environment needs approval" if approval.get("blocking", True) else
+             "◆ Repository egress awaits approval (stages run without it)" if approval.get("kind") == "egress" else
+             "◆ Repository environment skipped (approve for future jobs)")
+    body: List[Line] = [[("warn bold", title), ("muted", "  ·  A approve · X reject (optional reason)")]]
     body += [[("", fit(r, width - 4))] for r in rows]
     return panel(body, width, len(body) + 2, tone="warn", pad_x=1)
 
@@ -581,6 +583,11 @@ def job_screen(app: JobsApp, width: int, height: int, tick: Optional[int]) -> Li
     env_approval = vm.get("environment_approval")
     if env_approval:
         lines += _environment_approval_box(env_approval, width)
+    setup_warning = vm.get("setup_warning")
+    if setup_warning:
+        # Jobs run unattended: a failed template job setup is a warning, never a park.
+        text = str(setup_warning.get("message") or f"`{setup_warning.get('command', '')}` failed")
+        lines.append([("warn bold", " ? Job setup failed; continued without it  "), ("muted", fit(text, max(10, width - 44)))])
     files = content.parse_patch(content.job_patch(vm)[0])
     lines.append(tabs(_job_tabs(vm, files), tab, width, tick))
     mp = mode_panel(app, width)

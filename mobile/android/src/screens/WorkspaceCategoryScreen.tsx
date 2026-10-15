@@ -1,14 +1,14 @@
 import React from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { StackActions } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Text } from '../components';
 import { useTheme } from '../theme/ThemeContext';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { getWorkspaceCategory } from '../navigation/workspace';
 import { fontWeights, spacing } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 export type WorkspaceCategoryScreenProps = NativeStackScreenProps<RootStackParamList, 'WorkspaceCategory'>;
 
@@ -17,24 +17,24 @@ export function WorkspaceCategoryScreen({ navigation, route }: WorkspaceCategory
   const category = getWorkspaceCategory(route.params.categoryId);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
-        <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Tools</Text>
+        <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Tools</Text>
         <Text variant="sm" dim style={[styles.intro, { borderBottomColor: colors.hairline }]}>{category.description}</Text>
         {category.items.map(item => (
-          <TouchableOpacity
+          <Pressable
             key={item.screen}
             activeOpacity={0.68}
             onPress={() => navigation.dispatch(StackActions.push(item.screen))}
             style={styles.row}
           >
-            <Ionicons name={item.icon} size={19} color={colors.textDim} />
+            <Ionicons name={item.icon} size={19} color={colors.ink3} />
             <View style={styles.copy}>
               <Text variant="base" style={styles.title}>{item.title}</Text>
               <Text variant="sm" dim>{item.description}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-          </TouchableOpacity>
+            <Ionicons name="chevron-forward" size={18} color={colors.ink3} />
+          </Pressable>
         ))}
       </ScrollView>
     </SafeAreaView>

@@ -118,7 +118,7 @@ export const JOB_TAB_LABELS: Record<JobTab, string> = { session: 'Session', plan
 /** Pipeline step → tab. */
 export const STEP_TABS: Record<string, JobTab> = { plan: 'plan', approve: 'plan', implement: 'session', checks: 'checks', review: 'review', push: 'review' };
 
-/** planos default tab for a job's state. */
+/** Wash default tab for a job's state. */
 export function defaultTab(job: Pick<JobVM, 'state' | 'session'>): JobTab {
   if (job.session?.approval) return 'session';
   if (job.state === 'plan_review') return 'plan';

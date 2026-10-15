@@ -3,8 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ContainerStats } from '../api/containers';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Text } from '../ui';
 
 const MUCLI_CONTAINER_MONITOR_V1 = true;
 
@@ -81,25 +81,25 @@ export function ContainerStatsPanel({ stats, status }: Props) {
               : `${status} · retained storage ${formatBytes(stats?.storage_writable_bytes || 0)}`}
           </Text>
         </View>
-        <View style={[styles.liveDot, { backgroundColor: running ? colors.success : colors.textDim }]} />
+        <View style={[styles.liveDot, { backgroundColor: running ? colors.ok.ink : colors.ink3 }]} />
       </View>
 
       <View style={styles.grid}>
         {metrics.map(metric => (
           <View key={metric.label} style={styles.metric}>
             <View style={styles.metricHead}>
-              <Ionicons name={metric.icon} size={14} color={colors.textDim} />
+              <Ionicons name={metric.icon} size={14} color={colors.ink3} />
               <Text variant="xs" dim>{metric.label}</Text>
             </View>
-            <Text variant="xs" style={[styles.value, { color: colors.text }]} numberOfLines={1}>{metric.value}</Text>
+            <Text variant="xs" style={[styles.value, { color: colors.ink }]} numberOfLines={1}>{metric.value}</Text>
             {metric.detail ? <Text variant="xs" dim numberOfLines={1} style={styles.num}>{metric.detail}</Text> : null}
             {typeof metric.progress === 'number' ? (
-              <View style={[styles.track, { backgroundColor: colors.bgHover }]}>
+              <View style={[styles.track, { backgroundColor: colors.sunken }]}>
                 <View
                   style={[
                     styles.fill,
                     {
-                      backgroundColor: colors.viz[0],
+                      backgroundColor: colors.accent.ink,
                       width: `${Math.max(0, Math.min(100, metric.progress))}%`,
                     },
                   ]}
@@ -115,7 +115,7 @@ export function ContainerStatsPanel({ stats, status }: Props) {
           GPU values are totals for the assigned physical device.
         </Text>
       ) : null}
-      {stats?.error ? <Text variant="xs" style={{ color: colors.error }}>{stats.error}</Text> : null}
+      {stats?.error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{stats.error}</Text> : null}
     </View>
   );
 }

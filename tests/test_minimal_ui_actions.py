@@ -31,9 +31,9 @@ def test_web_container_cards_use_direct_edit_and_overflow_actions():
 
 
 def test_mobile_session_lists_open_on_row_press_and_use_delete_icon():
-    source = read("mobile/android/src/screens/SessionsScreen.tsx")
-    assert 'onPress={() => switchSession(item.name)}' in source
-    assert 'accessibilityLabel={`Delete session ${item.name}`}' in source
+    source = read("mobile/android/src/components/SwipeSessionsDrawer.tsx")
+    assert 'onPress={() => void switchSession(session.name)}' in source
+    assert 'accessibilityLabel={`Delete ${session.name}`}' in source
     assert '<Button title="Switch"' not in source
     assert '<Button title="Delete"' not in source
     assert '<Button title="New Session"' not in source

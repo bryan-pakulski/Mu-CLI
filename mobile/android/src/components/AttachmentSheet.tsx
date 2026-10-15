@@ -1,14 +1,12 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { attachmentsApi, type AttachmentDescriptor } from '../api/attachments';
 import { useTheme } from '../theme/ThemeContext';
-import { BottomSheet } from './BottomSheet';
-import { Button } from './Button';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Button, Pressable, Sheet, Text } from '../ui';
 
 interface Props {
   visible: boolean;
@@ -98,45 +96,45 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Attachments">
+    <Sheet visible={visible} onClose={onClose} title="Attachments">
       <View style={styles.header}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Attachments</Text>
-        <TouchableOpacity onPress={onClose} accessibilityLabel="Close attachments" hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
-          <Ionicons name="close" size={22} color={colors.textDim} />
-        </TouchableOpacity>
+        <Pressable onPress={onClose} accessibilityLabel="Close attachments" hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
+          <Ionicons name="close" size={22} color={colors.ink3} />
+        </Pressable>
       </View>
       <View style={styles.toolbar}>
         <Button title={uploading ? 'Uploading…' : 'Upload documents'} onPress={pick} disabled={uploading} />
-        {uploading ? <ActivityIndicator color={colors.accent} /> : null}
+        {uploading ? <ActivityIndicator color={colors.accent.ink} /> : null}
       </View>
-      <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.sm }}>
+      <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>
         Uploaded files are stored with this session. Select files to attach them to the next message.
       </Text>
-      {loading ? <ActivityIndicator color={colors.accent} /> : (
+      {loading ? <ActivityIndicator color={colors.accent.ink} /> : (
         <View style={styles.list}>
           {items.length === 0 ? <Text variant="sm" dim>No uploaded documents</Text> : null}
           {items.map(item => {
             const active = selectedIds.has(item.attachment_id);
             return (
-              <TouchableOpacity
+              <Pressable
                 key={item.attachment_id}
                 onPress={() => toggle(item)}
-                style={[styles.row, { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border }]}
+                style={[styles.row, { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline }]}
               >
-                <Ionicons name={active ? 'checkbox' : 'document-outline'} size={20} color={active ? colors.accentFg : colors.textDim} />
+                <Ionicons name={active ? 'checkbox-outline' : 'document-outline'} size={20} color={active ? colors.accent.ink : colors.ink3} />
                 <View style={styles.copy}>
                   <Text variant="sm" numberOfLines={1} style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text>
                   <Text variant="xs" dim>{formatSize(item.size)} · {item.mime_type}</Text>
                 </View>
-                <TouchableOpacity onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
-                  <Ionicons name="trash-outline" size={18} color={colors.textDim} />
-                </TouchableOpacity>
-              </TouchableOpacity>
+                <Pressable accessibilityLabel="Remove attachment" onPress={() => remove(item)} hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}>
+                  <Ionicons name="trash-outline" size={18} color={colors.ink3} />
+                </Pressable>
+              </Pressable>
             );
           })}
         </View>
       )}
-    </BottomSheet>
+    </Sheet>
   );
 }
 

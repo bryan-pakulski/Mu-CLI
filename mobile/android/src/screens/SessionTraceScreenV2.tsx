@@ -1,18 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { tracesApi, TraceRun, TraceSummary } from '../api/traces';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { Card, EmptyState, ErrorState, Skeleton, Text } from '../components';
 import { spacing, fontSizes, fontWeights, radii, tracking, typography, touchTarget } from '../theme/tokens';
+import { Card, ContextRing, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
 
 type NumericPoint = Record<string, unknown>;
 
@@ -101,7 +95,7 @@ export function SessionTraceScreenV2() {
 
   if (loading) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
         <View style={styles.loadingWrap}>
           <Skeleton height={96} style={styles.loadingBlock} />
           <Skeleton height={190} style={styles.loadingBlock} />
@@ -113,7 +107,7 @@ export function SessionTraceScreenV2() {
 
   if (error && !dashboard) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
         <ErrorState message={error} onRetry={() => load(selectedRunId)} />
       </SafeAreaView>
     );
@@ -121,9 +115,9 @@ export function SessionTraceScreenV2() {
 
   if (!dashboard) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
         <EmptyState
-          icon="analytics-outline"
+          icon="activity"
           title="No session traces"
           message="Run an agent turn with tracing enabled to populate session analytics."
         />
@@ -147,7 +141,7 @@ export function SessionTraceScreenV2() {
   const spikes = series.top_context_spikes || [];
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(selectedRunId); }} />}
         contentContainerStyle={styles.content}
@@ -160,9 +154,9 @@ export function SessionTraceScreenV2() {
               {selectedRunId || activeSessionName || summary.session} · {summary.provider} / {summary.model}
             </Text>
           </View>
-          <View style={[styles.statusPill, { backgroundColor: summary.status === 'completed' ? colors.successSubtle : colors.warningSubtle }]}>
-            <View style={[styles.statusDot, { backgroundColor: summary.status === 'completed' ? colors.success : colors.warning }]} />
-            <Text variant="xs" style={{ color: summary.status === 'completed' ? colors.success : colors.warning }}>{summary.status}</Text>
+          <View style={[styles.statusPill, { backgroundColor: summary.status === 'completed' ? colors.ok.wash : colors.attention.wash }]}>
+            <View style={[styles.statusDot, { backgroundColor: summary.status === 'completed' ? colors.ok.ink : colors.attention.ink }]} />
+            <Text variant="xs" style={{ color: summary.status === 'completed' ? colors.ok.ink : colors.attention.ink }}>{summary.status}</Text>
           </View>
         </View>
 
@@ -190,6 +184,10 @@ export function SessionTraceScreenV2() {
           </ScrollView>
         ) : null}
 
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
+          <ContextRing fill={contextFill(summary)} />
+          <Text variant="caption" tone="ink3">Peak context fill</Text>
+        </View>
         <MetricGrid metrics={[
           { label: 'Iterations', value: formatInteger(summary.iters), detail: `${summary.tool_calls} tool calls` },
           { label: 'Context peak', value: formatTokens(Math.max(summary.peak_context, summary.peak_estimated)), detail: `${formatPercent(contextFill(summary))} of window` },
@@ -206,8 +204,8 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'total_est', label: 'Estimated', color: colors.viz[7] },
-              { key: 'real', label: 'Provider / corrected', color: colors.viz[0] },
+              { key: 'total_est', label: 'Estimated', color: colors.ink3 },
+              { key: 'real', label: 'Provider / corrected', color: colors.accent.ink },
             ]}
           />
         </ChartCard>
@@ -219,12 +217,12 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'system', label: 'System', color: colors.viz[7] },
-              { key: 'user', label: 'User', color: colors.viz[4] },
-              { key: 'assistant', label: 'Assistant', color: colors.viz[0] },
-              { key: 'tool_calls', label: 'Tool calls', color: colors.viz[2] },
-              { key: 'tool_results', label: 'Tool results', color: colors.viz[3] },
-              { key: 'tool_schemas', label: 'Schemas', color: colors.viz[1] },
+              { key: 'system', label: 'System', color: colors.ink3 },
+              { key: 'user', label: 'User', color: colors.running.ink },
+              { key: 'assistant', label: 'Assistant', color: colors.accent.ink },
+              { key: 'tool_calls', label: 'Tool calls', color: colors.attention.ink },
+              { key: 'tool_results', label: 'Tool results', color: colors.danger.ink },
+              { key: 'tool_schemas', label: 'Schemas', color: colors.ok.ink },
             ]}
           />
         </ChartCard>
@@ -236,10 +234,10 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'in', label: 'Input', color: colors.viz[0] },
-              { key: 'out', label: 'Output', color: colors.viz[4] },
-              { key: 'cached', label: 'Cached', color: colors.viz[1] },
-              { key: 'reasoning', label: 'Reasoning', color: colors.viz[2] },
+              { key: 'in', label: 'Input', color: colors.accent.ink },
+              { key: 'out', label: 'Output', color: colors.running.ink },
+              { key: 'cached', label: 'Cached', color: colors.ok.ink },
+              { key: 'reasoning', label: 'Reasoning', color: colors.attention.ink },
             ]}
           />
         </ChartCard>
@@ -251,7 +249,7 @@ export function SessionTraceScreenV2() {
             mode="single"
             yAxisLabel="latency"
             valueFormatter={formatDuration}
-            series={[{ key: 'wall_ms', label: 'Wall time', color: colors.viz[0] }]}
+            series={[{ key: 'wall_ms', label: 'Wall time', color: colors.accent.ink }]}
           />
         </ChartCard>
 
@@ -262,8 +260,8 @@ export function SessionTraceScreenV2() {
             yAxisLabel="tokens"
             valueFormatter={formatTokens}
             series={[
-              { key: 'raw_tokens', label: 'Raw', color: colors.viz[7] },
-              { key: 'injected_tokens', label: 'Injected', color: colors.viz[1] },
+              { key: 'raw_tokens', label: 'Raw', color: colors.ink3 },
+              { key: 'injected_tokens', label: 'Injected', color: colors.ok.ink },
             ]}
           />
         </ChartCard>
@@ -279,8 +277,8 @@ export function SessionTraceScreenV2() {
 
         <ChartCard title="Compactions and nudges" subtitle="Context recovery events across the session">
           <EventTimeline groups={[
-            { label: 'Compaction', items: compactions, color: colors.viz[2], kindKey: 'kind' },
-            { label: 'Nudge', items: nudges, color: colors.viz[4], kindKey: 'kind' },
+            { label: 'Compaction', items: compactions, color: colors.attention.ink, kindKey: 'kind' },
+            { label: 'Nudge', items: nudges, color: colors.running.ink, kindKey: 'kind' },
           ]} />
         </ChartCard>
 
@@ -292,10 +290,10 @@ export function SessionTraceScreenV2() {
             valueFormatter={formatInteger}
             axisMinStep={1}
             series={[
-              { key: 'task_memory_count', label: 'Task memory', color: colors.viz[0] },
-              { key: 'scratchpad_count', label: 'Scratchpad', color: colors.viz[4] },
-              { key: 'active', label: 'Subagents', color: colors.viz[1] },
-              { key: 'stuck', label: 'Stuck', color: colors.viz[3] },
+              { key: 'task_memory_count', label: 'Task memory', color: colors.accent.ink },
+              { key: 'scratchpad_count', label: 'Scratchpad', color: colors.running.ink },
+              { key: 'active', label: 'Subagents', color: colors.ok.ink },
+              { key: 'stuck', label: 'Stuck', color: colors.danger.ink },
             ]}
           />
         </ChartCard>
@@ -332,17 +330,17 @@ export function SessionTraceScreenV2() {
 function ScopeChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       style={[
         styles.scopeChip,
-        { backgroundColor: active ? colors.accentSubtle : 'transparent', borderColor: active ? colors.accentSubtle : colors.border },
+        { backgroundColor: active ? colors.accent.wash : 'transparent', borderColor: active ? colors.accent.wash : colors.hairline },
       ]}
     >
-      <Text variant="xs" style={{ color: active ? colors.accentFg : colors.textSoft, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{label}</Text>
-    </TouchableOpacity>
+      <Text variant="xs" style={{ color: active ? colors.accent.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -353,7 +351,7 @@ function MetricGrid({ metrics }: { metrics: Array<{ label: string; value: string
       {metrics.map(metric => (
         <Card key={metric.label} style={styles.metricCard}>
           <Text variant="xs" dim>{metric.label}</Text>
-          <Text style={[styles.metricValue, { color: colors.text }]}>{metric.value}</Text>
+          <Text style={[styles.metricValue, { color: colors.ink }]}>{metric.value}</Text>
           <Text variant="xs" dim style={styles.num}>{metric.detail}</Text>
         </Card>
       ))}
@@ -426,7 +424,7 @@ function FixedBarChart({
             {scale.ticks.map(value => (
               <Text
                 key={`axis-${value}`}
-                style={[styles.yAxisTick, { color: colors.textDim }]}
+                style={[styles.yAxisTick, { color: colors.ink3 }]}
                 numberOfLines={1}
               >
                 {valueFormatter(value)}
@@ -434,7 +432,7 @@ function FixedBarChart({
             ))}
           </View>
           <View style={styles.yAxisUnitLane}>
-            <Text style={[styles.yAxisUnit, { color: colors.textDim }]} numberOfLines={1}>
+            <Text style={[styles.yAxisUnit, { color: colors.ink3 }]} numberOfLines={1}>
               {yAxisLabel}
             </Text>
           </View>
@@ -497,7 +495,7 @@ function FixedBarChart({
                   )}
                 </View>
                 <View style={styles.axisLane}>
-                  {showLabel ? <Text style={[styles.axisLabel, { color: colors.textDim }]}>{formatInteger(numberValue(point.iter))}</Text> : null}
+                  {showLabel ? <Text style={[styles.axisLabel, { color: colors.ink3 }]}>{formatInteger(numberValue(point.iter))}</Text> : null}
                 </View>
               </View>
             );
@@ -538,8 +536,8 @@ function HorizontalBars({
             <Text variant="sm" style={styles.horizontalLabel} numberOfLines={1}>{String(item[labelKey])}</Text>
             <Text variant="xs" dim>{formatInteger(numberValue(item[valueKey]))}</Text>
           </View>
-          <View style={[styles.horizontalTrack, { backgroundColor: colors.bgHover }]}>
-            <View style={[styles.horizontalFill, { backgroundColor: colors.viz[0], width: `${Math.max(3, (numberValue(item[valueKey]) / max) * 100)}%` }]} />
+          <View style={[styles.horizontalTrack, { backgroundColor: colors.sunken }]}>
+            <View style={[styles.horizontalFill, { backgroundColor: colors.accent.ink, width: `${Math.max(3, (numberValue(item[valueKey]) / max) * 100)}%` }]} />
           </View>
           <Text variant="xs" dim>{detail(item)}</Text>
         </View>
@@ -563,7 +561,7 @@ function EventTimeline({ groups }: { groups: Array<{ label: string; items: Numer
                 .map inside a ScrollView (renders all children); long sessions
                 with thousands of compactions/nudges would mount them all. */}
             {group.items.slice(-MAX_EVENT_PILLS).map((item, index) => (
-              <View key={`${group.label}-${index}`} style={[styles.eventPill, { backgroundColor: colors.bgHover }]}>
+              <View key={`${group.label}-${index}`} style={[styles.eventPill, { backgroundColor: colors.sunken }]}>
                 <View style={[styles.eventDot, { backgroundColor: group.color }]} />
                 <Text variant="xs" style={styles.num}>{String(item[group.kindKey] || group.label)} · {formatInteger(numberValue(item.iter))}</Text>
               </View>
@@ -596,7 +594,7 @@ function RankedList({
             <Text variant="sm" style={styles.rankTitle} numberOfLines={1}>{title(item)}</Text>
             <Text variant="xs" dim numberOfLines={2}>{detail(item)}</Text>
           </View>
-          <Text variant="xs" style={{ color: colors.textSoft, fontVariant: ['tabular-nums'] }}>{value(item)}</Text>
+          <Text variant="xs" style={{ color: colors.ink2, fontVariant: ['tabular-nums'] }}>{value(item)}</Text>
         </View>
       ))}
     </View>

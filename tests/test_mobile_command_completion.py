@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "mobile/android/src/hooks/useCommandCompletion.ts"
 BAR = ROOT / "mobile/android/src/components/CommandSuggestionBar.tsx"
-CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreen.tsx"
+CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreenProduct.tsx"
 CHAT_API = ROOT / "mobile/android/src/api/chat.ts"
 APP_JS = ROOT / "mu/gui/static/js/app.js"
 CHAT_ROUTER = ROOT / "mu/gui/routers/chat.py"

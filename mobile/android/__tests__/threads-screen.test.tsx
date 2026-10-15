@@ -30,8 +30,8 @@ jest.mock('../src/api/sessions', () => ({
 
 // React Native Modal does not render children in jest-expo; render the
 // ThreadsScreen create sheet inline instead of through a real modal.
-jest.mock('../src/components/SafeAreaModal', () => ({
-  SafeAreaModal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+jest.mock('../src/ui/Sheet', () => ({ ...jest.requireActual('../src/ui/Sheet'),
+  ModalFrame: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 function thread(overrides: Partial<ThreadListItem> = {}): ThreadListItem {

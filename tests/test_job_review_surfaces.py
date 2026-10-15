@@ -129,11 +129,14 @@ def test_mobile_has_first_class_work_board_and_review_detail():
     assert 'name="Work"' in nav
     assert 'name="JobDetail"' in nav
     assert "onOpenWork" in nav
+    # Wash: Work is a bottom tab (G§8.3) and stays one tap away from the chat header.
+    assert "<Tab.Screen name=\"Work\"" in nav and "tabBarAccessibilityLabel: 'Work'" in nav
 
     assert "onOpenWork: () => void" in header
-    assert 'accessibilityLabel="Open engineering work"' in header
-    assert 'name="briefcase-outline"' in header
-    assert 'label="Engineering work"' in header
+    assert '<IconButton icon="briefcase" label="Open engineering work"' in header
+    settings = (MOBILE_HEADER.parent.parent / "screens" / "SettingsScreen.tsx").read_text(encoding="utf-8")
+    assert 'label="Engineering work"' in header or "Open engineering work" in header
+    assert "label=\"Containers\"" in settings
 
     assert "jobCoreApi.home()" in work
     assert "jobsApi.create(input)" in work

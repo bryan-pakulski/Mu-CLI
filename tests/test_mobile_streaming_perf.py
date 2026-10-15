@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SSE = ROOT / "mobile/android/src/api/sse.ts"
-CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreen.tsx"
+CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreenProduct.tsx"
 CHAT_HOOK = ROOT / "mobile/android/src/hooks/useChatSession.ts"
 
 
@@ -74,10 +74,11 @@ def test_chatscreen_uses_callback_for_scroll():
 def test_chatscreen_skips_markdown_while_streaming():
     """Assistant messages with streaming=true must render plain Text, not Markdown."""
     src = read(CHAT_SCREEN)
-    assert "item.streaming" in src, \
+    assert "message.streaming" in src, \
         "No streaming check before Markdown render found"
-    # The pattern: isUser ? Text : item.streaming ? Text : Markdown
-    assert "? (" in src and "item.streaming" in src, \
+    # The pattern: streaming → plain Text, otherwise Markdown
+    body = src[src.index("const renderAssistantBody"):]
+    assert body.index("if (message.streaming)") < body.index("<Markdown"), \
         "Conditional streaming render path not found"
 
 
@@ -85,10 +86,12 @@ def test_chatscreen_markdown_only_on_finalize():
     """Markdown component must only render for non-streaming assistant messages."""
     src = read(CHAT_SCREEN)
     # After the streaming Text branch, Markdown should be the else case
-    assert "item.streaming ? (" in src, "Streaming branch not found"
-    # Ensure Markdown import still exists (not removed)
-    assert "from 'react-native-markdown-display'" in src, \
-        "Markdown import missing — was it accidentally removed?"
+    assert "if (message.streaming) {" in src, "Streaming branch not found"
+    # Markdown comes from the shared Wash module, which wraps the renderer.
+    assert "<Markdown variant={compact ? 'compact' : 'chat'}>" in src, \
+        "Markdown render missing — was it accidentally removed?"
+    markdown = (CHAT_SCREEN.parent.parent / "ui" / "Markdown.tsx").read_text(encoding="utf-8")
+    assert "from 'react-native-markdown-display'" in markdown
 
 
 # ── Fix 4: Skip session polling during active streaming ─────────────────────

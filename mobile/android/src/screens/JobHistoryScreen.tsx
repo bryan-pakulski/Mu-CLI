@@ -1,17 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { jobsApi, type JobHistoryRow, type JobReport } from '../api/jobs';
 import { JobsNavBar, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { ModernBottomSheet } from '../components/ModernBottomSheet';
-import { Banner, Empty, Loading, Panel, Pill, PlanosButton, Segmented, StatTile, TextField, useToast } from '../components/planos';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, touchTarget } from '../theme/tokens';
 import { STATUS, duration, money, when, type Status } from '../theme/status';
+import { Banner, Button, Empty, Loading, Panel, Pill, Pressable, Segmented, Sheet, StatTile, Text, TextField, useToast } from '../ui';
 
 export type JobHistoryScreenProps = NativeStackScreenProps<RootStackParamList, 'JobHistory'>;
 
@@ -29,7 +27,7 @@ export function historyStatus(status: string): Status {
   return 'active';
 }
 
-/** planos History page: search, archive filter, report tiles, archive/restore/delete. */
+/** Wash History page: search, archive filter, report tiles, archive/restore/delete. */
 export function JobHistoryScreen({ navigation }: JobHistoryScreenProps) {
   const { colors } = useTheme();
   const toast = useToast();
@@ -86,10 +84,10 @@ export function JobHistoryScreen({ navigation }: JobHistoryScreenProps) {
   const pct = (v: number) => `${Math.round((v || 0) * 100)}%`;
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="JobHistory" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(0); setRefreshing(false); }} tintColor={colors.muted} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(0); setRefreshing(false); }} tintColor={colors.ink3} />}>
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>History</Text>
         <TextField accessibilityLabel="Search job history" placeholder="Search title, repository, id…" value={query} onChangeText={setQuery} autoCapitalize="none" autoCorrect={false} />
         <Segmented<ArchiveFilter>
@@ -118,43 +116,43 @@ export function JobHistoryScreen({ navigation }: JobHistoryScreenProps) {
             {rows.length ? rows.map(row => {
               const st = historyStatus(row.status);
               return (
-                <View key={row.id} testID={`history-row-${row.id}`} style={[styles.row, { borderBottomColor: colors.border }]}>
+                <View key={row.id} testID={`history-row-${row.id}`} style={[styles.row, { borderBottomColor: colors.hairline }]}>
                   <Pressable accessibilityRole="button" accessibilityLabel={`Open ${row.title}`} onPress={() => navigation.navigate('JobDetail', { jobId: row.id })} style={styles.rowMain}>
                     <View style={styles.wrap}>
                       <Pill tone={STATUS[st].tone} glyph={STATUS[st].icon}>{row.status.replace(/_/g, ' ')}</Pill>
                       {row.archived ? <Pill tone="muted">archived</Pill> : null}
                       <View style={{ flex: 1 }} />
                       <Text variant="xs" style={styles.num}>{money(row.cost_usd)}</Text>
-                      <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{row.elapsed_seconds ? duration(row.elapsed_seconds * 1000) : ''}</Text>
+                      <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{row.elapsed_seconds ? duration(row.elapsed_seconds * 1000) : ''}</Text>
                     </View>
                     <Text variant="sm" numberOfLines={1}>{row.title}</Text>
-                    <Text variant="xs" style={{ color: colors.muted, fontFamily: fonts.mono }} numberOfLines={1}>{row.id.slice(0, 12)} · {when(row.updated_at)}{row.repository ? ` · ${row.repository}` : ''} · {row.attempt_count} attempt{row.attempt_count === 1 ? '' : 's'}</Text>
+                    <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }} numberOfLines={1}>{row.id.slice(0, 12)} · {when(row.updated_at)}{row.repository ? ` · ${row.repository}` : ''} · {row.attempt_count} attempt{row.attempt_count === 1 ? '' : 's'}</Text>
                   </Pressable>
                   <View style={styles.rowActions}>
                     {row.archived
-                      ? <PlanosButton small label="Restore" onPress={() => setPending({ kind: 'restore', row })} testID={`restore-${row.id}`} />
-                      : <PlanosButton small label="Archive" disabled={!row.manageable} accessibilityHint={row.manageable ? undefined : 'Stop or finish the job first'} onPress={() => setPending({ kind: 'archive', row })} testID={`history-archive-${row.id}`} />}
-                    <PlanosButton small tone="danger" label="Delete" disabled={!row.manageable && !row.archived} onPress={() => setPending({ kind: 'delete', row })} testID={`history-delete-${row.id}`} />
-                    {!row.manageable && !row.archived ? <Text variant="xs" style={{ color: colors.muted }}>active — stop it first</Text> : null}
+                      ? <Button small label="Restore" onPress={() => setPending({ kind: 'restore', row })} testID={`restore-${row.id}`} />
+                      : <Button small label="Archive" disabled={!row.manageable} accessibilityHint={row.manageable ? undefined : 'Stop or finish the job first'} onPress={() => setPending({ kind: 'archive', row })} testID={`history-archive-${row.id}`} />}
+                    <Button small tone="danger" label="Delete" disabled={!row.manageable && !row.archived} onPress={() => setPending({ kind: 'delete', row })} testID={`history-delete-${row.id}`} />
+                    {!row.manageable && !row.archived ? <Text variant="xs" style={{ color: colors.ink3 }}>active — stop it first</Text> : null}
                   </View>
                 </View>
               );
             }) : <View style={{ padding: spacing.base }}><Empty>No jobs match.</Empty></View>}
-            {rows.length < total ? <View style={{ padding: spacing.sm }}><PlanosButton label={`Load more (${total - rows.length})`} onPress={() => void load(rows.length)} /></View> : null}
+            {rows.length < total ? <View style={{ padding: spacing.sm }}><Button label={`Load more (${total - rows.length})`} onPress={() => void load(rows.length)} /></View> : null}
           </Panel>
         )}
       </ScrollView>
-      <ModernBottomSheet visible={!!pending} onClose={() => setPending(null)} title={pending ? `${pending.kind[0].toUpperCase()}${pending.kind.slice(1)} job` : ''}>
+      <Sheet visible={!!pending} onClose={() => setPending(null)} title={pending ? `${pending.kind[0].toUpperCase()}${pending.kind.slice(1)} job` : ''}>
         <Text variant="sm">
           {pending?.kind === 'delete' ? `Delete “${pending.row.title}”? Its record, telemetry and evidence are purged; the Git branch is preserved.`
             : pending?.kind === 'archive' ? `Archive “${pending.row.title}”? It leaves the board; History keeps its record and evidence.`
               : `Restore “${pending?.row.title}” to the board?`}
         </Text>
         <View style={styles.sheetActions}>
-          <PlanosButton label="Cancel" onPress={() => setPending(null)} />
-          <PlanosButton primary tone={pending?.kind === 'delete' ? 'danger' : ''} loading={busy} label={pending ? `${pending.kind[0].toUpperCase()}${pending.kind.slice(1)}` : 'OK'} onPress={() => void act()} testID="history-confirm" />
+          <Button label="Cancel" onPress={() => setPending(null)} />
+          <Button primary tone={pending?.kind === 'delete' ? 'danger' : ''} loading={busy} label={pending ? `${pending.kind[0].toUpperCase()}${pending.kind.slice(1)}` : 'OK'} onPress={() => void act()} testID="history-confirm" />
         </View>
-      </ModernBottomSheet>
+      </Sheet>
     </SafeAreaView>
   );
 }

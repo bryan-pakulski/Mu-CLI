@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import {
   doneSkippedKeys,
@@ -11,12 +11,10 @@ import {
   type JiraTicket,
   type TicketImportTarget,
 } from '../api/jobs';
-import { ModernBottomSheet } from './ModernBottomSheet';
 import { JobImportSheet } from './JobSessionPicker';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Banner, Field, Loading, Panel, PlanosButton, SwitchRow, TextField } from './planos';
+import { Banner, Button, Field, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 export type JiraSheetProps = {
   visible: boolean;
@@ -39,9 +37,9 @@ export function filterTickets(tickets: JiraTicket[], statuses: string[]): JiraTi
 
 export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob }: JiraSheetProps) {
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Jira">
+    <Sheet visible={visible} onClose={onClose} title="Jira">
       <JiraBrowser active={visible} sessionName={sessionName} onImported={onImported} onOpenJob={onOpenJob} />
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -198,7 +196,7 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
 
   const visibleTickets = useMemo(() => filterTickets(tickets, statusFilter), [tickets, statusFilter]);
   const shownBoards = useMemo(() => boards.slice(0, 12), [boards]);
-  const chip = (activeChip: boolean) => [styles.chip, { backgroundColor: activeChip ? colors.accentSubtle : colors.raised, borderColor: activeChip ? colors.accent : colors.border }];
+  const chip = (activeChip: boolean) => [styles.chip, { backgroundColor: activeChip ? colors.accent.wash : colors.raised, borderColor: activeChip ? colors.accent.ink : colors.hairline }];
   const linkOnly = section === 'link';
 
   return (
@@ -207,24 +205,24 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
       {notice ? <Banner tone="ok" glyph="✓" title={notice} /> : null}
       {rerunKeys.length > 0 && !linkOnly ? (
         <View style={styles.actions}>
-          <PlanosButton small testID="jira-run-again" label={`Run again (${rerunKeys.length})`} disabled={!!busy} onPress={runAgain} />
-          <Text variant="xs" style={{ color: colors.muted, flex: 1 }}>Start a new job for {rerunKeys.join(', ')}.</Text>
+          <Button small testID="jira-run-again" label={`Run again (${rerunKeys.length})`} disabled={!!busy} onPress={runAgain} />
+          <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>Start a new job for {rerunKeys.join(', ')}.</Text>
         </View>
       ) : null}
 
       {settings?.configured && !editingLink ? (
         <Panel title="Jira link" glyph="✓" glyphTone="ok">
-          <Text variant="xs" style={{ color: colors.muted }} numberOfLines={2}>
+          <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={2}>
             Linked · {settings.base_url}{settings.email ? ` · ${settings.email}` : ''}
           </Text>
           <View style={styles.actions}>
-            <PlanosButton small label="Edit" onPress={() => setEditingLink(true)} />
-            <PlanosButton small tone="danger" label="Unlink" onPress={unlink} />
+            <Button small label="Edit" onPress={() => setEditingLink(true)} />
+            <Button small tone="danger" label="Unlink" onPress={unlink} />
           </View>
         </Panel>
       ) : (
         <Panel title="Link Jira">
-          <Text variant="xs" style={{ color: colors.muted, marginBottom: spacing.sm }}>
+          <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>
             Saved on the server in $MUCLI_HOME/integrations/jira.json. Tokens are never shown again.
           </Text>
           <Field label="Jira URL">
@@ -244,8 +242,8 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
               value={token} onChangeText={setToken} />
           </Field>
           <View style={styles.actions}>
-            <PlanosButton primary label="Save and test" disabled={!!busy || !baseUrl.trim()} onPress={saveLink} />
-            {settings?.configured ? <PlanosButton ghost label="Cancel" onPress={() => setEditingLink(false)} /> : null}
+            <Button primary label="Save and test" disabled={!!busy || !baseUrl.trim()} onPress={saveLink} />
+            {settings?.configured ? <Button ghost label="Cancel" onPress={() => setEditingLink(false)} /> : null}
           </View>
         </Panel>
       )}
@@ -253,30 +251,30 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
       {settings?.configured && !linkOnly ? (
         <>
           <Panel title="Board">
-            <Text variant="xs" style={{ color: colors.muted }}>Starred and suggested boards (projects with your open work) come first. Long-press to star.</Text>
+            <Text variant="xs" style={{ color: colors.ink3 }}>Starred and suggested boards (projects with your open work) come first. Long-press to star.</Text>
             <TextField accessibilityLabel="Search boards" placeholder="Search boards"
               value={boardQuery} onChangeText={setBoardQuery} onSubmitEditing={() => void loadBoards(boardQuery.trim())}
               returnKeyType="search" />
             <View style={styles.wrap}>
               {shownBoards.map(board => (
-                <TouchableOpacity key={board.id} accessibilityRole="button" accessibilityState={{ selected: boardId === board.id }}
+                <Pressable key={board.id} accessibilityRole="button" accessibilityState={{ selected: boardId === board.id }}
                   onPress={() => setBoardId(boardId === board.id ? null : board.id)} onLongPress={() => togglePreferred(board)} style={chip(boardId === board.id)}>
-                  <Text variant="xs" style={{ color: colors.text }}>
+                  <Text variant="xs" style={{ color: colors.ink }}>
                     {board.preferred ? '★ ' : board.suggested ? '• ' : ''}{board.name}{board.project ? ` · ${board.project}` : ''}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
-              {busy === 'boards' ? <ActivityIndicator size="small" color={colors.running} /> : null}
+              {busy === 'boards' ? <ActivityIndicator size="small" color={colors.running.ink} /> : null}
             </View>
             {sprints.length ? (
               <View style={styles.wrap}>
-                <TouchableOpacity accessibilityRole="button" accessibilityState={{ selected: sprintId == null }} onPress={() => setSprintId(null)} style={chip(sprintId == null)}>
-                  <Text variant="xs" style={{ color: colors.text }}>Whole board</Text>
-                </TouchableOpacity>
+                <Pressable accessibilityRole="button" accessibilityState={{ selected: sprintId == null }} onPress={() => setSprintId(null)} style={chip(sprintId == null)}>
+                  <Text variant="xs" style={{ color: colors.ink }}>Whole board</Text>
+                </Pressable>
                 {sprints.map(s => (
-                  <TouchableOpacity key={s.id} accessibilityRole="button" accessibilityState={{ selected: sprintId === s.id }} onPress={() => setSprintId(s.id)} style={chip(sprintId === s.id)}>
-                    <Text variant="xs" style={{ color: colors.text }}>{s.name}{s.state === 'active' ? ' (active)' : ''}</Text>
-                  </TouchableOpacity>
+                  <Pressable key={s.id} accessibilityRole="button" accessibilityState={{ selected: sprintId === s.id }} onPress={() => setSprintId(s.id)} style={chip(sprintId === s.id)}>
+                    <Text variant="xs" style={{ color: colors.ink }}>{s.name}{s.state === 'active' ? ' (active)' : ''}</Text>
+                  </Pressable>
                 ))}
               </View>
             ) : null}
@@ -290,10 +288,10 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
                 {statuses.map(s => {
                   const on = statusFilter.includes(s.name);
                   return (
-                    <TouchableOpacity key={s.name} accessibilityRole="button" accessibilityState={{ selected: on }}
+                    <Pressable key={s.name} accessibilityRole="button" accessibilityState={{ selected: on }}
                       onPress={() => setStatusFilter(prev => (on ? prev.filter(x => x !== s.name) : [...prev, s.name]))} style={chip(on)}>
-                      <Text variant="xs" style={{ color: colors.text }}>{s.name} · {s.count}</Text>
-                    </TouchableOpacity>
+                      <Text variant="xs" style={{ color: colors.ink }}>{s.name} · {s.count}</Text>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -303,38 +301,38 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
           <Panel
             title="Tickets"
             badge={tickets.length ? visibleTickets.length : ''}
-            right={busy === 'tickets' ? <ActivityIndicator size="small" color={colors.running} /> : <PlanosButton small ghost label="Refresh" onPress={() => void loadTickets()} />}
+            right={busy === 'tickets' ? <ActivityIndicator size="small" color={colors.running.ink} /> : <Button small ghost label="Refresh" onPress={() => void loadTickets()} />}
           >
             {!visibleTickets.length && busy !== 'tickets' ? (
-              <Text variant="xs" style={{ color: colors.muted }}>{boardId == null && !mine ? 'Pick a board or turn on “Assigned to me”.' : 'No tickets match.'}</Text>
+              <Text variant="xs" style={{ color: colors.ink3 }}>{boardId == null && !mine ? 'Pick a board or turn on “Assigned to me”.' : 'No tickets match.'}</Text>
             ) : null}
             {visibleTickets.map(ticket => {
               const picked = selected.includes(ticket.key);
               const job = ticket.job;
               return (
-                <TouchableOpacity key={ticket.key} accessibilityRole="checkbox" accessibilityState={{ checked: picked, disabled: !!job?.live }}
+                <Pressable key={ticket.key} accessibilityRole="checkbox" accessibilityState={{ checked: picked, disabled: !!job?.live }}
                   disabled={!!job?.live}
                   onPress={() => setSelected(prev => (picked ? prev.filter(k => k !== ticket.key) : [...prev, ticket.key]))}
-                  style={[styles.ticket, { backgroundColor: picked ? colors.accentSubtle : colors.bg, borderColor: picked ? colors.accent : colors.border }]}>
+                  style={[styles.ticket, { backgroundColor: picked ? colors.accent.wash : colors.canvas, borderColor: picked ? colors.accent.ink : colors.hairline }]}>
                   <View style={styles.row}>
-                    <Text variant="xs" style={{ color: picked ? colors.accent : colors.muted }}>{picked ? '☑' : '☐'}</Text>
-                    <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono, fontWeight: fontWeights.semibold }}>{ticket.key}</Text>
-                    <Text variant="xs" style={{ color: colors.muted, flex: 1 }} numberOfLines={1}>{ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ''}</Text>
+                    <Text variant="xs" style={{ color: picked ? colors.accent.ink : colors.ink3 }}>{picked ? '☑' : '☐'}</Text>
+                    <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono, fontWeight: fontWeights.semibold }}>{ticket.key}</Text>
+                    <Text variant="xs" style={{ color: colors.ink3, flex: 1 }} numberOfLines={1}>{ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ''}</Text>
                   </View>
-                  <Text variant="sm" style={{ color: colors.text }} numberOfLines={2}>{ticket.summary}</Text>
+                  <Text variant="sm" style={{ color: colors.ink }} numberOfLines={2}>{ticket.summary}</Text>
                   {job ? (
-                    <TouchableOpacity accessibilityRole="link" onPress={() => onOpenJob?.(job.job_id)} style={styles.jobLink}>
-                      <Text variant="xs" style={{ color: job.live ? colors.warn : colors.accent }}>
+                    <Pressable accessibilityRole="link" onPress={() => onOpenJob?.(job.job_id)} style={styles.jobLink}>
+                      <Text variant="xs" style={{ color: job.live ? colors.attention.ink : colors.accent.ink }}>
                         {job.live ? '● ' : '› '}Job {job.job_id.slice(0, 10)} · {job.status.replace(/_/g, ' ')}{job.attention_reason ? ` · ${job.attention_reason.replace(/_/g, ' ')}` : ''}
                       </Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   ) : null}
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </Panel>
 
-          <PlanosButton primary disabled={!selected.length || !!busy} onPress={importSelected}
+          <Button primary disabled={!selected.length || !!busy} onPress={importSelected}
             label={busy === 'import' ? 'Creating jobs…' : `Create ${selected.length || ''} job${selected.length === 1 ? '' : 's'}`} />
           <JobImportSheet
             visible={askSession}

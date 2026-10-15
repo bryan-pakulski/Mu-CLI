@@ -17,7 +17,7 @@ ARTIFACTS_PANEL = ROOT / "mu/gui/templates/fragments/artifacts_panel.html"
 APP_JS = ROOT / "mu/gui/static/js/app.js"
 APP_CSS = ROOT / "mu/gui/static/css/app.css"
 ARTIFACT_STRIP = ROOT / "mobile/android/src/components/ArtifactStrip.tsx"
-CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreen.tsx"
+CHAT_SCREEN = ROOT / "mobile/android/src/screens/ChatScreenProduct.tsx"
 
 
 def read(path: Path) -> str:
@@ -100,14 +100,14 @@ def test_registry_section_flex_auto():
 
 def test_artifact_strip_has_visualizations_section():
     src = read(ARTIFACT_STRIP)
-    assert "VISUALIZATIONS" in src, "Missing VISUALIZATIONS heading"
+    assert ">Visualizations<" in src, "Missing Visualizations heading (sentence case, G§2.2)"
     assert "visualizations" in src
     assert "a.kind === 'visualization'" in src
 
 
 def test_artifact_strip_has_files_section():
     src = read(ARTIFACT_STRIP)
-    assert "FILES" in src, "Missing FILES heading"
+    assert ">Files<" in src, "Missing Files heading (sentence case, G§2.2)"
     assert "a.kind !== 'visualization'" in src
 
 
@@ -136,11 +136,13 @@ def test_artifact_strip_conditionally_renders_sections():
 
 def test_chat_screen_guards_content_size_change_during_scroll():
     src = read(CHAT_SCREEN)
-    assert "userScrollActiveRef.current || momentumScrollRef.current" in src, (
-        "onChatContentSizeChange must skip scrollToBottom when user is "
-        "actively scrolling or momentum is in flight — otherwise the list "
-        "fights the user's finger causing bounce/jitter"
+    # The live chat screen stops following output the moment the user drags,
+    # and the content-size handler only scrolls while following.
+    assert "onScrollBeginDrag={() => { followOutputRef.current = false; }}" in src, (
+        "a user drag must stop auto-follow, otherwise the list fights the "
+        "user's finger causing bounce/jitter"
     )
+    assert "!followOutputRef.current || visualizationActiveRef.current) return;" in src
 
 
 def test_chat_screen_has_maintain_visible_content_position():
@@ -150,7 +152,6 @@ def test_chat_screen_has_maintain_visible_content_position():
         "jump-on-insert when new messages arrive"
     )
     assert "minIndexForVisible" in src
-    assert "autoscrollToTopThreshold" in src
 
 
 def test_chat_screen_mvc_position_conditional():

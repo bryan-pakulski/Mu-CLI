@@ -2,10 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 import { threadsApi, type CreateThreadResponse } from '../api/threads';
 import { useTheme } from '../theme/ThemeContext';
-import { Button } from './Button';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Text } from './Text';
 import { fontSizes, fontWeights, radii, spacing, typography } from '../theme/tokens';
+import { Button, Sheet, Text } from '../ui';
 
 export type NewThreadSheetProps = {
   visible: boolean;
@@ -52,20 +50,20 @@ export function NewThreadSheet({
   };
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="New thread">
+    <Sheet visible={visible} onClose={onClose} title="New thread">
       <View style={styles.content}>
         <Text variant="sm" dim style={styles.intro}>
           Start an independent agent conversation that shares the environment from{' '}
           <Text variant="sm" style={styles.parentName}>{parentSessionName || 'the current session'}</Text>.
           Chat history and working memory start clean.
         </Text>
-        <Text variant="xs" style={[styles.label, { color: colors.textDim }]}>Thread title</Text>
+        <Text variant="xs" style={[styles.label, { color: colors.ink3 }]}>Thread title</Text>
         <TextInput
           testID="thread-title-input"
           value={title}
           onChangeText={setTitle}
           placeholder="Investigate the parser"
-          placeholderTextColor={colors.textDim}
+          placeholderTextColor={colors.ink3}
           maxLength={120}
           autoCapitalize="sentences"
           autoCorrect
@@ -74,16 +72,16 @@ export function NewThreadSheet({
           style={[
             styles.input,
             {
-              color: colors.text,
+              color: colors.ink,
               backgroundColor: colors.surface,
-              borderColor: colors.border,
+              borderColor: colors.hairline,
             },
           ]}
         />
         <Text variant="xs" dim style={styles.help}>
           The new thread inherits provider, mode, workspace, and container access.
         </Text>
-        {error ? <Text variant="xs" style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+        {error ? <Text variant="xs" style={[styles.error, { color: colors.danger.ink }]}>{error}</Text> : null}
         <View style={styles.actions}>
           <Button title="Cancel" variant="ghost" onPress={onClose} disabled={creating} style={styles.action} />
           <Button
@@ -95,7 +93,7 @@ export function NewThreadSheet({
           />
         </View>
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

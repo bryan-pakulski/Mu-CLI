@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { effortApi, effortHint, effortLabel, effortOptions } from '../api/effort';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Text } from './Text';
+import { Pressable, Sheet, Text } from '../ui';
 
 const HIT = { top: 6, bottom: 6, left: 4, right: 4 };
 
@@ -61,7 +60,7 @@ export function EffortControl({ variant = 'chip' }: { variant?: 'chip' | 'row' }
   return (
     <>
       {variant === 'chip' ? (
-        <TouchableOpacity
+        <Pressable
           onPress={() => setOpen(true)}
           disabled={disabled}
           style={[styles.chip, disabled && styles.disabled]}
@@ -69,30 +68,30 @@ export function EffortControl({ variant = 'chip' }: { variant?: 'chip' | 'row' }
           accessibilityRole="button"
           accessibilityLabel={`Effort: ${effortLabel(effort)}`}
         >
-          <Ionicons name="speedometer-outline" size={13} color={effort ? colors.accent : colors.muted} />
-          <Text variant="xs" style={{ color: effort ? colors.textSoft : colors.muted }}>{effortLabel(effort)}</Text>
-          <Ionicons name="chevron-down" size={13} color={colors.muted} />
-        </TouchableOpacity>
+          <Ionicons name="speedometer-outline" size={13} color={effort ? colors.accent.ink : colors.ink3} />
+          <Text variant="xs" style={{ color: effort ? colors.ink2 : colors.ink3 }}>{effortLabel(effort)}</Text>
+          <Ionicons name="chevron-down" size={13} color={colors.ink3} />
+        </Pressable>
       ) : (
-        <TouchableOpacity
+        <Pressable
           onPress={() => setOpen(true)}
           disabled={disabled}
           style={[styles.row, disabled && styles.disabled]}
           accessibilityRole="button"
           accessibilityLabel={`Effort: ${effortLabel(effort)}`}
         >
-          <Ionicons name="speedometer-outline" size={20} color={colors.muted} />
+          <Ionicons name="speedometer-outline" size={20} color={colors.ink3} />
           <View style={styles.rowCopy}>
-            <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>Effort</Text>
-            <Text variant="xs" style={{ color: colors.textDim }}>
+            <Text variant="base" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>Effort</Text>
+            <Text variant="xs" style={{ color: colors.ink3 }}>
               {disabled ? 'Load a session to set effort' : `${effortLabel(effort)} · ${effortHint(effort)}`}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={17} color={colors.muted} />
-        </TouchableOpacity>
+          <Ionicons name="chevron-forward" size={17} color={colors.ink3} />
+        </Pressable>
       )}
 
-      <ModernBottomSheet visible={open} onClose={() => setOpen(false)} title="Effort">
+      <Sheet visible={open} onClose={() => setOpen(false)} title="Effort">
         <Text variant="xs" dim style={styles.intro}>
           How much the model reasons per turn. Lower is faster; each provider maps the level to what its API supports.
         </Text>
@@ -100,28 +99,28 @@ export function EffortControl({ variant = 'chip' }: { variant?: 'chip' | 'row' }
           {levels.map(level => {
             const active = level === effort;
             return (
-              <TouchableOpacity
+              <Pressable
                 key={level || 'default'}
                 onPress={() => void select(level)}
                 disabled={saving}
                 style={[styles.option, {
-                  borderColor: active ? colors.accent : colors.border,
-                  backgroundColor: active ? colors.accentSubtle : colors.raised,
+                  borderColor: active ? colors.accent.ink : colors.hairline,
+                  backgroundColor: active ? colors.accent.wash : colors.raised,
                 }]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={`Effort ${effortLabel(level)}`}
               >
                 <View style={styles.optionCopy}>
-                  <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{effortLabel(level)}</Text>
+                  <Text variant="sm" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{effortLabel(level)}</Text>
                   <Text variant="xs" dim>{effortHint(level)}</Text>
                 </View>
-                {active ? <Ionicons name="checkmark" size={18} color={colors.accent} /> : null}
-              </TouchableOpacity>
+                {active ? <Ionicons name="checkmark" size={18} color={colors.accent.ink} /> : null}
+              </Pressable>
             );
           })}
         </View>
-      </ModernBottomSheet>
+      </Sheet>
     </>
   );
 }

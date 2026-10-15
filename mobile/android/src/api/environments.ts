@@ -156,7 +156,7 @@ export function draftError(d: EnvironmentDraft): string | null {
   return null;
 }
 
-/** `run_in_environment` tool calls fold to `[env] command` (planos: `› [node-build] npm test`). */
+/** `run_in_environment` tool calls fold to `[env] command` (`› [node-build] npm test`). */
 export function runInEnvironmentSummary(args: unknown): string | null {
   let value = args;
   if (typeof value === 'string') {

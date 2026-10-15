@@ -96,12 +96,10 @@ def test_mobile_handoff_does_not_fold_on_tool_or_thinking_activity():
 def test_mobile_visualizations_never_render_inside_interim_disclosures():
     hook = read("mobile/android/src/hooks/useChatSession.ts")
     product = read("mobile/android/src/screens/ChatScreenProduct.tsx")
-    legacy = read("mobile/android/src/screens/ChatScreen.tsx")
 
     assert "isTimelineAnchor" in hook
     assert "appendCollapsedSegments" in hook
     assert "child.role === 'visualization'" not in product
-    assert "child.role === 'visualization'" not in legacy
     assert "item.role === 'visualization'" in product
 
 
@@ -137,7 +135,7 @@ def test_mobile_input_required_banner_is_centered_and_prominent():
     assert "bottom:" not in style
     # planos approval banner: raised surface with a warn-tone left border + ◆.
     assert "backgroundColor: colors.raised" in source
-    assert "borderLeftColor: colors.warn" in source
+    assert "borderLeftColor: colors.attention.ink" in source
 
 
 def test_handoff_animations_exist_on_both_clients():

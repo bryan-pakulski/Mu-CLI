@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ModeWorkspaceContract, ModeWorkspaceTone } from '../api/modeWorkspace';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontWeights, fonts, spacing, touchTarget, tracking, typography } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 const VIEW_STORAGE_PREFIX = 'mucli.mode-workspace.view.v1.';
 
@@ -41,15 +41,15 @@ export function useModeWorkspaceView(workspace: ModeWorkspaceContract | null | u
 // Mode identity is neutral: the active mode is carried by its label, and the
 // single accent marks only selection. `mode` is kept for call compatibility.
 function workspaceAccent(_mode: string, colors: ReturnType<typeof useTheme>['colors']) {
-  return colors.accent;
+  return colors.accent.ink;
 }
 
-function toneColor(tone: ModeWorkspaceTone, colors: ReturnType<typeof useTheme>['colors'], accent = colors.accent) {
-  if (tone === 'risk') return colors.error;
-  if (tone === 'warn') return colors.warning;
-  if (tone === 'good') return colors.success;
+function toneColor(tone: ModeWorkspaceTone, colors: ReturnType<typeof useTheme>['colors'], accent = colors.accent.ink) {
+  if (tone === 'risk') return colors.danger.ink;
+  if (tone === 'warn') return colors.attention.ink;
+  if (tone === 'good') return colors.ok.ink;
   if (tone === 'active') return accent;
-  return colors.textDim;
+  return colors.ink3;
 }
 
 export function ModeWorkspaceHeader({
@@ -75,15 +75,15 @@ export function ModeWorkspaceHeader({
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-        <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>MODE</Text>
-        <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
+        <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>MODE</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }}>/</Text>
         <Text variant="xs" style={{ color: toneColor(workspace.status.tone, colors, modeAccent) }}>{workspace.status.label}</Text>
       </View>
 
-      <Text variant="lg" style={{ marginTop: spacing.lg, color: colors.text, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }}>
+      <Text variant="lg" style={{ marginTop: spacing.lg, color: colors.ink, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight }}>
         {workspace.title}
       </Text>
-      <Text variant="xs" style={{ marginTop: spacing.xs, color: colors.textSoft, lineHeight: typography.xs.lineHeight }}>
+      <Text variant="xs" style={{ marginTop: spacing.xs, color: colors.ink2, lineHeight: typography.xs.lineHeight }}>
         {workspace.objective}
       </Text>
 
@@ -101,7 +101,7 @@ export function ModeWorkspaceHeader({
             <Text variant="base" style={{ color: toneColor(metric.tone, colors, modeAccent), fontFamily: fonts.mono, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>
               {String(metric.value)}
             </Text>
-            <Text variant="xs" numberOfLines={1} style={{ marginTop: 1, color: colors.textDim }}>
+            <Text variant="xs" numberOfLines={1} style={{ marginTop: 1, color: colors.ink3 }}>
               {metric.label}
             </Text>
           </View>
@@ -125,12 +125,12 @@ export function ModeWorkspaceHeader({
                 paddingHorizontal: 1,
                 paddingBottom: spacing.xs,
                 borderBottomWidth: 2,
-                borderBottomColor: active ? colors.accent : 'transparent',
+                borderBottomColor: active ? colors.accent.ink : 'transparent',
                 opacity: pressed ? 0.7 : 1,
               })}
             >
-              <Text variant="xs" style={{ color: active ? colors.text : colors.textDim, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{view.label}</Text>
-              {view.count !== undefined && <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>· {view.count}</Text>}
+              <Text variant="xs" style={{ color: active ? colors.ink : colors.ink3, fontWeight: active ? fontWeights.semibold : fontWeights.regular }}>{view.label}</Text>
+              {view.count !== undefined && <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>· {view.count}</Text>}
             </Pressable>
           );
         })}
@@ -142,24 +142,24 @@ export function ModeWorkspaceHeader({
         accessibilityState={{ expanded: qualityOpen }}
         style={({ pressed }) => ({ minHeight: touchTarget, marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.hairline, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', opacity: pressed ? 0.7 : 1 })}
       >
-        <Text variant="xs" style={{ color: colors.textDim }}>How accuracy, relevance, and evidence are assessed</Text>
-        <Ionicons name={qualityOpen ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textDim} />
+        <Text variant="xs" style={{ color: colors.ink3 }}>How accuracy, relevance, and evidence are assessed</Text>
+        <Ionicons name={qualityOpen ? 'chevron-up' : 'chevron-down'} size={15} color={colors.ink3} />
       </Pressable>
       {qualityOpen && (
         <View style={{ paddingTop: spacing.sm }}>
           {workspace.quality.map(item => (
             <View key={item.id} style={{ paddingVertical: spacing.sm }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{item.label}</Text>
-                <Text variant="xs" style={{ color: colors.textSoft }}>{item.state.replace(/-/g, ' ')}</Text>
+                <Text variant="xs" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{item.label}</Text>
+                <Text variant="xs" style={{ color: colors.ink2 }}>{item.state.replace(/-/g, ' ')}</Text>
               </View>
-              <Text variant="xs" style={{ color: colors.textDim, marginTop: spacing.xs, lineHeight: typography.xs.lineHeight }}>{item.detail}</Text>
+              <Text variant="xs" style={{ color: colors.ink3, marginTop: spacing.xs, lineHeight: typography.xs.lineHeight }}>{item.detail}</Text>
             </View>
           ))}
         </View>
       )}
 
-      <Text variant="xs" numberOfLines={1} style={{ marginTop: spacing.md, color: colors.textDim, fontFamily: fonts.mono }}>
+      <Text variant="xs" numberOfLines={1} style={{ marginTop: spacing.md, color: colors.ink3, fontFamily: fonts.mono }}>
         Source · {workspace.provenance}
       </Text>
     </View>

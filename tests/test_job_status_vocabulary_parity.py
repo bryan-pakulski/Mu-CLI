@@ -10,6 +10,7 @@ spec §3.1), this test keeps them identical and complete.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB_VIEW = ROOT / "mu/gui/static/js/work/view.js"
 MOBILE_STATUS = ROOT / "mobile/android/src/theme/status.ts"
 MOBILE_NOTIFY = ROOT / "mobile/android/src/api/jobNotifications.ts"
+MOBILE_GENERATED = ROOT / "mobile/android/src/theme/wash.generated.ts"
 
 _PAIR = re.compile(r"""['"]?(\w+)['"]?\s*:\s*['"]([^'"]*)['"]""")
 
@@ -58,9 +60,9 @@ def test_every_job_state_has_a_status_and_label():
     assert set(state_label) == states
 
 
-def test_web_and_mobile_tables_match_the_terminal():
+def test_web_tables_match_the_terminal():
     py_status, py_state_status, py_state_label = _python_tables()
-    for path in (WEB_VIEW, MOBILE_STATUS):
+    for path in (WEB_VIEW,):
         source = path.read_text(encoding="utf-8")
         assert _status_table(source) == py_status, path.name
         assert _object_literal(source, "STATE_STATUS") == py_state_status, path.name
@@ -69,15 +71,36 @@ def test_web_and_mobile_tables_match_the_terminal():
 
 def test_provisioning_is_labelled_preparing_everywhere():
     assert theme.state_style("provisioning")["label"] == "preparing"
-    for path in (WEB_VIEW, MOBILE_STATUS):
+    for path in (WEB_VIEW,):
         labels = _object_literal(path.read_text(encoding="utf-8"), "STATE_LABEL")
         assert labels["provisioning"] == "preparing", path.name
+    # Android reads the label from the generated vocabulary (no local table).
+    assert '"provisioning": {\n      "status": "active",\n      "label": "preparing"' in MOBILE_GENERATED.read_text(encoding="utf-8")
+
+
+def test_mobile_reads_the_generated_vocabulary_and_has_no_local_tables():
+    """Wash spec §3.1/B8: Android imports the shared vocabulary instead of copying it."""
+    status = MOBILE_STATUS.read_text(encoding="utf-8")
+    assert "from './wash.generated'" in status
+    assert "vocabulary.status" in status and "vocabulary.job_state" in status
+    # No hand-written glyph/label tables survive.
+    assert "STATE_STATUS" not in status and "STATE_LABEL" not in status
+    assert not re.search(r"\{\s*icon\s*:\s*'", status)
+    assert not re.search(r"'(✓|●|◆|✗|○)'", status)
+    # The generated module embeds exactly the shared vocabulary.
+    generated = MOBILE_GENERATED.read_text(encoding="utf-8")
+    vocab = json.loads((ROOT / "mu/design/vocabulary.json").read_text(encoding="utf-8"))
+    for state, row in vocab["job_state"].items():
+        assert f'"{state}": {{\n      "status": "{row["status"]}",\n      "label": "{row["label"]}"' in generated
 
 
 def test_mobile_needs_you_states_are_the_waiting_states():
     source = MOBILE_NOTIFY.read_text(encoding="utf-8")
-    match = re.search(r"NEEDS_YOU_STATES\s*=\s*new Set\(\[(.*?)\]\)", source, re.S)
-    assert match
-    notify_states = set(re.findall(r"'(\w+)'", match.group(1)))
+    # Derived from the vocabulary's waiting states, never a literal list.
+    assert "NEEDS_YOU_STATES = new Set(WAITING_STATES)" in source
+    assert not re.search(r"NEEDS_YOU_STATES\s*=\s*new Set\(\[", source)
+    status = MOBILE_STATUS.read_text(encoding="utf-8")
+    assert "WAITING_STATES = Object.keys(jobStates).filter(state => jobStates[state].status === 'waiting')" in status
+    vocab = json.loads((ROOT / "mu/design/vocabulary.json").read_text(encoding="utf-8"))
     waiting = {s for s, status in _python_tables()[1].items() if status == "waiting"}
-    assert notify_states == waiting
+    assert {s for s, row in vocab["job_state"].items() if row["status"] == "waiting"} == waiting

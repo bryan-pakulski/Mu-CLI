@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
 import { jobCoreApi, subscribeToJobChanges, type Finding, type JobPart, type JobVM } from '../api/jobCore';
 import { jobsApi, type JobAttempt, type JobDiagnosticsSnapshot } from '../api/jobs';
-import { Text } from '../components/Text';
 import { JobStageModelsSheet } from '../components/JobStageModelsSheet';
 import { EnvironmentsPill, JobEnvironmentsSheet } from '../components/JobEnvironments';
 import { stageAgentsLabel } from '../api/agents';
@@ -15,19 +14,16 @@ import { budgetSummary } from '../components/jobViews';
 import { ChecksTab, DiffTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
 import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, defaultTab, eventTone, parsePatch, type JobTab } from '../components/jobViews';
 import { PrPill, jobKey } from '../components/JobsChrome';
-import {
-  Banner, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, PlanosButton, Pre, Tabs,
-  type TabItem,
-} from '../components/planos';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, fonts, spacing, toneColor, touchTarget } from '../theme/tokens';
+import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, duration, money, stateLabel, stateStatus, verdictStyle, when } from '../theme/status';
+import { Banner, Button, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, Pre, Pressable, type TabItem, Tabs, Text } from '../ui';
 
 export const LIVE_DIFF_REFRESH_MS = 5000;
 
 export type JobDetailScreenProps = NativeStackScreenProps<RootStackParamList, 'JobDetail'>;
-// Tab order (planos Task page): Session · Plan · Diff · Review · Checks · Diagnostics · Cost & audit
+// Tab order (Task page): Session · Plan · Diff · Review · Checks · Diagnostics · Cost & audit
 // (JOB_TABS / JOB_TAB_LABELS in components/jobViews.ts).
 
 export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
@@ -183,7 +179,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
 
   if (!job) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.bg }]}>
+      <View style={[styles.loading, { backgroundColor: colors.canvas }]}>
         {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : <Loading label="Loading job…" />}
       </View>
     );
@@ -202,11 +198,11 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const liveSession = st === 'active' && ['planning', 'implementing', 'reviewing'].includes(job.state);
   const badge = (id: JobTab): React.ReactNode => {
     switch (id) {
-      case 'session': return liveSession ? <Text variant="xs" accessibilityLabel="live" style={{ color: colors.running }}>●</Text> : job.session?.approval ? <Text variant="xs" accessibilityLabel="approval needed" style={{ color: colors.warn }}>◆</Text> : null;
-      case 'plan': return job.plan?.draft || job.state === 'plan_review' ? <Text variant="xs" accessibilityLabel="needs you" style={{ color: colors.warn }}>◆</Text> : null;
-      case 'diff': return files.length ? <Text variant="xs"><Text variant="xs" style={{ color: colors.ok }}>+{files.reduce((n, f) => n + f.added, 0)}</Text> <Text variant="xs" style={{ color: colors.danger }}>−{files.reduce((n, f) => n + f.removed, 0)}</Text></Text> : null;
+      case 'session': return liveSession ? <Text variant="xs" accessibilityLabel="live" style={{ color: colors.running.ink }}>●</Text> : job.session?.approval ? <Text variant="xs" accessibilityLabel="approval needed" style={{ color: colors.attention.ink }}>◆</Text> : null;
+      case 'plan': return job.plan?.draft || job.state === 'plan_review' ? <Text variant="xs" accessibilityLabel="needs you" style={{ color: colors.attention.ink }}>◆</Text> : null;
+      case 'diff': return files.length ? <Text variant="xs"><Text variant="xs" style={{ color: colors.ok.ink }}>+{files.reduce((n, f) => n + f.added, 0)}</Text> <Text variant="xs" style={{ color: colors.danger.ink }}>−{files.reduce((n, f) => n + f.removed, 0)}</Text></Text> : null;
       case 'review': return job.review ? <CountBadge tone={openFindings.some(f => ['blocker', 'major'].includes(f.severity)) ? 'danger' : openFindings.some(f => f.severity === 'minor') ? 'warn' : 'muted'}>{openFindings.length}</CountBadge> : null;
-      case 'checks': return job.state === 'checking' ? <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running }}>●</Text> : lastRun ? <Text variant="xs" accessibilityLabel={lastRun.passed ? 'passed' : 'failed'} style={{ color: lastRun.passed ? colors.ok : colors.danger }}>{lastRun.passed ? '✓' : '✗'}</Text> : null;
+      case 'checks': return job.state === 'checking' ? <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running.ink }}>●</Text> : lastRun ? <Text variant="xs" accessibilityLabel={lastRun.passed ? 'passed' : 'failed'} style={{ color: lastRun.passed ? colors.ok.ink : colors.danger.ink }}>{lastRun.passed ? '✓' : '✗'}</Text> : null;
       case 'diagnostics': return failed ? <CountBadge tone="danger">!</CountBadge> : null;
       default: return null;
     }
@@ -217,12 +213,12 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const limitPaused = !!job.limit;
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <ScrollView
         ref={scroller}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.muted} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.ink3} />}
       >
         <View style={styles.header} testID="job-header">
           <View style={styles.wrap}>
@@ -236,18 +232,18 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
             <PrPill pr={job.pr} testID="job-pr-pill" />
             <View style={{ flex: 1 }} />
             <View style={{ alignItems: 'flex-end' }} testID="job-budget">
-              <Text variant="md" accessibilityLabel={budget.costLabel} style={[styles.num, { fontWeight: fontWeights.semibold, color: budget.tone === 'danger' ? colors.danger : budget.tone === 'warn' ? colors.warn : colors.text }]}>{budget.cost}</Text>
-              <Text variant="xs" accessibilityLabel={budget.timeLabel} style={[styles.num, { color: colors.muted }]}>{budget.time}</Text>
+              <Text variant="md" accessibilityLabel={budget.costLabel} style={[styles.num, { fontWeight: fontWeights.semibold, color: budget.tone === 'danger' ? colors.danger.ink : budget.tone === 'warn' ? colors.attention.ink : colors.ink }]}>{budget.cost}</Text>
+              <Text variant="xs" accessibilityLabel={budget.timeLabel} style={[styles.num, { color: colors.ink3 }]}>{budget.time}</Text>
             </View>
           </View>
           <Text variant="md">{job.title}</Text>
           <View style={styles.wrap}>
-            {job.branch ? <View style={styles.row} accessible accessibilityLabel={`branch ${job.branch}`}><Ionicons name="git-branch-outline" size={14} color={colors.muted} /><Text variant="xs" style={[styles.mono, { color: colors.muted }]}>{job.branch}</Text></View> : null}
-            {job.repository ? <Text variant="xs" style={{ color: colors.muted }}>repo: <Text variant="xs" style={styles.mono}>{job.repository}</Text></Text> : null}
-            {failed && job.failed_from ? <Text variant="xs" style={{ color: colors.danger }}>failed in {stateLabel(job.failed_from)}</Text> : null}
-            {agentsLabel ? <Text variant="xs" testID="job-stage-agents" style={{ color: colors.muted }}>agents: {agentsLabel}</Text> : null}
-            {!agentsLabel || stageModels.length ? <Text variant="xs" style={{ color: colors.muted }}>models: {stageModels.length ? stageModels.map(([s, m]) => `${s} ${m?.model}`).join(' · ') : 'unset'}</Text> : null}
-            <Pressable accessibilityRole="button" onPress={() => setModels(true)} style={styles.link}><Text variant="xs" style={{ color: colors.accent }}>Job settings</Text></Pressable>
+            {job.branch ? <View style={styles.row} accessible accessibilityLabel={`branch ${job.branch}`}><Ionicons name="git-branch-outline" size={14} color={colors.ink3} /><Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{job.branch}</Text></View> : null}
+            {job.repository ? <Text variant="xs" style={{ color: colors.ink3 }}>repo: <Text variant="xs" style={styles.mono}>{job.repository}</Text></Text> : null}
+            {failed && job.failed_from ? <Text variant="xs" style={{ color: colors.danger.ink }}>failed in {stateLabel(job.failed_from)}</Text> : null}
+            {agentsLabel ? <Text variant="xs" testID="job-stage-agents" style={{ color: colors.ink3 }}>agents: {agentsLabel}</Text> : null}
+            {!agentsLabel || stageModels.length ? <Text variant="xs" style={{ color: colors.ink3 }}>models: {stageModels.length ? stageModels.map(([s, m]) => `${s} ${m?.model}`).join(' · ') : 'unset'}</Text> : null}
+            <Pressable accessibilityRole="button" onPress={() => setModels(true)} style={styles.link}><Text variant="xs" style={{ color: colors.accent.ink }}>Job settings</Text></Pressable>
           </View>
           {job.attention_detail && !(job.session?.approval && job.state === 'needs_input') && !limitPaused
             ? failed ? <Banner tone="danger" glyph="✗" role="alert" title={job.attention_detail} /> : <Banner tone="warn" glyph="◆" title={job.attention_detail} />
@@ -310,8 +306,8 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
             <View style={styles.col}>
               <View style={styles.row}>
                 <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold, flex: 1 }}>Job diagnostics</Text>
-                <PlanosButton small label="Refresh" onPress={loadDiagnostics} />
-                <PlanosButton small label="Job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId })} />
+                <Button small label="Refresh" onPress={loadDiagnostics} />
+                <Button small label="Job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId })} />
               </View>
               {diagnostics ? (
                 <>
@@ -328,7 +324,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
                       <Pre numberOfLines={20}>{JSON.stringify(diagnostics.latest_failure.payload, null, 2)}</Pre>
                     </Banner>
                   ) : null}
-                  <Panel title="Worker log" right={<Text variant="xs" style={{ color: colors.muted }}>{diagnostics.worker_log_truncated ? 'tail' : ''}</Text>}>
+                  <Panel title="Worker log" right={<Text variant="xs" style={{ color: colors.ink3 }}>{diagnostics.worker_log_truncated ? 'tail' : ''}</Text>}>
                     <Pre testID="job-worker-log">{diagnostics?.worker_log_tail || 'No worker log.'}</Pre>
                   </Panel>
                   {diagnostics.diagnostics?.length ? (
@@ -362,12 +358,12 @@ function AuditRow({ event: e }: { event: AuditLike }) {
     <View style={styles.audit}>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${when(e.created_at)} ${e.event_type}${e.to_status ? ` to ${e.to_status}` : ''}`}
         onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget, alignItems: 'flex-start' }]}>
-        <Text variant="xs" style={{ color: toneColor(colors, tone), marginTop: 2 }}>●</Text>
+        <Text variant="xs" style={{ color: toneInk(colors, tone), marginTop: 2 }}>●</Text>
         <View style={{ flex: 1 }}>
-          <Text variant="xs"><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{e.event_type}</Text>{e.to_status ? <Text variant="xs" style={{ color: colors.muted }}> → {e.to_status}</Text> : null}</Text>
-          {e.reason ? <Text variant="xs" style={{ color: colors.muted }} numberOfLines={open ? undefined : 2}>{e.reason}</Text> : null}
+          <Text variant="xs"><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{e.event_type}</Text>{e.to_status ? <Text variant="xs" style={{ color: colors.ink3 }}> → {e.to_status}</Text> : null}</Text>
+          {e.reason ? <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={open ? undefined : 2}>{e.reason}</Text> : null}
         </View>
-        <Text variant="xs" style={[styles.mono, { color: colors.muted }]}>{when(e.created_at).slice(5)}</Text>
+        <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{when(e.created_at).slice(5)}</Text>
       </Pressable>
       {open ? <Pre>{JSON.stringify(e.payload)}</Pre> : null}
     </View>
@@ -398,16 +394,16 @@ function CostsTab({ job, attempts }: { job: JobVM; attempts: JobAttempt[] | null
         {attempts == null ? <Loading label="Loading attempts…" /> : attempts.length ? attempts.map(a => {
           const tone = /fail|error/.test(a.status) ? 'danger' : /run/.test(a.status) ? 'running' : /succ|done|complete|pass/.test(a.status) ? 'ok' : 'muted';
           return (
-            <View key={a.id} style={[styles.attempt, { borderBottomColor: colors.border }]}>
+            <View key={a.id} style={[styles.attempt, { borderBottomColor: colors.hairline }]}>
               <View style={styles.row}>
                 <Text variant="xs" style={styles.num}>#{a.number}</Text>
                 <Pill tone={tone}>{a.status}</Pill>
                 <View style={{ flex: 1 }} />
                 <Text variant="xs" style={styles.num}>{money(a.cost_usd)}</Text>
-                <Text variant="xs" style={[styles.num, { color: colors.muted }]}>{a.finished_at && a.started_at ? duration((a.finished_at - a.started_at) * 1000) : ''}</Text>
+                <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{a.finished_at && a.started_at ? duration((a.finished_at - a.started_at) * 1000) : ''}</Text>
               </View>
-              <Text variant="xs" style={{ color: colors.muted }}>{when(a.started_at)}</Text>
-              {a.error ? <Text variant="xs" style={{ color: colors.danger }} numberOfLines={3}>{a.error}</Text> : null}
+              <Text variant="xs" style={{ color: colors.ink3 }}>{when(a.started_at)}</Text>
+              {a.error ? <Text variant="xs" style={{ color: colors.danger.ink }} numberOfLines={3}>{a.error}</Text> : null}
             </View>
           );
         }) : <Empty>None.</Empty>}
@@ -416,14 +412,14 @@ function CostsTab({ job, attempts }: { job: JobVM; attempts: JobAttempt[] | null
         {times.length > 1 ? (
           <View accessible accessibilityRole="image" accessibilityLabel={`Timeline: ${events.length} events from ${when(t0)} to ${when(t1)}`}>
             <View style={styles.timeline}>
-              <View style={[styles.timelineAxis, { backgroundColor: colors.border }]} />
+              <View style={[styles.timelineAxis, { backgroundColor: colors.hairline }]} />
               {events.map(e => (
-                <View key={e.id} style={[styles.timelineDot, { left: `${((Number(e.created_at) - t0) / Math.max(1, t1 - t0)) * 96 + 2}%`, backgroundColor: toneColor(colors, eventTone(`${e.event_type} ${e.to_status || ''}`)) }]} />
+                <View key={e.id} style={[styles.timelineDot, { left: `${((Number(e.created_at) - t0) / Math.max(1, t1 - t0)) * 96 + 2}%`, backgroundColor: toneInk(colors, eventTone(`${e.event_type} ${e.to_status || ''}`)) }]} />
               ))}
             </View>
             <View style={styles.row}>
-              <Text variant="xs" style={[styles.mono, { color: colors.muted, flex: 1 }]}>{when(t0)}</Text>
-              <Text variant="xs" style={[styles.mono, { color: colors.muted }]}>{when(t1)}</Text>
+              <Text variant="xs" style={[styles.mono, { color: colors.ink3, flex: 1 }]}>{when(t0)}</Text>
+              <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{when(t1)}</Text>
             </View>
           </View>
         ) : null}

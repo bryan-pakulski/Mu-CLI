@@ -5,7 +5,7 @@ import { inspectorApi } from '../src/api/inspector';
 import { isPlanModeBlocked, planModeFromGroups, refreshPlanMode, setPlanModeRemote } from '../src/api/planMode';
 import { PLAN_MODE_PLACEHOLDER, PlanModeBadge, PlanModeStrip } from '../src/components/PlanModeIndicator';
 import { useConnectionStore } from '../src/store/connection';
-import { darkColors, lightColors } from '../src/theme/tokens';
+import { duskColors, paperColors } from '../src/theme/tokens';
 
 jest.mock('../src/api/inspector', () => ({
   ...jest.requireActual('../src/api/inspector'),
@@ -108,11 +108,12 @@ describe('plan mode indicators', () => {
     expect(screen.getByTestId('plan-mode-strip')).toBeTruthy();
   });
 
-  it('uses a dedicated colour distinct from warn in both themes', () => {
-    for (const colors of [lightColors, darkColors]) {
-      expect(colors.plan).toBeTruthy();
-      expect(colors.plan).not.toBe(colors.warn);
-      expect(colors.plan).not.toBe(colors.accent);
+  it('uses a dedicated colour distinct from attention and accent in both themes', () => {
+    for (const colors of [paperColors, duskColors]) {
+      expect(colors.plan.ink).toBeTruthy();
+      expect(colors.plan.ink).not.toBe(colors.attention.ink);
+      expect(colors.plan.ink).not.toBe(colors.accent.ink);
+      expect(colors.plan.wash).not.toBe(colors.attention.wash);
     }
     expect(PLAN_MODE_PLACEHOLDER).toMatch(/Plan mode/);
   });

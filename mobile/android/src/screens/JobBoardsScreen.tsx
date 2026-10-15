@@ -5,27 +5,26 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { JiraBrowser } from '../components/JiraSheet';
 import { JobsNavBar, type JobsPage, switchJobsPage } from '../components/JobsChrome';
-import { useToast } from '../components/planos';
-import { Text } from '../components/Text';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, spacing } from '../theme/tokens';
+import { Text, useToast } from '../ui';
 
 export type JobBoardsScreenProps = NativeStackScreenProps<RootStackParamList, 'JobBoards'>;
 
-/** planos Tickets page (route id JobBoards): the Jira browser (link, boards, sprints, tickets, import) as a full screen. */
+/** Wash Tickets page (route id JobBoards): the Jira browser (link, boards, sprints, tickets, import) as a full screen. */
 export function JobBoardsScreen({ navigation }: JobBoardsScreenProps) {
   const { colors } = useTheme();
   const toast = useToast();
   const sessionName = useConnectionStore(state => state.activeSessionName);
   const go = (page: JobsPage) => switchJobsPage(navigation, 'JobBoards', page);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
       <JobsNavBar current="JobBoards" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Tickets</Text>
-        <Text variant="xs" style={{ color: colors.muted }}>Pick Jira tickets and create jobs from them. Tickets already linked to a job open that job.</Text>
+        <Text variant="xs" style={{ color: colors.ink3 }}>Pick Jira tickets and create jobs from them. Tickets already linked to a job open that job.</Text>
         <JiraBrowser
           active
           sessionName={sessionName}

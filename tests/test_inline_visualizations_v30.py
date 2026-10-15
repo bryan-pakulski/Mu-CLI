@@ -94,7 +94,7 @@ def test_history_replays_visualization_descriptors():
 def test_mobile_uses_native_webview_card():
     package = read("mobile/android/package.json")
     card = read("mobile/android/src/components/VisualizationCard.tsx")
-    screen = read("mobile/android/src/screens/ChatScreen.tsx")
+    screen = read("mobile/android/src/screens/ChatScreenProduct.tsx")
     assert '"react-native-webview"' in package
     assert "from 'react-native-webview'" in card
     assert "allowFileAccess={false}" in card

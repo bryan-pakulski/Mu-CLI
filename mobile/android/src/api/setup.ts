@@ -1,4 +1,4 @@
-// Jobs Setup and Doctor (planos-style; backend mu/jobs/setup.py). Setup is a live checklist:
+// Jobs Setup and Doctor (Wash-style; backend mu/jobs/setup.py). Setup is a live checklist:
 // every step checks the host's actual state and offers the actions that fix it. Doctor is the
 // quick pass/warn/fail report of everything job runs depend on. Secrets typed into a setup
 // prompt go to the host once and are never sent back.
@@ -52,7 +52,7 @@ export const runSetupAction = setupApi.action;
 export const finishSetup = setupApi.finish;
 export const fetchDoctor = setupApi.doctor;
 
-/** planos status vocabulary for a setup step (glyph + tone + label). */
+/** Wash status vocabulary for a setup step (glyph + tone + label). */
 export function stepStatus(step: Pick<SetupStep, 'state' | 'checking'>): Status {
   if (step.checking) return 'active';
   return ({ ok: 'done', todo: 'waiting', warn: 'waiting', skipped: 'skipped', optional: 'pending', '': 'pending' } as const)[step.state] || 'pending';

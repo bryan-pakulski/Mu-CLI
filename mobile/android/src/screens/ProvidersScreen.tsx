@@ -1,13 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, Alert, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { providersApi, ProviderInfo } from '../api/providers';
 import { spacing, fontWeights, fonts } from '../theme/tokens';
-import { Panel, StatusIcon } from '../components/planos';
+import { Button, Card, Chip, EmptyState, ErrorState, Panel, Pressable, Skeleton, StatusIcon, Text } from '../ui';
 
 export function ProvidersScreen() {
   const { colors } = useTheme();
@@ -83,7 +82,7 @@ export function ProvidersScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3].map(i => (
             <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />
@@ -95,7 +94,7 @@ export function ProvidersScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -103,7 +102,7 @@ export function ProvidersScreen() {
 
   if (providers.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
         <EmptyState title="No providers" message="No LLM providers configured" />
       </SafeAreaView>
     );
@@ -119,14 +118,14 @@ export function ProvidersScreen() {
               {item.name}
             </Text>
             {item.requires && (
-              <Text variant="xs" style={{ color: colors.textDim, marginTop: 2 }}>
+              <Text variant="xs" style={{ color: colors.ink3, marginTop: 2 }}>
                 Requires: {item.requires}
               </Text>
             )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            {item.configured && <Badge label="✓ Ready" variant="success" />}
-            {isSelected && <Badge label="Selected" variant="accent" />}
+            {item.configured && <Chip label="✓ Ready" tone="ok" />}
+            {isSelected && <Chip label="Selected" tone="accent" />}
             <Button
               title={isSelected ? 'Selected' : 'Select'}
               variant={isSelected ? 'ghost' : 'primary'}
@@ -137,11 +136,11 @@ export function ProvidersScreen() {
         </View>
         {isSelected && (
           <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
-            <Text variant="xs" style={{ color: colors.textDim, marginBottom: spacing.xs, fontVariant: ['tabular-nums'] }}>
+            <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.xs, fontVariant: ['tabular-nums'] }}>
               {loadingModels ? 'Loading models…' : `Models (${models.length})`}
             </Text>
             {models.map(m => (
-              <TouchableOpacity
+              <Pressable
                 key={m}
                 onPress={() => selectModel(m)}
                 accessibilityRole="button"
@@ -149,17 +148,17 @@ export function ProvidersScreen() {
                 style={{
                   flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                   paddingVertical: spacing.md, minHeight: 44,
-                  borderTopWidth: 1, borderTopColor: colors.border,
+                  borderTopWidth: 1, borderTopColor: colors.hairline,
                 }}
               >
-                <Text variant="sm" style={{ color: selectedModel === m ? colors.accentFg : colors.text, fontWeight: selectedModel === m ? fontWeights.medium : fontWeights.regular }}>
+                <Text variant="sm" style={{ color: selectedModel === m ? colors.accent.ink : colors.ink, fontWeight: selectedModel === m ? fontWeights.medium : fontWeights.regular }}>
                   {m}
                 </Text>
-                {selectedModel === m && <Badge label="Active" variant="accent" />}
-              </TouchableOpacity>
+                {selectedModel === m && <Chip label="Active" tone="accent" />}
+              </Pressable>
             ))}
             {!loadingModels && models.length === 0 && (
-              <Text variant="xs" style={{ color: colors.textDim }}>No models available</Text>
+              <Text variant="xs" style={{ color: colors.ink3 }}>No models available</Text>
             )}
           </View>
         )}
@@ -168,7 +167,7 @@ export function ProvidersScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
       {activeProvider && activeModel && (
         <View style={{ padding: spacing.base, paddingBottom: 0 }}>
           <Panel title="Current" right={<StatusIcon status="done" label="Active" showLabel size="xs" />}>

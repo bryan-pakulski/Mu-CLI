@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
-import { Text, Button } from './';
+import { Text, Button } from '../ui';
 
 /**
  * Round-31 F40: visible banner when offline-queue items are parked as
@@ -70,10 +70,10 @@ export function ConflictBanner({ style }: { style?: ViewStyle }) {
       style={[
         styles.banner,
         {
-          backgroundColor: colors.errorSubtle,
+          backgroundColor: colors.danger.wash,
           borderWidth: 1,
           borderLeftWidth: 3,
-          borderColor: colors.danger,
+          borderColor: colors.danger.ink,
           borderRadius: radii.control,
           padding: spacing.md,
           gap: spacing.sm,
@@ -84,8 +84,8 @@ export function ConflictBanner({ style }: { style?: ViewStyle }) {
       accessibilityLabel={`${count} offline ${count === 1 ? 'change' : 'changes'} in conflict`}
     >
       <View style={styles.row}>
-        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger, marginRight: spacing.sm }}>✗</Text>
-        <Text variant="sm" style={{ color: colors.text, flex: 1 }}>
+        <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink, marginRight: spacing.sm }}>✗</Text>
+        <Text variant="sm" style={{ color: colors.ink, flex: 1 }}>
           {count === 1
             ? '1 offline change conflicts with the current session.'
             : `${count} offline changes conflict with the current session.`}

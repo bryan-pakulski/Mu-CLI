@@ -1,16 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
+import { STATUS } from '../theme/status';
 
 export type ContainerProgressLog = {
   seq: number;
@@ -51,13 +45,13 @@ export function ContainerBuildProgress({
       style={[
         styles.container,
         {
-          backgroundColor: failed ? colors.errorSubtle : colors.surface,
-          borderColor: colors.border,
-          borderLeftColor: failed ? colors.danger : running ? colors.running : colors.ok,
+          backgroundColor: failed ? colors.danger.wash : colors.surface,
+          borderColor: colors.hairline,
+          borderLeftColor: failed ? colors.danger.ink : running ? colors.running.ink : colors.ok.ink,
         },
       ]}
     >
-      <TouchableOpacity
+      <Pressable
         onPress={onToggle}
         activeOpacity={0.72}
         accessibilityRole="button"
@@ -66,14 +60,14 @@ export function ContainerBuildProgress({
         style={styles.header}
       >
         {running ? (
-          <ActivityIndicator color={colors.running} accessibilityLabel="in progress" />
+          <ActivityIndicator color={colors.running.ink} accessibilityLabel="in progress" />
         ) : (
           <Text
             variant="base"
             accessibilityLabel={failed ? 'failed' : 'done'}
-            style={{ color: failed ? colors.danger : colors.ok, fontWeight: fontWeights.semibold }}
+            style={{ color: failed ? colors.danger.ink : colors.ok.ink, fontWeight: fontWeights.semibold }}
           >
-            {failed ? '✗' : '✓'}
+            {failed ? STATUS.failed.icon : STATUS.done.icon}
           </Text>
         )}
         <View style={styles.copy}>
@@ -88,13 +82,13 @@ export function ContainerBuildProgress({
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={17}
-            color={colors.textDim}
+            color={colors.ink3}
           />
         </View>
-      </TouchableOpacity>
+      </Pressable>
 
       {expanded ? (
-        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.codeBg }]}>
+        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.code }]}>
           <View style={styles.outputHeader}>
             <Text variant="xs" dim style={styles.outputTitle}>stdout / stderr</Text>
             <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{logs.length} events</Text>
@@ -111,7 +105,7 @@ export function ContainerBuildProgress({
                 <Text
                   variant="xs"
                   style={{
-                    color: line.stream === 'stderr' ? colors.error : colors.textDim,
+                    color: line.stream === 'stderr' ? colors.danger.ink : colors.ink3,
                     fontWeight: fontWeights.semibold,
                   }}
                 >
@@ -121,7 +115,7 @@ export function ContainerBuildProgress({
                   selectable
                   style={[
                     styles.logText,
-                    { color: line.stream === 'stderr' ? colors.error : colors.text },
+                    { color: line.stream === 'stderr' ? colors.danger.ink : colors.ink },
                   ]}
                 >
                   {line.text.replace(/\s+$/, '') || ' '}

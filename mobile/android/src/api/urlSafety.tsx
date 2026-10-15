@@ -1,5 +1,6 @@
 import React from 'react';
-import { Linking, Alert, Text } from 'react-native';
+import { Linking, Alert } from 'react-native';
+import { Text } from '../ui';
 
 /**
  * Safe external URL opening. Server/agent-controlled URLs (research sources,

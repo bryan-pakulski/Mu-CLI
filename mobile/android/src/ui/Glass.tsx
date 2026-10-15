@@ -169,8 +169,15 @@ export function activePillStyle(colors: WashColors, solid?: boolean): ViewStyle 
 
 /* ------------------------------------------------------------ hook */
 
-/** Blur is available on the native platforms; elsewhere chrome is solid. */
-export const BLUR_AVAILABLE = Platform.OS === 'ios' || Platform.OS === 'android';
+/**
+ * Live backdrop blur is iOS-only. On Android expo-blur's only real blur is the experimental
+ * Dimezis method, which re-captures the screen behind each BlurView every frame; with several
+ * chrome surfaces mounted (header, tab bar, drawers, sheets) and the chat's animated "thinking"
+ * indicator running, it starved the render thread and froze the UI on device (taps still reached
+ * JS, the screen stopped updating). Android chrome therefore uses the translucent glass fill —
+ * the design's documented no-blur fallback (G§3.3) — which keeps the ambient wash visible.
+ */
+export const BLUR_AVAILABLE = Platform.OS === 'ios';
 
 export type GlassApi = {
   /** Solid fallback is active (Reduce decoration). */
@@ -213,18 +220,16 @@ export type GlassChromeProps = {
  */
 export function GlassBackdrop({ level = 1, testID }: { level?: 1 | 2 | 3; testID?: string }) {
   const { colors, isDark, reduceDecoration } = useTheme();
-  const solid = reduceDecoration || !BLUR_AVAILABLE;
+  // Reduce decoration → solid surface. No live blur (Android) → the translucent glass fill alone.
+  const solid = reduceDecoration;
   const fill = glassStyle(level, colors, { solid, flat: true }).backgroundColor;
-  if (solid) return <View testID={testID} pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />;
+  if (solid || !BLUR_AVAILABLE) return <View testID={testID} pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />;
   const blur = level === 1 ? glassEffect.blur : glassEffect.blur_strong;
   return (
     <View testID={testID} pointerEvents="none" style={StyleSheet.absoluteFill}>
       <BlurView
         tint={isDark ? 'dark' : 'light'}
-        // Android: radius = intensity / blurReductionFactor (Dimezis caps at 25).
         intensity={Math.min(100, blur * 4)}
-        blurReductionFactor={4}
-        experimentalBlurMethod="dimezisBlurView"
         style={StyleSheet.absoluteFill}
       />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />
@@ -238,8 +243,7 @@ export function GlassBackdrop({ level = 1, testID }: { level?: 1 | 2 | 3; testID
  */
 export function GlassChrome({ level = 1, style, children, testID, edges = true, pointerEvents, accessibilityViewIsModal }: GlassChromeProps) {
   const { colors, reduceDecoration } = useTheme();
-  const solid = reduceDecoration || !BLUR_AVAILABLE;
-  const surface = glassStyle(level, colors, { solid, flat: !edges });
+  const surface = glassStyle(level, colors, { solid: reduceDecoration, flat: !edges });
   return (
     <View testID={testID} pointerEvents={pointerEvents} accessibilityViewIsModal={accessibilityViewIsModal}
       style={[surface, { backgroundColor: 'transparent', overflow: 'hidden' }, style]}>

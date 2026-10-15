@@ -183,3 +183,15 @@ rewritten, deleted or skipped. New coverage:
 order, remember payload, fit warning + Allow PATCH, New job and Jira import
 payloads, unverified rendering, setup progress lines, 44dp targets, no side
 borders in the picker).
+
+## Fix: no live blur on Android (0.5.1)
+
+On device, chat in the `mucli` session showed "thinking", then the screen stopped updating while
+taps still reached JS (a session switch loaded `general` on the server but the UI never changed).
+The web build of the same code could not reproduce it, because web never mounts a BlurView. Android
+chrome mounted expo-blur's experimental Dimezis BlurView on the header, tab bar, drawers and sheets,
+and it re-captures the screen behind each view every frame. `BLUR_AVAILABLE` is now iOS-only:
+Android chrome uses the translucent glass fill (the G§3.3 no-blur fallback), and is opaque only
+with Reduce decoration. New `__tests__/android-no-live-blur.test.tsx` (fails against the old code).
+No existing test was changed. Version 0.5.1 (versionCode 17); the Makefile derives the APK name
+from package.json.

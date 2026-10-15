@@ -171,3 +171,49 @@ def test_every_page_links_wash_css_through_the_layout_only():
         links = re.findall(r'<link[^>]+rel="stylesheet"[^>]*>', html)
         assert len(links) <= 1, (page, links)
         assert all("/static/css/wash/patterns/" in link for link in links), (page, links)
+
+
+# ------------------------------------------------------------ W4 page bundles
+W4_BUNDLES = ("work.css", "containers.css", "trace.css", "trace-common.css", "job-trace.css", "model-costs.css")
+RETIRED_PAGE_CSS = ("work.css", "work_management.css", "work_polish.css", "work_jira.css", "containers.css",
+                    "containers-crystal.css", "trace.css", "job_trace.css", "model_costs.css", "route-product.css")
+
+
+def test_w4_page_bundles_are_wash_rules_not_legacy_imports():
+    # Spec W4: /work, /containers, /trace, /jobs/trace and /models/costs run on
+    # Wash rules; their bundles import no legacy stylesheet into `legacy`.
+    for name in W4_BUNDLES:
+        text = _strip_comments((WASH / "patterns" / name).read_text(encoding="utf-8"))
+        assert "layer(legacy)" not in text, name
+        if name == "trace-common.css":
+            continue  # a partial: the analyzer bundles import it into `patterns` (below)
+        assert "@layer patterns" in text, name
+        for imported in re.findall(r'@import url\("([^"]+)"\)', text):
+            assert "/" not in imported and imported in W4_BUNDLES, (name, imported)
+
+
+def test_retired_page_stylesheets_are_deleted():
+    legacy = ROOT / "mu" / "gui" / "static" / "css"
+    assert [name for name in RETIRED_PAGE_CSS if (legacy / name).exists()] == []
+    # Nothing still references them (templates, JS, Wash CSS).
+    gui = ROOT / "mu" / "gui"
+    pattern = re.compile(r"/static/css/(?:" + "|".join(re.escape(n) for n in RETIRED_PAGE_CSS) + r")\b"
+                         r"|\.\./\.\./(?:" + "|".join(re.escape(n) for n in RETIRED_PAGE_CSS) + r")\b")
+    offenders = [str(p.relative_to(gui)) for ext in ("*.html", "*.js", "*.css") for p in gui.rglob(ext)
+                 if pattern.search(p.read_text(encoding="utf-8"))]
+    assert not offenders, offenders
+
+
+def test_work_scripts_render_without_inline_styles():
+    # Spec §4.3: the 18 inline style attributes in work/view.js and 10 in
+    # work/rules.js are gone; proportional bars are SVG geometry instead.
+    js = ROOT / "mu" / "gui" / "static" / "js"
+    for path in (js / "work" / "view.js", js / "work" / "rules.js", js / "wash" / "work_diff.js"):
+        text = path.read_text(encoding="utf-8")
+        assert "style=" not in text and ".style." not in text, path.name
+
+
+def test_shared_analyzer_rules_load_into_the_patterns_layer():
+    for name in ("trace.css", "job-trace.css"):
+        text = (WASH / "patterns" / name).read_text(encoding="utf-8")
+        assert '@import url("trace-common.css") layer(patterns);' in text, name

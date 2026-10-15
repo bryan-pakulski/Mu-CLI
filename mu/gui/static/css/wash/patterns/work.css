@@ -380,6 +380,9 @@
             overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
         }
         .work-chip[data-chip="live"] { padding: 0 8px; }
+        /* The page title already names the route; the chips (needs you, live)
+         * matter more in the phone top bar than the breadcrumb. */
+        .work-app .w-topbar .w-breadcrumb { display: none; }
     }
     .work-session-context:empty { display: none; }
     .w-topbar__chips > li:has(> .work-session-context:empty) { display: none; }
@@ -402,6 +405,11 @@
     .work-app[data-density="compact"] .w-hero__lede { display: none; }
 
     .work-setup-cta { margin-bottom: var(--wash-space-6); }
+    @media (width < 600px) {
+        .work-setup-cta { flex-wrap: wrap; }
+        .work-setup-cta .w-banner__msg { flex-basis: calc(100% - 32px); }
+        .work-setup-cta .w-btn { margin-left: 28px; }
+    }
 
     /* stat strip (G§9.3): five big numbers, hairline dividers, no tiles */
     .work-stats { margin-bottom: var(--wash-space-7); }

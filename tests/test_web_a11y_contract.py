@@ -93,3 +93,59 @@ def test_icon_only_shell_buttons_are_named():
     layout = (TEMPLATES / "_layout.html").read_text(encoding="utf-8")
     assert 'aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation"' in layout
     assert 'class="w-skip-link" href="#w-main"' in layout
+
+
+# ------------------------------------------------------------ W4 pages
+W4_PAGES = ("work.html", "containers.html", "trace.html", "job_trace.html", "model_costs.html")
+STATIC_JS = ROOT / "mu" / "gui" / "static" / "js"
+
+
+def test_w4_pages_have_no_click_handlers_on_non_interactive_elements():
+    for page in W4_PAGES:
+        text = (TEMPLATES / page).read_text(encoding="utf-8")
+        offenders = [
+            f"{page}:{line}: {tag[:80]}"
+            for tag, line in _tags(text, r"^<(div|span|li|section|article)\b")
+            if re.search(r"(@click(?!\.outside)|x-on:click(?!\.outside)|\sonclick=)", tag)
+        ]
+        assert not offenders, offenders
+
+
+def test_w4_dialogs_label_themselves_with_an_existing_title():
+    for page in ("work.html", "containers.html"):
+        text = (TEMPLATES / page).read_text(encoding="utf-8")
+        for tag, line in _tags(text, r'role="dialog"'):
+            assert 'aria-modal="true"' in tag, (page, line)
+            target = re.search(r'aria-labelledby="([^"]+)"', tag).group(1)
+            assert f'id="{target}"' in text, (page, line, target)
+    # Script-built /work dialogs (work/ui.js) use the same labelled modal surface.
+    ui = (STATIC_JS / "work" / "ui.js").read_text(encoding="utf-8")
+    assert 'class="w-modal__dialog work-dialog' in ui
+    assert 'role="dialog" aria-modal="true" aria-labelledby="${titleId}"' in ui
+    assert '<h2 class="w-modal__title" id="${titleId}">' in ui
+    # Destructive confirms give Cancel the default focus (G§9.17).
+    assert "foot.querySelector(danger ? '[data-cancel]' : '[data-ok]').focus();" in ui
+
+
+def test_work_toasts_use_the_shared_live_regions():
+    # One toast system (G§9.16): /work pushes through window.WashToast into the
+    # layout's polite / assertive regions instead of its own stack.
+    html = (TEMPLATES / "work.html").read_text(encoding="utf-8")
+    ui = (STATIC_JS / "work" / "ui.js").read_text(encoding="utf-8")
+    assert "data-toast-stack" not in html and 'id="work-toast"' not in html
+    assert "window.WashToast?.show(" in ui
+
+
+def test_work_job_page_controls_expose_their_state():
+    view = (STATIC_JS / "work" / "view.js").read_text(encoding="utf-8")
+    # Tabs: tablist with selected state and roving tabindex; arrow keys move.
+    assert 'role="tablist" aria-label="Job views"' in view and 'role="tab"' in view and 'aria-controls="work-panel-${t}"' in view
+    assert "e.key === 'ArrowRight'" in view and "e.key === 'ArrowLeft'" in view
+    # Overflow menu: a menu button with expanded state, Esc closes and returns focus.
+    assert 'aria-haspopup="menu" aria-expanded="${wasOpen}" aria-controls="work-actions-menu"' in view
+    assert 'role="menu" id="work-actions-menu"' in view and 'role="menuitem"' in view
+    assert "if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }" in view
+    # Pipeline steps are buttons (they open the step's tab), with the current step marked.
+    assert '<button type="button" class="work-step" data-step=' in view and "aria-current=\"step\"" in view
+    # Status is glyph + label, never colour alone.
+    assert '<span class="w-sr-only">${esc(text)}</span>' in view

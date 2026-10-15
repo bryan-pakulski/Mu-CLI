@@ -1,0 +1,20 @@
+/* Page bundle — Model pricing (/models/costs). No chat CSS: the shared Wash shell
+ * replaces the product header it was loaded for.
+ *
+ * Linked after wash.css (which declares the layer order), so these imports
+ * land in the lowest-priority `legacy` layer. Wash rules for this page go
+ * in the `patterns` layer below. */
+@import url("../../model_costs.css") layer(legacy);
+@import url("../../theme.css") layer(legacy);
+
+@layer patterns {
+    /* The registry filter sits in the shared top bar. */
+    .model-cost-body .w-topbar .mc-search {
+        width: min(280px, 30vw);
+        height: var(--wash-size-control);
+        border-radius: var(--wash-radius-pill);
+    }
+    @media (width < 600px) {
+        .model-cost-body .w-topbar .mc-search { width: 34vw; }
+    }
+}

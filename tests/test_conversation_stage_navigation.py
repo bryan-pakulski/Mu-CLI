@@ -64,9 +64,13 @@ def test_web_history_paging_preserves_content_and_layout_stability():
     assert "scrollbar-gutter: stable" in styles
     assert "overflow-anchor: none" in styles
     assert ".chat-history-loading {\n    position: absolute;" in styles
-    assert '<link id="mucli-conversation-css"' in index
-    assert index.index('/static/css/refinement.css') < index.index('/static/css/conversation.css')
-    assert index.index('/static/css/conversation.css') < index.index('/static/js/product.js')
+    # Wash W2: the chat shell links one page bundle; conversation.css is
+    # imported after refinement.css there, and the bundle is linked in <head>
+    # before product.js runs in the body.
+    bundle = read("mu/gui/static/css/wash/patterns/chat.css")
+    assert '<link id="mucli-chat-css" rel="stylesheet" href="/static/css/wash/patterns/chat.css">' in index
+    assert bundle.index('refinement.css') < bundle.index('conversation.css')
+    assert index.index('/static/css/wash/patterns/chat.css') < index.index('/static/js/product.js')
 
 
 def test_mobile_conversation_stage_rail_uses_virtualized_list_indexes():

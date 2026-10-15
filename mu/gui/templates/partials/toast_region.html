@@ -1,0 +1,36 @@
+{#- Toast regions (G§9.16, §11): one polite live region for info/success and a
+    separate assertive one for errors. Pages that run app.js set
+    `alpine_toasts = true` (base.html) and render $store.toast into them;
+    other pages push toasts with window.WashToast.show(message, tone). -#}
+<div class="w-toast-region toast-container" id="w-toasts" role="status" aria-live="polite" aria-relevant="additions"{% if alpine_toasts %} x-data{% endif %}>
+    {%- if alpine_toasts %}
+    <template x-for="m in $store.toast.messages.filter(m => m.type !== 'error')" :key="m.id">
+        <div class="toast" :class="'toast--' + m.type"
+             x-transition:enter="toast--enter"
+             x-transition:enter-start="toast--enter-start"
+             x-transition:enter-end="toast--enter-end"
+             x-transition:leave="toast--leave"
+             x-transition:leave-start="toast--leave-start"
+             x-transition:leave-end="toast--leave-end">
+            <span class="toast__msg" x-text="m.msg"></span>
+            <button class="toast__close" @click="$store.toast.dismiss(m.id)" aria-label="Dismiss notification">&times;</button>
+        </div>
+    </template>
+    {%- endif %}
+</div>
+<div class="w-toast-region toast-container toast-container--assertive" id="w-toasts-assertive" data-assertive role="alert" aria-live="assertive"{% if alpine_toasts %} x-data{% endif %}>
+    {%- if alpine_toasts %}
+    <template x-for="m in $store.toast.messages.filter(m => m.type === 'error')" :key="m.id">
+        <div class="toast" :class="'toast--' + m.type"
+             x-transition:enter="toast--enter"
+             x-transition:enter-start="toast--enter-start"
+             x-transition:enter-end="toast--enter-end"
+             x-transition:leave="toast--leave"
+             x-transition:leave-start="toast--leave-start"
+             x-transition:leave-end="toast--leave-end">
+            <span class="toast__msg" x-text="m.msg"></span>
+            <button class="toast__close" @click="$store.toast.dismiss(m.id)" aria-label="Dismiss notification">&times;</button>
+        </div>
+    </template>
+    {%- endif %}
+</div>

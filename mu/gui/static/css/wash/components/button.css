@@ -1,0 +1,165 @@
+/* Button (G§9.1)
+ *
+ *   <button class="w-btn" data-variant="primary|secondary|ghost|tonal|danger|icon"
+ *           data-size="sm|md|lg" data-tone="accent|attention|ok|danger|plan|caution|running">
+ *     <svg class="w-icon">…</svg> Label <kbd class="w-keycap">N</kbd>
+ *   </button>
+ *
+ * - default variant is secondary; default size md (36px), sm 28, lg 44
+ * - data-tone colours the tonal variant (default accent)
+ * - icon variant: 36px circle, always needs aria-label + title
+ * - loading: aria-busy="true" swaps the label for an ink drop, keeps width
+ * - a trailing .w-btn__chevron (›) means "navigates"
+ */
+.w-btn {
+    --w-btn-h: var(--wash-size-control);
+    --w-btn-pad: var(--wash-space-4);
+    --w-btn-bg: var(--wash-surface);
+    --w-btn-fg: var(--wash-ink);
+    --w-btn-border: var(--wash-hairline-strong);
+    --w-btn-hover: var(--wash-sunken);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    gap: var(--wash-space-2);
+    height: var(--w-btn-h);
+    min-width: 0;
+    margin: 0;
+    padding: 0 var(--w-btn-pad);
+    border: 1px solid var(--w-btn-border);
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-btn-bg);
+    color: var(--w-btn-fg);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    line-height: 1;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+    user-select: none;
+    transition:
+        background-color var(--wash-motion-micro) var(--wash-ease-micro),
+        border-color var(--wash-motion-micro) var(--wash-ease-micro),
+        color var(--wash-motion-micro) var(--wash-ease-micro),
+        transform var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-btn:hover { background: var(--w-btn-hover); text-decoration: none; }
+.w-btn:active:not(:disabled, [aria-disabled="true"]) { transform: scale(0.98); }
+.w-btn:focus-visible { outline: 2px solid var(--wash-accent-ink); outline-offset: 2px; }
+.w-btn :is(svg, .w-icon) { width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); flex: none; }
+
+/* variants */
+.w-btn[data-variant="primary"] {
+    --w-btn-bg: var(--wash-ink);
+    --w-btn-fg: var(--wash-on-ink);
+    --w-btn-border: var(--wash-ink);
+    --w-btn-hover: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas));
+}
+.w-btn[data-variant="secondary"] {
+    --w-btn-bg: var(--wash-surface);
+    --w-btn-border: var(--wash-hairline-strong);
+}
+.w-btn[data-variant="ghost"],
+.w-btn[data-variant="icon"] {
+    --w-btn-bg: transparent;
+    --w-btn-border: transparent;
+    --w-btn-fg: var(--wash-ink-2);
+}
+.w-btn[data-variant="ghost"]:hover,
+.w-btn[data-variant="icon"]:hover { color: var(--wash-ink); }
+.w-btn[data-variant="tonal"] {
+    --w-btn-bg: var(--w-tone-wash, var(--wash-accent-wash));
+    --w-btn-fg: var(--w-tone-ink, var(--wash-accent-ink));
+    --w-btn-border: transparent;
+    --w-btn-hover: color-mix(in srgb, var(--w-tone-wash, var(--wash-accent-wash)) 80%, var(--w-tone-pigment, var(--wash-accent-pigment)));
+}
+.w-btn[data-variant="danger"] {
+    --w-btn-bg: var(--wash-danger-ink);
+    --w-btn-fg: var(--wash-on-ink);
+    --w-btn-border: var(--wash-danger-ink);
+    --w-btn-hover: color-mix(in srgb, var(--wash-danger-ink) 86%, var(--wash-ink));
+}
+.w-btn[data-variant="icon"] {
+    width: var(--w-btn-h);
+    padding: 0;
+    border-radius: 50%;
+}
+.w-btn[data-variant="icon"] :is(svg, .w-icon) { width: var(--wash-size-icon); height: var(--wash-size-icon); }
+
+/* tones: data-tone sets --w-tone-wash/ink/pigment (base.css tone channels) */
+
+/* sizes */
+.w-btn[data-size="sm"] { --w-btn-h: var(--wash-size-control-sm); --w-btn-pad: var(--wash-space-3); font-size: var(--wash-type-caption-size); }
+.w-btn[data-size="lg"] { --w-btn-h: var(--wash-size-control-lg); --w-btn-pad: var(--wash-space-5); font-size: var(--wash-type-body-size); }
+@media (pointer: coarse) {
+    .w-btn { min-height: var(--wash-size-touch); }
+    .w-btn[data-variant="icon"] { --w-btn-h: var(--wash-size-touch); }
+}
+
+/* states */
+.w-btn:disabled,
+.w-btn[aria-disabled="true"] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.w-btn:disabled:hover,
+.w-btn[aria-disabled="true"]:hover { background: var(--w-btn-bg); }
+.w-btn[aria-pressed="true"] {
+    --w-btn-bg: var(--wash-sunken);
+    --w-btn-fg: var(--wash-ink);
+}
+.w-btn[aria-busy="true"] { color: transparent; pointer-events: none; }
+.w-btn[aria-busy="true"] > * { visibility: hidden; }
+.w-btn[aria-busy="true"]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    margin: -5px 0 0 -5px;
+    border-radius: 50%;
+    background: var(--w-btn-fg);
+    animation: w-btn-drop 1.6s var(--wash-ease-bleed) infinite;
+}
+@keyframes w-btn-drop {
+    50% { transform: scale(1.35); opacity: 0.6; }
+}
+
+/* trailing parts */
+.w-btn__chevron { margin-right: calc(var(--wash-space-1) * -1); color: currentColor; opacity: 0.8; }
+.w-keycap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 var(--wash-space-1);
+    border-radius: var(--wash-radius-xs);
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    font-weight: var(--wash-type-mono-weight);
+    line-height: 1;
+}
+.w-btn[data-variant="primary"] .w-keycap,
+.w-btn[data-variant="danger"] .w-keycap {
+    background: color-mix(in srgb, var(--wash-on-ink) 18%, transparent);
+    color: var(--wash-on-ink);
+}
+@media (pointer: coarse) {
+    .w-btn .w-keycap { display: none; }
+}
+
+/* button row */
+.w-btn-row {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+}
+.w-btn-row[data-align="end"] { justify-content: flex-end; }

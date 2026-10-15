@@ -240,7 +240,7 @@ def test_legacy_blended_estimate_override_remains_supported(tmp_path, monkeypatc
 def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     providers_router = (ROOT / "mu/gui/routers/providers.py").read_text(encoding="utf-8")
     work = (ROOT / "mu/gui/templates/work.html").read_text(encoding="utf-8")
-    html = (ROOT / "mu/gui/static/model_costs.html").read_text(encoding="utf-8")
+    html = (ROOT / "mu/gui/templates/model_costs.html").read_text(encoding="utf-8")
     script = (ROOT / "mu/gui/static/js/model_costs.js").read_text(encoding="utf-8")
     css = (ROOT / "mu/gui/static/css/model_costs.css").read_text(encoding="utf-8")
     work_semantics = (ROOT / "mu/gui/static/js/work_analysis_link.js").read_text(encoding="utf-8")
@@ -252,7 +252,7 @@ def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     assert '@router.get("/pricing")' in providers_router
     assert '@router.put("/pricing")' in providers_router
     assert '@router.post("/pricing/reset")' in providers_router
-    assert 'href="/static/model_costs.html"' in work
+    assert 'href="/models/costs"' in work
     assert 'Pricing registry' in html
     assert 'Input / 1M' in html
     assert 'Output / 1M' in html
@@ -267,7 +267,9 @@ def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     assert 'input_modalities' in script
     assert 'output_modalities' in script
     assert 'capabilities' in script
-    assert 'product-header' in html
+    # Wash W2: the page uses the shared app top bar from _layout.html.
+    assert '{% extends "_layout.html" %}' in html
+    assert '{% block topbar_tools %}' in html
     assert '.mc-table' in css
     assert 'estimated_token' in config
     assert '"glm-5.2:cloud"' in config

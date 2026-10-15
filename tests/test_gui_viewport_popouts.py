@@ -27,8 +27,14 @@ def test_shared_popout_positioner_covers_all_anchored_list_surfaces():
 def test_shared_popout_assets_load_on_shell_and_trace_pages():
     base = read("mu/gui/templates/base.html")
     trace = read("mu/gui/templates/trace.html")
+    # Wash W2: every page links wash.css (via _layout.html), which imports
+    # floating_popouts.css into the legacy layer; both pages extend the layout.
+    layout = read("mu/gui/templates/_layout.html")
+    wash = read("mu/gui/static/css/wash/wash.css")
+    assert '<link rel="stylesheet" href="/static/css/wash/wash.css">' in layout
+    assert '@import url("../floating_popouts.css") layer(legacy);' in wash
     for source in (base, trace):
-        assert '/static/css/floating_popouts.css' in source
+        assert '{% extends "_layout.html" %}' in source
         assert '/static/js/floating_popouts.js' in source
 
 

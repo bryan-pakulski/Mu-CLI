@@ -14,7 +14,7 @@ _logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.types import Scope
@@ -31,6 +31,7 @@ from .routers import (
     chat,
     containers as containers_router,
     debug as debug_router,
+    design as design_router,
     feature as feature_router,
     files as files_router,
     inspector,
@@ -54,6 +55,7 @@ from .routers import (
 from .watcher import SessionWatcher
 from .web_ui import WebUI
 from mu.container import ContainerSupervisor
+from mu.design import load_vocabulary, state_style
 from mu.jobs import get_default_job_service
 from mu.jobs.controller import JobController
 from mu.threads.scheduler import ThreadWakeScheduler
@@ -172,7 +174,22 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.auto_reload = True
+    # Shared status vocabulary for the Wash macros (templates/macros/wash.html).
+    templates.env.globals["wash_vocab"] = load_vocabulary()
+    templates.env.globals["wash_state"] = state_style
     app.state.templates = templates
+
+    # The job trace and model pricing pages moved from static HTML onto the
+    # shared Jinja layout. Keep old bookmarks working (query string included).
+    # Registered before the /static mount, which would otherwise claim them.
+    def _moved(target: str):
+        async def _redirect(request: Request):
+            query = request.url.query
+            return RedirectResponse(f"{target}?{query}" if query else target, status_code=308)
+        return _redirect
+
+    app.add_api_route("/static/job_trace.html", _moved("/jobs/trace"), methods=["GET", "HEAD"], include_in_schema=False)
+    app.add_api_route("/static/model_costs.html", _moved("/models/costs"), methods=["GET", "HEAD"], include_in_schema=False)
     # Compress assets only: SSE and live tool streams must never be buffered.
     app.mount("/static", GZipMiddleware(
         _RevalidatedStaticFiles(directory=str(STATIC_DIR)),
@@ -207,6 +224,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     traces_router._install_trace_gzip(app)
     app.include_router(traces_router.router, prefix="/api/traces", tags=["traces"])
     app.include_router(chat.events_router, tags=["events"])
+    app.include_router(design_router.router, tags=["design"])
 
     register_live_observability_hooks()
 
@@ -221,14 +239,23 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
             "provider": session.provider.name if session and session.provider else "",
             "model": session.provider.model_name if session and session.provider else "",
             "session_active": session is not None,
+            "nav_active": "chat",
         })
 
     @app.get("/trace", response_class=HTMLResponse)
     async def trace_analyzer(request: Request):
         return templates.TemplateResponse(request, "trace.html", {
             "session_name": "", "agent_mode": "default", "provider": "",
-            "model": "", "session_active": False,
+            "model": "", "session_active": False, "nav_active": "trace",
         })
+
+    @app.get("/jobs/trace", response_class=HTMLResponse)
+    async def job_trace_analyzer(request: Request):
+        return templates.TemplateResponse(request, "job_trace.html", {"nav_active": "job_trace"})
+
+    @app.get("/models/costs", response_class=HTMLResponse)
+    async def model_costs(request: Request):
+        return templates.TemplateResponse(request, "model_costs.html", {"nav_active": "model_costs"})
 
     @app.get("/work", response_class=HTMLResponse)
     async def engineering_work(request: Request):
@@ -240,6 +267,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
             "provider": "",
             "model": "",
             "session_active": bool(session_name),
+            "nav_active": "work",
         })
 
     @app.get("/healthz")

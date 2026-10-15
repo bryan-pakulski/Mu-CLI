@@ -10,7 +10,6 @@ html { background: var(--bg); }
 html, body { overscroll-behavior: none; }
 body {
     margin: 0;
-    padding: 0 !important;
     background: var(--bg);
     color: var(--text-primary);
     font-family: var(--font-sans);
@@ -1366,9 +1365,9 @@ code { font-family: var(--font-mono); }
 
 /* ------------------------------------------------------------ plan mode
  * Read-only indicator (session.variables.plan_mode). Violet so it never
- * reads as the amber auto-approve warning. Shown only while plan mode is on. */
-:root, html[data-theme="dark"] { --plan-mode: var(--viz-6, #bb9af7); }
-html[data-theme="light"] { --plan-mode: var(--viz-6, #8250df); }
+ * reads as the apricot needs-you or sun auto-approve signals (Wash `plan`,
+ * lilac ink; the token switches per theme). Shown only while plan mode is on. */
+:root, [data-theme] { --plan-mode: var(--wash-plan-ink); }
 .chip.plan-mode-pill {
     display: inline-flex;
     align-items: center;

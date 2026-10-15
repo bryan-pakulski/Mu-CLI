@@ -32,8 +32,13 @@ def test_web_mode_os_has_explicit_light_and_dark_palette_tokens():
     tokens = TOKENS_CSS.read_text(encoding="utf-8")
     # Light and dark palettes live in tokens.css, the single source of
     # visual values; app.css consumes the mode tokens without redefining them.
-    assert 'html[data-theme="dark"]' in tokens
-    assert 'html[data-theme="light"]' in tokens
+    # Wash W1: the mode names alias per-theme Wash mode pigments, which the
+    # generated wash/tokens.css defines for Paper and Dusk (and the legacy
+    # light/dark names).
+    wash = (TOKENS_CSS.parent / "wash" / "tokens.css").read_text(encoding="utf-8")
+    for selector in ('[data-theme="paper"]', '[data-theme="dusk"]', '[data-theme="light"]', '[data-theme="dark"]'):
+        assert selector in wash
+    assert "--mode-research: var(--wash-mode-research-ink);" in tokens
     for token in (
         "--mode-research",
         "--mode-security",

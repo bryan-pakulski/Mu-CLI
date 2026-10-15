@@ -1,0 +1,87 @@
+/* Legacy overrides (W2 bridge, patterns layer).
+ *
+ * The legacy stylesheets used ~58 `!important` declarations to beat their
+ * own earlier rules. Inside a cascade layer an `!important` declaration
+ * *reverses* layer priority, so a legacy `!important` would beat every Wash
+ * rule. W2 therefore moved those declarations here, without `!important`,
+ * into the `patterns` layer: they still beat every legacy declaration (as
+ * before) and never fight `.w-*` components, because the selectors are
+ * legacy ones. The few that had to beat inline styles are in utilities.css.
+ *
+ * Delete each block when the legacy selector it serves is retired (W3/W4).
+ */
+
+/* ------------------------------------------------ conversation.css (transcript density) */
+.chat-history { padding-top: var(--space-6); }
+.chat-history > .turn-wrap > .msg { margin-bottom: var(--space-3); }
+.chat-history .collapse-group { margin: var(--space-1) 0 var(--space-3); }
+.chat-history .collapse-header { min-height: 28px; }
+.chat-history .collapse-body { border-left: 1px solid var(--hairline); }
+.chat-history .collapse-body .msg.assistant.collapsed-child { padding: var(--space-1) var(--space-3); }
+.chat-history .collapse-body .trace,
+.chat-history .collapse-body .subagent-panel,
+.chat-history .collapse-body .msg.command,
+.chat-history .collapse-body .msg.info,
+.chat-history .collapse-body .msg.error,
+.chat-history .collapse-body .msg.prompt-resolved { border-top: 0; }
+@media (width < 840px) {
+    .chat-history { padding-top: var(--space-5); }
+    .chat-history > .turn-wrap > .msg { margin-bottom: var(--space-3); }
+}
+
+/* ------------------------------------------------ refinement.css / crystal.css (stage + composer) */
+.panel-stage .mode-panel { inset: var(--panel-tabs-h) 0 0 0; }
+.app .panel-stage .mode-panel,
+.panel-stage .mode-panel { max-height: none; flex: none; }
+.composer::before { content: none; }
+.composer-toolbar { position: static; }
+.composer .hint { min-height: 0; background: transparent; }
+.settings-pane .var-row { background: transparent; }
+
+/* ------------------------------------------------ product.css */
+body { padding: 0; }
+
+/* ------------------------------------------------ app.css (CodeMirror follows the tokens) */
+.CodeMirror { background: var(--bg); color: var(--text-primary); }
+.CodeMirror-gutters { background: var(--bg); border-right: 1px solid var(--hairline-color); }
+.CodeMirror-linenumber { color: var(--text-tertiary); }
+.CodeMirror-cursor { border-left-color: var(--accent-solid); }
+.CodeMirror-selected { background: var(--accent-subtle); }
+.CodeMirror-line::selection,
+.CodeMirror-line > span::selection,
+.CodeMirror-line > span > span::selection { background: var(--accent-subtle); }
+.CodeMirror-activeline-background { background: var(--bg-hover); }
+.CodeMirror-matchingbracket { color: var(--accent-fg); }
+.danger-text { color: var(--error); }
+
+/* ------------------------------------------------ floating_popouts.css (viewport geometry) */
+.cmd-complete[data-viewport-floating],
+.trace-info-popout[data-viewport-floating],
+.manager-overflow-menu[data-viewport-floating],
+.mode-popout[data-viewport-floating] {
+    position: fixed;
+    right: auto;
+    bottom: auto;
+    margin: 0;
+    min-width: 0;
+    z-index: var(--z-overlay);
+}
+
+/* ------------------------------------------------ work.css (jobs chrome) */
+.work-app .sr-only { position: absolute; }
+.work-logo { color: var(--text); }
+.work-logo:hover { text-decoration: none; }
+.work-side .work-navlink { color: var(--muted); }
+.work-side .work-navlink:hover { color: var(--text); text-decoration: none; }
+.work-side .work-navlink[aria-current='page'] { color: var(--text); }
+.work-stat:hover { text-decoration: none; }
+.work-tab { padding: var(--s-1) var(--s-2); border-bottom: 2px solid transparent; color: var(--muted); }
+.work-tab:hover { color: var(--text); }
+.work-tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
+.work-fold { color: var(--muted); padding: 1px 0; }
+.work-fold:hover:not(:disabled) { color: var(--text); }
+.work-fold.is-tool { color: var(--accent); }
+.work-segmented button { padding: 0 10px; color: var(--muted); }
+.work-segmented button[aria-pressed='true'] { color: var(--text); }
+.work-tree-item.is-viewed .work-tree-link { color: var(--muted); }
+.work-tree-link { padding: 2px 0; color: var(--text); }

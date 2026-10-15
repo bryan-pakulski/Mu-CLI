@@ -51,7 +51,10 @@ def test_model_pricing_is_first_class_in_settings():
     assert "Operator-added pricing row." in shell
     assert "input_modalities" in shell
     assert "capabilities" in shell
-    assert "pricing_rows.css" in shell
+    # Wash W2: pricing_rows.css is no longer injected by web_shell.js; the
+    # chat page bundle imports it behind the single wash.css link.
+    assert "pricing_rows.css" in (ROOT / "mu/gui/static/css/wash/patterns/chat.css").read_text(encoding="utf-8")
+    assert "createElement('link')" not in shell
 
     assert '@router.get("/pricing")' in providers
     assert '@router.put("/pricing")' in providers

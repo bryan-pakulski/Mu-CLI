@@ -1,0 +1,104 @@
+<!-- Skills modal -->
+<div class="modal-backdrop"
+     x-data
+     x-dialog="$store.skills.modalOpen"
+     x-cloak
+     x-show="$store.skills.modalOpen"
+     x-transition.opacity.duration.120ms
+     @dialog-close="$store.skills.modalOpen && $store.skills.view === 'list' && $store.skills.closeModal()">
+    <div class="modal modal-lg" @click.stop style="max-height:85vh;" role="dialog" aria-modal="true" :aria-labelledby="$store.skills.view === 'edit' ? 'skills-modal-edit-title' : 'skills-modal-title'" aria-labelledby="skills-modal-title">
+        <template x-if="$store.skills.view === 'list'">
+            <div style="display:flex;flex-direction:column;max-height:85vh;">
+                <div class="modal-head">
+                    <span class="modal-title" id="skills-modal-title">skills</span>
+                    <button class="icon-btn" @click="$store.skills.closeModal()">&times;</button>
+                </div>
+                <div class="skills-toolbar">
+                    <span class="skills-count" x-text="$store.skills.enabledCount() + '/' + $store.skills.list.length + ' enabled'"></span>
+                    <div class="skills-toolbar-btns">
+                        <button class="modal-add-btn" @click="$store.skills.reload()">reload</button>
+                        <button class="modal-add-btn" @click="$store.skills.startCreate()">+ new</button>
+                    </div>
+                </div>
+                <div class="modal-body" style="padding:0;">
+                    <ul class="skills-list">
+                        <template x-for="s in $store.skills.list" :key="s.name">
+                            <li class="skill-row" :class="{ disabled: !s.enabled }">
+                                <button class="skill-toggle-sw"
+                                        :class="{ on: s.enabled }"
+                                        @click="$store.skills.toggle(s.name)"
+                                        :title="s.enabled ? 'Disable' : 'Enable'"></button>
+                                <div class="skill-info">
+                                    <div class="skill-name" x-text="s.name"></div>
+                                    <div class="skill-desc" x-text="s.description || '(no description)'" x-show="s.description"></div>
+                                    <div class="skill-meta">
+                                        <span x-text="s.trigger ? 'trigger: ' + s.trigger : 'no trigger'"></span>
+                                        <span> · </span>
+                                        <span x-text="$store.skills.isBuiltin(s) ? 'built-in' : (s.source.includes('/.mu/skills/') ? (s.source.startsWith('/root/.mu/') || s.source.startsWith(String.fromCharCode(126) + '/.mu/') ? 'global' : 'workspace') : 'built-in')"></span>
+                                    </div>
+                                </div>
+                                <div class="skill-actions">
+                                    <button class="modal-add-btn small"
+                                            @click="$store.skills.startEdit(s)"
+                                            :title="$store.skills.isBuiltin(s) ? 'View (built-in, read-only)' : 'Edit'">
+                                        <span x-text="$store.skills.isBuiltin(s) ? 'view' : 'edit'"></span>
+                                    </button>
+                                    <button class="modal-remove-btn"
+                                            x-show="!$store.skills.isBuiltin(s)"
+                                            @click="$store.confirm.ask('Delete skill \'' + s.name + '\'?', $event, () => $store.skills.deleteSkill(s.name), {danger:true})"
+                                            title="Delete">&times;</button>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="empty-row" x-show="!$store.skills.list.length" style="padding:var(--space-5);text-align:center;">no skills found</div>
+                </div>
+            </div>
+        </template>
+
+        <template x-if="$store.skills.view === 'edit'">
+            <div style="display:flex;flex-direction:column;max-height:85vh;">
+                <div class="modal-head">
+                    <div style="display:flex;align-items:center;gap:var(--space-2)">
+                        <button class="icon-btn" @click="$store.skills.backToList()" title="Back to list">&larr;</button>
+                        <span class="modal-title" id="skills-modal-edit-title" x-text="$store.skills.editing ? 'edit skill' : 'new skill'"></span>
+                    </div>
+                    <button class="icon-btn" @click="$store.skills.closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-field">
+                        <label class="modal-label">name</label>
+                        <input type="text" x-model="$store.skills.form.name" placeholder="my-skill (alphanumeric, hyphens, underscores)" :disabled="!!$store.skills.editing" @keydown.stop />
+                    </div>
+                    <div class="modal-field">
+                        <label class="modal-label">description</label>
+                        <input type="text" x-model="$store.skills.form.description" placeholder="What this skill does" @keydown.stop />
+                    </div>
+                    <div class="modal-field">
+                        <label class="modal-label">trigger regex</label>
+                        <input type="text" x-model="$store.skills.form.trigger" placeholder="\b(commit|message)\b (optional)" @keydown.stop />
+                    </div>
+                    <div class="modal-field">
+                        <label class="modal-label">scope</label>
+                        <select x-model="$store.skills.form.scope">
+                            <option value="global">global (~/.mu/skills/)</option>
+                            <option value="workspace">workspace (.mu/skills/)</option>
+                        </select>
+                    </div>
+                    <div class="modal-field">
+                        <label class="modal-label">body (markdown)</label>
+                        <textarea x-model="$store.skills.form.body"
+                                  placeholder="Skill instructions in markdown…"
+                                  rows="10"
+                                  style="font-family:var(--font-mono);font-size:var(--fs-xs);"
+                                  @keydown.stop></textarea>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button @click="$store.skills.backToList()">cancel</button>
+                    <button class="primary" @click="$store.skills.save()">save</button>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>

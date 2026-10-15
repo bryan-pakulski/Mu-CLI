@@ -1,0 +1,9 @@
+/* Page bundle — Environments (/containers). Historical order: theme, then the page CSS.
+ *
+ * Linked after wash.css (which declares the layer order), so these imports
+ * land in the lowest-priority `legacy` layer. Wash rules for this page go
+ * in the `patterns` layer below. */
+@import url("../../theme.css") layer(legacy);
+@import url("../../containers.css") layer(legacy);
+@import url("../../route-product.css") layer(legacy);
+@import url("../../containers-crystal.css") layer(legacy);

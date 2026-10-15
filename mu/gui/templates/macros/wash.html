@@ -1,0 +1,119 @@
+{#- Wash Jinja macros (spec §4.2). Import with
+      {% import "macros/wash.html" as w %}
+    and call e.g. {{ w.btn("New job", variant="primary", icon="plus") }}.
+
+    Every macro renders the `.w-*` component markup documented in
+    static/css/wash/components/*.css and shown in the /design gallery.
+    `attrs` is a dict of extra HTML attributes; values are escaped, keys are
+    trusted (template authors only). A value of true renders a bare attribute;
+    attrs["class"] is appended to the component class.
+-#}
+
+{%- macro _attrs(attrs) -%}
+{%- for key, value in (attrs or {}).items() if key != "class" -%}
+{%- if value is sameas true %} {{ key }}{% elif value is not none and value is not sameas false %} {{ key }}="{{ value }}"{% endif -%}
+{%- endfor -%}
+{%- endmacro -%}
+
+{#- icon(name, size=None, label=None, attrs={})
+    Sprite icon from /static/icons/wash.svg (symbol `i-<name>`). size: "sm"
+    (16) | None (20) | "lg" (24). Decorative unless `label` is given, which
+    renders role="img" + aria-label. -#}
+{%- macro icon(name, size=None, label=None, attrs={}) -%}
+<svg class="w-icon"{% if size %} data-size="{{ size }}"{% endif %}{% if label %} role="img" aria-label="{{ label }}"{% else %} aria-hidden="true"{% endif %} focusable="false"{{ _attrs(attrs) }}><use href="/static/icons/wash.svg#i-{{ name }}"></use></svg>
+{%- endmacro -%}
+
+{#- btn(label, variant="secondary", icon=None, size=None, tone=None, href=None,
+        type="button", keycap=None, chevron=False, loading=False, disabled=False,
+        attrs={})
+    variant: primary | secondary | ghost | tonal | danger | icon.
+    For variant="icon" the label becomes aria-label + title (required).
+    href renders an <a>. loading sets aria-busy (label hidden, width kept). -#}
+{%- macro btn(label, variant="secondary", icon=None, size=None, tone=None, href=None, type="button", keycap=None, chevron=False, loading=False, disabled=False, attrs={}) -%}
+{%- set tag = "a" if href else "button" -%}
+<{{ tag }} class="w-btn{% if attrs.get('class') %} {{ attrs['class'] }}{% endif %}" data-variant="{{ variant }}"
+{%- if size %} data-size="{{ size }}"{% endif %}{% if tone %} data-tone="{{ tone }}"{% endif %}
+{%- if href %} href="{{ href }}"{% else %} type="{{ type }}"{% endif %}
+{%- if variant == "icon" %} aria-label="{{ label }}" title="{{ label }}"{% endif %}
+{%- if loading %} aria-busy="true"{% endif %}
+{%- if disabled %}{% if href %} aria-disabled="true"{% else %} disabled{% endif %}{% endif %}
+{{- _attrs(attrs) }}>
+{%- if icon %}<svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-{{ icon }}"></use></svg>{% endif -%}
+{%- if variant != "icon" %}<span>{{ label }}</span>{% endif -%}
+{%- if keycap %}<kbd class="w-keycap">{{ keycap }}</kbd>{% endif -%}
+{%- if chevron %}<span class="w-btn__chevron" aria-hidden="true">›</span>{% endif -%}
+</{{ tag }}>
+{%- endmacro -%}
+
+{#- chip(label, tone=None, variant=None, glyph=None, dot=None, caret=False,
+         href=None, attrs={})
+    Status chip: give a tone and a glyph (◆ Needs you). variant: meta |
+    filter (renders a <button> with aria-pressed from attrs) | None.
+    dot: a CSS colour for a leading pigment dot (e.g. "var(--wash-mode-feature)"). -#}
+{%- macro chip(label, tone=None, variant=None, glyph=None, dot=None, caret=False, href=None, attrs={}) -%}
+{%- set tag = "a" if href else ("button" if variant == "filter" else "span") -%}
+<{{ tag }} class="w-chip{% if attrs.get('class') %} {{ attrs['class'] }}{% endif %}"
+{%- if variant %} data-variant="{{ variant }}"{% endif %}{% if tone %} data-tone="{{ tone }}"{% endif %}
+{%- if href %} href="{{ href }}"{% elif tag == "button" %} type="button"{% endif %}
+{{- _attrs(attrs) }}>
+{%- if dot %}<span class="w-chip__dot" style="--w-dot: {{ dot }}" aria-hidden="true"></span>{% endif -%}
+{%- if glyph %}<span class="w-chip__glyph" aria-hidden="true">{{ glyph }}</span>{% endif -%}
+<span>{{ label }}</span>
+{%- if caret %}<span class="w-chip__caret" aria-hidden="true">▾</span>{% endif -%}
+</{{ tag }}>
+{%- endmacro -%}
+
+{#- status(state, label=None, as_chip=True)
+    Shared status vocabulary (mu/design/vocabulary.json via the `wash_vocab`
+    Jinja global). `state` may be a status (pending | active | waiting | done
+    | failed | skipped) or any JobState / JobStatus value ("implementing",
+    "needs_human", …). Renders glyph + canonical label, never colour alone. -#}
+{%- macro status(state, label=None, as_chip=True) -%}
+{%- set key = (state or "") | string | lower -%}
+{%- if key in wash_vocab.status -%}
+{%- set spec = wash_vocab.status[key] -%}
+{%- set info = {"status": key, "glyph": spec.glyph, "semantic": spec.semantic, "label": spec.label} -%}
+{%- else -%}
+{%- set info = wash_state(key) -%}
+{%- endif -%}
+{%- set text = label or (info.label[:1] | upper ~ info.label[1:]) -%}
+{%- if as_chip -%}
+<span class="w-chip" data-tone="{{ info.semantic }}" data-status="{{ info.status }}"><span class="w-chip__glyph" aria-hidden="true">{{ info.glyph }}</span><span>{{ text }}</span></span>
+{%- else -%}
+<span class="w-status" data-tone="{{ info.semantic }}" data-status="{{ info.status }}"><span class="w-status__glyph" aria-hidden="true">{{ info.glyph }}</span>{{ text }}</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{#- empty_state(title, body=None, icon="sparkles", tone="accent", variant=None,
+                action=None, action_href=None, action_variant="primary",
+                detail=None, size=None, attrs={})
+    Spot-wash empty state. variant="error" switches to the rose spot; use
+    `detail` for "what to do". One primary or secondary action. -#}
+{%- macro empty_state(title, body=None, icon="sparkles", tone="accent", variant=None, action=None, action_href=None, action_variant="primary", detail=None, size=None, attrs={}) -%}
+<div class="w-empty{% if attrs.get('class') %} {{ attrs['class'] }}{% endif %}" data-tone="{{ 'danger' if variant == 'error' and tone == 'accent' else tone }}"{% if variant %} data-variant="{{ variant }}"{% endif %}{% if size %} data-size="{{ size }}"{% endif %}{% if variant == "error" %} role="alert"{% endif %}{{ _attrs(attrs) }}>
+    <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-{{ icon }}"></use></svg></div>
+    <h3 class="w-empty__title">{{ title }}</h3>
+    {%- if body %}
+    <p class="w-empty__body">{{ body }}</p>
+    {%- endif %}
+    {%- if detail %}
+    <p class="w-empty__detail">{{ detail }}</p>
+    {%- endif %}
+    {%- if action or caller is defined %}
+    <div class="w-empty__actions">
+        {%- if action %}{{ btn(action, variant=action_variant, href=action_href) }}{% endif %}
+        {%- if caller is defined %}{{ caller() }}{% endif %}
+    </div>
+    {%- endif %}
+</div>
+{%- endmacro -%}
+
+{#- theme_toggle() — the sprite icon button that flips Paper / Dusk
+    (route_theme.js binds every [data-route-theme]). Shows the theme you
+    would switch to: moon on Paper, sun on Dusk. -#}
+{%- macro theme_toggle(id=None, extra_class="") -%}
+<button type="button" class="w-btn w-theme-toggle{% if extra_class %} {{ extra_class }}{% endif %}" data-variant="icon" data-route-theme{% if id %} id="{{ id }}"{% endif %} aria-label="Toggle theme" title="Toggle theme">
+    <svg class="w-icon" data-theme-icon="moon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-moon"></use></svg>
+    <svg class="w-icon" data-theme-icon="sun" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-sun"></use></svg>
+</button>
+{%- endmacro -%}

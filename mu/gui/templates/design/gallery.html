@@ -1,0 +1,388 @@
+{#- /design — the Wash component gallery (spec §3.6). Every base component in
+    every state, Paper and Dusk side by side ([data-theme] on each column
+    re-scopes the --wash-* tokens). Enabled only with MUCLI_DESIGN_GALLERY=1.
+    Fixtures come from mu/gui/routers/design.py. -#}
+{% extends "_layout.html" %}
+{% import "macros/wash.html" as w %}
+{% block title %}μcli · Design gallery{% endblock %}
+{% block page_css %}
+    <link id="mucli-gallery-css" rel="stylesheet" href="/static/css/wash/patterns/gallery.css">
+{% endblock %}
+{% block head_scripts %}
+    <script src="/static/js/dialogs.js" defer></script>
+    <script src="/static/vendor/alpine.min.js" defer></script>
+{% endblock %}
+{% block body_class %}gallery-body{% endblock %}
+{% block crumbs %}
+    <li class="w-breadcrumb__item"><span aria-current="page">Design gallery</span></li>
+{% endblock %}
+{% block topbar_chips %}
+    <li>{{ w.chip("Wash v1", variant="meta") }}</li>
+    <li class="w-optional">{{ w.status("waiting", label="1 needs you") }}</li>
+    <li class="w-optional">{{ w.chip("Live", tone="ok", glyph="●") }}</li>
+{% endblock %}
+{% block topbar_tools %}
+    {{ w.btn("Search", variant="icon", icon="search", attrs={"class": "w-optional"}) }}
+{% endblock %}
+
+{%- macro section(id, eyebrow, title, theme) -%}
+<section class="g-section" aria-labelledby="g-{{ id }}-{{ theme }}">
+    <header class="g-section__head">
+        <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>{{ eyebrow }}</span>
+        <h2 class="g-section__title" id="g-{{ id }}-{{ theme }}">{{ title }}</h2>
+    </header>
+    {{ caller() }}
+</section>
+{%- endmacro -%}
+
+{%- macro gallery(theme) -%}
+{# ------------------------------------------------------------ foundations #}
+{% call section("foundations", "Foundations", "Paper, ink and seven pigments", theme) %}
+<div class="g-swatches">
+    {%- for name, role in [("lagoon","accent"),("sky","running"),("meadow","ok"),("apricot","attention"),("sun","caution"),("rose","danger"),("lilac","plan"),("plum","layer L0")] %}
+    <div class="g-swatch"><b style="background: var(--wash-{{ name }}-pigment)"></b><i style="background: var(--wash-{{ name }}-wash)"></i><span>{{ name | capitalize }} <small>({{ role }})</small></span></div>
+    {%- endfor %}
+</div>
+<div class="g-type">
+    <p class="g-type__display">What are we building today?</p>
+    <p class="g-type__t1">Title 1 · Dashboard</p>
+    <p class="g-type__t2">Title 2 · Section</p>
+    <p class="g-type__t3">Title 3 · Card title</p>
+    <p class="g-type__body">Body — default UI text in ink, <span class="g-ink2">secondary in ink-2</span>, <span class="g-ink3">metadata in ink-3</span>.</p>
+    <p class="g-type__mono">mono · src/server/routes.py · 0.4s</p>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ buttons #}
+{% call section("buttons", "Button", "Pills, one primary per view", theme) %}
+<div class="g-row">
+    {%- for v in button_variants %}
+    {{ w.btn(v | capitalize, variant=v, tone="attention" if v == "tonal" else None) }}
+    {%- endfor %}
+    {{ w.btn("Settings", variant="icon", icon="settings") }}
+</div>
+<div class="g-row">
+    {{ w.btn("New job", variant="primary", icon="plus", keycap="N") }}
+    {{ w.btn("Explore", variant="secondary", chevron=True) }}
+    {{ w.btn("Review plan", variant="tonal", tone="plan", chevron=True) }}
+    {{ w.btn("Retry", variant="tonal", tone="ok", icon="refresh-cw") }}
+    {{ w.btn("Open docs", variant="ghost", icon="external-link", href="#") }}
+</div>
+<div class="g-row">
+    {{ w.btn("Small", size="sm") }}
+    {{ w.btn("Medium") }}
+    {{ w.btn("Large", size="lg", variant="primary") }}
+    {{ w.btn("Disabled", disabled=True) }}
+    {{ w.btn("Disabled", variant="primary", disabled=True) }}
+    {{ w.btn("Saving", variant="primary", loading=True) }}
+    {{ w.btn("Pressed", variant="ghost", attrs={"aria-pressed": "true"}) }}
+</div>
+<div class="g-row">
+    {%- for t in ["accent", "running", "ok", "attention", "caution", "danger", "plan"] %}
+    {{ w.btn(t | capitalize, variant="tonal", tone=t, size="sm") }}
+    {%- endfor %}
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ chips #}
+{% call section("chips", "Chip", "Status, meta, eyebrow, filter, count", theme) %}
+<div class="g-row">
+    {%- for s in status_samples %}{{ w.status(s) }}{% endfor %}
+</div>
+<div class="g-row">
+    {%- for s in job_state_samples %}{{ w.status(s) }}{% endfor %}
+</div>
+<div class="g-row">
+    {{ w.chip("Plan mode", tone="plan", glyph="◇") }}
+    {{ w.chip("Auto-approve on", tone="caution", glyph="●") }}
+    {{ w.chip("Feature", variant="meta", dot="var(--wash-mode-feature)", caret=True) }}
+    {{ w.chip("claude-opus-5-5", variant="meta", caret=True) }}
+    {{ w.chip("feat/ratelimit", variant="meta") }}
+    <span class="w-chip" data-variant="meta"><span>routes.py</span><button type="button" class="w-chip__remove" aria-label="Remove routes.py">{{ w.icon("x", size="sm") }}</button></span>
+</div>
+<div class="g-row">
+    {{ w.chip("Running", variant="filter", attrs={"aria-pressed": "true"}) }}
+    {{ w.chip("Needs you", variant="filter", attrs={"aria-pressed": "false"}) }}
+    {{ w.chip("Done", variant="filter", attrs={"aria-pressed": "false"}) }}
+    <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Review</span>
+    <span class="w-eyebrow"><i class="w-eyebrow__swatch"></i>Context</span>
+    <span class="w-count">12</span>
+    <span class="w-count" data-tone="attention">3</span>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ cards #}
+{% call section("cards", "Card", "Soft cards and state cards", theme) %}
+<dl class="w-stats">
+    <div class="w-stat" data-tone="attention"><dt class="w-stat__label">Needs you</dt><dd class="w-stat__value">1</dd></div>
+    <div class="w-stat"><dt class="w-stat__label">Running</dt><dd class="w-stat__value">3</dd></div>
+    <div class="w-stat"><dt class="w-stat__label">Ready to push</dt><dd class="w-stat__value">2</dd></div>
+    <div class="w-stat"><dt class="w-stat__label">Done this week</dt><dd class="w-stat__value">37</dd></div>
+</dl>
+<div class="g-grid">
+    <article class="w-card">
+        <header class="w-card__head"><h3 class="w-card__title">Default card</h3><span class="w-card__meta">surface · hairline</span></header>
+        <div class="w-card__body">Title, optional eyebrow, body and a footer with actions on the right.</div>
+        <footer class="w-card__foot">{{ w.btn("Cancel", size="sm") }}{{ w.btn("Open", variant="primary", size="sm") }}</footer>
+    </article>
+    <article class="w-card" data-variant="sunken">
+        <header class="w-card__head"><span class="w-eyebrow">Onboarding</span></header>
+        <div class="w-card__body"><strong class="g-ink">Sunken card</strong> No border — settings groups and selected explanations.</div>
+    </article>
+    {%- for state, glyph, title in [("attention", "◆", "Needs you · Permission to edit 1 file"), ("danger", "✗", "Checks failed"), ("plan", "◇", "Plan ready for review"), ("ok", "✓", "Pushed to origin")] %}
+    <article class="w-card" data-state="{{ state }}">
+        <header class="w-card__head">{{ w.chip(state | capitalize, tone=state, glyph=glyph) }}<h3 class="w-card__title">{{ title }}</h3><span class="w-card__meta">1 of 3</span></header>
+        <div class="w-card__body">State card: 4px rule in the semantic pigment and a wash header strip.</div>
+        <footer class="w-card__foot">{{ w.btn("Dismiss", variant="ghost", size="sm") }}{{ w.btn("Review", variant="tonal", tone=state, size="sm", chevron=True) }}</footer>
+    </article>
+    {%- endfor %}
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ navigation #}
+{% call section("nav", "Navigation", "Nav items, breadcrumb, tabs, segmented", theme) %}
+<div class="g-grid g-grid--2">
+    <nav class="g-navdemo" aria-label="Demo navigation ({{ theme }})">
+        <a class="w-nav__item" href="#" aria-current="page">{{ w.icon("message-circle") }}<span class="w-nav__label">Chat</span></a>
+        <a class="w-nav__item" href="#">{{ w.icon("briefcase") }}<span class="w-nav__label">Work</span><span class="w-count" data-tone="attention">1</span></a>
+        <a class="w-nav__item" href="#">{{ w.icon("box") }}<span class="w-nav__label">Environments</span></a>
+        <a class="w-nav__item" href="#">{{ w.icon("activity") }}<span class="w-nav__label">Trace</span></a>
+    </nav>
+    <div class="g-stack">
+        <nav class="w-breadcrumb" aria-label="Demo breadcrumb ({{ theme }})"><ol class="w-breadcrumb__list">
+            <li class="w-breadcrumb__item"><a href="#">μcli</a></li>
+            <li class="w-breadcrumb__item"><a href="#">atlas-api</a></li>
+            <li class="w-breadcrumb__item"><span aria-current="page">refactor-auth</span></li>
+        </ol></nav>
+        <div class="w-tabs" role="tablist" aria-label="Demo tabs ({{ theme }})">
+            <button type="button" class="w-tabs__tab" role="tab" aria-selected="true">Overview</button>
+            <button type="button" class="w-tabs__tab" role="tab" aria-selected="false">Diff <span class="w-count">3</span></button>
+            <button type="button" class="w-tabs__tab" role="tab" aria-selected="false">Activity</button>
+        </div>
+        <div class="g-row">
+            <div class="w-segmented" role="group" aria-label="Diff view ({{ theme }})">
+                <button type="button" class="w-segmented__option" aria-pressed="true">Unified</button>
+                <button type="button" class="w-segmented__option" aria-pressed="false">Split</button>
+            </div>
+            <div class="w-segmented" data-size="sm" role="radiogroup" aria-label="Theme ({{ theme }})">
+                <button type="button" class="w-segmented__option" role="radio" aria-checked="false">System</button>
+                <button type="button" class="w-segmented__option" role="radio" aria-checked="true">Paper</button>
+                <button type="button" class="w-segmented__option" role="radio" aria-checked="false">Dusk</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ forms #}
+{% call section("forms", "Form", "Fields, switches, checks, slider", theme) %}
+<div class="g-grid g-grid--2">
+    <form class="w-form" onsubmit="return false">
+        <div class="w-field">
+            <label class="w-field__label" for="g-name-{{ theme }}">Environment name</label>
+            <input class="w-input" id="g-name-{{ theme }}" value="gpu-dev" aria-describedby="g-name-hint-{{ theme }}">
+            <p class="w-field__hint" id="g-name-hint-{{ theme }}">Lowercase letters, digits and dashes.</p>
+        </div>
+        <div class="w-field">
+            <label class="w-field__label" for="g-repo-{{ theme }}">Repository</label>
+            <input class="w-input" id="g-repo-{{ theme }}" placeholder="git@github.com:org/repo.git" aria-invalid="true" aria-describedby="g-repo-err-{{ theme }}">
+            <p class="w-field__error" id="g-repo-err-{{ theme }}"><span aria-hidden="true">✗</span> Couldn't reach this remote. Check the URL.</p>
+        </div>
+        <div class="w-field">
+            <label class="w-field__label" for="g-model-{{ theme }}">Model</label>
+            <span class="w-select"><select class="w-select__control" id="g-model-{{ theme }}"><option>claude-opus-5-5</option><option>gpt-5</option></select></span>
+        </div>
+        <div class="w-field">
+            <label class="w-field__label" for="g-docker-{{ theme }}">Dockerfile</label>
+            <textarea class="w-textarea" data-mono id="g-docker-{{ theme }}">FROM python:3.12-slim
+RUN pip install -r requirements.txt</textarea>
+        </div>
+        <div class="w-field">
+            <label class="w-field__label" for="g-disabled-{{ theme }}">Disabled</label>
+            <input class="w-input" id="g-disabled-{{ theme }}" value="read-only value" disabled>
+        </div>
+    </form>
+    <div class="w-form">
+        <label class="w-switch"><span class="w-switch__label">Auto-approve tools</span><input class="w-switch__input" type="checkbox" role="switch"></label>
+        <label class="w-switch"><span class="w-switch__label">Desktop notifications</span><input class="w-switch__input" type="checkbox" role="switch" checked></label>
+        <label class="w-switch"><span class="w-switch__label">Unavailable</span><input class="w-switch__input" type="checkbox" role="switch" disabled></label>
+        <div class="g-row">
+            <label class="w-check"><input class="w-check__input" type="checkbox" checked><span>Always allow this tool</span></label>
+            <label class="w-check"><input class="w-check__input" type="checkbox"><span>Unchecked</span></label>
+        </div>
+        <div class="g-row" role="radiogroup" aria-label="Density ({{ theme }})">
+            <label class="w-check"><input class="w-check__input" type="radio" name="g-density-{{ theme }}" checked><span>Comfortable</span></label>
+            <label class="w-check"><input class="w-check__input" type="radio" name="g-density-{{ theme }}"><span>Compact</span></label>
+        </div>
+        <div class="w-field">
+            <label class="w-field__label" for="g-effort-{{ theme }}">Effort</label>
+            <input class="w-slider" id="g-effort-{{ theme }}" type="range" min="0" max="3" value="2" style="--w-fill: 66%">
+            <div class="w-slider__stops" aria-hidden="true"><span>Low</span><span>Medium</span><span>High</span><span>Max</span></div>
+        </div>
+    </div>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ overlays #}
+{% call section("overlays", "Overlays", "Modal, drawer, menu, toast", theme) %}
+<div class="g-grid g-grid--2">
+    <div class="g-frame">
+        <div class="w-modal">
+            <section class="w-modal__dialog" data-size="sm" role="dialog" aria-modal="false" aria-labelledby="g-modal-{{ theme }}">
+                <header class="w-modal__head"><h2 class="w-modal__title" id="g-modal-{{ theme }}">Delete environment “gpu-dev”?</h2>{{ w.btn("Close", variant="icon", icon="x") }}</header>
+                <div class="w-modal__body">The container and its volumes are removed. Templates made from it are kept.</div>
+                <footer class="w-modal__foot">{{ w.btn("Cancel") }}{{ w.btn("Delete", variant="danger") }}</footer>
+            </section>
+        </div>
+    </div>
+    <div class="g-frame">
+        <div class="w-drawer">
+            <aside class="w-drawer__panel" role="dialog" aria-modal="false" aria-labelledby="g-drawer-{{ theme }}">
+                <header class="w-drawer__head"><h2 class="w-drawer__title" id="g-drawer-{{ theme }}">Settings</h2>{{ w.btn("Close", variant="icon", icon="x") }}</header>
+                <div class="w-drawer__body"><label class="w-switch"><span class="w-switch__label">Reduce decoration</span><input class="w-switch__input" type="checkbox" role="switch"></label></div>
+                <footer class="w-drawer__foot">{{ w.btn("Done", variant="primary", size="sm") }}</footer>
+            </aside>
+        </div>
+    </div>
+</div>
+<div class="g-grid g-grid--2">
+    <div class="w-menu" role="menu" aria-label="Job actions ({{ theme }})">
+        <div class="w-menu__heading">Job</div>
+        <button type="button" class="w-menu__item" role="menuitem">{{ w.icon("refresh-cw", size="sm") }}<span class="w-menu__label">Retry stage</span><kbd class="w-menu__shortcut">R</kbd></button>
+        <button type="button" class="w-menu__item" role="menuitemcheckbox" aria-checked="true">{{ w.icon("eye", size="sm") }}<span class="w-menu__label">Follow logs</span></button>
+        <button type="button" class="w-menu__item" role="menuitem" disabled>{{ w.icon("git-branch", size="sm") }}<span class="w-menu__label">Push (nothing to push)</span></button>
+        <hr class="w-menu__separator">
+        <button type="button" class="w-menu__item" role="menuitem" data-tone="danger">{{ w.icon("trash-2", size="sm") }}<span class="w-menu__label">Delete job</span></button>
+    </div>
+    <div class="g-stack">
+        <div class="w-popover" role="dialog" aria-label="Context ({{ theme }})">
+            <strong class="g-ink">84k of 200k tokens</strong>
+            <p class="g-ink3">Real-frame fill · drift ×1.07</p>
+        </div>
+        <div class="w-toast" data-tone="ok"><span class="w-toast__glyph" aria-hidden="true">✓</span><span class="w-toast__msg">Patch applied to 1 file</span>{{ w.btn("Undo", variant="ghost", size="sm") }}<button type="button" class="w-toast__close" aria-label="Dismiss">{{ w.icon("x", size="sm") }}</button></div>
+        <div class="w-toast" data-tone="danger"><span class="w-toast__glyph" aria-hidden="true">✗</span><span class="w-toast__msg">Couldn't reach Ollama at localhost:11434. Is it running?</span><button type="button" class="w-toast__close" aria-label="Dismiss">{{ w.icon("x", size="sm") }}</button></div>
+        <div class="w-toast" data-tone="info"><span class="w-toast__glyph" aria-hidden="true">●</span><span class="w-toast__msg">3 changes waiting to sync</span></div>
+    </div>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ banners #}
+{% call section("banners", "Banner", "Page and panel state strips", theme) %}
+<div class="g-stack">
+    <div class="w-banner" data-tone="plan" role="status"><span class="w-banner__glyph" aria-hidden="true">◇</span><p class="w-banner__msg">Plan mode — read-only. Writing is blocked.</p>{{ w.btn("Turn off", variant="tonal", tone="plan", size="sm") }}</div>
+    <div class="w-banner" data-tone="caution" role="status"><span class="w-banner__glyph" aria-hidden="true">●</span><p class="w-banner__msg">Auto-approve is on — Mucli will run tools without asking</p>{{ w.btn("Turn off", variant="tonal", tone="caution", size="sm") }}</div>
+    <div class="w-banner" data-tone="attention" role="status"><span class="w-banner__glyph" aria-hidden="true">◆</span><p class="w-banner__msg"><strong>Setup incomplete.</strong> Add a Git remote to push jobs.</p>{{ w.btn("Open setup", variant="tonal", tone="attention", size="sm") }}<button type="button" class="w-banner__dismiss" aria-label="Dismiss">{{ w.icon("x", size="sm") }}</button></div>
+    <div class="w-banner" data-tone="danger" role="status"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">Disconnected from the Mucli server.</p>{{ w.btn("Retry", variant="tonal", tone="danger", size="sm") }}</div>
+    <div class="w-banner" data-tone="info" role="status"><span class="w-banner__glyph" aria-hidden="true">●</span><p class="w-banner__msg">A new model registry is available.</p></div>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ empty / error #}
+{% call section("empty", "Empty states", "Spot washes, never a blank pane", theme) %}
+<div class="g-grid">
+    {{ w.empty_state("No jobs yet", "Start one from a ticket or a prompt.", icon="briefcase", tone="accent", action="New job") }}
+    {{ w.empty_state("You're all caught up", "Nothing needs you right now.", icon="circle-check", tone="ok", size="sm") }}
+    {{ w.empty_state("Couldn't load traces", "The trace directory isn't readable.", icon="alert-triangle", variant="error", detail="Check MUCLI_HOME permissions, then retry.", action="Retry", action_variant="secondary") }}
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ table #}
+{% call section("table", "Table", "Hairline rows, sticky sunken header", theme) %}
+<div class="w-table-wrap">
+    <table class="w-table" data-stack>
+        <thead><tr><th>Job</th><th>Repo</th><th>State</th><th data-num>Cost</th><th data-num>Age</th><th><span class="w-sr-only">Actions</span></th></tr></thead>
+        <tbody>
+            {%- for row in table_rows %}
+            <tr{% if loop.first %} aria-selected="true"{% endif %}>
+                <td data-label="Job">{{ row.job }}</td>
+                <td data-label="Repo" data-mono>{{ row.repo }}</td>
+                <td data-label="State">{{ w.status(row.state) }}</td>
+                <td data-label="Cost" data-num>{{ row.cost }}</td>
+                <td data-label="Age" data-num>{{ row.time }}</td>
+                <td class="w-table__actions">{{ w.btn("More actions", variant="icon", icon="more-horizontal", size="sm") }}</td>
+            </tr>
+            {%- endfor %}
+        </tbody>
+    </table>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ progress #}
+{% call section("progress", "Progress", "Ink drop, bars, skeletons, stepper", theme) %}
+<div class="g-row">
+    <span class="w-inkdrop" role="status" aria-label="Working"></span>
+    <span class="w-inkdrop" data-size="sm" data-tone="attention" role="status" aria-label="Waiting"></span>
+    <span class="w-inkdrop" data-size="lg" data-tone="ok" role="status" aria-label="Settling"></span>
+    {{ w.status("active", as_chip=False, label="Implementing") }}
+    {{ w.status("done", as_chip=False) }}
+    {{ w.status("failed", as_chip=False) }}
+</div>
+<div class="g-stack">
+    <div class="w-progress" role="progressbar" aria-label="Build" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" style="--w-progress: 25%"><span class="w-progress__bar"></span></div>
+    <div class="w-progress" data-tone="ok" role="progressbar" aria-label="Tests" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70" style="--w-progress: 70%"><span class="w-progress__bar"></span></div>
+    <div class="w-progress" data-indeterminate role="progressbar" aria-label="Preparing"><span class="w-progress__bar"></span></div>
+    <div class="g-skeletons"><span class="w-skeleton" data-shape="circle"></span><div><span class="w-skeleton" style="--w-skeleton-w: 60%"></span><span class="w-skeleton" style="--w-skeleton-w: 85%"></span><span class="w-skeleton" style="--w-skeleton-w: 40%"></span></div></div>
+    <ol class="w-stepper" aria-label="Job progress ({{ theme }})">
+        {%- for status, label in stepper %}
+        <li class="w-stepper__step" data-status="{{ status }}"{% if status == "active" %} aria-current="step"{% endif %}><span aria-hidden="true">{{ wash_vocab.status[status].glyph }}</span>{{ label }}</li>
+        {%- endfor %}
+    </ol>
+    <ol class="w-stepper" aria-label="Job waiting ({{ theme }})">
+        <li class="w-stepper__step" data-status="done"><span aria-hidden="true">✓</span>Planning</li>
+        <li class="w-stepper__step" data-status="waiting" aria-current="step"><span aria-hidden="true">◆</span>Plan review</li>
+        <li class="w-stepper__step" data-status="pending"><span aria-hidden="true">○</span>Implementing</li>
+        <li class="w-stepper__step" data-status="failed"><span aria-hidden="true">✗</span>Checking</li>
+        <li class="w-stepper__step" data-status="skipped"><span aria-hidden="true">–</span>Pushing</li>
+    </ol>
+    <ol class="w-stepper" data-compact aria-label="Compact stepper ({{ theme }})">
+        {%- for status, label in stepper %}
+        <li class="w-stepper__step" data-status="{{ status }}"{% if status == "active" %} aria-current="step"{% endif %}><span aria-hidden="true">{{ wash_vocab.status[status].glyph }}</span>{{ label }}</li>
+        {%- endfor %}
+    </ol>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ icons #}
+{% call section("icons", "Icon", "Sprite icons · 16 / 20 / 24", theme) %}
+<ul class="g-icons">
+    {%- for name in icons %}
+    <li title="{{ name }}">{{ w.icon(name) }}<span>{{ name }}</span></li>
+    {%- endfor %}
+</ul>
+<div class="g-row">{{ w.icon("drop", size="sm") }}{{ w.icon("drop") }}{{ w.icon("drop", size="lg") }}</div>
+{% endcall %}
+{%- endmacro -%}
+
+{% block content %}
+<div class="w-hero" data-art="hero">
+    <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Design system</span>
+    <h1 class="w-hero__title">Wash component gallery</h1>
+    <p class="w-hero__lede">Every base component in every state, Paper and Dusk side by side. Build pages from these <code>.w-*</code> classes and the macros in <code>templates/macros/wash.html</code>.</p>
+    <div class="w-btn-row" x-data="{ open: false }">
+        <button type="button" class="w-btn" data-variant="primary" @click="open = true" id="g-open-modal">Open a live modal</button>
+        <button type="button" class="w-btn" data-variant="secondary" onclick="WashToast.show('Saved — this toast lives in the polite region', 'ok')">Show a toast</button>
+        <button type="button" class="w-btn" data-variant="ghost" onclick="WashToast.show('Something failed — errors use the assertive region', 'danger')">Show an error</button>
+        <div class="w-modal" x-dialog="open" x-show="open" x-cloak @dialog-close="open = false" @click.self="open = false">
+            <section class="w-modal__dialog" data-size="sm" role="dialog" aria-modal="true" aria-labelledby="g-live-modal-title">
+                <header class="w-modal__head">
+                    <h2 class="w-modal__title" id="g-live-modal-title">Live dialog</h2>
+                    <button type="button" class="w-btn" data-variant="icon" aria-label="Close" title="Close" @click="open = false">{{ w.icon("x") }}</button>
+                </header>
+                <div class="w-modal__body">Driven by the shared <code>x-dialog</code> directive: focus is trapped, Esc closes, and focus returns to the opener.</div>
+                <footer class="w-modal__foot">
+                    <button type="button" class="w-btn" data-variant="secondary" @click="open = false">Cancel</button>
+                    <button type="button" class="w-btn" data-variant="primary" @click="open = false">Got it</button>
+                </footer>
+            </section>
+        </div>
+    </div>
+</div>
+<div class="g-themes">
+    {%- for theme in themes %}
+    <div class="g-theme" data-theme="{{ theme }}">
+        <p class="g-theme__label">{{ theme | capitalize }}</p>
+        {{ gallery(theme) }}
+    </div>
+    {%- endfor %}
+</div>
+{% endblock %}

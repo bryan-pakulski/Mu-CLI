@@ -9,7 +9,7 @@ WORK_ANALYSIS_LINK = ROOT / "mu" / "gui" / "static" / "js" / "work_analysis_link
 WORK_POLISH = ROOT / "mu" / "gui" / "static" / "css" / "work_polish.css"
 WORK_MANAGEMENT = ROOT / "mu" / "gui" / "static" / "js" / "work_management.js"
 WORK_MANAGEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "work_management.css"
-JOB_TRACE_HTML = ROOT / "mu" / "gui" / "static" / "job_trace.html"
+JOB_TRACE_HTML = ROOT / "mu" / "gui" / "templates" / "job_trace.html"
 JOB_TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace.js"
 JOB_TRACE_DELTA_JS = ROOT / "mu" / "gui" / "static" / "js" / "job_trace_signed_delta.js"
 JOB_TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "job_trace.css"
@@ -53,8 +53,9 @@ def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
 
     assert 'work-header product-header' in template
     assert 'product-icon-button work-header-icon' in template
-    assert 'Toggle appearance' in template
-    assert 'data-route-theme' in template
+    # Wash W2: the theme switch is the shared sprite icon button macro.
+    assert 'w.theme_toggle(extra_class="product-icon-button work-header-icon")' in template
+    assert 'data-route-theme' in (ROOT / "mu" / "gui" / "templates" / "macros" / "wash.html").read_text(encoding="utf-8")
     assert 'title="Analyze jobs"' in template
     assert 'title="Model pricing"' in template
     assert 'title="Manage jobs"' in template
@@ -97,7 +98,9 @@ def test_web_job_management_queries_archives_reports_and_exports():
 
     assert 'id="work-manage"' in template
     assert 'id="work-management-backdrop"' in template
-    assert '/static/css/work_management.css' in template
+    # Wash W2: work_management.css is imported by the /work page bundle.
+    assert '/static/css/wash/patterns/work.css' in template
+    assert 'work_management.css' in (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")
     assert '/static/js/work_management.js' in template
     assert '/api/jobs/history?' in script
     assert '/api/jobs/report?' in script
@@ -127,11 +130,14 @@ def test_web_job_trace_analyzer_matches_product_chrome_and_drills_lifecycle():
     detail = JOB_ANALYSIS_DETAIL.read_text(encoding="utf-8")
     routers_init = ROUTERS_INIT.read_text(encoding="utf-8")
 
-    assert 'href="/static/job_trace.html"' in template
+    # Wash W2: the analyzer is a Jinja page at /jobs/trace on the shared
+    # layout (top bar, sidebar, shared theme toggle) instead of static HTML
+    # with its own product header and theme button.
+    assert 'href="/jobs/trace"' in template
     assert 'Job Trace Analyzer' in html
-    assert 'product-app job-trace-shell' in html
-    assert 'header product-header job-trace-header' in html
-    assert 'id="jt-theme"' in html
+    assert '{% extends "_layout.html" %}' in html
+    assert 'class="job-trace-shell"' in html
+    assert 'id="jt-job-select"' in html and 'id="jt-refresh"' in html
     assert 'Compare with…' in html
     assert 'Agent harness trace' in html
     assert 'state residence is separated from actual execution' in html

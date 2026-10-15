@@ -1,3 +1,4 @@
+{% import "macros/wash.html" as w %}
 <div class="welcome welcome-launcher" x-data="welcomeView()" x-init="load()">
     <header class="welcome-hero">
         <div class="welcome-mark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 32 32"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg><span>mucli</span></div>
@@ -37,7 +38,7 @@
 
     <footer class="welcome-footnote">
         <span>Providers use credentials configured on the MuCLI host.</span>
-        <button class="subtle" @click="$store.theme.toggle()">toggle theme</button>
+        {{ w.theme_toggle() }}
     </footer>
 
     <!-- Sessions -->

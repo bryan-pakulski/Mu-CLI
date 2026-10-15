@@ -1,0 +1,75 @@
+/* Toast (G§9.16) — level 2, radius-md, max 360px, bottom-right.
+ *
+ * Regions (templates/partials/toast_region.html, on every page):
+ *   <div class="w-toast-region" role="status" aria-live="polite">…info/success…</div>
+ *   <div class="w-toast-region" data-assertive role="alert" aria-live="assertive">…errors…</div>
+ *
+ *   <div class="w-toast" data-tone="ok|danger|attention|info">
+ *     <span class="w-toast__glyph" aria-hidden="true">✓</span>
+ *     <span class="w-toast__msg">Patch applied to 1 file</span>
+ *     <button class="w-btn" data-variant="ghost" data-size="sm">Undo</button>
+ *     <button class="w-toast__close" aria-label="Dismiss">…</button>
+ *   </div>
+ *
+ * Toasts bleed in (blur → sharp). Info/success auto-dismiss after 5s
+ * (caller); errors persist.
+ */
+.w-toast-region {
+    position: fixed;
+    right: var(--wash-space-6);
+    bottom: var(--wash-space-6);
+    z-index: var(--wash-z-toast);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--wash-space-2);
+    width: min(360px, calc(100vw - 32px));
+    pointer-events: none;
+}
+.w-toast-region[data-assertive] { bottom: calc(var(--wash-space-6) + var(--w-toast-offset, 0px)); }
+.w-toast-region:empty { display: none; }
+.w-toast-region > * { pointer-events: auto; }
+.w-toast {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    width: 100%;
+    max-width: 360px;
+    min-height: 44px;
+    padding: var(--wash-space-2) var(--wash-space-2) var(--wash-space-2) var(--wash-space-4);
+    border: 1px solid var(--wash-hairline);
+    border-radius: var(--wash-radius-md);
+    background: var(--wash-raised);
+    color: var(--wash-ink);
+    box-shadow: var(--wash-elevation-2);
+    font-size: var(--wash-type-body-size);
+    animation: w-toast-bleed var(--wash-motion-bleed) var(--wash-ease-bleed) both;
+}
+[data-theme="dusk"] .w-toast,
+[data-theme="dark"] .w-toast { box-shadow: var(--wash-elevation-2), inset 0 1px 0 var(--wash-hairline-strong); }
+.w-toast__glyph { flex: none; color: var(--w-tone-ink, var(--wash-ink-2)); font-weight: 600; }
+.w-toast__msg { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.w-toast__close {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--wash-ink-3);
+    cursor: pointer;
+}
+.w-toast__close:hover { background: var(--wash-sunken); color: var(--wash-ink); }
+.w-toast__close :is(svg, .w-icon) { width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); }
+.w-toast[data-leaving] { opacity: 0; transition: opacity var(--wash-motion-small) var(--wash-ease-small); }
+@keyframes w-toast-bleed {
+    from { opacity: 0; filter: blur(8px); }
+    to { opacity: 1; filter: none; }
+}
+@media (width < 600px) {
+    .w-toast-region { right: var(--wash-space-4); bottom: var(--wash-space-4); left: var(--wash-space-4); width: auto; align-items: stretch; }
+    .w-toast { max-width: none; }
+}

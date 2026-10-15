@@ -1,0 +1,16 @@
+/* Page bundle — Main chat shell (/). Historical order: product, crystal, clarity,
+ * refinement, conversation, theme, then the stylesheets product.js and
+ * web_shell.js used to inject at runtime (popouts, pricing settings, pricing rows).
+ *
+ * Linked after wash.css (which declares the layer order), so these imports
+ * land in the lowest-priority `legacy` layer. Wash rules for this page go
+ * in the `patterns` layer below. */
+@import url("../../product.css") layer(legacy);
+@import url("../../crystal.css") layer(legacy);
+@import url("../../clarity.css") layer(legacy);
+@import url("../../refinement.css") layer(legacy);
+@import url("../../conversation.css") layer(legacy);
+@import url("../../theme.css") layer(legacy);
+@import url("../../popouts.css") layer(legacy);
+@import url("../../pricing_settings.css") layer(legacy);
+@import url("../../pricing_rows.css") layer(legacy);

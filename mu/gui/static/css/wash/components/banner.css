@@ -1,0 +1,46 @@
+/* Banner (G§9.16) — a full-width state strip at the top of a page or panel.
+ *
+ *   <div class="w-banner" data-tone="plan|caution|attention|danger|info|ok" role="status">
+ *     <span class="w-banner__glyph" aria-hidden="true">◆</span>
+ *     <p class="w-banner__msg">Plan mode — read-only. Writing is blocked.</p>
+ *     <button class="w-btn" data-variant="tonal" data-tone="plan" data-size="sm">Turn off</button>
+ *     <button class="w-banner__dismiss" aria-label="Dismiss">…</button>   ← omit for YOLO (never dismissable)
+ *   </div>
+ */
+.w-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    min-height: 44px;
+    padding: var(--wash-space-2) var(--wash-space-3) var(--wash-space-2) var(--wash-space-4);
+    border-radius: var(--wash-radius-md);
+    background: var(--w-tone-wash, var(--wash-info-wash));
+    color: var(--w-tone-ink, var(--wash-info-ink));
+    font-size: var(--wash-type-body-size);
+}
+.w-banner[data-tone="plan"] { outline: 1px dashed var(--wash-plan-ink); outline-offset: -1px; }
+.w-banner[data-flush] { border-radius: 0; }
+.w-banner__glyph { flex: none; font-weight: 600; }
+.w-banner__msg { flex: 1 1 auto; min-width: 0; margin: 0; }
+.w-banner__msg strong { font-weight: 600; }
+.w-banner__dismiss {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.w-banner__dismiss:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.w-banner__dismiss :is(svg, .w-icon) { width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); }
+/* The banner already sits on the tone wash: its tonal action steps up one
+ * pigment notch so the pill stays visible. */
+.w-banner .w-btn[data-variant="tonal"] {
+    --w-btn-bg: color-mix(in srgb, var(--w-tone-pigment, var(--wash-info-pigment)) 24%, var(--w-tone-wash, var(--wash-info-wash)));
+    --w-btn-hover: color-mix(in srgb, var(--w-tone-pigment, var(--wash-info-pigment)) 36%, var(--w-tone-wash, var(--wash-info-wash)));
+}

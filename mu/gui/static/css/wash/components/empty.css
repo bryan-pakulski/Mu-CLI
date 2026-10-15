@@ -1,0 +1,104 @@
+/* Empty and error states (G§9.18)
+ *
+ *   <div class="w-empty" data-tone="accent|running|ok|attention|danger|plan" [data-variant="error"]>
+ *     <div class="w-empty__art" aria-hidden="true"><svg class="w-icon">…</svg></div>
+ *     <h3 class="w-empty__title">No jobs yet</h3>
+ *     <p class="w-empty__body">Start one from a ticket or a prompt.</p>
+ *     <div class="w-empty__actions"><button class="w-btn" data-variant="primary">New job</button></div>
+ *   </div>
+ *
+ * The spot wash is a pre-painted watercolour blot (static/wash/art/spot-*)
+ * whose background is the theme canvas. It is blended `darken` on Paper and
+ * `lighten` on Dusk: min/max against an identical canvas is exact, so the
+ * square edge vanishes (multiply/screen would leave a faint darker/lighter
+ * square, C×C ≠ C). Error states default to the rose spot. With
+ * "Reduce decoration" or reduced transparency the blot becomes a flat wash.
+ */
+.w-empty {
+    --w-spot-paper: url("/static/wash/art/spot-lagoon-paper-320.webp");
+    --w-spot-dusk: url("/static/wash/art/spot-lagoon-dusk-320.webp");
+    --w-spot: var(--w-spot-paper);
+    --w-spot-blend: darken;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--wash-space-2);
+    margin: 0 auto;
+    padding: var(--wash-space-7) var(--wash-space-5);
+    text-align: center;
+}
+[data-theme="dusk"] .w-empty,
+[data-theme="dark"] .w-empty { --w-spot: var(--w-spot-dusk); --w-spot-blend: lighten; }
+.w-empty[data-tone="running"],
+.w-empty[data-tone="info"] { --w-spot-paper: url("/static/wash/art/spot-sky-paper-320.webp"); --w-spot-dusk: url("/static/wash/art/spot-sky-dusk-320.webp"); }
+.w-empty[data-tone="ok"] { --w-spot-paper: url("/static/wash/art/spot-meadow-paper-320.webp"); --w-spot-dusk: url("/static/wash/art/spot-meadow-dusk-320.webp"); }
+.w-empty[data-tone="attention"],
+.w-empty[data-tone="caution"] { --w-spot-paper: url("/static/wash/art/spot-apricot-paper-320.webp"); --w-spot-dusk: url("/static/wash/art/spot-apricot-dusk-320.webp"); }
+.w-empty[data-tone="plan"] { --w-spot-paper: url("/static/wash/art/spot-lilac-paper-320.webp"); --w-spot-dusk: url("/static/wash/art/spot-lilac-dusk-320.webp"); }
+.w-empty[data-tone="danger"],
+.w-empty[data-variant="error"] { --w-spot-paper: url("/static/wash/art/spot-rose-paper-320.webp"); --w-spot-dusk: url("/static/wash/art/spot-rose-dusk-320.webp"); }
+.w-empty__art {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 128px;
+    height: 112px;
+    margin-bottom: var(--wash-space-2);
+    color: var(--w-tone-ink, var(--wash-accent-ink));
+}
+.w-empty__art::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    background: var(--w-spot) center / contain no-repeat;
+    mix-blend-mode: var(--w-spot-blend);
+    animation: w-empty-bleed var(--wash-motion-bleed) var(--wash-ease-bleed) both;
+}
+.w-empty__art > * { position: relative; }
+.w-empty__art :is(svg, .w-icon) { width: 32px; height: 32px; }
+.w-empty__title {
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+}
+.w-empty__body {
+    max-width: 360px;
+    margin: 0;
+    color: var(--wash-ink-2);
+}
+.w-empty__detail {
+    max-width: 360px;
+    margin: 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+.w-empty__actions {
+    display: flex;
+    justify-content: center;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+    margin-top: var(--wash-space-3);
+}
+.w-empty[data-size="sm"] { padding: var(--wash-space-5) var(--wash-space-4); }
+.w-empty[data-size="sm"] .w-empty__art { width: 88px; height: 76px; }
+@keyframes w-empty-bleed {
+    from { opacity: 0; filter: blur(8px); }
+    to { opacity: 1; filter: none; }
+}
+:root[data-decoration="reduced"] .w-empty__art::before {
+    inset: 12px 20px;
+    border-radius: 50%;
+    background: var(--w-tone-wash, var(--wash-accent-wash));
+    mix-blend-mode: normal;
+}
+@media (prefers-reduced-transparency: reduce) {
+    .w-empty__art::before {
+        inset: 12px 20px;
+        border-radius: 50%;
+        background: var(--w-tone-wash, var(--wash-accent-wash));
+        mix-blend-mode: normal;
+    }
+}

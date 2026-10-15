@@ -133,7 +133,10 @@ def build_css() -> str:
         + "/* Breakpoints (media queries cannot use custom properties): "
         + ", ".join(f"{k} {v}px" for k, v in bp.items()) + " */\n\n"
         + "@layer tokens {\n"
-        + ":root {\n" + static + "\n}\n\n"
+        # Aliases (semantic → pigment, mode, layer, …) are re-declared on every
+        # [data-theme] scope so a nested theme (e.g. the /design gallery's
+        # side-by-side panels) resolves them against its own pigments.
+        + ":root,\n[data-theme] {\n" + static + "\n}\n\n"
         + ":root,\n[data-theme=\"paper\"],\n[data-theme=\"light\"] {\n" + paper + "\n}\n\n"
         + "[data-theme=\"dusk\"],\n[data-theme=\"dark\"] {\n" + dusk + "\n}\n\n"
         + "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme]) {\n"

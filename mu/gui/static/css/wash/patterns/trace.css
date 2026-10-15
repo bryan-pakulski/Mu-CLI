@@ -1,0 +1,36 @@
+/* Page bundle — Trace analyzer (/trace). trace.css imports route-product.css itself.
+ *
+ * Linked after wash.css (which declares the layer order), so these imports
+ * land in the lowest-priority `legacy` layer. Wash rules for this page go
+ * in the `patterns` layer below. */
+@import url("../../trace.css") layer(legacy);
+@import url("../../theme.css") layer(legacy);
+
+/* W2 a11y: the run suspects, tool histogram rows, turn labels and tool rows
+ * are now <button>s (they were clickable div/span). Strip UA and generic
+ * legacy button chrome at element specificity so the existing .trace-*
+ * class rules keep their look. Lives in the legacy layer on purpose, after
+ * the imports above. */
+@layer legacy {
+    button:where(.trace-suspect, .trace-hist-row, .trace-conv-tool, .trace-conv-turn-iters) {
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        line-height: inherit;
+        text-align: left;
+        white-space: normal;
+    }
+    button:where(.trace-suspect, .trace-hist-row) { width: 100%; }
+    button:where(.trace-conv-tool) { width: calc(100% + var(--space-4)); }
+    button:where(.trace-conv-tool) .trace-conv-tool-prev { display: block; white-space: pre-wrap; }
+}
+
+/* Shared-shell fit: the analyzer scrolls inside the Wash stage. */
+@layer patterns {
+    .trace-body .trace-shell { min-height: 100%; }
+}

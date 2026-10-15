@@ -1,0 +1,69 @@
+{#- Shared Wash layout (spec §4.2). Every page extends this, directly or via
+    base.html. Blocks:
+
+      title          <title> text
+      page_css       the page's bundle <link> (static/css/wash/patterns/*.css)
+      head_scripts   page / vendor scripts (defer where possible)
+      body_class, body_attrs
+      page           the whole body content; defaults to the app shell below.
+                     Pages with their own chrome (chat, work) replace it.
+      crumbs         <li class="w-breadcrumb__item"> items after "μcli"
+      topbar_chips   <li> status chips (.w-chip) on the right of the top bar
+      topbar_tools   tool buttons before the theme toggle
+      content        page content inside <main class="w-stage">
+      overlays       global modals / popovers (partials/*.html)
+      body_end       late scripts
+
+    Context: `nav_active` (chat | work | environments | trace | job_trace |
+    model_costs | design) highlights the sidebar item.
+-#}
+{%- import "macros/wash.html" as w -%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="{% block viewport %}width=device-width, initial-scale=1, viewport-fit=cover{% endblock %}">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}μcli{% endblock %}</title>
+    <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+    {% include "partials/theme_bootstrap.html" %}
+    <link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/wash/wash.css">
+    {% block page_css %}{% endblock %}
+    <script src="/static/js/wash_tokens.js"></script>
+    <script src="/static/js/route_theme.js" defer></script>
+    <script src="/static/js/wash_shell.js" defer></script>
+    {% block head_scripts %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}"{% block body_attrs %}{% endblock %}>
+{% block page %}
+<div class="w-shell" id="w-shell" data-shell>
+    <a class="w-skip-link" href="#w-main">Skip to content</a>
+    <header class="w-topbar">
+        <button type="button" class="w-btn w-topbar__menu" data-variant="icon" data-shell-menu
+                aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
+            {{ w.icon("menu") }}
+        </button>
+        <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-drop" aria-hidden="true"></span>μcli</a>
+        <nav class="w-breadcrumb" aria-label="Breadcrumb">
+            <ol class="w-breadcrumb__list">{% block crumbs %}{% endblock %}</ol>
+        </nav>
+        <span class="w-topbar__spacer"></span>
+        <ul class="w-topbar__chips" aria-label="Status">{% block topbar_chips %}{% endblock %}</ul>
+        <div class="w-topbar__tools">
+            {% block topbar_tools %}{% endblock %}
+            {{ w.theme_toggle() }}
+        </div>
+    </header>
+    {% include "partials/sidebar.html" %}
+    <main class="w-stage" id="w-main" tabindex="-1">
+        {% block content %}{% endblock %}
+    </main>
+</div>
+{% endblock %}
+{% block overlays %}{% endblock %}
+{% include "partials/toast_region.html" %}
+{% include "partials/palette.html" %}
+{% block body_end %}{% endblock %}
+</body>
+</html>

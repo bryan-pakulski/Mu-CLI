@@ -1467,7 +1467,7 @@ def run_turn(session, text, *, origin="user"):
                         # per-tool progress tracker, so this MUST keep firing
                         # regardless of how the parent terminal renders it.
                         session.ui.show_info(
-                            f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
+                            f"● Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                         )
                     logger.info(
                         f"Tool call: {part.tool_name} with args {part.tool_args}"
@@ -1926,7 +1926,7 @@ def run_turn(session, text, *, origin="user"):
                     if session.ui:
                         show_markup(
                             session.ui,
-                            "[dim]Compacting turn history (removing tool metadata)...[/dim]",
+                            "[wash.muted]Compacting turn history (removing tool metadata)...[/wash.muted]",
                         )
                     _sm_ = session.session_manager
                     _sm_._pending_compaction_iter = iteration
@@ -1992,7 +1992,7 @@ def run_turn(session, text, *, origin="user"):
                 if session.ui:
                     show_markup(
                         session.ui,
-                        f"\n[bold yellow]Turn contains {len(approval_plans)} modifications requiring approval.[/bold yellow]",
+                        f"\n[wash.attention.bold]Turn contains {len(approval_plans)} modifications requiring approval.[/wash.attention.bold]",
                     )
                 for approval_plan in approval_plans.values():
                     for modification in approval_plan.modifications:
@@ -2053,7 +2053,7 @@ def run_turn(session, text, *, origin="user"):
                         if session.ui:
                             show_markup(
                                 session.ui,
-                                f"  [yellow]Auto-retrying malformed patch for {esc(str(part.tool_name))}...[/yellow]",
+                                f"  [wash.caution]Auto-retrying malformed patch for {esc(str(part.tool_name))}...[/wash.caution]",
                             )
                         result = (
                             "Error: Malformed patch detected. Please ensure your diff is correctly "
@@ -2259,7 +2259,7 @@ def run_turn(session, text, *, origin="user"):
 
                         if len(par_calls) > 1 and session.ui:
                             session.ui.show_info(
-                                f"⚡ Dispatching {len(par_calls)} tool call(s) in "
+                                f"Dispatching {len(par_calls)} tool call(s) in "
                                 f"parallel (max_concurrency={max_concurrency})."
                             )
 

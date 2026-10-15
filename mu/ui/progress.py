@@ -1,19 +1,19 @@
 """Live progress tracker for parallel sub-agent dispatch.
 
 When the parent agent issues multiple `spawn_agent` calls in one turn,
-per-call "🔨 Running tool: X" log lines flood the terminal —
+per-call "Running tool: X" log lines flood the terminal —
 each child can fire dozens of those during its run.
 
 `SubagentProgressTracker` replaces that stream with a compact in-place
-live panel that shows one row per active sub-agent:
+live panel that shows one row per active sub-agent, using the shared
+status glyphs (``● ◆ ✓ ✗ ○ –``) and one ``series`` pigment per agent:
 
-    ┌─ Sub-agents (3 active, 1 done) ────────────────────────┐
-    │ d │ task                  │ status              │ calls │ elapsed │
-    │ 1 │ Review agent loop ar… │ 🔨 read_file        │   3   │  12.4s  │
-    │ 1 │ Review available tools │ 🔨 search_for_str… │   5   │  12.4s  │
-    │ 1 │ Review commands & UI  │ ✓ done — All 11…    │   4   │   8.1s  │
-    │ 1 │ Review tests & core   │ 🔨 list_dir         │   2   │   9.2s  │
-    └────────────────────────────────────────────────────────┘
+    Sub-agents (3 active, 1 done)
+     depth  task                    status                 calls  elapsed
+     d=1    Review agent loop ar…   ● read  read_file          3    12.4s
+     d=1    Review available tools  ● search  search_for…      5    12.4s
+     d=1    Review commands & UI    ✓ All 11 commands …        4     8.1s
+     d=1    Review tests & core     ◆ stuck · 3x list_dir      2     9.2s
 
 Thread-safety: every state-changing method takes a lock. The render
 method takes a snapshot so the Rich `Live` redraw never observes a
@@ -290,9 +290,13 @@ class SubagentProgressTracker:
         """Return a Rich Table renderable for the current snapshot."""
         # Local imports — rich is a hard dep of the harness but we keep the
         # tracker importable in headless contexts that don't render anything.
-        from rich.table import Table
         from rich.text import Text
-        from rich import box
+
+        from mu.ui.theme import glyphs
+        from mu.ui.theme.components import table as wash_table
+        from mu.design import load_tokens
+
+        series_count = len(load_tokens()["series"])
 
         snap = self.snapshot()
         running = sum(1 for s in snap if s.status in ("running", "stuck"))
@@ -309,8 +313,8 @@ class SubagentProgressTracker:
             title_parts.append(f"{killed} killed")
         title = "Sub-agents (" + ", ".join(title_parts) + ")"
 
-        table = Table(title=title, box=box.ROUNDED, expand=True, show_lines=False)
-        table.add_column("depth", justify="center", width=5, style="cyan", no_wrap=True)
+        table = wash_table(title=title, expand=True, show_lines=False)
+        table.add_column("depth", justify="center", width=5, no_wrap=True)
         table.add_column("task", overflow="ellipsis", no_wrap=True, max_width=max_task_chars)
         table.add_column(
             "status", overflow="ellipsis", no_wrap=True, max_width=max_status_chars
@@ -325,14 +329,12 @@ class SubagentProgressTracker:
         # context above its children.
         if any(s.status in ("running", "stuck") for s in snap):
             parent_status = Text(
-                "orchestrating — waiting on N children".replace(
-                    "N", str(running)
-                ),
-                style="bold cyan",
+                f"{glyphs.ACTIVE} orchestrating — waiting on {running} children",
+                style="wash.running.bold",
             )
-            table.add_row("d=0", "(parent)", parent_status, "", "")
+            table.add_row(Text("d=0", style="wash.muted"), "(parent)", parent_status, "", "")
 
-        for state in snap:
+        for index, state in enumerate(snap):
             task_text = state.task if len(state.task) <= max_task_chars else state.task[: max_task_chars - 1] + "…"
             end_time = state.finished_at if state.finished_at is not None else now
             elapsed_s = max(0.0, end_time - state.started_at)
@@ -340,31 +342,35 @@ class SubagentProgressTracker:
 
             if state.status == "running":
                 tool = state.current_tool or "(starting…)"
-                status_text = Text(f"🔨 {tool}", style="yellow")
+                kind = glyphs.tool_kind_label(tool) if state.current_tool else ""
+                status_text = Text(f"{glyphs.ACTIVE} ", style="wash.running")
+                if kind:
+                    status_text.append(f"{kind}  ", style="wash.running")
+                status_text.append(tool, style="wash.ink2")
             elif state.status == "stuck":
                 tool = state.current_tool or "?"
                 status_text = Text(
-                    f"⚠ stuck — {state.repeat_count}x {tool}", style="bold yellow"
+                    f"{glyphs.WAITING} stuck · {state.repeat_count}x {tool}",
+                    style="wash.attention.bold",
                 )
             elif state.status == "killed":
                 reason = state.kill_reason or "killed"
-                summary = state.summary or reason
-                if len(summary) > max_status_chars - 6:
-                    summary = summary[: max_status_chars - 7] + "…"
-                status_text = Text(f"⏹ killed ({reason})", style="magenta")
+                status_text = Text(f"{glyphs.SKIPPED} killed ({reason})", style="wash.neutral")
             elif state.status == "done":
                 summary = state.summary
                 if len(summary) > max_status_chars - 4:
                     summary = summary[: max_status_chars - 5] + "…"
-                status_text = Text(f"✓ {summary}", style="green")
+                status_text = Text(f"{glyphs.DONE} ", style="wash.ok")
+                status_text.append(summary, style="wash.ink2")
             else:
                 summary = state.summary
                 if len(summary) > max_status_chars - 4:
                     summary = summary[: max_status_chars - 5] + "…"
-                status_text = Text(f"✗ {summary}", style="red")
+                status_text = Text(f"{glyphs.FAILED} ", style="wash.danger")
+                status_text.append(summary, style="wash.danger")
 
             table.add_row(
-                f"d={state.depth}",
+                Text(f"d={state.depth}", style=f"wash.series.{index % series_count}"),
                 task_text,
                 status_text,
                 str(state.tool_count),

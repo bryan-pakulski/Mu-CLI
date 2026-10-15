@@ -84,7 +84,7 @@ def _skill_banner(ui: Any, skill_name: str) -> None:
     Delegates to the shared `mu.skills.announce_skill` so the
     `invoke_skill` tool call and trigger-regex auto-expansion share one
     consistent highlight. `via` is left as None here so the invoke_skill
-    banner text stays exactly as before ("🎯 SKILL ACTIVE: <name>")."""
+    banner text stays exactly as before ("SKILL ACTIVE: <name>")."""
     from mu.skills import announce_skill
 
     announce_skill(ui, skill_name)

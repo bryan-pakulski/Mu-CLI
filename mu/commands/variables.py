@@ -127,12 +127,12 @@ def _list_layer_budgets(session: Any, allow_prompt: bool) -> CommandResult:
                 from rich import box
                 from rich.table import Table
 
-                table = Table(title="Layer budgets", box=box.SIMPLE)
-                table.add_column("Layer", style="cyan", no_wrap=True)
-                table.add_column("Tokens", style="green", justify="right")
-                table.add_column("Chars", style="dim", justify="right")
-                table.add_column("Variable", style="dim")
-                table.add_column("Description", style="white")
+                table = Table(title="Layer budgets", box=box.SIMPLE_HEAD)
+                table.add_column("Layer", style="wash.accent", no_wrap=True)
+                table.add_column("Tokens", style="wash.ok", justify="right")
+                table.add_column("Chars", style="wash.muted", justify="right")
+                table.add_column("Variable", style="wash.muted")
+                table.add_column("Description", style="wash.ink")
                 for row in rows:
                     table.add_row(
                         row["layer"],
@@ -143,10 +143,10 @@ def _list_layer_budgets(session: Any, allow_prompt: bool) -> CommandResult:
                     )
                 console.print(table)
                 console.print(
-                    "[dim]Set with[/dim] [bold]/set layer <id> <tokens>[/bold]"
+                    "[wash.muted]Set with[/wash.muted] [bold]/set layer <id> <tokens>[/bold]"
                     " — e.g. /set layer L2 6000\n"
-                    "[dim]L5 has no per-layer budget; tighten[/dim] "
-                    "[bold]context_token_limit[/bold] [dim]instead.[/dim]"
+                    "[wash.muted]L5 has no per-layer budget; tighten[/wash.muted] "
+                    "[bold]context_token_limit[/bold] [wash.muted]instead.[/wash.muted]"
                 )
             except Exception:
                 pass
@@ -455,7 +455,7 @@ def variables_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comm
 
             for k, v in session.variables.items():
                 console.print(
-                    f"[blue]{safe_markup(k)}[/blue] = [green]{safe_markup(v)}[/green]"
+                    f"[wash.info]{safe_markup(k)}[/wash.info] = [wash.ok]{safe_markup(v)}[/wash.ok]"
                 )
     return CommandResult(
         ok=True,

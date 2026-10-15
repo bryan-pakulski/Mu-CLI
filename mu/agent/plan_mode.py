@@ -189,19 +189,19 @@ def set_plan_mode(session, enabled: bool, *, persist: bool = True, announce: boo
             pass
     elif announce and ui is not None and hasattr(ui, "show_info"):
         try:
-            from mu.ui.markup import show_markup
+            from mu.ui.markup import show_notice
 
             if value:
-                show_markup(
+                show_notice(
                     ui,
-                    "[bold black on cyan] 🔒 PLAN MODE ENABLED [/bold black on cyan] "
-                    "Write-side tools are blocked. /plan off to disable.",
+                    "plan",
+                    "PLAN MODE ENABLED · Write-side tools are blocked. /plan off to disable.",
                 )
             else:
-                show_markup(
+                show_notice(
                     ui,
-                    "[bold black on green] ✓ PLAN MODE DISABLED [/bold black on green] "
-                    "Write-side tools are unblocked.",
+                    "ok",
+                    "PLAN MODE DISABLED · Write-side tools are unblocked.",
                 )
         except Exception:
             pass

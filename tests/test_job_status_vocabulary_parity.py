@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from mu.design import load_vocabulary
 from mu.jobs.core.states import JobState
 from mu.ui.jobs import theme
 
@@ -41,8 +42,13 @@ def _status_table(source: str) -> dict[str, tuple[str, str]]:
 
 
 def _python_tables():
-    status = {k: (v["icon"], v["label"]) for k, v in theme.STATUS.items()}
-    return status, dict(theme._STATE_STATUS), dict(theme._STATE_LABEL)
+    # The terminal reads the shared vocabulary (mu/design/vocabulary.json).
+    vocab = load_vocabulary()
+    status = {k: (v["glyph"], v["label"]) for k, v in vocab["status"].items()}
+    assert status == {k: (v["icon"], v["label"]) for k, v in theme.STATUS.items()}
+    state_status = {k: v["status"] for k, v in vocab["job_state"].items()}
+    state_label = {k: v["label"] for k, v in vocab["job_state"].items()}
+    return status, state_status, state_label
 
 
 def test_every_job_state_has_a_status_and_label():
@@ -73,5 +79,5 @@ def test_mobile_needs_you_states_are_the_waiting_states():
     match = re.search(r"NEEDS_YOU_STATES\s*=\s*new Set\(\[(.*?)\]\)", source, re.S)
     assert match
     notify_states = set(re.findall(r"'(\w+)'", match.group(1)))
-    waiting = {s for s, status in theme._STATE_STATUS.items() if status == "waiting"}
+    waiting = {s for s, status in _python_tables()[1].items() if status == "waiting"}
     assert notify_states == waiting

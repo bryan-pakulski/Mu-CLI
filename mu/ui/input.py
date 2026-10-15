@@ -16,20 +16,25 @@ from prompt_toolkit.completion import (
     PathCompleter,
 )
 from prompt_toolkit.document import Document
-from prompt_toolkit.styles import Style
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.formatted_text import HTML
 
+from mu.ui.theme.glyphs import PROMPT_ARROW, PROMPT_MARK, SEPARATOR
+from mu.ui.theme.pt_style import prompt_style
 from utils.config import HISTORY_DIR, VARIABLE_SCHEMA
 
 
+# Every mode in mu/design/tokens.json has a prompt class (`mode-<name>`),
+# styled with the mode's pigment by mu.ui.theme.pt_style.
 MODE_PROMPT_STYLES = {
+    "default": "mode-default",
     "debug": "mode-debug",
     "feature": "mode-feature",
     "research": "mode-research",
     "security": "mode-security",
     "teacher": "mode-teacher",
+    "loop": "mode-loop",
 }
 
 def _mode_choices():
@@ -655,24 +660,10 @@ class InputHandler:
         # per-command sub-completer once a space has been typed.
         self.completer = SlashCommandCompleter(self.command_completions)
 
-        self.style = Style.from_dict(
-            {
-                "prompt": "ansiblue bold",
-                "rprompt": "bg:ansiblue ansiwhite",
-                "files": "ansiyellow",
-                "yolo-indicator": "ansiyellow bold blink",
-                # Plan mode: high-contrast lock indicator so the user can never
-                # miss it. Persists across the prompt while plan_mode=True.
-                "plan-indicator": "bg:ansicyan ansiblack bold",
-                "mode-debug": "ansiyellow bold",
-                "mode-feature": "ansiblue bold",
-                "mode-research": "ansimagenta bold",
-                "mode-security": "ansired bold",
-                # Every MODE_PROMPT_STYLES class must be defined here, or the
-                # mode name renders unstyled.
-                "mode-teacher": "ansibrightyellow bold",
-            }
-        )
+        # One Wash prompt_toolkit style for the prompt, toolbar, completion
+        # menu and pickers. It defines every MODE_PROMPT_STYLES class plus
+        # `plan-indicator` (lilac) and `yolo-indicator` (sun, never blinking).
+        self.style = prompt_style()
 
         self.kb = KeyBindings()
 
@@ -777,25 +768,31 @@ class InputHandler:
         current_task=None,
         feature_context=None,
     ):
+        """Prompt as prompt_toolkit HTML: ``μ session · mode [plan] [yolo] ›``.
+
+        Task, feature progress and staged files ride on a muted line above
+        the prompt when present. Every interpolated value is HTML-escaped.
+        """
         files_text = ""
         if staged_files:
             # Note the updated accessor here for our new FileReference schema
             f_names = ", ".join([f["file_ref"]["display_name"] for f in staged_files])
-            files_text = f" [Files: {f_names}]"
+            files_text = f"[Files: {escape(f_names)}]"
 
         mode_name = str(agent_mode or "default").lower()
-        mode_text = ""
-        if mode_name != "default":
-            mode_style = MODE_PROMPT_STYLES.get(mode_name, "prompt")
-            mode_text = f" <{mode_style}>{mode_name}</{mode_style}>"
+        mode_style = MODE_PROMPT_STYLES.get(mode_name, "prompt")
+        mode_text = (
+            f" <prompt-sep>{SEPARATOR}</prompt-sep>"
+            f" <{mode_style}>{escape(mode_name)}</{mode_style}>"
+        )
 
         yolo_text = ""
         if self.is_yolo_enabled():
-            yolo_text = " <yolo-indicator>✦</yolo-indicator>"
+            yolo_text = " <yolo-indicator>[yolo]</yolo-indicator>"
 
         plan_text = ""
         if self.is_plan_mode_enabled():
-            plan_text = " <plan-indicator> 🔒 PLAN MODE </plan-indicator>"
+            plan_text = " <plan-indicator>[plan]</plan-indicator>"
 
         task_text = ""
         if current_task:
@@ -818,20 +815,23 @@ class InputHandler:
                 f" <files>[P {phase_bar} | O {overall_bar}]</files>"
             )
 
+        context = f"{task_text}{feature_text}"
+        if files_text:
+            context += f" <files>{files_text}</files>"
+        context_line = f"{context.strip()}\n" if context.strip() else ""
         return (
-            f"<prompt>[{session_name}]</prompt>"
+            f"{context_line}"
+            f"<prompt-mark>{PROMPT_MARK}</prompt-mark>"
+            f" <prompt-session>{escape(str(session_name))}</prompt-session>"
             f"{mode_text}"
             f"{plan_text}"
             f"{yolo_text}"
-            f"{task_text}"
-            f"{feature_text}"
-            f"<files>{files_text}</files>\n"
-            f"<prompt>>></prompt> "
+            f" <prompt-arrow>{PROMPT_ARROW}</prompt-arrow> "
         )
 
     def build_input_toolbar_text(self):
         yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
-        plan_segment = " | 🔒 PLAN MODE ACTIVE — writes blocked" if self.is_plan_mode_enabled() else ""
+        plan_segment = " | PLAN MODE ACTIVE — writes blocked" if self.is_plan_mode_enabled() else ""
         return (
             "[Meta+Enter] or [Esc] [Enter] to submit | [Shift+Left] threads | "
             f"[Shift+Tab] toggles YOLO ({yolo_status})"
@@ -842,6 +842,20 @@ class InputHandler:
     def build_choice_toolbar_text(self):
         yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
         return f"[Shift+Tab] toggles YOLO ({yolo_status})"
+
+    @staticmethod
+    def style_toolbar(text):
+        """Key-hint styling for a toolbar string: ``[key]`` in ink (bold),
+        descriptions in ink-3 (G§8.4). Returns prompt_toolkit fragments."""
+        fragments = []
+        for part in re.split(r"(\[[^\]]+\])", str(text)):
+            if not part:
+                continue
+            if part.startswith("[") and part.endswith("]"):
+                fragments.append(("class:toolbar-key", part))
+            else:
+                fragments.append(("class:toolbar-hint", part))
+        return fragments
 
     def get_input(
         self,
@@ -863,7 +877,7 @@ class InputHandler:
         )
 
         def bottom_toolbar():
-            return self.build_input_toolbar_text()
+            return self.style_toolbar(self.build_input_toolbar_text())
 
         try:
             return self.session.prompt(
@@ -881,11 +895,13 @@ class InputHandler:
         choices_str = "/".join(str(choice) for choice in choices)
         default_suffix = f" default={default}" if default else ""
         message = HTML(
-            f"<prompt>{plain_prompt} [{choices_str}]{default_suffix}</prompt> "
+            f"<prompt-arrow>{PROMPT_ARROW}</prompt-arrow> "
+            f"<prompt>{escape(plain_prompt)} [{escape(choices_str)}]"
+            f"{escape(default_suffix)}</prompt> "
         )
 
         def bottom_toolbar():
-            return self.build_choice_toolbar_text()
+            return self.style_toolbar(self.build_choice_toolbar_text())
 
         while True:
             value = self.session.prompt(
@@ -898,4 +914,4 @@ class InputHandler:
                 return value
 
     def _prompt_continuation(self, width, line_number, is_soft_wrap):
-        return HTML("<prompt>    </prompt>")
+        return HTML("<prompt-sep>  · </prompt-sep>")

@@ -23,7 +23,7 @@ v2 design:
   * `# AUTO-EXPANDED SKILLS` carries full bodies for skills whose
     trigger matched the latest user message;
   * model can call `invoke_skill(name)` to expand any other skill;
-  * both activation paths print a visible `🎯 SKILL ACTIVE` banner via
+  * both activation paths print a visible `SKILL ACTIVE` banner via
     `announce_skill` (auto-expansion tags itself `· trigger`) and bump
     a per-skill counter in `/stats`;
   * users list / inspect / reload / enable / disable via `/skills`.
@@ -276,20 +276,15 @@ def announce_skill(ui: Any, skill_name: str, via: Optional[str] = None) -> None:
     markup parser. Falls back to a plain print when no Rich console is
     attached (headless / non-TTY).
     """
-    from rich.markup import escape as _esc
-
     label = skill_name or "?"
-    tag = f" · {_esc(via)}" if via else ""
-    body = (
-        f"[bold black on yellow] 🎯 SKILL ACTIVE: {_esc(label)}{tag} "
-        f"[/bold black on yellow]"
-    )
+    tag = f" · {via}" if via else ""
     console = getattr(ui, "console", None) if ui is not None else None
     if console is not None:
         try:
-            from rich.text import Text as _Text
+            from mu.ui.theme.components import notice_text
 
-            console.print(_Text.from_markup(body))
+            # Literal Text: the skill name and tag can never be parsed as markup.
+            console.print(notice_text("ok", f"SKILL ACTIVE: {label}{tag}"))
             return
         except Exception:
             pass

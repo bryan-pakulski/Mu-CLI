@@ -159,13 +159,13 @@ def build_approval_prompt(
     count_text = esc(str(count_info))
     if approval_plan.can_approve:
         prompt_text = (
-            f"\n[bold yellow]Permission Required[/bold yellow] for tool: "
-            f"[cyan]{tool_name}[/cyan]{count_text}\nArgs: {args_text}\nAllow?"
+            f"\n[wash.attention.bold]Permission Required[/wash.attention.bold] for tool: "
+            f"[wash.accent]{tool_name}[/wash.accent]{count_text}\nArgs: {args_text}\nAllow?"
         )
         return prompt_text, ["y", "n", "e"], "y"
 
     prompt_text = (
-        f"\n[bold red]Diff Failed[/bold red] for tool: "
-        f"[cyan]{tool_name}[/cyan]{count_text}\nArgs: {args_text}\nReject or Explain?"
+        f"\n[wash.danger.bold]Diff Failed[/wash.danger.bold] for tool: "
+        f"[wash.accent]{tool_name}[/wash.accent]{count_text}\nArgs: {args_text}\nReject or Explain?"
     )
     return prompt_text, ["n", "e"], "n"

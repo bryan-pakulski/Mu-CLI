@@ -16,7 +16,7 @@ def _emit_dim(session: Any, body: str, allow_prompt: bool) -> None:
         try:
             from utils.helpers import safe_markup
 
-            console.print(f"[dim]{safe_markup(body)}[/dim]")
+            console.print(f"[wash.muted]{safe_markup(body)}[/wash.muted]")
         except Exception:
             pass
 

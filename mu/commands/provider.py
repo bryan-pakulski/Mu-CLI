@@ -47,7 +47,7 @@ def model_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
             try:
                 from rich.prompt import IntPrompt
 
-                console.print("\n[bold cyan]Available Models:[/bold cyan]")
+                console.print("\n[wash.accent.bold]Available Models:[/wash.accent.bold]")
                 for i, model in enumerate(models, 1):
                     console.print(f" {i}. {model}", markup=False)
                 choice = IntPrompt.ask(

@@ -99,7 +99,7 @@ def run_choice_picker(
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.styles import Style
+    from mu.ui.theme.pt_style import picker_style
 
     state = ChoicePickerState.create(options, default=default)
     kb = KeyBindings()
@@ -204,16 +204,7 @@ def run_choice_picker(
         key_bindings=kb,
         full_screen=True,
         mouse_support=False,
-        style=Style.from_dict(
-            {
-                "title": "ansicyan",
-                "subtitle": "ansiblack bold",
-                "current": "ansigreen",
-                "item": "",
-                "description": "ansiblack bold",
-                "hint": "ansiblack bold",
-            }
-        ),
+        style=picker_style(),
     )
     result = app.run()
     return str(result)

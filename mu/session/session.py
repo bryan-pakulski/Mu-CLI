@@ -925,7 +925,7 @@ class Session:
 
         When `announce` is True (the real per-turn system-prompt assembly
         path), every skill whose `trigger` regex matches the current
-        user message prints the same `🎯 SKILL ACTIVE` banner the
+        user message prints the same `SKILL ACTIVE` banner the
         `invoke_skill` tool uses — so trigger-regex auto-expansion is
         visible, not silent. The `/memory` size-measurement path calls
         this with `announce=False` (the default) and never banners.
@@ -1315,7 +1315,7 @@ class Session:
             logger.info(f"Hook abort at {point}: {reason_str}")
             if self.ui is not None:
                 try:
-                    self.ui.show_info(f"⏹  Hook abort ({point}): {reason_str}")
+                    self.ui.show_info(f"Hook abort ({point}): {reason_str}")
                 except Exception:
                     # Defensive: best-effort path must not break the caller.
                     logger.debug("Suppressed exception", exc_info=True)
@@ -1483,7 +1483,7 @@ class Session:
         if self.ui:
             if count >= 3:
                 self.ui.show_error(
-                    f"🔁 {tool_name} has hit {error_code} {count}x this turn. "
+                    f"{tool_name} has hit {error_code} {count}x this turn. "
                     f"Hint stays the same: {hint[:160]}"
                 )
             else:
@@ -2078,7 +2078,7 @@ class Session:
         if ui is not None and hasattr(ui, "show_info"):
             try:
                 ui.show_info(
-                    f"🎯 Session goal cleared (was: {current!r}). "
+                    f"Session goal cleared (was: {current!r}). "
                     "Use /goal <text> to pin a new one."
                 )
             except Exception:

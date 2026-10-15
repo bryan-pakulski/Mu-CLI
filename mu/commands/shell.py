@@ -90,9 +90,9 @@ def bash_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
 
     cwd = _workspace_cwd(session)
     if allow_prompt:
-        _print(session, f"$ {command_str}", style="dim cyan")
+        _print(session, f"$ {command_str}", style="wash.muted")
         if cwd != os.getcwd():
-            _print(session, f"  (cwd: {cwd})", style="dim")
+            _print(session, f"  (cwd: {cwd})", style="wash.muted")
 
     try:
         proc = run_noninteractive_shell(
@@ -123,15 +123,15 @@ def bash_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
         if stdout:
             _print(session, stdout.rstrip("\n"))
         if stderr:
-            _print(session, stderr.rstrip("\n"), style="yellow")
+            _print(session, stderr.rstrip("\n"), style="wash.caution")
         if timed_out:
             _print(
                 session,
-                f"⏱  Timed out after {_BASH_TIMEOUT:.0f}s",
-                style="red",
+                f"✗ Timed out after {_BASH_TIMEOUT:.0f}s",
+                style="wash.danger",
             )
         elif exit_code != 0:
-            _print(session, f"  (exit {exit_code})", style="dim red")
+            _print(session, f"  (exit {exit_code})", style="wash.muted")
 
     return CommandResult(
         ok=(not timed_out) and exit_code == 0,

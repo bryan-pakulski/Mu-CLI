@@ -6,15 +6,19 @@ from types import SimpleNamespace
 from mu.ui.input import InputHandler, get_session_names
 
 
-def test_prompt_markup_hides_default_mode():
+def test_prompt_markup_shows_session_and_default_mode():
+    # Wash prompt (G§8.4): `μ session · mode ›`; the mode is always named,
+    # in its own pigment class, and only that mode's class is used.
     handler = InputHandler()
     handler.set_variables({"yolo": False})
 
     markup = handler.build_prompt_markup("demo", [], agent_mode="default")
 
-    assert "[demo]" in markup
+    assert "<prompt-session>demo</prompt-session>" in markup
+    assert "<mode-default>default</mode-default>" in markup
     assert "mode-feature" not in markup
-    assert ">>>" in markup
+    assert markup.startswith("<prompt-mark>μ</prompt-mark>")
+    assert markup.rstrip().endswith("<prompt-arrow>›</prompt-arrow>")
 
 
 def test_prompt_markup_shows_non_default_mode():
@@ -23,7 +27,7 @@ def test_prompt_markup_shows_non_default_mode():
 
     markup = handler.build_prompt_markup("demo", [], agent_mode="feature")
 
-    assert "[demo]" in markup
+    assert "<prompt-session>demo</prompt-session>" in markup
     assert "mode-feature" in markup
     assert ">feature<" in markup
 
@@ -35,7 +39,9 @@ def test_prompt_markup_shows_yolo_indicator_when_enabled():
     markup = handler.build_prompt_markup("demo", [], agent_mode="default")
 
     assert "yolo-indicator" in markup
-    assert "✦" in markup
+    assert "<yolo-indicator>[yolo]</yolo-indicator>" in markup
+    yolo_rule = dict(handler.style.style_rules)["yolo-indicator"]
+    assert "blink" not in yolo_rule
 
 
 def test_prompt_markup_includes_current_task_when_present():

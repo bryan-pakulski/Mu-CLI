@@ -9,7 +9,7 @@ import sys
 import time
 import threading
 
-from rich.console import Console
+from mu.ui.theme import get_console
 from rich.panel import Panel
 from rich.prompt import Prompt, IntPrompt, Confirm
 from rich.text import Text
@@ -36,7 +36,7 @@ from mu.ui.choice_picker import prompt_choice, prompt_confirm
 from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
 from mu.tools.capabilities import normalize_session_type
 
-console = Console()
+console = get_console()
 
 
 def read_headless_prompt_file(path):
@@ -117,11 +117,11 @@ def refresh_memory_hud(session, ui, *, force=False):
 
 def print_mode_overview(session):
     current_mode = str(session.variables.get("agent_mode", "default"))
-    table = Table(title="Available Agent Modes", box=box.SIMPLE_HEAVY)
-    table.add_column("Mode", style="cyan", no_wrap=True)
-    table.add_column("Current", style="yellow", justify="center")
-    table.add_column("Description", style="white")
-    table.add_column("Docs", style="magenta")
+    table = Table(title="Available Agent Modes", box=box.SIMPLE_HEAD)
+    table.add_column("Mode", style="wash.accent", no_wrap=True)
+    table.add_column("Current", style="wash.caution", justify="center")
+    table.add_column("Description", style="wash.ink")
+    table.add_column("Docs", style="wash.plum")
 
     for mode_name, metadata in AGENT_MODE_METADATA.items():
         table.add_row(
@@ -132,7 +132,7 @@ def print_mode_overview(session):
         )
 
     console.print(table)
-    console.print(f"[dim]Current mode: {safe_markup(current_mode)}[/dim]")
+    console.print(f"[wash.muted]Current mode: {safe_markup(current_mode)}[/wash.muted]")
 
 
 def _research_tool_names():
@@ -390,7 +390,7 @@ def choose_session(session_manager):
             return "new", raw or None
 
         if not sessions:
-            console.print("[dim]No saved sessions. Choose create to begin.[/dim]")
+            console.print("[wash.muted]No saved sessions. Choose create to begin.[/wash.muted]")
             continue
         # Build options with session-type glyph prefix.
         _session_type_glyph = {
@@ -443,13 +443,13 @@ def _choose_session_numbered(session_manager):
         if not sessions:
             return "new", None
 
-        console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
+        console.print("\n[wash.accent.bold]Available Sessions:[/wash.accent.bold]")
         for i, s in enumerate(sessions, 1):
             console.print(f" {i}. {s}", markup=False)
         new_idx = len(sessions) + 1
         delete_idx = len(sessions) + 2
-        console.print(f" {new_idx}. [bold green][New Session][/bold green]")
-        console.print(f" {delete_idx}. [bold red][Delete a session…][/bold red]")
+        console.print(f" {new_idx}. [wash.ok.bold][New Session][/wash.ok.bold]")
+        console.print(f" {delete_idx}. [wash.danger.bold][Delete a session…][/wash.danger.bold]")
 
         choice = IntPrompt.ask(
             "Select a session",
@@ -474,28 +474,28 @@ def _delete_session_flow(session_manager, sessions):
     if not sessions:
         return
 
-    console.print("\n[bold red]Delete a session[/bold red]")
+    console.print("\n[wash.danger.bold]Delete a session[/wash.danger.bold]")
     for i, s in enumerate(sessions, 1):
         console.print(f" {i}. {s}", markup=False)
     cancel_idx = len(sessions) + 1
-    console.print(f" {cancel_idx}. [dim][Cancel][/dim]")
+    console.print(f" {cancel_idx}. [wash.muted][Cancel][/wash.muted]")
 
     choice = IntPrompt.ask(
         "Pick a session to delete",
         choices=[str(i) for i in range(1, cancel_idx + 1)],
     )
     if choice == cancel_idx:
-        console.print("[dim]Cancelled.[/dim]")
+        console.print("[wash.muted]Cancelled.[/wash.muted]")
         return
 
     target = sessions[choice - 1]
     from rich.prompt import Confirm
 
     if not Confirm.ask(
-        f"Delete session [bold red]{target!r}[/bold red]? This cannot be undone.",
+        f"Delete session [wash.danger.bold]{target!r}[/wash.danger.bold]? This cannot be undone.",
         default=False,
     ):
-        console.print("[dim]Cancelled.[/dim]")
+        console.print("[wash.muted]Cancelled.[/wash.muted]")
         return
 
     _safe_delete_session(session_manager, target)
@@ -709,8 +709,8 @@ def build_session(args, ui, allow_prompt=True):
             from prompt_toolkit.completion import PathCompleter as _PathCompleter
 
             console.print(
-                "[dim]Workspace folder (optional — press enter to skip)\n"
-                "Without a workspace the agent runs in chat-only mode[/dim]"
+                "[wash.muted]Workspace folder (optional — press enter to skip)\n"
+                "Without a workspace the agent runs in chat-only mode[/wash.muted]"
             )
             ws_path = _pt_prompt(
                 "workspace> ",
@@ -724,9 +724,9 @@ def build_session(args, ui, allow_prompt=True):
             if os.path.isdir(ws_path):
                 session.folder_context.add_folder(ws_path)
                 session.session_manager.save_history(session.folder_context)
-                console.print(f"[dim]workspace → {ws_path}[/dim]")
+                console.print(f"[wash.muted]workspace → {ws_path}[/wash.muted]")
             else:
-                console.print(f"[yellow]not a directory: {ws_path} — skipping[/yellow]")
+                console.print(f"[wash.caution]not a directory: {ws_path} — skipping[/wash.caution]")
 
     if args.yolo:
         session.variables["yolo"] = True
@@ -805,12 +805,12 @@ def _trace_analyze_cli(path: str) -> int:
     from mu.trace import build_series, build_summary, parse_trace
 
     if not os.path.exists(path):
-        console.print(f"[red]trace file not found: {safe_markup(path)}[/red]")
+        console.print(f"[wash.danger]trace file not found: {safe_markup(path)}[/wash.danger]")
         return 1
     run = parse_trace(path)
     if not run.header and not run.iters:
         console.print(
-            f"[red]no trace records parsed from: {safe_markup(path)}[/red]"
+            f"[wash.danger]no trace records parsed from: {safe_markup(path)}[/wash.danger]"
         )
         return 1
     series = build_series(run)
@@ -818,7 +818,7 @@ def _trace_analyze_cli(path: str) -> int:
 
     console.print(
         f"[bold]Trace run[/bold] {s['run_id']}  "
-        f"session=[cyan]{safe_markup(s['session'])}[/cyan]  "
+        f"session=[wash.accent]{safe_markup(s['session'])}[/wash.accent]  "
         f"model={safe_markup(s['model'])}  mode={safe_markup(s['mode'])}"
     )
     console.print(
@@ -1033,7 +1033,7 @@ def main():
             run_gui(args, build_session)
         except Exception as exc:
             console.print(
-                f"[red]Failed to launch GUI: {safe_markup(str(exc))}[/red]"
+                f"[wash.danger]Failed to launch GUI: {safe_markup(str(exc))}[/wash.danger]"
             )
             sys.exit(1)
         console.print(
@@ -1053,7 +1053,7 @@ def main():
             run_gui(args, build_session)
         except Exception as exc:
             console.print(
-                f"[red]Failed to launch GUI: {safe_markup(str(exc))}[/red]"
+                f"[wash.danger]Failed to launch GUI: {safe_markup(str(exc))}[/wash.danger]"
             )
             sys.exit(1)
         return
@@ -1073,7 +1073,7 @@ def main():
             session = build_session(args, headless_ui, allow_prompt=False)
         except Exception as exc:
             console.print(
-                f"[red]Headless init failed: {safe_markup(str(exc))}[/red]"
+                f"[wash.danger]Headless init failed: {safe_markup(str(exc))}[/wash.danger]"
             )
             sys.exit(1)
         exit_code = 0
@@ -1082,9 +1082,9 @@ def main():
             status = (result or {}).get("status", "complete")
             if status not in ("complete", "completed", "paused"):
                 exit_code = 1
-            console.print(f"[dim]headless turn status: {status}[/dim]")
+            console.print(f"[wash.muted]headless turn status: {status}[/wash.muted]")
         except Exception as exc:
-            console.print(f"[red]Headless turn failed: {safe_markup(str(exc))}[/red]")
+            console.print(f"[wash.danger]Headless turn failed: {safe_markup(str(exc))}[/wash.danger]")
             exit_code = 1
         finally:
             try:
@@ -1096,7 +1096,7 @@ def main():
     try:
         session = build_session(args, ui, allow_prompt=True)
     except Exception as exc:
-        console.print(f"[red]Failed to initialize Session/Provider: {safe_markup(str(exc))}[/red]")
+        console.print(f"[wash.danger]Failed to initialize Session/Provider: {safe_markup(str(exc))}[/wash.danger]")
         sys.exit(1)
 
     print_splash(session)
@@ -1231,7 +1231,7 @@ def main():
                         send_result = session.send_message(user_input)
                 if send_result.get("status") == "interrupted":
                     console.print(
-                        "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+                        "[wash.muted]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/wash.muted]"
                     )
                 refresh_memory_hud(session, ui)
 

@@ -1,7 +1,7 @@
 """Tests that plan mode is visually surfaced across the REPL UI:
 
   * `collect_runtime_metrics` exposes a `plan.enabled` field.
-  * `build_live_status_line` prepends a "🔒 PLAN" marker when on.
+  * `build_live_status_line` prepends a "PLAN" marker when on.
   * `InputHandler.build_prompt_markup` adds a high-contrast plan indicator.
   * `InputHandler.build_input_toolbar_text` adds a plan-mode toolbar line.
   * `/plan on|off` emits a visible banner via `ui.show_info`.
@@ -54,17 +54,17 @@ def test_collect_runtime_metrics_exposes_plan_flag(session):
 def test_status_line_lacks_plan_marker_when_off(session):
     session.variables["plan_mode"] = False
     line = build_live_status_line(session)
-    assert "🔒 PLAN" not in line
+    assert "PLAN" not in line
     assert "yolo:off" in line  # baseline sanity
 
 
 def test_status_line_prepends_plan_marker_when_on(session):
     session.variables["plan_mode"] = True
     line = build_live_status_line(session)
-    assert "🔒 PLAN" in line
+    assert "PLAN" in line and "🔒" not in line
     # The PLAN marker must come BEFORE the yolo indicator so it's the first
     # thing the user sees on a glance.
-    assert line.index("🔒 PLAN") < line.index("yolo:")
+    assert line.index("PLAN") < line.index("yolo:")
 
 
 # ============================================================ input prompt
@@ -95,8 +95,14 @@ def test_prompt_markup_with_plan_mode_includes_indicator():
         session_name="test", staged_files=[]
     )
     assert "plan-indicator" in markup
-    assert "PLAN MODE" in markup
-    assert "🔒" in markup
+    # Wash: plan mode is a bracketed `[plan]` chip in the plan (lilac) colour.
+    assert "<plan-indicator>[plan]</plan-indicator>" in markup
+    from mu.design import semantic
+    from mu.ui.theme.pt_style import style_dict
+
+    assert style_dict("truecolor", "dusk")["plan-indicator"] == (
+        f"fg:{semantic('dusk', 'plan')} bold"
+    )
 
 
 def test_toolbar_text_includes_plan_mode_when_on():
@@ -140,7 +146,11 @@ def test_plan_on_emits_enable_banner(session):
     assert session.variables["plan_mode"] is True
     banners = [m for m in session.ui.info_calls if "PLAN MODE ENABLED" in m]
     assert banners, f"expected enable banner in {session.ui.info_calls!r}"
-    assert "🔒" in banners[0]
+    # Wash: the banner is a plan notice led by the plan glyph, no emoji.
+    from mu.ui.theme.glyphs import NOTICE
+
+    assert banners[0].startswith(NOTICE["plan"][0] + " ")
+    assert "🔒" not in banners[0]
 
 
 def test_plan_off_emits_disable_banner(session):

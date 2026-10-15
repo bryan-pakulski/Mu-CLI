@@ -233,7 +233,7 @@ def session_item_lines(item: Dict[str, Any], width: int, *, expanded: bool, sele
             head = mark + [("danger" if failed else "running", "› "), ("accent", f"[{item.get('env', '?')}] "),
                            ("", item.get("args", ""))]
         else:
-            head = mark + [("danger" if failed else "running", "⏺ "), ("bold", item.get("name", "tool")),
+            head = mark + [("danger", "✗ ") if failed else ("running", "● "), ("bold", item.get("name", "tool")),
                            ("muted", f"({item.get('args', '')})")]
         if results and not expanded:
             first = (results[0].get("text") or "").strip().split("\n")[0]

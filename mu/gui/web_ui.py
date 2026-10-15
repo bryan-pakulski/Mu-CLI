@@ -189,6 +189,11 @@ class WebUI(BaseUI):
     def show_renderable(self, renderable):
         self._publish({"kind": "info", "text": render_plain(renderable)})
 
+    def show_notice(self, kind, message):
+        # Mode banners / toggles. ``notice`` is an additive, optional field
+        # (info|ok|attention|caution|danger|plan) so clients can pick a tone.
+        self._publish({"kind": "info", "text": str(message), "notice": str(kind)})
+
     def show_status(self, message):
         return _NullStatus(self, str(message))
 

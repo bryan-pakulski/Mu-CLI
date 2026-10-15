@@ -18,6 +18,7 @@ import {
   COVERAGE, SEVERITY, SEVERITY_ORDER, duration, stateStatus, stripAnsi, verdictStyle, when,
 } from '../theme/status';
 import { Banner, Button, CheckRow, CountBadge, Empty, Markdown, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 type Invoke = (idOrAction: string | JobAction, extra?: Record<string, unknown>) => void;
 
@@ -321,11 +322,12 @@ function ChangeBar({ added, removed }: { added: number; removed: number }) {
 
 function InlineFinding({ finding, fixEnabled, fixReason, onFix }: { finding: Finding; fixEnabled: boolean; fixReason?: string; onFix: () => void }) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const tone = SEVERITY[finding.severity] || 'muted';
   return (
     <View accessibilityRole="summary" accessibilityLabel={`Review finding: ${finding.severity}: ${finding.title}`}
-      style={[styles.inlineFinding, { borderLeftColor: toneInk(colors, tone), backgroundColor: colors.raised, borderColor: colors.hairline }]}>
-      <View style={styles.wrap}>
+      style={[styles.inlineFinding, glass.style(2)]}>
+      <View style={[styles.wrap, styles.inlineFindingHead, { backgroundColor: glass.tint(tone) }]}>
         <Text variant="xs" style={{ color: toneInk(colors, tone) }}>⚑</Text>
         <Pill tone={tone}>{finding.severity}</Pill>
         <Text variant="xs" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{finding.title}</Text>
@@ -354,6 +356,7 @@ export type ReviewTabProps = {
 
 export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, onDisposition, onJump, busy }: ReviewTabProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const report = job.review;
   const files = useMemo(() => new Set(parsePatch(job.diff?.patch).map(f => f.path)), [job.diff?.patch]);
   if (!report) return <Empty>Review report pending. The reviewer reports here after checks pass.</Empty>;
@@ -412,8 +415,8 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
               const closed = (f.disposition || 'open') !== 'open';
               const picked = selected.includes(f.id);
               return (
-                <View key={f.id} testID={`finding-${f.id}`} style={[styles.findingCard, { borderColor: colors.hairline, borderLeftColor: toneInk(colors, tone), backgroundColor: colors.surface, opacity: closed ? 0.7 : 1 }]}>
-                  <View style={styles.wrap}>
+                <View key={f.id} testID={`finding-${f.id}`} style={[styles.findingCard, glass.style(1), { opacity: closed ? 0.7 : 1 }]}>
+                  <View style={[styles.wrap, styles.findingHead, { backgroundColor: glass.tint(tone) }]}>
                     <CheckRow label="" accessibilityLabel={`select “${f.title}” for fixing`} checked={picked} disabled={closed} onChange={() => onToggle(f.id)} />
                     <Pill tone={tone}>{f.severity}</Pill>
                     <Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{f.title}</Text>
@@ -626,9 +629,12 @@ const styles = StyleSheet.create({
   lineNo: { width: 36, textAlign: 'right', paddingRight: 4 },
   sign: { width: 14, textAlign: 'center' },
   code: { flex: 1, paddingRight: spacing.sm },
-  inlineFinding: { margin: spacing.sm, borderWidth: 1, borderLeftWidth: 3, borderRadius: radii.control, padding: spacing.sm, gap: spacing.xs },
+  // Findings: severity tint in the header strip plus the severity chip; no side rule (G§3.4).
+  inlineFinding: { margin: spacing.sm, borderRadius: radii.control, padding: spacing.sm, gap: spacing.xs, overflow: 'hidden' },
+  inlineFindingHead: { marginHorizontal: -spacing.sm, marginTop: -spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   coverage: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  findingCard: { borderWidth: 1, borderLeftWidth: 3, borderRadius: radii.control, padding: spacing.md, gap: spacing.xs },
+  findingCard: { borderRadius: radii.control, padding: spacing.md, gap: spacing.xs, overflow: 'hidden' },
+  findingHead: { marginHorizontal: -spacing.md, marginTop: -spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   runRow: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs, borderBottomWidth: 1, minHeight: touchTarget },
   caseRow: { borderTopWidth: 1, paddingTop: spacing.xs },
   historyRow: { gap: 2 },

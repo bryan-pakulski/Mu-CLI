@@ -295,7 +295,7 @@ export function ArtifactsScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: 'transparent' }}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.hairline, paddingTop: insets.top + spacing.xs }]}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Session files</Text>
@@ -347,7 +347,7 @@ export function ArtifactsScreen() {
         statusBarTranslucent
         onRequestClose={() => setViewingArtifact(null)}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
           <View style={[styles.visHeader, { borderBottomColor: colors.hairline }]}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text variant="xs" dim style={{ fontWeight: fontWeights.semibold }}>

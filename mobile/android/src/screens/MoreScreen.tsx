@@ -27,7 +27,7 @@ export function MoreScreen() {
   const { colors } = useTheme();
   const activeSessionName = useConnectionStore(s => s.activeSessionName);
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.canvas }} contentContainerStyle={styles.content} testID="more-screen">
+    <ScrollView style={{ flex: 1, backgroundColor: 'transparent' }} contentContainerStyle={styles.content} testID="more-screen">
       <Eyebrow>More</Eyebrow>
       <Text variant="title1" accessibilityRole="header">Everything else</Text>
       <Card variant="sunken" bodyStyle={styles.body}>

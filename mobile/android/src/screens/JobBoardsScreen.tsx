@@ -20,7 +20,7 @@ export function JobBoardsScreen({ navigation }: JobBoardsScreenProps) {
   const sessionName = useConnectionStore(state => state.activeSessionName);
   const go = (page: JobsPage) => switchJobsPage(navigation, 'JobBoards', page);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <JobsNavBar current="JobBoards" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Tickets</Text>

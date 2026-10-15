@@ -10,8 +10,14 @@
 //   handle, drag-to-dismiss and a 44dp close button. `dismissable={false}`
 //   removes every implicit way out (scrim tap, back button, drag, close) so
 //   the user must make an explicit choice — used for approvals.
-// - `Sheet full`: a full-screen flow (editors, container manager) on canvas.
+// - `Sheet full`: a full-screen flow (editors, container manager) on a glass
+//   stage over the ambient wash (modals are their own window, so the wash is
+//   drawn again inside them).
 // - `Dialog`: a centred level-3 card for small confirmations.
+//
+// Glass (G§3.3): sheets and dialogs are level-3 glass chrome, a blurred
+// backdrop under `glass.strong` with light edges; the solid `raised`
+// fallback applies with "Reduce decoration".
 
 import React, { useMemo, useRef } from 'react';
 import {
@@ -36,7 +42,8 @@ import {
 } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useMotionPreference } from '../hooks/useMotionPreference';
-import { elevation, radii, spacing, touchTarget } from '../theme/tokens';
+import { radii, spacing, touchTarget } from '../theme/tokens';
+import { AmbientLayer, GlassBackdrop, glassStyle, useAmbientArt, type AmbientArt } from './Glass';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Icon } from './Icon';
@@ -55,11 +62,14 @@ export type ModalFrameProps = {
   testID?: string;
   statusBarTranslucent?: boolean;
   presentationStyle?: 'fullScreen' | 'pageSheet' | 'formSheet' | 'overFullScreen';
+  /** Ambient wash for an opaque (full-screen) frame; defaults to the current screen's. */
+  ambient?: AmbientArt;
 };
 
 /** The safe-area-aware native modal window every kit overlay renders into. */
-export function ModalFrame({ visible, onRequestClose, transparent = true, edges = ['top', 'bottom'], animationType = 'fade', containerStyle, children, testID, statusBarTranslucent = true, presentationStyle }: ModalFrameProps) {
-  const { colors } = useTheme();
+export function ModalFrame({ visible, onRequestClose, transparent = true, edges = ['top', 'bottom'], animationType = 'fade', containerStyle, children, testID, statusBarTranslucent = true, presentationStyle, ambient }: ModalFrameProps) {
+  const { colors, reduceDecoration } = useTheme();
+  const screenArt = useAmbientArt();
   return (
     <Modal
       testID={testID}
@@ -74,7 +84,8 @@ export function ModalFrame({ visible, onRequestClose, transparent = true, edges 
       navigationBarTranslucent={navigationBarTranslucent}
     >
       <SafeAreaProvider initialMetrics={initialWindowMetrics} style={styles.flex}>
-        <SafeAreaView edges={edges} style={[styles.flex, transparent ? null : { backgroundColor: colors.canvas }, containerStyle]}>
+        {transparent ? null : <AmbientLayer art={ambient || screenArt} testID="modal-ambient-wash" />}
+        <SafeAreaView edges={edges} style={[styles.flex, transparent ? null : glassStyle(1, colors, { flat: true, solid: reduceDecoration }), containerStyle]}>
           {children}
         </SafeAreaView>
       </SafeAreaProvider>
@@ -171,12 +182,13 @@ export function Sheet({ visible, onClose, title, children, dismissable = true, f
   );
 }
 
-function SheetBody({ colors, isDark, onScrim, drag, children }: {
+function SheetBody({ colors, onScrim, drag, children }: {
   colors: ReturnType<typeof useTheme>['colors']; isDark: boolean; dismissable: boolean; onScrim: () => void; drag: Animated.Value;
   panHandlers: object; children: React.ReactNode;
 }) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { reduceDecoration } = useTheme();
   const maxHeight = Math.max(0, height - insets.top - insets.bottom - spacing.base);
   return (
     <View style={styles.root}>
@@ -187,10 +199,12 @@ function SheetBody({ colors, isDark, onScrim, drag, children }: {
           accessibilityViewIsModal
           style={[
             styles.sheet,
-            elevation(3, colors, isDark),
+            glassStyle(3, colors, { solid: reduceDecoration }),
+            { backgroundColor: 'transparent', overflow: 'hidden' },
             { borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl, borderBottomWidth: 0, maxHeight, transform: [{ translateY: drag }] },
           ]}
         >
+          <GlassBackdrop level={3} testID="sheet-glass" />
           {children}
         </Animated.View>
       </KeyboardAvoidingView>
@@ -211,13 +225,14 @@ export type DialogProps = {
 
 /** Centred level-3 dialog: title-2 header, scrolling body, right-aligned actions. */
 export function Dialog({ visible, onClose, title, children, footer, dismissable = true, testID }: DialogProps) {
-  const { colors, isDark } = useTheme();
+  const { colors, reduceDecoration } = useTheme();
   if (!visible) return null;
   const requestClose = dismissable ? onClose : () => undefined;
   return (
     <ModalFrame testID={testID} visible onRequestClose={requestClose}>
       <View style={[styles.dialogRoot, { backgroundColor: colors.scrim }]}>
-        <View accessibilityViewIsModal style={[styles.dialog, elevation(3, colors, isDark)]}>
+        <View accessibilityViewIsModal style={[styles.dialog, glassStyle(3, colors, { solid: reduceDecoration }), { backgroundColor: 'transparent', overflow: 'hidden' }]}>
+          <GlassBackdrop level={3} testID="dialog-glass" />
           <Text variant="title2" accessibilityRole="header" style={{ marginBottom: spacing.md }}>{title}</Text>
           <ScrollView style={{ flexGrow: 0 }} keyboardShouldPersistTaps="handled">{children}</ScrollView>
           {footer ? <View style={styles.dialogFooter}>{footer}</View> : null}

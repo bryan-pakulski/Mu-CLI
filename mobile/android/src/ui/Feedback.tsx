@@ -1,21 +1,23 @@
 // Toasts and banners (G§9.16) plus empty and error states (G§9.18).
 //
-// Toasts: level 2, radius-md, above the tab bar, glyph in semantic ink. Info
+// Toasts: level-2 glass chrome (blurred), radius-md, above the tab bar, glyph in semantic ink. Info
 // and success auto-dismiss after 5s; errors persist until dismissed. Polite
 // live region (assertive for errors).
-// Banners: a full-width state strip with the semantic wash, glyph, sentence,
-// one tonal action and an optional dismiss.
+// Banners: a full-width state strip with the semantic wash mixed into glass,
+// glyph, sentence, one tonal action and an optional dismiss. No coloured
+// side rule (G§3.4); plan mode keeps its dashed outline.
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Image, View, type StyleProp, type ViewStyle } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../theme/ThemeContext';
-import { elevation, radii, spacing, toSemantic, toneOf, type Tone } from '../theme/tokens';
+import { radii, spacing, toSemantic, toneOf, type Tone } from '../theme/tokens';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Icon, type IconName } from './Icon';
 import { Button } from './Button';
 import { spotWash } from './WashBackground';
+import { GlassChrome, useGlass } from './Glass';
 
 const GLYPH: Record<string, string> = { ok: '✓', danger: '✗', attention: '◆', caution: '◆', running: '●', plan: '◇', info: 'ℹ', accent: 'ℹ', neutral: 'ℹ' };
 
@@ -23,7 +25,7 @@ type ToastItem = { id: number; text: string; tone: Tone };
 const ToastContext = createContext<(text: string, tone?: Tone) => void>(() => {});
 
 export function ToastHost({ children, bottomOffset = spacing.xl }: { children: React.ReactNode; bottomOffset?: number }) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [items, setItems] = useState<ToastItem[]>([]);
   const seq = useRef(0);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
@@ -51,13 +53,14 @@ export function ToastHost({ children, bottomOffset = spacing.xl }: { children: R
               const c = toneOf(colors, sem).ink;
               const isError = sem === 'danger';
               return (
-                <View key={item.id} accessibilityRole={isError ? 'alert' : 'text'} accessibilityLiveRegion={isError ? 'assertive' : 'polite'}
-                  style={[elevation(2, colors, isDark), { width: '100%', maxWidth: 360, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.md, paddingLeft: spacing.md, minHeight: 44 }]}>
+                <View key={item.id} accessibilityRole={isError ? 'alert' : 'text'} accessibilityLiveRegion={isError ? 'assertive' : 'polite'} style={{ width: '100%', maxWidth: 360 }}>
+                <GlassChrome level={2} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.md, paddingLeft: spacing.md, minHeight: 44 }}>
                   <Text variant="body" importantForAccessibility="no" style={{ color: c }}>{GLYPH[sem] || 'ℹ'}</Text>
                   <Text variant="body" style={{ flex: 1, paddingVertical: spacing.sm }}>{item.text}</Text>
                   <Pressable accessibilityLabel="Dismiss" onPress={() => dismiss(item.id)} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name="x" size="sm" color={colors.ink3} />
                   </Pressable>
+                </GlassChrome>
                 </View>
               );
             })}
@@ -88,10 +91,11 @@ export type BannerProps = {
 
 export function Banner({ tone = 'attention', glyph, title, children, right, action, onDismiss, role, dashed, testID, style }: BannerProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const t = toneOf(colors, tone);
   return (
     <View testID={testID} accessibilityRole={role}
-      style={[{ backgroundColor: t.wash, borderRadius: radii.md, padding: spacing.md, gap: spacing.sm, borderWidth: dashed ? 1 : 0, borderStyle: dashed ? 'dashed' : 'solid', borderColor: t.pigment }, style]}>
+      style={[{ backgroundColor: glass.tint(tone), borderRadius: radii.md, padding: spacing.md, gap: spacing.sm, borderWidth: 1, borderStyle: dashed ? 'dashed' : 'solid', borderColor: dashed ? t.pigment : glass.edge }, style]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
         {glyph ? <Text variant="body" importantForAccessibility="no" style={{ color: t.ink, fontWeight: '600' }}>{glyph}</Text> : null}
         {typeof title === 'string' ? <Text variant="body" style={{ flex: 1, color: t.ink, fontWeight: '600' }}>{title}</Text> : title}

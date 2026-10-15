@@ -8,9 +8,10 @@ import {
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { elevation, radii, spacing, touchTarget, typeStyle } from '../theme/tokens';
+import { radii, spacing, touchTarget, typeStyle } from '../theme/tokens';
 import { vocabulary } from '../theme/wash.generated';
 import { ApprovalCard, Button, ChoicePrompt, Icon, InkDrop, Pressable, PromptFrame, Sheet, Text, primaryArg } from '../ui';
+import { GlassBackdrop, useGlass } from '../ui/Glass';
 
 // Approvals and questions (G§9.9, G§9.10). A pending prompt shows as the
 // floating "Input required" banner; opening it presents the Wash approval
@@ -83,7 +84,8 @@ function quizOptionValue(o: unknown): string {
 // ---------- main component ----------------------------------------------
 
 export function PromptHost() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
+  const glass = useGlass();
   const isConnected = useConnectionStore(state => state.isConnected);
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const yolo = useConnectionStore(state => state.yolo);
@@ -224,8 +226,12 @@ export function PromptHost() {
         accessibilityLabel="Review pending agent input"
         haptic="light"
         onPress={() => setReviewOpen(true)}
-        style={[elevation(2, colors, isDark), styles.pendingBanner, { backgroundColor: colors.raised, borderColor: colors.hairline, borderLeftColor: colors.attention.ink }]}
+        // Attention state on level-2 glass chrome: blurred backdrop, the
+        // attention wash mixed into the glass and the ◆ glyph; no side rule.
+        style={[glass.style(2), styles.pendingBanner, { backgroundColor: 'transparent', overflow: 'hidden' }]}
       >
+        <GlassBackdrop level={2} testID="pending-banner-glass" />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: glass.tint('attention') }]} />
         <View style={[styles.pendingIcon, { backgroundColor: colors.attention.wash }]}>
           <Text variant="title3" importantForAccessibility="no" style={{ color: colors.attention.ink }}>{vocabulary.status.waiting.glyph}</Text>
         </View>
@@ -604,7 +610,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     paddingHorizontal: spacing.base,
     borderWidth: 1,
-    borderLeftWidth: 4,
   },
   pendingIcon: { width: 40, height: 40, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
   pendingCopy: { flex: 1, marginHorizontal: spacing.md },

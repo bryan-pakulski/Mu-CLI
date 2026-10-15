@@ -7,6 +7,7 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { PromptHost } from './src/components/PromptHost';
 import { refreshPendingMutations, useConnectionStore } from './src/store/connection';
+import { AmbientBackground } from './src/ui/Glass';
 
 // Hold the native splash (Paper canvas) until the bundled Wash fonts load,
 // so the first frame never flashes the platform font.
@@ -76,8 +77,16 @@ export default function App() {
   );
 }
 
-/** Paper/Dusk canvas behind every screen (art is placed per screen by WashBackground). */
+/**
+ * Paper/Dusk canvas with the fixed ambient wash behind every screen
+ * (G§3.3, G§6.2). The navigator is transparent so the wash shows through its
+ * glass; "Reduce decoration" leaves the flat canvas.
+ */
 function AppCanvas({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
-  return <View style={{ flex: 1, backgroundColor: colors.canvas }}>{children}</View>;
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <AmbientBackground>{children}</AmbientBackground>
+    </View>
+  );
 }

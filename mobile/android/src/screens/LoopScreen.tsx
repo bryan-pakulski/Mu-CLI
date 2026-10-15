@@ -23,15 +23,15 @@ export function LoopScreen() {
   }, []);
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
-  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><View style={{ padding: spacing.base }}><Skeleton height={280} /><Skeleton height={100} style={{ marginTop: spacing.sm }} /></View></SafeAreaView>;
-  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
-  if (!state || !state.active) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><EmptyState title="No loop mission" message="Set a goal to open autonomous mission control." /></SafeAreaView>;
+  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><View style={{ padding: spacing.base }}><Skeleton height={280} /><Skeleton height={100} style={{ marginTop: spacing.sm }} /></View></SafeAreaView>;
+  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
+  if (!state || !state.active) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><EmptyState title="No loop mission" message="Set a goal to open autonomous mission control." /></SafeAreaView>;
 
   const completed = state.backlog.filter(item => item.status === 'completed').length;
   const progress = state.backlog.length ? (completed / state.backlog.length) * 100 : 0;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />} contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}>
         <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
         {!!state.loop_goal && <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: -spacing.xs, marginBottom: spacing.md }}><Button title={state.loop_active ? 'Pause mission' : 'Resume mission'} variant={state.loop_active ? 'ghost' : 'primary'} onPress={async () => { await loopApi.setActive(!state.loop_active, state.loop_goal); load(); }} /></View>}

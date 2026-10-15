@@ -82,7 +82,7 @@ export function ProvidersScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3].map(i => (
             <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />
@@ -94,7 +94,7 @@ export function ProvidersScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -102,7 +102,7 @@ export function ProvidersScreen() {
 
   if (providers.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No providers" message="No LLM providers configured" />
       </SafeAreaView>
     );
@@ -167,7 +167,7 @@ export function ProvidersScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       {activeProvider && activeModel && (
         <View style={{ padding: spacing.base, paddingBottom: 0 }}>
           <Panel title="Current" right={<StatusIcon status="done" label="Active" showLabel size="xs" />}>

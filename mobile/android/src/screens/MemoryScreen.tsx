@@ -178,7 +178,7 @@ export function MemoryScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           <Skeleton height={44} style={{ marginBottom: spacing.sm }} />
           <Skeleton height={120} style={{ marginBottom: spacing.sm }} />
@@ -190,7 +190,7 @@ export function MemoryScreen() {
 
   if (error && !ledger && !snapshot) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -230,7 +230,7 @@ export function MemoryScreen() {
   const maxChurn = Math.max(10, ...contextPoints.map(point => point.churn_score || 0));
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {tabButton('memories', 'Memories')}
         {tabButton('context', 'Context')}

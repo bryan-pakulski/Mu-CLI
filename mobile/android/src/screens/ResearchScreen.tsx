@@ -33,17 +33,17 @@ export function ResearchScreen() {
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   if (loading) return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <View style={{ padding: spacing.base }}><Skeleton height={280} /><Skeleton height={90} style={{ marginTop: spacing.sm }} /></View>
     </SafeAreaView>
   );
-  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
+  if (error) return <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><ErrorState message={error} onRetry={load} /></SafeAreaView>;
   if (!state || (!state.active && !state.sources.length && !state.findings.length)) return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}><EmptyState title="No research session" message="Start a research conversation to build a source-backed evidence desk." /></SafeAreaView>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}><EmptyState title="No research session" message="Start a research conversation to build a source-backed evidence desk." /></SafeAreaView>
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}

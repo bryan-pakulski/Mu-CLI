@@ -33,6 +33,7 @@ import { STATUS, duration, money, stateLabel, stateStatus } from '../theme/statu
 import { BAR_HIDDEN, actionLabel, actionTone } from '../components/JobActions';
 import { JobRow, JobsNavBar, ResultRow, focusStep, jobKey, stepsOf, type JobsPage, switchJobsPage } from '../components/JobsChrome';
 import { Banner, Button, Empty, Field, Loading, Panel, Pressable, Sheet, StatStrip, StatusIcon, WashBackground, SwitchRow, Text, TextField, useInterval, Icon } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 export type WorkScreenProps = NativeStackScreenProps<RootStackParamList, 'Work'>;
 
@@ -271,11 +272,13 @@ export function WorkScreen({ navigation }: WorkScreenProps) {
 /** Needs-you card: state, title, attention detail and the job's enabled primary actions. */
 function NeedsYouCard({ job, onOpen, onAction }: { job: JobSummary; onOpen: () => void; onAction: (id: string) => void }) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const failed = job.state === 'failed';
   const primary = job.actions.filter(a => a.primary && a.enabled && !BAR_HIDDEN.has(a.id) && !a.hidden);
   return (
-    <View testID={`needs-you-${job.id}`} style={[styles.card, { borderColor: failed ? colors.danger.pigment : colors.hairline, backgroundColor: colors.raised, borderLeftColor: failed ? colors.danger.ink : colors.attention.ink }]}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Open ${jobKey(job)} ${job.title}`} onPress={onOpen} style={styles.cardHead}>
+    <View testID={`needs-you-${job.id}`} style={[styles.card, glass.style(1)]}>
+      {/* State card (G§9.3): attention/danger wash in the header strip + status glyph; no side rule. */}
+      <Pressable accessibilityRole="button" accessibilityLabel={`Open ${jobKey(job)} ${job.title}`} onPress={onOpen} style={[styles.cardHead, styles.cardHeadStrip, { backgroundColor: glass.tint(failed ? 'danger' : 'attention') }]}>
         <StatusIcon status={stateStatus(job.state)} label={stateLabel(job.state)} />
         <Text variant="sm" style={[styles.key, { color: colors.accent.ink }]}>{jobKey(job)}</Text>
         <Text variant="xs" style={{ color: failed ? colors.danger.ink : colors.attention.ink }}>{stateLabel(job.state)}</Text>
@@ -572,7 +575,8 @@ const styles = StyleSheet.create({
   num: { fontVariant: ['tabular-nums'] },
   key: { fontFamily: fonts.mono, fontWeight: fontWeights.semibold },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  card: { borderWidth: 1, borderLeftWidth: 3, borderRadius: radii.control, padding: spacing.md, gap: spacing.xs },
+  card: { borderRadius: radii.control, padding: spacing.md, gap: spacing.xs, overflow: 'hidden' },
+  cardHeadStrip: { marginHorizontal: -spacing.md, marginTop: -spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 28 },
   cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
   running: { paddingVertical: spacing.sm, gap: 2, borderBottomWidth: 1, minHeight: touchTarget },

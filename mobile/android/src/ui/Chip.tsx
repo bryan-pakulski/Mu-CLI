@@ -1,5 +1,6 @@
 // Chips, pills and badges (G§9.2). Status chips pair the vocabulary glyph
-// with its label on the semantic wash; meta chips are surface pills; eyebrow
+// with its label on the semantic wash; meta chips are `glass-subtle` pills
+// with a light edge (solid surface with Reduce decoration); eyebrow
 // chips label sections (sentence case, never all-caps); filter chips invert
 // to ink when selected; count badges use tabular numbers.
 
@@ -11,6 +12,7 @@ import { STATUS, asStatus, type Status } from '../theme/status';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Icon } from './Icon';
+import { useGlass } from './Glass';
 
 export type ChipVariant = 'status' | 'meta' | 'eyebrow' | 'filter';
 
@@ -41,15 +43,17 @@ export function Chip({
   dashed, accessibilityLabel, testID, style,
 }: ChipProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const t = toneOf(colors, tone);
   const content = label ?? children;
+  const onGlass = glass.solid ? colors.surface : glass.style('subtle').backgroundColor as string;
   const look = (() => {
     switch (variant) {
-      case 'meta': return { bg: colors.surface, border: colors.hairline, fg: colors.ink2 };
-      case 'eyebrow': return { bg: colors.sunken, border: colors.sunken, fg: colors.ink2 };
+      case 'meta': return { bg: onGlass, border: colors.hairline, fg: colors.ink2 };
+      case 'eyebrow': return glass.solid ? { bg: colors.sunken, border: colors.sunken, fg: colors.ink2 } : { bg: onGlass, border: 'transparent', fg: colors.ink2 };
       case 'filter': return selected
         ? { bg: colors.ink, border: colors.ink, fg: colors.onInk }
-        : { bg: colors.surface, border: colors.hairline, fg: colors.ink2 };
+        : { bg: onGlass, border: colors.hairline, fg: colors.ink2 };
       default: return { bg: t.wash, border: dashed ? t.pigment : t.wash, fg: t.ink };
     }
   })();

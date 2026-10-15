@@ -20,5 +20,6 @@ export { InkDrop, ProgressBar, Skeleton, ResultBar, Meter, Sparkline, type Skele
 export { PipelineStepper, MiniStepper, describeStep, type StepLike } from './Stepper';
 export { ContextRing, LayerBar, contextTone, layerTone, CONTEXT_CAUTION, CONTEXT_DANGER, type LayerSegment } from './Meters';
 export { WashBackground, washArt, spotWash, type WashArt } from './WashBackground';
+export { glassStyle, useGlass, stateTint, activePillStyle, GlassChrome, GlassBackdrop, Stage, AmbientBackground, AmbientLayer, ambientArt, routeAmbient, useAmbientOverride, GLASS_MIN_ALPHA, type GlassLevel, type AmbientArt } from './Glass';
 export { layout, useInterval } from './layout';
 export type { Tone, Semantic } from '../theme/tokens';

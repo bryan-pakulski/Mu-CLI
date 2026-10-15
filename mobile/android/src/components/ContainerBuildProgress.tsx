@@ -4,6 +4,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
 import { Pressable, Text, Icon } from '../ui';
 import { STATUS } from '../theme/status';
+import { useGlass } from '../ui/Glass';
 
 export type ContainerProgressLog = {
   seq: number;
@@ -29,6 +30,7 @@ export function ContainerBuildProgress({
   failed = false,
 }: ContainerBuildProgressProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const outputRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -41,14 +43,8 @@ export function ContainerBuildProgress({
 
   return (
     <View
-      style={[
-        styles.container,
-        {
-          backgroundColor: failed ? colors.danger.wash : colors.surface,
-          borderColor: colors.hairline,
-          borderLeftColor: failed ? colors.danger.ink : running ? colors.running.ink : colors.ok.ink,
-        },
-      ]}
+      // Glass card; state is the header tint plus the status glyph, never a side rule (G§3.4).
+      style={[styles.container, glass.style(1)]}
     >
       <Pressable
         onPress={onToggle}
@@ -56,7 +52,7 @@ export function ContainerBuildProgress({
         accessibilityRole="button"
         accessibilityLabel={`${expanded ? 'Hide' : 'Show'} container build output`}
         accessibilityHint="Displays live stdout and stderr from Docker container creation"
-        style={styles.header}
+        style={[styles.header, { backgroundColor: glass.tint(failed ? 'danger' : running ? 'running' : 'ok') }]}
       >
         {running ? (
           <ActivityIndicator color={colors.running.ink} accessibilityLabel="in progress" />
@@ -135,8 +131,6 @@ export function ContainerBuildProgress({
 const styles = StyleSheet.create({
   container: {
     marginTop: spacing.md,
-    borderWidth: 1,
-    borderLeftWidth: 3,
     borderRadius: radii.panel,
     overflow: 'hidden',
   },

@@ -29,7 +29,7 @@ export function AudioScreen() {
   }, [text, activeSessionName]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <View style={{ padding: spacing.base }}>
         <Text variant="lg" style={{ fontWeight: fontWeights.semibold, marginBottom: spacing.sm }}>Audio</Text>
 

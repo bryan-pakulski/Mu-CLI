@@ -69,7 +69,7 @@ export function SystemPromptsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4].map(i => <Skeleton key={i} height={60} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -79,7 +79,7 @@ export function SystemPromptsScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -87,14 +87,14 @@ export function SystemPromptsScreen() {
 
   if (prompts.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No system prompts" message="No system prompts configured" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <FlatList
         data={prompts}
         keyExtractor={item => item.name}

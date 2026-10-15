@@ -85,7 +85,7 @@ export function SettingsScreen() {
   const needsSession = (name: string) => () => (activeSessionName ? navigation.navigate(name) : navigation.navigate('Tabs', { screen: 'Chat' }));
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.canvas }} contentContainerStyle={styles.content} testID="settings-screen">
+    <ScrollView style={{ flex: 1, backgroundColor: 'transparent' }} contentContainerStyle={styles.content} testID="settings-screen">
       {!isConnected ? (
         <Banner tone="danger" glyph="✗" title="Not connected to Mucli" action={{ label: 'Connect', onPress: go('Connection') }} />
       ) : null}

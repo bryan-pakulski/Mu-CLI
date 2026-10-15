@@ -178,7 +178,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
 
   if (!job) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.canvas }]}>
+      <View style={[styles.loading, { backgroundColor: 'transparent' }]}>
         {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : <Loading label="Loading job…" />}
       </View>
     );
@@ -212,7 +212,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const limitPaused = !!job.limit;
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <ScrollView
         ref={scroller}
         contentContainerStyle={styles.content}

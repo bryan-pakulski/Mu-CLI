@@ -2,7 +2,9 @@
 // title-3 plum with the provider · model line; safety states (plan mode,
 // auto-approve) are always visible here (G§10.4); a compact context ring
 // opens the breakdown; trace, work and settings are icon buttons. Settings
-// is a real screen under More, not a sheet.
+// is a real screen under More, not a sheet. The bar is level-1 glass chrome
+// (blurred ambient wash, G§3.3) with a neutral glass bottom edge; solid
+// surface with Reduce decoration.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
@@ -14,6 +16,7 @@ import { normaliseFill, useContextFillStore } from '../store/contextFill';
 import { PlanModeBadge } from './PlanModeIndicator';
 import { radii, spacing } from '../theme/tokens';
 import { Chip, ContextRing, IconButton, Pressable, Text } from '../ui';
+import { GlassChrome, useGlass } from '../ui/Glass';
 
 export type ModernHeaderProps = {
   onOpenSessions: () => void;
@@ -69,6 +72,7 @@ export function ModernHeader({
 }: ModernHeaderProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const glass = useGlass();
   const activeSessionName = useConnectionStore(s => s.activeSessionName);
   const activeProvider = useConnectionStore(s => s.activeProvider);
   const activeModel = useConnectionStore(s => s.activeModel);
@@ -107,7 +111,7 @@ export function ModernHeader({
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.canvas, borderBottomColor: colors.hairline, paddingTop: insets.top + spacing.xs }]}>
+    <GlassChrome level={1} edges={false} testID="chat-header-glass" style={[styles.container, { borderBottomColor: glass.edge, paddingTop: insets.top + spacing.xs }]}>
       <Pressable accessibilityLabel="Open sessions" onPress={onOpenSessions} style={styles.mark}>
         <Text variant="title2" style={{ color: colors.plum }}>μ</Text>
       </Pressable>
@@ -132,7 +136,7 @@ export function ModernHeader({
         <IconButton icon="activity" label="Open Trace Analyzer" onPress={onOpenTraces} disabled={!activeSessionName} />
         <IconButton icon="settings" label="Open settings" onPress={onOpenSettings} />
       </View>
-    </View>
+    </GlassChrome>
   );
 }
 

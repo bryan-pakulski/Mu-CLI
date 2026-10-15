@@ -1,5 +1,5 @@
 // Form controls (G§9.5): label above, hint below, inline error with ✗.
-// Text fields are 44 on touch with a control-border; the switch is accent
+// Text fields are 44 on touch: a `glass-subtle` inset with a control-border; the switch is accent
 // when on; checkboxes are 18px with a 44px hit row; the slider is a sunken
 // track with an accent fill and labelled stops.
 
@@ -11,6 +11,7 @@ import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Icon } from './Icon';
 import { Sheet } from './Sheet';
+import { useGlass } from './Glass';
 
 export function Field({ label, hint, error, optional, children, testID }: { label: string; hint?: string; error?: string; optional?: boolean; children: React.ReactNode; testID?: string }) {
   const { colors } = useTheme();
@@ -33,6 +34,7 @@ export type TextFieldProps = TextInputProps & { mono?: boolean; invalid?: boolea
 
 export function TextField({ style, multiline, mono, invalid, ...rest }: TextFieldProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const [focused, setFocused] = useState(false);
   return (
     <TextInput
@@ -50,7 +52,7 @@ export function TextField({ style, multiline, mono, invalid, ...rest }: TextFiel
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm,
           color: colors.ink,
-          backgroundColor: colors.surface,
+          backgroundColor: glass.solid ? colors.surface : glass.style('subtle').backgroundColor,
           borderWidth: focused ? 2 : 1,
           borderColor: invalid ? colors.danger.ink : focused ? colors.accent.ink : colors.controlBorder,
         },
@@ -68,13 +70,14 @@ export function Select<T extends string>({ label, value, options, onChange, plac
   placeholder?: string; disabled?: boolean; testID?: string; accessibilityLabel?: string;
 }) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const [open, setOpen] = useState(false);
   const current = options.find(o => o.value === value);
   return (
     <>
       <Pressable testID={testID} accessibilityLabel={accessibilityLabel || `${label}: ${current?.label || placeholder}`} accessibilityHint="Opens a list of options"
         disabled={disabled} scale={false} onPress={() => setOpen(true)}
-        style={{ minHeight: touchTarget, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.sm, borderWidth: 1, borderColor: colors.controlBorder, backgroundColor: colors.surface, paddingHorizontal: spacing.md }}>
+        style={{ minHeight: touchTarget, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radii.sm, borderWidth: 1, borderColor: colors.controlBorder, backgroundColor: glass.solid ? colors.surface : glass.style('subtle').backgroundColor, paddingHorizontal: spacing.md }}>
         <Text variant="body" numberOfLines={1} style={{ flex: 1, color: current ? colors.ink : colors.ink3 }}>{current?.label || placeholder}</Text>
         <Icon name="chevron-down" size="sm" color={colors.ink3} />
       </Pressable>

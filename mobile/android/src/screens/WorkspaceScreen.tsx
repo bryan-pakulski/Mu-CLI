@@ -37,7 +37,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
   }, [loadWorkspaces]);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
         <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Workspace</Text>
         <Text variant="xl" style={styles.pageTitle}>Tools</Text>

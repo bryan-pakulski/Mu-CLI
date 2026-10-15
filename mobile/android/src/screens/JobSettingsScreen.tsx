@@ -27,7 +27,7 @@ export function JobSettingsScreen({ navigation }: JobSettingsScreenProps) {
   const [notify, setNotify] = useState(true);
   useEffect(() => { void loadNotifyEnabled().then(setNotify); }, []);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
       <JobsNavBar current="JobSettings" onNavigate={go} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Settings</Text>

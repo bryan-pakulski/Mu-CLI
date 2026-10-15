@@ -266,7 +266,7 @@ def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
                     )
                 console.print(table)
                 if len(sources) > 50:
-                    console.print(f"[wash.muted]…and {len(sources) - 50} more (see data payload).[/wash.muted]")
+                    console.print(f"[wash.muted]…and {len(sources) - 50:d} more (see data payload).[/wash.muted]")
             except Exception:
                 pass
         elif console is not None:

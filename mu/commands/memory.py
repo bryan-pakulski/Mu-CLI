@@ -459,24 +459,25 @@ def _durable_why(session: Any, receipt_id: str, allow_prompt: bool) -> CommandRe
     if allow_prompt and _console(session) is not None:
         console = _console(session)
         console.print(
-            f"[wash.accent.bold]Recall {receipt['id']}[/wash.accent.bold] · "
-            f"{len(receipt['included'])} included · {receipt['token_count']} tokens"
+            f"[wash.accent.bold]Recall {safe_markup(str(receipt['id']))}[/wash.accent.bold] · "
+            f"{len(receipt['included'])} included · {safe_markup(str(receipt['token_count']))} tokens"
         )
         for candidate in receipt["included"]:
             memory = candidate.get("memory", {})
             reasons = candidate.get("reasons", {})
             console.print(
-                f"[wash.ok]used[/wash.ok] {str(memory.get('id', ''))[:8]} "
-                f"[{memory.get('scope', {}).get('type', '')}] "
-                f"score={candidate.get('score')} · {memory.get('statement', '')}"
+                f"[wash.ok]used[/wash.ok] {safe_markup(str(memory.get('id', ''))[:8])} "
+                f"{safe_markup('[' + str(memory.get('scope', {}).get('type', '')) + ']')} "
+                f"score={safe_markup(str(candidate.get('score')))} · "
+                f"{safe_markup(str(memory.get('statement', '')))}"
             )
             console.print(f"  [wash.muted]{safe_markup(json.dumps(reasons, sort_keys=True))}[/wash.muted]")
         for candidate in receipt["excluded"][:10]:
             memory = candidate.get("memory", {})
             console.print(
-                f"[wash.muted]skip {str(memory.get('id', ''))[:8]} · "
-                f"{candidate.get('exclusion_reason', '')} · "
-                f"{memory.get('statement', '')}[/wash.muted]"
+                f"[wash.muted]skip {safe_markup(str(memory.get('id', ''))[:8])} · "
+                f"{safe_markup(str(candidate.get('exclusion_reason', '')))} · "
+                f"{safe_markup(str(memory.get('statement', '')))}[/wash.muted]"
             )
     return CommandResult(ok=True, message=f"Recall receipt {receipt['id']}", data=receipt)
 
@@ -790,7 +791,7 @@ def _clear(session: Any, target: str, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[wash.ok]{msg}[/wash.ok]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg)
@@ -830,7 +831,7 @@ def _save_memory(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[wash.ok]{msg}[/wash.ok]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg, data={"saved_count": len(entries), "filepath": filepath})
@@ -868,7 +869,7 @@ def _load_memory(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[wash.ok]{msg}[/wash.ok]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg, data={"loaded_count": loaded, "filepath": filepath})
@@ -882,7 +883,7 @@ def _list_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
             console = _console(session)
             if console is not None:
                 try:
-                    console.print(f"[wash.muted]{msg}[/wash.muted]")
+                    console.print(f"[wash.muted]{safe_markup(str(msg))}[/wash.muted]")
                 except Exception:
                     pass
         return CommandResult(ok=True, message=msg, data={"saved_files": []})
@@ -943,7 +944,7 @@ def _clear_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[wash.ok]{msg}[/wash.ok]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg, data={"cleared_count": cleared})

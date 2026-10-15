@@ -21,6 +21,7 @@ from providers.gemini import GeminiProvider
 from providers.anthropic import AnthropicProvider
 from providers.ollama import OllamaProvider
 from utils.helpers import safe_markup
+from rich.markup import escape as esc
 from utils.logger import logger
 from providers.openai import OpenAIProvider
 from mu.session.session import SessionManager, Session, derive_feature_state_status
@@ -448,8 +449,8 @@ def _choose_session_numbered(session_manager):
             console.print(f" {i}. {s}", markup=False)
         new_idx = len(sessions) + 1
         delete_idx = len(sessions) + 2
-        console.print(f" {new_idx}. [wash.ok.bold][New Session][/wash.ok.bold]")
-        console.print(f" {delete_idx}. [wash.danger.bold][Delete a session…][/wash.danger.bold]")
+        console.print(f" {new_idx:d}. [wash.ok.bold][New Session][/wash.ok.bold]")
+        console.print(f" {delete_idx:d}. [wash.danger.bold][Delete a session…][/wash.danger.bold]")
 
         choice = IntPrompt.ask(
             "Select a session",
@@ -478,7 +479,7 @@ def _delete_session_flow(session_manager, sessions):
     for i, s in enumerate(sessions, 1):
         console.print(f" {i}. {s}", markup=False)
     cancel_idx = len(sessions) + 1
-    console.print(f" {cancel_idx}. [wash.muted][Cancel][/wash.muted]")
+    console.print(f" {cancel_idx:d}. [wash.muted][Cancel][/wash.muted]")
 
     choice = IntPrompt.ask(
         "Pick a session to delete",
@@ -724,9 +725,9 @@ def build_session(args, ui, allow_prompt=True):
             if os.path.isdir(ws_path):
                 session.folder_context.add_folder(ws_path)
                 session.session_manager.save_history(session.folder_context)
-                console.print(f"[wash.muted]workspace → {ws_path}[/wash.muted]")
+                console.print(f"[wash.muted]workspace → {esc(str(ws_path))}[/wash.muted]")
             else:
-                console.print(f"[wash.caution]not a directory: {ws_path} — skipping[/wash.caution]")
+                console.print(f"[wash.caution]not a directory: {esc(str(ws_path))} — skipping[/wash.caution]")
 
     if args.yolo:
         session.variables["yolo"] = True
@@ -817,7 +818,7 @@ def _trace_analyze_cli(path: str) -> int:
     s = build_summary(run, series)
 
     console.print(
-        f"[bold]Trace run[/bold] {s['run_id']}  "
+        f"[bold]Trace run[/bold] {esc(str(s['run_id']))}  "
         f"session=[wash.accent]{safe_markup(s['session'])}[/wash.accent]  "
         f"model={safe_markup(s['model'])}  mode={safe_markup(s['mode'])}"
     )
@@ -1082,7 +1083,7 @@ def main():
             status = (result or {}).get("status", "complete")
             if status not in ("complete", "completed", "paused"):
                 exit_code = 1
-            console.print(f"[wash.muted]headless turn status: {status}[/wash.muted]")
+            console.print(f"[wash.muted]headless turn status: {esc(str(status))}[/wash.muted]")
         except Exception as exc:
             console.print(f"[wash.danger]Headless turn failed: {safe_markup(str(exc))}[/wash.danger]")
             exit_code = 1

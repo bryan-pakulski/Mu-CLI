@@ -67,7 +67,7 @@ def _edit_dockerfile(initial: str) -> str:
             result = subprocess.run(command, check=False)
             if result.returncode != 0:
                 console.print(
-                    f"[wash.caution]editor exited with status {result.returncode}; keeping the previous template[/wash.caution]"
+                    f"[wash.caution]editor exited with status {esc(str(result.returncode))}; keeping the previous template[/wash.caution]"
                 )
                 return initial
             return Path(path).read_text(encoding="utf-8")

@@ -154,14 +154,14 @@ def tool_marker(tool_name: str, target: str = "", *, state: str = "active",
     text = Text()
     if state == "active":
         text.append(f"{glyphs.ACTIVE} ", style="wash.running")
-        text.append(f"{kind:<6}", style="wash.running")
+        text.append(f"{kind:<7}", style="wash.running")
         text.append(f" {target}", style="wash.ink2")
         return text
     if state == "failed":
         text.append(f"{glyphs.FAILED} ", style="wash.danger")
-        text.append(f"{kind:<6} {target}", style="wash.muted")
+        text.append(f"{kind:<7} {target}", style="wash.muted")
     else:
-        text.append(f"{glyphs.DONE} {kind:<6} {target}", style="wash.muted")
+        text.append(f"{glyphs.DONE} {kind:<7} {target}", style="wash.muted")
     if elapsed is not None:
         text.append(f"  {elapsed:.1f}s", style="wash.muted")
     return text
@@ -190,6 +190,7 @@ def table(*columns: str, title: Optional[str] = None, **kwargs) -> Table:
     kwargs.setdefault("header_style", "wash.table.header")
     kwargs.setdefault("title_style", "wash.heading")
     kwargs.setdefault("border_style", "wash.border")
+    kwargs.setdefault("show_edge", False)
     return Table(*columns, title=title, **kwargs)
 
 

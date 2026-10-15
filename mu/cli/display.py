@@ -277,6 +277,47 @@ def build_splash(session):
         f" (effective cap ÷ safety; raw {raw_limit:,})" if context_limit < raw_limit else ""
     )
 
+    splash = splash_renderable(
+        session_name=str(session.session_manager.current_session_name),
+        session_type=f"{session_type_glyph} {session_type}",
+        agent_mode=agent_mode,
+        model_name=str(session.provider.model_name),
+        flags=(
+            f"thinking {'on' if session.thinking else 'off'} · "
+            f"agentic {'on' if session.agentic else 'off'} · "
+            f"yolo {'on' if yolo_on else 'off'} · system {sys_status}"
+        ),
+        context=f"ctx {context_tokens:,} / {context_limit:,}{cap_note}",
+        workspace=folder_list,
+        has_workspace=bool(folder_count),
+        plan=plan_on,
+        yolo=yolo_on,
+    )
+
+    warning = None
+    if context_tokens >= threshold_tokens:
+        warning = (
+            f"Context is {context_tokens:,} / {context_limit:,} tokens, past the "
+            f"{int(trim_threshold * 100)}% trim threshold.{cap_note}"
+        )
+    return splash, warning
+
+
+def splash_renderable(
+    *,
+    session_name: str,
+    session_type: str,
+    agent_mode: str,
+    model_name: str,
+    flags: str,
+    context: str,
+    workspace: str,
+    has_workspace: bool = True,
+    plan: bool = False,
+    yolo: bool = False,
+):
+    """Wordmark + gradient rule + the 3-row info grid. All values are literal."""
+
     def sep(text):
         text.append("  ·  ", style="wash.muted")
 
@@ -285,31 +326,25 @@ def build_splash(session):
     wordmark.append_text(gradient_rule(40))
 
     session_row = Text()
-    session_row.append(str(session.session_manager.current_session_name), style="wash.ink.bold")
+    session_row.append(session_name, style="wash.ink.bold")
     sep(session_row)
-    session_row.append(f"{session_type_glyph} {session_type}", style="wash.ink2")
+    session_row.append(session_type, style="wash.ink2")
     sep(session_row)
-    session_row.append(agent_mode, style=f"wash.mode.{agent_mode}" if agent_mode in load_tokens()["mode"] else "wash.ink2")
-    if plan_on:
+    mode_style = f"wash.mode.{agent_mode}" if agent_mode in load_tokens()["mode"] else "wash.ink2"
+    session_row.append(agent_mode, style=mode_style)
+    if plan:
         session_row.append("  [plan]", style="wash.chip.plan")
-    if yolo_on:
+    if yolo:
         session_row.append("  [yolo]", style="wash.chip.yolo")
 
     model_row = Text()
-    model_row.append(str(session.provider.model_name), style="wash.ink.bold")
+    model_row.append(model_name, style="wash.ink.bold")
     sep(model_row)
-    model_row.append(
-        f"thinking {'on' if session.thinking else 'off'} · "
-        f"agentic {'on' if session.agentic else 'off'} · "
-        f"yolo {'on' if yolo_on else 'off'} · system {sys_status}",
-        style="wash.muted",
-    )
+    model_row.append(flags, style="wash.muted")
     sep(model_row)
-    model_row.append(f"ctx {context_tokens:,} / {context_limit:,}", style="wash.ink2")
-    if cap_note:
-        model_row.append(cap_note, style="wash.muted")
+    model_row.append(context, style="wash.ink2")
 
-    workspace_row = Text(folder_list, style="wash.path" if folder_count else "wash.muted")
+    workspace_row = Text(workspace, style="wash.path" if has_workspace else "wash.muted")
 
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="wash.muted", no_wrap=True)
@@ -317,14 +352,7 @@ def build_splash(session):
     grid.add_row("session", session_row)
     grid.add_row("model", model_row)
     grid.add_row("workspace", workspace_row)
-
-    warning = None
-    if context_tokens >= threshold_tokens:
-        warning = (
-            f"Context is {context_tokens:,} / {context_limit:,} tokens, past the "
-            f"{int(trim_threshold * 100)}% trim threshold.{cap_note}"
-        )
-    return Group(wordmark, Text(""), grid), warning
+    return Group(wordmark, Text(""), grid)
 
 
 def print_splash(session):

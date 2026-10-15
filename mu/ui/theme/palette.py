@@ -93,12 +93,15 @@ def role_hex(role: str, theme: str, step: str = "ink") -> Optional[str]:
 
 
 def role_ansi16(role: str) -> Optional[str]:
-    """ANSI-16 colour name for a role (``None`` means terminal default)."""
+    """ANSI-16 colour name for a role (``None``: no colour; ``default``: terminal fg)."""
     role = canonical(role)
     table = ansi16_table()
-    if role in ("ink", "ink-2", "surface", "raised", "canvas", "sunken"):
-        value = table.get(role, "default")
-        return None if value == "default" else value
+    if role in ("ink", "ink-2"):
+        # Explicit terminal default so ink text overrides an enclosing colour
+        # (e.g. a panel title sitting on a muted border).
+        return table.get(role, "default")
+    if role in ("surface", "raised", "canvas", "sunken"):
+        return None
     if role in ("ink-3", "neutral", "hairline", "hairline-strong", "control-border"):
         return table.get("muted", "bright_black")
     if role in table:
@@ -129,7 +132,9 @@ def pt_color(role: str, mode: str, theme: str, step: str = "ink") -> Optional[st
         return None
     if mode == "16":
         name = role_ansi16(role)
-        return f"ansi{name.replace('_', '')}" if name else None
+        if not name or name == "default":
+            return None
+        return f"ansi{name.replace('_', '')}"
     return role_hex(role, theme, step)
 
 

@@ -726,6 +726,7 @@ class RichUI:
             header_style="wash.table.header",
             border_style="wash.border",
             expand=True,
+            show_edge=False,
             pad_edge=False,
             collapse_padding=True,
         )
@@ -1028,7 +1029,7 @@ class RichUI:
                 self.console.print(f"  {i}. {safe_markup(option)}")
             if other_index is not None:
                 self.console.print(
-                    f"  {other_index}. [wash.muted]Other (type your own)…[/wash.muted]"
+                    f"  {other_index:d}. [wash.muted]Other (type your own)…[/wash.muted]"
                 )
             if multi_select:
                 self.console.print(

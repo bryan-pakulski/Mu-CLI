@@ -6,7 +6,8 @@ WORK_TEMPLATE = ROOT / "mu" / "gui" / "templates" / "work.html"
 MANAGEMENT_JS = ROOT / "mu" / "gui" / "static" / "js" / "work_management.js"
 TRACE_JS = ROOT / "mu" / "gui" / "static" / "js" / "work_trace.js"
 DIAGNOSTICS_JS = ROOT / "mu" / "gui" / "static" / "js" / "work_diagnostics.js"
-MANAGEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "work_management.css"
+# Wash W4: the History / trace rules moved into the /work page bundle.
+MANAGEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css"
 ROUTER = ROOT / "mu" / "gui" / "routers" / "jobs.py"
 
 
@@ -15,10 +16,13 @@ def test_engineering_work_loads_management_and_trace_assets():
 
     assert 'id="work-manage"' in template
     assert 'id="work-management-backdrop"' in template
-    # Wash W2: work_management.css is imported by the /work page bundle.
+    # Wash W4: the /work page bundle styles History itself (Wash rules, no
+    # legacy import); work_management.css is retired.
     assert '/static/css/wash/patterns/work.css' in template
-    bundle = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")
-    assert '@import url("../../work_management.css") layer(legacy);' in bundle
+    bundle = MANAGEMENT_CSS.read_text(encoding="utf-8")
+    assert '.work-management-query {' in bundle and '.work-management-table {' in bundle
+    assert '@import' not in bundle
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "work_management.css").exists()
     assert '/static/js/work_trace.js' in template
     assert '/static/js/work_management.js' in template
     assert template.index('/static/js/work_trace.js') < template.index('/static/js/work_diagnostics.js')

@@ -8,7 +8,12 @@
       page           the whole body content; defaults to the app shell below.
                      Pages with their own chrome (chat, work) replace it.
       crumbs         <li class="w-breadcrumb__item"> items after "μcli"
+      crumbs_attrs   extra attributes on the breadcrumb <ol> (e.g. an id a
+                     page script rewrites)
       topbar_chips   <li> status chips (.w-chip) on the right of the top bar
+      topbar_chips_attrs  extra attributes on the chips <ul>
+      sidebar_extra  an extra page section in the shared sidebar, rendered
+                     under the primary navigation (e.g. the Work sub-pages)
       topbar_tools   tool buttons before the theme toggle
       content        page content inside <main class="w-stage">
       overlays       global modals / popovers (partials/*.html)
@@ -46,15 +51,16 @@
         </button>
         <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-drop" aria-hidden="true"></span>μcli</a>
         <nav class="w-breadcrumb" aria-label="Breadcrumb">
-            <ol class="w-breadcrumb__list">{% block crumbs %}{% endblock %}</ol>
+            <ol class="w-breadcrumb__list"{% block crumbs_attrs %}{% endblock %}>{% block crumbs %}{% endblock %}</ol>
         </nav>
         <span class="w-topbar__spacer"></span>
-        <ul class="w-topbar__chips" aria-label="Status">{% block topbar_chips %}{% endblock %}</ul>
+        <ul class="w-topbar__chips" aria-label="Status"{% block topbar_chips_attrs %}{% endblock %}>{% block topbar_chips %}{% endblock %}</ul>
         <div class="w-topbar__tools">
             {% block topbar_tools %}{% endblock %}
             {{ w.theme_toggle() }}
         </div>
     </header>
+    {%- set sidebar_extra %}{% block sidebar_extra %}{% endblock %}{% endset %}
     {% include "partials/sidebar.html" %}
     <main class="w-stage" id="w-main" tabindex="-1">
         {% block content %}{% endblock %}

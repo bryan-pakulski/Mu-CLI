@@ -66,22 +66,3 @@ body { padding: 0; }
     min-width: 0;
     z-index: var(--z-overlay);
 }
-
-/* ------------------------------------------------ work.css (jobs chrome) */
-.work-app .sr-only { position: absolute; }
-.work-logo { color: var(--text); }
-.work-logo:hover { text-decoration: none; }
-.work-side .work-navlink { color: var(--muted); }
-.work-side .work-navlink:hover { color: var(--text); text-decoration: none; }
-.work-side .work-navlink[aria-current='page'] { color: var(--text); }
-.work-stat:hover { text-decoration: none; }
-.work-tab { padding: var(--s-1) var(--s-2); border-bottom: 2px solid transparent; color: var(--muted); }
-.work-tab:hover { color: var(--text); }
-.work-tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
-.work-fold { color: var(--muted); padding: 1px 0; }
-.work-fold:hover:not(:disabled) { color: var(--text); }
-.work-fold.is-tool { color: var(--accent); }
-.work-segmented button { padding: 0 10px; color: var(--muted); }
-.work-segmented button[aria-pressed='true'] { color: var(--text); }
-.work-tree-item.is-viewed .work-tree-link { color: var(--muted); }
-.work-tree-link { padding: 2px 0; color: var(--text); }

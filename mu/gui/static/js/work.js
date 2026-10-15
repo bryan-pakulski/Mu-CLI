@@ -86,13 +86,14 @@
 
     /* ------------------------------------------------------------ status chips (planos StatusChips) */
     let knownNeeds = null;
+    // Top-bar status chips are Wash status chips: tone via data-tone, glyph + label always.
+    const CHIP_TONE = { muted: 'neutral', warn: 'attention' };
     function chip(name, tone, text, active) {
         const el = root.querySelector(`[data-chip="${name}"]`);
         if (!el) return;
-        el.className = `work-chip tone-${tone}`;
+        el.dataset.tone = CHIP_TONE[tone] || tone;
         el.querySelector('[data-chip-text]').textContent = text;
-        const glyph = el.querySelector('[aria-hidden="true"]');
-        if (glyph) glyph.className = active ? 'status-icon active' : '';
+        el.toggleAttribute('data-active', !!active);
     }
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
     function renderStatus(st) {
@@ -138,7 +139,7 @@
     }
     function onConnection(live) {
         const el = root.querySelector('[data-chip="live"]');
-        el.className = `work-chip ${live ? 'tone-ok' : 'tone-warn'}`;
+        el.dataset.tone = live ? 'ok' : 'caution';
         el.title = live ? 'Live updates connected' : 'Reconnecting to mucli…';
         el.querySelector('[data-chip-glyph]').textContent = live ? '●' : '○';
         el.querySelector('[data-chip-text]').textContent = live ? 'live' : 'offline';
@@ -169,8 +170,9 @@
             : route.name === 'jobs' ? [{ label: 'Jobs' }]
             : route.name === 'setup' && route.params?.get('tab') === 'doctor' ? [{ label: 'Setup', to: '#/setup' }, { label: 'Doctor' }]
             : PAGES[route.name] ? [{ label: PAGES[route.name] }] : [{ label: 'Dashboard' }];
-        crumbsEl.innerHTML = trail.map((c, i) => `<li>${c.to && i < trail.length - 1 ? `<a href="${c.to}">${esc(c.label)}</a>` : `<span aria-current="${i === trail.length - 1 ? 'page' : 'false'}">${esc(c.label)}</span>`}</li>`).join('');
-        document.title = `${trail[trail.length - 1].label} · mucli jobs`;
+        // The shared top-bar breadcrumb (μcli › Work › …): Work links back to the dashboard.
+        crumbsEl.innerHTML = [{ label: 'Work', to: '#/' }, ...trail].map((c, i, all) => `<li class="w-breadcrumb__item">${c.to && i < all.length - 1 ? `<a href="${c.to}">${esc(c.label)}</a>` : `<span aria-current="${i === all.length - 1 ? 'page' : 'false'}">${esc(c.label)}</span>`}</li>`).join('');
+        document.title = `${trail[trail.length - 1].label} · Work · μcli`;
     }
     async function applyRoute() {
         const next = parseHash();
@@ -183,10 +185,15 @@
         });
         if (route.name !== 'job') view.leave();
         setCrumbs();
-        document.getElementById('work-main').scrollTop = 0;
+        (document.getElementById('w-main') || document.getElementById('work-main')).scrollTop = 0;
         window.dispatchEvent(new CustomEvent('mu:work-route', { detail: { name: route.name, params: route.params || new URLSearchParams() } }));
         if (route.name === 'job') {
-            try { await view.select(route.id, { tab: route.tab }); } catch (e) { detailEl.innerHTML = `<div class="error-box" role="alert">✗ ${esc(/not found|404/i.test(e.message) ? `Job ${route.id} not found.` : e.message)}</div>`; }
+            try { await view.select(route.id, { tab: route.tab }); } catch (e) {
+                const missing = /not found|404/i.test(e.message);
+                detailEl.innerHTML = `<div class="w-empty" data-variant="error" role="alert"><div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-alert-circle"></use></svg></div>
+                    <h3 class="w-empty__title">${missing ? 'Job not found' : 'Couldn’t open this job'}</h3><p class="w-empty__body">${esc(missing ? `Job ${route.id} not found.` : e.message)}</p>
+                    <div class="w-empty__actions"><a class="w-btn" data-variant="secondary" href="#/jobs">All jobs</a></div></div>`;
+            }
             setCrumbs();
         }
     }
@@ -262,7 +269,7 @@
     function renderWorkspaceChips() {
         const recent = recentWorkspaces(sessions || []);
         document.getElementById('job-workspace-recent').innerHTML = recent.map(w => `<option value="${esc(w)}"></option>`).join('');
-        workspaceChips.innerHTML = recent.map(w => `<button type="button" class="btn sm ghost mono" data-workspace="${esc(w)}" aria-pressed="${sameWorkspace(w, chosenWorkspace())}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('');
+        workspaceChips.innerHTML = recent.map(w => `<button type="button" class="w-chip work-mono" data-variant="filter" data-workspace="${esc(w)}" aria-pressed="${sameWorkspace(w, chosenWorkspace())}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('');
     }
     function syncSessionHints() {
         const path = chosenWorkspace();
@@ -315,17 +322,18 @@
         const offers = [...(suggestion ? [suggestion] : []), ...pending].filter(o => o && o.fingerprint);
         if (!offers.length || envOverride) { host.hidden = true; host.innerHTML = ''; return; }
         host.hidden = false;
-        host.innerHTML = offers.map((o, i) => `<div class="note-box col" style="gap:var(--s-half)">
-            <div class="row wrap"><span class="tone-warn" aria-hidden="true">◆</span><strong>This repository declares a build environment</strong></div>
-            ${envPreview?.suggestion?.message && o === suggestion ? `<div class="small">${esc(envPreview.suggestion.message)}</div>` : ''}
-            <dl class="work-env-approval-facts small">
+        host.innerHTML = offers.map((o, i) => `<div class="w-card work-env-offer" data-state="attention">
+            <header class="w-card__head"><span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Needs you</span></span><strong class="w-card__title">This repository declares a build environment</strong></header>
+            <div class="w-card__body">
+            ${envPreview?.suggestion?.message && o === suggestion ? `<p>${esc(envPreview.suggestion.message)}</p>` : ''}
+            <dl class="work-env-approval-facts">
                 <dt>Kind</dt><dd>${esc(o.kind === 'build' ? 'Dockerfile build' : o.kind === 'image' ? 'image' : (o.kind || 'image'))}</dd>
                 ${o.label ? `<dt>What</dt><dd class="mono">${esc(o.label)}</dd>` : ''}
                 ${o.ref ? `<dt>Image</dt><dd class="mono">${esc(o.ref)}</dd>` : ''}
                 <dt>Fingerprint</dt><dd class="mono">${esc(o.fingerprint)}</dd>
             </dl>
-            <div class="row wrap"><button type="button" class="btn sm tone-warn" data-env-approve="${i}">Approve for this repository</button>
-                <span class="small muted">Not approved: jobs on this repository park until you approve it or pick an environment under Advanced.</span></div></div>`).join('');
+            <div class="work-toolbar"><button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-env-approve="${i}">Approve for this repository</button>
+                <span class="work-meta">Not approved: jobs on this repository park until you approve it or pick an environment under Advanced.</span></div></div></div>`).join('');
         host.querySelectorAll('[data-env-approve]').forEach(b => { b.onclick = async () => {
             const offer = offers[Number(b.dataset.envApprove)];
             if (!await ui.confirm(`Approve ${offer.label || offer.ref || offer.fingerprint} as the build environment for ${path}?${offer.kind === 'build' ? '\n\nBuilding runs the Dockerfile\'s RUN steps on your container engine with network access.' : ''}`,
@@ -371,22 +379,22 @@
         return new Promise(resolve => {
             let result = null;
             const form = document.createElement('form');
-            form.className = 'col';
+            form.className = 'work-stack';
             const recent = recentWorkspaces(list);
-            form.innerHTML = `<div class="field"><label class="label" for="work-import-workspace">Workspace</label>
-                <input id="work-import-workspace" data-autofocus required list="work-import-workspace-recent" autocomplete="off" spellcheck="false"
+            form.innerHTML = `<div class="w-field"><label class="w-field__label" for="work-import-workspace">Workspace</label>
+                <input class="w-input" data-mono id="work-import-workspace" data-autofocus required list="work-import-workspace-recent" autocomplete="off" spellcheck="false"
                     placeholder="/home/me/src/project — or https://github.com/org/repo.git" value="${esc(initial)}">
                 <datalist id="work-import-workspace-recent">${recent.map(w => `<option value="${esc(w)}"></option>`).join('')}</datalist>
-                <div class="row wrap work-workspace-recent" role="group" aria-label="Recent workspaces">${recent.map(w =>
-                    `<button type="button" class="btn sm ghost mono" data-import-workspace="${esc(w)}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('')}</div>
-                <span class="hint" data-import-hint></span></div>
-                <div class="field"><label class="label" for="work-import-session">Session (optional)</label>
-                <select id="work-import-session"><option value="">Match by workspace</option>${list.map(s =>
-                    `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(describeSession(s))}</option>`).join('')}</select></div>
-                <label class="row" style="gap:var(--s-half)"><input type="checkbox" id="work-import-force" ${force ? 'checked' : ''}>
-                    <span>Run again <span class="muted small">— also start a new job for tickets whose latest job is done</span></span></label>
-                <span class="error" data-error></span>
-                <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(okLabel)}</button></div>`;
+                <div class="w-chip-row work-workspace-recent" role="group" aria-label="Recent workspaces">${recent.map(w =>
+                    `<button type="button" class="w-chip work-mono" data-variant="filter" data-import-workspace="${esc(w)}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('')}</div>
+                <p class="w-field__hint" data-import-hint></p></div>
+                <div class="w-field"><label class="w-field__label" for="work-import-session">Session (optional)</label>
+                <span class="w-select"><select class="w-select__control" id="work-import-session"><option value="">Match by workspace</option>${list.map(s =>
+                    `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(describeSession(s))}</option>`).join('')}</select></span></div>
+                <label class="w-check"><input class="w-check__input" type="checkbox" id="work-import-force" ${force ? 'checked' : ''}>
+                    <span>Run again <span class="work-meta">— also start a new job for tickets whose latest job is done</span></span></label>
+                <p class="w-field__error work-form-error" data-error></p>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${esc(okLabel)}</button></div>`;
             const d = ui.dialog({ title, body: form, onClose: () => resolve(result) });
             const input = form.querySelector('#work-import-workspace'), hint = form.querySelector('[data-import-hint]');
             const sessionSelect = form.querySelector('#work-import-session');
@@ -420,11 +428,11 @@
         return new Promise(resolve => {
             let result = null;
             const form = document.createElement('form');
-            form.className = 'col';
-            form.innerHTML = `<div class="field"><label class="label" for="work-choose-session">Session</label>
-                <select id="work-choose-session" data-autofocus required>${sessionOptions(list, entrySession)}</select>
-                <span class="hint" data-session-hint></span><span class="error" data-error></span></div>
-                <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(okLabel)}</button></div>`;
+            form.className = 'work-stack';
+            form.innerHTML = `<div class="w-field"><label class="w-field__label" for="work-choose-session">Session</label>
+                <span class="w-select"><select class="w-select__control" id="work-choose-session" data-autofocus required>${sessionOptions(list, entrySession)}</select></span>
+                <p class="w-field__hint" data-session-hint></p><p class="w-field__error work-form-error" data-error></p></div>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${esc(okLabel)}</button></div>`;
             const d = ui.dialog({ title, body: form, onClose: () => resolve(result) });
             const select = form.querySelector('select'), hint = form.querySelector('[data-session-hint]');
             const sync = () => { const s = list.find(x => x.name === select.value); hint.textContent = s ? describeSession(s) : 'Jobs run in the chosen session’s workspace.'; };
@@ -593,7 +601,17 @@
     document.getElementById('work-create-cancel').addEventListener('click', closeCreate);
     backdrop.addEventListener('click', e => { if (e.target === backdrop) closeCreate(); });
     createForm.addEventListener('submit', submitCreate);
-    window.addEventListener('keydown', e => { if (e.key === 'Escape' && !backdrop.hidden) closeCreate(); });
+    // The New job modal (.w-modal): Esc closes, Tab stays inside while it is open.
+    window.addEventListener('keydown', e => {
+        if (backdrop.hidden) return;
+        if (e.key === 'Escape') { closeCreate(); return; }
+        if (e.key !== 'Tab') return;
+        const items = [...backdrop.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')].filter(x => x.offsetParent !== null);
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
     document.getElementById('work-palette-open').addEventListener('click', ui.palette);
     document.getElementById('work-help-open').addEventListener('click', ui.help);
     document.getElementById('work-density').addEventListener('click', toggleDensity);

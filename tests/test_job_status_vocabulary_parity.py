@@ -1,11 +1,14 @@
 """The job status vocabulary must read the same on every surface.
 
 The terminal (``mu/ui/jobs/theme.py``), web (``work/view.js``) and Android
-(``theme/status.ts``, ``api/jobNotifications.ts``) each carry a copy of the
-state → status → label tables. The copies had drifted: the terminal
-labelled ``provisioning`` as "provisioning" while web and mobile said
-"preparing". Until a shared vocabulary file replaces the copies (Wash
-spec §3.1), this test keeps them identical and complete.
+(``theme/status.ts``, ``api/jobNotifications.ts``) used to each carry a copy
+of the state → status → label tables, and the copies had drifted: the
+terminal labelled ``provisioning`` as "provisioning" while web and mobile
+said "preparing". Every surface now reads the shared vocabulary
+(``mu/design/vocabulary.json``, Wash spec §3.1): the terminal through
+``mu.design``, the web through the generated ``window.WASH``
+(``static/js/wash_tokens.js``) and Android through ``wash.generated.ts``.
+This test keeps that true: complete tables, no local copies.
 """
 
 from __future__ import annotations
@@ -20,27 +23,19 @@ from mu.ui.jobs import theme
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_VIEW = ROOT / "mu/gui/static/js/work/view.js"
+WEB_TOKENS = ROOT / "mu/gui/static/js/wash_tokens.js"
+WEB_LAYOUT = ROOT / "mu/gui/templates/_layout.html"
+WEB_WORK = ROOT / "mu/gui/templates/work.html"
 MOBILE_STATUS = ROOT / "mobile/android/src/theme/status.ts"
 MOBILE_NOTIFY = ROOT / "mobile/android/src/api/jobNotifications.ts"
 MOBILE_GENERATED = ROOT / "mobile/android/src/theme/wash.generated.ts"
 
-_PAIR = re.compile(r"""['"]?(\w+)['"]?\s*:\s*['"]([^'"]*)['"]""")
-
-
-def _object_literal(source: str, name: str) -> dict[str, str]:
-    match = re.search(rf"\b{name}\b[^=]*=\s*\{{(.*?)\}};", source, re.S)
-    assert match, f"{name} table not found"
-    return dict(_PAIR.findall(match.group(1)))
-
-
-def _status_table(source: str) -> dict[str, tuple[str, str]]:
-    match = re.search(r"\bSTATUS\b[^=]*=\s*\{(.*?)\};", source, re.S)
-    assert match, "STATUS table not found"
-    rows = re.findall(
-        r"(\w+)\s*:\s*\{\s*icon\s*:\s*'([^']*)'\s*,\s*tone\s*:\s*'\w+'\s*,\s*label\s*:\s*'([^']*)'",
-        match.group(1),
-    )
-    return {key: (icon, label) for key, icon, label in rows}
+def _web_vocabulary() -> dict:
+    """The vocabulary embedded in the generated window.WASH object."""
+    source = WEB_TOKENS.read_text(encoding="utf-8")
+    match = re.search(r"var WASH = (\{.*?\n  \});\n", source, re.S)
+    assert match, "WASH object not found in wash_tokens.js"
+    return json.loads(match.group(1))["vocabulary"]
 
 
 def _python_tables():
@@ -60,20 +55,32 @@ def test_every_job_state_has_a_status_and_label():
     assert set(state_label) == states
 
 
-def test_web_tables_match_the_terminal():
+def test_web_reads_the_shared_vocabulary_and_has_no_local_tables():
+    """Wash spec §3.1/B8: /work reads window.WASH instead of copying the tables."""
     py_status, py_state_status, py_state_label = _python_tables()
-    for path in (WEB_VIEW,):
-        source = path.read_text(encoding="utf-8")
-        assert _status_table(source) == py_status, path.name
-        assert _object_literal(source, "STATE_STATUS") == py_state_status, path.name
-        assert _object_literal(source, "STATE_LABEL") == py_state_label, path.name
+    web = _web_vocabulary()
+    assert {k: (v["glyph"], v["label"]) for k, v in web["status"].items()} == py_status
+    assert {k: v["status"] for k, v in web["job_state"].items()} == py_state_status
+    assert {k: v["label"] for k, v in web["job_state"].items()} == py_state_label
+    assert web == load_vocabulary()
+    # Every page loads the generated tokens before its scripts; /work is on that layout.
+    assert '<script src="/static/js/wash_tokens.js"></script>' in WEB_LAYOUT.read_text(encoding="utf-8")
+    assert '{% extends "_layout.html" %}' in WEB_WORK.read_text(encoding="utf-8")
+    view = WEB_VIEW.read_text(encoding="utf-8")
+    assert "const WASH = window.WASH;" in view and "const VOCAB = WASH.vocabulary;" in view
+    assert "WASH.stateStyle(state).status" in view and "WASH.stateStyle(state).label" in view
+    for table in ("severity", "verdict", "coverage"):
+        assert f"VOCAB.{table}" in view, table
+    # No hand-written vocabulary tables survive.
+    for name in ("STATUS", "STATE_STATUS", "STATE_LABEL", "SEVERITY", "VERDICT", "COVERAGE"):
+        assert not re.search(rf"\bconst {name}\s*=", view), name
+    assert not re.search(r"\{\s*icon\s*:\s*'", view)
+    assert not re.search(r"\b(major|minor|blocker)\s*:\s*'(danger|warn|muted)'", view)
 
 
 def test_provisioning_is_labelled_preparing_everywhere():
     assert theme.state_style("provisioning")["label"] == "preparing"
-    for path in (WEB_VIEW,):
-        labels = _object_literal(path.read_text(encoding="utf-8"), "STATE_LABEL")
-        assert labels["provisioning"] == "preparing", path.name
+    assert _web_vocabulary()["job_state"]["provisioning"]["label"] == "preparing"
     # Android reads the label from the generated vocabulary (no local table).
     assert '"provisioning": {\n      "status": "active",\n      "label": "preparing"' in MOBILE_GENERATED.read_text(encoding="utf-8")
 

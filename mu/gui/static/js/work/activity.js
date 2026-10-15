@@ -64,7 +64,7 @@
     /* Hand-written SVG sparkline (planos Sparkline: bare line + 15% fill, no axes). */
     function sparkline(values, token, label, fmt, ceiling) {
         const nums = values.filter(v => v != null && Number.isFinite(v));
-        if (!nums.length) return `<span class="work-spark-empty muted small" role="img" aria-label="${esc(label)}: no samples yet">–</span>`;
+        if (!nums.length) return `<span class="work-spark-empty work-meta" role="img" aria-label="${esc(label)}: no samples yet">–</span>`;
         const W = 120, H = 28, n = Math.max(2, values.length);
         const max = Math.max(ceiling || 0, ...nums, 1e-9);
         const x = i => (values.length === 1 ? W : (i / (n - 1)) * W), y = v => H - 2 - (v / max) * (H - 4);
@@ -78,7 +78,7 @@
             return `<polygon class="fill" points="${pts[0][0].toFixed(1)},${H} ${line} ${pts[pts.length - 1][0].toFixed(1)},${H}"/><polyline class="line" points="${line}"/>`;
         }).join('');
         const last = nums[nums.length - 1], peak = Math.max(...nums);
-        return `<svg class="work-spark tone-${token}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${label}: now ${fmt(last)}, peak ${fmt(peak)} over ${nums.length} samples`)}">${paths}</svg>`;
+        return `<svg class="work-spark" data-tone="${token}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${label}: now ${fmt(last)}, peak ${fmt(peak)} over ${nums.length} samples`)}">${paths}</svg>`;
     }
 
     /* ------------------------------------------------------------ render */
@@ -88,18 +88,20 @@
         const running = /^(running|up)/i.test(String(c.status || c.status_text || ''));
         const locked = job && ACTIVE.has(job.state);
         const status = pill(running ? 'running' : /exited|dead|created/i.test(String(c.status || '')) ? 'muted' : 'warn',
-            `<span aria-hidden="true">${running ? '●' : '○'}</span>${esc(c.status_text || c.status || 'unknown')}`);
+            `${glyph(running ? '●' : '○', running)}<span>${esc(c.status_text || c.status || 'unknown')}</span>`);
         return `<li class="work-ctr" data-container="${esc(key)}">
-            <div class="work-ctr-name"><div class="row"><span class="tone-accent" aria-hidden="true">⬢</span><span class="mono small ellipsis" title="${esc(key)}">${esc(key)}</span>${c.role === 'engine' ? pill('accent', 'docker engine', 'Per-job Docker engine (Sysbox)') : c.role === 'broker' ? pill('accent', 'run_in_environment', 'Sibling container for another build environment') : c.stage ? pill('accent', esc(c.stage)) : ''}${c.binding ? pill('muted', `<span aria-hidden="true">⬢</span> ${esc(c.binding)}`, 'build environment') : ''}${c.gpus ? pill('warn', `gpus ${esc(c.gpus)}`, 'GPU request') : ''}</div>
-                <div class="muted small ellipsis" title="${esc(c.image || '')}">${esc(c.image || '')}${c.started_at ? ` · ${running ? 'up' : 'started'} ${esc(since(c.started_at))}${running ? '' : ' ago'}` : ''}</div></div>
+            <div class="work-ctr-name"><div class="work-toolbar"><span class="work-accent" aria-hidden="true">⬢</span><span class="work-mono work-ellipsis" title="${esc(key)}">${esc(key)}</span>${c.role === 'engine' ? pill('accent', 'docker engine', 'Per-job Docker engine (Sysbox)') : c.role === 'broker' ? pill('accent', 'run_in_environment', 'Sibling container for another build environment') : c.stage ? pill('accent', esc(c.stage)) : ''}${c.binding ? pill('muted', `<span aria-hidden="true">⬢</span> ${esc(c.binding)}`, 'build environment') : ''}${c.gpus ? pill('warn', `gpus ${esc(c.gpus)}`, 'GPU request') : ''}</div>
+                <div class="work-meta work-ellipsis" title="${esc(c.image || '')}">${esc(c.image || '')}${c.started_at ? ` · ${running ? 'up' : 'started'} ${esc(since(c.started_at))}${running ? '' : ' ago'}` : ''}</div></div>
             <div class="work-ctr-state">${status}</div>
-            <div class="work-ctr-metric"><span class="work-ctr-label small muted">CPU</span>${sparkline(s.cpu, 'running', `CPU of ${key}`, pct, 100)}<span class="small num">${esc(pct(c.cpu_percent))}</span></div>
-            <div class="work-ctr-metric"><span class="work-ctr-label small muted">Mem</span>${sparkline(s.mem, 'accent', `Memory of ${key}`, bytes, c.mem_limit || 0)}<span class="small num" title="${c.mem_limit ? `limit ${esc(bytes(c.mem_limit))}` : ''}">${esc(bytes(c.mem_bytes))}</span></div>
-            <div class="work-ctr-actions"><button type="button" class="btn sm tone-danger" data-remove-container="${esc(key)}" aria-label="Remove ${esc(key)}"
+            <div class="work-ctr-metric"><span class="work-ctr-label work-meta">CPU</span>${sparkline(s.cpu, 'running', `CPU of ${key}`, pct, 100)}<span class="work-num">${esc(pct(c.cpu_percent))}</span></div>
+            <div class="work-ctr-metric"><span class="work-ctr-label work-meta">Mem</span>${sparkline(s.mem, 'accent', `Memory of ${key}`, bytes, c.mem_limit || 0)}<span class="work-num" title="${c.mem_limit ? `limit ${esc(bytes(c.mem_limit))}` : ''}">${esc(bytes(c.mem_bytes))}</span></div>
+            <div class="work-ctr-actions"><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-remove-container="${esc(key)}" aria-label="Remove ${esc(key)}"
                 ${locked ? `aria-disabled="true" data-locked="${esc(`${U.jobKey(job)} is ${U.stateLabel(job.state)}: stop or discard the job first`)}" title="${esc(`${U.jobKey(job)} is ${U.stateLabel(job.state)}: stop or discard the job first`)}"` : 'title="Remove container (docker rm -f)"'}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></div></li>`;
+                <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-trash-2"></use></svg></button></div></li>`;
     }
-    const pill = (tone, html, title = '') => `<span class="pill tone-${tone}"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+    const TONE = { warn: 'attention', muted: 'neutral' };
+    const pill = (tone, html, title = '') => `<span class="w-chip" data-tone="${TONE[tone] || tone}"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+    const glyph = (g, live = false) => (live ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-chip__glyph" aria-hidden="true">${g}</span>`);
 
     function jobNode(j) {
         const [glyph, tone, word] = KIND[j.kind] || KIND.agent;
@@ -107,55 +109,55 @@
         const stale = j.heartbeat_at && Date.now() / 1000 - Number(j.heartbeat_at) > 90;
         const containers = j.containers || [];
         return `<li class="work-tree-job" data-activity-job="${esc(j.id)}">
-            <div class="row wrap work-tree-head">
-                <span class="tone-${tone} ${live ? 'status-icon active' : 'status-icon'}" aria-hidden="true">${glyph}</span>
-                <a href="#/job/${esc(j.id)}" class="mono" style="font-weight:600">${esc(U.jobKey(j))}</a>
+            <div class="work-toolbar work-tree-head">
+                ${U.statusIcon(live ? 'active' : tone === 'warn' ? 'waiting' : 'pending', word)}
+                <a href="#/job/${esc(j.id)}" class="work-job-row__key">${esc(U.jobKey(j))}</a>
                 ${U.statePill(j.state)}
-                ${pill(tone, `${esc(word)}${j.stage && j.stage !== j.kind && j.stage !== word ? ` · ${esc(j.stage)}` : ''}`)}
-                <span class="grow ellipsis small" title="${esc(j.title)}">${esc(j.title)}</span>
-                ${j.since ? `<span class="muted small num" title="in this state since ${esc(U.when(j.since))}">${esc(since(j.since))}</span>` : ''}
-                <span class="small num">${esc(U.money(j.cost_usd))}</span>
-                <button type="button" class="btn sm" data-activity-log="${esc(j.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/></svg>Log<span class="sr-only"> of ${esc(U.jobKey(j))}</span></button>
+                ${pill(tone, `<span>${esc(word)}${j.stage && j.stage !== j.kind && j.stage !== word ? ` · ${esc(j.stage)}` : ''}</span>`)}
+                <span class="work-grow work-ellipsis" title="${esc(j.title)}">${esc(j.title)}</span>
+                ${j.since ? `<span class="work-meta work-num" title="in this state since ${esc(U.when(j.since))}">${esc(since(j.since))}</span>` : ''}
+                <span class="work-num">${esc(U.money(j.cost_usd))}</span>
+                <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-activity-log="${esc(j.id)}"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-file-text"></use></svg><span>Log</span><span class="w-sr-only"> of ${esc(U.jobKey(j))}</span></button>
             </div>
-            <div class="row wrap small work-tree-meta">
-                ${j.worker_id ? `<span class="muted">worker <code>${esc(String(j.worker_id).slice(0, 18))}</code></span>` : '<span class="muted">no worker</span>'}
-                ${j.heartbeat_at ? `<span class="${stale ? 'tone-warn' : 'muted'}">${stale ? '<span aria-hidden="true">◆ </span>' : ''}heartbeat ${esc(U.age(Date.now() / 1000 - Number(j.heartbeat_at)))} ago${stale ? ' (stale)' : ''}</span>` : ''}
-                ${j.last ? `<span class="mono muted ellipsis grow" title="${esc(U.stripAnsi(j.last))}">› ${esc(U.stripAnsi(j.last))}</span>` : ''}
+            <div class="work-toolbar work-meta work-tree-meta">
+                ${j.worker_id ? `<span>worker <code>${esc(String(j.worker_id).slice(0, 18))}</code></span>` : '<span>no worker</span>'}
+                ${j.heartbeat_at ? `<span${stale ? ' class="work-warn"' : ''}>${stale ? '<span aria-hidden="true">◆ </span>' : ''}heartbeat ${esc(U.age(Date.now() / 1000 - Number(j.heartbeat_at)))} ago${stale ? ' (stale)' : ''}</span>` : ''}
+                ${j.last ? `<span class="work-mono work-ellipsis work-grow" title="${esc(U.stripAnsi(j.last))}">› ${esc(U.stripAnsi(j.last))}</span>` : ''}
             </div>
-            ${containers.length ? `<ul class="plain work-tree-children" aria-label="Containers of ${esc(U.jobKey(j))}">${containers.map(c => containerRow(c, j)).join('')}</ul>`
-                : `<p class="small muted work-tree-children work-tree-none">${j.kind === 'waiting' ? 'Waiting for you; no container.' : 'No container (runs on the host or not started yet).'}</p>`}
+            ${containers.length ? `<ul class="work-list work-tree-children" aria-label="Containers of ${esc(U.jobKey(j))}">${containers.map(c => containerRow(c, j)).join('')}</ul>`
+                : `<p class="work-meta work-tree-children work-tree-none">${j.kind === 'waiting' ? 'Waiting for you; no container.' : 'No container (runs on the host or not started yet).'}</p>`}
         </li>`;
     }
 
     function render() {
         if (!active) return;
         if (!data) {
-            bodyEl.innerHTML = lastError ? `<div class="error-box" role="alert">✗ ${esc(lastError)}</div>`
-                : '<div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>Loading activity…</div>';
+            bodyEl.innerHTML = lastError ? `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(lastError)}</p></div>`
+                : '<div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading activity…</div>';
             return;
         }
         const engine = String(data.engine || '');
         const [eTone, eText] = ENGINE[engine] || ['muted', engine ? `docker ${engine}` : 'engine unknown'];
-        engineEl.innerHTML = legacy ? '' : pill(eTone, `<span aria-hidden="true">⬢</span> ${esc(eText)}`, 'Container engine');
+        engineEl.innerHTML = legacy ? '' : pill(eTone, `${glyph('⬢')}<span>${esc(eText)}</span>`, 'Container engine');
         updatedEl.textContent = data.generated_at ? `updated ${U.when(data.generated_at).slice(11)}` : '';
         const c = data.counts || {};
         const jobs = data.jobs || [], orphans = data.orphans || [];
         const focusKey = document.activeElement?.closest?.('[data-container], [data-activity-job]') && document.activeElement.matches('button')
             ? [document.activeElement.dataset.removeContainer, document.activeElement.dataset.activityLog] : null;
         bodyEl.innerHTML = `
-            ${lastError ? `<div class="error-box small" role="alert">✗ ${esc(lastError)} — showing the last data.</div>` : ''}
-            ${legacy ? '<div class="note-box small" role="note"><span class="tone-warn" aria-hidden="true">◆</span> This mucli server has no activity endpoint yet: showing running jobs only, without containers.</div>' : ''}
-            ${engine === 'down' ? '<div class="note-box small" role="note"><span class="tone-danger" aria-hidden="true">✗</span> Docker is not reachable: container stats are unavailable.</div>' : ''}
-            <ul class="plain row wrap work-activity-counts" aria-label="Activity summary">
-                <li>${pill(c.agents ? 'running' : 'muted', `<span aria-hidden="true" class="${c.agents ? 'status-icon active' : ''}">●</span>${Number(c.agents || 0)} agent${c.agents === 1 ? '' : 's'}`)}</li>
-                <li>${pill(c.checks ? 'running' : 'muted', `<span aria-hidden="true" class="${c.checks ? 'status-icon active' : ''}">●</span>${Number(c.checks || 0)} check${c.checks === 1 ? '' : 's'}`)}</li>
-                <li>${pill(c.needs_you ? 'warn' : 'muted', `<span aria-hidden="true">◆</span>${Number(c.needs_you || 0)} need${c.needs_you === 1 ? 's' : ''} you`)}</li>
-                <li>${pill('accent', `<span aria-hidden="true">⬢</span>${Number(c.containers || 0)} container${c.containers === 1 ? '' : 's'}`)}</li>
+            ${lastError ? `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(lastError)} — showing the last data.</p></div>` : ''}
+            ${legacy ? '<div class="w-banner" data-tone="caution" role="note"><span class="w-banner__glyph" aria-hidden="true">◆</span><p class="w-banner__msg">This mucli server has no activity endpoint yet: showing running jobs only, without containers.</p></div>' : ''}
+            ${engine === 'down' ? '<div class="w-banner" data-tone="danger" role="note"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">Docker is not reachable: container stats are unavailable.</p></div>' : ''}
+            <ul class="w-chip-row work-activity-counts" aria-label="Activity summary">
+                <li>${pill(c.agents ? 'running' : 'muted', `${glyph('●', !!c.agents)}<span>${Number(c.agents || 0)} agent${c.agents === 1 ? '' : 's'}</span>`)}</li>
+                <li>${pill(c.checks ? 'running' : 'muted', `${glyph('●', !!c.checks)}<span>${Number(c.checks || 0)} check${c.checks === 1 ? '' : 's'}</span>`)}</li>
+                <li>${pill(c.needs_you ? 'warn' : 'muted', `${glyph('◆')}<span>${Number(c.needs_you || 0)} need${c.needs_you === 1 ? 's' : ''} you</span>`)}</li>
+                <li>${pill('accent', `${glyph('⬢')}<span>${Number(c.containers || 0)} container${c.containers === 1 ? '' : 's'}</span>`)}</li>
             </ul>
-            <section class="panel" aria-labelledby="activity-jobs-h"><header><h2 id="activity-jobs-h">Agents, checks &amp; containers</h2><span class="badge tone-running">${jobs.length}</span></header>
-                <div class="panel-body">${jobs.length ? `<ul class="plain work-tree">${jobs.map(jobNode).join('')}</ul>` : '<p class="empty">No agent or check is running.</p>'}</div></section>
-            <section class="panel" aria-labelledby="activity-orphans-h"><header><h2 id="activity-orphans-h">Orphan containers</h2><span class="badge ${orphans.length ? 'tone-warn' : ''}">${orphans.length}</span><span class="spacer"></span><span class="small muted">job containers whose job is no longer active</span></header>
-                <div class="panel-body">${orphans.length ? `<ul class="plain work-tree-children is-flat">${orphans.map(o => containerRow(o, null)).join('')}</ul>` : '<p class="empty">No orphan containers.</p>'}</div></section>`;
+            <section class="w-card work-card" aria-labelledby="activity-jobs-h"><header class="w-card__head"><span class="w-eyebrow">Live</span><h2 class="w-card__title" id="activity-jobs-h">Agents, checks &amp; containers</h2><span class="w-count" data-tone="running">${jobs.length}</span></header>
+                <div class="w-card__body">${jobs.length ? `<ul class="work-list work-tree">${jobs.map(jobNode).join('')}</ul>` : '<div class="w-empty" data-tone="running" data-size="sm"><div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-activity"></use></svg></div><h3 class="w-empty__title">All quiet</h3><p class="w-empty__body">No agent or check is running.</p></div>'}</div></section>
+            <section class="w-card work-card" aria-labelledby="activity-orphans-h"><header class="w-card__head"><span class="w-eyebrow">Cleanup</span><h2 class="w-card__title" id="activity-orphans-h">Orphan containers</h2><span class="w-count"${orphans.length ? ' data-tone="attention"' : ''}>${orphans.length}</span><span class="w-card__meta">job containers whose job is no longer active</span></header>
+                <div class="w-card__body">${orphans.length ? `<ul class="work-list work-tree-children is-flat">${orphans.map(o => containerRow(o, null)).join('')}</ul>` : '<p class="work-empty-line">No orphan containers.</p>'}</div></section>`;
         bodyEl.querySelectorAll('[data-remove-container]').forEach(b => { b.onclick = () => b.dataset.locked ? toast(`Can't remove ${b.dataset.removeContainer}: ${b.dataset.locked}`, 'warn') : remove(b.dataset.removeContainer, jobs.find(j => (j.containers || []).some(x => (x.name || x.id) === b.dataset.removeContainer))); });
         bodyEl.querySelectorAll('[data-activity-log]').forEach(b => { b.onclick = () => openLog(jobs.find(j => j.id === b.dataset.activityLog)); });
         if (focusKey) {
@@ -216,12 +218,12 @@
     function openLog(job) {
         if (!job || !ui?.dialog) return;
         const wrap = document.createElement('div');
-        wrap.className = 'col work-log-drawer';
-        wrap.innerHTML = `<div class="row wrap small"><span data-log-source class="muted"></span><span data-log-trunc class="muted"></span><span class="spacer"></span>
-            <label class="check small"><input type="checkbox" data-log-follow checked> Follow</label>
-            <button type="button" class="btn sm" data-log-refresh><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>Refresh</button></div>
-            <pre class="work-log work-log-tall" role="log" aria-label="Log of ${esc(U.jobKey(job))}" tabindex="0" data-log-text><span class="muted">Reading log…</span></pre>
-            <a class="small" href="#/job/${esc(job.id)}?tab=session" data-log-open>Open ${esc(U.jobKey(job))} →</a>`;
+        wrap.className = 'work-stack-tight work-log-drawer';
+        wrap.innerHTML = `<div class="work-toolbar work-meta"><span data-log-source></span><span data-log-trunc></span><span class="work-spacer"></span>
+            <label class="w-check"><input class="w-check__input" type="checkbox" data-log-follow checked><span>Follow</span></label>
+            <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-log-refresh><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg><span>Refresh</span></button></div>
+            <pre class="work-log work-log-tall" role="log" aria-label="Log of ${esc(U.jobKey(job))}" tabindex="0" data-log-text><span class="work-meta">Reading log…</span></pre>
+            <a href="#/job/${esc(job.id)}?tab=session" data-log-open>Open ${esc(U.jobKey(job))}<span aria-hidden="true"> ›</span></a>`;
         let closed = false, logTimer = 0;
         const d = ui.dialog({ title: `Log · ${U.jobKey(job)}`, body: wrap, wide: true, sheet: true, onClose: () => { closed = true; clearTimeout(logTimer); } });
         const pre = wrap.querySelector('[data-log-text]');
@@ -233,14 +235,14 @@
                 const r = await api(`/api/jobs/vm/activity/logs/${encodeURIComponent(job.id)}?tail_bytes=65536`);
                 if (closed) return;
                 const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-                pre.innerHTML = r.text ? U.ansi(r.text) : '<span class="muted">The log is empty.</span>';
+                pre.innerHTML = r.text ? U.ansi(r.text) : '<span class="work-meta">The log is empty.</span>';
                 wrap.querySelector('[data-log-source]').textContent = r.source ? `source: ${r.source}` : '';
                 wrap.querySelector('[data-log-trunc]').textContent = r.truncated ? '· showing the last 64 KB' : '';
                 if (follow.checked && (atEnd || !pre.dataset.loaded)) pre.scrollTop = pre.scrollHeight;
                 pre.dataset.loaded = '1';
             } catch (e) {
                 if (closed) return;
-                pre.innerHTML = `<span class="tone-danger">✗ ${esc(/404|not found/i.test(e.message) ? 'This mucli server has no activity log endpoint yet.' : e.message)}</span>`;
+                pre.innerHTML = `<span class="work-del">✗ ${esc(/404|not found/i.test(e.message) ? 'This mucli server has no activity log endpoint yet.' : e.message)}</span>`;
                 return;
             }
             if (ACTIVE.has(job.state) && document.visibilityState === 'visible') logTimer = setTimeout(load, 3000);

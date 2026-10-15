@@ -71,8 +71,11 @@ def test_browser_plan_edit_save_approve_and_partial_refresh(tmp_path, monkeypatc
         page.route("http://jobs.test/**", route)
         page.goto("http://jobs.test/")
         page.evaluate("() => { window.EventSource = class { constructor() { window.stream=this; } addEventListener() {} close() {} }; }")
-        for name in ("plan_editor", "view"):
-            page.add_script_tag(path=str(ROOT / f"mu/gui/static/js/work/{name}.js"))
+        # Wash W4: view.js reads the shared status vocabulary (wash_tokens.js,
+        # loaded by _layout.html on every page) and renders diffs with
+        # wash/work_diff.js, so the harness loads them first like work.html.
+        for script in ("wash_tokens.js", "wash/work_diff.js", "work/plan_editor.js", "work/view.js"):
+            page.add_script_tag(path=str(ROOT / f"mu/gui/static/js/{script}"))
         page.evaluate("""async () => {
             window.work = MuJobWork.create({
               api: async (path, opts={}) => { const r=await fetch(path, {method:opts.method, headers:{'content-type':'application/json'}, body:opts.body ? JSON.stringify(opts.body):undefined}); const data=await r.json(); if(!r.ok) throw Error(data.detail); return data; },

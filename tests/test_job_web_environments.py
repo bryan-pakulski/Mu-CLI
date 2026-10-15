@@ -15,7 +15,7 @@ SHELL = (STATIC / "js" / "work.js").read_text(encoding="utf-8")
 RULES = (STATIC / "js" / "work" / "rules.js").read_text(encoding="utf-8")
 ACTIVITY = (STATIC / "js" / "work" / "activity.js").read_text(encoding="utf-8")
 CONTAINERS = (STATIC / "js" / "containers.js").read_text(encoding="utf-8")
-CSS = (STATIC / "css" / "work_polish.css").read_text(encoding="utf-8")
+CSS = (STATIC / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")  # Wash W4: /work page bundle
 CONTAINERS_CSS = (STATIC / "css" / "containers-crystal.css").read_text(encoding="utf-8")
 
 

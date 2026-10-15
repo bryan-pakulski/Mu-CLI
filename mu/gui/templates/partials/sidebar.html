@@ -1,7 +1,9 @@
 {#- Shared sidebar (G§8.1): primary navigation for every page on the Wash
     shell. 264px; a 64px icon rail below 1200px; an off-canvas drawer below
     840px (wash_shell.js toggles #w-shell[data-sidebar-open]).
-    `nav_active` names the current item. -#}
+    `nav_active` names the current item. A page may add its own section
+    under the primary navigation through _layout.html's `sidebar_extra`
+    block (rendered here as `sidebar_extra`). -#}
 {%- import "macros/wash.html" as w -%}
 {%- set active = nav_active | default("") -%}
 {%- set primary = [
@@ -20,6 +22,9 @@
         <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span></a></li>
         {%- endfor %}
     </ul>
+    {%- if sidebar_extra %}
+    {{ sidebar_extra }}
+    {%- endif %}
     <p class="w-sidebar__heading" id="w-sidebar-tools">Insights</p>
     <ul class="w-sidebar__section" aria-labelledby="w-sidebar-tools">
         {%- for key, href, glyph, label in tools %}

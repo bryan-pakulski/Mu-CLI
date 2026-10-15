@@ -55,15 +55,10 @@
     function statusLabel(value) {
         return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
-    // planos status vocabulary: glyph + label, never colour alone.
-    const STATUS_TONE = {
-        failed: ['✗', 'danger'], environment_error: ['✗', 'danger'], timed_out: ['✗', 'danger'], budget_exceeded: ['✗', 'danger'],
-        cancelled: ['–', 'muted'], merged: ['✓', 'ok'], ready_for_review: ['◆', 'warn'], needs_human: ['◆', 'warn'],
-        running: ['●', 'running'], queued: ['○', 'muted'],
-    };
+    // Shared Wash vocabulary (window.WASH, job_status): glyph + label, never colour alone.
     function statusPill(value) {
-        const [glyph, tone] = STATUS_TONE[value] || ['○', 'muted'];
-        return `<span class="pill tone-${tone} work-management-status"><span aria-hidden="true">${glyph}</span>${escapeHtml(statusLabel(value).toLowerCase())}</span>`;
+        const st = window.WASH ? window.WASH.stateStyle(value) : { glyph: '○', semantic: 'neutral', label: statusLabel(value).toLowerCase() };
+        return `<span class="w-chip work-management-status" data-tone="${st.semantic}"><span class="w-chip__glyph" aria-hidden="true">${st.glyph}</span><span>${escapeHtml(st.label)}</span></span>`;
     }
 
     function fmtMoney(value) {
@@ -131,33 +126,34 @@
         const statusEntries = Object.entries(report?.status_counts || {}).slice(0, 6);
         const repositories = Array.isArray(report?.repositories) ? report.repositories.slice(0, 5) : [];
         const failure = Number(report?.failure_rate || 0);
-        const metric = (value, label, tone = 'accent') => `<li class="work-stat work-report-metric tone-${tone}"><span class="work-stat-value">${value}</span><span class="work-stat-label">${escapeHtml(label)}</span></li>`;
+        // Stat strip (G§9.3): one row of big numbers, not a card per metric.
+        const metric = (value, label, tone = '') => `<div class="w-stat work-report-metric"${tone ? ` data-tone="${tone}"` : ''}><dt class="w-stat__label">${escapeHtml(label)}</dt><dd class="w-stat__value">${value}</dd></div>`;
         reportEl.innerHTML = `
-            <ul class="plain work-stats work-report-metrics">
-                ${metric(Number(report?.total_jobs || 0), 'jobs')}
-                ${metric(Number(report?.archived_jobs || 0), 'archived', 'muted')}
-                ${metric(Number(report?.attempts || 0), 'attempts', 'muted')}
-                ${metric(fmtMoney(report?.total_cost_usd), 'cost', 'muted')}
-                ${metric(fmtDuration(report?.average_elapsed_seconds), 'avg runtime', 'muted')}
-                ${metric(`${(failure * 100).toFixed(1)}%`, 'failure rate', failure > 0 ? 'danger' : 'ok')}
-            </ul>
-            <div class="grid-2 work-report-breakdown">
-                <section class="panel" aria-labelledby="work-report-status-h"><header><h2 id="work-report-status-h">By status</h2></header>
-                    <div class="panel-body">${statusEntries.length ? `<ul class="plain col work-report-breakdown-list">${statusEntries.map(([status, count]) => `<li class="row">${statusPill(status)}<span class="spacer"></span><span class="num">${Number(count)}</span></li>`).join('')}</ul>` : '<p class="empty">No matching history.</p>'}</div></section>
-                <section class="panel" aria-labelledby="work-report-repo-h"><header><h2 id="work-report-repo-h">By repository</h2></header>
-                    <div class="panel-body">${repositories.length ? `<ul class="plain col work-report-breakdown-list">${repositories.map(item => `<li class="row"><span class="mono small ellipsis grow" title="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</span><span class="num muted">${Number(item.jobs)} jobs</span><span class="num">${fmtMoney(item.cost_usd)}</span></li>`).join('')}</ul>` : '<p class="empty">No matching history.</p>'}</div></section>
+            <dl class="w-stats work-report-metrics">
+                ${metric(Number(report?.total_jobs || 0), 'Jobs')}
+                ${metric(Number(report?.archived_jobs || 0), 'Archived')}
+                ${metric(Number(report?.attempts || 0), 'Attempts')}
+                ${metric(fmtMoney(report?.total_cost_usd), 'Cost')}
+                ${metric(fmtDuration(report?.average_elapsed_seconds), 'Avg runtime')}
+                ${metric(`${(failure * 100).toFixed(1)}%`, 'Failure rate', failure > 0 ? 'danger' : '')}
+            </dl>
+            <div class="work-grid-2 work-report-breakdown">
+                <section class="w-card" aria-labelledby="work-report-status-h"><header class="w-card__head"><span class="w-eyebrow">Report</span><h2 class="w-card__title" id="work-report-status-h">By status</h2></header>
+                    <div class="w-card__body">${statusEntries.length ? `<ul class="work-list work-report-breakdown-list">${statusEntries.map(([status, count]) => `<li class="work-toolbar">${statusPill(status)}<span class="work-spacer"></span><span class="work-num">${Number(count)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No matching history.</p>'}</div></section>
+                <section class="w-card" aria-labelledby="work-report-repo-h"><header class="w-card__head"><span class="w-eyebrow">Report</span><h2 class="w-card__title" id="work-report-repo-h">By repository</h2></header>
+                    <div class="w-card__body">${repositories.length ? `<ul class="work-list work-report-breakdown-list">${repositories.map(item => `<li class="work-toolbar"><span class="work-mono work-ellipsis work-grow" title="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</span><span class="work-num work-meta">${Number(item.jobs)} jobs</span><span class="work-num">${fmtMoney(item.cost_usd)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No matching history.</p>'}</div></section>
             </div>
         `;
     }
 
     function rowActions(job) {
         return `
-            <div class="row work-management-row-actions">
-                <a class="btn sm" href="/api/jobs/${encodeURIComponent(job.id)}/debug-export" title="Export job telemetry">Debug export</a>
+            <div class="w-btn-row work-management-row-actions">
+                <a class="w-btn" data-variant="ghost" data-size="sm" href="/api/jobs/${encodeURIComponent(job.id)}/debug-export" title="Export job telemetry">Debug export</a>
                 ${job.archived
-                    ? `<button type="button" class="btn sm" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
-                    : job.manageable ? `<button type="button" class="btn sm" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
-                <button type="button" class="btn sm tone-danger delete" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" aria-label="Delete ${escapeHtml(job.title)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
+                    ? `<button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
+                    : job.manageable ? `<button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
+                <button type="button" class="w-btn delete" data-variant="ghost" data-size="sm" data-tone="danger" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" aria-label="Delete ${escapeHtml(job.title)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
             </div>
         `;
     }
@@ -168,19 +164,19 @@
         } else {
             resultsEl.innerHTML = state.rows.map(job => `
                 <tr data-history-job="${escapeHtml(job.id)}">
-                    <td><input type="checkbox" data-history-select="${escapeHtml(job.id)}" aria-label="Select ${escapeHtml(job.title)}" ${state.selected.has(job.id) ? 'checked' : ''}></td>
+                    <td><input type="checkbox" class="w-check__input" data-history-select="${escapeHtml(job.id)}" aria-label="Select ${escapeHtml(job.title)}" ${state.selected.has(job.id) ? 'checked' : ''}></td>
                     <td>
                         <div class="work-management-title">
                             <a href="#/job/${encodeURIComponent(job.id)}" title="${escapeHtml(job.title)}">${escapeHtml(job.title)}</a>
                             <span>${escapeHtml(job.id.slice(0, 12))}${job.archived ? ' · archived' : ''}</span>
                         </div>
                     </td>
-                    <td>${statusPill(job.status)}${job.archived ? '<span class="pill tone-muted work-management-archive-mark" title="archived">archived</span>' : ''}</td>
+                    <td>${statusPill(job.status)}${job.archived ? '<span class="w-chip work-management-archive-mark" data-tone="neutral" title="archived"><span>archived</span></span>' : ''}</td>
                     <td class="work-management-repo" title="${escapeHtml(job.repository || '')}">${escapeHtml(job.repository || '—')}</td>
-                    <td class="num">${fmtMoney(job.cost_usd)}</td>
-                    <td class="num">${Number(job.attempt_count || 0)}</td>
-                    <td class="num muted small" title="Worked ${escapeHtml(fmtDuration(job.elapsed_seconds))}">${escapeHtml(fmtDate(job.updated_at))}</td>
-                    <td>${rowActions(job)}</td>
+                    <td class="num" data-num>${fmtMoney(job.cost_usd)}</td>
+                    <td class="num" data-num>${Number(job.attempt_count || 0)}</td>
+                    <td class="num work-meta" data-num title="Worked ${escapeHtml(fmtDuration(job.elapsed_seconds))}">${escapeHtml(fmtDate(job.updated_at))}</td>
+                    <td class="w-table__actions">${rowActions(job)}</td>
                 </tr>
             `).join('');
         }

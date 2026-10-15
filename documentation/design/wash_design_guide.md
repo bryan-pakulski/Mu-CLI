@@ -860,12 +860,13 @@ There is one diff component (web, mobile and TUI), used in approvals, chat
   persist. It bleeds in, and lives in an `aria-live="polite"` region (assertive
   for errors).
 - **Banner:** a full-width state strip at the top of a page or panel, for
-  setup incomplete, plan mode, or YOLO on. It uses the semantic wash with a
-  glyph, a sentence, one tonal action, and an optional dismiss.
+  setup incomplete or plan mode. It uses the semantic wash with a glyph, a
+  sentence, one tonal action, and an optional dismiss.
   - Plan mode banner: lilac.
-  - YOLO banner: sun, with the text "Auto-approve is on — Mucli will run tools
-    without asking" plus a "Turn off" action. It is persistent while YOLO is
-    on and **cannot be dismissed**.
+  - YOLO has **no banner**. It is shown by the top-bar status chip
+    (`◆ Auto-approve` in sun while on), which is always visible and toggles it.
+    Auto-approved tool calls still leave an `auto` breadcrumb in the
+    transcript (§9.9).
 
 ### 9.17 Modal, drawer, sheet, popover, command palette
 

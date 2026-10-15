@@ -4,7 +4,7 @@
     context ring, plan, auto-approve, ◆ approvals, connection) and tools.
     Sidebar: the shared Navigate list plus Threads and Sessions
     (`sidebar_extra`), a job-attention badge on Work (`work_badge`).
-    Stage: plan / auto-approve banners, the chat column and the workspace
+    Stage: the plan-mode banner, the chat column and the workspace
     panel stage (one header with a mode-tint band). Without a session the
     stage shows the welcome launcher. -#}
 {% extends "base.html" %}
@@ -242,8 +242,8 @@
      }"
      :style="'--panel-w:' + $store.layout.panelWidth + 'px'">
 
-    <!-- Safety banners (G§9.16, §10.4): plan mode (lilac) and auto-approve
-         (sun, never dismissable) stay visible under the top bar. -->
+    <!-- Safety banner (G§9.16, §10.4): plan mode (lilac) stays visible under the
+         top bar. Auto-approve is shown only by the top-bar status chip. -->
     <div class="w-chat__banners">
         <div class="plan-mode-strip w-banner" data-tone="plan" data-flush data-testid="plan-mode-strip"
              x-show="$store.planMode.active" x-cloak
@@ -254,13 +254,6 @@
             <button type="button" class="w-btn plan-mode-strip-off" data-variant="tonal" data-tone="plan" data-size="sm"
                     :disabled="$store.planMode.busy"
                     @click="$store.planMode.turnOff()">Turn off</button>
-        </div>
-        <div class="w-banner yolo-banner" data-tone="caution" data-flush data-testid="yolo-banner"
-             x-show="$store.yolo.active" x-cloak role="status" aria-live="polite">
-            <span class="w-banner__glyph" aria-hidden="true">◆</span>
-            <p class="w-banner__msg"><strong>Auto-approve is on</strong> — Mucli will run tools without asking.</p>
-            <button type="button" class="w-btn" data-variant="tonal" data-tone="caution" data-size="sm"
-                    @click="$store.yolo.toggle()">Turn off</button>
         </div>
     </div>
 

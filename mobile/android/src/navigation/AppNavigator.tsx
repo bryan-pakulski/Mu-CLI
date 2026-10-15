@@ -262,6 +262,7 @@ function MainTabs() {
         tabBarLabelStyle: { ...textStyle('caption'), marginBottom: 2 },
         tabBarStyle: { backgroundColor: colors.canvas, borderTopColor: colors.hairline, minHeight: 64, paddingTop: 6 },
         tabBarItemStyle: { minHeight: 44 },
+        tabBarHideOnKeyboard: true,
         headerStyle: { backgroundColor: colors.canvas },
         headerTintColor: colors.ink,
         headerShadowVisible: false,

@@ -1,6 +1,6 @@
 # Wash overhaul — implementation spec
 
-**Status:** Approved v1 · 2026-10-15
+**Status:** Implemented · 2026-10-15 (see §12)
 **Design source of truth:** [`wash_design_guide.md`](wash_design_guide.md). This
 spec says *how* and *in what order*. The guide says *what*. Section references
 like "G§9.9" point into the guide.
@@ -903,3 +903,49 @@ The highest-churn files to expect:
   archived for the final review.
 - The docs are updated: this spec, the guide, the viz guide, the mobile
   README, the accessibility audit, and AGENTS.md.
+
+---
+
+## 12. Implementation status (2026-10-15)
+
+All phases P0–P7 are implemented on branch `wash/overhaul`. Per-track test
+migration ledgers live in `documentation/design/ledger/`: `web-foundation`,
+`web-shell`, `web-pages`, `web-final`, `android` and `terminal`.
+
+**Final verification**
+- `python3 -m pytest tests/ -q`: 4256 passed, 9 skipped.
+- Android: `npx jest` 289 passed and `npx tsc --noEmit` clean. The APK
+  (0.5.0) builds.
+- `build_tokens.py --check`, `build_icons.py --check` and `check_contrast.py`
+  pass.
+- `snap.py` reports zero console errors on all seven pages, in both themes
+  and at both viewports.
+
+**Where the implementation deviates from this spec, deliberately**
+- `RichUI.show_info(markup=)` (§6.2) became class-level helpers:
+  `mu.ui.markup.show_markup`, `show_renderable` and `show_notice`. Many UI
+  test doubles define a narrow `show_info(self, message)`, and a new keyword
+  argument would break them.
+- Form-control borders use a dedicated `control-border` token (≥ 3:1).
+  `hairline-strong` stays decorative (§3.4).
+- Mobile skipped the transitional `legacyColors` view. A codemod moved every
+  call site straight to the semantic shape.
+- Android registers static font families per weight (instanced from the
+  variable fonts), because Android synthesises weights for variable custom
+  fonts.
+- YOLO auto-approval breadcrumbs (`prompt_resolved` with `auto: true`) come
+  from a display-only hook in `loop_body.py`, because auto-approved calls
+  never reach the prompt path. The hook cannot change any approval decision.
+- The `/work` sub-navigation lives in the shared sidebar, through the
+  `sidebar_extra` layout block.
+- Terminal panel borders use `hairline-strong`, because `hairline` is nearly
+  invisible on real terminal backgrounds.
+
+**Not verified (no device or terminal hardware in the build environment)**
+- An Android emulator or device walkthrough: TalkBack, 200% font scale,
+  rendering of the static font weights, sheet gestures and haptics. There
+  were no Android system images installed.
+- Real kitty or alacritty rendering of the terminal theme. It was checked
+  through Rich SVG exports and the `NO_COLOR` text output.
+- Raw RN `Text` that sets `fontWeight` outside the kit `Text` still gets
+  synthetic bold on Android.

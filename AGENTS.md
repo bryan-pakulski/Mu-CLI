@@ -46,7 +46,7 @@ python3 mucli.py --gui
 python3 -m pytest tests/ -q
 ```
 
-- The full suite is approximately 2,400 tests and normally takes about 30s.
+- The full suite is approximately 4,250 tests and normally takes about 2.5 minutes.
 - `tests/` intentionally has no `__init__.py`; do not add one.
 - Never weaken, skip, or delete tests to make a change pass.
 - Fix product code first; change a test only when the specified behavior changes.

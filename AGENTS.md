@@ -87,6 +87,15 @@ python3 -m pytest tests/ -q
   byte-stable per turn; volatile blocks ride in the trailing RUNTIME STATE message
   (never persisted). Every history shrink records a ledger kind (`turn_fold`,
   `turn_roll`, `pressure_clear`, `pressure_forced`, ...).
+- UI follows the Wash design system (`documentation/design/wash_design_guide.md`).
+  Colours, type, spacing and the job/status vocabulary come only from
+  `mu/design/tokens.json` and `vocabulary.json`; after editing them run
+  `python3 scripts/design/build_tokens.py` (web CSS/JS + Android TS are
+  generated; tests fail when stale). Web uses `.w-*` components and
+  `--wash-*` variables inside `static/css/wash/` cascade layers; Android uses
+  `mobile/android/src/ui`; the terminal uses `mu/ui/theme` (`get_console()`,
+  `wash.*` Rich styles). Escape non-literal values with `mu.ui.markup.esc`
+  before putting them in Rich markup.
 - Do not bypass approval gates for mutations. Write-side tools require approval
   unless the user explicitly enables YOLO mode; plan mode remains read-only.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.

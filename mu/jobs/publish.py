@@ -489,8 +489,9 @@ def publish_preview(service, job: Job) -> Dict[str, Any]:
     report = artifacts_for(job).read_json("review.json") or {}
     verdict = str(report.get("verdict") or "")
     run = VerificationStore(service.store).latest(job.id)
+    unverified = run is not None and not run.verified
     try:
-        reason = push_check_reason(service, job, run=run)
+        reason = push_check_reason(service, job, run=run, allow_unverified=True)
     except Exception as exc:  # noqa: BLE001
         reason = str(exc)[:300] or "cannot verify checks"
     return {
@@ -498,8 +499,9 @@ def publish_preview(service, job: Job) -> Dict[str, Any]:
         "branch": str(job.branch or meta.get("review_branch") or ""),
         "base": base,
         "mode": mode, "remote": _redact(remote_url), "draft": True,
-        "requires_override": verdict == "do_not_merge", "verdict": verdict,
-        "head_sha": str(run.head_sha or "") if run is not None and run.passed else "",
+        # Unverified checks (job_templates.md §5) need the same override reason as do_not_merge.
+        "requires_override": verdict == "do_not_merge" or unverified, "verdict": verdict,
+        "head_sha": str(run.head_sha or "") if run is not None and (run.passed or unverified) else "",
         "reason": reason,
     }
 
@@ -635,7 +637,12 @@ def publish_job(service, job_id: str, *, run: Optional[RunFn] = None,
         from .checks import push_check_reason
         from .verification import VerificationStore
         checked = VerificationStore(service.store).latest(job.id)
-        check_reason = push_check_reason(service, job, run=checked)
+        # An unverified run (unrunnable checks) publishes only with the push override recorded
+        # for exactly that check run (job_templates.md §5).
+        override = dict((job.metadata or {}).get("unverified_override") or {})
+        allow_unverified = bool(checked is not None and override.get("reason")
+                                and override.get("verification_id") == checked.id)
+        check_reason = push_check_reason(service, job, run=checked, allow_unverified=allow_unverified)
         if check_reason:
             raise PublishError(check_reason)
         pr = open_draft_pr(job, run=run or _default_run, post=post or _default_post,

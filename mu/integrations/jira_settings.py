@@ -172,6 +172,14 @@ def _clean_writeback(value: Any) -> Dict[str, Any]:
             "events": events}
 
 
+def _clean_template(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.startswith("template:"):
+        text = text[len("template:"):].strip()
+    import re
+    return text if re.fullmatch(r"[A-Za-z0-9][\w.-]{0,127}", text) else ""
+
+
 def _clean_watch(value: Any) -> Dict[str, Any]:
     value = dict(value or {})
     try:
@@ -196,6 +204,8 @@ def _clean_watch(value: Any) -> Dict[str, Any]:
             "workspace_root": str(item.get("workspace_root") or "").strip()[:4000],
             "session_name": str(item.get("session_name") or "").strip()[:200],
             "max_results": max_results,
+            # "Run in": the container template the imported jobs run in ('' = default resolution).
+            "template": _clean_template(item.get("template")),
         })
     return {"enabled": bool(value.get("enabled", False)),
             "interval_seconds": max(_MIN_WATCH_INTERVAL, interval), "queries": queries}

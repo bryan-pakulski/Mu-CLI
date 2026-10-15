@@ -209,11 +209,34 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         has_worker=bool(job.worker_id),
         environments=len(meta.get("build_environments") or []) or len(((job.execution or {}).get("environments") or [])),
         environments_kept=bool(meta.get("environments_kept")),
-        push_check_reason=push_check_reason(service, job) if core.state == JobState.REVIEW_DONE else "push is available after review",
+        push_check_reason=push_check_reason(service, job, allow_unverified=True) if core.state == JobState.REVIEW_DONE
+        else "push is available after review",
         environment_approval=environment_approval(service, job, core),
         pr_closed=isinstance(meta.get("pr"), dict) and meta["pr"].get("state") == "closed",
         limit_reached=_limit(job, core),
+        checks_unverified=_checks_unverified(art),
+        unverified_pending=core.state == JobState.NEEDS_INPUT and bool(meta.get("checks_unverified"))
+        and str(getattr(job.attention_reason, "value", job.attention_reason) or "") == "verification_required",
+        setup_failed=_setup_failed(job, core),
     )
+
+
+def _checks_unverified(art) -> bool:
+    """The latest check run has unrunnable checks (honest gate, job_templates.md §5)."""
+    try:
+        summary = art.read_json("checks/summary.json", {}) if art.exists() else {}
+    except (OSError, ValueError):
+        return False
+    return isinstance(summary, dict) and summary.get("verified") is False
+
+
+def _setup_failed(job, core: CoreState) -> Optional[Dict[str, Any]]:
+    if core.state != JobState.NEEDS_INPUT:
+        return None
+    if str(getattr(job.attention_reason, "value", job.attention_reason) or "") != "environment_failure":
+        return None
+    from ..sandbox.job_setup import failed_setup
+    return failed_setup(job)
 
 
 def _limit(job, core: CoreState) -> Optional[Dict[str, Any]]:
@@ -324,6 +347,13 @@ def environments_vm(service=None, *, repository: str = "", session: str = "", en
     probe = SimpleNamespace(id="preview", repository=repository, metadata={"repository_root": repository, "origin_session": session},
                             execution={"environments": environments} if environments else {})
     out = {**list_sources(include_images=include_images), "resolved": preview(probe)}
+    out["remembered"] = None
+    if repository:
+        from ..sandbox.environments import remembered_template, template_fit
+        out["remembered"] = remembered_template(repository)
+        detected = (out["resolved"] or {}).get("detected") or {}
+        for row in out.get("templates") or []:
+            row["fit"] = template_fit(row.get("egress_allow") or [], detected)
     if service is not None:
         out["kept_jobs"] = kept_jobs(service)
     return out
@@ -438,7 +468,7 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
                   ("sandbox_event", "stage_message", "sandbox_starting", "sandbox_stopped", "runtime_error",
                    "build_environments_preparing", "build_environment_progress", "build_environment_ready",
                    "build_environment_failed", "build_environments_recreated", "environment_command_started",
-                   "environment_command")]
+                   "environment_command", "environment_setup", "environment_setup_dirty", "environment_setup_skipped")]
         out["session"] = {"session_name": job.session_name, "live": bool(job.worker_id),
                           "stages": stages, "events": events,
                           "approval": facts_for(service, job, core).pending_approval}

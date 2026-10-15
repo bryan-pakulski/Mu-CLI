@@ -21,6 +21,11 @@
       "semantic": "danger",
       "label": "failed"
     },
+    "unverified": {
+      "glyph": "?",
+      "semantic": "caution",
+      "label": "unverified"
+    },
     "skipped": {
       "glyph": "–",
       "semantic": "neutral",
@@ -320,6 +325,10 @@
     "failed": {
       "status": "failed",
       "label": "failed"
+    },
+    "unrunnable": {
+      "status": "unverified",
+      "label": "unrunnable"
     },
     "error": {
       "status": "failed",

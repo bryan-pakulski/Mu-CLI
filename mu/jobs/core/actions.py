@@ -25,6 +25,8 @@ COMMANDS: Sequence[tuple[str, str]] = (
     ("resume", "Resume"),
     ("restartStage", "Restart stage"),
     ("retry", "Retry"),
+    ("skipSetup", "Continue without setup"),
+    ("continueUnverified", "Continue unverified"),
     ("recheck", "Re-run checks"),
     ("reprompt", "Re-prompt with findings"),
     ("markFindings", "Update findings"),
@@ -80,6 +82,12 @@ class JobFacts:
     # The cap the job is paused on (``mu.jobs.limits.limit_detail``): {kind, scope, stage, used,
     # limit, unit, message, summary, suggested, suggested_text}; None when not paused on a limit.
     limit_reached: Optional[Dict[str, Any]] = None
+    # Honest gate (job_templates.md §5): the latest check run could not run some checks.
+    checks_unverified: bool = False
+    # Parked on unverified checks (``continueUnverified`` reviews anyway, verdict capped).
+    unverified_pending: bool = False
+    # Parked on a failed template job setup: {binding, command, index, error, template}.
+    setup_failed: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -108,6 +116,7 @@ TONES = {
     "retry": "warn", "restartStage": "warn", "resume": "warn", "push": "ok", "repush": "ok",
     "refreshEnvironments": "warn", "discard": "danger", "delete": "danger",
     "approveEnvironment": "warn", "rejectEnvironment": "danger", "raiseLimit": "ok",
+    "skipSetup": "warn", "continueUnverified": "warn",
 }
 CONFIRMS = {
     "repush": "Push the branch again and open a new PR? The closed PR is left as it is.",
@@ -117,6 +126,10 @@ CONFIRMS = {
     "refreshEnvironments": "Re-snapshot the build environments for this job? Stages started after this use the new images.",
     "approveEnvironment": "Approve this repository-declared build environment? mucli will use (or build) it for "
                           "jobs on this repository and requeue this job.",
+    "skipSetup": "Continue without the template's job setup? Checks that need the missing dependencies will be "
+                 "reported as unrunnable.",
+    "continueUnverified": "Review this job although some checks could not run? The review verdict is capped at "
+                          "needs work, and pushing needs an override reason.",
 }
 INPUTS: Dict[str, Dict[str, Any]] = {
     "rejectPlan": {"label": "What should the planner change?", "optional": False, "multiline": True},
@@ -186,6 +199,10 @@ def _rule(cmd: str, f: JobFacts) -> Optional[str]:
         return "no stage to restart"
     if cmd == "retry":
         return None if s == JobState.FAILED else "only failed jobs can be retried"
+    if cmd == "skipSetup":
+        return None if s == JobState.NEEDS_INPUT and f.setup_failed else "no failed job setup"
+    if cmd == "continueUnverified":
+        return None if s == JobState.NEEDS_INPUT and f.unverified_pending else "checks are not waiting on unrunnable results"
     if cmd == "recheck":
         if s in (JobState.REVIEW_DONE, JobState.PUSHED) and (f.has_worktree or f.has_branch):
             return None
@@ -261,6 +278,9 @@ def available_actions(facts: JobFacts) -> List[ActionVM]:
             args["fingerprint"] = facts.environment_approval.get("fingerprint", "")
         if cid == "push" and facts.verdict == "do_not_merge":
             args["requires_override"] = True
+        if cid == "push" and facts.checks_unverified:
+            args["requires_override"] = True
+            args["unverified"] = True
         if cid == "keepEnvironments" and facts.environments_kept:
             label = "Unkeep environments"
         if cid == "markMerged" and facts.pr_closed:

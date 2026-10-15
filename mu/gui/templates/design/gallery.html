@@ -255,8 +255,8 @@ RUN pip install -r requirements.txt</textarea>
         <button type="button" class="w-menu__item" role="menuitem" data-tone="danger">{{ w.icon("trash-2", size="sm") }}<span class="w-menu__label">Delete job</span></button>
     </div>
     <div class="g-stack">
-        <div class="w-popover" role="dialog" aria-label="Context ({{ theme }})">
-            <strong class="g-ink">84k of 200k tokens</strong>
+        <div class="w-popover" role="dialog" aria-labelledby="g-popover-{{ theme }}">
+            <strong class="g-ink" id="g-popover-{{ theme }}">84k of 200k tokens</strong>
             <p class="g-ink3">Real-frame fill · drift ×1.07</p>
         </div>
         <div class="w-toast" data-tone="ok"><span class="w-toast__glyph" aria-hidden="true">✓</span><span class="w-toast__msg">Patch applied to 1 file</span>{{ w.btn("Undo", variant="ghost", size="sm") }}<button type="button" class="w-toast__close" aria-label="Dismiss">{{ w.icon("x", size="sm") }}</button></div>

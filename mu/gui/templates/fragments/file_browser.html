@@ -10,12 +10,12 @@
      aria-modal="true"
      x-transition.opacity.duration.120ms
      @click.self="$store.fileBrowser.cancel()"
-     @dialog-close="$store.fileBrowser.cancel()" aria-label="File browser">
+     @dialog-close="$store.fileBrowser.cancel()" aria-label="File browser" aria-labelledby="file-browser-title">
     <div class="file-browser">
         <div class="fb-head">
-            <span class="fb-title"
+            <span class="fb-title" id="file-browser-title"
                   x-text="$store.fileBrowser.mode === 'folder' ? 'Select folder' : 'Select file'"></span>
-            <button class="icon-btn" @click="$store.fileBrowser.cancel()" title="Close">×</button>
+            <button class="icon-btn" @click="$store.fileBrowser.cancel()" title="Close" aria-label="Close">×</button>
         </div>
 
         <div class="fb-path">

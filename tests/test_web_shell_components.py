@@ -292,3 +292,20 @@ def test_palette_is_page_agnostic_with_a_registration_api():
     for source in ("chat:sessions", "chat:views", "chat:actions", "chat:commands"):
         assert f"WashPalette.register('{source}'" in CHAT_PALETTE_JS
     assert INDEX.index("/static/js/wash/palette.js") < INDEX.index("/static/js/wash/chat_palette.js")
+
+
+# ------------------------------------------------------------------ gallery
+
+def test_gallery_replays_chat_through_the_real_renderers():
+    gallery = (GUI / "templates/design/gallery.html").read_text(encoding="utf-8")
+    states = (GUI / "templates/design/_chat_components.html").read_text(encoding="utf-8")
+    replay = (GUI / "static/js/wash/gallery_chat.js").read_text(encoding="utf-8")
+    assert '{% include "fragments/chat.html" %}' in gallery
+    assert "window.MUCLI_GALLERY_REPLAY = true;" in gallery
+    assert "if (window.MUCLI_GALLERY_REPLAY) return;" in APP_JS  # no session boot
+    assert "{{ chat_components(theme) }}" in gallery
+    for section in ("composer", "messages", "toolcards", "approval", "diff", "meters", "palette"):
+        assert f'g_section("{section}"' in states, section
+    for kind in ("assistant_delta", "thinking_delta", "tool_call", "tool_result", "diff", "prompt", "prompt_resolved"):
+        assert f"kind: '{kind}'" in replay, kind
+    assert "window.routeEvent(" in replay and "window.renderToolCards(" in replay

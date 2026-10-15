@@ -196,6 +196,10 @@
 @media (width < 840px) {
     .w-composer { padding: 0 var(--wash-space-3) var(--wash-space-3); }
 }
+@media (width < 600px) {
+    .w-composer__effort { display: none; }
+    .w-composer__bar { flex-wrap: nowrap; gap: var(--wash-space-1); }
+}
 @media (pointer: coarse) {
     .w-composer__send,
     .w-composer__stop { width: 44px; height: 44px; }

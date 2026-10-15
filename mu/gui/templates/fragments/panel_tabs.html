@@ -16,8 +16,10 @@
                 const panel = $store.mode.panelModes;
                 const views = [];
                 if (panel.includes($store.mode.realMode)) views.push($store.mode.realMode);
+                const all = [...$store.mode.modes, ...$store.mode.views];
+                const disabled = name => (all.find(item => item.name === name) || {}).disabled;
                 for (const name of ['memory', 'files', 'artifacts']) {
-                    if (!views.includes(name) && panel.includes(name)) views.push(name);
+                    if (!views.includes(name) && panel.includes(name) && !disabled(name)) views.push(name);
                 }
                 return views;
             },

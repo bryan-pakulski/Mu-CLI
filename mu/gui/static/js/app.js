@@ -7751,6 +7751,9 @@ function rehighlightAll() {
 document.addEventListener("DOMContentLoaded", () => {
     applyTheme(muWashTheme());
     Alpine.store("layout").init();
+    // The /design gallery loads app.js only to replay canned events through
+    // routeEvent() and the real chat templates; it never boots a session.
+    if (window.MUCLI_GALLERY_REPLAY) return;
     bootSSE();
     Alpine.store("chat").loadHistory();
     Alpine.store("sessions").load();

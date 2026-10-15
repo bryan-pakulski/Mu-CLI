@@ -36,6 +36,7 @@
 .w-msg {
     position: relative;
     min-width: 0;
+    margin: 0;
     color: var(--wash-ink);
     font-size: var(--wash-type-body-lg-size);
     line-height: var(--wash-type-body-lg-line);
@@ -157,7 +158,7 @@
 }
 
 /* ------------------------------------------------------------ worked (interim collapse) */
-.w-worked { align-self: stretch; }
+.w-worked { align-self: stretch; margin: 0; padding: 0; border: 0; }
 .w-worked__row {
     display: flex;
     align-items: center;
@@ -190,6 +191,10 @@
 /* ------------------------------------------------------------ resolved breadcrumb */
 .w-resolved {
     align-self: stretch;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
     color: var(--wash-ink-3);
     font-size: var(--wash-type-caption-size);
     line-height: var(--wash-type-caption-line);

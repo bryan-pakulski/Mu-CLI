@@ -21,7 +21,7 @@
  * live timer. Done: ✓ in ok ink for 1.2s (data-fresh + --w-age), then the
  * glyph settles to neutral ink-3. Errors get a danger rule.
  */
-.w-trace { align-self: stretch; min-width: 0; }
+.w-trace { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; background: none; }
 .w-toollist { display: flex; flex-direction: column; gap: var(--wash-space-1); min-width: 0; }
 
 .w-toolcard,
@@ -159,6 +159,9 @@
 /* sub-agent card */
 .w-subagents {
     align-self: stretch;
+    margin: 0;
+    padding: 0;
+    border: 0;
     min-width: 0;
     border-radius: var(--wash-radius-md);
     background: var(--wash-sunken);

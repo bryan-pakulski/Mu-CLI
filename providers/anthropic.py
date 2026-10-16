@@ -17,9 +17,10 @@
 #     its `thinking` blocks intact (signature-verified). We serialize the
 #     thinking blocks that preceded each tool call into the tool-call part's
 #     `thought_signature` (the same slot Gemini uses), which the harness
-#     persists and copies onto the matching tool_result part. On replay only
-#     the LAST assistant turn with tool calls gets its thinking blocks back;
-#     earlier turns are sent as text + tool_use only. That is the shape the
+#     persists on the tool-call part only (never on tool results). On replay
+#     only the LATEST assistant message, when it called tools (the open
+#     tool-use loop), gets its thinking blocks back; earlier turns are sent as
+#     text + tool_use only. That is the shape the
 #     API docs recommend for harnesses that compact / edit history client-side
 #     (older thinking blocks may be invalidated by those edits on
 #     preserved-thinking models). If the API still rejects a replayed block,
@@ -39,6 +40,8 @@ import anthropic
 from anthropic import Anthropic
 
 from .base import (
+    REPLAY_LAST_TOOL_TURN,
+    replay_keep_indices,
     tool_result_json,
     CacheHint,
     FileReference,
@@ -270,6 +273,8 @@ class AnthropicProvider(LLMProvider):
     # connection alive, this is the ceiling for one request.
     DEFAULT_TIMEOUT_SECONDS = 600.0
 
+    replay_scope = REPLAY_LAST_TOOL_TURN
+
     def __init__(
         self,
         model_name: str = "",
@@ -460,10 +465,10 @@ class AnthropicProvider(LLMProvider):
         counter = 0
         pending: List[Tuple[str, str]] = []  # tool_use ids awaiting results
 
-        last_tool_turn = -1
-        for idx, msg in enumerate(messages):
-            if msg.role == "assistant" and any(p.type == "tool_call" for p in msg.parts):
-                last_tool_turn = idx
+        # Thinking is replayed only where the API requires it: the latest assistant
+        # message, when it called tools (the open tool-use loop). Older turns' thinking is
+        # dropped from the request — allowed by the API, and it is most of the bytes.
+        replay_turns = replay_keep_indices(messages, REPLAY_LAST_TOOL_TURN)
 
         def flush_pending() -> None:
             if not pending:
@@ -541,7 +546,7 @@ class AnthropicProvider(LLMProvider):
                         cid = f"mucli_toolu_{counter}"
                         thinking_blocks = (
                             _decode_thinking(part.thought_signature)
-                            if replay_thinking and idx == last_tool_turn
+                            if replay_thinking and idx in replay_turns
                             else []
                         )
                         if thinking_blocks:

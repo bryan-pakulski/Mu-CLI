@@ -18,7 +18,7 @@ from typing import Any, Dict
 from mu.agent.retry import is_context_overflow_error, parse_overflow_token_counts
 from providers.base import Message, MessagePart
 from utils.logger import logger
-from utils.token_estimator import estimate_tokens
+from utils.token_estimator import estimate_messages_tokens, estimate_tokens, tool_schema_text
 
 
 def _reinject_refreshed_summary(session, prompt: str) -> str:
@@ -93,17 +93,13 @@ def _reattach_runtime_state(session, messages):
 
 
 def _estimate_messages_tokens(messages) -> int:
-    """Cheap token estimate for a list of Message objects."""
-    total = 0
-    for msg in messages:
-        for part in msg.parts:
-            if part.text:
-                total += estimate_tokens(part.text)
-            elif part.tool_result is not None:
-                total += estimate_tokens(str(part.tool_result))
-            elif part.tool_args is not None:
-                total += estimate_tokens(json.dumps(part.tool_args))
-    return total
+    """Visible-content token estimate for a list of Message objects.
+
+    Delegates to ``utils.token_estimator.estimate_messages_tokens`` — the one
+    estimator the job relay preflight shares — so provider replay blobs
+    (``thought_signature``: thinking signatures, encrypted reasoning) never
+    count toward a pressure gate."""
+    return estimate_messages_tokens(messages)
 
 
 _TOOL_SCHEMA_CACHE: Dict[tuple, int] = {}
@@ -122,27 +118,16 @@ def _estimate_tools_tokens(tools) -> int:
     """
     if not tools:
         return 0
-    payload = [
-        {
-            "name": getattr(tool, "name", ""),
-            "description": getattr(tool, "description", ""),
-            "parameters": getattr(tool, "parameters", {}) or {},
-        }
-        for tool in tools
-    ]
+    serialized = tool_schema_text(tools)
     identity = (
-        tuple(entry["name"] for entry in payload),
-        hashlib.sha256(
-            json.dumps(payload, sort_keys=True, default=str).encode(
-                "utf-8", errors="replace"
-            )
-        ).hexdigest(),
+        tuple(getattr(tool, "name", "") for tool in tools),
+        hashlib.sha256(serialized.encode("utf-8", errors="replace")).hexdigest(),
     )
     with _TOOL_SCHEMA_CACHE_LOCK:
         cached = _TOOL_SCHEMA_CACHE.get(identity)
     if cached is not None:
         return cached
-    count = estimate_tokens(json.dumps(payload, sort_keys=True, default=str))
+    count = estimate_tokens(serialized)
     with _TOOL_SCHEMA_CACHE_LOCK:
         if len(_TOOL_SCHEMA_CACHE) >= _TOOL_SCHEMA_CACHE_CAP and identity not in _TOOL_SCHEMA_CACHE:
             _TOOL_SCHEMA_CACHE.pop(next(iter(_TOOL_SCHEMA_CACHE)), None)
@@ -399,16 +384,41 @@ def _preflight_context_check(
     return system_prompt, messages
 
 
-# Per-turn cap on reactive overflow recoveries. Each recovery aggressively
-# compacts history (keep_recent=4) and retries the provider call once. A
-# later iteration in the same turn can overflow again as tool results
+# The overflow recovery ladder. Each rung is stronger than the last:
+#   compact        — aggressive compaction (keep_recent=4) toward the real window.
+#   strip_degrade  — drop every replay blob from the retry and degrade large
+#                    tool results, including the protected recent ones and
+#                    provider-signed bundles (floor lifted, keep_recent=2).
+#   full_compact   — the `/compact` equivalent: roll the whole conversation
+#                    except the latest user/goal message into L2
+#                    (ledger kind ``overflow_full_compact``).
+#   truncate       — a single message larger than the window has its tool
+#                    result / text body cut with a clear marker
+#                    (ledger kind ``overflow_truncate``).
+_OVERFLOW_RUNGS = ("compact", "strip_degrade", "full_compact", "truncate")
+
+# Per-turn circuit breaker, counted in RUNGS applied (not identical retries).
+# A later iteration in the same turn can overflow again as tool results
 # accumulate — that's a *different* overflowing prompt and deserves its own
-# recovery, so this is a count (not a boolean): each overflow gets a
-# compaction attempt up to this many times per turn. The cap prevents a
-# compact-fail loop when compaction genuinely can't shrink the prompt (e.g.
-# a single active-turn tool result larger than the window, which the floor
-# protects from degradation).
-_MAX_OVERFLOW_RECOVERIES_PER_TURN = 3
+# recovery, so this is a count (not a boolean). The cap prevents a
+# compact-fail loop when nothing can shrink the prompt. Sessions may raise it
+# with ``overflow_recovery_max_rungs`` (job stages do: one stage is one turn).
+_MAX_OVERFLOW_RECOVERIES_PER_TURN = len(_OVERFLOW_RUNGS)
+
+# A rung that shrinks the estimated request by less than this fraction is not
+# retried as-is: the next rung is applied before the provider is called again.
+_MIN_OVERFLOW_SHRINK = 0.10
+
+#: Marker left where rung 4 cut a message body (``[truncated N tokens ...]``).
+OVERFLOW_TRUNCATION_MARKER = "[truncated {tokens:,} tokens to fit the context window]"
+
+
+def _max_overflow_rungs(session) -> int:
+    try:
+        value = int((getattr(session, "variables", None) or {}).get("overflow_recovery_max_rungs", 0) or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else _MAX_OVERFLOW_RECOVERIES_PER_TURN
 
 
 def _resolve_real_context_window(session) -> int:
@@ -571,8 +581,11 @@ def _aggressive_compact_for_overflow(
 
     floor_value = resolve_tool_result_floor(session)
     # lift_floor: let `_degrade_oldest_runtime_payload` reach the protected
-    # recent tool results that alone exceed the budget. Restored in `finally`.
+    # recent tool results that alone exceed the budget — and provider-signed
+    # bundles, whose replay data the retry no longer sends (rung 2 strips it).
+    # Restored in `finally`.
     session.session_manager._tool_result_floor = 0 if lift_floor else floor_value
+    session.session_manager._degrade_ignore_signatures = bool(lift_floor)
     if lift_floor:
         session.session_manager._pending_compaction_kind = (
             "reactive_overflow_floor_lift"
@@ -602,6 +615,7 @@ def _aggressive_compact_for_overflow(
     finally:
         # Restore the floor so later in-turn compaction keeps FM-8 protection.
         session.session_manager._tool_result_floor = floor_value
+        session.session_manager._degrade_ignore_signatures = False
 
 
 def _projected_history_estimator(session):
@@ -775,52 +789,213 @@ def _maybe_nudge_context_pressure(
     session.session_manager.history.append(nudge_msg)
 
 
+def _latest_goal_index(history) -> int | None:
+    """Index of the latest real user request (text, not a tool result, not a
+    synthetic nudge) — the message a full compaction keeps verbatim."""
+    for index in range(len(history) - 1, -1, -1):
+        message = history[index]
+        if message.get("role") != "user" or message.get("synthetic"):
+            continue
+        parts = message.get("parts") or []
+        if any(p.get("type") == "tool_result" for p in parts):
+            continue
+        if any(p.get("type") == "text" and str(p.get("text") or "").strip() for p in parts):
+            return index
+    return None
+
+
+def _full_compact_for_overflow(session) -> bool:
+    """Rung 3: the ``/compact`` equivalent. Roll the whole conversation except
+    the latest user/goal message into the L2 summary (the existing summarizer,
+    in bounded segments), recorded under ledger kind ``overflow_full_compact``.
+
+    The goal message is pinned (``protected_indices``) so it is re-injected
+    verbatim below the anchor; the newest call/result bundle may stay in the
+    tail when the roll cannot split it. Returns True when the anchor moved."""
+    sm = session.session_manager
+    goal = _latest_goal_index(sm.history)
+    if goal is not None:
+        pinned = set(getattr(sm, "protected_indices", set()) or set())
+        pinned.add(goal)
+        sm.protected_indices = pinned
+    floor_value = getattr(sm, "_tool_result_floor", 0)
+    before_anchor = int(getattr(sm, "summary_anchor", 0) or 0)
+    sm._tool_result_floor = 0
+    sm._pending_compaction_kind = "overflow_full_compact"
+    sm._pending_compaction_iter = int(getattr(session, "_trace_current_iter", 0) or 0)
+    sm._compact_focus = (getattr(session, "variables", None) or {}).get("compact_focus") or ""
+    try:
+        sm.roll_history_summary_to_token_budget(
+            1,
+            keep_recent=1,
+            max_passes=64,
+            provider=getattr(session, "provider", None),
+            max_segment_chars=200_000,
+            allow_degrade=False,
+            estimate_tokens=_projected_history_estimator(session),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Overflow full compaction failed: %s", exc)
+    finally:
+        sm._tool_result_floor = floor_value
+    session._compaction_watermark = len(sm.history)
+    return int(getattr(sm, "summary_anchor", 0) or 0) > before_anchor
+
+
+def _truncate_text(value: str, keep_tokens: int) -> tuple[str, int]:
+    """Cut ``value`` to about ``keep_tokens`` tokens; returns (text, tokens removed)."""
+    total = estimate_tokens(value)
+    if total <= keep_tokens:
+        return value, 0
+    keep_chars = max(0, int(len(value) * keep_tokens / max(1, total)))
+    head = value[:keep_chars].rstrip()
+    removed = max(1, total - estimate_tokens(head))
+    return f"{head}\n{OVERFLOW_TRUNCATION_MARKER.format(tokens=removed)}", removed
+
+
+def _truncate_oversized_messages(session, system_prompt, tools) -> int:
+    """Rung 4: a single message whose visible content alone exceeds the room
+    left in the window has its largest text / tool-result bodies truncated with
+    ``[truncated N tokens to fit the context window]``. Ledger kind
+    ``overflow_truncate``. Returns the number of parts cut."""
+    from mu.session.budgets import drift_corrected_context_limit, resolve_response_reserve
+    from mu.session.context_maintenance import retention_for_parts
+    from utils.token_estimator import estimate_message_tokens, estimate_part_tokens
+
+    sm = session.session_manager
+    try:
+        limit = int(drift_corrected_context_limit(session))
+    except Exception:  # noqa: BLE001
+        limit = _resolve_real_context_window(session)
+    room = limit - int(resolve_response_reserve(session) or 0)
+    room -= estimate_tokens(system_prompt or "") + _estimate_tools_tokens(tools)
+    # One message may use at most half of what is left, so the rest of the
+    # conversation (and the reply) still fits next to it.
+    cap = max(512, int(room * 0.5))
+    anchor = max(0, min(int(getattr(sm, "summary_anchor", 0) or 0), len(sm.history)))
+    indexes = sorted(set(range(anchor, len(sm.history))) | {
+        i for i in (getattr(sm, "protected_indices", set()) or set()) if 0 <= i < len(sm.history)
+    })
+    retention = retention_for_parts(sm)
+    snapshot = sm._shrink_snapshot()
+    cut = 0
+    for index in indexes:
+        message = sm.history[index]
+        if estimate_message_tokens(message) <= cap:
+            continue
+        parts = [p for p in message.get("parts") or []
+                 if p.get("type") in ("text", "tool_result")
+                 and retention.get(id(p), {}).get("action") != "clear"]
+        for part in sorted(parts, key=estimate_part_tokens, reverse=True):
+            over = estimate_message_tokens(message) - cap
+            if over <= 0:
+                break
+            key = "text" if part.get("type") == "text" else "tool_result"
+            raw = part.get(key)
+            body = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+            size = estimate_tokens(body)
+            new_body, removed = _truncate_text(body, max(256, size - over))
+            if removed:
+                part[key] = new_body
+                cut += 1
+    if cut:
+        sm._record_shrink_since(snapshot, kind="overflow_truncate", parts=cut, cap_tokens=cap)
+    return cut
+
+
+def _rebuild_request(session, system_prompt, turn_start_index, tools, *, anchor_before):
+    """Rebuild the wire messages from live history after a recovery rung."""
+    recent_history = session._prepare_runtime_history(turn_start_index=turn_start_index)
+    messages = session._build_messages_from_history(
+        recent_history,
+        {"role": "system", "parts": []},
+    )[:-1]
+    messages = _reattach_runtime_state(session, messages)
+    if int(getattr(session.session_manager, "summary_anchor", 0) or 0) > anchor_before:
+        # The L2 summary changed: rebuild the layered prompt from the base.
+        system_prompt = _reinject_refreshed_summary(session, system_prompt)
+    # Final pre-flight (re-checks + may compact more) before the retry.
+    return _preflight_context_check(
+        session, system_prompt, messages, turn_start_index=turn_start_index,
+        tools=tools,
+    )
+
+
+def _apply_overflow_rung(session, rung, *, exc, system_prompt, messages, tools, turn_start_index):
+    """Apply one recovery rung; returns (system_prompt, messages, strip_replay)."""
+    name = _OVERFLOW_RUNGS[min(rung, len(_OVERFLOW_RUNGS) - 1)]
+    anchor_before = int(getattr(session.session_manager, "summary_anchor", 0) or 0)
+    strip_replay = False
+    if name in ("compact", "strip_degrade"):
+        # Late-bind through loop_body so monkeypatching
+        # `loop_body._aggressive_compact_for_overflow` (the documented
+        # public seam, used by tests) intercepts this call even though
+        # the implementation moved here.
+        _lb = sys.modules.get("mu.agent.loop_body")
+        _compact_fn = getattr(_lb, "_aggressive_compact_for_overflow", None) or _aggressive_compact_for_overflow
+        if name == "compact":
+            _compact_fn(session, system_prompt, messages, overflow_error=exc,
+                        keep_recent=4, margin=0.20, lift_floor=False, tools=tools)
+        else:
+            strip_replay = True
+            _compact_fn(session, system_prompt, messages, overflow_error=exc,
+                        keep_recent=2, margin=0.30, lift_floor=True, tools=tools)
+    elif name == "full_compact":
+        strip_replay = True
+        _full_compact_for_overflow(session)
+    else:
+        strip_replay = True
+        _truncate_oversized_messages(session, system_prompt, tools)
+    system_prompt, messages = _rebuild_request(
+        session, system_prompt, turn_start_index, tools, anchor_before=anchor_before,
+    )
+    return system_prompt, messages, strip_replay
+
+
+_RUNG_NOTICES = {
+    "compact": "Context overflow from the model — compacting older history into a summary and retrying (no data lost).",
+    "strip_degrade": "Context still too large — dropping replayed reasoning and shrinking large tool results, then retrying.",
+    "full_compact": "Context still too large — compacting the whole conversation into a summary (like /compact) and retrying.",
+    "truncate": "Context still too large — truncating the single oversized message so the request fits, then retrying.",
+}
+
+
 def _generate_with_overflow_recovery(
     session, *, messages, system_prompt, thinking, tools, turn_start_index,
 ):
-    """Provider generate with reactive context-overflow recovery.
+    """Provider generate with a reactive context-overflow recovery ladder.
 
-    Mirrors Claude Code's Tier 5 reactive compaction: if the provider
-    rejects the prompt as too long (a non-transient 400/413), instead of
-    surfacing a hard error we aggressively compact history, rebuild the
-    prompt, and retry — and if the retry *still* overflows, compact harder
-    and retry again, up to `_MAX_OVERFLOW_RECOVERIES_PER_TURN` times per
-    turn. The retry lives inside the same try (it's the next loop
-    iteration), so a too-generous compaction budget that overflows on the
-    retry is caught and re-compacted instead of surfacing as "API Error
-    during agentic loop" (the old code returned the retry outside the try).
+    If the provider (or the job relay) rejects the prompt as too long, the
+    turn does not end: recovery climbs ``_OVERFLOW_RUNGS`` — aggressive
+    compaction, then strip replay blobs + degrade large (even protected)
+    tool results, then a full ``/compact``-equivalent roll into L2, then
+    truncation of any single message larger than the window — rebuilding the
+    prompt and retrying the provider after each rung. The retry lives inside
+    the same loop, so a retry that still overflows is caught and climbs the
+    next rung instead of surfacing as "API Error during agentic loop".
 
-    Escalation per still-overflowing attempt: shrink `keep_recent`
-    (4 → 2 → 1), grow the drift margin (0.20 → 0.30 → 0.40), and from the
-    2nd recovery on lift the per-turn tool-result floor so protected
-    recent tool results that alone exceed the budget can be degraded. A
-    per-turn count (`_overflow_recoveries_this_turn`, capped at
-    `_MAX_OVERFLOW_RECOVERIES_PER_TURN`) is the circuit breaker — it's a
-    count, not a boolean, so a *later* iteration that overflows again still
-    gets its own recovery.
+    A rung that shrinks the estimated request by less than
+    ``_MIN_OVERFLOW_SHRINK`` (10%) is not retried as-is: the next rung is
+    applied first. The per-turn circuit breaker
+    (``_overflow_recoveries_this_turn``, capped at ``_max_overflow_rungs``)
+    counts rungs applied; only when it trips does the overflow re-raise, and
+    the loop turns that into a ``context_overflow`` result (job stages then
+    retry once with a fresh, summary-seeded conversation).
 
-    This is the estimation-independent backstop behind the cl100k-based
-    pre-flight check: when the cheap token estimate under-counts the
-    model's real BPE (Ollama drifts ~2.2x), the wire-level 400 is the
-    ground truth, and we recover from it rather than crashing the turn.
-    The compaction budget is drift-corrected from that ground truth (see
-    `_aggressive_compact_for_overflow`), so each retry targets a *real*
-    token count the daemon accepts.
+    The compaction budget is drift-corrected from the error's ground truth
+    (see `_aggressive_compact_for_overflow`); estimates count visible content
+    only, so replay blobs never make the request look larger than it is.
     """
-    # Escalation ladder: each still-overflowing attempt compacts harder
-    # before retrying. The retry is the next loop iteration — it sits
-    # INSIDE the try, so a retry that still overflows is caught and
-    # re-compacted instead of surfacing as "API Error during agentic loop"
-    # (the old code returned the retry outside the try, so a too-generous
-    # compaction budget blew context on the retry with no recovery).
-    _KEEP_RECENT_LADDER = (4, 2, 1)
-    _MARGIN_LADDER = (0.20, 0.30, 0.40)
+    from providers.base import REPLAY_NONE, project_replay
 
-    first_attempt = True
+    rung = 0
+    strip_replay = False
+    first_notice = True
     while True:
+        send = project_replay(messages, REPLAY_NONE) if strip_replay else messages
         try:
             return session._provider_generate_with_retry(
-                messages=messages,
+                messages=send,
                 system_prompt=system_prompt,
                 thinking=thinking,
                 tools=tools,
@@ -828,59 +1003,43 @@ def _generate_with_overflow_recovery(
         except Exception as exc:
             if not is_context_overflow_error(exc):
                 raise
-            recoveries = int(getattr(session, "_overflow_recoveries_this_turn", 0) or 0)
-            if recoveries >= _MAX_OVERFLOW_RECOVERIES_PER_TURN:
-                logger.error(
-                    "Context overflow persisted after %d reactive compactions this "
-                    "turn; re-raising (circuit breaker): %s",
-                    recoveries, str(exc)[:300],
-                )
-                raise
-            session._overflow_recoveries_this_turn = recoveries + 1
-            # Escalate per recovery: shrink keep_recent, grow the margin,
-            # and (from the 2nd recovery on) lift the tool-result floor so
-            # protected recent tool results that alone exceed the budget
-            # can be degraded. Clamp the ladder index to its last rung.
-            level = min(recoveries, len(_KEEP_RECENT_LADDER) - 1)
-            keep_recent = _KEEP_RECENT_LADDER[level]
-            margin = _MARGIN_LADDER[min(level, len(_MARGIN_LADDER) - 1)]
-            lift_floor = level >= 1
-            if first_attempt or session.ui:
-                if session.ui:
-                    session.ui.show_info(
-                        "Context overflow from the model — compacting older "
-                        "history into a summary and retrying (no data lost)."
+            cap = _max_overflow_rungs(session)
+            while True:
+                recoveries = int(getattr(session, "_overflow_recoveries_this_turn", 0) or 0)
+                if recoveries >= cap:
+                    logger.error(
+                        "Context overflow persisted after %d recovery rungs this "
+                        "turn; re-raising (circuit breaker): %s",
+                        recoveries, str(exc)[:300],
                     )
-                first_attempt = False
-            logger.warning(
-                "Reactive overflow recovery #%d: provider rejected prompt as "
-                "too long. Compacting (keep_recent=%d, margin=%.2f, lift_floor=%s) "
-                "and retrying. Error: %s",
-                recoveries + 1, keep_recent, margin, lift_floor, str(exc)[:300],
-            )
-            # Late-bind through loop_body so monkeypatching
-            # `loop_body._aggressive_compact_for_overflow` (the documented
-            # public seam, used by tests) intercepts this call even though
-            # the implementation moved here.
-            _lb = sys.modules.get("mu.agent.loop_body")
-            _compact_fn = getattr(_lb, "_aggressive_compact_for_overflow", None) or _aggressive_compact_for_overflow
-            _compact_fn(
-                session, system_prompt, messages, overflow_error=exc,
-                keep_recent=keep_recent, margin=margin, lift_floor=lift_floor,
-                tools=tools,
-            )
-            recent_history = session._prepare_runtime_history(
-                turn_start_index=turn_start_index,
-            )
-            messages = session._build_messages_from_history(
-                recent_history,
-                {"role": "system", "parts": []},
-            )[:-1]
-            # Final pre-flight (re-checks + may compact more) before the retry.
-            system_prompt, messages = _preflight_context_check(
-                session, system_prompt, messages, turn_start_index=turn_start_index,
-                tools=tools,
-            )
+                    raise exc
+                session._overflow_recoveries_this_turn = recoveries + 1
+                name = _OVERFLOW_RUNGS[min(rung, len(_OVERFLOW_RUNGS) - 1)]
+                before = _estimate_request_tokens(system_prompt, messages, tools)["total"] if messages else 0
+                if session.ui and (first_notice or name != "compact"):
+                    session.ui.show_info(_RUNG_NOTICES[name])
+                first_notice = False
+                logger.warning(
+                    "Reactive overflow recovery #%d (rung %s): provider rejected the "
+                    "prompt as too long. Error: %s",
+                    recoveries + 1, name, str(exc)[:300],
+                )
+                system_prompt, messages, strip_now = _apply_overflow_rung(
+                    session, rung, exc=exc, system_prompt=system_prompt,
+                    messages=messages, tools=tools, turn_start_index=turn_start_index,
+                )
+                strip_replay = strip_replay or strip_now
+                rung += 1
+                if before <= 0 or rung >= len(_OVERFLOW_RUNGS):
+                    break  # unmeasurable, or the last rung: retry the provider
+                after = _estimate_request_tokens(system_prompt, messages, tools)["total"]
+                if before - after >= before * _MIN_OVERFLOW_SHRINK:
+                    break
+                logger.warning(
+                    "Overflow rung %s shrank the request only %d -> %d tokens "
+                    "(< %.0f%%); escalating before retrying.",
+                    name, before, after, _MIN_OVERFLOW_SHRINK * 100,
+                )
 
 
 from mu.agent.teacher_watcher import (  # noqa: F401

@@ -117,11 +117,35 @@ def claim_stage_response(service, job, stage, payload):
     return response
 
 
+def overflow_retry_prompt(prompt, result, stage):
+    """The stage brief for a context_overflow retry: the original brief plus what the first
+    conversation achieved (its L2 summary, else its last reply). The worktree keeps its edits."""
+    summary = str(result.get("summary") or "").strip() or str(result.get("text") or "").strip()
+    note = (f"\n\nCONTEXT RECOVERY: an earlier run of this {stage} stage ran out of model context and was "
+            "restarted with a fresh conversation. Any changes it made are still in /workspace; check "
+            "them (for example git status and git diff) before continuing, and do not redo finished work.")
+    if summary:
+        note += "\n\nSummary of the earlier run:\n" + summary
+    return str(prompt or "") + note
+
+
 def run_stage_in_container(service, job, stage, prompt, **kwargs):
     spent = 0.0  # runs discarded by a restart were still paid for
+    overflow_retried = False
     while True:
         try:
             result = _run_stage_once(service, job, stage, prompt, **kwargs)
+            if result.get("error_class") == "context_overflow" and not overflow_retried:
+                # Every in-stage recovery rung failed: retry ONCE with a fresh conversation seeded
+                # from the summary and the stage brief, instead of stopping the job.
+                overflow_retried = True
+                spent += float(result.get("cost_usd") or 0)
+                service.store.append_event(job.id, "stage_context_overflow", reason=str(result.get("error") or "")[:500],
+                                           payload={"stage": stage, "retry": "fresh_conversation"})
+                prompt = overflow_retry_prompt(prompt, result, stage)
+                kwargs = {**kwargs, "fresh": True}
+                job = service.get(job.id)
+                continue
             result["cost_usd"] = float(result.get("cost_usd") or 0) + spent
             return result
         except StageRestart as exc:
@@ -347,6 +371,19 @@ def _context_window(relay, model):
         return None
 
 
+def harness_context_window(agent, model_name):
+    """A harness model's window from the pricing table (None when unknown: the CLI's default)."""
+    if agent != "codex" or not model_name:
+        return None
+    try:
+        from utils.model_pricing import resolve_token_pricing
+        item = resolve_token_pricing("openai", str(model_name))
+        window = int(getattr(item, "context_window", 0) or 0) if item else 0
+    except Exception:  # noqa: BLE001 - a missing price row just leaves Codex's default
+        return None
+    return window or None
+
+
 def _stage_effort(stage) -> str:
     from ..job_settings import rule_or
     return str(rule_or(f"jobs.stage_effort.{stage}", "") or "")
@@ -411,7 +448,7 @@ def check_runtime_image(service, job, runner, docker, policy):
     return warning
 
 
-def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=ModelRelay):
+def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=ModelRelay, fresh=False):
     from dataclasses import replace as _replace
     from .. import limits
     restart_cursor = service.store.event_cursor()
@@ -501,14 +538,17 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
                 target.write_text(value)
         guidance = str((job.metadata or {}).get("resume_guidance") or "")
         previous = art.read_json(f"logs/{stage}-transcript.json", []) or []
-        paused = stage in ((job.metadata or {}).get("stage_resume") or {})
+        # ``fresh``: a context_overflow retry starts a new conversation even if the stage was paused.
+        paused = not fresh and stage in ((job.metadata or {}).get("stage_resume") or {})
         harness_request = {}
         if agent != "mucli":
             # Resume the CLI's own session (its transcript lives in the job's harness state).
             session = art.read_json(f"harness/{agent}/{stage}.json", {}) or {}
             resume_session = str(session.get("session_id") or "") if paused else ""
             harness_request = {"agent": agent, "model": model["model"], "effort": agent_cfg["effort"],
-                               "resume_session": resume_session}
+                               "resume_session": resume_session,
+                               # Codex compacts at 85% of this window (model_auto_compact_token_limit).
+                               "context_window": harness_context_window(agent, model["model"])}
             state_dir = root / "state"
             state_dir.mkdir()
             harnesses.copy_state(art.path("harness", agent, "state"), str(state_dir))
@@ -524,6 +564,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
             resume = True
             # Continue the paused stage's own conversation (prior work, warm cache prefix)
             # instead of restarting with a transcript excerpt.
+            from utils.token_estimator import strip_replay_fields
+            strip_replay_fields(previous, tool_results_only=True)  # older images duplicated signatures
             (inputs / "history.json").write_text(json.dumps(previous))
             prompt = ("Continue this stage from where you left off." + (f"\n\nHuman guidance:\n{guidance}" if guidance else ""))
         else:

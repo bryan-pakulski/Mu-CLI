@@ -17,6 +17,7 @@ from google import genai
 from google.genai import types
 
 from .base import (
+    project_replay,
     tool_result_json,
     CacheHint,
     FileReference,
@@ -129,6 +130,9 @@ class GeminiProvider(LLMProvider):
         self, messages: List[Message]
     ) -> List[types.Content]:
         gemini_contents: List[types.Content] = []
+        # Thought signatures are validated for the current turn only; earlier turns'
+        # signatures are dropped from the request (``project_replay``), never from history.
+        messages = project_replay(messages, self.replay_scope)
         for msg in messages:
             gemini_role = "user"
             if msg.role == "assistant":

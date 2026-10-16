@@ -2660,11 +2660,14 @@ def run_turn(session, text, *, origin="user"):
                 except Exception:  # noqa: BLE001
                     pass
 
+                # Replay data (thinking signature, encrypted reasoning) stays on
+                # the tool_call part that produced it. Copying it onto the result
+                # doubled every signature in history and on the wire, and made
+                # the result look provider-signed to folding and clearing.
                 tool_result_part = {
                     "type": "tool_result",
                     "tool_name": part.tool_name,
                     "tool_result": result,
-                    "thought_signature": part.thought_signature,
                     "cache_key": cache_key,
                 }
                 # Artifacts such as browser_snapshot PNGs stay durable in the
@@ -3157,6 +3160,34 @@ def run_turn(session, text, *, origin="user"):
                 tool_context = (
                     f" | Last tool: {current_tool_name}("
                     f"{_shorten_tool_args(current_tool_args or {})})"
+                )
+            if is_context_overflow_error(e):
+                # Every recovery rung (compact, strip + degrade, full
+                # compaction, truncation) already ran and the request still
+                # does not fit. That is not an API failure: save the
+                # conversation and end the turn with a clear
+                # `context_overflow` result (job stages retry it once with a
+                # fresh, summary-seeded conversation) instead of the generic
+                # "API Error during agentic loop" path, whose rollback/retry
+                # would resend the same oversized request.
+                logger.error("Context overflow could not be recovered this turn: %s", e)
+                if session.ui:
+                    session.ui.show_error(
+                        "Context overflow: the conversation no longer fits the model's "
+                        "context window even after compacting, stripping replayed "
+                        "reasoning and truncating oversized messages. The conversation "
+                        "is saved; run /compact or start a new session to continue."
+                    )
+                session.session_manager.save_history_turn(session.folder_context)
+                if session.session_manager.get_feature_state():
+                    session._set_feature_state(status="error")
+                return session._collect_turn_response(
+                    initial_history_len,
+                    status="context_overflow",
+                    total_in=total_in,
+                    total_out=total_out,
+                    total_cost=total_cost,
+                    error=f"context_overflow: {e}",
                 )
             if session.ui:
                 session.ui.show_error(f"API Error during agentic loop: {e}{tool_context}")

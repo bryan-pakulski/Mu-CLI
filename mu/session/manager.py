@@ -84,6 +84,16 @@ def _message_identity(message: Any) -> str:
         return repr(message)
 
 
+def _strip_tool_result_replay(history: Any) -> None:
+    """Older builds copied each tool call's replay data (``thought_signature``)
+    onto its tool result; tool results never need it. Dropped on load."""
+    if not isinstance(history, list):
+        return
+    from utils.token_estimator import strip_replay_fields
+
+    strip_replay_fields(history, tool_results_only=True)
+
+
 def _empty_tool_stats() -> dict[str, Any]:
     return {
         "session_started_at": time.time(),
@@ -329,11 +339,13 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             try:
                 if isinstance(data, list):
                     self.history = data
+                    _strip_tool_result_replay(self.history)
                 elif isinstance(data, dict):
                     self.thread_meta = ensure_thread_meta(
                         name, data.get("thread_meta")
                     )
                     self.history = data.get("history", [])
+                    _strip_tool_result_replay(self.history)
                     self.conversation_summary = str(
                         data.get("conversation_summary", "") or ""
                     )

@@ -91,6 +91,70 @@ def tool_result_json(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
 
 
+# ------------------------------------------------------------------ replay projection
+#
+# ``MessagePart.thought_signature`` carries opaque provider replay data: Anthropic thinking /
+# redacted_thinking blocks, OpenAI Responses encrypted reasoning items, Gemini thought
+# signatures. Providers only need it for the current tool loop and do not count earlier turns'
+# replay data toward the context window, so requests drop it everywhere else. This is a request
+# projection: ``session.history`` keeps every signature.
+
+#: Keep replay data only on the latest assistant message, when it called tools (Anthropic:
+#: thinking blocks are required for the last assistant turn of a tool-use loop only).
+REPLAY_LAST_TOOL_TURN = "last_tool_turn"
+#: Keep replay data on every assistant message of the current user turn (Gemini validates
+#: thought signatures for the current turn; OpenAI reasoning items continue within one turn).
+REPLAY_CURRENT_TURN = "current_turn"
+#: Drop all replay data (overflow recovery).
+REPLAY_NONE = "none"
+
+
+def replay_keep_indices(messages: List["Message"], scope: str) -> set:
+    """Indices of the assistant messages whose replay data a request must keep under ``scope``."""
+    assistants = [i for i, m in enumerate(messages) if getattr(m, "role", "") == "assistant"]
+    if scope == REPLAY_NONE or not assistants:
+        return set()
+    last = assistants[-1]
+    if scope == REPLAY_LAST_TOOL_TURN:
+        has_call = any(getattr(p, "type", "") == "tool_call" for p in messages[last].parts)
+        return {last} if has_call else set()
+    # The current turn starts at the last user message with content other than tool results
+    # that an assistant message answered; a trailing user message (the RUNTIME STATE block, a
+    # nudge not yet answered) does not open a new turn.
+    start = -1
+    for index in range(last):
+        message = messages[index]
+        if getattr(message, "role", "") == "user" and any(
+            getattr(p, "type", "") != "tool_result" for p in message.parts
+        ):
+            start = index
+    return {i for i in assistants if i > start}
+
+
+def project_replay(messages: List["Message"], scope: str) -> List["Message"]:
+    """``messages`` with replay data kept only where ``scope`` requires it.
+
+    Tool results never carry replay data. Returns new ``Message`` objects only where
+    something changed; the inputs (and so ``session.history``) are never mutated."""
+    import dataclasses
+
+    keep = replay_keep_indices(messages, scope)
+    out: List[Message] = []
+    for index, message in enumerate(messages):
+        parts = list(getattr(message, "parts", []) or [])
+        changed = False
+        new_parts = []
+        for part in parts:
+            if getattr(part, "thought_signature", None) and (
+                index not in keep or getattr(part, "type", "") == "tool_result"
+            ):
+                part = dataclasses.replace(part, thought_signature=None)
+                changed = True
+            new_parts.append(part)
+        out.append(Message(role=message.role, parts=new_parts) if changed else message)
+    return out
+
+
 @dataclass
 class CacheHint:
     """Optional hint to the provider about which prompt content should be cached.
@@ -197,6 +261,9 @@ class ProviderResponse:
 
 
 class LLMProvider(ABC):
+    #: Where a request must keep provider replay data (``project_replay``).
+    replay_scope: str = REPLAY_CURRENT_TURN
+
     def __init__(self, model_name: str = ""):
         self.name = ""
         self.model_name = model_name

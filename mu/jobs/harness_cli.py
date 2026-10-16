@@ -84,6 +84,53 @@ def claude_env(tool_timeout_s: int) -> Dict[str, str]:
             "BASH_DEFAULT_TIMEOUT_MS": ms, "BASH_MAX_TIMEOUT_MS": ms, "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"}
 
 
+# ------------------------------------------------------------------ context compaction
+#
+# Claude Code (2.1.x) auto-compacts when ``autoCompactEnabled`` (global config, default on) is set
+# and neither ``DISABLE_AUTO_COMPACT`` nor ``DISABLE_COMPACT`` is in the environment;
+# ``DISABLE_COMPACT`` would also disable a manual ``/compact``. Its model traffic goes straight to
+# api.anthropic.com through the byte-forwarding egress bridge, so it sees the provider's own
+# "prompt is too long" 400 and compacts on it. Codex (0.162.x) compacts at
+# ``model_auto_compact_token_limit``.
+
+#: Environment variables that would turn Claude Code's compaction off; removed for stages.
+CLAUDE_COMPACT_DISABLERS = ("DISABLE_AUTO_COMPACT", "DISABLE_COMPACT")
+#: Codex compacts once the conversation reaches this share of the model window.
+CODEX_AUTO_COMPACT_SHARE = 0.85
+#: Times one stage run compacts and continues after the CLI still stopped on a context overflow.
+OVERFLOW_RESUMES = 2
+#: The user turn that resumes a CLI session after it compacted.
+OVERFLOW_CONTINUE_PROMPT = ("Your conversation was compacted because it ran out of context. Continue the stage from "
+                            "where you left off; check /workspace (git status, git diff) for the work already done.")
+
+
+def claude_global_config(existing: Any = None) -> Dict[str, Any]:
+    """Claude Code's global config (``$CLAUDE_CONFIG_DIR/.claude.json``) with auto-compact on."""
+    config = dict(existing) if isinstance(existing, dict) else {}
+    config["autoCompactEnabled"] = True
+    return config
+
+
+def codex_auto_compact_limit(context_window: Any) -> int:
+    """``model_auto_compact_token_limit`` for a model window (0 = unknown: Codex's own default)."""
+    try:
+        window = int(context_window or 0)
+    except (TypeError, ValueError):
+        return 0
+    return int(window * CODEX_AUTO_COMPACT_SHARE) if window > 0 else 0
+
+
+def harness_context_overflow(text: str) -> bool:
+    """A Claude Code / Codex error that means the conversation outgrew the model window."""
+    lowered = str(text or "").lower()
+    if not lowered:
+        return False
+    if "context_window_exceeded" in lowered or "contextwindowexceeded" in lowered:
+        return True
+    from mu.agent.retry import is_context_overflow_error
+    return is_context_overflow_error(RuntimeError(lowered))
+
+
 def claude_user_frame(text: str) -> str:
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}, "parent_tool_use_id": None,
                        "session_id": ""}) + "\n"
@@ -102,7 +149,7 @@ def claude_control_error(request_id: str, message: str) -> str:
 
 
 def codex_args(*, model: str, effort: str = "", read_only: bool, resume: str = "",
-               root: str = CODEX_ROOT, workdir: str = "/workspace") -> List[str]:
+               root: str = CODEX_ROOT, workdir: str = "/workspace", auto_compact_tokens: int = 0) -> List[str]:
     """Codex's own sandbox (bubblewrap) cannot create namespaces inside the job container, so
     every stage runs Codex unsandboxed *inside* the job container, which is the control: read-only
     stages see a read-only workspace mount, implement the writable worktree. Jobs run unattended
@@ -116,6 +163,9 @@ def codex_args(*, model: str, effort: str = "", read_only: bool, resume: str = "
         args += ["-m", model]
     if effort and CODEX_EFFORT.get(effort):
         args += ["-c", f"model_reasoning_effort={CODEX_EFFORT[effort]}"]
+    if auto_compact_tokens and int(auto_compact_tokens) > 0:
+        # Compact before the window fills instead of failing the turn (``codex_auto_compact_limit``).
+        args += ["-c", f"model_auto_compact_token_limit={int(auto_compact_tokens)}"]
     return args + ["-"]
 
 

@@ -192,8 +192,13 @@ class ModelRelay:
             messages = messages_from_wire(payload.get("messages", []))
             guidance = self.messages()
             messages.extend(Message("user", [MessagePart("text", text=text)]) for text in guidance)
-            from utils.token_estimator import estimate_tokens
-            request_tokens = estimate_tokens(json.dumps(payload)) + sum(estimate_tokens(text) for text in guidance)
+            from utils.token_estimator import estimate_payload_tokens, estimate_tokens
+            # Visible content only (text, tool args and results, system prompt, tool schemas): the
+            # opaque replay blobs on ``thought_signature`` (thinking signatures, encrypted
+            # reasoning) are not counted by the provider for earlier turns, and once counted
+            # under cl100k they made a ~210k-token request look like ~1M.
+            request_tokens = max(1, estimate_payload_tokens(payload.get("system_prompt") or "", messages,
+                                                            payload.get("tools") or []))  # any request costs
             # Cache reads are not counted by default, so only a request that could not fit even
             # uncached is refused up front; the real (new-token) usage is charged after the call.
             def projected_cost(output):
@@ -214,8 +219,11 @@ class ModelRelay:
                 self.reserved_cost += reserved_cost
             window = self._context_window()
             if window and request_tokens >= window:
-                # cl100k undercounts Claude tokens, so this request is certain to be rejected.
-                # The wording matches the loop's overflow detection, which compacts and retries.
+                # Refuse up front only when rejection is certain: the visible content alone fills
+                # the window (cl100k undercounts Claude tokens). Anything less is forwarded and
+                # the provider's own 400 is the ground truth. The wording matches the loop's
+                # overflow detection (``is_context_overflow_error``), which compacts and retries;
+                # "about" keeps this estimate from being parsed as a real provider count.
                 raise RelayDenied(f"prompt is too long: about {request_tokens:,} tokens > {window:,} maximum "
                                   "(refused by the job relay before sending)")
             tools = [ToolDefinition(**t) for t in payload.get("tools") or []]
@@ -271,6 +279,8 @@ class ModelRelay:
             with self.lock:
                 self.reserved_tokens -= reserved_tokens
                 self.reserved_cost -= reserved_cost
+                if abs(self.reserved_cost) < 1e-9:
+                    self.reserved_cost = 0.0  # float residue once every reservation is released
             self._slots.release()
 
     def _warn_unpriced(self, provider, model):

@@ -6,7 +6,7 @@ import os
 
 import httpx
 
-from providers.base import LLMProvider, StreamEvent
+from providers.base import REPLAY_CURRENT_TURN, REPLAY_LAST_TOOL_TURN, LLMProvider, StreamEvent, project_replay
 from .model_relay import wire
 
 
@@ -35,7 +35,16 @@ class RelayProvider(LLMProvider):
     def generate(self, messages, system_prompt=None, thinking=False, tools=None):
         return self.drain_stream(self.stream(messages, system_prompt, thinking, tools))
 
+    @property
+    def replay_scope(self):
+        """The host provider's replay scope: Anthropic needs thinking for the open tool loop's
+        latest turn only; the others keep the current turn's replay data."""
+        return REPLAY_LAST_TOOL_TURN if str(self.name or "").lower() == "anthropic" else REPLAY_CURRENT_TURN
+
     def stream(self, messages, system_prompt=None, thinking=False, tools=None, cache_hint=None, reasoning_effort=None):
+        # Request projection: stale replay blobs (old thinking signatures, encrypted reasoning)
+        # never cross the relay; the host adapter would drop them anyway.
+        messages = project_replay(list(messages or []), self.replay_scope)
         payload = wire(dict(messages=messages, system_prompt=system_prompt, thinking=thinking,
                             tools=tools, cache_hint=cache_hint, reasoning_effort=reasoning_effort))
         transport = httpx.HTTPTransport(uds=os.environ["MUCLI_MODEL_RELAY"])

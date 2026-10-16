@@ -23,7 +23,8 @@ class JobRunOutcome:
     # under the job's retry budget instead of failing terminally.
     transient: bool = False
     # Why the stage stopped (sandbox worker): "provider_transient" | "rate_limited" (both set
-    # ``transient``) | "iteration_limit" | "fatal"; "" = completed or waiting on a human.
+    # ``transient``) | "iteration_limit" | "context_overflow" (already retried once with a fresh
+    # conversation by the sandbox runner) | "fatal"; "" = completed or waiting on a human.
     error_class: str = ""
 
 

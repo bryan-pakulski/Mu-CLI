@@ -402,7 +402,10 @@ def test_injected_literals_cover_env_and_credential_files(monkeypatch):
     ("error", "connection reset by peer", "provider_transient"),
     ("error", "Stage cost budget exhausted: $1.00 of $1.00", "fatal"),
     ("error", "429 insufficient_quota", "fatal"),
-    ("error", "prompt is too long: 300000 tokens", "fatal"),
+    # Overflow is still never a transient (backoff) retry; it is its own class, which the
+    # sandbox runner retries once with a fresh, summary-seeded conversation.
+    ("error", "prompt is too long: 300000 tokens", "context_overflow"),
+    ("context_overflow", "", "context_overflow"),
     ("error", "KeyError: 'x'", "fatal"),
 ])
 def test_error_classes(status, error, expected):

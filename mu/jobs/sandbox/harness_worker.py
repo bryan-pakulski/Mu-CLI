@@ -70,7 +70,22 @@ def prepare_home(agent):
                 target.chmod(0o600)
     store.mkdir(parents=True, exist_ok=True)
     (home / link).symlink_to(store)
+    if agent == "claude":
+        write_claude_config(home)
     return env
+
+
+def write_claude_config(home):
+    """Claude Code's global config in its config dir with auto-compact explicitly on (its default),
+    so a long stage compacts instead of stopping; keeps any keys already there."""
+    config_path = Path(home) / ".claude.json"
+    try:
+        existing = json.loads(config_path.read_text()) if config_path.is_file() else {}
+    except (OSError, ValueError):
+        existing = {}
+    config_path.write_text(json.dumps(cli.claude_global_config(existing)))
+    config_path.chmod(0o600)
+    return config_path
 
 
 def codex_session_model(thread_id):
@@ -120,7 +135,8 @@ class Run:
                                    read_only=self.read_only, resume=resume,
                                    system=cli.stage_system(self.stage, self.read_only))
         return cli.codex_args(model=harness.get("model") or "", effort=harness.get("effort") or "",
-                              read_only=self.read_only, resume=resume)
+                              read_only=self.read_only, resume=resume,
+                              auto_compact_tokens=cli.codex_auto_compact_limit(harness.get("context_window")))
 
     def prompt(self):
         text = str(self.request.get("prompt") or "")
@@ -277,7 +293,10 @@ class Run:
         full_env = dict(os.environ, **env)
         if self.agent == "claude":
             full_env.update(cli.claude_env(int(self.request.get("tool_timeout_s") or 3600)))
+            for name in cli.CLAUDE_COMPACT_DISABLERS:
+                full_env.pop(name, None)
         code, stderr = self._run_once(full_env, self.prompt(), None)
+        code, stderr = self._recover_overflow(full_env, code, stderr)
         # Codex takes no input mid-turn: messages sent meanwhile resume its thread afterwards.
         for _ in range(20):
             if self.agent != "codex" or code != 0 or self.stopped or self.state.is_error:
@@ -289,6 +308,36 @@ class Run:
             self.state.finished = False
             code, stderr = self._run_once(full_env, self.message_text(texts), self.state.session_id)
         return code, stderr
+
+    def overflowed(self, stderr=""):
+        """The CLI stopped because its conversation outgrew the model window."""
+        if self.stopped or self.state.usage_limit:
+            return False
+        return bool(self.state.is_error and cli.harness_context_overflow(self.state.error)) or (
+            not self.state.finished and cli.harness_context_overflow(stderr))
+
+    def _recover_overflow(self, full_env, code, stderr):
+        """A CLI that still exits on a context overflow is compacted and resumed, not ended:
+        Claude Code runs ``/compact`` on its session, then continues; Codex resumes its thread
+        (``model_auto_compact_token_limit`` makes it compact before sampling again)."""
+        label = "Claude Code" if self.agent == "claude" else "Codex"
+        for _ in range(cli.OVERFLOW_RESUMES):
+            if not self.overflowed(stderr) or not self.state.session_id:
+                break
+            emit("runtime_info", {"text": f"{label} ran out of context; compacting its conversation and continuing"})
+            if self.agent == "claude":
+                self._reset_turn_state()
+                code, stderr = self._run_once(full_env, "/compact", self.state.session_id)
+                if self.stopped or self.state.usage_limit:
+                    break
+            self._reset_turn_state()
+            code, stderr = self._run_once(full_env, cli.OVERFLOW_CONTINUE_PROMPT, self.state.session_id)
+        return code, stderr
+
+    def _reset_turn_state(self):
+        self.state.is_error = False
+        self.state.error = ""
+        self.state.finished = False
 
     def _run_once(self, full_env, prompt, resume):
         self.state.add_user(prompt)

@@ -13,7 +13,14 @@ from mu.ui.exceptions import InteractionRequired
 from .provider import RelayProvider
 
 
-ERROR_CLASSES = ("provider_transient", "rate_limited", "iteration_limit", "fatal")
+ERROR_CLASSES = ("provider_transient", "rate_limited", "iteration_limit", "context_overflow", "fatal")
+
+# Overflow recovery rungs one stage may apply. A stage is a single agent turn of up to
+# hundreds of iterations, so it gets more than an interactive turn's breaker; past it the
+# stage ends ``context_overflow`` and the host retries it once with a fresh conversation.
+STAGE_OVERFLOW_RUNGS = 16
+# How much of the L2 summary a context_overflow result carries to seed the fresh retry.
+OVERFLOW_SUMMARY_CHARS = 24_000
 _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "ratelimit", "too many requests", "429", "resource_exhausted",
                        "resource exhausted")
 
@@ -23,6 +30,8 @@ def classify_error(status: str, error: str = "") -> str:
     ``provider_transient`` are retried with backoff, ``iteration_limit`` and ``fatal`` are not.
     "" for a completed stage or one waiting on a human (approval, question, pause)."""
     status = str(status or "")
+    if status == "context_overflow":
+        return "context_overflow"
     # usage_limit: a subscription window (Claude Code / Codex) that resets in hours; the human
     # resumes after the reset rather than burning automatic retries.
     if status in ("completed", "needs_input", "paused", "usage_limit"):
@@ -39,7 +48,10 @@ def classify_error(status: str, error: str = "") -> str:
     if any(marker in text for marker in _RATE_LIMIT_MARKERS):
         return "rate_limited"
     exc = RuntimeError(text)
-    if not is_context_overflow_error(exc) and is_transient_provider_error(exc):
+    if is_context_overflow_error(exc):
+        # Recoverable: the host retries the stage once with a fresh, summary-seeded conversation.
+        return "context_overflow"
+    if is_transient_provider_error(exc):
         return "provider_transient"
     return "fatal"
 
@@ -76,6 +88,19 @@ class StageUI(JobUI):
                 return response.json().get("response")
         except Exception:  # noqa: BLE001 - no relay answer: decide automatically
             return None
+
+
+def overflow_result(session, result):
+    """The stage ran out of context after every recovery rung: end it with a clear
+    ``context_overflow`` result carrying the conversation summary, which the host uses to
+    retry the stage once with a fresh conversation (the transcript is saved as usual)."""
+    sm = session.session_manager
+    summary = str(getattr(sm, "conversation_summary", "") or "").strip()
+    if len(summary) > OVERFLOW_SUMMARY_CHARS:
+        summary = summary[:OVERFLOW_SUMMARY_CHARS].rstrip() + "\n[summary clipped]"
+    return {**result, "kind": "failed", "status": "context_overflow", "error_class": "context_overflow",
+            "error": str(result.get("error") or "context overflow")[:2000], "summary": summary,
+            "text": str(result.get("text") or "")}
 
 
 def main():
@@ -118,7 +143,8 @@ def main():
         session = mucli.build_session(args, ui, allow_prompt=False)
         session.variables.update(provider_recovery_policy="auto", internal_session_kind="durable_job",
             max_iterations=int(request.get("max_iterations") or DEFAULT_JOB_MAX_ITERATIONS), yolo=args.yolo,
-            plan_mode=stage in READ_ONLY_STAGES, security_allow_secret_paths=False)
+            plan_mode=stage in READ_ONLY_STAGES, security_allow_secret_paths=False,
+            overflow_recovery_max_rungs=STAGE_OVERFLOW_RUNGS)
         if request.get("reasoning_effort"):
             session.variables["reasoning_effort"] = str(request["reasoning_effort"])
         if request.get("tool_timeout_s"):
@@ -129,7 +155,11 @@ def main():
             session.disabled_tools = sorted({t.name for t in TOOLS} - STAGE_TOOL_ALLOWLIST)
         history = Path("/artifacts/history.json")
         if request.get("resume") and history.is_file():
-            session.session_manager.history = json.loads(history.read_text())
+            from utils.token_estimator import strip_replay_fields
+            loaded = json.loads(history.read_text())
+            # Transcripts from older images carry each call's signature on its tool results too.
+            strip_replay_fields(loaded, tool_results_only=True)
+            session.session_manager.history = loaded
         raw = session.send_message(request["prompt"]) or {}
         status = raw.get("status", "completed") if isinstance(raw, dict) else "completed"
         result = {"kind": "completed" if status == "completed" else "needs_human",
@@ -139,6 +169,8 @@ def main():
         result["text"] = next(("\n".join(p.get("text", "") for p in m.get("parts", [])
                                         if p.get("type") == "text")
                                for m in reversed(history) if m.get("role") == "assistant"), "")
+        if result["error_class"] == "context_overflow":
+            result = overflow_result(session, result)
     except InteractionRequired as exc:
         # JobUI never raises it; anything else that does is a stage failure, not a prompt.
         result = {"kind": "failed", "status": "error", "error": f"stage asked for human input: {exc.detail}",
@@ -147,6 +179,8 @@ def main():
         result = {"kind": "needs_human", "status": "paused", "error": str(exc) or "stage stopped"}
     except Exception as exc:
         result = {"kind": "failed", "status": "error", "error": str(exc), "error_class": classify_error("error", str(exc))}
+        if session is not None and result["error_class"] == "context_overflow":
+            result = overflow_result(session, {**result, "text": ""})
     finally:
         if session is not None:
             Path("/output/transcript.json").write_text(json.dumps(session.session_manager.history, default=str))

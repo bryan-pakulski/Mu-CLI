@@ -191,7 +191,9 @@ def build_messages_from_history(
     """Rehydrate dict-shaped history records into provider-typed
     `Message` objects. Pass-through for text; decodes base64 image
     payloads back into `ImageData`; threads provider-supplied
-    `thought_signature` through tool_call / tool_result parts.
+    `thought_signature` through tool_call parts (tool results never carry
+    replay data on the wire; providers drop stale turns' replay data via
+    `providers.base.project_replay`).
 
     When ``tool_result_floor > 0``, the last ``floor`` tool-result-bearing
     messages are kept verbatim (the model needs recent results in context
@@ -335,7 +337,6 @@ def build_messages_from_history(
                             type="tool_result",
                             tool_name=p.get("tool_name", "tool"),
                             tool_result=_compact_tool_result_ref({**p, "cache_key": cache_key}),
-                            thought_signature=p.get("thought_signature"),
                             media_inputs=media_inputs,
                         )
                     )
@@ -347,7 +348,6 @@ def build_messages_from_history(
                             tool_result=_lean_tool_result(
                                 p.get("tool_result", "")
                             ),
-                            thought_signature=p.get("thought_signature"),
                             media_inputs=media_inputs,
                         )
                     )

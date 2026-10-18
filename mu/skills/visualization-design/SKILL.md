@@ -55,11 +55,13 @@ not a wall of nested cards.
   ids, coordinates, and aligned values. Use tabular numerics.
 - Hierarchy: title, one-sentence subtitle, visual, then compact legend/source.
   Use size and weight before colour.
-- Surfaces: translucent neutral fill, 1px neutral hairline, 12–16px radius, and
+- Surfaces: translucent neutral fill, 1px neutral hairline, 14–20px radius, and
   at most one soft elevation shadow. Blur is optional enhancement, never the
   only separation mechanism.
-- Colour: neutral scaffolding plus MuCLI blue as the single default accent.
-  Reserve green/amber/red for semantic success/warning/error. Avoid rainbow
+- Colour: Wash paper/dusk neutrals plus lagoon teal as the single default
+  accent (the MuCLI Wash design system). Reserve meadow/apricot/rose for
+  semantic success/needs-attention/error; use `--mu-series-1..7` in order for
+  categorical series. Avoid rainbow
   palettes, neon glows, gradients used as decoration, and coloured card borders.
 - Gridlines: only the major lines needed to read values. Axes and labels are
   quieter than data, but must still meet contrast requirements.
@@ -69,23 +71,30 @@ not a wall of nested cards.
 Use these shared tokens and provide both themes:
 
 ```css
-:root, :root[data-theme="dark"] {
+:root, :root[data-theme="dark"], :root[data-theme="dusk"] {
   color-scheme: dark;
-  --mu-canvas: #0d1219; --mu-glass: rgba(18,24,32,.90);
-  --mu-glass-soft: rgba(19,25,34,.62); --mu-text: #eef2f6;
-  --mu-text-soft: #bbc4cd; --mu-text-dim: #85909c;
-  --mu-accent: #8ba9c6; --mu-accent-strong: #7295b5;
-  --mu-border: rgba(222,231,240,.085); --mu-grid: rgba(222,231,240,.09);
-  --mu-success: #86a897; --mu-warning: #aa987b; --mu-error: #cd7c86;
+  --mu-canvas: #16131B; --mu-glass: rgba(29,25,35,.92);
+  --mu-glass-soft: rgba(29,25,35,.64); --mu-text: #F3EEE8;
+  --mu-text-soft: #D2C9D1; --mu-text-dim: #A89FAD;
+  --mu-accent: #7CC4CB; --mu-accent-strong: #5FA3AB;
+  --mu-border: #332C3D; --mu-grid: rgba(243,238,232,.09);
+  --mu-success: #A5D68A; --mu-warning: #F5B58A; --mu-error: #F29AAE;
+  /* categorical series (Wash pigments, fixed order) */
+  --mu-series-1: #5FA3AB; --mu-series-2: #F2A36B; --mu-series-3: #B39DDB;
+  --mu-series-4: #8DBF6A; --mu-series-5: #E58A9E; --mu-series-6: #84AEE3;
+  --mu-series-7: #F2C94C;
 }
-:root[data-theme="light"] {
+:root[data-theme="light"], :root[data-theme="paper"] {
   color-scheme: light;
-  --mu-canvas: #edf3f8; --mu-glass: rgba(252,254,255,.91);
-  --mu-glass-soft: rgba(249,252,254,.64); --mu-text: #1c2732;
-  --mu-text-soft: #53616e; --mu-text-dim: #5f6e7b;
-  --mu-accent: #6286a8; --mu-accent-strong: #527795;
-  --mu-border: rgba(39,59,77,.10); --mu-grid: rgba(39,59,77,.10);
-  --mu-success: #66877a; --mu-warning: #8f7d60; --mu-error: #b95f6b;
+  --mu-canvas: #F8F6F1; --mu-glass: rgba(255,254,251,.92);
+  --mu-glass-soft: rgba(255,254,251,.66); --mu-text: #1E1A17;
+  --mu-text-soft: #4E4844; --mu-text-dim: #6B645F;
+  --mu-accent: #2A6870; --mu-accent-strong: #1F5359;
+  --mu-border: #E6E1D8; --mu-grid: rgba(30,26,23,.09);
+  --mu-success: #3D6A2A; --mu-warning: #984812; --mu-error: #A3324B;
+  --mu-series-1: #5FA3AB; --mu-series-2: #F2A36B; --mu-series-3: #B39DDB;
+  --mu-series-4: #8DBF6A; --mu-series-5: #E58A9E; --mu-series-6: #84AEE3;
+  --mu-series-7: #F2C94C;
 }
 ```
 

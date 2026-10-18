@@ -14,6 +14,12 @@ from fastapi import Request
 from providers.base import CacheHint, FileReference, ImageData, MediaData, Message, MessagePart, ToolDefinition
 
 
+
+# Largest model request the relay accepts from a stage: only a guard against a runaway client.
+# Well above the providers' own request limits (they reject first, with their own message);
+# JSON-encoded images and attachments make honest requests large.
+MAX_REQUEST_BYTES = 64 * 1024 * 1024
+
 def wire(value):
     if dataclasses.is_dataclass(value):
         return {f.name: wire(getattr(value, f.name)) for f in dataclasses.fields(value)}
@@ -58,6 +64,27 @@ FALLBACK_INPUT_PER_MILLION = 15.0
 FALLBACK_CACHED_PER_MILLION = 1.5
 FALLBACK_OUTPUT_PER_MILLION = 75.0
 _UNPRICED_WARNED: set = set()
+
+# Model requests one stage may have in flight. The agent loop sends one at a time, but sub-agents
+# (spawn_agent, parallel sub-agents) call the model while the parent's request is still streaming.
+# Requests beyond the limit wait for a slot rather than failing the agent's turn.
+DEFAULT_RELAY_CONCURRENCY = 4
+MAX_RELAY_CONCURRENCY = 8
+SLOT_WAIT_S = 900
+
+
+def relay_concurrency(job) -> int:
+    """Concurrent model requests for a stage: the parent plus its sub-agents.
+
+    ``max_subagents = 0`` (sub-agents off) gives 1; unset uses the default; otherwise
+    ``1 + max_subagents``, capped."""
+    limit = getattr(job, "max_subagents", None)
+    if limit is None:
+        return DEFAULT_RELAY_CONCURRENCY
+    try:
+        return max(1, min(MAX_RELAY_CONCURRENCY, 1 + int(limit)))
+    except (TypeError, ValueError):
+        return DEFAULT_RELAY_CONCURRENCY
 
 
 def price_usd(provider, model, *, input_tokens=0, output_tokens=0, cached_tokens=0, reasoning_tokens=0):
@@ -127,7 +154,15 @@ class ModelRelay:
         self.revoked = False
         self.tokens = 0
         self.cost = 0.0
+        # Accounting lock: short critical sections around tokens/cost/reservations only.
         self.lock = threading.Lock()
+        # Model requests in flight at once. Sub-agents (and parallel sub-agents) call the model while
+        # the parent's request is still streaming; more requests than slots queue instead of failing.
+        self.concurrency = relay_concurrency(job)
+        self._slots = threading.BoundedSemaphore(self.concurrency)
+        # Spend reserved by requests in flight, so concurrent requests can't jointly overrun a budget.
+        self.reserved_tokens = 0
+        self.reserved_cost = 0.0
         self.alive = alive or (lambda: True)
         self.messages = messages or (lambda: [])
         self.interaction = interaction or (lambda payload: None)
@@ -148,8 +183,10 @@ class ModelRelay:
 
     def stream(self, token, payload):
         self.authorize(token)
-        if not self.lock.acquire(blocking=False):
-            raise RelayDenied("only one model request per stage may run at a time")
+        if not self._slots.acquire(timeout=SLOT_WAIT_S):
+            raise RelayDenied(f"model relay busy: {self.concurrency} requests from this stage were still running "
+                              f"after {SLOT_WAIT_S}s; retry")
+        reserved_tokens, reserved_cost = 0, 0.0
         try:
             self.authorize(token)
             if any(k in payload for k in ("provider", "model", "url", "api_key")):
@@ -161,23 +198,38 @@ class ModelRelay:
             messages = messages_from_wire(payload.get("messages", []))
             guidance = self.messages()
             messages.extend(Message("user", [MessagePart("text", text=text)]) for text in guidance)
-            from utils.token_estimator import estimate_tokens
-            request_tokens = estimate_tokens(json.dumps(payload)) + sum(estimate_tokens(text) for text in guidance)
+            from utils.token_estimator import estimate_payload_tokens, estimate_tokens
+            # Visible content only (text, tool args and results, system prompt, tool schemas): the
+            # opaque replay blobs on ``thought_signature`` (thinking signatures, encrypted
+            # reasoning) are not counted by the provider for earlier turns, and once counted
+            # under cl100k they made a ~210k-token request look like ~1M.
+            request_tokens = max(1, estimate_payload_tokens(payload.get("system_prompt") or "", messages,
+                                                            payload.get("tools") or []))  # any request costs
             # Cache reads are not counted by default, so only a request that could not fit even
             # uncached is refused up front; the real (new-token) usage is charged after the call.
-            projected = request_tokens + (self.tokens if self.policy.count_cache_reads else 0)
-            if projected >= self.policy.max_tokens or (not self.policy.count_cache_reads and self.tokens >= self.policy.max_tokens):
-                raise RelayDenied(self._budget_text("token", request_tokens))
             def projected_cost(output):
                 return price_usd(self.model["provider"], self.model["model"],
                                  input_tokens=request_tokens, output_tokens=output)[0]
             request_cost = projected_cost(0)
-            if request_cost is not None and self.cost + request_cost >= self.policy.max_cost_usd:
-                raise RelayDenied(self._budget_text("cost"))
+            with self.lock:
+                # Other requests in flight count through their reservations.
+                used_tokens = self.tokens + self.reserved_tokens
+                projected = request_tokens + (used_tokens if self.policy.count_cache_reads else 0)
+                if projected >= self.policy.max_tokens or (not self.policy.count_cache_reads and used_tokens >= self.policy.max_tokens):
+                    raise RelayDenied(self._budget_text("token", request_tokens))
+                if request_cost is not None and self.cost + self.reserved_cost + request_cost >= self.policy.max_cost_usd:
+                    raise RelayDenied(self._budget_text("cost"))
+                reserved_tokens = request_tokens if self.policy.count_cache_reads else 0
+                reserved_cost = float(request_cost or 0)
+                self.reserved_tokens += reserved_tokens
+                self.reserved_cost += reserved_cost
             window = self._context_window()
             if window and request_tokens >= window:
-                # cl100k undercounts Claude tokens, so this request is certain to be rejected.
-                # The wording matches the loop's overflow detection, which compacts and retries.
+                # Refuse up front only when rejection is certain: the visible content alone fills
+                # the window (cl100k undercounts Claude tokens). Anything less is forwarded and
+                # the provider's own 400 is the ground truth. The wording matches the loop's
+                # overflow detection (``is_context_overflow_error``), which compacts and retries;
+                # "about" keeps this estimate from being parsed as a real provider count.
                 raise RelayDenied(f"prompt is too long: about {request_tokens:,} tokens > {window:,} maximum "
                                   "(refused by the job relay before sending)")
             tools = [ToolDefinition(**t) for t in payload.get("tools") or []]
@@ -221,15 +273,21 @@ class ModelRelay:
                     if fallback:
                         self._warn_unpriced(self.model["provider"], self.model["model"])
                     charged = self._charged_tokens(usage)
-                    self.tokens += charged
-                    self.cost += float(cost or 0)
-                    self.artifacts.append_cost({"stage": self.stage, "at": time.time(),
-                        "provider": self.model["provider"], "model": self.model["model"],
-                        "cost_usd": cost, "tokens": wire(usage), "charged_tokens": charged,
-                        "estimated": estimated or fallback,
-                        **({"fallback_price": True} if fallback else {})})
+                    with self.lock:
+                        self.tokens += charged
+                        self.cost += float(cost or 0)
+                        self.artifacts.append_cost({"stage": self.stage, "at": time.time(),
+                            "provider": self.model["provider"], "model": self.model["model"],
+                            "cost_usd": cost, "tokens": wire(usage), "charged_tokens": charged,
+                            "estimated": estimated or fallback,
+                            **({"fallback_price": True} if fallback else {})})
         finally:
-            self.lock.release()
+            with self.lock:
+                self.reserved_tokens -= reserved_tokens
+                self.reserved_cost -= reserved_cost
+                if abs(self.reserved_cost) < 1e-9:
+                    self.reserved_cost = 0.0  # float residue once every reservation is released
+            self._slots.release()
 
     def _warn_unpriced(self, provider, model):
         """Once per process and model: say the stage is being charged the fallback price."""
@@ -383,7 +441,7 @@ class ModelRelay:
             raw = bytearray()
             async for chunk in request.stream():
                 raw.extend(chunk)
-                if len(raw) > 16 * 1024 * 1024:
+                if len(raw) > MAX_REQUEST_BYTES:
                     raise HTTPException(413, "model request is too large")
             try:
                 payload = json.loads(raw)

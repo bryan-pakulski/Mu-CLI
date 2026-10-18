@@ -9,10 +9,29 @@
 (() => {
     'use strict';
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const pill = (tone, html, title = '') => `<span class="pill tone-${tone}"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+    // Wash chip tones (G§9.2): the job vocabulary's warn is attention; muted is the plain chip.
+    const TONE = {warn:'attention', muted:''};
+    const toneAttr = tone => { const t = TONE[tone] ?? tone; return t ? ` data-tone="${t}"` : ''; };
+    const pill = (tone, html, title = '') => `<span class="w-chip"${toneAttr(tone)}${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
     const SOURCE_LABEL = {job:'this job', repo:'repo config', session:'session', settings:'settings', default:'default runtime', error:'error'};
     const STATUS = {ready:['ok', '✓', 'ready'], preparing:['running', '●', 'preparing'], failed:['danger', '✗', 'failed'], cleaned:['muted', '○', 'cleaned']};
     const ACTIONS = new Set(['setEnvironments', 'refreshEnvironments', 'keepEnvironments']);
+    // Template job setup (job_templates.md §4): the binding's setup status and per-command progress.
+    const SETUP = {running:['running', '●', 'job setup running'], ok:['ok', '✓', 'job setup done'], failed:['danger', '✗', 'job setup failed'],
+        skipped:['muted', '–', 'job setup skipped'], pending:['muted', '○', 'job setup pending']};
+    function setupBlock(x) {
+        const setup = x.setup || {};
+        const commands = (setup.commands || []).length ? setup.commands : (x.job_setup || []).map((command, index) => ({index, command, status:'pending'}));
+        if (!commands.length) return '';
+        const [tone, glyph, word] = SETUP[setup.status || 'pending'] || SETUP.pending;
+        const rows = commands.map(c => { const [t, g] = SETUP[c.status] || SETUP.pending;
+            return `<li class="work-setup-cmd" data-setup-index="${esc(c.index)}" data-setup-status="${esc(c.status || 'pending')}"><span class="w-status" data-tone="${t === 'muted' ? 'neutral' : t}">${c.status === 'running' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${g}</span>`}<span class="w-sr-only">${esc(c.status || 'pending')}</span></span><code>${esc(c.command)}</code>${c.exit_code != null && c.status !== 'ok' ? `<span class="work-meta">exit ${esc(c.exit_code)}</span>` : ''}</li>`; }).join('');
+        return `<div class="work-stack-tight" data-env-setup="${esc(setup.status || 'pending')}"><div class="work-toolbar">${pill(tone, `<span aria-hidden="true" class="w-chip__glyph"${setup.status === 'running' ? ' data-state="active"' : ''}>${glyph}</span><span>${esc(word)}</span>`)}
+            ${x.source === 'template' ? `<a class="work-meta" href="/containers#template-${encodeURIComponent(x.ref)}">Edit template</a>` : ''}</div>
+            <ol class="work-setup-cmds" aria-label="Job setup commands of ${esc(x.name)}">${rows}</ol>
+            ${(setup.files || []).length ? `<p class="work-meta" data-tone="attention">Setup left ${setup.files.length} file${setup.files.length === 1 ? '' : 's'} git does not ignore (checks ignore them): ${esc(setup.files.slice(0, 6).join(', '))}${setup.files.length > 6 ? '…' : ''}</p>` : ''}
+            ${setup.status === 'failed' && setup.error ? `<pre class="work-log">${esc(setup.error)}</pre>` : ''}</div>`;
+    }
 
     function bytes(n) {
         const v = Number(n || 0);
@@ -61,31 +80,31 @@
             if (!rows.length) rows = [{env:'', as:'', paths:'', docker:false, primary:false, gpus:''}];
             const listId = `work-env-sources-${Math.random().toString(36).slice(2, 8)}`;
             const form = document.createElement('form');
-            form.className = 'col work-env-editor';
+            form.className = 'work-stack-tight work-env-editor';
             form.noValidate = true;
             const foot = document.createElement('div');
-            foot.className = 'row';
-            foot.innerHTML = `${allowClear ? `<button type="button" class="btn ghost" data-env-clear>${esc(clearLabel)}</button>` : ''}<span class="spacer"></span><button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" data-env-save>Save</button>`;
+            foot.className = 'w-btn-row';
+            foot.innerHTML = `${allowClear ? `<button type="button" class="w-btn" data-variant="ghost" data-env-clear>${esc(clearLabel)}</button>` : ''}<span class="work-spacer"></span><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="button" class="w-btn" data-variant="primary" data-env-save>Save</button>`;
             let info = null;
             const draw = () => {
                 const dind = info?.docker_in_docker, gpu = info?.gpu;
-                form.innerHTML = `<p class="small muted">Each job snapshots these at start and removes the images when it ends. Source: a container-mode environment, <code>template:&lt;name&gt;</code> or <code>image:&lt;ref&gt;</code>. Paths are repository-relative components (blank = whole repository).</p>
+                form.innerHTML = `<p class="work-meta">Each job snapshots these at start and removes the images when it ends. Source: a container-mode environment, <code>template:&lt;name&gt;</code> or <code>image:&lt;ref&gt;</code>. Paths are repository-relative components (blank = whole repository).</p>
                     <datalist id="${listId}">${(info?.environments || []).map(e => `<option value="${esc(e.spec)}">environment · ${esc(e.status || '')}${e.gpus ? ` · gpus ${esc(e.gpus)}` : ''}</option>`).join('')}
                         ${(info?.templates || []).map(t => `<option value="${esc(t.spec)}">template${t.description ? ` · ${esc(t.description)}` : ''}</option>`).join('')}
                         ${(info?.images || []).map(i => `<option value="${esc(i.spec)}">image · ${esc(i.size || '')}</option>`).join('')}</datalist>
-                    <div class="table-wrap"><table class="table work-env-table"><thead><tr><th scope="col">Source</th><th scope="col">Paths</th><th scope="col">Docker</th><th scope="col">Primary</th><th scope="col">GPUs</th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead><tbody>
+                    <div class="w-table-wrap"><table class="w-table work-env-table"><thead><tr><th scope="col">Source</th><th scope="col">Paths</th><th scope="col">Docker</th><th scope="col">Primary</th><th scope="col">GPUs</th><th scope="col"><span class="w-sr-only">Remove</span></th></tr></thead><tbody>
                     ${rows.map((r, i) => `<tr data-env-row="${i}">
-                        <td><input type="text" list="${listId}" data-env-key="env" aria-label="Source of row ${i + 1}" placeholder="rust-build · template:x · image:rust:1.89" value="${esc(r.env)}" class="grow" style="min-width:220px"></td>
-                        <td><input type="text" data-env-key="paths" aria-label="Paths of row ${i + 1}" placeholder="whole repository" value="${esc(r.paths)}"></td>
-                        <td><input type="checkbox" data-env-key="docker" aria-label="Docker engine for row ${i + 1}" ${r.docker ? 'checked' : ''}></td>
-                        <td><input type="checkbox" data-env-key="primary" aria-label="Primary environment (row ${i + 1})" ${r.primary ? 'checked' : ''}></td>
-                        <td><input type="text" data-env-key="gpus" aria-label="GPUs of row ${i + 1}" placeholder="inherit" value="${esc(r.gpus)}" style="max-width:90px"></td>
-                        <td><button type="button" class="btn ghost icon sm tone-danger" data-env-remove="${i}" aria-label="Remove row ${i + 1}">×</button></td></tr>`).join('')}
+                        <td><input type="text" list="${listId}" data-env-key="env" aria-label="Source of row ${i + 1}" placeholder="rust-build · template:x · image:rust:1.89" value="${esc(r.env)}" class="w-input work-env-source"></td>
+                        <td><input type="text" data-env-key="paths" aria-label="Paths of row ${i + 1}" placeholder="whole repository" value="${esc(r.paths)}" class="w-input"></td>
+                        <td><input type="checkbox" class="w-check__input" data-env-key="docker" aria-label="Docker engine for row ${i + 1}" ${r.docker ? 'checked' : ''}></td>
+                        <td><input type="checkbox" class="w-check__input" data-env-key="primary" aria-label="Primary environment (row ${i + 1})" ${r.primary ? 'checked' : ''}></td>
+                        <td><input type="text" data-env-key="gpus" aria-label="GPUs of row ${i + 1}" placeholder="inherit" value="${esc(r.gpus)}" class="w-input work-env-gpus"></td>
+                        <td><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-env-remove="${i}" aria-label="Remove row ${i + 1}" title="Remove row ${i + 1}">×</button></td></tr>`).join('')}
                     </tbody></table></div>
-                    <div class="row wrap"><button type="button" class="btn sm" data-env-add>+ Add environment</button><span class="spacer"></span>
-                        ${info ? `<span class="small ${dind?.available ? 'tone-ok' : 'muted'}" title="${esc(dind?.message || '')}">Docker-in-Docker: ${dind?.available ? 'Sysbox available' : 'needs Sysbox'}</span>
-                        <span class="small ${gpu?.supported ? 'tone-ok' : 'muted'}" title="${esc(gpu?.reason || '')}">GPUs: ${gpu?.supported ? 'available' : 'unavailable'}</span>` : '<span class="small muted">Loading sources…</span>'}</div>
-                    <span class="error" data-env-error></span>`;
+                    <div class="work-toolbar"><button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-env-add>+ Add environment</button><span class="work-spacer"></span>
+                        ${info ? `<span class="work-meta"${dind?.available ? ' data-tone="ok"' : ''} title="${esc(dind?.message || '')}">Docker-in-Docker: ${dind?.available ? 'Sysbox available' : 'needs Sysbox'}</span>
+                        <span class="work-meta"${gpu?.supported ? ' data-tone="ok"' : ''} title="${esc(gpu?.reason || '')}">GPUs: ${gpu?.supported ? 'available' : 'unavailable'}</span>` : '<span class="work-meta">Loading sources…</span>'}</div>
+                    <span class="work-meta" data-tone="danger" data-env-error></span>`;
                 form.querySelectorAll('[data-env-remove]').forEach(b => { b.onclick = () => { read(); rows.splice(Number(b.dataset.envRemove), 1); draw(); }; });
                 form.querySelector('[data-env-add]').onclick = () => { read(); rows.push({env:'', as:'', paths:'', docker:false, primary:false, gpus:''}); draw(); form.querySelector(`[data-env-row="${rows.length - 1}"] [data-env-key="env"]`)?.focus(); };
             };
@@ -121,31 +140,74 @@
         const tone = s.status === 'failed' ? 'danger' : s.status === 'preparing' ? 'running' : count ? 'accent' : 'muted';
         const text = count ? `${count} environment${count === 1 ? '' : 's'}` : 'shared runtime';
         const title = count ? `${s.summary || ''}${s.source ? ` (from ${SOURCE_LABEL[s.source] || s.source})` : ''}` : 'Stages run in the shared mucli-job-runtime image';
-        return `<button type="button" class="pill tone-${tone} work-env-pill" data-env-pill aria-expanded="${!!open}" aria-controls="work-env-panel" title="${esc(title)}"><span aria-hidden="true" class="${s.status === 'preparing' ? 'status-icon active' : ''}">⬢</span> ${esc(text)}${s.kept ? ' · kept' : ''}</button>`;
+        return `<button type="button" class="w-chip work-env-pill"${toneAttr(tone)} data-env-pill aria-expanded="${!!open}" aria-controls="work-env-panel" title="${esc(title)}"><span aria-hidden="true" class="w-chip__glyph"${s.status === 'preparing' ? ' data-state="active"' : ''}>⬢</span><span>${esc(text)}${s.kept ? ' · kept' : ''}</span></button>`;
     }
 
     /* Job page panel: one row per binding plus Refresh (E) / Keep (K) / Change. */
     function panel(info, buttons) {
         const b = info || {bindings:[]};
+        // Environment repair (§7): the job page adds the card's actions into [data-repair-actions].
+        const repair = repairCard(b.repairs, {id:'work-env-repair-h', compact:true});
         const rows = (b.bindings || []).map(x => {
             const [tone, glyph, word] = STATUS[x.status] || ['muted', '○', x.status || 'not prepared'];
             const probe = (x.probed_env || []).length ? `probed ${x.probed_env.join(', ')}` : '';
-            return `<li class="work-env-binding col" data-env-binding="${esc(x.name)}">
-                <div class="row wrap">${pill(tone, `<span aria-hidden="true" class="${x.status === 'preparing' ? 'status-icon active' : ''}">${glyph}</span>${esc(word)}`)}
-                    <strong class="mono">${esc(x.name)}</strong><span class="muted small">${esc(x.source)} <code>${esc(x.ref)}</code></span>
+            return `<li class="work-env-binding work-stack-tight" data-env-binding="${esc(x.name)}">
+                <div class="work-toolbar">${pill(tone, `<span aria-hidden="true" class="w-chip__glyph"${x.status === 'preparing' ? ' data-state="active"' : ''}>${glyph}</span><span>${esc(word)}</span>`)}
+                    <strong class="work-mono">${esc(x.name)}</strong><span class="work-meta">${esc(x.source)} <code>${esc(x.ref)}</code></span>
                     ${x.primary ? pill('accent', 'primary') : ''}${x.docker ? pill('accent', `<span aria-hidden="true">⬢</span> docker${x.engine ? ` · ${esc(x.engine)}` : ''}`) : ''}${x.gpus ? pill('accent', `gpus ${esc(x.gpus)}`) : ''}
-                    <span class="spacer"></span>${x.image_bytes ? `<span class="small num" title="job image size">${esc(bytes(x.image_bytes))}</span>` : ''}</div>
-                <div class="small muted">${esc((x.paths || []).length ? x.paths.join(', ') : 'whole repository')}${probe ? ` · ${esc(probe)}` : ''}${x.home_bytes ? ` · home ${esc(bytes(x.home_bytes))}` : ''}</div>
-                ${x.error ? `<div class="error-box small" role="alert"><span aria-hidden="true">✗ </span>${esc(x.error)}</div>` : ''}
-                ${(x.secret_paths || []).length ? `<details open><summary class="small tone-danger">Secret scan blocked ${x.secret_paths.length} path${x.secret_paths.length === 1 ? '' : 's'}</summary><ul class="mono small">${x.secret_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
-                ${(x.skipped_paths || []).length ? `<details><summary class="small muted">${x.skipped_paths.length} home path${x.skipped_paths.length === 1 ? '' : 's'} left out of the snapshot</summary><ul class="mono small muted">${x.skipped_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}</li>`;
+                    <span class="work-spacer"></span>${x.image_bytes ? `<span class="work-caption work-num" title="job image size">${esc(bytes(x.image_bytes))}</span>` : ''}</div>
+                <div class="work-meta">${esc((x.paths || []).length ? x.paths.join(', ') : 'whole repository')}${probe ? ` · ${esc(probe)}` : ''}${x.home_bytes ? ` · home ${esc(bytes(x.home_bytes))}` : ''}</div>
+                ${setupBlock(x)}
+                ${x.error ? `<div class="w-banner work-banner-sm" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(x.error)}</p></div>` : ''}
+                ${(x.secret_paths || []).length ? `<details open><summary class="work-meta" data-tone="danger">Secret scan blocked ${x.secret_paths.length} path${x.secret_paths.length === 1 ? '' : 's'}</summary><ul class="work-caption work-mono">${x.secret_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
+                ${(x.skipped_paths || []).length ? `<details><summary class="work-meta">${x.skipped_paths.length} home path${x.skipped_paths.length === 1 ? '' : 's'} left out of the snapshot</summary><ul class="work-meta work-mono">${x.skipped_paths.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}</li>`;
         }).join('');
-        const src = b.source ? `<span class="small muted">from ${esc(SOURCE_LABEL[b.source] || b.source)}</span>` : '';
-        return `<section class="panel work-env-panel" id="work-env-panel" aria-labelledby="work-env-h"><header><h2 id="work-env-h"><span aria-hidden="true">⬢</span> Build environments</h2>${src}
+        const src = b.source ? `<span class="work-meta">from ${esc(SOURCE_LABEL[b.source] || b.source)}</span>` : '';
+        return `<section class="w-card work-env-panel" id="work-env-panel" aria-labelledby="work-env-h"><header class="w-card__head"><h2 class="w-card__title" id="work-env-h"><span aria-hidden="true">⬢</span> Build environments</h2>${src}
                 ${b.kept ? pill('accent', '<span aria-hidden="true">⬢</span> kept', 'Exempt from idle retention') : ''}${b.refresh_pending ? pill('warn', 'refresh pending') : ''}
-                ${b.bytes ? `<span class="small muted num">${esc(bytes(b.bytes))}</span>` : ''}<span class="spacer"></span>
-                <div class="row wrap" role="toolbar" aria-label="Build environment actions">${buttons || ''}</div></header>
-            <div class="panel-body">${rows ? `<ul class="plain col">${rows}</ul>` : '<p class="empty">No build environments: stages run in the shared <code>mucli-job-runtime</code> image. Use Change to pick environments.</p>'}</div></section>`;
+                ${b.bytes ? `<span class="work-meta work-num">${esc(bytes(b.bytes))}</span>` : ''}<span class="work-spacer"></span>
+                <div class="work-toolbar" role="toolbar" aria-label="Build environment actions">${buttons || ''}</div></header>
+            <div class="w-card__body work-stack">${repair}${rows ? `<ul class="work-list">${rows}</ul>` : '<div class="w-empty work-empty-inline"><p class="w-empty__body">No build environments: stages run in the shared <code>mucli-job-runtime</code> image. Use Change to pick environments.</p></div>'}</div></section>`;
+    }
+
+    /* Environment repair (job_templates.md §7): the "Environment repaired" / "Repair failed" card
+     * shown in the Checks tab and the environments panel. Statuses and labels come from the
+     * shared vocabulary (repair_outcome → status). ``buttons``: the addRepairToTemplate /
+     * saveRepairedTemplate action buttons (non-blocking; rendered by the job page). */
+    const REPAIR_TITLE = {running:'Repairing environment', committed:'Environment repaired · re-running checks',
+        repaired:'Environment repaired', unresolved:'Environment repaired · checks still can’t run'};
+    function repairOutcome(outcome) {
+        const vocab = (window.WASH && window.WASH.vocabulary) || {};
+        const row = (vocab.repair_outcome || {})[outcome] || {status:'pending', label:String(outcome || '').replace(/_/g, ' ')};
+        const status = (vocab.status || {})[row.status] || {glyph:'○', semantic:'neutral'};
+        return {status:row.status, label:row.label, glyph:status.glyph, tone:status.semantic};
+    }
+    function repairCard(repairs, {buttons = '', id = 'repair-h', compact = false} = {}) {
+        const list = Array.isArray(repairs) ? repairs.filter(Boolean) : [];
+        if (!list.length) return '';
+        const last = list[list.length - 1];
+        const o = repairOutcome(last.outcome);
+        const title = REPAIR_TITLE[last.outcome] || 'Repair failed';
+        const active = o.status === 'active';
+        const meta = [`attempt ${last.attempt || list.length}`, last.binding === 'runtime' ? 'shared runtime' : last.binding,
+            last.agent && last.agent !== 'mucli' ? (last.agent === 'claude' ? 'Claude Code' : 'Codex') : '',
+            last.cost_usd ? `$${Number(last.cost_usd).toFixed(2)}` : ''].filter(Boolean).join(' · ');
+        const commands = (last.commands || []).length
+            ? `<ol class="work-setup-cmds" aria-label="Commands that repaired the environment">${last.commands.map(c => `<li class="work-setup-cmd"><code>${esc(c)}</code></li>`).join('')}</ol>` : '';
+        const suites = (last.trigger_suites || []).map(s => `<code>${esc(s.suite || s.command || '')}</code>`).join(', ');
+        const earlier = list.length > 1 ? `<p class="work-meta">${list.length} repair attempts: ${list.map(r => `#${esc(r.attempt)} ${esc(repairOutcome(r.outcome).label)}`).join(' · ')}</p>` : '';
+        return `<section class="w-card work-card work-repair" data-repair-card data-repair-outcome="${esc(last.outcome || '')}" aria-labelledby="${esc(id)}">
+            <header class="w-card__head"><span class="w-status" data-tone="${esc(o.tone)}" title="${esc(o.label)}">${active ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${o.glyph}</span>`}<span class="w-sr-only">${esc(o.label)}</span></span>
+                <h2 class="w-card__title" id="${esc(id)}">${esc(title)}</h2><span class="w-card__meta">${esc(meta)}</span></header>
+            <div class="w-card__body work-stack-tight">
+                ${suites ? `<p class="work-meta">Checks that could not run: ${suites}</p>` : ''}
+                ${commands}
+                ${last.error ? `<div class="w-banner work-banner-sm" data-tone="${o.status === 'failed' ? 'danger' : 'caution'}" role="status"><span class="w-banner__glyph" aria-hidden="true">${o.glyph}</span><p class="w-banner__msg">${esc(last.error)}${o.status === 'failed' ? ' The job continued unverified.' : ''}</p></div>` : ''}
+                ${(last.reverted_files || []).length ? `<p class="work-meta" data-tone="attention">The repair changed tracked files; they were reverted: ${esc(last.reverted_files.slice(0, 8).join(', '))}${last.reverted_files.length > 8 ? '…' : ''}</p>` : ''}
+                ${last.image && !compact ? `<p class="work-meta">Image <code>${esc(last.image)}</code> — later stages and checks use it; it is removed with the job.</p>` : ''}
+                ${earlier}
+                <div class="w-btn-row" role="toolbar" aria-label="Environment repair" data-repair-actions>${last.transcript ? '<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-repair-transcript>View transcript</button>' : ''}${buttons}</div>
+            </div></section>`;
     }
 
     /* Session tab: ``› [node-build] npm test`` for run_in_environment calls. */
@@ -157,5 +219,6 @@
         return `[${a.env || '?'}] ${a.command || ''}${a.cwd && a.cwd !== '.' ? `  (in ${a.cwd})` : ''}`;
     }
 
-    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow};
+    window.MuJobEnvironments = {ACTIONS, SOURCE_LABEL, bytes, label, summary, sources, editor, headerPill, panel, toolSummary, toRow, setupBlock,
+        repairCard, repairOutcome};
 })();

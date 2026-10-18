@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
-import { Text } from '../components';
 import { WorkspaceSettingsSheet } from '../components/WorkspaceSettingsSheet';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
@@ -11,6 +9,7 @@ import { useConnectionStore } from '../store/connection';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { WORKSPACE_CATEGORIES } from '../navigation/workspace';
 import { fontSizes, fontWeights, radii, spacing, tracking } from '../theme/tokens';
+import { Pressable, Text, Icon } from '../ui';
 
 export type WorkspaceScreenProps = NativeStackScreenProps<RootStackParamList, 'Workspace'>;
 
@@ -38,9 +37,9 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
   }, [loadWorkspaces]);
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <ScrollView contentContainerStyle={[styles.content, { padding: spacing.base }]}>
-        <Text variant="xs" style={[styles.kicker, { color: colors.textDim }]}>Workspace</Text>
+        <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Workspace</Text>
         <Text variant="xl" style={styles.pageTitle}>Tools</Text>
         <Text variant="sm" dim style={styles.pageSubtitle}>
           Tools are grouped by intent so the chat remains focused.
@@ -48,7 +47,7 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
 
         <View style={[styles.sessionSection, { borderBottomColor: colors.hairline }]}>
           <View style={styles.sessionHeader}>
-            <Text style={[styles.brandGlyph, { color: colors.text }]}>μ</Text>
+            <Text style={[styles.brandGlyph, { color: colors.ink }]}>μ</Text>
             <View style={styles.sessionCopy}>
               <Text variant="base" style={styles.sessionName} numberOfLines={1}>
                 {activeSessionName || 'New session'}
@@ -58,37 +57,37 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
               </Text>
             </View>
             <View style={styles.status}>
-              <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.success : colors.textDim }]} />
-              <Text variant="xs" style={{ color: isConnected ? colors.success : colors.textDim }}>
+              <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.ok.ink : colors.ink3 }]} />
+              <Text variant="xs" style={{ color: isConnected ? colors.ok.ink : colors.ink3 }}>
                 {isConnected ? 'Online' : 'Offline'}
               </Text>
             </View>
           </View>
           <View style={styles.workspaceRow}>
-            <Ionicons name="folder-outline" size={17} color={colors.textDim} />
+            <Icon name="folder" size="sm" color={colors.ink3} />
             <Text variant="xs" dim style={styles.workspacePath} numberOfLines={1} ellipsizeMode="middle">
               {workspaces.length > 0
                 ? workspaces.length === 1 ? workspaces[0] : `${workspaces[0]} +${workspaces.length - 1}`
                 : 'No workspace attached'}
             </Text>
             {activeSessionName ? (
-              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.editButton}>
-                <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Edit</Text>
-              </TouchableOpacity>
+              <Pressable onPress={() => setWorkspaceEditorOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.editButton}>
+                <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Edit</Text>
+              </Pressable>
             ) : null}
           </View>
         </View>
 
-        <Text variant="xs" style={[styles.sectionLabel, { color: colors.textDim }]}>Tool groups</Text>
+        <Text variant="xs" style={[styles.sectionLabel, { color: colors.ink3 }]}>Tool groups</Text>
         <View>
           {WORKSPACE_CATEGORIES.filter(category => category.id !== 'review').map(category => (
-            <TouchableOpacity
+            <Pressable
               key={category.id}
               activeOpacity={0.72}
               onPress={() => navigation.navigate('WorkspaceCategory', { categoryId: category.id, title: category.title })}
               style={styles.categoryRow}
             >
-              <Ionicons name={category.icon} size={20} color={colors.textDim} />
+              <Icon name={category.icon} size="md" color={colors.ink3} />
               <View style={styles.categoryCopy}>
                 <View style={styles.categoryTitleRow}>
                   <Text variant="base" style={styles.categoryTitle}>{category.title}</Text>
@@ -96,8 +95,8 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
                 </View>
                 <Text variant="sm" dim>{category.description}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-            </TouchableOpacity>
+              <Icon name="chevron-right" size="md" color={colors.ink3} />
+            </Pressable>
           ))}
         </View>
       </ScrollView>

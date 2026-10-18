@@ -53,7 +53,7 @@ def _status_subcommand(session: Any) -> CommandResult:
         message = getattr(exc, "actionable", str(exc))
         if hasattr(session, "ui") and session.ui is not None and hasattr(session.ui, "show_error"):
             try:
-                session.ui.show_error(f"⚠️ Ollama: {message}")
+                session.ui.show_error(f"Ollama: {message}")
             except Exception:
                 pass
         return CommandResult(

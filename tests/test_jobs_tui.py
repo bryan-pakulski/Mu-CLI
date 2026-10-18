@@ -17,6 +17,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+from mu.design import load_vocabulary, semantic
+import mu.ui.theme as wash_theme
 from mu.ui.jobs import app as tui_app
 from mu.ui.jobs import content, primitives, theme, views
 from mu.ui.jobs.app import JobsApp, fuzzy, rank_palette
@@ -292,8 +294,8 @@ def test_session_tab_folds_tool_calls_and_expands_on_enter(jobs):
     app = _app(jobs)
     app.open_job(jobs["implementing"])
     text = _text(app, 120, 40)
-    assert "⏺ bash(ls src)  ⎿ STDOUT:" in text
-    assert "⏺ read_file(src/a.rs)  ⎿ ✗ no such file" in text
+    assert "● bash(ls src)  ⎿ STDOUT:" in text
+    assert "✗ read_file(src/a.rs)  ⎿ ✗ no such file" in text
     assert "lib.rs" not in text
     st = app.job_state(jobs["implementing"])
     items = content.session_items(app.jobs[jobs["implementing"]]["session"])
@@ -355,8 +357,13 @@ def test_ansi_and_no_color_rendering(jobs):
     app = _app(jobs)
     lines = views.render(app, 100, 20)
     tc = to_ansi(lines, "truecolor")
-    assert "\x1b[1;38;2;122;162;247m mucli jobs" in tc  # accent #7aa2f7, bold logo
-    assert "38;2;224;175;104" in tc  # warn #e0af68 for needs-you
+    # Bold logo in the Wash accent (lagoon ink of the detected theme), computed from tokens.
+    accent = semantic(wash_theme.theme(), "accent")
+    r, g, b = (int(accent[i:i + 2], 16) for i in (1, 3, 5))
+    assert theme.sgr("accent bold", "truecolor") == f"1;38;2;{r};{g};{b}"
+    assert f"\x1b[{theme.sgr('accent bold', 'truecolor')}m mucli jobs" in tc
+    assert theme.sgr("warn", "truecolor") in tc  # needs-you in the attention colour
+    assert theme.TOKENS["warn"][0] == semantic(wash_theme.theme(), "attention")
     c16 = to_ansi(lines, "16")
     assert "\x1b[1;36m mucli jobs" in c16 and "38;2" not in c16
     plain = to_ansi(lines, "none")
@@ -626,14 +633,15 @@ def test_color_mode_detection():
     assert theme.color_mode({"COLORTERM": "24bit"}) == "truecolor"
     assert theme.color_mode({"WT_SESSION": "x"}) == "truecolor"
     assert theme.color_mode({}) == "16"
-    assert theme.pt_style("accent bold", "truecolor") == "fg:#7aa2f7 bold"
+    assert theme.color_mode({"TERM": "xterm-256color"}) == "256"
+    assert theme.pt_style("accent bold", "truecolor") == f"fg:{semantic(wash_theme.theme(), 'accent')} bold"
     assert theme.pt_style("muted", "16") == "fg:ansibrightblack"
     assert theme.pt_style("danger bold", "none") == "bold"
 
 
 def test_status_vocabulary_and_state_style():
     assert {k: v["icon"] for k, v in theme.STATUS.items()} == {
-        "done": "✓", "active": "●", "waiting": "◆", "failed": "✗", "skipped": "–", "pending": "○"}
+        "done": "✓", "active": "●", "waiting": "◆", "failed": "✗", "unverified": "?", "skipped": "–", "pending": "○"}
     assert theme.state_style("review_done") == {"status": "waiting", "token": "warn", "icon": "◆", "label": "review done"}
     assert theme.state_style("implementing")["token"] == "running"
     assert theme.state_style("failed")["token"] == "danger"
@@ -667,7 +675,8 @@ def test_spinner_uses_shared_tick(jobs):
     app.tick += 1
     second = _text(app, 120, 30)
     assert theme.SPINNER[0] in first and theme.SPINNER[1] in second
-    assert theme.TICK_S == 0.120
+    assert theme.TICK_S == load_vocabulary()["spinner"]["interval_ms"] / 1000
+    assert theme.SPINNER == tuple(load_vocabulary()["spinner"]["frames"])
 
 
 def test_fuzzy_palette_ranking():

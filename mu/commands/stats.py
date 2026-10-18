@@ -5,14 +5,15 @@ from typing import Any
 from . import CommandResult, command
 
 
-def _emit_toggle_banner(session: Any, label: str, state: bool) -> None:
-    """Print a visible '<label>: ON|OFF' banner via the session UI."""
+def _emit_toggle_banner(session: Any, label: str, state: bool, *, on_kind: str = "ok") -> None:
+    """Print a visible '<label>: ON|OFF' notice via the session UI."""
     ui = getattr(session, "ui", None)
     if ui is None or not hasattr(ui, "show_info"):
         return
-    marker = "[bold green]ON[/bold green]" if state else "[bold]OFF[/bold]"
+    from mu.ui.markup import show_notice
+
     try:
-        ui.show_info(f"{label}: {marker}")
+        show_notice(ui, on_kind if state else "info", f"{label}: {'ON' if state else 'OFF'}")
     except Exception:
         pass
 
@@ -20,7 +21,7 @@ def _emit_toggle_banner(session: Any, label: str, state: bool) -> None:
 @command("/thinking", help="Toggle extended thinking / reasoning mode.")
 def thinking_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     session.thinking = not session.thinking
-    _emit_toggle_banner(session, "🧠 Thinking mode", session.thinking)
+    _emit_toggle_banner(session, "Thinking mode", session.thinking)
     return CommandResult(
         ok=True,
         message=f"Thinking mode: {'ON' if session.thinking else 'OFF'}",
@@ -31,7 +32,7 @@ def thinking_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
 @command("/agentic", help="Toggle agentic tool-calling mode.")
 def agentic_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     session.agentic = not session.agentic
-    _emit_toggle_banner(session, "🛠 Agentic mode", session.agentic)
+    _emit_toggle_banner(session, "Agentic mode", session.agentic)
     return CommandResult(
         ok=True,
         message=f"Agentic mode: {'ON' if session.agentic else 'OFF'}",
@@ -46,7 +47,7 @@ def yolo_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
     # Persist to the session file so the setting survives restart.
     if hasattr(session, "session_manager") and hasattr(session, "folder_context"):
         session.session_manager.save_history(session.folder_context)
-    _emit_toggle_banner(session, "⚡ YOLO mode", session.variables["yolo"])
+    _emit_toggle_banner(session, "YOLO mode", session.variables["yolo"], on_kind="caution")
     return CommandResult(
         ok=True,
         message=f"YOLO mode: {'ON' if session.variables['yolo'] else 'OFF'}",
@@ -85,7 +86,7 @@ def show_thinking_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> 
     session.variables["show_thinking_explicit"] = True
     if hasattr(session, "session_manager") and hasattr(session, "folder_context"):
         session.session_manager.save_history(session.folder_context)
-    _emit_toggle_banner(session, "💭 Show thinking", new_value)
+    _emit_toggle_banner(session, "Show thinking", new_value)
     return CommandResult(
         ok=True,
         message=f"Show thinking: {'ON' if new_value else 'OFF'}",
@@ -118,7 +119,7 @@ def verbose_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comman
     session.variables["verbose"] = new_value
     if hasattr(session, "session_manager") and hasattr(session, "folder_context"):
         session.session_manager.save_history(session.folder_context)
-    _emit_toggle_banner(session, "📢 Verbose rendering", new_value)
+    _emit_toggle_banner(session, "Verbose rendering", new_value)
     return CommandResult(
         ok=True,
         message=f"Verbose rendering: {'ON' if new_value else 'OFF'}",
@@ -171,8 +172,9 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
     import time as _time_mod
 
     try:
-        from rich import box
-        from rich.table import Table
+        from rich.text import Text
+
+        from mu.ui.theme.components import layer_bar, table as wash_table
     except Exception:
         return
 
@@ -189,9 +191,9 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
     now = _time_mod.time()
 
     # Header / runtime line
-    runtime_table = Table(box=box.SIMPLE, show_header=False)
-    runtime_table.add_column("Field", style="cyan")
-    runtime_table.add_column("Value", style="white")
+    runtime_table = wash_table(show_header=False)
+    runtime_table.add_column("Field", style="wash.muted")
+    runtime_table.add_column("Value", style="wash.ink")
     runtime_table.add_row("Mode", mode)
     runtime_table.add_row(
         "Toggles",
@@ -225,18 +227,34 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
     )
     console.print(runtime_table)
 
+    # Stacked L0–L5 context bar, coloured per layer with direct labels (G§9.14).
+    try:
+        from utils.runtime_metrics import collect_context_layers
+
+        order = ["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"]
+        by_name = {}
+        for layer in collect_context_layers(session) or []:
+            name = str(layer.get("layer") or "")
+            if name in order:
+                by_name[name] = by_name.get(name, 0) + int(layer.get("current") or 0)
+        if by_name:
+            pairs = [(name, by_name[name]) for name in order if name in by_name]
+            console.print(Text("Context layers", style="wash.heading"))
+            console.print(layer_bar(pairs, limit=int(ctx.get("maximum", 0) or 0) or None))
+            console.print("")
+    except Exception:
+        pass
+
     # Tool-usage table
     if tools:
-        tool_table = Table(
-            title="Tools used (top by call count)", box=box.SIMPLE
-        )
-        tool_table.add_column("Tool", style="cyan", no_wrap=True)
-        tool_table.add_column("Calls", style="green", justify="right")
-        tool_table.add_column("Success", style="green", justify="right")
-        tool_table.add_column("Fail", style="red", justify="right")
-        tool_table.add_column("Avg ms", style="yellow", justify="right")
-        tool_table.add_column("Last used", style="dim")
-        tool_table.add_column("Last args", style="dim")
+        tool_table = wash_table(title="Tools used (top by call count)")
+        tool_table.add_column("Tool", style="wash.ink", no_wrap=True)
+        tool_table.add_column("Calls", style="wash.ink", justify="right")
+        tool_table.add_column("Success", style="wash.ok", justify="right")
+        tool_table.add_column("Fail", style="wash.danger", justify="right")
+        tool_table.add_column("Avg ms", style="wash.ink2", justify="right")
+        tool_table.add_column("Last used", style="wash.muted")
+        tool_table.add_column("Last args", style="wash.muted")
         ranked = sorted(
             tools.items(), key=lambda kv: int(kv[1].get("count", 0) or 0), reverse=True
         )
@@ -259,15 +277,15 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
             )
         console.print(tool_table)
     else:
-        console.print("[dim]No tool calls recorded yet this session.[/dim]")
+        console.print("[wash.muted]No tool calls recorded yet this session.[/]")
 
     # Skills table
     if skills:
-        skill_table = Table(title="Skills invoked", box=box.SIMPLE)
-        skill_table.add_column("Skill", style="cyan", no_wrap=True)
-        skill_table.add_column("Invocations", style="green", justify="right")
-        skill_table.add_column("Auto-expanded", style="yellow", justify="right")
-        skill_table.add_column("Last used", style="dim")
+        skill_table = wash_table(title="Skills invoked")
+        skill_table.add_column("Skill", style="wash.ink", no_wrap=True)
+        skill_table.add_column("Invocations", style="wash.ink", justify="right")
+        skill_table.add_column("Auto-expanded", style="wash.ink2", justify="right")
+        skill_table.add_column("Last used", style="wash.muted")
         ranked_skills = sorted(
             skills.items(),
             key=lambda kv: int(kv[1].get("invocations", 0) or 0)
@@ -287,9 +305,9 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
 
     # Error tally
     if errors:
-        err_table = Table(title="Tool errors", box=box.SIMPLE)
-        err_table.add_column("error_code", style="red")
-        err_table.add_column("count", style="yellow", justify="right")
+        err_table = wash_table(title="Tool errors")
+        err_table.add_column("error_code", style="wash.danger")
+        err_table.add_column("count", style="wash.ink", justify="right")
         from rich.text import Text as _Text
 
         for code, n in sorted(errors.items(), key=lambda kv: -int(kv[1] or 0)):
@@ -315,9 +333,12 @@ def stats_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         session.session_manager.save_history(getattr(session, "folder_context", None))
         ui = getattr(session, "ui", None)
         if ui is not None and hasattr(ui, "show_info") and allow_prompt:
-            ui.show_info(
-                "[bold green]Stats tracker cleared.[/bold green] "
-                "Token counts kept (lifetime accounting)."
+            from mu.ui.markup import show_notice
+
+            show_notice(
+                ui,
+                "ok",
+                "Stats tracker cleared. Token counts kept (lifetime accounting).",
             )
         return CommandResult(
             ok=True,

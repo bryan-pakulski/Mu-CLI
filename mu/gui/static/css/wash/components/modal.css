@@ -1,0 +1,95 @@
+/* Modal (G§9.17) — one dialog markup, driven by the x-dialog directive
+ * (static/js/dialogs.js: focus trap, Esc → dialog-close, focus restore).
+ *
+ *   <div class="w-modal" x-data x-dialog="$store.thing.open" x-show="$store.thing.open" x-cloak
+ *        @dialog-close="$store.thing.close()" @click.self="$store.thing.close()">
+ *     <section class="w-modal__dialog" role="dialog" aria-modal="true"
+ *              aria-labelledby="thing-title" data-size="sm|md|lg">
+ *       <header class="w-modal__head">
+ *         <h2 class="w-modal__title" id="thing-title">Delete environment?</h2>
+ *         <button class="w-btn" data-variant="icon" aria-label="Close" title="Close">…x icon…</button>
+ *       </header>
+ *       <div class="w-modal__body">…scrolls…</div>
+ *       <footer class="w-modal__foot">…secondary… …primary last…</footer>
+ *     </section>
+ *   </div>
+ *
+ * Without Alpine, toggle the backdrop's `hidden` attribute. Sizes: sm 560,
+ * md 760 (default), lg 960. Level 3 elevation, radius-xl, scrim backdrop.
+ */
+.w-modal {
+    position: fixed;
+    inset: 0;
+    z-index: var(--wash-z-modal);
+    display: grid;
+    place-items: center;
+    padding: var(--wash-space-6);
+    background: var(--wash-scrim);
+    animation: w-modal-fade var(--wash-motion-medium) var(--wash-ease-medium) both;
+}
+.w-modal:focus { outline: none; }
+.w-modal__dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(760px, 100%);
+    max-height: min(85dvh, 900px);
+    overflow: hidden;
+    border-radius: var(--wash-radius-xl);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift-3);
+    animation: w-modal-rise var(--wash-motion-medium) var(--wash-ease-medium) both;
+}
+
+.w-modal__dialog[data-size="sm"] { width: min(560px, 100%); }
+.w-modal__dialog[data-size="lg"] { width: min(960px, 100%); }
+.w-modal__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    padding: var(--wash-space-5) var(--wash-space-5) var(--wash-space-3) var(--wash-space-6);
+}
+.w-modal__title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-2-size);
+    line-height: var(--wash-type-title-2-line);
+    font-weight: var(--wash-type-title-2-weight);
+    letter-spacing: var(--wash-type-title-2-tracking);
+}
+.w-modal__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: var(--wash-space-2) var(--wash-space-6) var(--wash-space-5);
+    overflow: auto;
+    color: var(--wash-ink-2);
+}
+.w-modal__foot {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-4) var(--wash-space-6);
+    border-top: 1px solid var(--wash-hairline);
+    background: transparent;
+}
+@keyframes w-modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes w-modal-rise {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); filter: blur(4px); }
+    to { opacity: 1; transform: none; filter: none; }
+}
+@media (width < 600px) {
+    .w-modal { place-items: end stretch; padding: 0; }
+    .w-modal__dialog,
+    .w-modal__dialog[data-size] {
+        width: 100%;
+        max-height: 92dvh;
+        border-radius: var(--wash-radius-xl) var(--wash-radius-xl) 0 0;
+    }
+}

@@ -44,7 +44,14 @@ import uuid
 from collections import deque
 from typing import Any
 
-from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
+from mu.agent.approval import (
+    ApprovalPlan,
+    auto_approved_by_yolo,
+    build_approval_prompt,
+    collect_approval_plans,
+    notify_auto_approval,
+)
+from mu.ui.markup import esc, show_markup, show_renderable
 from mu.agent.hooks import HookContext
 from mu.agent.retry import is_context_overflow_error, parse_overflow_token_counts
 from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
@@ -1466,7 +1473,7 @@ def run_turn(session, text, *, origin="user"):
                         # per-tool progress tracker, so this MUST keep firing
                         # regardless of how the parent terminal renders it.
                         session.ui.show_info(
-                            f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
+                            f"● Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                         )
                     logger.info(
                         f"Tool call: {part.tool_name} with args {part.tool_args}"
@@ -1923,8 +1930,9 @@ def run_turn(session, text, *, origin="user"):
                     # headless/API sessions with compact_history=True were
                     # silently skipping it under the old `if session.ui`.
                     if session.ui:
-                        session.ui.show_info(
-                            "[dim]Compacting turn history (removing tool metadata)...[/dim]"
+                        show_markup(
+                            session.ui,
+                            "[wash.muted]Compacting turn history (removing tool metadata)...[/wash.muted]",
                         )
                     _sm_ = session.session_manager
                     _sm_._pending_compaction_iter = iteration
@@ -1988,8 +1996,9 @@ def run_turn(session, text, *, origin="user"):
             # Show bulk diffs if multiple
             if len(approval_plans) > 1:
                 if session.ui:
-                    session.ui.show_info(
-                        f"\n[bold yellow]Turn contains {len(approval_plans)} modifications requiring approval.[/bold yellow]"
+                    show_markup(
+                        session.ui,
+                        f"\n[wash.attention.bold]Turn contains {len(approval_plans)} modifications requiring approval.[/wash.attention.bold]",
                     )
                 for approval_plan in approval_plans.values():
                     for modification in approval_plan.modifications:
@@ -2048,8 +2057,9 @@ def run_turn(session, text, *, origin="user"):
                         and approval_plan.preview_error
                     ):
                         if session.ui:
-                            session.ui.show_info(
-                                f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
+                            show_markup(
+                                session.ui,
+                                f"  [wash.caution]Auto-retrying malformed patch for {esc(str(part.tool_name))}...[/wash.caution]",
                             )
                         result = (
                             "Error: Malformed patch detected. Please ensure your diff is correctly "
@@ -2106,6 +2116,15 @@ def run_turn(session, text, *, origin="user"):
                 else:
                     # No approval needed — defer to exec phase.
                     pending_executions.append(i)
+                    # YOLO skipped a prompt this call would otherwise need:
+                    # leave a visible "auto" breadcrumb in UIs that show one.
+                    if session.ui and auto_approved_by_yolo(
+                        part.tool_name,
+                        part.tool_args,
+                        strict_mode=strict_mode,
+                        yolo=session.variables.get("yolo", False),
+                    ):
+                        notify_auto_approval(session.ui, part.tool_name, part.tool_args)
 
             # --- PHASE 2: execute pending calls (parallel for safe tools, serial for others) ---
             exec_results: dict[int, Any] = {}
@@ -2249,13 +2268,13 @@ def run_turn(session, text, *, origin="user"):
                             try:
                                 _tracker = session._subagent_registry.tracker
                                 if _tracker.has_active():
-                                    session.ui.show_info(_tracker.render_panel())
+                                    show_renderable(session.ui, _tracker.render_panel())
                             except Exception:  # noqa: BLE001
                                 pass
 
                         if len(par_calls) > 1 and session.ui:
                             session.ui.show_info(
-                                f"⚡ Dispatching {len(par_calls)} tool call(s) in "
+                                f"Dispatching {len(par_calls)} tool call(s) in "
                                 f"parallel (max_concurrency={max_concurrency})."
                             )
 
@@ -2641,11 +2660,14 @@ def run_turn(session, text, *, origin="user"):
                 except Exception:  # noqa: BLE001
                     pass
 
+                # Replay data (thinking signature, encrypted reasoning) stays on
+                # the tool_call part that produced it. Copying it onto the result
+                # doubled every signature in history and on the wire, and made
+                # the result look provider-signed to folding and clearing.
                 tool_result_part = {
                     "type": "tool_result",
                     "tool_name": part.tool_name,
                     "tool_result": result,
-                    "thought_signature": part.thought_signature,
                     "cache_key": cache_key,
                 }
                 # Artifacts such as browser_snapshot PNGs stay durable in the
@@ -3138,6 +3160,34 @@ def run_turn(session, text, *, origin="user"):
                 tool_context = (
                     f" | Last tool: {current_tool_name}("
                     f"{_shorten_tool_args(current_tool_args or {})})"
+                )
+            if is_context_overflow_error(e):
+                # Every recovery rung (compact, strip + degrade, full
+                # compaction, truncation) already ran and the request still
+                # does not fit. That is not an API failure: save the
+                # conversation and end the turn with a clear
+                # `context_overflow` result (job stages retry it once with a
+                # fresh, summary-seeded conversation) instead of the generic
+                # "API Error during agentic loop" path, whose rollback/retry
+                # would resend the same oversized request.
+                logger.error("Context overflow could not be recovered this turn: %s", e)
+                if session.ui:
+                    session.ui.show_error(
+                        "Context overflow: the conversation no longer fits the model's "
+                        "context window even after compacting, stripping replayed "
+                        "reasoning and truncating oversized messages. The conversation "
+                        "is saved; run /compact or start a new session to continue."
+                    )
+                session.session_manager.save_history_turn(session.folder_context)
+                if session.session_manager.get_feature_state():
+                    session._set_feature_state(status="error")
+                return session._collect_turn_response(
+                    initial_history_len,
+                    status="context_overflow",
+                    total_in=total_in,
+                    total_out=total_out,
+                    total_cost=total_cost,
+                    error=f"context_overflow: {e}",
                 )
             if session.ui:
                 session.ui.show_error(f"API Error during agentic loop: {e}{tool_context}")

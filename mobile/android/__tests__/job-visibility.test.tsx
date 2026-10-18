@@ -155,6 +155,16 @@ describe('job page', () => {
     await waitFor(() => expect(core.command).toHaveBeenLastCalledWith('j', 'rejectEnvironment', { fingerprint: 'build:abc', reason: 'use mine' }));
     screen.unmount();
   });
+
+  it('shows a failed job setup as a warning while the job keeps running (jobs run unattended)', async () => {
+    const message = 'Job setup for build environment `rsq` failed: `npm ci` exited 1. The job continues without it.';
+    core.job.mockResolvedValue({ ...baseVm, state: 'planning', setup_warning: { binding: 'rsq', command: 'npm ci', message } });
+    const screen = render(<JobDetailScreen route={{ params: { jobId: 'j' } } as any} navigation={navigation as any} />);
+    expect(await screen.findByTestId('job-setup-warning')).toBeTruthy();
+    expect(screen.getByText('Job setup failed; the job continued without it')).toBeTruthy();
+    expect(screen.getByText(message)).toBeTruthy();
+    screen.unmount();
+  });
 });
 
 describe('budget summary', () => {

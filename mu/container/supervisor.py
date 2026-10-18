@@ -1045,7 +1045,11 @@ class ContainerSupervisor:
             dockerfile_hash=ref.dockerfile_hash,
             egress_allow=list(ref.egress_allow),
             egress_deny=list(ref.egress_deny),
+            # Re-snapshotting keeps the template's job setup and the domains added for jobs.
+            job_setup=list(previous.job_setup) if previous is not None else [],
         )
+        if previous is not None:
+            template.egress_allow = list(dict.fromkeys([*template.egress_allow, *previous.egress_allow]))
         return self.template_registry.upsert(template)
 
     def remove_template(self, template_name: str, *, remove_image: bool = True) -> bool:

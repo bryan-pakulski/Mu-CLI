@@ -1,90 +1,109 @@
-"""planos design tokens for the terminal job dashboard.
+"""Jobs TUI theme: a compatibility shim over ``mu.ui.theme`` / ``mu.design``.
 
-Mirrors planos ``src/core/theme.ts``: semantic tokens with a truecolor value
-and a 16-colour fallback, the shared status vocabulary, and ``color_mode``
-detection (``NO_COLOR`` → none, ``COLORTERM``/``WT_SESSION`` → truecolor,
-otherwise 16 colours). Views never use raw colours, only these tokens.
+The jobs dashboard keeps its token-style strings (``"accent bold"``,
+``"warn"``, ``"muted"``) and this module's signatures: ``TOKENS``,
+``STATUS``, ``SEVERITY``, ``SPINNER``, ``TICK_S``, ``state_style()``,
+``color_mode()``, ``pt_style()`` and ``sgr()``. The values come from
+``mu/design/tokens.json`` (resolved for the detected Paper/Dusk background)
+and the status tables from ``mu/design/vocabulary.json``.
+
+Token names are the legacy jobs names plus the Wash semantics:
+``warn`` is the ``attention`` colour (it marks "needs you"), ``text`` is
+the terminal default. ``vocabulary.json`` ``legacy_tone`` maps semantics
+onto these names.
 """
 
 from __future__ import annotations
 
-import os
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Dict, Iterator, Mapping, Optional, Tuple
 
-# token -> (truecolor, 16-colour name)
-TOKENS: Dict[str, Tuple[Optional[str], Optional[str]]] = {
-    "accent": ("#7aa2f7", "cyan"),
-    "ok": ("#9ece6a", "green"),
-    "warn": ("#e0af68", "yellow"),
-    "danger": ("#f7768e", "red"),
-    "running": ("#7dcfff", "cyan"),
-    "muted": ("#565f89", "gray"),
-    "text": (None, None),
+from mu.design import load_vocabulary, state_style as _state_style
+import mu.ui.theme as _wash
+from mu.ui.theme import detect
+from mu.ui.theme.glyphs import SPINNER_FRAMES, SPINNER_INTERVAL_S
+from mu.ui.theme.palette import pt_color, role_ansi16, role_hex, sgr_color
+
+# jobs token → Wash colour role
+_TOKEN_ROLES: Dict[str, Optional[str]] = {
+    "accent": "accent",
+    "ok": "ok",
+    "warn": "attention",
+    "attention": "attention",
+    "caution": "caution",
+    "danger": "danger",
+    "running": "running",
+    "plan": "plan",
+    "info": "info",
+    "muted": "ink-3",
+    "text": None,
 }
 
 ATTRS = ("bold", "dim", "underline", "inverse", "italic")
 
+
+class _Tokens(Mapping):
+    """``TOKENS[name]`` → ``(truecolor hex, ANSI-16 name)`` for the detected theme.
+
+    Resolved lazily so importing the jobs TUI never probes the terminal.
+    """
+
+    def __getitem__(self, key: str) -> Tuple[Optional[str], Optional[str]]:
+        role = _TOKEN_ROLES[key]
+        if role is None:
+            return (None, None)
+        return (role_hex(role, _wash.theme()), role_ansi16(role))
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_TOKEN_ROLES)
+
+    def __len__(self) -> int:
+        return len(_TOKEN_ROLES)
+
+    def __contains__(self, key: object) -> bool:
+        return key in _TOKEN_ROLES
+
+
+TOKENS: Mapping[str, Tuple[Optional[str], Optional[str]]] = _Tokens()
+
+_VOCAB = load_vocabulary()
+_LEGACY_TONE: Dict[str, str] = dict(_VOCAB["legacy_tone"])
+
 STATUS: Dict[str, Dict[str, str]] = {
-    "done": {"icon": "✓", "token": "ok", "label": "done"},
-    "active": {"icon": "●", "token": "running", "label": "in progress"},
-    "waiting": {"icon": "◆", "token": "warn", "label": "needs you"},
-    "failed": {"icon": "✗", "token": "danger", "label": "failed"},
-    "skipped": {"icon": "–", "token": "muted", "label": "skipped"},
-    "pending": {"icon": "○", "token": "muted", "label": "not started"},
+    status: {"icon": spec["glyph"], "token": _LEGACY_TONE[spec["semantic"]], "label": spec["label"]}
+    for status, spec in _VOCAB["status"].items()
 }
 
-_STATE_STATUS = {
-    "selected": "pending",
-    "provisioning": "active", "planning": "active", "implementing": "active",
-    "checking": "active", "reviewing": "active", "pushing": "active",
-    "plan_review": "waiting", "review_done": "waiting", "needs_input": "waiting",
-    "pushed": "done", "done": "done",
-    "failed": "failed",
-    "cancelled": "skipped",
-}
+# Derived views of the shared vocabulary (kept for callers of the old tables).
+_STATE_STATUS: Dict[str, str] = {k: v["status"] for k, v in _VOCAB["job_state"].items()}
+_STATE_LABEL: Dict[str, str] = {k: v["label"] for k, v in _VOCAB["job_state"].items()}
 
-_STATE_LABEL = {
-    "selected": "selected", "provisioning": "provisioning", "planning": "planning",
-    "plan_review": "plan to approve", "implementing": "implementing", "checking": "checking",
-    "reviewing": "reviewing", "review_done": "review done", "pushing": "pushing",
-    "pushed": "pushed", "done": "done", "needs_input": "needs input", "failed": "failed",
-    "cancelled": "cancelled",
-}
+# Environment repair outcome → {status, label} (job_templates.md §7).
+REPAIR_OUTCOME: Dict[str, Dict[str, str]] = {k: dict(v) for k, v in (_VOCAB.get("repair_outcome") or {}).items()}
 
+# severity → (token, rank). Tokens are the Wash semantics: major = attention.
 SEVERITY: Dict[str, Tuple[str, int]] = {
-    "blocker": ("danger", 0),
-    "major": ("danger", 1),
-    "minor": ("warn", 2),
-    "nit": ("muted", 3),
+    name: ("muted" if spec["semantic"] == "neutral" else spec["semantic"], int(spec["rank"]))
+    for name, spec in _VOCAB["severity"].items()
 }
 
-SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-TICK_S = 0.120
+SPINNER: Tuple[str, ...] = SPINNER_FRAMES
+TICK_S: float = SPINNER_INTERVAL_S
 
 
 def state_style(state: str) -> Dict[str, str]:
     """The single mapping from pipeline states onto the status vocabulary."""
-    key = str(state or "").split(" ")[0].lower()
-    status = _STATE_STATUS.get(key, "pending")
-    spec = STATUS[status]
-    return {"status": status, "token": spec["token"], "icon": spec["icon"],
-            "label": _STATE_LABEL.get(key, key.replace("_", " "))}
+    row = _state_style(state)
+    return {"status": row["status"], "token": STATUS[row["status"]]["token"],
+            "icon": row["glyph"], "label": row["label"]}
 
 
 def color_mode(env: Optional[Mapping[str, str]] = None) -> str:
-    """``none`` | ``16`` | ``truecolor`` (same rules as planos ``colorMode``)."""
-    env = os.environ if env is None else env
-    if env.get("NO_COLOR") not in (None, ""):
-        return "none"
-    ct = str(env.get("COLORTERM") or "").lower()
-    if ct in ("truecolor", "24bit") or env.get("WT_SESSION"):
-        return "truecolor"
-    return "16"
+    """``none`` | ``16`` | ``256`` | ``truecolor`` (see ``mu.ui.theme.detect``)."""
+    if env is None:
+        return detect.color_depth()
+    return detect.color_depth(env)
 
 
-_PT16 = {"cyan": "ansicyan", "green": "ansigreen", "yellow": "ansiyellow", "red": "ansired",
-         "gray": "ansibrightblack"}
-_SGR16 = {"cyan": "36", "green": "32", "yellow": "33", "red": "31", "gray": "90"}
 _SGR_ATTR = {"bold": "1", "dim": "2", "italic": "3", "underline": "4", "inverse": "7"}
 _PT_ATTR = {"bold": "bold", "dim": "", "italic": "italic", "underline": "underline", "inverse": "reverse"}
 
@@ -93,7 +112,7 @@ def _split(style: str) -> Tuple[Optional[str], list]:
     color = None
     attrs = []
     for part in str(style or "").split():
-        if part in TOKENS:
+        if part in _TOKEN_ROLES:
             color = part
         elif part in ATTRS:
             attrs.append(part)
@@ -104,29 +123,30 @@ def pt_style(style: str, mode: str) -> str:
     """Token style (``"accent bold"``) → prompt_toolkit style string."""
     color, attrs = _split(style)
     out = []
-    if color and mode != "none":
-        tc, c16 = TOKENS[color]
-        if mode == "truecolor" and tc:
-            out.append(f"fg:{tc}")
-        elif c16:
-            out.append(f"fg:{_PT16[c16]}")
+    theme = _wash.theme() if mode in ("256", "truecolor") else "dusk"
+    role = _TOKEN_ROLES.get(color) if color else None
+    if role and mode != "none":
+        value = pt_color(role, mode, theme)
+        if value:
+            out.append(f"fg:{value}")
     for a in attrs:
         if a == "dim" and mode != "none" and not color:
-            out.append("fg:ansibrightblack" if mode == "16" else "fg:#565f89")
+            value = pt_color("ink-3", mode, theme)
+            if value:
+                out.append(f"fg:{value}")
         elif _PT_ATTR.get(a):
             out.append(_PT_ATTR[a])
     return " ".join(out)
 
 
 def sgr(style: str, mode: str) -> str:
-    """Token style → ANSI SGR parameter list ("" when nothing applies)."""
+    """Token style → ANSI SGR parameter list (``""`` when nothing applies)."""
     color, attrs = _split(style)
     codes = [_SGR_ATTR[a] for a in attrs if a in _SGR_ATTR]
-    if color and mode != "none":
-        tc, c16 = TOKENS[color]
-        if mode == "truecolor" and tc:
-            r, g, b = int(tc[1:3], 16), int(tc[3:5], 16), int(tc[5:7], 16)
-            codes.append(f"38;2;{r};{g};{b}")
-        elif c16:
-            codes.append(_SGR16[c16])
+    role = _TOKEN_ROLES.get(color) if color else None
+    if role and mode != "none":
+        theme = _wash.theme() if mode in ("256", "truecolor") else "dusk"
+        code = sgr_color(role, mode, theme)
+        if code:
+            codes.append(code)
     return ";".join(codes)

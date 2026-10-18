@@ -7,7 +7,7 @@ import { providersApi } from '../src/api/providers';
 import { AdvancedSettingsSheet, optionLabel } from '../src/components/AdvancedSettingsSheet';
 import { EffortControl } from '../src/components/EffortControl';
 import { JobRulesForm } from '../src/components/JobRulesForm';
-import { ToastHost } from '../src/components/planos';
+import { ToastHost } from '../src/ui';
 import { useConnectionStore } from '../src/store/connection';
 
 jest.mock('../src/api/providers', () => ({

@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WELCOME_HTML = ROOT / "mu/gui/templates/fragments/welcome.html"
-APP_CSS = ROOT / "mu/gui/static/css/app.css"
+APP_CSS = ROOT / "mu/gui/static/css/wash/patterns/welcome.css"
 SESSIONS_ROUTER = ROOT / "mu/gui/routers/sessions.py"
 
 
@@ -68,8 +68,6 @@ def test_css_styles_state_hooks():
 
 
 def test_css_busy_pulse_respects_reduced_motion():
-    css = _css()
-    idx = css.find(".welcome-session-state.is-busy{animation:none}")
-    assert idx > 0
-    guard = css.rfind("@media (prefers-reduced-motion: reduce)", 0, idx)
-    assert guard > 0 and idx - guard < 200
+    from wash_css_helpers import css, decls
+    welcome = css("patterns/welcome.css")
+    assert decls(welcome, ".welcome-session-state.is-busy", media="prefers-reduced-motion: reduce") == {"animation": "none"}

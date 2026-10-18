@@ -38,9 +38,18 @@ class VerificationCheck:
     stdout: str = ""
     stderr: str = ""
     error: str = ""
+    # Honest gate (job_templates.md §5): passed | failed | unrunnable ('' = recorded before it).
+    status: str = ""
+    # For unrunnable checks: {tool, cause, hint}.
+    unrunnable: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "VerificationCheck":
+        allowed = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in dict(raw or {}).items() if k in allowed})
 
 
 @dataclass(frozen=True)
@@ -66,9 +75,17 @@ class VerificationRun:
     manifest_path: str = ""
     summary: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def verified(self) -> bool:
+        """False when any check could not run (the run proves nothing about those suites)."""
+        if "verified" in (self.summary or {}):
+            return bool(self.summary["verified"])
+        return self.status != "unverified"
+
     def to_dict(self) -> Dict[str, Any]:
         value = asdict(self)
         value["checks"] = [check.to_dict() for check in self.checks]
+        value["verified"] = self.verified
         return value
 
 
@@ -222,7 +239,7 @@ class VerificationStore:
             head_sha=row["head_sha"],
             branch=row["branch"],
             worktree=row["worktree"],
-            checks=[VerificationCheck(**item) for item in checks_raw],
+            checks=[VerificationCheck.from_dict(item) for item in checks_raw],
             changed_files=json.loads(row["changed_files_json"] or "[]"),
             additions=int(row["additions"]),
             deletions=int(row["deletions"]),
@@ -287,14 +304,19 @@ _MAX_CAPTURE = 8 << 20  # 8 MiB hard cap per stream before truncation
 
 
 class _CappedReader:
-    """Drain a pipe on a thread, retaining head+tail within a hard cap so a
-    command emitting unlimited output cannot exhaust worker memory."""
+    """Drain a pipe on a thread so a command emitting unlimited output cannot exhaust worker
+    memory. Output within ``cap`` is kept whole. Beyond it the first half of the budget (the
+    head, where the first error usually is) and the last half (the tail) are kept, with a
+    marker in between saying how much was left out."""
 
     def __init__(self, pipe, cap: int = _MAX_CAPTURE):
         self._pipe = pipe
         self._cap = cap
-        self._head = deque(maxlen=200)
-        self._tail = deque(maxlen=200)
+        self._head: list = []
+        self._head_bytes = 0
+        self._tail: deque = deque()
+        self._tail_bytes = 0
+        self._dropped = 0
         self._total = 0
         self._thread: Optional[threading.Thread] = None
 
@@ -303,12 +325,20 @@ class _CappedReader:
         self._thread.start()
 
     def _drain(self) -> None:
+        half = self._cap // 2
         try:
             for line in iter(self._pipe.readline, ""):
                 self._total += len(line)
-                if self._total <= self._cap:
+                if self._head_bytes + len(line) <= half and not self._tail:
                     self._head.append(line)
+                    self._head_bytes += len(line)
+                    continue
                 self._tail.append(line)
+                self._tail_bytes += len(line)
+                while self._tail_bytes > half and len(self._tail) > 1:
+                    gone = self._tail.popleft()
+                    self._tail_bytes -= len(gone)
+                    self._dropped += len(gone)
         except Exception:
             pass
         finally:
@@ -320,13 +350,11 @@ class _CappedReader:
     def join(self, timeout: float = 5.0) -> tuple:
         if self._thread is not None:
             self._thread.join(timeout=timeout)
-        if self._total <= self._cap:
-            return "".join(self._head), False
-        # Over the cap: head + marker + tail, bounded.
-        head_text = "".join(self._head)
-        tail_text = "".join(self._tail)
-        marker = f"\n... [{self._total} bytes total, output truncated]\n"
-        return head_text[: self._cap // 2] + marker + tail_text[-self._cap // 2 :], True
+        head, tail = "".join(self._head), "".join(self._tail)
+        if not self._dropped:
+            return head + tail, False
+        marker = f"\n... [{self._total} bytes total, {self._dropped} bytes left out]\n"
+        return head + marker + tail[-(self._cap // 2):], True
 
 
 def _git(worktree: str, *args: str) -> str:

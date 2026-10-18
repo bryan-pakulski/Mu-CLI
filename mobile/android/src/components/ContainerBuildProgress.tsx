@@ -1,16 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
+import { Pressable, Text, Icon } from '../ui';
+import { STATUS } from '../theme/status';
+import { useGlass } from '../ui/Glass';
 
 export type ContainerProgressLog = {
   seq: number;
@@ -36,6 +30,7 @@ export function ContainerBuildProgress({
   failed = false,
 }: ContainerBuildProgressProps) {
   const { colors } = useTheme();
+  const glass = useGlass();
   const outputRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -48,32 +43,26 @@ export function ContainerBuildProgress({
 
   return (
     <View
-      style={[
-        styles.container,
-        {
-          backgroundColor: failed ? colors.errorSubtle : colors.surface,
-          borderColor: colors.border,
-          borderLeftColor: failed ? colors.danger : running ? colors.running : colors.ok,
-        },
-      ]}
+      // Glass card; state is the header tint plus the status glyph, never a side rule (G§3.4).
+      style={[styles.container, glass.style(1)]}
     >
-      <TouchableOpacity
+      <Pressable
         onPress={onToggle}
         activeOpacity={0.72}
         accessibilityRole="button"
         accessibilityLabel={`${expanded ? 'Hide' : 'Show'} container build output`}
         accessibilityHint="Displays live stdout and stderr from Docker container creation"
-        style={styles.header}
+        style={[styles.header, { backgroundColor: glass.tint(failed ? 'danger' : running ? 'running' : 'ok') }]}
       >
         {running ? (
-          <ActivityIndicator color={colors.running} accessibilityLabel="in progress" />
+          <ActivityIndicator color={colors.running.ink} accessibilityLabel="in progress" />
         ) : (
           <Text
             variant="base"
             accessibilityLabel={failed ? 'failed' : 'done'}
-            style={{ color: failed ? colors.danger : colors.ok, fontWeight: fontWeights.semibold }}
+            style={{ color: failed ? colors.danger.ink : colors.ok.ink, fontWeight: fontWeights.semibold }}
           >
-            {failed ? '✗' : '✓'}
+            {failed ? STATUS.failed.icon : STATUS.done.icon}
           </Text>
         )}
         <View style={styles.copy}>
@@ -85,16 +74,16 @@ export function ContainerBuildProgress({
           </Text>
         </View>
         <View style={styles.chevron}>
-          <Ionicons
+          <Icon
             name={expanded ? 'chevron-up' : 'chevron-down'}
-            size={17}
-            color={colors.textDim}
+            size="sm"
+            color={colors.ink3}
           />
         </View>
-      </TouchableOpacity>
+      </Pressable>
 
       {expanded ? (
-        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.codeBg }]}>
+        <View style={[styles.outputShell, { borderTopColor: colors.hairline, backgroundColor: colors.code }]}>
           <View style={styles.outputHeader}>
             <Text variant="xs" dim style={styles.outputTitle}>stdout / stderr</Text>
             <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{logs.length} events</Text>
@@ -111,7 +100,7 @@ export function ContainerBuildProgress({
                 <Text
                   variant="xs"
                   style={{
-                    color: line.stream === 'stderr' ? colors.error : colors.textDim,
+                    color: line.stream === 'stderr' ? colors.danger.ink : colors.ink3,
                     fontWeight: fontWeights.semibold,
                   }}
                 >
@@ -121,7 +110,7 @@ export function ContainerBuildProgress({
                   selectable
                   style={[
                     styles.logText,
-                    { color: line.stream === 'stderr' ? colors.error : colors.text },
+                    { color: line.stream === 'stderr' ? colors.danger.ink : colors.ink },
                   ]}
                 >
                   {line.text.replace(/\s+$/, '') || ' '}
@@ -142,8 +131,6 @@ export function ContainerBuildProgress({
 const styles = StyleSheet.create({
   container: {
     marginTop: spacing.md,
-    borderWidth: 1,
-    borderLeftWidth: 3,
     borderRadius: radii.panel,
     overflow: 'hidden',
   },

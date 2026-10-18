@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import type { CompletionItem } from '../hooks/useCommandCompletion';
 import { spacing, fonts, radii, fontWeights, touchTarget, elevation } from '../theme/tokens';
+import { Pressable, Text } from '../ui';
 
 interface CommandSuggestionBarProps {
   visible: boolean;
@@ -38,14 +38,14 @@ export function CommandSuggestionBar({ visible, items, selectedIdx, onSelect }: 
             onPress={() => onSelect(item)}
             style={({ pressed }) => [
               styles.item,
-              idx === selectedIdx ? { backgroundColor: colors.accentSubtle } : pressed ? { backgroundColor: colors.bgHover } : null,
+              idx === selectedIdx ? { backgroundColor: colors.accent.wash } : pressed ? { backgroundColor: colors.sunken } : null,
             ]}
           >
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text
                 variant="sm"
                 style={{
-                  color: idx === selectedIdx ? colors.accentFg : colors.text,
+                  color: idx === selectedIdx ? colors.accent.ink : colors.ink,
                   fontFamily: fonts.mono,
                   fontWeight: idx === selectedIdx ? fontWeights.semibold : fontWeights.regular,
                 }}
@@ -56,7 +56,7 @@ export function CommandSuggestionBar({ visible, items, selectedIdx, onSelect }: 
               {item.desc ? (
                 <Text
                   variant="xs"
-                  style={{ color: colors.textDim, marginTop: 2 }}
+                  style={{ color: colors.ink3, marginTop: 2 }}
                   numberOfLines={1}
                 >
                   {item.desc}

@@ -15,28 +15,26 @@
         const number = Number(text);
         return Number.isFinite(number) ? number : null;
     }
+    // Every cell control is named for screen readers: "<column> for <model>".
+    const FIELD_LABELS = {
+        provider: 'Provider', key: 'Model', input_modalities: 'Native inputs', output_modalities: 'Outputs',
+        capabilities: 'Capabilities', billing: 'Billing', input_per_million: 'Input per 1M tokens',
+        cached_input_per_million: 'Cached input per 1M tokens', output_per_million: 'Output per 1M tokens',
+        context_window: 'Context window', long_context_cutoff: 'Long-context cutoff',
+        long_input_per_million: 'Long-context input per 1M', long_cached_input_per_million: 'Long-context cached input per 1M',
+        long_output_per_million: 'Long-context output per 1M', aliases: 'Aliases', role: 'Role', notes: 'Notes',
+    };
+    let rowName = '';
+    function label(field) { return esc(`${FIELD_LABELS[field] || field}${rowName ? ` for ${rowName}` : ''}`); }
     function input(value, field, type = 'text', extra = '') {
         const display = value == null ? '' : String(value);
-        return `<input data-field="${field}" type="${type}" value="${esc(display)}" ${extra}>`;
+        return `<input class="mc-cell-input" data-field="${field}" type="${type}" value="${esc(display)}" aria-label="${label(field)}" ${extra}>`;
     }
     function markDirty() {
         state.dirty = true;
         $('mc-dirty').hidden = false;
         $('mc-status').textContent = '';
     }
-    function syncThemeIcon() {
-        const dark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-        document.querySelectorAll('.mc-theme-dark').forEach(node => { node.style.display = dark ? '' : 'none'; });
-        document.querySelectorAll('.mc-theme-light').forEach(node => { node.style.display = dark ? 'none' : ''; });
-    }
-    function toggleTheme() {
-        const current = document.documentElement.getAttribute('data-theme') || 'dark';
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        try { localStorage.setItem('mucli-theme', next); } catch (_) {}
-        syncThemeIcon();
-    }
-
     function billingSelect(value) {
         const options = [
             ['token', 'Token rates'],
@@ -44,7 +42,7 @@
             ['local', 'Local / $0 API'],
             ['unknown', 'Unpriced'],
         ];
-        return `<select data-field="billing">${options.map(([key, label]) => `<option value="${key}" ${key === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
+        return `<select class="mc-cell-input" data-field="billing" aria-label="${label('billing')}">${options.map(([key, label]) => `<option value="${key}" ${key === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
     }
 
     function render() {
@@ -52,6 +50,7 @@
         const rows = state.models.map((item, index) => {
             const search = `${item.provider} ${item.key} ${(item.aliases || []).join(' ')} ${(item.input_modalities || []).join(' ')} ${(item.output_modalities || []).join(' ')} ${(item.capabilities || []).join(' ')} ${item.role || ''} ${item.notes || ''}`.toLowerCase();
             const hidden = needle && !search.includes(needle) ? ' hidden' : '';
+            rowName = [item.provider, item.key].filter(Boolean).join(' ') || 'new model';
             return `<tr data-index="${index}" data-search="${esc(search)}"${hidden}>
                 <td>${input(item.provider, 'provider')}</td>
                 <td class="mc-model-cell">${input(item.key, 'key')}</td>
@@ -68,11 +67,11 @@
                 <td>${input(item.long_cached_input_per_million, 'long_cached_input_per_million', 'number', 'min="0" step="0.001"')}</td>
                 <td>${input(item.long_output_per_million, 'long_output_per_million', 'number', 'min="0" step="0.001"')}</td>
                 <td>${input((item.aliases || []).join(', '), 'aliases')}</td>
-                <td class="mc-notes-cell">
-                    ${input(item.role || '', 'role')}
-                    <textarea data-field="notes" rows="2" placeholder="Notes">${esc(item.notes || '')}</textarea>
-                </td>
-                <td><button class="mc-row-remove" data-remove title="Remove model" aria-label="Remove model">×</button></td>
+                <td><div class="mc-notes-cell">
+                    ${input(item.role || '', 'role', 'text', 'placeholder="Role"')}
+                    <textarea class="mc-cell-input" data-field="notes" rows="1" placeholder="Notes" aria-label="${label('notes')}">${esc(item.notes || '')}</textarea>
+                </div></td>
+                <td class="w-table__actions"><button type="button" class="w-btn mc-row-remove" data-variant="icon" data-size="sm" data-remove title="Remove model" aria-label="Remove ${esc(rowName)}"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></td>
             </tr>`;
         }).join('');
         $('mc-models').innerHTML = rows || '<tr><td colspan="17" class="mc-table-empty">No configured models.</td></tr>';
@@ -193,7 +192,13 @@
     }
 
     async function reset() {
-        if (!window.confirm('Remove the user pricing override and return to packaged defaults?')) return;
+        const confirmed = await window.WashConfirm({
+            title: 'Reset pricing to defaults?',
+            message: 'This removes your pricing override and returns every model to the packaged defaults.',
+            confirmLabel: 'Reset pricing',
+            tone: 'danger',
+        });
+        if (!confirmed) return;
         $('mc-status').textContent = 'Resetting…';
         const response = await fetch('/api/providers/pricing/reset', { method: 'POST' });
         const data = await response.json().catch(() => ({}));
@@ -212,12 +217,18 @@
     }
 
     async function init() {
-        syncThemeIcon();
         $('mc-search').addEventListener('input', render);
-        $('mc-theme').addEventListener('click', toggleTheme);
         $('mc-add').addEventListener('click', addModel);
         $('mc-save').addEventListener('click', save);
         $('mc-reset').addEventListener('click', reset);
+        // Command palette (static/js/wash/palette.js): this page's actions.
+        if (window.WashPalette) {
+            window.WashPalette.register('model-costs', () => [
+                { id: 'mc:add', group: 'Actions', label: 'Add a model', icon: 'plus', run: addModel },
+                { id: 'mc:save', group: 'Actions', label: 'Save pricing', icon: 'check', enabled: !$('mc-save').disabled, run: save },
+                { id: 'mc:reset', group: 'Actions', label: 'Reset pricing to defaults…', icon: 'rotate-ccw', run: reset },
+            ], { priority: 10 });
+        }
         window.addEventListener('beforeunload', event => {
             if (!state.dirty) return;
             event.preventDefault();

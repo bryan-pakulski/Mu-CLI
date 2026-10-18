@@ -49,21 +49,26 @@ function muTokenAlpha(name, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${(a * alpha).toFixed(3)})`;
 }
 
-// Context layers arrive with a server-side HSL hue (LAYER_HUES). Map each to
-// a data-visualisation series token; unknown hues (and FREE) stay neutral.
-const MU_LAYER_HUE_VIZ = Object.freeze({
-    210: "--viz-1",   // L0  system prompt
-    168: "--viz-7",   // L1B skills
-    280: "--viz-6",   // L2  summary
-    25: "--viz-3",    // L3  active goal
-    50: "--viz-2",    // L4B retrieved snippets
-    358: "--viz-4",   // L5  live history
+// Context layer colours (G§1.4): every chart maps a layer through its own
+// Wash pigment, --wash-layer-<id>, so L1A and L4 (which the server sends
+// without a hue) are coloured like every other layer. The legacy server hue
+// map is only a fallback for payloads that carry no layer id; unknown layers
+// (and FREE) stay neutral.
+const MU_LAYER_IDS = Object.freeze(["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"]);
+const MU_LAYER_HUE_ID = Object.freeze({
+    210: "L0",    // L0  system prompt
+    168: "L1B",   // L1B skills
+    280: "L2",    // L2  summary
+    25: "L3",     // L3  active goal
+    50: "L4B",    // L4B retrieved snippets
+    358: "L5",    // L5  live history
 });
-function muLayerVizToken(hue) {
-    return MU_LAYER_HUE_VIZ[hue] || "--viz-8";
+function muLayerToken(id, hue) {
+    const key = MU_LAYER_IDS.includes(String(id)) ? String(id) : MU_LAYER_HUE_ID[hue];
+    return key ? `--wash-layer-${key}` : "--wash-neutral-pigment";
 }
-function muLayerColor(hue) {
-    return `var(${muLayerVizToken(hue)})`;
+function muLayerColor(id, hue) {
+    return `var(${muLayerToken(id, hue)})`;
 }
 
 // MuCLI session type icons — same Ionicons used by the mobile app.
@@ -108,6 +113,39 @@ window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = 
     const normalized = type === "container" || type === "chat" ? type : "workspace";
     const safeClass = String(className || "session-type-svg").replace(/[^A-Za-z0-9 _-]/g, "");
     return `<svg class="${safeClass}" viewBox="0 0 512 512" aria-hidden="true" focusable="false">${MUCLI_SESSION_TYPE_ICON_CONTENT[normalized]}</svg>`;
+};
+
+// Session avatar (components/avatar.css): a pigment tile with the session's monogram and a
+// small session-type badge. The pigment is a stable hash of the name, so a session keeps its
+// colour everywhere (the Android drawer uses the same rule: src/ui/SessionAvatar.tsx).
+const MUCLI_AVATAR_PIGMENTS = Object.freeze(["lagoon", "meadow", "sun", "apricot", "rose", "lilac", "sky", "plum"]);
+const MUCLI_AVATAR_BADGE = Object.freeze({ workspace: "folder", container: "box", chat: "message-circle" });
+
+window.sessionMonogram = function sessionMonogram(name) {
+    const raw = String(name || "").trim();
+    const words = raw.replace(/([a-z])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean);
+    if (!words.length) return "?";
+    if (words.length === 1) {
+        const word = words[0];
+        return (word[0].toUpperCase() + (word[1] || "").toLowerCase());
+    }
+    return (words[0][0] + words[1][0]).toUpperCase();
+};
+
+window.sessionPigment = function sessionPigment(name) {
+    let hash = 0;
+    for (const ch of String(name || "")) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+    return MUCLI_AVATAR_PIGMENTS[hash % MUCLI_AVATAR_PIGMENTS.length];
+};
+
+window.sessionAvatarMarkup = function sessionAvatarMarkup(name, type, size = "") {
+    const normalized = type === "container" || type === "chat" ? type : "workspace";
+    const sizeAttr = size === "sm" || size === "lg" ? ` data-size="${size}"` : "";
+    // The monogram is letters and digits only (sessionMonogram), so it is safe as markup.
+    return `<span class="w-avatar" data-pigment="${sessionPigment(name)}"${sizeAttr} aria-hidden="true">`
+        + `<span class="w-avatar__mono">${sessionMonogram(name)}</span>`
+        + `<span class="w-avatar__badge" data-type="${normalized}"><svg class="w-icon" focusable="false">`
+        + `<use href="/static/icons/wash.svg#i-${MUCLI_AVATAR_BADGE[normalized]}"></use></svg></span></span>`;
 };
 
 // MUCLI_CONTAINER_PERSISTENCE_V1 — actionable session-load errors.
@@ -217,6 +255,13 @@ document.addEventListener("alpine:init", () => {
             // filter, or the newly focused session silently receives no
             // live events while the connection looks healthy. Guard: only
             // reconnect on an actual session change.
+            if ((prev || null) !== (this.currentName || null)) {
+                try {
+                    const context = Alpine.store("context");
+                    context.reset();
+                    if (this.currentName) context.prime(this.currentName);
+                } catch (e) { /* context meter is display-only */ }
+            }
             if ((prev || null) !== (this.currentName || null)
                 && typeof window.__muReconnectWithFocus === "function") {
                 // bootSSE owns the stream; it publishes its reconnect hook
@@ -740,6 +785,7 @@ document.addEventListener("alpine:init", () => {
                 id: this._id("ev"),
                 kind: "tool_call",
                 name: toolName || "(unknown)",
+                args,
                 jsonHtml: renderJSON(args),
                 at: Date.now(),
             });
@@ -847,6 +893,40 @@ document.addEventListener("alpine:init", () => {
                 at: Date.now(),
             });
             if (!name || name === this.currentName) this.scroll();
+        },
+        addDiff(filename, original, modified, name) {
+            const slot = this._slot(name);
+            const file = String(filename || "file");
+            const unified = window.WashDiff
+                ? window.WashDiff.diffContents(original || "", modified || "", { filename: file })
+                : "";
+            if (!unified) {
+                this.addInfo(`diff proposed: ${file}`, null, name);
+                return;
+            }
+            const stats = window.WashDiff.stats(unified);
+            const turn = {
+                id: this._id("df"),
+                role: "diff",
+                filename: file,
+                unified,
+                added: stats.added,
+                removed: stats.removed,
+                at: Date.now(),
+            };
+            slot.recentDiffs = [turn, ...(slot.recentDiffs || []).filter(d => d.filename !== file)].slice(0, 12);
+            this._closeStreamingAssistants(slot);
+            slot.turns.push(turn);
+            if (!name || name === this.currentName) this.scroll();
+        },
+        // Latest proposed diff whose filename matches `path` (approval preview).
+        diffFor(path, name) {
+            const target = String(path || "");
+            if (!target) return null;
+            const diffs = this._slot(name).recentDiffs || [];
+            return diffs.find(d => d.filename === target
+                || target.endsWith("/" + d.filename)
+                || d.filename.endsWith("/" + target)) || null;
         },
         addError(text, name) {
             const slot = this._slot(name);
@@ -979,6 +1059,10 @@ document.addEventListener("alpine:init", () => {
                 id: this._id("pr"),
                 role: "prompt_resolved",
                 cancelled,
+                // `auto`: approved without asking (YOLO). Rendered tagged
+                // "auto" in sun so auto-approval stays visible (G§9.9).
+                auto: !!(record && record.auto),
+                target: (record && record.target) || "",
                 shape: (record && record.shape) || "",
                 toolName: (record && record.toolName) || "",
                 title,
@@ -1582,6 +1666,7 @@ document.addEventListener("alpine:init", () => {
                             id: `h-ev-${turn.index}-${stablePartIndex}`,
                             kind: "tool_call",
                             name: part.tool_name || "(unknown)",
+                            args: part.tool_args,
                             jsonHtml: renderJSON(part.tool_args),
                             at: 0,
                         });
@@ -1963,6 +2048,8 @@ document.addEventListener("alpine:init", () => {
         current: null,
         loaded: [],     // names currently resident in daemon memory
         busy: [],       // names with a turn in flight (server-side)
+        outcomes: {},   // name → {status: completed|error|interrupted, error, at}: how the last turn ended
+        unseen: {},     // name → true: a background session finished a turn you have not looked at
         async load() {
             const r = await fetch("/api/sessions");
             const data = await r.json();
@@ -1970,6 +2057,7 @@ document.addEventListener("alpine:init", () => {
             this.current = data.current;
             this.loaded = data.loaded || [];
             this.busy = data.busy || [];
+            this.outcomes = { ...(data.outcomes || {}), ...this._liveOutcomes() };
             const chat = Alpine.store("chat");
             // Sync server-reported busy into chat slots so the UI shows
             // "generating" after a page refresh mid-turn.
@@ -1984,6 +2072,44 @@ document.addEventListener("alpine:init", () => {
             if (!chat.currentName && this.current) chat.focus(this.current);
         },
         isLoaded(name) { return (this.loaded || []).includes(name); },
+        // Outcomes seen live in this tab win over the (older) server snapshot.
+        _liveOutcomes() {
+            return Object.fromEntries(Object.entries(this.outcomes || {}).filter(([, o]) => o && o.live));
+        },
+        recordOutcome(name, status, error = "") {
+            const previous = (this.outcomes || {})[name];
+            // An error event and its turn_complete arrive together: the error stands.
+            if (status === "completed" && previous && previous.status === "error" && previous.live
+                && Date.now() / 1000 - previous.at < 2) return;
+            this.outcomes = { ...this.outcomes, [name]: { status, error: String(error || ""), at: Date.now() / 1000, live: true } };
+            if (name !== Alpine.store("chat").currentName) this.unseen = { ...this.unseen, [name]: true };
+        },
+        markSeen(name) {
+            if (this.unseen && this.unseen[name]) {
+                const next = { ...this.unseen };
+                delete next[name];
+                this.unseen = next;
+            }
+        },
+        /* One state per session for the sidebar (Wash status vocabulary):
+         * running → needs you → error → paused → done (finished while you were away) → loaded.
+         * Null for a session that is not loaded. */
+        state(name) {
+            const vocab = (window.WASH && window.WASH.vocabulary && window.WASH.vocabulary.status) || {};
+            const make = (key, status, label, hint) => ({ key, label, hint, glyph: (vocab[status] || {}).glyph || "●",
+                tone: (vocab[status] || {}).semantic || "neutral" });
+            if (this.isBusy(name)) return make("running", "active", "running", "A turn is running");
+            if ((Alpine.store("prompts").queue || []).some(p => p.session_name === name))
+                return make("waiting", "waiting", "needs you", "Waiting for your answer");
+            if (!this.isLoaded(name)) return null;
+            const outcome = (this.outcomes || {})[name];
+            if (outcome && outcome.status === "error")
+                return make("error", "failed", "error", outcome.error ? `Last turn failed: ${outcome.error}` : "Last turn failed");
+            if (outcome && outcome.status === "interrupted")
+                return { ...make("paused", "unverified", "paused", "Paused; /continue resumes"), glyph: "‖" };
+            if (this.unseen && this.unseen[name]) return make("done", "done", "done", "Finished while you were away");
+            return { key: "loaded", label: "loaded", hint: "Loaded in the background", glyph: "", tone: "ok" };
+        },
         isBusy(name) {
             // Server-reported busy OR locally-tracked busy. The local
             // slot flag flips on /send before the server has echoed an
@@ -2012,6 +2138,7 @@ ${problem.text}`, "error", 14000);
                     return;
                 }
                 this.current = name;
+                this.markSeen(name);
                 Alpine.store("chat").focus(name);
                 // Ensure history is populated (it may be a session the
                 // browser has never rendered before, only resident in
@@ -2043,6 +2170,7 @@ ${problem.text}`, "error", 16000);
             }
             await this.load();
             this.current = name;
+            this.markSeen(name);
             Alpine.store("chat").focus(name);
             await Alpine.store("chat").loadHistory(name);
             await Alpine.store("mode").load();
@@ -2205,13 +2333,32 @@ ${problem.text}`, "error", 16000);
     });
 
     // ── Toast notifications ──────────────────────────────────
+    // Toasts render through window.WashToast (static/js/wash_shell.js) into
+    // the shared live regions (partials/toast_region.html): info/success go
+    // to the polite region and auto-dismiss after 5s, errors go to the
+    // assertive region and persist until dismissed (G§9.16, §11). The
+    // `messages` list only backs the legacy Alpine template when WashToast is
+    // unavailable.
     Alpine.store("toast", {
         messages: [],
         _nextId: 0,
-        show(msg, type = "info", ms = 4000) {
+        _tone(type) {
+            return { success: "ok", ok: "ok", error: "danger", danger: "danger", warn: "attention", warning: "attention", attention: "attention" }[type] || "info";
+        },
+        // Fallback rendering (templates/partials/toast_region.html) uses the
+        // same Wash toast component as WashToast: tone + status glyph.
+        tone(type) { return this._tone(type); },
+        glyph(type) { return { ok: "✓", danger: "✗", attention: "◆" }[this._tone(type)] || "●"; },
+        show(msg, type = "info", ms = 5000, options = {}) {
+            const tone = this._tone(type);
+            if (window.WashToast && typeof window.WashToast.show === "function") {
+                const timeout = tone === "danger" ? 0 : (ms > 0 ? Math.max(ms, 5000) : 0);
+                return window.WashToast.show(msg, tone, { timeout, action: options.action });
+            }
             const id = this._nextId++;
             this.messages.push({ id, msg, type });
-            if (ms > 0) setTimeout(() => this.dismiss(id), ms);
+            if (ms > 0 && tone !== "danger") setTimeout(() => this.dismiss(id), ms);
+            return null;
         },
         dismiss(id) {
             this.messages = this.messages.filter(m => m.id !== id);
@@ -2890,6 +3037,40 @@ ${problem.text}`, "error", 16000);
                 return !name || !cur || name === cur;
             });
         },
+        // Approval queue (G§9.9): one card shows at a time with "1 of N" and
+        // previous/next controls; `cursor` indexes visibleQueue.
+        cursor: 0,
+        get cursorIndex() {
+            const n = this.visibleQueue.length;
+            return n ? Math.min(Math.max(0, this.cursor), n - 1) : 0;
+        },
+        step(delta) {
+            const n = this.visibleQueue.length;
+            if (!n) return;
+            this.cursor = (this.cursorIndex + delta + n) % n;
+            queueMicrotask(() => this.focusCard());
+        },
+        // Move focus to the current card's heading. Only called from user
+        // actions (the top-bar attention chip, previous/next), so it arms the
+        // card's keyboard shortcuts. Never focuses Approve.
+        focusCard() {
+            requestAnimationFrame(() => {
+                const card = document.querySelector(".w-approval[data-current]");
+                if (!card) return;
+                card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                const heading = card.querySelector("[data-approval-heading]");
+                if (heading) {
+                    card.dataset.armed = "true";
+                    heading.focus({ preventScroll: true });
+                }
+            });
+        },
+        // Assertive live-region text for the newest prompt (G§9.9, §11).
+        announcement: "",
+        announce(text) {
+            this.announcement = "";
+            requestAnimationFrame(() => { this.announcement = String(text || ""); });
+        },
         push(payload) { this.queue.push(payload); },
         // Remove a specific id from the queue (used after answer/cancel
         // since the head isn't always the right one with cross-session
@@ -2942,6 +3123,47 @@ ${problem.text}`, "error", 16000);
     });
 
     Alpine.store("tokens", { input: 0, output: 0, total: 0, total_cost: 0 });
+
+    // Live context fill for the top-bar meter (G§9.14). Display only: fed by
+    // every focused-session `context_snapshot` (the pre_provider_call hook)
+    // and primed once per session load. Never feeds back into budgets.
+    Alpine.store("context", {
+        fillPct: 0,
+        totalTokens: 0,
+        contextLimit: 0,
+        layers: [],
+        at: 0,
+        get known() { return this.at > 0 && this.contextLimit > 0; },
+        get level() {
+            const pct = Number(this.fillPct) || 0;
+            return pct >= 85 ? "danger" : (pct >= 65 ? "caution" : "");
+        },
+        get label() {
+            if (!this.known) return "Context not measured yet";
+            return `Context ${Math.round(Number(this.fillPct) || 0)}% · ${_fmtTok(this.totalTokens)} of ${_fmtTok(this.contextLimit)} tokens`;
+        },
+        apply(snap) {
+            if (!snap) return;
+            this.fillPct = Number(snap.fill_pct) || 0;
+            this.totalTokens = Number(snap.total_tokens) || 0;
+            this.contextLimit = Number(snap.context_limit) || 0;
+            this.layers = Array.isArray(snap.layers) ? snap.layers.map(layer => ({
+                id: layer.id, label: layer.label || layer.name || layer.id,
+                tokens: Number(layer.tokens) || 0,
+            })) : [];
+            this.at = Date.now();
+        },
+        reset() { this.fillPct = 0; this.totalTokens = 0; this.contextLimit = 0; this.layers = []; this.at = 0; },
+        async prime(name) {
+            try {
+                const target = name || Alpine.store("chat").currentName;
+                const suffix = target ? `&session_name=${encodeURIComponent(target)}` : "";
+                const r = await fetch(`/api/memory/state?cols=4&rows=4${suffix}`);
+                if (!r.ok) return;
+                this.apply(await r.json());
+            } catch (e) { /* the meter stays empty until the first snapshot */ }
+        },
+    });
 
     // Model effort for agent turns (`reasoning_effort`; "" = provider default). Each
     // provider maps the neutral levels: Anthropic effort, OpenAI reasoning_effort,
@@ -3084,6 +3306,8 @@ ${problem.text}`, "error", 16000);
                     title: "approve tool call",
                     answer: `auto-approved \`${item.prompt.tool_name || "tool"}\` (yolo)`,
                     toolName: item.prompt.tool_name || "",
+                    target: window.WashToolCard ? window.WashToolCard.primaryArg(item.prompt.tool_args) : "",
+                    auto: true,
                     cancelled: false,
                 }, item.session_name);
                 prompts.answer(item.id, { approved: true, remember: false });
@@ -3229,18 +3453,29 @@ ${problem.text}`, "error", 16000);
     });
 
     Alpine.store("theme", {
-        // Initialised from the data-theme attribute the pre-paint
-        // script in base.html set. Toggling it updates the DOM,
-        // localStorage, and (via subscribers) the highlight.js link.
-        current: document.documentElement.getAttribute("data-theme") || "dark",
+        // Wash themes. `current` is the resolved theme ("paper" | "dusk") the
+        // pre-paint bootstrap wrote to html[data-theme]; `preference` is the
+        // stored choice ("system" | "paper" | "dusk"). route_theme.js
+        // (window.MuTheme) owns persistence and the mucli-theme-change event.
+        current: muWashTheme(),
+        preference: window.MuTheme ? window.MuTheme.preference() : "system",
+        get legacy() { return this.current === "dusk" ? "dark" : "light"; },
         toggle() {
-            this.current = this.current === "dark" ? "light" : "dark";
-            try { localStorage.setItem("mucli-theme", this.current); } catch (e) {}
-            applyTheme(this.current);
-            // Re-highlight existing code blocks after the stylesheet swap.
+            if (window.MuTheme) window.MuTheme.toggle();
+            else toggleTheme();
+        },
+        set(preference) {
+            if (window.MuTheme) window.MuTheme.set(preference);
+        },
+        _sync(detail) {
+            this.current = detail.wash;
+            this.preference = detail.preference;
+            applyTheme(detail.wash);
+            // Re-highlight existing code blocks after the theme switch.
             queueMicrotask(rehighlightAll);
         },
     });
+    if (window.MuTheme) window.MuTheme.onChange((detail) => Alpine.store("theme")._sync(detail));
 
     Alpine.store("layout", {
         sidebarOpen: true,
@@ -4113,12 +4348,12 @@ ${problem.text}`, "error", 16000);
         },
         severityColor(sev) {
             switch ((sev || "").toLowerCase()) {
-                case "critical": return "var(--error)";
-                case "high":     return "color-mix(in srgb, var(--error) 60%, var(--warning))";
-                case "medium":   return "var(--warning)";
-                case "low":      return "var(--success)";
-                case "info":     return "var(--text-tertiary)";
-                default:         return "var(--text-tertiary)";
+                case "critical": return "var(--wash-danger-ink)";
+                case "high":     return "color-mix(in srgb, var(--wash-danger-ink) 60%, var(--wash-attention-ink))";
+                case "medium":   return "var(--wash-attention-ink)";
+                case "low":      return "var(--wash-ok-ink)";
+                case "info":     return "var(--wash-ink-3)";
+                default:         return "var(--wash-ink-3)";
             }
         },
         formatTimestamp(unix) {
@@ -4357,8 +4592,51 @@ ${problem.text}`, "error", 16000);
         timelineHover: { visible: false, x: 0, y: 0, point: null, layer: null },
         cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
         _hoverTimer: null,
-        // Layer swatch colour: server hue -> --viz-N data-vis token.
-        layerColor(hue) { return muLayerColor(hue); },
+        // Wash colours are CSS variables; canvas pixels are redrawn whenever
+        // the theme changes (route_theme.js fires mucli-theme-change).
+        init() {
+            window.addEventListener("mucli-theme-change", () => this._scheduleRender());
+        },
+        // Layer swatch colour (G§1.4): the layer id picks its Wash layer
+        // pigment (--wash-layer-L0 … L5); older payloads fall back to the
+        // server hue map.
+        layerColor(hue, id) {
+            return muLayerColor(id, hue);
+        },
+        // Display-only view model for the Observatory's stacked layer bar and
+        // compact ring. Never changes the L0–L5 contract: it orders and
+        // proportions the layers the snapshot already reports against the
+        // (drift-corrected) context limit.
+        _layerOrder: MU_LAYER_IDS,
+        layerSegments() {
+            const layers = (this.layers || []).filter(layer => layer && layer.id !== "FREE" && Number(layer.tokens) > 0);
+            const used = layers.reduce((sum, layer) => sum + Number(layer.tokens || 0), 0);
+            const denom = Math.max(1, Number(this.contextLimit) || 0, used);
+            const rank = id => {
+                const index = this._layerOrder.indexOf(String(id));
+                return index < 0 ? this._layerOrder.length : index;
+            };
+            return layers
+                .slice()
+                .sort((a, b) => rank(a.id) - rank(b.id))
+                .map(layer => {
+                    const pct = (Number(layer.tokens) / denom) * 100;
+                    const names = (window.WASH && WASH.layerNames) || {};
+                    return {
+                        id: layer.id,
+                        hue: layer.hue,
+                        name: layer.name || names[layer.id] || layer.id,
+                        tokens: Number(layer.tokens) || 0,
+                        pct,
+                        labelled: pct >= 6,
+                        color: this.layerColor(layer.hue, layer.id),
+                    };
+                });
+        },
+        ringLevel() {
+            const pct = Number(this.fillPct) || 0;
+            return pct >= 85 ? "danger" : (pct >= 65 ? "caution" : "");
+        },
         durable: {
             items: [],
             stats: {},
@@ -4653,36 +4931,42 @@ ${problem.text}`, "error", 16000);
             (window.requestAnimationFrame || setTimeout)(run);
         },
 
-        // row index → layer hue. Built once per render from the legend
-        // (each region carries row_start/row_end + hue). Regions include the
-        // neutral FREE band, so unallocated capacity is rendered rather than
-        // being mistaken for a tiny layer or omitted from the map.
-        _rowHueMap() {
+        // row index → layer colour token. Built once per render from the
+        // legend (each region carries row_start/row_end, its id and a hue).
+        // Regions include the neutral FREE band, so unallocated capacity is
+        // rendered rather than being mistaken for a tiny layer or omitted.
+        _rowLayerMap() {
             const m = new Array(this.rows);
             for (const l of this.regions) {
-                const hue = (typeof l.hue === "number") ? l.hue : 0;
+                const token = muLayerToken(l.id, (typeof l.hue === "number") ? l.hue : 0);
                 const end = Math.min(l.row_end || 0, this.rows);
-                for (let i = l.row_start || 0; i < end; i++) m[i] = hue;
+                for (let i = l.row_start || 0; i < end; i++) m[i] = token;
             }
             return m;
         },
 
         _contextPalette() {
-            const light = document.documentElement.getAttribute("data-theme") === "light";
-            const font = `${muCssToken("--fs-xs", "12px")} ${muCssToken("--font-mono", "monospace")}`;
+            const light = muWashTheme() === "paper";
+            // Wash tokens (CSS custom properties), with the generated WASH
+            // palette as the fallback when a variable is not resolvable.
+            const wash = (name) => muCssToken(`--wash-${name}`,
+                (window.WASH && WASH.color(name, light ? "paper" : "dusk")) || "");
+            const mono = muCssToken("--wash-font-mono", "monospace");
+            const font = `${muCssToken("--wash-type-caption-size", "12px")} ${mono}`;
             return {
                 light,
-                text: muCssToken("--text-primary"),
-                textDim: muCssToken("--text-tertiary"),
-                plot: muCssToken("--bg-subtle"),
-                grid: muCssToken("--hairline-color"),
-                selection: muCssToken("--text-secondary"),
-                churnFill: muTokenAlpha("--viz-4", light ? .16 : .22),
-                churnLine: muCssToken("--viz-4"),
-                compaction: muCssToken("--viz-7"),
+                text: wash("ink"),
+                textDim: wash("ink-3"),
+                plot: wash("sunken"),
+                grid: wash("hairline"),
+                selection: wash("ink-2"),
+                churnFill: muTokenAlpha("--wash-running-pigment", light ? .16 : .22),
+                churnLine: wash("running-pigment"),
+                compaction: wash("accent-pigment"),
                 font,
-                fontEmpty: `${muCssToken("--fs-sm", "13px")} ${muCssToken("--font-mono", "monospace")}`,
-                layer: (hue, alpha) => muTokenAlpha(muLayerVizToken(hue), alpha),
+                fontEmpty: `${muCssToken("--wash-type-label-size", "13px")} ${mono}`,
+                // `token` is a --wash-layer-<id> name from muLayerToken().
+                layer: (token, alpha) => muTokenAlpha(token, alpha),
             };
         },
 
@@ -4697,26 +4981,26 @@ ${problem.text}`, "error", 16000);
                 canvas.height = rows;
             }
             ctx.clearRect(0, 0, cols, rows);
-            const rowHue = this._rowHueMap();
+            const rowLayer = this._rowLayerMap();
             const heat = this.view !== "layer";
             const palette = this._contextPalette();
             for (let ri = 0; ri < rows; ri++) {
                 const row = this.grid[ri];
                 if (!row) continue;
-                const hue = rowHue[ri];
-                if (hue == null) continue;       // outside any band → transparent
+                const layerToken = rowLayer[ri];
+                if (layerToken == null) continue;  // outside any band → transparent
                 for (let ci = 0; ci < cols; ci++) {
                     const v = row[ci];
                     if (!v) {
                         // Empty space is still space: a column with no text
                         // renders as a dim, desaturated layer hue so the
                         // band's full extent stays visible.
-                        ctx.fillStyle = palette.layer(hue, palette.light ? .08 : .1);
+                        ctx.fillStyle = palette.layer(layerToken, palette.light ? .08 : .1);
                     } else {
                         // v is 1..255: 1 = present & stable, 255 = churning.
                         const t = (v - 1) / 254;     // 0..1 change frequency
                         const alpha = heat ? .22 + .78 * t : .72;
-                        ctx.fillStyle = palette.layer(hue, alpha);
+                        ctx.fillStyle = palette.layer(layerToken, alpha);
                     }
                     ctx.fillRect(ci, ri, 1, 1);
                 }
@@ -4796,12 +5080,7 @@ ${problem.text}`, "error", 16000);
             const rows = this.layers.length || 8;
             const rowHeight = plotHeight / rows;
             const cellWidth = plotWidth / points.length;
-            const fallback = [
-                { id: "L0", hue: 210 },
-                { id: "L1B", hue: 168 },
-                { id: "L2", hue: 280 }, { id: "L3", hue: 25 },
-                { id: "L4B", hue: 50 }, { id: "L5", hue: 358 },
-            ];
+            const fallback = MU_LAYER_IDS.map(id => ({ id }));
             const legend = this.layers.length ? this.layers : fallback;
             for (let row = 0; row < legend.length; row++) {
                 const layerMeta = legend[row];
@@ -4818,7 +5097,7 @@ ${problem.text}`, "error", 16000);
                         ? Math.min(.96, (palette.light ? .38 : .28) + ratio * (palette.light ? .58 : .68))
                         : (occupied ? (palette.light ? .18 : .105) : (palette.light ? .055 : .035));
                     const inset = Math.min(1.5, cellWidth * .14);
-                    ctx.fillStyle = palette.layer(layerMeta.hue || 0, alpha);
+                    ctx.fillStyle = palette.layer(muLayerToken(layerMeta.id, layerMeta.hue || 0), alpha);
                     ctx.fillRect(
                         left + col * cellWidth + inset,
                         y + 1.5,
@@ -4832,9 +5111,7 @@ ${problem.text}`, "error", 16000);
         _drawContextStream(g, points) {
             const { ctx, left, top, plotWidth, plotHeight } = g;
             const palette = this._contextPalette();
-            const layerIds = ["L0", "L1B", "L2", "L3", "L4B", "L5"];
-            const hueById = {};
-            for (const layer of this.layers) hueById[layer.id] = layer.hue;
+            const layerIds = MU_LAYER_IDS;
             const peak = Math.max(1, ...points.map(point => point.total_tokens || 0));
             const xAt = index => left + (points.length === 1 ? plotWidth : index * plotWidth / (points.length - 1));
             const cumulative = points.map(() => 0);
@@ -4855,8 +5132,7 @@ ${problem.text}`, "error", 16000);
                     ctx.lineTo(xAt(i), y);
                 }
                 ctx.closePath();
-                const hue = hueById[layerId] == null ? 210 : hueById[layerId];
-                ctx.fillStyle = palette.layer(hue, palette.light ? .55 : .6);
+                ctx.fillStyle = palette.layer(muLayerToken(layerId), palette.light ? .55 : .6);
                 ctx.fill();
             }
             ctx.fillStyle = palette.textDim;
@@ -6277,16 +6553,48 @@ function escapeHtml(s) {
         .replace(/"/g, "&quot;");
 }
 
+// DOMPurify allowlist for model-authored markdown (spec §4.3, §9). It keeps
+// what marked emits today — headings, lists, tables, links, images, inline
+// SVG — and drops scripts, event handlers and javascript: URLs. MathJax runs
+// AFTER sanitising (typesetMath on the rendered node), so its SVG output is
+// never filtered.
+const MUCLI_PURIFY_CONFIG = Object.freeze({
+    USE_PROFILES: { html: true, svg: true, svgFilters: true, mathMl: true },
+    FORBID_TAGS: ["style", "form", "button", "textarea", "select", "iframe", "object", "embed"],
+    FORBID_ATTR: ["style"],
+    ALLOW_DATA_ATTR: false,
+});
+
+function sanitizeHtml(html) {
+    if (typeof DOMPurify === "undefined" || typeof DOMPurify.sanitize !== "function") {
+        // Never hand unsanitised model output to x-html.
+        return null;
+    }
+    return DOMPurify.sanitize(String(html || ""), MUCLI_PURIFY_CONFIG);
+}
+
+// Wrap each fenced block in the Wash code component (G§9.12): a header row
+// with the language and a copy button. Runs on SANITISED markup and only
+// inserts our own static markup around it.
+function wrapCodeBlocks(html) {
+    return html.replace(/<pre><code([^>]*)>/g, (match, attrs) => {
+        const lang = (/class="[^"]*language-([\w+#.-]+)/.exec(attrs) || [])[1] || "";
+        const label = lang ? escapeHtml(lang) : "code";
+        return `<div class="w-code" data-lang="${escapeHtml(lang)}"><div class="w-code__head"><span class="w-code__lang">${label}</span>`
+            + '<button class="w-code__copy code-copy-btn" type="button" title="Copy code" aria-label="Copy code"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-copy"></use></svg><span class="w-code__copy-label">Copy</span></button></div>'
+            + `<pre class="code-block w-code__pre"><code${attrs}>`;
+    }).replace(/<\/code><\/pre>/g, "</code></pre></div>");
+}
+
 function renderMarkdown(text) {
     if (typeof marked === "undefined") return escapeHtml(text);
     try {
-        const html = marked.parse(text, { breaks: true, gfm: true });
+        const raw = marked.parse(String(text || ""), { breaks: true, gfm: true });
+        const clean = sanitizeHtml(raw);
+        if (clean === null) return escapeHtml(text);
         // x-html content is not compiled by Alpine, so a delegated listener
-        // handles these controls after each streamed markdown re-render.
-        return html.replace(
-            /<pre><code([^>]*)>/g,
-            '<pre class="code-block"><button class="code-copy-btn" type="button" title="Copy code" aria-label="Copy code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></button><code$1>'
-        );
+        // handles the copy controls after each re-render.
+        return wrapCodeBlocks(clean);
     } catch {
         return escapeHtml(text);
     }
@@ -6314,13 +6622,19 @@ async function copyToClipboard(text) {
 document.addEventListener("click", async (event) => {
     const button = event.target.closest(".code-copy-btn");
     if (!button) return;
-    const code = button.parentElement && button.parentElement.querySelector("code");
+    const block = button.closest(".w-code") || button.parentElement;
+    const code = block && block.querySelector("code");
     if (!code || !(await copyToClipboard(code.textContent || ""))) return;
+    const label = button.querySelector(".w-code__copy-label");
     button.classList.add("copied");
+    button.setAttribute("data-copied", "");
     button.title = "Copied";
+    if (label) label.textContent = "✓ Copied";
     setTimeout(() => {
         button.classList.remove("copied");
+        button.removeAttribute("data-copied");
         button.title = "Copy code";
+        if (label) label.textContent = "Copy";
     }, 1500);
 });
 
@@ -6334,7 +6648,8 @@ function renderMarkdownBlock(text) { return renderMarkdown(text); }
 function renderMarkdownInline(text) {
     if (typeof marked === "undefined") return escapeHtml(text);
     try {
-        return marked.parseInline(String(text || ""), { gfm: true });
+        const clean = sanitizeHtml(marked.parseInline(String(text || ""), { gfm: true }));
+        return clean === null ? escapeHtml(text) : clean;
     } catch {
         return escapeHtml(text);
     }
@@ -6615,9 +6930,10 @@ function routeEvent(ev) {
             break;
         case "context_snapshot": {
             // Live Context Observatory push from the pre_provider_call hook —
-            // one per iteration. Only act when the Memory view is the
-            // active panel for the focused session, so background turns
-            // and other views pay nothing.
+            // one per iteration. The top-bar meter takes the summary numbers
+            // for the focused session; the full grid only renders when the
+            // Memory view is the active panel, so other views pay nothing.
+            if (isFocused) Alpine.store("context").apply(ev);
             const mode = Alpine.store("mode");
             if (isFocused && mode && mode.active === "memory") {
                 Alpine.store("memory").applySnapshot(ev);
@@ -6760,6 +7076,7 @@ function routeEvent(ev) {
             chat.addError(ev.text || "", name);
             slot.busy = false;
             chat.finishTurn(name);
+            Alpine.store("sessions").recordOutcome(name, "error", ev.text || "");
             break;
         case "status_start": break;  // spinner status; trace dots cover it
         case "status_end": break;
@@ -6769,6 +7086,21 @@ function routeEvent(ev) {
             prompts.push({ id: ev.id, prompt: ev.prompt, session_name: name });
             break;
         case "prompt_resolved":
+            // Server-side YOLO auto-approvals carry the additive `auto: true`
+            // flag (mu/gui/web_ui.py notify_auto_approved). Prompts a person
+            // answered are recorded by the card itself on submit.
+            if (ev.auto) {
+                chat.addPromptResolved({
+                    shape: "tool_approval",
+                    title: "approve tool call",
+                    answer: "approved",
+                    toolName: ev.tool_name || "",
+                    target: ev.target || "",
+                    auto: true,
+                    cancelled: false,
+                }, name);
+            }
+            break;
         case "prompt_cancelled": break;
         case "turn_complete":
             // A terminal error is carried on turn_complete as well as the
@@ -6787,6 +7119,8 @@ function routeEvent(ev) {
             }
             slot.busy = false;
             chat.finishTurn(name);
+            Alpine.store("sessions").recordOutcome(name, (ev.result && ev.result.status) || "completed",
+                                                   (ev.result && ev.result.error) || "");
             if (ev.result && ev.result.status === "interrupted") {
                 chat.addInfo(
                     "Execution paused. Type `/continue` to resume, or enter a new prompt.",
@@ -6832,7 +7166,9 @@ function routeEvent(ev) {
             }
             break;
         case "diff":
-            chat.addInfo(`diff proposed: ${ev.filename}`, null, name);
+            // Rendered through the shared Wash diff (static/js/wash/diff.js);
+            // approval cards look the latest diff up by filename.
+            chat.addDiff(ev.filename, ev.original, ev.new, name);
             break;
         case "session_updated":
             slot.externalActive = true;
@@ -6919,6 +7255,55 @@ function summarizeTrace(t, _tick) {
             ? `${((Date.now() - t.startedAt) / 1000).toFixed(1)}s`
             : null);
     return dur ? `${label} · ${dur}` : label;
+}
+
+// "Worked for 2m 4s · 14 steps" — the interim-turn collapse row (G§9.7).
+function summarizeCollapse(t) {
+    const children = (t && t.childTurns) || [];
+    let steps = 0;
+    for (const child of children) {
+        if (child.role === "trace") {
+            steps += (child.events || []).filter(ev => ev.kind === "tool_call").length;
+        } else if (child.role !== "assistant") {
+            steps += 1;
+        }
+    }
+    if (!steps) steps = children.length;
+    const stepText = `${steps} step${steps === 1 ? "" : "s"}`;
+    const seconds = parseFloat(t && t.elapsed);
+    if (!(seconds > 0)) return stepText;
+    const minutes = Math.floor(seconds / 60);
+    const rest = Math.round(seconds % 60);
+    const worked = minutes > 0 ? `${minutes}m ${rest}s` : `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+    return `Worked for ${worked} · ${stepText}`;
+}
+
+// Resolved-prompt breadcrumb helpers (G§9.9 "✓ Approved · write_file routes.py · 14:02").
+function resolvedIsApproval(t) {
+    return !!t && (t.shape === "tool_approval" || t.shape === "diff");
+}
+function resolvedVerb(t) {
+    if (!t) return "";
+    if (resolvedIsApproval(t)) {
+        if (t.cancelled) return "Denied";
+        return t.auto ? "Auto-approved" : "Approved";
+    }
+    return t.cancelled ? "Cancelled" : "Answered";
+}
+function resolvedSubject(t) {
+    if (!t) return "";
+    if (resolvedIsApproval(t)) {
+        const target = String(t.target || "").split("/").pop();
+        return [t.toolName || (t.shape === "diff" ? "change" : "tool"), target].filter(Boolean).join(" ");
+    }
+    return "";
+}
+function formatClock(ms) {
+    const value = Number(ms) || 0;
+    if (!value) return "";
+    try {
+        return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch (e) { return ""; }
 }
 
 function _fmtTok(n) {
@@ -7015,7 +7400,7 @@ function isPlanModeBlockedResult(value) {
 }
 
 function eventLabel(ev) {
-    if (ev.kind === "tool_result" && ev.planBlocked) return "🔒 Blocked by plan mode";
+    if (ev.kind === "tool_result" && ev.planBlocked) return "Blocked by plan mode";
     switch (ev.kind) {
         case "tool_call":   return "› tool";
         case "tool_result": return "↳ result";
@@ -7075,6 +7460,9 @@ function promptModal() {
             this.otherText = "";
             this.answers = {};
             this.remember = false;
+            // Announce the new prompt assertively (G§9.9). Focus is NOT moved
+            // to Approve; see focusOnAppear().
+            try { Alpine.store("prompts").announce(this.announcement()); } catch (e) { /* no store */ }
             // Apply syntax highlighting to any code fences in the
             // freshly-rendered title/description/options.
             queueMicrotask(() => highlightInScope(".modal"));
@@ -7099,6 +7487,130 @@ function promptModal() {
         // of a single line of plaintext.
         titleHtml() { return renderMarkdownBlock(this.title()); },
         descriptionHtml() { return renderMarkdownBlock(this.description); },
+
+        // ---------- Wash approval card (G§9.9, §9.10) -----------------
+        // Presentation helpers only; submit()/cancel() payloads are unchanged.
+        isApproval() { return ["tool_approval", "diff"].includes(this.shape); },
+        target() {
+            if (this.shape === "diff") return String(this.prompt.filename || this.prompt.path || "");
+            return window.WashToolCard ? window.WashToolCard.primaryArg(this.prompt.tool_args) : "";
+        },
+        toolKind() {
+            return window.WashToolCard ? window.WashToolCard.kindOf(this.prompt.tool_name) : "tool";
+        },
+        // A high-risk call escalates the card from attention to danger:
+        // a server-supplied risk, an always-human policy, deletes, pushes and
+        // shell commands that reach the network.
+        risky() {
+            if (!this.isApproval()) return false;
+            if (this.prompt.risk) return true;
+            if (this.prompt.approval_policy === "always_human") return true;
+            const name = String(this.prompt.tool_name || "").toLowerCase();
+            if (/(delete|remove|rm_|drop|push|force|destroy|kill)/.test(name)) return true;
+            const command = this.shape === "tool_approval" && this.toolKind() === "shell" ? this.target() : "";
+            return /\b(rm\s+-[a-z]*[rf]|git\s+push|curl|wget|ssh|scp|rsync|nc\s|sudo|mkfs|dd\s+if=|chmod\s+-R|docker\s+(rm|push))/i.test(command);
+        },
+        tone() {
+            if (this.risky()) return "danger";
+            return this.isApproval() ? "attention" : "accent";
+        },
+        chipLabel() { return this.isApproval() ? "Needs you" : "Question"; },
+        // The human sentence in the card heading ("Edit 1 file", "Run `pytest -q`").
+        headline() {
+            if (this.shape === "diff") return `Review the change to ${this.target() || "a file"}`;
+            if (this.shape !== "tool_approval") return this.title();
+            const tool = String(this.prompt.tool_name || "a tool");
+            const target = this.target();
+            switch (this.toolKind()) {
+                case "edit": return target ? `Permission to edit ${target.split("/").pop()}` : "Permission to edit files";
+                case "shell": return target ? `Run \`${target.length > 80 ? target.slice(0, 79) + "…" : target}\`` : "Permission to run a command";
+                case "web": return "Permission to reach the web";
+                case "agent": return "Permission to start a sub-agent";
+                default: return `Permission to use ${tool}`;
+            }
+        },
+        headlineHtml() {
+            return this.shape === "tool_approval" || this.shape === "diff"
+                ? renderMarkdownInline(this.headline())
+                : renderMarkdownBlock(this.title());
+        },
+        announcement() {
+            if (this.isApproval()) return `Mucli needs your approval: ${this.headline().replace(/`/g, "")}`;
+            return `Mucli has a question: ${String(this.title() || "").slice(0, 160)}`;
+        },
+        // Diff for the preview: the prompt's own diff, else the latest
+        // proposed diff for the same file (the server publishes `diff`
+        // events just before edit approvals), else a patch argument.
+        previewDiff() {
+            if (this.shape === "diff") return String(this.prompt.diff || "");
+            const args = this.prompt.tool_args;
+            if (args && typeof args === "object") {
+                for (const key of ["patch", "diff", "unified_diff"]) {
+                    if (typeof args[key] === "string" && /^(---|\+\+\+|@@|diff --git)/m.test(args[key])) return args[key];
+                }
+            }
+            const recent = Alpine.store("chat").diffFor(this.target(), this.prompt.session_name);
+            return recent ? recent.unified : "";
+        },
+        previewHtml() {
+            const diff = this.previewDiff();
+            if (diff && window.WashDiff) return window.WashDiff.renderDiffHTML(diff, { maxLines: 16, moreLabel: "the full arguments are below" });
+            return "";
+        },
+        diffStats() {
+            const diff = this.previewDiff();
+            return diff && window.WashDiff ? window.WashDiff.stats(diff) : null;
+        },
+        commandPreview() {
+            return this.shape === "tool_approval" && this.toolKind() === "shell" ? this.target() : "";
+        },
+        riskText() {
+            if (this.prompt.risk) return String(this.prompt.risk);
+            if (this.prompt.approval_policy === "always_human") return "Always asks a person";
+            if (this.risky()) return "High-risk action";
+            if (this.toolKind() === "edit") return "Modifies files";
+            if (this.toolKind() === "shell") return "Runs a shell command";
+            return "";
+        },
+        // Focus the heading when the card appears, unless the person is
+        // typing somewhere else (then the live region announces it and the
+        // top-bar ◆ chip jumps here). Programmatic focus does not arm the
+        // ⏎ / a / d shortcuts; a pointer or keyboard move into the card does.
+        focusOnAppear(el) {
+            const active = document.activeElement;
+            const typing = active && active !== document.body
+                && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+            if (typing) return;
+            requestAnimationFrame(() => {
+                const heading = el.querySelector("[data-approval-heading]");
+                if (heading && el.hasAttribute("data-current")) heading.focus({ preventScroll: true });
+            });
+        },
+        arm(el) { el.dataset.armed = "true"; },
+        // Card-scoped shortcuts: only when focus is on the card or its heading
+        // (never inside a field or on another control) and the card is armed.
+        onCardKey(event, el) {
+            const t = event.target;
+            if (!(t === el || (t && t.hasAttribute && t.hasAttribute("data-approval-heading")))) return;
+            if (event.metaKey || event.ctrlKey || event.altKey) return;
+            if (el.dataset.armed !== "true") {
+                if (event.key === "Tab") this.arm(el);
+                return;
+            }
+            const key = event.key;
+            if (key === "Enter") { event.preventDefault(); this.submit(); return; }
+            if (this.isApproval() && (key === "a" || key === "A")) { event.preventDefault(); this.submit(); return; }
+            if (this.isApproval() && (key === "d" || key === "D")) { event.preventDefault(); this.cancel(); return; }
+            if (/^[1-9]$/.test(key) && ["choice", "choices"].includes(this.shape)) {
+                const options = this.prompt.options || this.prompt.choices || [];
+                const opt = options[Number(key) - 1];
+                if (opt !== undefined) {
+                    event.preventDefault();
+                    const value = this.optValue(opt);
+                    this.setChoice(value, this.multi ? !this.isChoiceSelected(value) : true);
+                }
+            }
+        },
 
         okLabel() {
             switch (this.shape) {
@@ -7251,19 +7763,26 @@ function autoSize(el) {
 
 // ---------- theme ----------------------------------------------------------
 //
-// The early-load script in base.html sets data-theme before first paint.
-// These helpers run after DOM ready to (a) sync the highlight.js stylesheet
-// to the current theme and (b) flip the theme on user toggle.
+// The pre-paint bootstrap (templates/partials/theme_bootstrap.html) sets
+// html[data-theme] to "paper" or "dusk" before first paint. route_theme.js
+// (window.MuTheme) persists the preference and fires mucli-theme-change;
+// these helpers forward the theme to visualization frames and redraw canvases.
+// Code highlighting uses the token-driven Wash hljs theme, so no stylesheet swap.
 
-function applyTheme(theme) {
-    document.documentElement.setAttribute("data-theme", theme);
-    const dark = document.getElementById("hljs-dark");
-    const light = document.getElementById("hljs-light");
-    if (dark)  dark.disabled  = (theme === "light");
-    if (light) light.disabled = (theme === "dark");
+function muWashTheme() {
+    const t = document.documentElement.getAttribute("data-theme");
+    return (t === "dusk" || t === "dark") ? "dusk" : "paper";
+}
+
+function applyTheme(wash) {
+    wash = (wash === "dusk" || wash === "dark") ? "dusk" : "paper";
+    document.documentElement.setAttribute("data-theme", wash);
+    // Visualization artifacts keep the legacy light/dark contract in `theme`
+    // and receive the Wash name in `wash`.
+    const theme = wash === "dusk" ? "dark" : "light";
     document.querySelectorAll("iframe.visualization-frame").forEach((frame) => {
         try {
-            frame.contentWindow?.postMessage({ type: "mucli-theme", theme }, "*");
+            frame.contentWindow?.postMessage({ type: "mucli-theme", theme, wash }, "*");
         } catch (e) { /* Sandboxed frames may be between navigations. */ }
     });
     // Canvas pixels do not inherit CSS variables. Redraw observability
@@ -7281,7 +7800,8 @@ function visualizationThemeUrl(value, theme) {
     if (!value) return "";
     try {
         const url = new URL(value, window.location.origin);
-        url.searchParams.set("mucli_theme", theme === "light" ? "light" : "dark");
+        const light = theme === "light" || theme === "paper";
+        url.searchParams.set("mucli_theme", light ? "light" : "dark");
         return url.origin === window.location.origin
             ? `${url.pathname}${url.search}${url.hash}`
             : url.toString();
@@ -7291,8 +7811,8 @@ function visualizationThemeUrl(value, theme) {
 }
 
 function toggleTheme() {
-    const cur = document.documentElement.getAttribute("data-theme") || "dark";
-    const next = cur === "dark" ? "light" : "dark";
+    if (window.MuTheme) { window.MuTheme.toggle(); return; }
+    const next = muWashTheme() === "dusk" ? "paper" : "dusk";
     try { localStorage.setItem("mucli-theme", next); } catch (e) {}
     applyTheme(next);
 }
@@ -7307,8 +7827,11 @@ function rehighlightAll() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+    applyTheme(muWashTheme());
     Alpine.store("layout").init();
+    // The /design gallery loads app.js only to replay canned events through
+    // routeEvent() and the real chat templates; it never boots a session.
+    if (window.MUCLI_GALLERY_REPLAY) return;
     bootSSE();
     Alpine.store("chat").loadHistory();
     Alpine.store("sessions").load();
@@ -7513,7 +8036,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const tab = document.createElement('button');
         tab.type = 'button';
+        tab.className = 'w-nav__item';
         tab.setAttribute(':class', "{ active: $store.inspector.tab === 'pricing' }");
+        tab.setAttribute(':aria-selected', "$store.inspector.tab === 'pricing' ? 'true' : 'false'");
         tab.setAttribute('@click', "$store.inspector.setTab('pricing'); $store.pricingSettings.load()");
         tab.setAttribute('role', 'tab');
         tab.textContent = 'pricing';
@@ -7532,79 +8057,80 @@ document.addEventListener("DOMContentLoaded", () => {
                     <h3 class="pricing-settings-title">Model pricing</h3>
                     <p class="pricing-settings-copy">Edit the per-million token rates MuCLI uses for cost accounting. OpenAI, Gemini, Anthropic, and Ollama Cloud all use this registry. Local Ollama remains $0 attributable provider/API cost; host compute is intentionally separate.</p>
                 </div>
-                <a class="pricing-settings-advanced" href="/static/model_costs.html">Advanced registry</a>
+                <a class="pricing-settings-advanced w-btn" data-variant="ghost" data-size="sm" href="/models/costs"><span>Advanced registry</span><span class="w-btn__chevron" aria-hidden="true">›</span></a>
             </div>
 
             <div class="pricing-settings-meta" x-show="$store.pricingSettings.loaded">
                 <span class="pricing-settings-source" x-text="$store.pricingSettings.sourceLabel()" :title="$store.pricingSettings.activeConfigPath || $store.pricingSettings.configPath"></span>
-                <span class="pricing-settings-state"
+                <span class="pricing-settings-state w-chip"
+                      :data-tone="$store.pricingSettings.usingOverride ? 'accent' : 'neutral'"
                       :class="{ 'is-override': $store.pricingSettings.usingOverride }"
                       x-text="$store.pricingSettings.usingOverride ? 'override active' : 'defaults'"></span>
             </div>
 
-            <div class="pricing-provider-filter" x-show="$store.pricingSettings.loaded">
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'all' }" @click="$store.pricingSettings.provider = 'all'">all</button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'openai' }" @click="$store.pricingSettings.provider = 'openai'">OpenAI <span x-text="$store.pricingSettings.providerCount('openai')"></span></button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'gemini' }" @click="$store.pricingSettings.provider = 'gemini'">Gemini <span x-text="$store.pricingSettings.providerCount('gemini')"></span></button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'anthropic' }" @click="$store.pricingSettings.provider = 'anthropic'">Anthropic <span x-text="$store.pricingSettings.providerCount('anthropic')"></span></button>
-                <button type="button" :class="{ active: $store.pricingSettings.provider === 'ollama' }" @click="$store.pricingSettings.provider = 'ollama'">Ollama <span x-text="$store.pricingSettings.providerCount('ollama')"></span></button>
-                <button type="button" @click="$store.pricingSettings.load(true)">refresh</button>
+            <div class="pricing-provider-filter w-tabs" role="tablist" aria-label="Pricing providers" x-show="$store.pricingSettings.loaded">
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'all' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'all' }" @click="$store.pricingSettings.provider = 'all'">all</button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'openai' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'openai' }" @click="$store.pricingSettings.provider = 'openai'">OpenAI <span class="w-count" x-text="$store.pricingSettings.providerCount('openai')"></span></button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'gemini' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'gemini' }" @click="$store.pricingSettings.provider = 'gemini'">Gemini <span class="w-count" x-text="$store.pricingSettings.providerCount('gemini')"></span></button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'anthropic' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'anthropic' }" @click="$store.pricingSettings.provider = 'anthropic'">Anthropic <span class="w-count" x-text="$store.pricingSettings.providerCount('anthropic')"></span></button>
+                <button type="button" class="w-tabs__tab" role="tab" :aria-selected="$store.pricingSettings.provider === 'ollama' ? 'true' : 'false'" :class="{ active: $store.pricingSettings.provider === 'ollama' }" @click="$store.pricingSettings.provider = 'ollama'">Ollama <span class="w-count" x-text="$store.pricingSettings.providerCount('ollama')"></span></button>
+                <button type="button" class="pricing-refresh-button w-btn" data-variant="ghost" data-size="sm" @click="$store.pricingSettings.load(true)"><span>Refresh</span></button>
             </div>
 
-            <div class="pricing-settings-error" x-show="$store.pricingSettings.error" x-text="$store.pricingSettings.error"></div>
+            <div class="pricing-settings-error" role="alert" x-show="$store.pricingSettings.error" x-text="$store.pricingSettings.error"></div>
             <div class="pricing-settings-empty" x-show="$store.pricingSettings.loading">Loading model pricing…</div>
 
             <div class="pricing-model-list" x-show="$store.pricingSettings.loaded && !$store.pricingSettings.loading">
                 <template x-for="row in $store.pricingSettings.filteredModels()" :key="row.provider + ':' + row.key">
                     <article class="pricing-model-row">
                         <div class="pricing-model-head">
-                            <span class="pricing-provider-badge" x-text="row.provider"></span>
+                            <span class="pricing-provider-badge w-chip" data-variant="meta" x-text="row.provider"></span>
                             <span class="pricing-model-name" x-text="row.key" :title="row.key"></span>
-                            <select class="pricing-billing-select" :value="row.billing" @change="$store.pricingSettings.setBilling(row, $event.target.value)">
+                            <span class="w-select pricing-billing-wrap"><select class="pricing-billing-select w-select__control" aria-label="Billing mode" :value="row.billing" @change="$store.pricingSettings.setBilling(row, $event.target.value)">
                                 <option value="token">token priced</option>
                                 <option value="estimated_token">estimated token</option>
                                 <option value="local">local / $0 API</option>
                                 <option value="unknown">unpriced</option>
-                            </select>
+                            </select></span>
                         </div>
                         <div class="pricing-capability-map">
                             <div class="pricing-capability-line">
                                 <span class="pricing-capability-label">inputs</span>
                                 <template x-for="modality in (row.input_modalities || ['text'])" :key="'in:' + modality">
-                                    <span class="pricing-capability-chip is-input" x-text="modality"></span>
+                                    <span class="pricing-capability-chip is-input w-chip" data-tone="accent" x-text="modality"></span>
                                 </template>
                             </div>
                             <div class="pricing-capability-line">
                                 <span class="pricing-capability-label">outputs</span>
                                 <template x-for="modality in (row.output_modalities || ['text'])" :key="'out:' + modality">
-                                    <span class="pricing-capability-chip" x-text="modality"></span>
+                                    <span class="pricing-capability-chip w-chip" data-variant="meta" x-text="modality"></span>
                                 </template>
                             </div>
                             <div class="pricing-capability-line" x-show="(row.capabilities || []).length">
                                 <span class="pricing-capability-label">features</span>
                                 <template x-for="capability in (row.capabilities || [])" :key="'cap:' + capability">
-                                    <span class="pricing-capability-chip is-feature" x-text="String(capability).replaceAll('_', ' ')"></span>
+                                    <span class="pricing-capability-chip is-feature w-chip" x-text="String(capability).replaceAll('_', ' ')"></span>
                                 </template>
                             </div>
                         </div>
                         <div class="pricing-rate-grid">
-                            <label class="pricing-rate-field">
-                                <span>Input / 1M</span>
-                                <input type="number" min="0" step="0.001"
+                            <label class="pricing-rate-field w-field">
+                                <span class="w-field__label">Input / 1M</span>
+                                <input type="number" class="w-input" data-mono min="0" step="0.001"
                                        :disabled="row.billing === 'local' || row.billing === 'unknown'"
                                        :value="$store.pricingSettings.displayRate(row.input_per_million)"
                                        @input="$store.pricingSettings.setRate(row, 'input_per_million', $event.target.value)">
                             </label>
-                            <label class="pricing-rate-field">
-                                <span>Cached input / 1M</span>
-                                <input type="number" min="0" step="0.001"
+                            <label class="pricing-rate-field w-field">
+                                <span class="w-field__label">Cached input / 1M</span>
+                                <input type="number" class="w-input" data-mono min="0" step="0.001"
                                        :disabled="row.billing === 'local' || row.billing === 'unknown'"
                                        :value="$store.pricingSettings.displayRate(row.cached_input_per_million)"
                                        @input="$store.pricingSettings.setRate(row, 'cached_input_per_million', $event.target.value)">
                             </label>
-                            <label class="pricing-rate-field">
-                                <span>Output / 1M</span>
-                                <input type="number" min="0" step="0.001"
+                            <label class="pricing-rate-field w-field">
+                                <span class="w-field__label">Output / 1M</span>
+                                <input type="number" class="w-input" data-mono min="0" step="0.001"
                                        :disabled="row.billing === 'local' || row.billing === 'unknown'"
                                        :value="$store.pricingSettings.displayRate(row.output_per_million)"
                                        @input="$store.pricingSettings.setRate(row, 'output_per_million', $event.target.value)">
@@ -7622,8 +8148,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="pricing-settings-actions" x-show="$store.pricingSettings.loaded">
                 <span class="pricing-settings-dirty" x-text="$store.pricingSettings.dirty ? 'Unsaved pricing changes' : ($store.pricingSettings.usingOverride ? 'Operator pricing override active' : 'Using packaged defaults')"></span>
                 <div class="pricing-settings-buttons">
-                    <button type="button" @click="$store.confirm.ask('Reset all model pricing to packaged defaults?', $event, () => $store.pricingSettings.reset(), {danger:true})">reset</button>
-                    <button type="button" class="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'saving…' : 'save pricing'"></button>
+                    <button type="button" class="w-btn" data-variant="secondary" @click="$store.confirm.ask('Reset all model pricing to packaged defaults?', $event, () => $store.pricingSettings.reset(), {danger:true})"><span>Reset</span></button>
+                    <button type="button" class="w-btn" data-variant="primary" :disabled="!$store.pricingSettings.dirty || $store.pricingSettings.saving" @click="$store.pricingSettings.save()" x-text="$store.pricingSettings.saving ? 'Saving…' : 'Save pricing'"></button>
                 </div>
             </div>
         `;

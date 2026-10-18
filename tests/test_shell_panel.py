@@ -22,7 +22,7 @@ MODES_PY = REPO / "mu" / "gui" / "routers" / "modes.py"
 APP_JS = REPO / "mu" / "gui" / "static" / "js" / "app.js"
 INDEX_HTML = REPO / "mu" / "gui" / "templates" / "index.html"
 SHELL_PANEL_HTML = REPO / "mu" / "gui" / "templates" / "fragments" / "shell_panel.html"
-APP_CSS = REPO / "mu" / "gui" / "static" / "css" / "app.css"
+APP_CSS = REPO / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "panels.css"
 
 
 def read(path: Path) -> str:
@@ -147,7 +147,7 @@ def test_shell_panel_included_in_index():
 # ---------------------------------------------------------------------------
 
 def test_shell_panel_css_exists():
-    """app.css must contain shell panel styles."""
+    """The stage-panel patterns must contain shell panel styles."""
     src = read(APP_CSS)
     assert ".shell-panel" in src, ".shell-panel CSS class not found"
     assert ".shell-output" in src, ".shell-output CSS class not found"

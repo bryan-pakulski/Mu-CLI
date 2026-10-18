@@ -1,0 +1,83 @@
+/* Table (G§9.19) — hairline rows, no zebra, sticky sunken header,
+ * right-aligned tabular numbers, accent-wash selected row, row actions on
+ * hover/focus.
+ *
+ *   <div class="w-table-wrap">
+ *     <table class="w-table">
+ *       <thead><tr><th>Job</th><th data-num>Cost</th><th><span class="w-sr-only">Actions</span></th></tr></thead>
+ *       <tbody><tr aria-selected="true"><td>…</td><td data-num>$0.42</td>
+ *         <td class="w-table__actions">…ghost buttons…</td></tr></tbody>
+ *     </table>
+ *   </div>
+ *
+ * Below 600 a table with data-stack stacks into a list; give each <td> a
+ * data-label for its column name.
+ */
+.w-table-wrap {
+    max-width: 100%;
+    overflow: auto;
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-md);
+    background: var(--w-glass-fill);
+    box-shadow: var(--w-glass-lift-flat);
+}
+.w-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-body-size);
+}
+.w-table th {
+    position: sticky;
+    top: 0;
+    z-index: var(--wash-z-raised);
+    height: 36px;
+    padding: 0 var(--wash-space-3);
+    border-bottom: 1px solid var(--wash-hairline);
+    /* sticky: rows scroll beneath, so the head is strong glass with its own blur */
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter);
+    -webkit-backdrop-filter: var(--w-glass-filter);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    text-align: left;
+    white-space: nowrap;
+}
+.w-table td {
+    height: 44px;
+    padding: var(--wash-space-2) var(--wash-space-3);
+    border-bottom: 1px solid var(--wash-hairline);
+    vertical-align: middle;
+}
+.w-table tbody tr:last-child td { border-bottom: 0; }
+.w-table :is(th, td)[data-num] { text-align: right; font-variant-numeric: tabular-nums; }
+.w-table td[data-mono] { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
+.w-table tbody tr:hover td { background: var(--w-glass-fill-subtle); }
+.w-table tbody tr[aria-selected="true"] td { background: var(--wash-accent-wash); }
+.w-table__actions { width: 1%; white-space: nowrap; text-align: right; }
+.w-table__actions > * { opacity: 0; transition: opacity var(--wash-motion-micro) var(--wash-ease-micro); }
+.w-table tr:is(:hover, :focus-within) .w-table__actions > * { opacity: 1; }
+@media (pointer: coarse) {
+    .w-table__actions > * { opacity: 1; }
+}
+.w-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+@media (width < 600px) {
+    .w-table[data-stack] thead { display: none; }
+    .w-table[data-stack] tr { display: block; padding: var(--wash-space-2) 0; border-bottom: 1px solid var(--wash-hairline); }
+    .w-table[data-stack] td { display: flex; justify-content: space-between; gap: var(--wash-space-3); height: auto; border: 0; }
+    .w-table[data-stack] td[data-label]::before { content: attr(data-label); color: var(--wash-ink-3); }
+    .w-table[data-stack] .w-table__actions { width: auto; }
+    .w-table[data-stack] .w-table__actions > * { opacity: 1; }
+}

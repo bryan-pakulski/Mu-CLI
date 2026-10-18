@@ -1,0 +1,151 @@
+/* Card, state card, stat strip (G§9.3)
+ *
+ *   <article class="w-card" [data-variant="sunken"] [data-state="attention|danger|plan|ok"]>
+ *     <header class="w-card__head">
+ *       <span class="w-eyebrow">…</span>
+ *       <h3 class="w-card__title">Title</h3>
+ *       <span class="w-card__meta">1 of 3</span>
+ *     </header>
+ *     <div class="w-card__body">…</div>
+ *     <footer class="w-card__foot">…actions…</footer>
+ *   </article>
+ *
+ *   <dl class="w-stats"><div class="w-stat"><dt class="w-stat__label">Needs you</dt>
+ *     <dd class="w-stat__value">1</dd></div>…</dl>
+ *
+ * Cards are level-1 glass (G§3.3): glass fill, light glass edge, top sheen.
+ * State cards: the header strip is tinted with the semantic wash (72% wash
+ * mixed into the glass) and carries the status chip. No side rule (G§3.4).
+ * Only attention, danger, plan and ok use it.
+ */
+.w-card {
+    --w-card-pad: var(--wash-space-5);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-lg);
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift);
+}
+.w-card[data-variant="sunken"] {
+    border-color: transparent;
+    background: var(--w-glass-fill-subtle);
+    box-shadow: none;
+}
+.w-card[data-variant="interactive"] { cursor: pointer; transition: border-color var(--wash-motion-micro) var(--wash-ease-micro); }
+.w-card[data-variant="interactive"]:hover { border-color: var(--wash-hairline-strong); background: var(--w-glass-fill-strong); }
+.w-card__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    flex-wrap: wrap;
+    padding: var(--wash-space-4) var(--w-card-pad) 0;
+}
+.w-card__head:only-child,
+.w-card__head:has(+ .w-card__foot) { padding-bottom: var(--wash-space-4); }
+.w-card__title {
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+}
+.w-card__meta {
+    margin-left: auto;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-variant-numeric: tabular-nums;
+}
+.w-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-3);
+    padding: var(--wash-space-3) var(--w-card-pad) var(--w-card-pad);
+    color: var(--wash-ink-2);
+}
+.w-card__foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+    padding: var(--wash-space-3) var(--w-card-pad);
+    border-top: 1px solid var(--wash-hairline);
+}
+.w-card__body + .w-card__foot { border-top: 0; padding-top: 0; }
+
+/* state cards: a tinted header strip, no side rule */
+.w-card[data-state] .w-card__head {
+    padding: var(--wash-space-3) var(--w-card-pad);
+    border-bottom: 1px solid var(--wash-hairline);
+    background: color-mix(in srgb, var(--w-state-wash) 72%, var(--w-glass-fill));
+}
+.w-card[data-state] .w-card__head .w-card__title { color: var(--w-state-ink, var(--wash-plum)); }
+.w-card[data-state] .w-card__body { padding-top: var(--wash-space-4); }
+.w-card[data-state="attention"] { --w-state-ink: var(--wash-attention-ink); --w-state-wash: var(--wash-attention-wash); }
+.w-card[data-state="danger"] { --w-state-ink: var(--wash-danger-ink); --w-state-wash: var(--wash-danger-wash); }
+.w-card[data-state="ok"] { --w-state-ink: var(--wash-ok-ink); --w-state-wash: var(--wash-ok-wash); }
+.w-card[data-state="plan"] {
+    --w-state-ink: var(--wash-plan-ink);
+    --w-state-wash: var(--wash-plan-wash);
+    border-style: dashed;
+    border-color: var(--wash-plan-ink);
+}
+
+/* card grid */
+.w-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+    gap: var(--wash-space-4);
+}
+
+/* stat strip: one row of big numbers with hairline dividers, not tiles */
+.w-stats {
+    display: flex;
+    margin: 0;
+    padding: 0 0 var(--wash-space-5);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.w-stat {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    padding: 0 var(--wash-space-6);
+    border-left: 1px solid var(--wash-hairline);
+    color: inherit;
+    text-decoration: none;
+}
+.w-stat:first-child { padding-left: 0; border-left: 0; }
+a.w-stat:hover .w-stat__value { color: var(--wash-accent-ink); }
+.w-stat__value {
+    display: block;
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-1-size);
+    line-height: var(--wash-type-title-1-line);
+    font-weight: var(--wash-type-title-1-weight);
+    letter-spacing: var(--wash-type-title-1-tracking);
+    font-variant-numeric: tabular-nums;
+}
+.w-stat__label {
+    display: block;
+    margin: var(--wash-space-1) 0 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.w-stat[data-tone] .w-stat__value { color: var(--w-tone-ink); }
+
+@media (width < 600px) {
+    .w-stats { flex-wrap: wrap; row-gap: var(--wash-space-4); }
+    .w-stat { flex-basis: 50%; padding: 0 var(--wash-space-4); }
+    .w-stat:nth-child(odd) { padding-left: 0; border-left: 0; }
+}

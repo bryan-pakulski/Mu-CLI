@@ -104,6 +104,11 @@ def import_jira(service, *, keys, jql, defaults, force=False):
     """``force`` re-imports tickets whose latest job is done (terminal ``--force``)."""
     from mu.integrations.jira import JiraClient, import_issues
     from mu.integrations.jira_settings import resolve_config
+    template = str(((defaults or {}).get("execution") or {}).get("template") or "").strip()
+    if template:
+        # "Run in" for every ticket: an unknown template fails the import once (ValueError).
+        from ..sandbox.environments import normalize_template_choice
+        normalize_template_choice({"template": template})
     return import_issues(service, JiraClient(resolve_config()), keys=keys, jql=jql, defaults=defaults, force=force)
 
 
@@ -266,7 +271,10 @@ def _message(service, job, facts, args):
 
 def _resume(service, job, facts, args):
     if facts.pending_approval:
-        raise CommandRejected("Approve or deny the pending tool request before resuming")
+        # Jobs run unattended: the parked call is decided automatically and the stage resumes.
+        from ..unattended import resume_parked_approval
+        resume_parked_approval(service, job)
+        return ["state", "pipeline", "session"], {"auto_resolved": True}
     guidance = str(args.get("guidance") or "").strip()
     if guidance:
         _merge_meta(service, job.id, resume_guidance=guidance)
@@ -348,6 +356,27 @@ def _retry(service, job, facts, args):
     return ["state", "pipeline"], {}
 
 
+def _skip_setup(service, job, facts, args):
+    """"Continue without setup": the failed template job setup is marked skipped for the
+    job's current image and the parked stage resumes."""
+    from ..sandbox.job_setup import skip_failed_setup
+    skipped = skip_failed_setup(service, job.id)
+    fresh = service.get(job.id)
+    _resume(service, fresh, facts_for_job(service, fresh), {"guidance": ""})
+    return ["state", "pipeline", "session"], {"skipped": skipped}
+
+
+def _continue_unverified(service, job, facts, args):
+    """Legacy alias: jobs run unattended, so unverified checks continue to review on their own.
+    Only a job parked on unverified checks before that rule can use it (the review verdict is
+    capped at needs_work)."""
+    _merge_meta(service, job.id, checks_unverified=None, continued_unverified=True)
+    service.store.append_event(job.id, "continue_unverified", reason="human continued with unverified checks",
+                               payload={"reason": str(args.get("reason") or "")[:2000]})
+    service.transition(job.id, "reviewing", reason="continue unverified: review with unrunnable checks")
+    return ["state", "pipeline", "checks", "review"], {}
+
+
 def _recheck(service, job, facts, args):
     # Re-run Checks + Review on the current HEAD (no implement run).
     if not job.worktree:
@@ -408,18 +437,23 @@ def _mark_findings(service, job, facts, args):
 
 def _push(service, job, facts, args):
     from ..checks import push_check_reason
-    reason = push_check_reason(service, job)
+    from ..verification import VerificationStore
+    run = VerificationStore(service.store).latest(job.id)
+    reason = push_check_reason(service, job, run=run, allow_unverified=True)
     if reason:
         raise CommandRejected(reason)
     override = str(args.get("override_reason") or "").strip()
     if facts.verdict == "do_not_merge" and not override:
         raise CommandRejected("verdict is do_not_merge: push requires override_reason")
+    # Unverified checks (some could not run) need no override: the review verdict is capped and
+    # the PR body states that the checks could not run.
+    unverified = run is not None and not run.verified
     publish_override = _publish_override(args)
     if override:
         service.store.append_event(job.id, "push_override", reason="human override",
-                                   payload={"verdict": facts.verdict, "reason": override[:2000]})
+                                   payload={"verdict": facts.verdict, "reason": override[:2000], "unverified": unverified})
     # Always (re)written so a stale override from an earlier push never leaks.
-    _merge_meta(service, job.id, publish_override=publish_override)
+    _merge_meta(service, job.id, publish_override=publish_override, unverified_override=None)
     service.store.transition_core(job.id, JobState.PUSHING, reason="human push")
     return ["state", "pipeline"], {"publish_override": publish_override}
 
@@ -519,8 +553,10 @@ def _environment_target(facts, args):
 
 
 def _approve_environment(service, job, facts, args):
-    """Explicit human approval of a repository-declared image/Dockerfile (then requeue the parked
-    job) or of repository egress (recorded only; a running job keeps running)."""
+    """Explicit human approval of a repository-declared image/Dockerfile or of repository egress.
+    Jobs run unattended, so the job normally never waited on it (the image was skipped, the egress
+    left out): the approval is recorded for future jobs. A job parked on it before that rule is
+    requeued."""
     from ..sandbox.devcontainer import approve
     pending = _environment_target(facts, args)
     approve(pending["repository"], pending["fingerprint"], kind=pending.get("kind", ""), ref=pending.get("ref", ""))
@@ -545,6 +581,39 @@ def _reject_environment(service, job, facts, args):
     service.store.append_event(job.id, "build_environment_rejected", reason=reason or "human rejected build environment",
                                payload={k: pending.get(k, "") for k in ("repository", "fingerprint", "kind", "ref", "label")})
     return ["state", "session"], {"rejected": pending["fingerprint"]}
+
+
+def _add_repair_to_template(service, job, facts, args):
+    """Environment repair (job_templates.md §7), non-blocking: append the repair's project-level
+    commands (e.g. ``npm ci``) to the binding's template job setup, so future jobs start ready."""
+    from ..sandbox.repair import add_repair_to_template
+    try:
+        result = add_repair_to_template(job, args.get("attempt"))
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    added = result["added"]
+    service.store.append_event(job.id, "environment_repair_saved", reason=(
+        f"Added {', '.join(f'`{c}`' for c in added)} to template `{result['template']}`'s job setup." if added else
+        f"Template `{result['template']}`'s job setup already has the repair's commands."),
+        payload={"action": "addRepairToTemplate", **result})
+    return ["state", "checks"], result
+
+
+def _save_repaired_template(service, job, facts, args):
+    """Environment repair (job_templates.md §7), non-blocking: create a container template from the
+    repaired image with the binding's egress plus the registries the repair used, and its setup."""
+    from ..sandbox.repair import save_repaired_template
+    name = args.get("name")
+    if name is not None and not isinstance(name, str):
+        raise CommandError("name must be a string")
+    try:
+        result = save_repaired_template(service, job, name or "", args.get("attempt"))
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    service.store.append_event(job.id, "environment_repair_saved",
+                               reason=f"Saved the repaired environment as template `{result['template']}`.",
+                               payload={"action": "saveRepairedTemplate", **result})
+    return ["state", "checks"], result
 
 
 def facts_for_job(service, job):
@@ -626,10 +695,11 @@ _HANDLERS = {
     "denyTool": lambda s, j, f, a: _tool_response(s, j, f, a, "deny"),
     "approvePlan": _approve_plan, "rejectPlan": _reject_plan, "savePlanDraft": _save_plan_draft,
     "message": _message, "resume": _resume, "raiseLimit": _raise_limit, "restartStage": _restart_stage, "retry": _retry,
-    "recheck": _recheck, "reprompt": _reprompt, "markFindings": _mark_findings, "markViewed": _mark_viewed, "push": _push, "repush": _repush,
+    "recheck": _recheck, "skipSetup": _skip_setup, "continueUnverified": _continue_unverified, "reprompt": _reprompt, "markFindings": _mark_findings, "markViewed": _mark_viewed, "push": _push, "repush": _repush,
     "markMerged": _mark_merged, "discard": _discard, "delete": _delete,
     "setEnvironments": _set_environments, "refreshEnvironments": _refresh_environments,
     "keepEnvironments": _keep_environments,
+    "addRepairToTemplate": _add_repair_to_template, "saveRepairedTemplate": _save_repaired_template,
     "approveEnvironment": _approve_environment, "rejectEnvironment": _reject_environment,
 }
 
@@ -640,6 +710,12 @@ def save_agent_secret(key: str, value: Optional[str]) -> None:
     """Store (empty value: clear) a harness secret in ``$MUCLI_HOME/secrets.env`` (0600)."""
     from ..harness import write_secret
     write_secret(key, value)
+
+
+def save_publish_token(provider: str, value: Optional[str]) -> None:
+    """Store (empty value: clear) a PR/MR provider token (host-side publish only, 0600)."""
+    from ..publish_tokens import write_token
+    write_token(provider, value)
 
 
 def setup_action(step: str, action: str, inputs=None, *, wait: bool = False, on_line=None) -> Dict[str, Any]:

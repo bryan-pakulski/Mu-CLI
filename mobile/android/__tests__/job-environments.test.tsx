@@ -9,7 +9,7 @@ import { jobCoreApi, type JobAction, type JobVM } from '../src/api/jobCore';
 import { sessionItems } from '../src/components/jobViews';
 import { BuildEnvironmentsField, BuildEnvironmentsSettings, EnvironmentsPill, JobEnvironmentsSheet } from '../src/components/JobEnvironments';
 import { ChecksTab } from '../src/components/JobTabs';
-import { ToastHost } from '../src/components/planos';
+import { ToastHost } from '../src/ui';
 import { JobActivityScreen } from '../src/screens/JobActivityScreen';
 
 jest.mock('../src/api/environments', () => ({ ...jest.requireActual('../src/api/environments'), environmentsApi: { get: jest.fn() } }));

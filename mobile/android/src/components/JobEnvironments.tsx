@@ -4,7 +4,7 @@
 // Change) and the Settings card (Docker-in-Docker status, install steps, kept jobs).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import {
   bindingLabel, bindingsFromDrafts, draftError, draftFromBinding, draftFromSpec, emptyDraft, environmentsApi,
@@ -12,12 +12,10 @@ import {
   type BindingSource, type EnvironmentDraft, type EnvironmentsVM, type JobBuildEnvironments, type JobEnvironmentsSummary,
 } from '../api/environments';
 import { jobCoreApi, type JobAction } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Banner, Empty, Field, KV, Loading, Panel, Pill, PlanosButton, Pre, Segmented, SwitchRow, TextField, useToast } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
 import { bytes, when } from '../theme/status';
+import { Banner, Button, Empty, Field, KV, Loading, Panel, Pill, Pre, Pressable, Segmented, Sheet, SwitchRow, Text, TextField, useToast } from '../ui';
 
 type Invoke = (idOrAction: string | JobAction, extra?: Record<string, unknown>) => void;
 
@@ -54,7 +52,7 @@ export function EnvironmentsEditor({ drafts, onChange, sources }: { drafts: Envi
         const options = d.source === 'environment' ? sources?.environments || [] : d.source === 'template' ? sources?.templates || [] : sources?.images || [];
         const error = draftError(d);
         return (
-          <View key={i} style={[styles.draft, { borderColor: colors.border, backgroundColor: colors.bg }]} testID={`environment-draft-${i}`}>
+          <View key={i} style={[styles.draft, { borderColor: colors.hairline, backgroundColor: colors.canvas }]} testID={`environment-draft-${i}`}>
             <Segmented accessibilityLabel={`Source kind ${i + 1}`} options={KIND_OPTIONS} value={d.source} onChange={source => set(i, { source, ref: '' })} />
             {options.length ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} accessibilityLabel="Sources">
@@ -63,9 +61,9 @@ export function EnvironmentsEditor({ drafts, onChange, sources }: { drafts: Envi
                   return (
                     <Pressable key={o.spec} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`Use ${o.name}`}
                       onPress={() => onChange(drafts.map((x, j) => (j === i ? draftFromSpec(o.spec, x) : x)))}
-                      style={[styles.chip, { borderColor: on ? colors.accent : colors.border, backgroundColor: on ? colors.accentSubtle : colors.surface }]}>
-                      <Text variant="xs" style={[styles.mono, { color: on ? colors.accent : colors.text }]} numberOfLines={1}>{o.name}</Text>
-                      {o.status || o.size ? <Text variant="xs" style={{ color: colors.muted }}>{o.status || o.size}</Text> : null}
+                      style={[styles.chip, { borderColor: on ? colors.accent.ink : colors.hairline, backgroundColor: on ? colors.accent.wash : colors.surface }]}>
+                      <Text variant="xs" style={[styles.mono, { color: on ? colors.accent.ink : colors.ink }]} numberOfLines={1}>{o.name}</Text>
+                      {o.status || o.size ? <Text variant="xs" style={{ color: colors.ink3 }}>{o.status || o.size}</Text> : null}
                     </Pressable>
                   );
                 })}
@@ -87,12 +85,12 @@ export function EnvironmentsEditor({ drafts, onChange, sources }: { drafts: Envi
                 placeholder="inherit" onChangeText={gpus => set(i, { gpus })} />
             </Field>
             <View style={styles.rowEnd}>
-              <PlanosButton small ghost tone="danger" label="Remove" accessibilityLabel={`Remove build environment ${i + 1}`} onPress={() => onChange(drafts.filter((_, j) => j !== i))} />
+              <Button small ghost tone="danger" label="Remove" accessibilityLabel={`Remove build environment ${i + 1}`} onPress={() => onChange(drafts.filter((_, j) => j !== i))} />
             </View>
           </View>
         );
       })}
-      <PlanosButton small label="Add environment" onPress={() => onChange([...drafts, emptyDraft()])} testID="environment-add" />
+      <Button small label="Add environment" onPress={() => onChange([...drafts, emptyDraft()])} testID="environment-add" />
     </View>
   );
 }
@@ -111,17 +109,17 @@ export function BuildEnvironmentsField({ active, repository, session, value, onC
   return (
     <Field label="Build environments" hint={value ? 'Job override' : resolved ? `from ${sourceLabel(resolved.source)}` : undefined} testID="new-job-environments">
       {loading && !vm ? <Loading label="Resolving build environments…" /> : null}
-      {error ? <Text variant="xs" style={{ color: colors.muted }}>Build environments unavailable: {error}</Text> : null}
+      {error ? <Text variant="xs" style={{ color: colors.ink3 }}>Build environments unavailable: {error}</Text> : null}
       {resolved?.error ? <Banner tone="danger" glyph="✗" title={resolved.error} /> : null}
       {value ? (
         <>
           <EnvironmentsEditor drafts={value} onChange={onChange} sources={vm} />
-          <PlanosButton small ghost label="Use resolved set" onPress={() => onChange(null)} testID="environments-reset" />
+          <Button small ghost label="Use resolved set" onPress={() => onChange(null)} testID="environments-reset" />
         </>
       ) : vm ? (
         <View style={styles.rowWrap}>
           <Text variant="xs" style={[styles.mono, { flex: 1 }]} testID="environments-summary">{summary}</Text>
-          <PlanosButton small label="Change" testID="environments-change"
+          <Button small label="Change" testID="environments-change"
             onPress={() => onChange(resolved?.bindings?.length ? resolved.bindings.map(draftFromBinding) : [emptyDraft()])} />
         </View>
       ) : null}
@@ -157,12 +155,12 @@ export function RepositoryEnvironmentApproval({ repository, session, debounceMs 
     <View style={styles.col} testID="new-job-environment-approval">
       {pending.map(r => (
         <Banner key={r.fingerprint} tone="warn" glyph="◆" title={`Repository build environment: ${r.kind === 'build' ? 'build and use' : 'use'} ${r.label || r.ref}`}>
-          <Text variant="xs"><Text variant="xs" style={{ color: colors.muted }}>Ref: </Text><Text variant="xs" style={styles.mono}>{r.ref}</Text></Text>
-          <Text variant="xs"><Text variant="xs" style={{ color: colors.muted }}>Fingerprint: </Text><Text variant="xs" style={styles.mono}>{r.fingerprint}</Text></Text>
-          {r.ignored_features?.length ? <Text variant="xs" style={{ color: colors.muted }}>Ignored features: {r.ignored_features.join(', ')}</Text> : null}
-          {r.message ? <Text variant="xs" style={{ color: colors.muted }}>{r.message}</Text> : null}
+          <Text variant="xs"><Text variant="xs" style={{ color: colors.ink3 }}>Ref: </Text><Text variant="xs" style={styles.mono}>{r.ref}</Text></Text>
+          <Text variant="xs"><Text variant="xs" style={{ color: colors.ink3 }}>Fingerprint: </Text><Text variant="xs" style={styles.mono}>{r.fingerprint}</Text></Text>
+          {r.ignored_features?.length ? <Text variant="xs" style={{ color: colors.ink3 }}>Ignored features: {r.ignored_features.join(', ')}</Text> : null}
+          {r.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{r.message}</Text> : null}
           <View style={styles.rowWrap}>
-            <PlanosButton small tone="warn" label="Approve environment" disabled={!!busy} testID={`approve-environment-${r.fingerprint}`}
+            <Button small tone="warn" label="Approve environment" disabled={!!busy} testID={`approve-environment-${r.fingerprint}`}
               onPress={() => {
                 setBusy(r.fingerprint);
                 environmentsApi.approve({ repository: r.repository || repo, fingerprint: r.fingerprint, session: session || undefined })
@@ -207,22 +205,22 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
   const env = environments;
   const editErrors = (editing || []).map(draftError).filter(Boolean);
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Build environments">
+    <Sheet visible={visible} onClose={onClose} title="Build environments">
       <View style={styles.col} testID="job-environments-sheet">
         {editing ? (
           <>
-            <Text variant="xs" style={{ color: colors.muted }}>Saved as this job's override; its snapshots are re-created before the next stage. Remove every row to fall back to repo config, session or Settings.</Text>
+            <Text variant="xs" style={{ color: colors.ink3 }}>Saved as this job's override; its snapshots are re-created before the next stage. Remove every row to fall back to repo config, session or Settings.</Text>
             <EnvironmentsEditor drafts={editing} onChange={setEditing} sources={vm} />
             <View style={styles.rowEnd}>
-              <PlanosButton label="Cancel" onPress={() => setEditing(null)} />
-              <PlanosButton primary label="Save environments" disabled={busy || !!editErrors.length} testID="environments-save"
+              <Button label="Cancel" onPress={() => setEditing(null)} />
+              <Button primary label="Save environments" disabled={busy || !!editErrors.length} testID="environments-save"
                 onPress={() => { invoke('setEnvironments', { environments: bindingsFromDrafts(editing) }); setEditing(null); }} />
             </View>
           </>
         ) : (
           <>
             <View style={styles.rowWrap}>
-              <Text variant="xs" style={{ color: colors.muted, flex: 1 }}>
+              <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>
                 {env?.count ? `${env.count} binding${env.count === 1 ? '' : 's'} from ${sourceLabel(env.source)}${env.bytes ? ` · ${bytes(env.bytes)}` : ''}` : 'This job uses the shared runtime image.'}
               </Text>
               {env?.kept ? <Pill tone="accent">⬢ kept</Pill> : null}
@@ -240,16 +238,16 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
                 {b.probed_env?.length ? <KV label="Probed env">{b.probed_env.join(', ')}</KV> : null}
                 {b.error ? <Banner tone="danger" glyph="✗" role="alert" title={b.error} /> : null}
                 {b.secret_paths?.length ? (
-                  <View><Text variant="xs" style={{ color: colors.danger, fontWeight: fontWeights.semibold }}>Secret scan hits ({b.secret_paths.length})</Text><Pre numberOfLines={12}>{b.secret_paths.join('\n')}</Pre></View>
+                  <View><Text variant="xs" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Secret scan hits ({b.secret_paths.length})</Text><Pre numberOfLines={12}>{b.secret_paths.join('\n')}</Pre></View>
                 ) : null}
                 {b.skipped_paths?.length ? <SkippedPaths paths={b.skipped_paths} /> : null}
               </Panel>
             ))}
             <View style={styles.rowWrap}>
-              {refresh ? <PlanosButton label={`${refresh.label} (E)`} tone="warn" disabled={busy} ariaDisabled={!refresh.enabled} accessibilityHint={refresh.reason} onPress={() => invoke(refresh)} testID="environments-refresh" /> : null}
-              {keep ? <PlanosButton label={keep.label} disabled={busy} ariaDisabled={!keep.enabled} accessibilityHint={keep.reason} onPress={() => invoke(keep)} testID="environments-keep" /> : null}
+              {refresh ? <Button label={`${refresh.label} (E)`} tone="warn" disabled={busy} ariaDisabled={!refresh.enabled} accessibilityHint={refresh.reason} onPress={() => invoke(refresh)} testID="environments-refresh" /> : null}
+              {keep ? <Button label={keep.label} disabled={busy} ariaDisabled={!keep.enabled} accessibilityHint={keep.reason} onPress={() => invoke(keep)} testID="environments-keep" /> : null}
               {change ? (
-                <PlanosButton label="Change" disabled={busy} ariaDisabled={!change.enabled} accessibilityHint={change.reason} testID="environments-edit"
+                <Button label="Change" disabled={busy} ariaDisabled={!change.enabled} accessibilityHint={change.reason} testID="environments-edit"
                   onPress={() => {
                     if (!change.enabled) { invoke(change); return; }
                     setEditing(env?.bindings?.length ? env.bindings.map(draftFromBinding) : [emptyDraft()]);
@@ -259,7 +257,7 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
           </>
         )}
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -269,7 +267,7 @@ function SkippedPaths({ paths }: { paths: string[] }) {
   return (
     <View>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(v => !v)} style={styles.disclosure}>
-        <Text variant="xs" style={{ color: colors.accent }}>{open ? '▾' : '▸'} {paths.length} home path{paths.length === 1 ? '' : 's'} left out</Text>
+        <Text variant="xs" style={{ color: colors.accent.ink }}>{open ? '▾' : '▸'} {paths.length} home path{paths.length === 1 ? '' : 's'} left out</Text>
       </Pressable>
       {open ? <Pre numberOfLines={30}>{paths.join('\n')}</Pre> : null}
     </View>
@@ -295,27 +293,27 @@ export function BuildEnvironmentsSettings({ active }: { active: boolean }) {
   return (
     <Panel title="Build environment host" testID="build-environments-settings">
       {loading && !vm ? <Loading label="Checking the host…" /> : null}
-      {error ? <Text variant="xs" style={{ color: colors.muted }}>Unavailable: {error}</Text> : null}
+      {error ? <Text variant="xs" style={{ color: colors.ink3 }}>Unavailable: {error}</Text> : null}
       {vm ? (
         <>
           <KV label="Docker-in-Docker">
-            <Text variant="xs" style={{ color: dind?.available ? colors.ok : colors.warn }}>{dind?.available ? `✓ available (${dind.engine})` : '◆ not installed'}</Text>
+            <Text variant="xs" style={{ color: dind?.available ? colors.ok.ink : colors.attention.ink }}>{dind?.available ? `✓ available (${dind.engine})` : '◆ not installed'}</Text>
           </KV>
           {!dind?.available ? (
             <View style={styles.col} testID="sysbox-guidance">
-              <Text variant="xs" style={{ color: colors.muted }}>{dind?.message}</Text>
+              <Text variant="xs" style={{ color: colors.ink3 }}>{dind?.message}</Text>
               {(dind?.install || []).map((step, i) => <Text key={i} variant="xs" selectable>{i + 1}. {step}</Text>)}
             </View>
           ) : null}
-          <KV label="GPUs"><Text variant="xs" style={{ color: vm.gpu?.supported ? colors.ok : colors.muted }}>{vm.gpu?.supported ? `✓ ${vm.gpu.reason}` : vm.gpu?.reason || 'unavailable'}</Text></KV>
+          <KV label="GPUs"><Text variant="xs" style={{ color: vm.gpu?.supported ? colors.ok.ink : colors.ink3 }}>{vm.gpu?.supported ? `✓ ${vm.gpu.reason}` : vm.gpu?.reason || 'unavailable'}</Text></KV>
           <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>Kept jobs</Text>
           {kept.length ? kept.map(k => (
-            <View key={k.id} style={[styles.kept, { borderColor: colors.border }]} testID={`kept-job-${k.id}`}>
+            <View key={k.id} style={[styles.kept, { borderColor: colors.hairline }]} testID={`kept-job-${k.id}`}>
               <View style={{ flex: 1 }}>
                 <Text variant="xs" numberOfLines={1}>{k.title || k.id.slice(0, 8)}</Text>
-                <Text variant="xs" style={[styles.mono, { color: colors.muted }]} numberOfLines={1}>{k.bindings || '—'}{k.bytes ? ` · ${bytes(k.bytes)}` : ''}</Text>
+                <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={1}>{k.bindings || '—'}{k.bytes ? ` · ${bytes(k.bytes)}` : ''}</Text>
               </View>
-              <PlanosButton small label="Unkeep" loading={busy === k.id} disabled={!!busy} onPress={() => void unkeep(k.id)} testID={`unkeep-${k.id}`} />
+              <Button small label="Unkeep" loading={busy === k.id} disabled={!!busy} onPress={() => void unkeep(k.id)} testID={`unkeep-${k.id}`} />
             </View>
           )) : <Empty>No job keeps its environments past idle retention.</Empty>}
         </>

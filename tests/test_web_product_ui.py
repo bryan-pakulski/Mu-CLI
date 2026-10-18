@@ -8,39 +8,55 @@ INSPECTOR = ROOT / "mu" / "gui" / "templates" / "fragments" / "inspector.html"
 PANEL_TABS = ROOT / "mu" / "gui" / "templates" / "fragments" / "panel_tabs.html"
 FILES_PANEL = ROOT / "mu" / "gui" / "templates" / "fragments" / "files_panel.html"
 CONTAINERS = ROOT / "mu" / "gui" / "templates" / "containers.html"
-PRODUCT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "product.css"
-CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "crystal.css"
-CLARITY_CSS = ROOT / "mu" / "gui" / "static" / "css" / "clarity.css"
-REFINEMENT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "refinement.css"
-POPOUT_CSS = ROOT / "mu" / "gui" / "static" / "css" / "popouts.css"
+LEGACY_CSS = ROOT / "mu" / "gui" / "static" / "css"
+WASH = LEGACY_CSS / "wash"
+CHAT_CSS = WASH / "patterns" / "chat.css"
+PANEL_CSS = WASH / "components" / "panel.css"
+COMPOSER_CSS = WASH / "components" / "composer.css"
+PROMPT_CSS = WASH / "components" / "prompt.css"
+CHAT_HTML = ROOT / "mu" / "gui" / "templates" / "fragments" / "chat.html"
+SIDEBAR = ROOT / "mu" / "gui" / "templates" / "partials" / "sidebar.html"
+# The chat page's retired legacy stylesheets (W4, web-shell ledger).
+RETIRED_CHAT_CSS = ("product.css", "crystal.css", "clarity.css", "refinement.css",
+                    "conversation.css", "popouts.css", "pricing_settings.css", "pricing_rows.css")
 ROUTE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "route-product.css"
 TRACE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "trace.css"
-CONTAINER_CRYSTAL_CSS = ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css"
+CONTAINERS_BUNDLE_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "containers.css"
 PRODUCT_JS = ROOT / "mu" / "gui" / "static" / "js" / "product.js"
 WEB_SHELL_JS = ROOT / "mu" / "gui" / "static" / "js" / "web_shell.js"
+OVERRIDES_CSS = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "legacy-overrides.css"
 
 
 def test_product_assets_are_loaded_by_main_web_shell():
     text = INDEX.read_text(encoding="utf-8")
-    for asset in (
-        '/static/css/product.css', '/static/css/crystal.css',
-        '/static/css/clarity.css', '/static/css/refinement.css',
-        '/static/js/product.js', '/static/js/web_shell.js',
-    ):
+    # Wash W4: the chat page sits on the shared shell (`content` block, not its
+    # own `page` chrome) and links one page bundle; the chat page's own legacy
+    # stylesheets are retired, so the bundle imports none of them.
+    bundle = CHAT_CSS.read_text(encoding="utf-8")
+    assert '/static/css/wash/patterns/chat.css' in text
+    assert '{% block content %}' in text and '{% block page %}' not in text
+    for name in RETIRED_CHAT_CSS:
+        assert name not in bundle
+        assert not (LEGACY_CSS / name).exists(), name
+    for asset in ('/static/js/product.js', '/static/js/web_shell.js'):
         assert asset in text
-    assert 'class="app product-app"' in text
-    assert 'class="panel-stage"' in text
+    assert 'class="app product-app w-chat"' in text
+    assert 'class="panel-stage w-chat__stage"' in text
     assert 'fragments/panel_tabs.html' in text
 
 
 def test_left_navigation_groups_threads_and_sessions():
     """Sidebar contract: Threads section = current session's thread-group roster
     (hidden for singleton groups); Sessions section = the FULL sessions list
-    (main session always visible) with hover unload/delete row actions."""
+    (main session always visible) with hover unload/delete row actions.
+    Wash W4: the sections render inside the shared sidebar (partials/sidebar.html
+    `sidebar_extra`), after the Navigate list; rows are role=button with
+    keyboard support for threads and sessions alike (G§9.20)."""
     text = INDEX.read_text(encoding="utf-8")
-    sidebar = text.split('<aside class="sidebar product-sidebar"', 1)[1].split('</aside>', 1)[0]
-    assert '<span>Threads</span>' in sidebar
-    assert '<span>Sessions</span>' in sidebar
+    sidebar = text.split('{% block sidebar_extra %}', 1)[1].split('{% endblock %}', 1)[0]
+    assert '{%- if sidebar_extra is defined and sidebar_extra|trim %}{{ sidebar_extra }}{% endif %}' in SIDEBAR.read_text(encoding="utf-8")
+    assert '>Threads</span>' in sidebar
+    assert '>Sessions</span>' in sidebar
     # Threads scoped to the group roster and hidden when it is a singleton.
     assert '$store.threads.groupRoster.length > 1' in sidebar
     assert 'x-for="t in $store.threads.groupRoster"' in sidebar
@@ -55,6 +71,9 @@ def test_left_navigation_groups_threads_and_sessions():
     assert '$store.confirm.ask(' in sidebar
     assert 'New thread' in sidebar
     assert '+ new session' in sidebar
+    # Keyboard access on both row kinds.
+    assert sidebar.count('role="button" tabindex="0"') >= 2
+    assert sidebar.count('@keydown.enter.prevent="$el.click()"') >= 2
     assert '<span>Work</span>' not in sidebar
     assert '<span>Workspace</span>' not in sidebar
     assert '$store.mode.setView(m.name)' not in sidebar
@@ -62,12 +81,16 @@ def test_left_navigation_groups_threads_and_sessions():
 
 
 def test_header_has_trace_action_and_centered_settings_cog():
+    # Wash W4 (G§8.1): Chat/Work/Environments/Trace are primary navigation in
+    # the sidebar, not top-bar icons. The session-scoped trace link lives in
+    # the stage view menu; the top bar keeps the settings cog (sprite icon).
     text = INDEX.read_text(encoding="utf-8")
-    assert "'/trace?session=' + encodeURIComponent($store.chat.currentName || '')" in text
-    assert 'aria-label="Open Trace Analyzer"' in text
-    assert 'class="product-icon-button settings-cog-button"' in text
-    assert '<circle cx="12" cy="12" r="3"></circle>' in text
-    assert 'M12.22 2h-.44' in text
+    tabs = PANEL_TABS.read_text(encoding="utf-8")
+    assert "'/trace?session=' + encodeURIComponent($store.chat.currentName || '')" in tabs
+    assert 'aria-label="Open Trace Analyzer"' in tabs
+    assert '("trace", "/trace", "activity", "Trace")' in SIDEBAR.read_text(encoding="utf-8")
+    assert 'class="w-btn settings-cog-button" data-variant="icon"' in text
+    assert 'aria-label="Open settings">{{ w.icon("settings") }}' in text
 
 
 def test_product_shell_keeps_core_navigation_contracts():
@@ -77,50 +100,71 @@ def test_product_shell_keeps_core_navigation_contracts():
     assert '$store.yolo.toggle()' in text
     assert "$store.mode.setView('memory'); $store.layout.panelOpen = true" in text
     assert 'aria-label="Toggle workspace panel"' in text
-    assert 'href="/containers"' in text
+    # Environments is a shared sidebar destination (Wash W4).
+    assert '("environments", "/containers", "box", "Environments")' in SIDEBAR.read_text(encoding="utf-8")
 
 
-def test_rhs_panel_uses_exactly_two_dropdowns_not_scrollable_tabs():
+def test_rhs_panel_uses_a_segmented_control_and_menu_not_selects():
+    # Wash W4 retires the two-<select> stage picker (G§8.1: "Panels are chosen
+    # from a segmented list or menu, not two <select>s"). One stage header:
+    # title over a mode-tint band, a segmented control for everyday views, a
+    # menu with every mode panel and tool, and close.
     text = PANEL_TABS.read_text(encoding="utf-8")
-    css = REFINEMENT_CSS.read_text(encoding="utf-8")
-    assert 'class="panel-view-select panel-mode-select"' in text
-    assert 'class="panel-view-select panel-tool-select"' in text
-    assert 'Select mode' in text
-    assert 'Select tool' in text
-    assert text.count('<select ') == 2
+    assert '<select ' not in text and '</select>' not in text
+    assert 'class="panel-tabs panel-select-nav w-panel__head w-stage-head"' in text
+    assert ':data-mode-tint="$store.mode.active"' in text
+    assert 'class="w-segmented panel-segmented"' in text
+    assert 'role="menu"' in text and 'aria-haspopup="menu"' in text
+    assert 'Modes</div>' in text and 'Tools</div>' in text
+    assert '$store.mode.setView(name)' in text
+    assert '$store.mode.setView(m.name)' in text and '$store.mode.setView(v.name)' in text
+    assert '$store.layout.panelOpen = false' in text
     assert 'panel-tabs-strip' not in text
     assert 'class="panel-tab"' not in text
-    assert '$event.target.value && $store.mode.setView($event.target.value)' in text
-    assert '$store.layout.panelOpen = false' in text
-    assert '--panel-tabs-h: 64px' in css
-    assert '.panel-selectors' in css
-    assert '.panel-selector-label' in css
-    assert 'border-bottom: 1px solid var(--hairline)' in css
-    assert 'background-color: transparent' in css
-    assert 'inset: var(--panel-tabs-h) 0 0 0 !important' in css
+    panel = PANEL_CSS.read_text(encoding="utf-8")
+    assert '.w-panel__head::before' in panel
+    assert 'linear-gradient(to bottom, var(--w-mode-wash, var(--wash-accent-wash)), transparent)' in panel
+    assert 'border-bottom: 1px solid var(--wash-hairline)' in panel
+    # Panels fill the stage under the header.
+    assert '.w-chat__panels > .mode-panel {' in CHAT_CSS.read_text(encoding="utf-8")
 
 
 def test_product_css_covers_primary_web_surfaces():
-    product = PRODUCT_CSS.read_text(encoding="utf-8")
-    combined = ''.join(path.read_text(encoding="utf-8") for path in (
-        PRODUCT_CSS, CRYSTAL_CSS, CLARITY_CSS, REFINEMENT_CSS, POPOUT_CSS,
-    ))
+    # Wash W4: the chat page is styled by real Wash rules (components + the
+    # chat page patterns), not the retired product/crystal/clarity layers.
+    files = sorted((WASH / "components").glob("*.css")) + [
+        WASH / "layout.css", CHAT_CSS, WASH / "patterns" / "panels.css",
+        WASH / "patterns" / "settings.css", WASH / "patterns" / "welcome.css",
+    ]
+    combined = ''.join(path.read_text(encoding="utf-8") for path in files)
     for selector in (
-        '.product-header', '.product-sidebar', '.chat-history', '.msg.user',
-        '.composer', '.panel-stage', '.panel-select-nav', '.inspector',
-        '.welcome-entry', '.prompt-body .options label',
+        '.w-topbar', '.w-sidebar', '.w-transcript', '.w-msg[data-role="user"]',
+        '.w-composer', '.w-chat__stage', '.w-stage-head', '.inspector',
+        '.w-welcome__choice', '.w-prompt__option',
         '.composer-mode-popout', '.composer-settings-popout',
     ):
-        assert selector in combined
-    assert 'backdrop-filter' not in combined
-    assert '@media (max-width: 760px)' in combined
-    assert '@media (prefers-reduced-motion: reduce)' in combined
-    assert 'padding: 0 !important;' in product
+        assert selector in combined, selector
+    page = CHAT_CSS.read_text(encoding="utf-8")
+    # Any blur on the chat page comes from the shared glass recipe only.
+    assert all(v.strip().startswith('var(--w-glass-filter')
+               for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', page))
+    assert '@media (width < 840px)' in page
+    assert '@media (prefers-reduced-motion: reduce)' in page
+    # Body padding: the shared shell owns the page frame; no override needed
+    # (the legacy-overrides bridge file is gone).
+    assert not OVERRIDES_CSS.exists()
+    assert '!important' not in page
 
 
 def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
-    css = CLARITY_CSS.read_text(encoding="utf-8")
-    route = ROUTE_CSS.read_text(encoding="utf-8")
+    # clarity.css and route-product.css are retired (Wash W4). Neither the
+    # chat page patterns nor the standalone analyzer bundles carry the
+    # sunrise atmosphere: Wash art lives only in .w-hero zones (G§6.2).
+    assert not ROUTE_CSS.exists()
+    css = CHAT_CSS.read_text(encoding="utf-8")
+    patterns = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
+    route = "\n".join((patterns / name).read_text(encoding="utf-8") for name in (
+        "trace.css", "trace-common.css", "job-trace.css", "model-costs.css"))
     for token in (
         '--sky-blue', '--glacier-blue', '--sunrise-pink', '--sunrise-peach',
         '--alpine-green', '--snow-glow',
@@ -129,7 +173,8 @@ def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
         assert token not in route
     assert 'radial-gradient' not in css
     assert 'radial-gradient' not in route
-    assert 'backdrop-filter' not in css
+    assert all(v.strip().startswith('var(--w-glass-filter')
+               for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', css))
     assert 'clip-path' not in css
     assert 'clip-path' not in route
     assert '--mountain-near' not in css
@@ -142,8 +187,10 @@ def test_alpine_sunrise_atmosphere_is_retired_for_flat_surfaces():
 
 def test_product_javascript_positions_overlays_and_is_presentation_only():
     js = PRODUCT_JS.read_text(encoding="utf-8")
-    assert 'installPresentationStylesheet' in js
-    assert "installPresentationStylesheet('mucli-popouts-css', '/static/css/popouts.css')" in js
+    # Wash W4: popout geometry lives in the chat page patterns (popouts.css is
+    # retired); product.js injects no stylesheets at runtime.
+    assert 'installPresentationStylesheet' not in js
+    assert '.composer .composer-mode-popout {' in CHAT_CSS.read_text(encoding="utf-8")
     assert 'polishWelcomeCopy' in js
     assert 'focusComposer' in js
     assert 'preserveOverlayGeometry' in js
@@ -165,26 +212,31 @@ def test_product_javascript_positions_overlays_and_is_presentation_only():
 
 
 def test_composer_is_single_pane_with_controls_outside_typing_surface():
-    css = REFINEMENT_CSS.read_text(encoding="utf-8")
-    assert '.composer::before' in css
-    assert 'content: none !important' in css
-    assert '.composer-toolbar {' in css
-    assert 'position: static !important' in css
-    assert 'margin: 0 0 var(--space-2)' in css
-    assert 'justify-content: flex-end' in css
-    assert '.composer form {' in css
-    assert 'background: var(--bg-raised)' in css
-    assert '.composer .hint {' in css
-    assert 'min-height: 0 !important' in css
-    assert 'background: transparent !important' in css
+    # Wash W3 composer (G§9.6): one surface (radius-lg, level 1) holding the
+    # auto-growing textarea and, below it, the control bar; the hint row sits
+    # outside the surface.
+    css = COMPOSER_CSS.read_text(encoding="utf-8")
+    html = CHAT_HTML.read_text(encoding="utf-8")
+    form = css.split('.w-composer__form {', 1)[1].split('}', 1)[0]
+    assert 'border-radius: var(--wash-radius-lg)' in form
+    assert 'background: var(--w-glass-fill)' in form
+    assert 'flex-direction: column' in form
+    assert '.w-composer__bar {' in css
+    assert '.w-composer__hint {' in css
+    assert html.index('class="composer-input-wrap w-composer__input"') < html.index('class="composer-toolbar w-composer__bar"')
+    assert html.index('class="composer-toolbar w-composer__bar"') < html.index('</form>') < html.index('class="hint w-composer__hint"')
+    # The textarea is unframed inside the single surface.
+    textarea = css.split('.w-composer__textarea {', 1)[1].split('}', 1)[0]
+    assert 'border: 0' in textarea and 'background: transparent' in textarea
 
 
 def test_composer_feature_and_provider_popouts_fit_content_cleanly():
-    css = POPOUT_CSS.read_text(encoding="utf-8")
+    # Wash W4: the popout sizing moved from popouts.css into the chat patterns.
+    css = CHAT_CSS.read_text(encoding="utf-8")
     js = PRODUCT_JS.read_text(encoding="utf-8")
     assert 'min-width: min(310px, calc(100vw - 20px))' in css
     assert 'max-width: min(420px, calc(100vw - 20px))' in css
-    assert '.composer-mode-popout .mode-desc' in css
+    assert '.composer-mode-popout .mode-option .mode-desc' in css
     assert 'max-width: 44ch' in css
     assert 'min-width: min(460px, calc(100vw - 20px))' in css
     assert 'max-width: min(590px, calc(100vw - 20px))' in css
@@ -233,72 +285,107 @@ def test_embedded_file_editor_and_codemirror_dependencies_are_removed():
 
 
 def test_choice_picker_is_flat_not_card_based():
-    css = CRYSTAL_CSS.read_text(encoding="utf-8")
-    compact = css.replace(' ', '')
-    assert '.prompt-body .options label' in css
-    assert 'border-bottom:1pxsolidvar(--hairline)' in compact
-    assert 'appearance: none' in css
+    # Wash W3 prompts (G§9.10): options are full-width selectable rows
+    # (radius-md, sunken hover, accent wash + ✓ when selected), not cards; the
+    # native input stays for keyboard/AT but is visually hidden.
+    css = PROMPT_CSS.read_text(encoding="utf-8")
+    html = CHAT_HTML.read_text(encoding="utf-8")
+    row = css.split('.w-prompt__option {', 1)[1].split('}', 1)[0]
+    assert 'border-radius: var(--wash-radius-md)' in row
+    assert 'border:' not in row and 'box-shadow' not in row
+    assert '.w-prompt__option:hover { background: var(--w-glass-fill-subtle); }' in css
+    assert '.w-prompt__option[data-selected] { background: var(--wash-accent-wash); }' in css
+    hidden = css.split('.w-prompt__input {', 1)[1].split('}', 1)[0]
+    assert 'opacity: 0' in hidden
+    assert 'class="w-prompt__option"' in html
 
 
 def test_settings_drawer_is_spacious_clean_and_consistent():
-    clarity = CLARITY_CSS.read_text(encoding="utf-8")
-    refinement = REFINEMENT_CSS.read_text(encoding="utf-8")
+    # Wash W4: the settings drawer is a wide .w-drawer styled by
+    # wash/patterns/settings.css (replacing the clarity.css / refinement.css
+    # settings blocks): a 176px vertical tab rail beside a scrolling pane.
+    settings = (ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns" / "settings.css").read_text(encoding="utf-8")
     template = INSPECTOR.read_text(encoding="utf-8")
-    assert 'width: min(1040px, 94vw)' in clarity
-    assert 'grid-template-columns: 176px minmax(0, 1fr)' in clarity
+    assert 'width: min(1040px, 94vw)' in settings
+    assert 'grid-template-columns: 176px minmax(0, 1fr)' in settings
+    assert 'class="inspector-backdrop w-drawer"' in template
+    assert 'class="inspector w-drawer__panel"' in template
     assert 'aria-orientation="vertical"' in template
     assert 'class="settings-pane"' in template
     assert 'class="settings-pane-head"' in template
     assert 'Configuration' in template
     assert 'Manage skills' in template
-    assert '.settings-pane .var-group-head' in refinement
-    assert '.settings-pane .var-row' in refinement
-    # planos Settings: each group is a bordered panel; fields stack label
-    # above control with a muted hint, inline error and role=switch booleans.
-    assert '.settings-pane .var-group {' in refinement
-    assert 'border-radius: var(--radius-lg)' in refinement
-    assert '.settings-pane .var-hint' in refinement
-    assert '.settings-pane .var-error' in refinement
+    assert '.settings-pane .var-group-head' in settings
+    assert '.settings-pane .var-row' in settings
+    # Wash Settings: each group is a hairline-separated section (no nested
+    # cards); fields stack label above control with a muted hint, an inline
+    # error and role=switch booleans.
+    assert '.settings-pane .var-group {' in settings
+    assert 'border-top: 1px solid var(--wash-hairline)' in settings
+    assert '.settings-pane .var-hint' in settings
+    assert '.settings-pane .var-error' in settings
     assert 'class="switch" role="switch"' in template
-    assert 'class="var-hint"' in template
-    assert 'background: transparent !important' in refinement
-    assert '.settings-pane .var-row > input' in refinement
-    assert 'border-bottom: 1px solid var(--hairline)' in refinement
+    assert 'class="var-hint w-field__hint"' in template
+    assert 'class="var-row w-field"' in template
+    var_row = settings.split('.settings-pane .var-row {', 1)[1].split('}', 1)[0]
+    assert 'background: transparent;' in var_row
+    assert '.settings-pane .var-row > input[aria-invalid="true"] ~ .var-error' in settings
+    assert 'border-bottom: 1px solid var(--wash-hairline)' in settings
 
 
 def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
-    css = TRACE_CSS.read_text(encoding="utf-8")
-    route = ROUTE_CSS.read_text(encoding="utf-8")
-    assert '@import url("/static/css/route-product.css")' in css
-    assert '.trace-section {' in css
-    assert 'border-radius: 22px' not in css
-    assert 'background: color-mix(in srgb, var(--glass) 82%, transparent)' not in css
-    assert 'backdrop-filter' not in css
+    # Wash W4: the legacy trace.css / route-product.css are gone; the analyzer
+    # styles live in its pattern bundle (+ the shared trace-common.css) with no
+    # legacy imports. Sections are flat Wash cards (no glass), charts sit in a
+    # plain rounded wrap, metrics are one hairline grid, and info popouts stay.
+    assert not TRACE_CSS.exists() and not ROUTE_CSS.exists()
+    patterns = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
+    bundle = (patterns / "trace.css").read_text(encoding="utf-8")
+    css = (patterns / "trace-common.css").read_text(encoding="utf-8")
+    assert '@import url("trace-common.css") layer(patterns);' in bundle
+    assert 'layer(legacy)' not in bundle
+    html = (ROOT / "mu" / "gui" / "templates" / "trace.html").read_text(encoding="utf-8")
+    assert '<section class="w-card trace-section"' in html
+    assert 'class="w-eyebrow"' in html
+    assert '.trace-section.w-card' in css
+    assert 'border-radius: 22px' not in css + bundle
+    assert all(v.strip().startswith('var(--w-glass-filter')
+               for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', css + bundle))
     assert '.trace-canvas-wrap {' in css
-    assert 'border-radius: var(--radius-sm)' in css
-    assert 'filter: saturate' not in css
+    assert 'border-radius: var(--wash-radius-sm)' in css
+    assert 'filter: saturate' not in css + bundle
     assert 'html[data-theme="light"] .trace-canvas' not in css
     assert '.trace-card {' in css
-    assert 'background: transparent' in css
     assert '.trace-info-popout' in css
-    assert '--accent:' not in route
-    assert '#79c2cb' not in route
-    assert '#e0a040' not in route
-    assert '.trace-mu{color:var(--text-secondary)}' in route
+    assert '--accent:' not in css + bundle
+    # Charts read Wash pigments (series / layer / semantic), not legacy names.
+    js = (ROOT / "mu" / "gui" / "static" / "js" / "trace.js").read_text(encoding="utf-8")
+    assert '"--wash-series-"' in js and '"--wash-layer-"' in js
+    assert '--viz-' not in js
 
 
 def test_container_management_uses_current_product_surface_without_breaking_ids():
     template = CONTAINERS.read_text(encoding="utf-8")
-    assert '/static/css/route-product.css' in template
-    assert '/static/css/containers-crystal.css' in template
+    # Wash W4: /containers links its page bundle, which is real Wash rules and
+    # imports no legacy CSS (containers.css / containers-crystal.css retired).
+    bundle = CONTAINERS_BUNDLE_CSS.read_text(encoding="utf-8")
+    assert '/static/css/wash/patterns/containers.css' in template
+    assert '@import' not in bundle and '@layer patterns' in bundle
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "containers-crystal.css").exists()
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "containers.css").exists()
+    # Wash W4: route-product.css is deleted (the analyzer pages no longer use it).
+    assert 'route-product.css' not in bundle
+    assert not (ROOT / "mu" / "gui" / "static" / "css" / "route-product.css").exists()
     for dom_id in (
         'container-list', 'template-list', 'create-environment-button',
         'create-modal', 'environment-name', 'shell-modal', 'shell-command',
     ):
         assert f'id="{dom_id}"' in template
 
-    css = CONTAINER_CRYSTAL_CSS.read_text(encoding="utf-8")
-    assert '.manager-card{display:grid' in css
-    assert 'border-bottom:1px solid var(--hairline)' in css
-    assert '.manager-monitor-grid' in css
-    assert '.manager-overflow-menu' in css and 'var(--bg-raised)' in css
+    # Cards, monitor grid and overflow menu are Wash components laid out by the bundle.
+    script = (ROOT / "mu" / "gui" / "static" / "js" / "containers.js").read_text(encoding="utf-8")
+    assert 'class="w-card w-env-card" data-variant="interactive"' in script
+    assert 'class="w-menu w-env-overflow__menu" role="menu"' in script
+    assert 'class="w-card-grid w-env-grid"' in template
+    assert '.w-env-monitor__grid' in bundle
+    assert '.w-env-overflow__menu' in bundle and '.w-env-meta' in bundle

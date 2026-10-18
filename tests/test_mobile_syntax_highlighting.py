@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile" / "android" / "src"
 TOKENS = MOBILE / "theme" / "tokens.ts"
 CODEBLOCK = MOBILE / "components" / "CodeBlock.tsx"
-CHATSCREEN = MOBILE / "screens" / "ChatScreen.tsx"
+CHATSCREEN = MOBILE / "screens" / "ChatScreenProduct.tsx"
+# Wash: the fence/code_block/code_inline rules live in the shared Markdown module.
+MARKDOWN = MOBILE / "ui" / "Markdown.tsx"
 INDEX = MOBILE / "components" / "index.ts"
 PKG = ROOT / "mobile" / "android" / "package.json"
 
@@ -49,36 +51,38 @@ def test_theme_colors_includes_syntax():
     assert "syntax: SyntaxColors" in src, "ThemeColors missing syntax field"
 
 
+def _syntax_builder(src: str) -> str:
+    return src.split("function syntaxFrom")[1].split("\n}\n")[0]
+
+
 def test_light_colors_has_syntax_palette():
-    """lightColors object must have a ``syntax`` block with color values."""
+    """Paper's syntax palette is built from the generated Wash syntax slots."""
     src = read(TOKENS)
-    # Find lightColors syntax block — should contain hex colors
-    assert "syntax: {" in src, "No syntax block found in tokens.ts"
-    # Verify light theme has specific colors (purple-ish keyword for light)
-    light_section = src.split("export const lightColors")[1].split("export const darkColors")[0]
-    assert "keyword:" in light_section, "light colors missing syntax.keyword"
-    assert light_section.count("keyword:") >= 1
+    assert "export const paperColors: WashColors = washColors('paper');" in src
+    assert "syntax: syntaxFrom(p)" in src
+    builder = _syntax_builder(src)
+    assert "keyword: slot(syntaxSlots.keyword)" in builder
 
 
 def test_dark_colors_has_syntax_palette():
-    """darkColors object must have a ``syntax`` block with color values."""
+    """Dusk's syntax palette comes from the same builder over the Dusk palette."""
     src = read(TOKENS)
-    dark_section = src.split("export const darkColors")[1]
-    assert "syntax: {" in dark_section, "dark colors missing syntax block"
-    assert "keyword:" in dark_section, "dark colors missing syntax.keyword"
-    assert "string:" in dark_section, "dark colors missing syntax.string"
+    assert "export const duskColors: WashColors = washColors('dusk');" in src
+    assert "const p = name === 'dusk' ? dusk : paper;" in src
+    builder = _syntax_builder(src)
+    assert "keyword:" in builder and "string:" in builder
 
 
 def test_both_themes_have_all_syntax_keys():
-    """Both lightColors and darkColors must define all 11 syntax keys."""
+    """One builder defines all syntax keys for both themes (G§9.12 Wash syntax theme)."""
     src = read(TOKENS)
-    light = src.split("export const lightColors")[1].split("export const darkColors")[0]
-    dark = src.split("export const darkColors")[1].split("export type Theme")[0]
+    builder = _syntax_builder(src)
     required = ["keyword", "string", "comment", "number", "func", "operator",
                 "punctuation", "plain", "added", "removed", "diffHeader"]
     for key in required:
-        assert f"{key}:" in light, f"lightColors syntax missing key: {key}"
-        assert f"{key}:" in dark, f"darkColors syntax missing key: {key}"
+        assert f"{key}:" in builder, f"syntax builder missing key: {key}"
+    generated = (TOKENS.parent / "wash.generated.ts").read_text(encoding="utf-8")
+    assert '"keyword": "lilac"' in generated and '"string": "meadow"' in generated
 
 
 # ── CodeBlock.tsx ─────────────────────────────────────────────────────────
@@ -166,8 +170,9 @@ def test_codeblock_no_new_native_deps():
 
 
 def test_chatscreen_imports_codeblock():
-    """ChatScreen must import CodeBlock."""
-    src = read(CHATSCREEN)
+    """The chat renders Markdown through the shared module, which imports CodeBlock."""
+    assert "import {\n  Chip," in read(CHATSCREEN) and "Markdown," in read(CHATSCREEN)
+    src = read(MARKDOWN)
     assert "CodeBlock" in src, "CodeBlock not referenced in ChatScreen"
     assert "import { CodeBlock }" in src or "import {CodeBlock}" in src, \
         "CodeBlock import statement not found"
@@ -175,9 +180,9 @@ def test_chatscreen_imports_codeblock():
 
 def test_chatscreen_fence_uses_codeblock():
     """ChatScreen fence rule must use CodeBlock component."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     # Find the fence rule
-    fence_section = re.search(r"fence:\s*\(node\)\s*=>\s*{", src)
+    fence_section = re.search(r"fence:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert fence_section, "fence rule not found in ChatScreen"
     # Get text from fence rule to next rule
     start = fence_section.end()
@@ -190,9 +195,9 @@ def test_chatscreen_fence_uses_codeblock():
 
 def test_chatscreen_code_block_uses_codeblock():
     """ChatScreen code_block rule must use CodeBlock component."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     # Find code_block rule
-    cb_section = re.search(r"code_block:\s*\(node\)\s*=>\s*{", src)
+    cb_section = re.search(r"code_block:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert cb_section, "code_block rule not found in ChatScreen"
     start = cb_section.end()
     end = src.find("},", start)
@@ -202,8 +207,8 @@ def test_chatscreen_code_block_uses_codeblock():
 
 def test_chatscreen_code_inline_uses_syntax_color():
     """code_inline must use colors.syntax.keyword (not colors.accent)."""
-    src = read(CHATSCREEN)
-    ci_section = re.search(r"code_inline:\s*\(node\)\s*=>\s*{", src)
+    src = read(MARKDOWN)
+    ci_section = re.search(r"code_inline:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({]", src)
     assert ci_section, "code_inline rule not found"
     start = ci_section.end()
     end = src.find("},", start)
@@ -214,7 +219,7 @@ def test_chatscreen_code_inline_uses_syntax_color():
 
 def test_chatscreen_no_old_plain_code_block():
     """Old plain Text code blocks should be removed from fence/code_block."""
-    src = read(CHATSCREEN)
+    src = read(MARKDOWN)
     # The old pattern was: <Text variant="sm" style={{ color: colors.textSoft, fontFamily: 'monospace' }}>
     # inside fence/code_block rules. Should be gone now.
     old_pattern = "colors.textSoft, fontFamily: 'monospace'"
@@ -224,7 +229,7 @@ def test_chatscreen_no_old_plain_code_block():
     # markdownStyles has fence + code_block style entries but those use
     # backgroundColor, not textSoft. So the old plain-text pattern should
     # be gone from the fence/code_block *render* functions.
-    fence_section = re.search(r"fence:\s*\(node\)\s*=>\s*{(.*?)},", src, re.DOTALL)
+    fence_section = re.search(r"fence:\s*\(node(?::\s*\w+)?\)\s*=>\s*[({](.*?)[})],", src, re.DOTALL)
     assert fence_section, "fence rule not found"
     assert "colors.textSoft, fontFamily: 'monospace'" not in fence_section.group(1), \
         "Old plain text pattern still in fence rule"

@@ -737,3 +737,109 @@ def test_git_timeout_is_configurable_and_wrapped_as_repository_error(tmp_path, m
     with pytest.raises(repository.RepositoryError, match="timed out"):
         repository.RepositoryRegistry.inspect(str(tmp_path))
     assert seen["timeout"] == 300
+
+
+# ------------------------------------------------------------------ self-hosted Gitea (MRs/PRs)
+
+
+def test_gitea_fingerprints_cover_sign_in_only_instances():
+    from mu.jobs.publish import _looks_like_gitea
+    assert _looks_like_gitea(200, {"version": "1.22.3"}, "")
+    # REQUIRE_SIGNIN_VIEW: the API refuses anonymous calls with Gitea's own message.
+    assert _looks_like_gitea(403, {"message": "Only signed in user is allowed to call APIs."}, "")
+    assert _looks_like_gitea(200, {}, "i_like_gitea=60de69e46c055fb9; Path=/; HttpOnly")
+    assert not _looks_like_gitea(404, {"message": "Not Found"}, "_gh_sess=x", "<html>GitHub</html>")
+    assert not _looks_like_gitea(403, {"message": "Forbidden"}, "")
+
+
+def test_unknown_host_resolves_to_gitea_by_probe_then_opens_a_pull_request(tmp_path, monkeypatch):
+    """git.resqvision-util.com.au-style hosts: no name hint, no provider_hosts entry."""
+    from mu.jobs import publish, publish_tokens
+    origin = "ssh://git@git.example-util.com.au:2222/Team/app.git"
+    probed = []
+    monkeypatch.setattr(publish, "probe_provider", lambda host, **kw: probed.append(host) or "gitea")
+    publish_tokens.write_token("gitea", "stored-gt")
+    job, head = _api_job(tmp_path, "auto", origin)
+    post = Post({"html_url": "https://git.example-util.com.au/Team/app/pulls/7", "number": 7})
+    pr = open_draft_pr(job, run=_fake_remote_run(origin), post=post, env=publish_tokens.with_tokens({}),
+                       verified_head=head)
+    assert probed == ["git.example-util.com.au"]
+    call = post.calls[0]
+    assert call["url"] == "https://git.example-util.com.au/api/v1/repos/Team/app/pulls"
+    assert call["headers"]["Authorization"] == "token stored-gt"
+    assert pr["provider"] == "gitea" and pr["number"] == 7
+
+
+def test_provider_hosts_and_publish_mode_win_before_probing(tmp_path, monkeypatch):
+    from mu.jobs import publish
+    monkeypatch.setattr(publish, "probe_provider", lambda host, **kw: pytest.fail("probed"))
+    settings(tmp_path, {"publish": {"provider_hosts": ["git.x.io=gitlab"]}})
+    assert publish.resolve_kind(parse_remote("git@git.x.io:a/b.git")) == "gitlab"
+    settings(tmp_path, {"publish": {"mode": "gitea"}})
+    assert publish.resolve_kind(parse_remote("git@git.y.io:a/b.git")) == "gitea"
+    assert publish.resolve_kind(parse_remote("git@github.com:a/b.git")) == "github"
+
+
+def test_unknown_host_message_is_actionable(tmp_path, monkeypatch):
+    from mu.jobs import publish
+    monkeypatch.setattr(publish, "probe_provider", lambda host, **kw: "unknown")
+    origin = "ssh://git@git.mystery.dev:2222/Team/app.git"
+    job, head = _api_job(tmp_path, "auto", origin)
+    with pytest.raises(PublishError) as excinfo:
+        open_draft_pr(job, run=_fake_remote_run(origin), post=Post({}), env={}, verified_head=head)
+    text = str(excinfo.value)
+    assert "git.mystery.dev=gitea" in text and "Settings → Push" in text
+
+
+def test_missing_gitea_token_says_where_to_set_it(tmp_path):
+    origin = "https://git.acme.dev/team/app.git"
+    settings(tmp_path, {"publish": {"provider_hosts": ["git.acme.dev=gitea"]}})
+    job, head = _api_job(tmp_path, "auto", origin)
+    with pytest.raises(PublishError) as excinfo:
+        open_draft_pr(job, run=_fake_remote_run(origin), post=Post({}), env={}, verified_head=head)
+    assert "GITEA_TOKEN is not set" in str(excinfo.value) and "/job publish token gitea" in str(excinfo.value)
+
+
+def test_publish_token_store_is_private_and_environment_wins(tmp_path, monkeypatch):
+    from mu.jobs import publish_tokens
+    publish_tokens.write_token("gitea", "stored")
+    path = publish_tokens.tokens_path()
+    assert oct(os.stat(path).st_mode & 0o777) == "0o600"
+    assert publish_tokens.with_tokens({})["GITEA_TOKEN"] == "stored"
+    assert publish_tokens.with_tokens({"GITEA_TOKEN": "env"})["GITEA_TOKEN"] == "env"
+    monkeypatch.delenv("GITEA_TOKEN", raising=False)
+    assert publish_tokens.status()["gitea"] == {"variable": "GITEA_TOKEN", "source": "stored"}
+    monkeypatch.setenv("GITEA_TOKEN", "env")
+    assert publish_tokens.status()["gitea"]["source"] == "environment"
+    publish_tokens.write_token("gitea", "")
+    assert "GITEA_TOKEN" not in publish_tokens.read_tokens()
+    with pytest.raises(ValueError):
+        publish_tokens.write_token("svn", "x")
+    with pytest.raises(ValueError):
+        publish_tokens.write_token("gitea", "has space")
+
+
+def test_publish_tokens_never_reach_job_containers():
+    """The token store is host-side only: the sandbox and harness code never read it."""
+    root = Path(__file__).resolve().parents[1]
+    for path in (root / "mu/jobs/sandbox").rglob("*.py"):
+        assert "publish_tokens" not in path.read_text(encoding="utf-8"), path
+    assert "publish_tokens" not in (root / "mu/jobs/harness.py").read_text(encoding="utf-8")
+
+
+def test_publish_token_api_and_cli(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from mu.commands import job as job_cmd
+    from mu.gui.routers import jobs as jobs_router
+    app = FastAPI()
+    app.include_router(jobs_router.router, prefix="/api/jobs")
+    with TestClient(app) as client:
+        assert client.put("/api/jobs/publish/tokens", json={"provider": "gitea", "value": "abc"}).status_code == 200
+        body = client.get("/api/jobs/publish/tokens").json()
+        assert body["tokens"]["gitea"]["source"] in ("stored", "environment") and "abc" not in json.dumps(body)
+        assert client.put("/api/jobs/publish/tokens", json={"provider": "nope", "value": "x"}).status_code == 400
+    result = job_cmd._job_publish(None, "token gitlab glpat-1", allow_prompt=False)
+    assert result.ok and "gitlab token saved" in result.message
+    status = job_cmd._job_publish(None, "", allow_prompt=False)
+    assert "GITLAB_TOKEN" in status.message and "glpat-1" not in status.message

@@ -4,41 +4,47 @@
        x-transition.opacity.duration.200ms>
     <div class="thread-panel-head">
         <div>
-            <p class="eyebrow">thread group</p>
+            <p class="eyebrow w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Thread group</p>
             <h2>Coordination</h2>
         </div>
-        <button class="history-search-btn" @click="$store.threads.load()">refresh</button>
+        <button type="button" class="history-search-btn w-btn" data-variant="ghost" data-size="sm"
+                @click="$store.threads.load()"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg><span>Refresh</span></button>
     </div>
-    <p class="muted mono" x-text="$store.threads.groupId || 'loading…'"></p>
-    <p class="history-error err-text" x-show="$store.threads.error" x-text="$store.threads.error"></p>
+    <p class="thread-group-id mono" x-text="$store.threads.groupId || 'Loading…'"></p>
+    <div class="history-error w-banner" data-tone="danger" role="alert" x-show="$store.threads.error">
+        <span class="w-banner__glyph" aria-hidden="true">✗</span>
+        <p class="err-text w-banner__msg" x-text="$store.threads.error"></p>
+    </div>
 
-    <section class="thread-roster-panel">
+    <section class="thread-roster-panel" aria-label="Threads in this group">
         <template x-for="thread in $store.threads.roster" :key="thread.thread_id">
-            <button class="thread-roster-row"
+            <button type="button" class="thread-roster-row"
                     :class="{ active: thread.thread_id === $store.threads.currentThreadId }"
+                    :aria-current="thread.thread_id === $store.threads.currentThreadId ? 'true' : null"
                     @click="$store.threads.switchTo(thread)">
-                <span class="thread-status-dot" :class="$store.threads.statusClass(thread.status)"></span>
+                <span class="thread-status-dot" :class="$store.threads.statusClass(thread.status)" aria-hidden="true"></span>
                 <span class="thread-roster-copy">
                     <strong x-text="thread.title || thread.session_name"></strong>
                     <small x-text="thread.status + (thread.current_goal ? ' · ' + thread.current_goal : '')"></small>
                     <small x-show="thread.claimed_paths && thread.claimed_paths.length"
                            x-text="'owns ' + thread.claimed_paths.join(', ')"></small>
                 </span>
-                <span class="thread-unread" x-show="thread.unread_count" x-text="thread.unread_count"></span>
+                <span class="thread-unread w-count" data-tone="accent" x-show="thread.unread_count" x-text="thread.unread_count"
+                      :aria-label="thread.unread_count + ' unread'"></span>
             </button>
         </template>
     </section>
 
     <div class="thread-activity-head">
         <h3>Agent conversations</h3>
-        <span class="muted mono" x-text="$store.threads.activity.length + ' events'"></span>
+        <span class="w-count" x-text="$store.threads.activity.length" :aria-label="$store.threads.activity.length + ' events'"></span>
     </div>
     <div class="thread-activity-list">
         <template x-for="event in $store.threads.activity.slice().reverse()" :key="event.event_id">
             <article class="thread-event" :class="'thread-event-' + event.kind">
                 <header>
                     <span x-text="event.actor_title || event.actor_thread_id || 'system'"></span>
-                    <span>→</span>
+                    <span aria-hidden="true">→</span>
                     <span x-text="event.target_title || event.target_thread_id || 'group'"></span>
                     <time x-text="new Date(event.created_at * 1000).toLocaleTimeString()"></time>
                 </header>
@@ -47,9 +53,10 @@
                 <p class="muted mono" x-show="event.payload && event.payload.path" x-text="event.payload && event.payload.path"></p>
             </article>
         </template>
-        <div class="panel-empty" x-show="!$store.threads.loading && !$store.threads.activity.length">
-            <h3>no coordination yet</h3>
-            <p class="muted">Peer messages, path claims, conflicts, handoffs and wake-ups appear here.</p>
+        <div class="panel-empty w-empty" data-size="sm" data-tone="accent" x-show="!$store.threads.loading && !$store.threads.activity.length">
+            <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-network"></use></svg></div>
+            <h3 class="w-empty__title">No coordination yet</h3>
+            <p class="w-empty__body">Peer messages, path claims, conflicts, handoffs and wake-ups appear here.</p>
         </div>
     </div>
 </aside>

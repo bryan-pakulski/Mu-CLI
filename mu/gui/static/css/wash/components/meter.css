@@ -1,0 +1,186 @@
+/* Context and token meters (G§9.14) — display only; never changes data.
+ *
+ * Compact ring (top bar, mobile header, observatory). The fill is the
+ * real-frame effective fill; ink-2, caution at >=65%, danger at >=85%
+ * (the caller sets data-level from the same thresholds as .warm/.hot).
+ *
+ *   <span class="w-ring" [data-size="sm|lg"] [data-level="caution|danger"]
+ *         style="--w-fill: 42%" role="img" aria-label="Context 42% full">
+ *     <span class="w-ring__label">42%</span>          ← optional; hidden at sm
+ *   </span>
+ *
+ * Sizes: sm 16, default 20, lg 64 (label centred inside the ring).
+ *
+ * Stacked layer bar: one bar split into L0–L5 segments in their layer
+ * pigments (--wash-layer-*), direct labels above segments of 6% or more and
+ * a legend for the rest. Ticks: data-kind="cap" is the budget cap (dashed
+ * ink), data-kind="real" is the drift-corrected limit (solid, "real" label).
+ *
+ *   <div class="w-layerbar" role="img" aria-label="Context layers: L0 6k, …">
+ *     <div class="w-layerbar__track">
+ *       <span class="w-layerbar__seg" data-layer="L0" style="--w-seg: 6%">
+ *         <span class="w-layerbar__label">L0</span></span>
+ *       …
+ *       <span class="w-layerbar__tick" data-kind="cap" style="--w-tick: 80%"></span>
+ *       <span class="w-layerbar__tick" data-kind="real" style="--w-tick: 100%">
+ *         <span class="w-layerbar__tick-label">real</span></span>
+ *     </div>
+ *     <ul class="w-layerbar__legend">
+ *       <li class="w-layerbar__key" data-layer="L0"><i class="w-layerbar__swatch"></i>
+ *         <span class="w-layerbar__key-id">L0</span> System</li>
+ *     </ul>
+ *   </div>
+ *
+ * Segments may be <button>s (open the layer). Colour is never the only key:
+ * every segment carries a title/aria-label and the legend repeats the ids.
+ */
+
+/* ------------------------------------------------------------ ring */
+.w-ring {
+    --w-fill: 0%;
+    --w-ring-ink: var(--wash-ink-2);
+    --w-ring-size: 20px;
+    --w-ring-hole: 62%;
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: var(--w-ring-size);
+    height: var(--w-ring-size);
+    border-radius: 50%;
+    background: conic-gradient(var(--w-ring-ink) 0 var(--w-fill), var(--wash-sunken) 0);
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+}
+.w-ring::before {
+    content: "";
+    position: absolute;
+    inset: calc((100% - var(--w-ring-hole)) / 2);
+    border-radius: 50%;
+    background: var(--w-ring-hole-bg, var(--wash-surface));
+}
+.w-ring[data-level="caution"] { --w-ring-ink: var(--wash-caution-pigment); }
+.w-ring[data-level="danger"] { --w-ring-ink: var(--wash-danger-pigment); }
+.w-ring[data-size="sm"] { --w-ring-size: 16px; }
+.w-ring[data-size="lg"] { --w-ring-size: 64px; --w-ring-hole: 76%; }
+.w-ring__label {
+    position: relative;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-caption-size);
+    font-weight: 600;
+    line-height: 1;
+}
+.w-ring:not([data-size="lg"]) .w-ring__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+.w-ring[data-size="lg"] .w-ring__label { font-size: var(--wash-type-label-size); }
+.w-ring[data-level="caution"] .w-ring__label { color: var(--wash-caution-ink); }
+.w-ring[data-level="danger"] .w-ring__label { color: var(--wash-danger-ink); }
+@media (forced-colors: active) {
+    .w-ring { border: 1px solid CanvasText; }
+}
+
+/* ------------------------------------------------------------ layer bar */
+.w-layerbar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-2);
+    min-width: 0;
+}
+.w-layerbar__track {
+    position: relative;
+    display: flex;
+    gap: 2px;
+    height: 14px;
+    margin-top: var(--wash-space-5);  /* room for direct labels above */
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-glass-fill-subtle);
+}
+.w-layerbar__seg {
+    --w-seg: 0%;
+    --w-seg-color: var(--wash-neutral-pigment);
+    position: relative;
+    flex: 0 0 auto;
+    width: var(--w-seg);
+    min-width: 3px;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: var(--w-seg-color);
+    color: var(--wash-ink-2);
+    font: inherit;
+    cursor: default;
+}
+button.w-layerbar__seg { cursor: pointer; }
+button.w-layerbar__seg:hover { filter: saturate(1.25) brightness(0.96); }
+.w-layerbar__seg:first-of-type { border-radius: var(--wash-radius-pill) 0 0 var(--wash-radius-pill); }
+.w-layerbar__seg:focus-visible { z-index: 1; outline-offset: 2px; }
+.w-layerbar__label {
+    position: absolute;
+    bottom: calc(100% + 3px);
+    left: 0;
+    color: var(--wash-ink-2);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: 1;
+    white-space: nowrap;
+}
+.w-layerbar__tick {
+    --w-tick: 100%;
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    left: min(var(--w-tick), calc(100% - 2px));
+    width: 0;
+    color: var(--wash-ink);
+    border-left: 2px solid currentColor;
+    pointer-events: none;
+}
+.w-layerbar__tick[data-kind="cap"] { border-left-style: dashed; border-left-width: 1px; }
+.w-layerbar__tick-label {
+    position: absolute;
+    top: calc(100% + 2px);
+    right: 2px;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: 1;
+    white-space: nowrap;
+}
+.w-layerbar__legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: var(--wash-space-1) var(--wash-space-3);
+    margin: var(--wash-space-2) 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-caption-size);
+}
+.w-layerbar__key { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.w-layerbar__key-id { color: var(--wash-ink); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); }
+.w-layerbar__swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--w-seg-color, var(--wash-neutral-pigment));
+}
+
+/* Layer pigments, in the fixed L0 → L5 order (G§1.4). */
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L0"] { --w-seg-color: var(--wash-layer-L0); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L1A"] { --w-seg-color: var(--wash-layer-L1A); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L1B"] { --w-seg-color: var(--wash-layer-L1B); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L2"] { --w-seg-color: var(--wash-layer-L2); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L3"] { --w-seg-color: var(--wash-layer-L3); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L4"] { --w-seg-color: var(--wash-layer-L4); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L4B"] { --w-seg-color: var(--wash-layer-L4B); }
+:is(.w-layerbar__seg, .w-layerbar__key)[data-layer="L5"] { --w-seg-color: var(--wash-layer-L5); }
+@media (prefers-contrast: more) {
+    .w-layerbar__track { outline: 1px solid var(--wash-ink-3); }
+}

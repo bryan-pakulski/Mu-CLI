@@ -64,7 +64,7 @@ def _run_teacher_watcher_user(session, user_text: str) -> None:
         _persist_teacher_course(session, course)
         if result.events_applied and session.ui:
             session.ui.show_info(
-                f"📚 watcher: recorded {len(result.events_applied)} "
+                f"teach · watcher: recorded {len(result.events_applied)} "
                 f"learner turn{'s' if len(result.events_applied) != 1 else ''}"
             )
     except Exception as exc:
@@ -91,12 +91,12 @@ def _run_teacher_watcher_assistant(session, assistant_text: str) -> None:
         result = apply_assistant_classification(course, lesson_id, classification)
         _persist_teacher_course(session, course)
         if result.agent_feedback and session.ui:
-            session.ui.show_info(f"📚 {result.agent_feedback}")
+            session.ui.show_info(f"teach · {result.agent_feedback}")
         if result.events_applied and session.ui:
             kinds = ", ".join(e["kind"] for e in result.events_applied)
-            session.ui.show_info(f"📚 watcher: recorded {kinds}")
+            session.ui.show_info(f"teach · watcher: recorded {kinds}")
         if result.auto_concluded_lecture and session.ui:
-            session.ui.show_info("📚 lecture auto-concluded by watcher")
+            session.ui.show_info("teach · lecture auto-concluded by watcher")
     except Exception as exc:
         logger.warning("watcher (assistant): %s", exc)
 

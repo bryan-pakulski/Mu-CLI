@@ -99,6 +99,7 @@ _OVERFLOW_MARKERS = (
     "exceeds the context",
     "exceeded your available",
     "context_length_exceeded",
+    "context_window_exceeded",  # Codex CLI's error code
     "maximum_input_tokens",
 )
 # HTTP status codes that, when paired with a prompt/context marker, signal

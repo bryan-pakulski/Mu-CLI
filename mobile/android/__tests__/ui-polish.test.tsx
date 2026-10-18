@@ -1,7 +1,7 @@
 import React from 'react';
 import { AccessibilityInfo, AppState, Text } from 'react-native';
 import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react-native';
-import { BottomSheet } from '../src/components/BottomSheet';
+import { Sheet as BottomSheet } from '../src/ui';
 import { ThemeProvider } from '../src/theme/ThemeContext';
 import { useMotionPreference } from '../src/hooks/useMotionPreference';
 

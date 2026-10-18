@@ -127,9 +127,6 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
             if stages:
                 execution["stages"] = stages
         if workspace:
-            from mu.jobs.core.vm import unattended_default
-
-            execution.setdefault("auto_approve_writes", unattended_default())
             value["execution"] = execution
         return value
     session = resolver(session_name) if callable(resolver) else None
@@ -166,11 +163,7 @@ def _with_session_defaults(request: Request, payload: Dict[str, Any]) -> Dict[st
             execution["stages"] = stages
     execution.setdefault("agent_mode", str(variables.get("agent_mode", "default") or "default"))
     execution.setdefault("session_type", str(variables.get("session_type", "workspace") or "workspace"))
-    # Unattended sandbox writes are an explicit per-job choice (Settings default off);
-    # the session's YOLO is never inherited.
-    from mu.jobs.core.vm import unattended_default
-
-    execution.setdefault("auto_approve_writes", unattended_default())
+    # Jobs always run unattended (mu.jobs.unattended); a client's auto_approve_writes is ignored.
     value["execution"] = execution
     return value
 
@@ -428,6 +421,14 @@ async def _import_tickets(request: Request, body: Dict[str, Any]):
             status_code=400,
             detail="Choose a workspace or repository for the imported jobs.",
         )
+    template = str((defaults.get("execution") or {}).get("template") or "").strip()
+    if template:
+        # "Run in" for every imported ticket: reject an unknown template once, not per ticket.
+        from mu.jobs.sandbox.environments import normalize_template_choice
+        try:
+            normalize_template_choice({"template": template})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     service = _service(request)
     try:
         max_results = int(body.get("max_results") or 20)
@@ -610,6 +611,26 @@ def get_doctor(deep: bool = False):
     checks = doctor(deep=deep)
     return {"checks": checks, "failed": sum(1 for c in checks if c["status"] == "fail"),
             "warnings": sum(1 for c in checks if c["status"] == "warn"), "needs_setup": needs_setup()}
+
+
+@router.get("/publish/tokens")
+def get_publish_tokens():
+    """PR/MR provider tokens used when pushing: where each is set (environment / stored / unset).
+    Values are never returned."""
+    from mu.jobs import publish_tokens
+    return {"tokens": publish_tokens.status()}
+
+
+@router.put("/publish/tokens")
+def put_publish_token(payload: Dict[str, Any]):
+    """Store (empty value: clear) a provider token in ``$MUCLI_HOME/jobs/publish_tokens.env`` (0600).
+    Host-side only: never passed into job containers."""
+    from mu.jobs import publish_tokens
+    try:
+        publish_tokens.write_token(str((payload or {}).get("provider") or ""), (payload or {}).get("value"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"tokens": publish_tokens.status()}
 
 
 @router.get("/agents")
@@ -837,6 +858,28 @@ async def delete_historic_job(
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found") from exc
     except (ValueError, JobManagementError) as exc:
         raise _state_error(exc) from exc
+
+
+@router.get("/{job_id}/evidence/{file:path}")
+async def get_job_evidence(job_id: str, file: str, request: Request):
+    """One evidence file (mu/jobs/evidence.py). Only files in the job's evidence manifest are
+    served; images and video inline, everything else (SVG and HTML included) as a download."""
+    from fastapi.responses import FileResponse
+    from mu.jobs.core.artifacts import artifacts_for
+    from mu.jobs.evidence import media_type, resolve
+    service = _service(request)
+    job = _job_or_404(service, job_id)
+    entry = resolve(artifacts_for(job), file)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="evidence not found")
+    inline = entry["kind"] in ("image", "video") or request.query_params.get("view") == "text" and entry["kind"] == "text"
+    disposition = "inline" if inline else "attachment"
+    return FileResponse(entry["path"], media_type=media_type(entry["name"]), headers={
+        "Content-Disposition": f'{disposition}; filename="{re.sub(r"[^A-Za-z0-9._-]", "_", entry["name"])}"',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+        "Cache-Control": "private, max-age=3600",
+    })
 
 
 @router.get("/{job_id}/receipt")

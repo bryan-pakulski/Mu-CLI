@@ -152,9 +152,9 @@ def test_commit_guard_allows_only_approved_workflow_and_rejects_escape_and_size(
     (tmp_path / "outside").symlink_to("/etc/passwd")
     with pytest.raises(ValueError, match="escapes"):
         validate_changes(str(tmp_path), ["outside"])
-    (tmp_path / "big").write_text("1234")
-    with pytest.raises(ValueError, match="size"):
-        validate_changes(str(tmp_path), ["big"], max_file_bytes=3)
+    # No size limit: a large changed file is allowed (the secret scan streams it).
+    (tmp_path / "big").write_bytes(b"x" * (32 * 1024 * 1024))
+    validate_changes(str(tmp_path), ["big"])
 
 
 def test_stage_policies_only_allow_opt_in_registry_egress_for_writing_stages():

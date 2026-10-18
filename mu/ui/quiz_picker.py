@@ -199,7 +199,7 @@ def run_interactive_quiz(
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.styles import Style
+    from mu.ui.theme.pt_style import picker_style
 
     state = QuizPickerState(questions=list(normalized))
     kb = KeyBindings()
@@ -334,18 +334,7 @@ def run_interactive_quiz(
     )
     layout = Layout(HSplit([body]))
 
-    style = Style.from_dict(
-        {
-            "title": "ansicyan",
-            "prompt": "ansiwhite",
-            "current": "ansiyellow",
-            "correct": "ansigreen",
-            "wrong": "ansired",
-            "input": "ansiwhite",
-            "explain": "ansiblack bold",
-            "hint": "ansiblack bold",
-        }
-    )
+    style = picker_style()
 
     app: Application = Application(
         layout=layout,

@@ -20,7 +20,6 @@ export interface JobExecutionProfile {
   model: string;
   agent_mode: string;
   session_type: 'chat' | 'workspace' | 'container';
-  auto_approve_writes: boolean;
   stages?: JobStageModels;
   /** Agent per stage: mucli (default), Claude Code or Codex. */
   stage_agents?: import('./agents').StageAgents;
@@ -506,7 +505,12 @@ export const jiraApi = {
 };
 
 /** Where imported tickets run: workspace path or git URL first; the session is optional. */
-export interface TicketImportTarget { workspace?: string; session?: string | null; force?: boolean }
+export interface TicketImportTarget {
+  workspace?: string; session?: string | null; force?: boolean;
+  /** "Run in" for every imported ticket (`runInExecution`: `{template, remember_template?}` or
+   * `{environments}`), sent as `defaults.execution`. */
+  execution?: Record<string, unknown>;
+}
 
 /** POST /api/jobs/jira/import body: a git URL goes as `defaults.repository` (the server clones
  * it), a path as `defaults.workspace_root`; a bare string is the legacy session name. */
@@ -514,7 +518,10 @@ export function ticketImportBody(keys: string[], target?: TicketImportTarget | s
   const t: TicketImportTarget = typeof target === 'string' ? { session: target } : target || {};
   const body: Record<string, unknown> = { keys };
   const path = (t.workspace || '').trim();
-  if (path) body.defaults = isRepositoryUrl(path) ? { repository: path } : { workspace_root: path };
+  const defaults: Record<string, unknown> = {};
+  if (path) Object.assign(defaults, isRepositoryUrl(path) ? { repository: path } : { workspace_root: path });
+  if (t.execution && Object.keys(t.execution).length) defaults.execution = { ...t.execution };
+  if (Object.keys(defaults).length) body.defaults = defaults;
   if (t.session) body.session_name = t.session;
   if (t.force) body.force = true;
   return body;
@@ -581,11 +588,6 @@ export function sessionForWorkspace(sessions: JobSessionOption[], workspace: str
 export function defaultWorkspace(sessions: JobSessionOption[], preferredSession: string | null | undefined): string {
   const entry = sessions.find(s => s.name === preferredSession) || sessions.find(s => s.current);
   return entry?.workspace || recentWorkspaces(sessions)[0] || '';
-}
-
-/** Settings → New job defaults → "Run unattended in sandbox" (off unless explicitly turned on). */
-export function unattendedDefault(rules: JobRules | null | undefined): boolean {
-  return rules?.values?.['defaults.run_unattended'] === true;
 }
 
 /** New-job form prefill from rules.values defaults.* (blank when unset). */

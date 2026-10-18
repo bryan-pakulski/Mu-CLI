@@ -10,9 +10,14 @@
     const work = () => window.MuWork || {};
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const STEP_ICON = { ok: '✓', todo: '○', warn: '!', skipped: '–', optional: '·', '': '…' };
-    const STEP_TONE = { ok: 'tone-ok', todo: 'tone-warn', warn: 'tone-warn', skipped: 'tone-muted', optional: 'tone-muted', '': 'tone-muted' };
+    // Wash tones (G§9.13); '' = the neutral ink-3 status.
+    const STEP_TONE = { ok: 'ok', todo: 'attention', warn: 'attention', skipped: '', optional: '', '': '' };
     const DOC_ICON = { ok: '✓', warn: '!', fail: '✗' };
-    const DOC_TONE = { ok: 'tone-ok', warn: 'tone-warn', fail: 'tone-danger' };
+    const DOC_TONE = { ok: 'ok', warn: 'attention', fail: 'danger' };
+    const toneAttr = tone => (tone ? ` data-tone="${tone}"` : '');
+    // Status glyph (✓ ○ ! ✗ ●) in its tone's ink; data-state="active" pulses while checking.
+    const glyph = (tone, icon, active = false, attrs = 'aria-hidden="true"') =>
+        `<span class="w-status work-status-glyph"${toneAttr(tone)}${active ? ' data-state="active"' : ''} ${attrs}>${icon}</span>`;
     const DISMISS_KEY = 'mucli-jobs-setup-cta';
 
     let vm = null, selected = '', openForm = '', poll = null, busy = false, doctor = null, doctorBusy = false;
@@ -51,21 +56,21 @@
         const list = vm.steps.map(s => {
             const state = s.checking ? '' : s.state;
             return `<li><button type="button" class="work-setup-step${s.id === step.id ? ' is-selected' : ''}" data-step="${esc(s.id)}" aria-current="${s.id === step.id}">
-                <span class="status-icon ${STEP_TONE[state] || ''}${s.checking ? ' active' : ''}" aria-hidden="true">${STEP_ICON[state] ?? '?'}</span>
-                <span class="work-setup-step-title">${esc(s.title)}${s.optional ? ' <span class="muted small">(optional)</span>' : ''}</span>
-                <span class="sr-only">${esc(s.checking ? 'checking' : s.state)}</span></button></li>`;
+                ${glyph(STEP_TONE[state], STEP_ICON[state] ?? '?', s.checking)}
+                <span class="work-setup-step-title">${esc(s.title)}${s.optional ? ' <span class="work-meta">(optional)</span>' : ''}</span>
+                <span class="w-sr-only">${esc(s.checking ? 'checking' : s.state)}</span></button></li>`;
         }).join('');
         const footer = vm.can_finish
-            ? '<p class="small tone-ok"><strong>All set:</strong> press Finish setup.</p>'
-            : `<p class="small muted">${vm.blocking.length ? `To do: ${esc(vm.blocking.join(', '))}` : 'checking…'}</p>`;
+            ? '<p class="work-caption" data-tone="ok"><strong>All set:</strong> press Finish setup.</p>'
+            : `<p class="work-meta">${vm.blocking.length ? `To do: ${esc(vm.blocking.join(', '))}` : 'checking…'}</p>`;
         host.innerHTML = `
-            <section class="panel work-setup-steps" aria-label="Setup steps"><ul>${list}</ul>${footer}</section>
-            <section class="panel work-setup-detail" aria-labelledby="work-setup-step-title">
-                <header><h2 id="work-setup-step-title">${esc(step.title)}</h2>${step.optional ? '<span class="badge tone-muted">optional</span>' : ''}</header>
-                <div class="panel-body stack">
-                    <p class="muted">${esc(step.why)}</p>
-                    <p class="work-setup-state"><span class="status-icon ${STEP_TONE[step.checking ? '' : step.state] || ''}${step.checking ? ' active' : ''}" aria-hidden="true">${STEP_ICON[step.checking ? '' : step.state] ?? '?'}</span> ${esc(step.detail)}</p>
-                    <div class="work-setup-actions stack">${step.actions.map(a => actionHtml(step, a)).join('') || '<p class="muted small">Nothing to do here.</p>'}</div>
+            <section class="w-card work-setup-steps" aria-label="Setup steps"><ul>${list}</ul>${footer}</section>
+            <section class="w-card work-setup-detail" aria-labelledby="work-setup-step-title">
+                <header class="w-card__head"><h2 class="w-card__title" id="work-setup-step-title">${esc(step.title)}</h2>${step.optional ? '<span class="w-count">optional</span>' : ''}</header>
+                <div class="w-card__body work-stack">
+                    <p class="work-muted">${esc(step.why)}</p>
+                    <p class="work-setup-state">${glyph(STEP_TONE[step.checking ? '' : step.state], STEP_ICON[step.checking ? '' : step.state] ?? '?', step.checking)} ${esc(step.detail)}</p>
+                    <div class="work-setup-actions work-stack">${step.actions.map(a => actionHtml(step, a)).join('') || '<p class="work-meta">Nothing to do here.</p>'}</div>
                     <div data-setup-log></div>
                 </div>
             </section>`;
@@ -73,27 +78,27 @@
     }
 
     function actionHtml(step, a) {
-        const hint = a.hint ? `<small class="muted">${esc(a.hint)}</small>` : '';
+        const hint = a.hint ? `<small class="work-meta">${esc(a.hint)}</small>` : '';
         const key = `${step.id}:${a.id}`;
         if (a.kind === 'terminal') {
             return `<div class="work-setup-action work-setup-terminal">
-                <div class="work-setup-action-label">${esc(a.label)} <span class="muted small">(in a terminal)</span></div>
+                <div class="work-setup-action-label">${esc(a.label)} <span class="work-meta">(in a terminal)</span></div>
                 <div class="work-setup-command"><code>${esc(a.command || '')}</code>
-                    <button type="button" class="btn ghost" data-copy="${esc(a.command || '')}">Copy</button></div>
+                    <button type="button" class="w-btn" data-variant="ghost" data-copy="${esc(a.command || '')}">Copy</button></div>
                 ${hint}
-                <div><button type="button" class="btn" data-run="${esc(a.id)}">I ran it — check again</button></div></div>`;
+                <div><button type="button" class="w-btn" data-variant="secondary" data-run="${esc(a.id)}">I ran it — check again</button></div></div>`;
         }
         if (a.kind === 'prompts' && openForm === key) {
-            return `<form class="work-setup-action work-setup-form stack" data-form="${esc(a.id)}" autocomplete="off">
+            return `<form class="work-setup-action work-setup-form" data-form="${esc(a.id)}" autocomplete="off">
                 <div class="work-setup-action-label">${esc(a.label)}</div>${hint}
-                ${(a.prompts || []).map((p, i) => `<label class="stack"><span class="small">${esc(p.label)}</span>
-                    <input name="p${i}" ${p.secret ? 'type="password" autocomplete="new-password"' : `type="text" value="${esc(p.initial || '')}"`} ${i === 0 ? 'autofocus' : ''}></label>`).join('')}
-                <div class="row"><button type="submit" class="btn primary">Save</button><button type="button" class="btn ghost" data-cancel>Cancel</button></div></form>`;
+                ${(a.prompts || []).map((p, i) => `<label class="w-field"><span class="w-field__label">${esc(p.label)}</span>
+                    <input class="w-input" name="p${i}" ${p.secret ? 'type="password" autocomplete="new-password"' : `type="text" value="${esc(p.initial || '')}"`} ${i === 0 ? 'autofocus' : ''}></label>`).join('')}
+                <div class="w-btn-row"><button type="submit" class="w-btn" data-variant="primary">Save</button><button type="button" class="w-btn" data-variant="ghost" data-cancel>Cancel</button></div></form>`;
         }
         const running = vm.job?.running;
         const disabled = a.kind === 'job' && running ? 'disabled title="another setup job is running"' : '';
-        const tone = a.kind === 'job' ? 'primary' : '';
-        return `<div class="work-setup-action"><button type="button" class="btn ${tone}" data-run="${esc(a.id)}" ${disabled}>${esc(a.label)}${a.kind === 'nav' ? ' →' : ''}</button>${hint}</div>`;
+        const variant = a.kind === 'job' ? 'primary' : 'secondary';
+        return `<div class="work-setup-action"><button type="button" class="w-btn" data-variant="${variant}" data-run="${esc(a.id)}" ${disabled}>${esc(a.label)}${a.kind === 'nav' ? ' →' : ''}</button>${hint}</div>`;
     }
 
     function renderLog() {
@@ -101,10 +106,10 @@
         if (!host || !vm) return;
         const job = vm.job;
         if (!job || (job.step !== selected && !job.running) || !job.lines) { host.innerHTML = ''; return; }
-        const tone = job.running ? 'tone-running' : job.ok ? 'tone-ok' : 'tone-danger';
+        const tone = job.running ? 'running' : job.ok ? 'ok' : 'danger';
         const icon = job.running ? '●' : job.ok ? '✓' : '✗';
-        host.innerHTML = `<div class="work-setup-job"><div><span class="status-icon ${tone}${job.running ? ' active' : ''}" aria-hidden="true">${icon}</span>
-            <strong>${esc(job.title)}</strong> <span class="muted small">${job.running ? 'running…' : job.ok ? 'passed' : 'failed'}</span></div>
+        host.innerHTML = `<div class="work-setup-job"><div>${glyph(tone, icon, job.running)}
+            <strong>${esc(job.title)}</strong> <span class="work-meta">${job.running ? 'running…' : job.ok ? 'passed' : 'failed'}</span></div>
             <pre class="work-setup-log" aria-live="polite">${esc(job.lines.join('\n'))}</pre></div>`;
         const pre = host.querySelector('pre');
         pre.scrollTop = pre.scrollHeight;
@@ -195,18 +200,19 @@
         const host = $('work-doctor');
         if (!host) return;
         const badge = $('work-doctor-badge');
-        if (doctorBusy && !doctor) { host.innerHTML = `<div class="loading" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>${esc(doctorBusy)}</div>`; return; }
+        if (doctorBusy && !doctor) { host.innerHTML = `<div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>${esc(doctorBusy)}</div>`; return; }
         if (!doctor) return;
         const checks = doctor.checks || [];
         const ok = checks.filter(c => c.status === 'ok').length;
         badge.textContent = `${ok}/${checks.length} ok${doctor.failed ? ` · ${doctor.failed} failing` : ''}${doctor.warnings ? ` · ${doctor.warnings} warnings` : ''}`;
-        badge.className = `badge ${doctor.failed ? 'tone-danger' : doctor.warnings ? 'tone-warn' : 'tone-ok'}`;
+        badge.className = 'w-count';
+        badge.dataset.tone = doctor.failed ? 'danger' : doctor.warnings ? 'attention' : 'ok';
         host.innerHTML = `
-            ${doctorBusy ? `<p class="small muted" role="status"><span class="status-icon active tone-running" aria-hidden="true">●</span>${esc(doctorBusy)}</p>` : ''}
-            ${doctor.failed ? `<div class="work-setup-cta" role="alert"><span class="status-icon tone-danger" aria-hidden="true">✗</span><span>${doctor.failed} check${doctor.failed === 1 ? '' : 's'} failing. The Checklist tab has the actions that fix them.</span><span class="spacer"></span><a class="btn" href="#/setup">Open checklist</a></div>` : ''}
-            <section class="panel"><table class="work-doctor-table"><thead><tr><th scope="col"><span class="sr-only">Status</span></th><th scope="col">Check</th><th scope="col">Detail</th></tr></thead>
-            <tbody>${checks.map(c => `<tr class="is-${esc(c.status)}"><td><span class="status-icon ${DOC_TONE[c.status] || ''}" aria-label="${esc(c.status)}">${DOC_ICON[c.status] || '?'}</span></td>
-                <td><code>${esc(c.name)}</code></td><td class="${c.status === 'ok' ? 'muted' : DOC_TONE[c.status]}">${esc(c.detail)}</td></tr>`).join('')}</tbody></table></section>`;
+            ${doctorBusy ? `<p class="work-loading" role="status"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>${esc(doctorBusy)}</p>` : ''}
+            ${doctor.failed ? `<div class="w-banner work-doctor-cta" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${doctor.failed} check${doctor.failed === 1 ? '' : 's'} failing. The Checklist tab has the actions that fix them.</p><a class="w-btn" data-variant="tonal" data-tone="danger" data-size="sm" href="#/setup">Open checklist</a></div>` : ''}
+            <div class="w-table-wrap"><table class="w-table work-doctor-table"><thead><tr><th scope="col"><span class="w-sr-only">Status</span></th><th scope="col">Check</th><th scope="col">Detail</th></tr></thead>
+            <tbody>${checks.map(c => `<tr class="is-${esc(c.status)}"><td>${glyph(DOC_TONE[c.status], DOC_ICON[c.status] || '?', false, `aria-label="${esc(c.status)}"`)}</td>
+                <td><code>${esc(c.name)}</code></td><td class="${c.status === 'ok' ? 'work-muted' : 'work-tone'}"${c.status === 'ok' ? '' : toneAttr(DOC_TONE[c.status])}>${esc(c.detail)}</td></tr>`).join('')}</tbody></table></div>`;
     }
 
     async function runDoctor(deep = false) {
@@ -268,7 +274,7 @@
         }
         if (vm) renderSetup();
         load().then(() => { renderSetup(); if (vm.job?.running) startPolling(); }).catch(e => {
-            $('work-setup').innerHTML = `<div class="error-box" role="alert">✗ ${esc(e.message)}</div>`;
+            $('work-setup').innerHTML = `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(e.message)}</p></div>`;
         });
     }
 

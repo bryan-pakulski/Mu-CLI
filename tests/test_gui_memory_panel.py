@@ -163,7 +163,8 @@ def test_app_js_context_canvases_are_theme_aware_and_redraw():
     with open(APP_JS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
     assert "_contextPalette()" in content
-    assert 'getAttribute("data-theme") === "light"' in content
+    # Wash themes: canvases ask for the resolved paper/dusk theme.
+    assert 'const light = muWashTheme() === "paper";' in content
     assert "palette.light" in content
     assert "memory._scheduleRender()" in content
 
@@ -240,7 +241,7 @@ def test_css_has_memory_layer_modal_classes():
         ".memory-layer-pre",
         ".memory-legend-row",
     ):
-        assert cls in content, f"CSS class {cls} not found in app.css"
+        assert cls in content, f"CSS class {cls} not found in patterns/panels.css"
     # the <pre> body is selectable so copy/paste works
     assert "user-select: text" in content
 
@@ -254,7 +255,9 @@ CSS_PATH = os.path.join(
     "gui",
     "static",
     "css",
-    "app.css",
+    "wash",
+    "patterns",
+    "panels.css",
 )
 
 
@@ -270,34 +273,28 @@ def test_css_has_memory_panel_classes():
         ".memory-legend",
         ".memory-legend-row",
     ):
-        assert cls in content, f"CSS class {cls} not found in app.css"
+        assert cls in content, f"CSS class {cls} not found in patterns/panels.css"
 
 
 def test_css_has_context_observatory_light_theme_palette():
     with open(CSS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
-    tokens_path = os.path.join(os.path.dirname(CSS_PATH), "tokens.css")
-    with open(tokens_path, "r", encoding="utf-8") as f:
-        tokens = f.read()
-    # The observatory palette resolves in tokens.css for both themes; app.css
-    # carries no per-theme colour overrides for it.
-    assert 'html[data-theme="light"] .context-observatory' not in content
-    assert 'html[data-theme="light"]' in tokens
-    for token in (
-        "--context-card-surface",
-        "--context-control-surface",
-        "--context-plot-surface",
-        "--context-tooltip-surface",
-    ):
-        assert token + ":" in tokens
-        assert "var(" + token + ")" in content
-    assert 'html[data-theme="light"] .context-pressure-pill' not in content
-    pill = content.split(".context-pressure-pill.hot", 1)[1].split("}", 1)[0]
-    assert "var(--error-subtle)" in pill
-
-
-# ============================================================ backend wiring
-
+    # The observatory palette resolves in the generated Wash tokens for both
+    # themes; the panel rules carry no per-theme colour overrides for it.
+    assert '[data-theme="light"] .context-observatory' not in content
+    assert '[data-theme="paper"] .context-observatory' not in content
+    wash_path = os.path.join(os.path.dirname(CSS_PATH), "..", "tokens.css")
+    with open(wash_path, "r", encoding="utf-8") as f:
+        wash = f.read()
+    assert '[data-theme="paper"]' in wash and '[data-theme="dusk"]' in wash
+    # Cards, plot, controls and tooltips read the per-theme --wash-* steps
+    # directly (the --context-* aliases are retired with tokens.css).
+    from wash_css_helpers import css, decls
+    panels = css("patterns/panels.css")
+    assert "--context-" not in panels
+    assert decls(panels, ".context-timeline-tooltip").get("background") == "var(--w-glass-fill-strong)"
+    assert '[data-theme="light"] .context-pressure-pill' not in content
+    assert decls(panels, ".context-pressure-pill.hot").get("background") == "var(--wash-danger-wash)"
 
 def test_memory_router_registered():
     import inspect

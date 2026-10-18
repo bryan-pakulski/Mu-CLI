@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
+from .notes import bullets as note_bullets, clean
+
 SEVERITIES = ("blocker", "major", "minor", "nit")
 CATEGORIES = ("correctness", "security", "regression", "tests", "perf", "maintainability", "scope")
 DISPOSITIONS = ("open", "accepted", "dismissed", "fixed")
@@ -77,6 +79,9 @@ class ReviewReport:
     reviewed_head: str = ""
     model: Dict[str, str] = field(default_factory=dict)
     summary: str = ""
+    # Notes tab (core/notes.py): the reviewer's one-line bottom line and a few bullets.
+    headline: str = ""
+    notes: List[str] = field(default_factory=list)
     plan_coverage: List[Coverage] = field(default_factory=list)
     findings: List[Finding] = field(default_factory=list)
     checks_context: Dict[str, int] = field(default_factory=lambda: {"new_failures": 0, "preexisting_failures": 0})
@@ -135,6 +140,8 @@ class ReviewReport:
             reviewed_head=str(raw.get("reviewed_head") or raw.get("head_sha") or ""),
             model={k: str(v) for k, v in dict(raw.get("model") or {}).items()},
             summary=str(raw.get("summary") or "")[:6000],
+            headline=clean(raw.get("headline")),
+            notes=note_bullets(raw.get("notes")),
             plan_coverage=[
                 Coverage(str(c.get("criterion_id") or f"AC-{i}"),
                          _pick(c.get("status"), COVERAGE, "unverifiable"),
@@ -146,6 +153,9 @@ class ReviewReport:
             checks_context={
                 "new_failures": int((raw.get("checks_context") or {}).get("new_failures") or 0),
                 "preexisting_failures": int((raw.get("checks_context") or {}).get("preexisting_failures") or 0),
+                # Present only for unverified check runs (unrunnable checks; verdict capped).
+                **({"unverified": int((raw.get("checks_context") or {})["unverified"])}
+                   if int((raw.get("checks_context") or {}).get("unverified") or 0) else {}),
             },
             out_of_scope_changes=[str(x) for x in raw.get("out_of_scope_changes") or []],
             model_verdict=str(raw.get("model_verdict") or raw.get("verdict") or ""),
@@ -174,6 +184,8 @@ class ReviewReport:
             "reviewed_head": review.get("head_sha") or "",
             "model": review.get("model") or {},
             "summary": review.get("summary") or "",
+            "headline": review.get("headline") or "",
+            "notes": review.get("notes") or [],
             "findings": findings,
             "verdict": legacy,
             "cost_usd": review.get("cost_usd") or 0.0,
@@ -186,6 +198,9 @@ def compute_verdict(findings: Iterable[Finding], coverage: Iterable[Coverage],
     if "blocker" in open_sev or int((checks or {}).get("new_failures") or 0) > 0:
         return "do_not_merge"
     if "major" in open_sev or any(c.status == "unmet" for c in coverage):
+        return "needs_work"
+    if int((checks or {}).get("unverified") or 0) > 0:
+        # Honest gate (job_templates.md §5): checks that could not run never yield "ready".
         return "needs_work"
     if open_sev & {"minor", "nit"}:
         return "ready_with_nits"
@@ -201,4 +216,6 @@ def compute_readiness(findings: Iterable[Finding], coverage: Iterable[Coverage],
     for c in coverage:
         score -= {"unmet": 15, "partial": 5}.get(c.status, 0)
     score -= 25 * int((checks or {}).get("new_failures") or 0)
+    if int((checks or {}).get("unverified") or 0) > 0:
+        score = min(score - 20, 60)
     return max(0, min(100, score))

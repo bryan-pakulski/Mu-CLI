@@ -1,0 +1,6 @@
+# Dev-only tools for regenerating committed design assets (Wash design system).
+# Runtime never needs these. See documentation/design/wash_implementation_spec.md §3.
+numpy>=1.24          # scripts/design/paint_washes.py
+fonttools>=4.40      # scripts/design/build_fonts.py
+brotli>=1.0          # woff2 output for build_fonts.py
+playwright>=1.40     # scripts/design/snap.py visual snapshots

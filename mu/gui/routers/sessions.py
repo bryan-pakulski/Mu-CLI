@@ -957,6 +957,9 @@ async def list_sessions(request: Request):
         "active": current is not None,
         "loaded": sorted(loaded),
         "busy": sorted(busy),
+        # How each loaded session's last turn ended: {name: {status, error, at}}.
+        "outcomes": {n: o for n, o in dict(getattr(getattr(state, "bus", None), "outcomes", {}) or {}).items()
+                     if n in loaded},
         "sessions": [
             _summarize(p, current=current, loaded=loaded, busy_names=busy)
             for p in _session_dirs()

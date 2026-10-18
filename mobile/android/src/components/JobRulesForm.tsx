@@ -14,10 +14,9 @@ import {
   type JobRules,
   type ToolchainImage,
 } from '../api/jobs';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fonts, fontWeights, spacing } from '../theme/tokens';
-import { Banner, Field, Loading, Panel, Pill, PlanosButton, Pre, Segmented, StatusPill, SwitchRow, TextField, useToast } from './planos';
+import { Banner, Button, Field, Loading, Panel, Pill, Pre, Segmented, StatusPill, SwitchRow, Text, TextField, useToast } from '../ui';
 
 /** Editable form state of one field: numbers/text/lists are edited as text. */
 type Draft = string | boolean | JobRuleSuite[] | JobRuleRow[];
@@ -123,7 +122,7 @@ function fieldForError(section: JobRuleSection, detail: string): string | null {
 
 export type JobRulesFormProps = { active: boolean };
 
-/** Generated "Run rules" form: one planos Panel per RULES_SCHEMA section. */
+/** Generated "Run rules" form: one Wash Card per RULES_SCHEMA section. */
 export function JobRulesForm({ active }: JobRulesFormProps) {
   const { colors } = useTheme();
   const toast = useToast();
@@ -214,7 +213,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
             <TextField accessibilityLabel={a11y} keyboardType="numeric" invalid={invalid} value={String(draft)}
               placeholder={field.optional ? 'default' : undefined}
               onChangeText={t => edit(field.path, t)} style={{ flex: 1 }} />
-            {field.unit ? <Text variant="xs" style={{ color: colors.muted }}>{field.unit}</Text> : null}
+            {field.unit ? <Text variant="xs" style={{ color: colors.ink3 }}>{field.unit}</Text> : null}
           </View>
         );
       case 'select':
@@ -236,18 +235,18 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
         return (
           <View style={styles.suites}>
             {rows.map((row, i) => (
-              <View key={i} style={[styles.suite, { borderColor: colors.border }]}>
+              <View key={i} style={[styles.suite, { borderColor: colors.hairline }]}>
                 <TextField accessibilityLabel={`Suite ${i + 1} name`} placeholder="name" value={row.name} autoCapitalize="none"
                   onChangeText={t => setRow(i, { name: t })} invalid={invalid} />
                 <TextField accessibilityLabel={`Suite ${i + 1} command`} placeholder="command" mono value={row.command} autoCapitalize="none"
                   onChangeText={t => setRow(i, { command: t })} invalid={invalid} />
                 <TextField accessibilityLabel={`Suite ${i + 1} junit`} placeholder="junit report path (optional)" mono value={row.junit || ''} autoCapitalize="none"
                   onChangeText={t => setRow(i, { junit: t })} />
-                <PlanosButton small ghost tone="danger" label="Remove" accessibilityLabel={`Remove suite ${i + 1}`}
+                <Button small ghost tone="danger" label="Remove" accessibilityLabel={`Remove suite ${i + 1}`}
                   onPress={() => edit(field.path, rows.filter((_, j) => j !== i))} />
               </View>
             ))}
-            <PlanosButton small label="Add suite" onPress={() => edit(field.path, [...rows, { name: '', command: '', junit: '' }])} />
+            <Button small label="Add suite" onPress={() => edit(field.path, [...rows, { name: '', command: '', junit: '' }])} />
           </View>
         );
       }
@@ -260,24 +259,24 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
         return (
           <View style={styles.suites}>
             {rows.map((row, i) => (
-              <View key={i} style={[styles.suite, { borderColor: colors.border }]} testID={`rule-row-${field.path}-${i}`}>
+              <View key={i} style={[styles.suite, { borderColor: colors.hairline }]} testID={`rule-row-${field.path}-${i}`}>
                 {columns.map(column => {
                   const hint = rowCellError(field, column, row);
                   return (
                     <View key={column.key} style={styles.cell}>
-                      <Text variant="xs" style={{ color: colors.muted }}>{`${column.label}${column.required ? '' : ' (optional)'}`}</Text>
+                      <Text variant="xs" style={{ color: colors.ink3 }}>{`${column.label}${column.required ? '' : ' (optional)'}`}</Text>
                       <TextField accessibilityLabel={`${column.label} ${i + 1}`} placeholder={column.placeholder || column.label} mono
                         value={row[column.key] || ''} autoCapitalize="none" autoCorrect={false} invalid={invalid || !!hint}
                         onChangeText={t => setCell(i, column.key, t)} />
-                      {hint ? <Text variant="xs" style={{ color: colors.danger }}>{hint.slice(field.label.length + 2)}</Text> : null}
+                      {hint ? <Text variant="xs" style={{ color: colors.danger.ink }}>{hint.slice(field.label.length + 2)}</Text> : null}
                     </View>
                   );
                 })}
-                <PlanosButton small ghost tone="danger" label="Remove" accessibilityLabel={`Remove row ${i + 1}`}
+                <Button small ghost tone="danger" label="Remove" accessibilityLabel={`Remove row ${i + 1}`}
                   onPress={() => edit(field.path, rows.filter((_, j) => j !== i))} />
               </View>
             ))}
-            <PlanosButton small label="Add row" accessibilityLabel={`Add ${field.label} row`} onPress={() => edit(field.path, [...rows, blank])} />
+            <Button small label="Add row" accessibilityLabel={`Add ${field.label} row`} onPress={() => edit(field.path, [...rows, blank])} />
           </View>
         );
       }
@@ -292,13 +291,13 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
   return (
     <View style={styles.root} testID="job-rules-form">
       <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Run rules</Text>
-      <Text variant="xs" style={{ color: colors.muted }}>Limits and policies every job run obeys. Blank or reset values use the default.</Text>
+      <Text variant="xs" style={{ color: colors.ink3 }}>Limits and policies every job run obeys. Blank or reset values use the default.</Text>
       {rules.schema.map(section => {
         const dirty = section.fields.filter(isDirty).length;
         return (
           <Panel key={section.id} testID={`rules-${section.id}`} title={section.title}
             right={dirty ? <Pill tone="warn" glyph="●" testID={`rules-${section.id}-dirty`}>{`${dirty} unsaved`}</Pill> : null}>
-            {section.hint ? <Text variant="xs" style={{ color: colors.muted }}>{section.hint}</Text> : null}
+            {section.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{section.hint}</Text> : null}
             {section.fields.map(field => {
               const set = isSet(field);
               const meta = [
@@ -312,9 +311,9 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                 <View style={styles.inline}>
                   {set
                     ? <Pill tone="accent" testID={`rule-set-${field.path}`}>set</Pill>
-                    : <Text variant="xs" style={{ color: colors.muted }}>{defaultLabel(field)}</Text>}
+                    : <Text variant="xs" style={{ color: colors.ink3 }}>{defaultLabel(field)}</Text>}
                   {set ? (
-                    <PlanosButton small ghost label="Reset" accessibilityLabel={`Reset ${field.label}`} disabled={busy === section.id}
+                    <Button small ghost label="Reset" accessibilityLabel={`Reset ${field.label}`} disabled={busy === section.id}
                       onPress={() => { void reset(section, field); }} />
                   ) : null}
                 </View>
@@ -325,7 +324,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                     <SwitchRow label={field.label} hint={field.hint} value={!!valueOf(field)} onValueChange={v => edit(field.path, v)}
                       testID={`rule-${field.path}`} />
                     {status}
-                    {errors[field.path] ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger }}>{errors[field.path]}</Text> : null}
+                    {errors[field.path] ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{errors[field.path]}</Text> : null}
                   </View>
                 );
               }
@@ -341,13 +340,13 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
               );
             })}
             {sectionErrors[section.id] ? (
-              <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger }}>{sectionErrors[section.id]}</Text>
+              <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{sectionErrors[section.id]}</Text>
             ) : null}
             <View style={styles.inline}>
-              <PlanosButton primary small label={`Save ${section.title.toLowerCase()}`} accessibilityLabel={`Save ${section.title}`}
+              <Button primary small label={`Save ${section.title.toLowerCase()}`} accessibilityLabel={`Save ${section.title}`}
                 disabled={!dirty || busy === section.id} loading={busy === section.id} onPress={() => saveSection(section)} />
               {dirty ? (
-                <PlanosButton small ghost label="Discard" accessibilityLabel={`Discard ${section.title} changes`}
+                <Button small ghost label="Discard" accessibilityLabel={`Discard ${section.title} changes`}
                   onPress={() => setDrafts(prev => {
                     const next = { ...prev };
                     section.fields.forEach(f => delete next[f.path]);
@@ -417,7 +416,7 @@ export function ToolchainImages({ saved }: { saved: string }) {
 
   if (items === null) return null;
   if (!items.length) {
-    return <Text variant="xs" style={{ color: colors.muted }} testID="toolchain-images-empty">Save a row to build its image.</Text>;
+    return <Text variant="xs" style={{ color: colors.ink3 }} testID="toolchain-images-empty">Save a row to build its image.</Text>;
   }
   return (
     <View style={styles.suites} testID="toolchain-images">
@@ -431,14 +430,14 @@ export function ToolchainImages({ saved }: { saved: string }) {
               <StatusPill status={meta.status} label={meta.label} />
               <Text variant="xs" style={{ flexShrink: 1, fontFamily: fonts.mono }}>{`${item.repository || ''} ← ${key}`}</Text>
             </View>
-            {item.error ? <Text variant="xs" style={{ color: colors.danger }}>{item.error}</Text> : null}
+            {item.error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{item.error}</Text> : null}
             <View style={styles.inline}>
               {item.status === 'building' ? null : (
-                <PlanosButton small label={item.status === 'built' ? 'Rebuild' : 'Build'} accessibilityLabel={`${item.status === 'built' ? 'Rebuild' : 'Build'} ${key}`}
+                <Button small label={item.status === 'built' ? 'Rebuild' : 'Build'} accessibilityLabel={`${item.status === 'built' ? 'Rebuild' : 'Build'} ${key}`}
                   loading={starting === key} disabled={!!starting} onPress={() => { void build(key); }} />
               )}
               {item.log_tail ? (
-                <PlanosButton small ghost label={logOpen ? 'Hide build log' : 'Build log'} accessibilityLabel={`${logOpen ? 'Hide' : 'Show'} build log for ${key}`}
+                <Button small ghost label={logOpen ? 'Hide build log' : 'Build log'} accessibilityLabel={`${logOpen ? 'Hide' : 'Show'} build log for ${key}`}
                   onPress={() => setOpenLogs(prev => ({ ...prev, [key]: !logOpen }))} />
               ) : null}
             </View>

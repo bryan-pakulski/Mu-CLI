@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, TextInput, Alert, ScrollView } from 'react-native';
+import { FlatList, View, RefreshControl, TextInput, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { systemPromptsApi, SystemPromptInfo } from '../api/systemPrompts';
 import { elevation, spacing, fontWeights, fonts, radii } from '../theme/tokens';
-import { SafeAreaModal } from '../components/SafeAreaModal';
+import { Button, Card, Chip, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text } from '../ui';
 
 export function SystemPromptsScreen() {
   const { colors, isDark } = useTheme();
@@ -70,7 +69,7 @@ export function SystemPromptsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4].map(i => <Skeleton key={i} height={60} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -80,7 +79,7 @@ export function SystemPromptsScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -88,14 +87,14 @@ export function SystemPromptsScreen() {
 
   if (prompts.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No system prompts" message="No system prompts configured" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <FlatList
         data={prompts}
         keyExtractor={item => item.name}
@@ -106,11 +105,11 @@ export function SystemPromptsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1 }}>
                 <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{item.name}</Text>
-                <Text variant="xs" style={{ color: colors.textDim, marginTop: 2, fontVariant: ['tabular-nums'] }}>
+                <Text variant="xs" style={{ color: colors.ink3, marginTop: 2, fontVariant: ['tabular-nums'] }}>
                   {item.chars} chars · {item.source}
                 </Text>
               </View>
-              {item.has_override && <Badge label="Override" variant="accent" />}
+              {item.has_override && <Chip label="Override" tone="accent" />}
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
               <Button title="Edit" onPress={() => openEdit(item.name)} />
@@ -119,7 +118,7 @@ export function SystemPromptsScreen() {
           </Card>
         )}
       />
-      <SafeAreaModal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+      <ModalFrame statusBarTranslucent={false} visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <View style={{ flex: 1, backgroundColor: colors.scrim, justifyContent: 'center' }}>
           <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>{editing?.name}</Text>
@@ -128,10 +127,10 @@ export function SystemPromptsScreen() {
                 value={editText}
                 onChangeText={setEditText}
                 placeholder="Prompt text…"
-                placeholderTextColor={colors.textDim}
+                placeholderTextColor={colors.ink3}
                 multiline
                 textAlignVertical="top"
-                style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, minHeight: 200, fontFamily: fonts.mono }}
+                style={{ color: colors.ink, borderWidth: 1, borderColor: colors.hairline, borderRadius: radii.sm, padding: spacing.md, minHeight: 200, fontFamily: fonts.mono }}
               />
             </ScrollView>
             <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end', marginTop: spacing.sm }}>
@@ -140,7 +139,7 @@ export function SystemPromptsScreen() {
             </View>
           </View>
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

@@ -1,78 +1,96 @@
-// planos status vocabulary (theme.ts STATUS) — the same glyphs, tones and
-// labels in every mucli front end. Status is never shown by colour alone:
-// every glyph travels with a text label (visible or accessibilityLabel).
+// Status vocabulary for the Android client. Every glyph, semantic and
+// canonical label comes from the shared vocabulary in `wash.generated.ts`
+// (generated from `mu/design/vocabulary.json`); this module only adds typed
+// accessors. Status is never shown by colour alone: every glyph travels with
+// a text label (visible or accessibilityLabel).
 
-import type { PlanosTone } from './tokens';
+import { vocabulary } from './wash.generated';
+import type { Semantic, Tone } from './tokens';
 
-export type Status = 'done' | 'active' | 'waiting' | 'failed' | 'skipped' | 'pending';
+export type Status = keyof typeof vocabulary.status;
+type StatusRow = { icon: string; tone: Semantic; label: string };
 
-export const STATUS: Record<Status, { icon: string; tone: PlanosTone; label: string }> = {
-  done: { icon: '✓', tone: 'ok', label: 'done' },
-  active: { icon: '●', tone: 'running', label: 'in progress' },
-  waiting: { icon: '◆', tone: 'warn', label: 'needs you' },
-  failed: { icon: '✗', tone: 'danger', label: 'failed' },
-  skipped: { icon: '–', tone: 'muted', label: 'skipped' },
-  pending: { icon: '○', tone: 'muted', label: 'not started' },
-};
+// `unverified` (checks that could not run, job_templates.md §5) and the `unrunnable` check row
+// come from the shared vocabulary like every other row.
+const statusRows = vocabulary.status as Record<string, { glyph: string; semantic: string; label: string }>;
+const jobStates = vocabulary.job_state as Record<string, { status: string; label: string }>;
 
-const STATE_STATUS: Record<string, Status> = {
-  selected: 'pending', provisioning: 'active', planning: 'active', implementing: 'active', checking: 'active',
-  reviewing: 'active', pushing: 'active', plan_review: 'waiting', review_done: 'waiting', needs_input: 'waiting',
-  pushed: 'done', done: 'done', failed: 'failed', cancelled: 'skipped',
-};
+/** Glyph (`icon`), semantic tone and label per status, read from the vocabulary. */
+export const STATUS = Object.fromEntries(
+  Object.entries(statusRows).map(([key, row]) => [key, { icon: row.glyph, tone: row.semantic as Semantic, label: row.label }]),
+) as Record<Status, StatusRow>;
 
-const STATE_LABEL: Record<string, string> = {
-  selected: 'selected', provisioning: 'preparing', planning: 'planning', plan_review: 'plan to approve',
-  implementing: 'implementing', checking: 'checking', reviewing: 'reviewing', review_done: 'review done',
-  pushing: 'pushing', pushed: 'pushed', done: 'done', needs_input: 'needs input', failed: 'failed', cancelled: 'cancelled',
-};
+/** Job states whose status is `active` (work in progress). */
+export const ACTIVE_STATES = Object.keys(jobStates).filter(state => jobStates[state].status === 'active');
 
-export const ACTIVE_STATES = ['provisioning', 'planning', 'implementing', 'checking', 'reviewing', 'pushing'];
+/** Job states whose status is `waiting` (needs you). */
+export const WAITING_STATES = Object.keys(jobStates).filter(state => jobStates[state].status === 'waiting');
 
 export function asStatus(value: string | null | undefined): Status {
-  return (value && value in STATUS ? value : 'pending') as Status;
+  return (value && value in statusRows ? value : 'pending') as Status;
 }
 
 export function stateStatus(state: string | null | undefined): Status {
-  return STATE_STATUS[String(state || '')] || 'pending';
+  const row = jobStates[String(state || '')];
+  return row ? asStatus(row.status) : 'pending';
 }
 
 export function stateLabel(state: string | null | undefined): string {
   const key = String(state || '');
-  return STATE_LABEL[key] || key.replace(/_/g, ' ');
+  return jobStates[key]?.label || key.replace(/_/g, ' ');
 }
 
-/** Review finding severities. */
-export const SEVERITY: Record<string, PlanosTone> = { blocker: 'danger', major: 'danger', minor: 'warn', nit: 'muted' };
-export const SEVERITY_ORDER = ['blocker', 'major', 'minor', 'nit'] as const;
+const severityRows = vocabulary.severity as Record<string, { semantic: string; rank: number; label: string }>;
 
-/** Review verdicts → tone + wording. */
-export const VERDICT: Record<string, [PlanosTone, string]> = {
-  ready: ['ok', 'ready to merge'], ready_with_nits: ['ok', 'ready with nits'],
-  needs_work: ['warn', 'needs work'], do_not_merge: ['danger', 'do not merge'],
-};
-export function verdictStyle(verdict: string | null | undefined): [PlanosTone, string] {
+/** Review finding severity → semantic tone (blocker danger, major attention, minor caution, nit neutral). */
+export const SEVERITY: Record<string, Semantic> = Object.fromEntries(
+  Object.entries(severityRows).map(([key, row]) => [key, row.semantic as Semantic]),
+);
+export const SEVERITY_ORDER = Object.keys(severityRows).sort((a, b) => severityRows[a].rank - severityRows[b].rank);
+
+const verdictRows = vocabulary.verdict as Record<string, { semantic: string; label: string }>;
+
+/** Review verdict → tone + canonical wording. */
+export function verdictStyle(verdict: string | null | undefined): [Tone, string] {
   const v = String(verdict || '');
-  return VERDICT[v] || ['muted', v.replace(/_/g, ' ')];
+  const row = verdictRows[v];
+  return row ? [row.semantic as Semantic, row.label] : ['neutral', v.replace(/_/g, ' ')];
 }
 
 /** Plan-coverage status → status vocabulary. */
-export const COVERAGE: Record<string, Status> = { met: 'done', partial: 'waiting', unmet: 'failed', unverifiable: 'skipped' };
+export const COVERAGE = vocabulary.coverage as Record<string, Status>;
 
-/** planos action tones (CONTRACT §7) — used when the server omits `tone`. */
-export const ACTION_TONE: Record<string, PlanosTone> = {
-  approvePlan: 'ok', rejectPlan: 'danger', approveTool: 'warn', denyTool: 'danger', retry: 'warn',
-  restartStage: 'warn', resume: 'warn', push: 'ok', discard: 'danger', delete: 'danger',
-};
+const repairRows = vocabulary.repair_outcome as Record<string, { status: string; label: string }>;
 
-/** planos action wording overrides. */
-export const ACTION_LABEL: Record<string, string> = { savePlanDraft: 'Edit plan', reprompt: 'Fix selected findings', message: 'Message agent' };
+/** Environment repair outcome (job_templates.md §7) → status vocabulary + canonical label. */
+export function repairOutcome(outcome: string | null | undefined): { status: Status; label: string } {
+  const row = repairRows[String(outcome || '')];
+  return row ? { status: asStatus(row.status), label: row.label } : { status: 'pending', label: String(outcome || '').replace(/_/g, ' ') };
+}
+
+const checkRows = vocabulary.check_status as Record<string, { status: string; label: string }>;
 
 /** Build/test run status → status vocabulary. */
 export function runStatus(status: string): Status {
-  const map: Record<string, Status> = { running: 'active', passed: 'done', failed: 'failed', error: 'failed', cancelled: 'skipped' };
-  return map[status] || 'pending';
+  return checkRows[status] ? asStatus(checkRows[status].status) : 'pending';
 }
+
+const attentionRows = vocabulary.attention_reason as Record<string, { label: string; action: string }>;
+
+/** Attention reason → canonical label and short action verb. */
+export function attentionReason(reason: string | null | undefined): { label: string; action: string } {
+  const key = String(reason || '');
+  return attentionRows[key] || { label: key.replace(/_/g, ' '), action: '' };
+}
+
+/** Action tones for job actions when the server omits `tone` (UI presentation, not status). */
+export const ACTION_TONE: Record<string, Tone> = {
+  approvePlan: 'ok', rejectPlan: 'danger', approveTool: 'attention', denyTool: 'danger', retry: 'attention',
+  restartStage: 'attention', resume: 'attention', push: 'ok', discard: 'danger', delete: 'danger',
+};
+
+/** Action wording overrides. */
+export const ACTION_LABEL: Record<string, string> = { savePlanDraft: 'Edit plan', reprompt: 'Fix selected findings', message: 'Message agent' };
 
 export function money(value: number | null | undefined): string {
   return `$${Number(value || 0).toFixed(2)}`;

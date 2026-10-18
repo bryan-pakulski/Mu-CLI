@@ -6,10 +6,14 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { HomeVM, JobSummary } from './jobCore';
+import { WAITING_STATES } from '../theme/status';
 
 export const NOTIFY_STORAGE_KEY = '@mucli/job-notifications';
-/** States that always count as "needs you" even if an older server omits needs_you. */
-export const NEEDS_YOU_STATES = new Set(['needs_input', 'plan_review', 'review_done']);
+/**
+ * States that always count as "needs you" even if an older server omits
+ * needs_you: every job state whose shared-vocabulary status is `waiting`.
+ */
+export const NEEDS_YOU_STATES = new Set(WAITING_STATES);
 
 let enabledCache: boolean | null = null;
 const listeners = new Set<(on: boolean) => void>();

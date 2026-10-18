@@ -150,7 +150,9 @@ def test_push_preview_shape(tmp_path):
         preview = client.get(f"/api/jobs/vm/job/{job.id}/push-preview").json()
         assert client.get("/api/jobs/vm/job/nope/push-preview").status_code == 404
     assert set(preview) == {"title", "body", "branch", "base", "mode", "remote", "draft",
-                            "requires_override", "verdict", "head_sha", "reason"}
+                            "requires_override", "verdict", "head_sha", "reason", "token", "provider"}
+    # The token the PR step will use (never its value), so the dialog can warn before pushing.
+    assert preview["token"] is None or set(preview["token"]) == {"provider", "variable", "source"}
     assert preview["title"] == "Ticket" and "Do it" in preview["body"]
     assert preview["branch"] == "mucli/job-abc" and preview["base"] == "main"
     assert preview["mode"] == "gh" and preview["draft"] is True and preview["reason"] == ""

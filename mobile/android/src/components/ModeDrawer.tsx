@@ -1,11 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  PanResponder,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { PanResponder, StyleSheet, View } from 'react-native';
 import { modesApi, ModeInfo } from '../api/modes';
 import { useTheme } from '../theme/ThemeContext';
 import { DebugScreen } from '../screens/DebugScreen';
@@ -14,10 +8,9 @@ import { LoopScreen } from '../screens/LoopScreen';
 import { ResearchScreen } from '../screens/ResearchScreen';
 import { SecurityScreen } from '../screens/SecurityScreen';
 import { TeacherScreen } from '../screens/TeacherScreen';
-import { Button } from './Button';
-import { Text } from './Text';
-import { SafeAreaModal } from './SafeAreaModal';
-import { elevation, fontSizes, fontWeights, spacing, touchTarget, typography } from '../theme/tokens';
+import { fontSizes, fontWeights, spacing, touchTarget, typography } from '../theme/tokens';
+import { Button, ModalFrame, Pressable, Text, Icon } from '../ui';
+import { GlassBackdrop } from '../ui/Glass';
 
 export type ModeDrawerProps = {
   visible: boolean;
@@ -35,7 +28,7 @@ const MODE_COMPONENTS: Record<string, React.ComponentType | undefined> = {
 };
 
 export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [activeMode, setActiveMode] = useState<ModeInfo | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -70,36 +63,38 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
   };
 
   return (
-    <SafeAreaModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <ModalFrame statusBarTranslucent={false} visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+        <Pressable accessibilityLabel="Close mode drawer" style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         <View
           {...swipeResponder.panHandlers}
           style={[
             styles.drawer,
-            elevation(2, colors, isDark),
+            // Side panel = level-1 glass chrome (G§3.3) with a neutral 1px edge.
             {
               borderWidth: 0,
               borderLeftWidth: 1,
-              backgroundColor: colors.glassStrong,
+              backgroundColor: 'transparent',
+              overflow: 'hidden',
               borderLeftColor: colors.hairline,
               paddingTop: spacing.base,
             },
           ]}
         >
+          <GlassBackdrop level={1} testID="mode-drawer-glass" />
           <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <View style={styles.headerCopy}>
               <Text variant="xs" dim>Active mode</Text>
-              <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+              <Text style={[styles.title, { color: colors.ink }]} numberOfLines={1}>
                 {activeMode?.display_name || (loading ? 'Loading…' : 'Default mode')}
               </Text>
               <Text variant="xs" dim numberOfLines={2}>
                 {activeMode?.description || 'No mode-specific explorer is active.'}
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
-              <Ionicons name="close" size={20} color={colors.textDim} />
-            </TouchableOpacity>
+            <Pressable onPress={onClose} style={styles.iconButton} accessibilityLabel="Close mode panel">
+              <Icon name="x" size="md" color={colors.ink3} />
+            </Pressable>
           </View>
 
           <View style={styles.content}>
@@ -107,7 +102,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
               <ModeContent />
             ) : (
               <View style={styles.emptyState}>
-                <Ionicons name="options-outline" size={24} color={colors.textDim} />
+                <Icon name="sliders-horizontal" size="lg" color={colors.ink3} />
                 <Text variant="lg" style={styles.emptyTitle}>No mode explorer</Text>
                 <Text variant="sm" dim style={styles.emptyBody}>
                   Select Feature, Research, Debug, Security, Loop, or Teacher mode to expose its dedicated controls here.
@@ -118,7 +113,7 @@ export function ModeDrawer({ visible, onClose, onOpenModes }: ModeDrawerProps) {
           </View>
         </View>
       </View>
-    </SafeAreaModal>
+    </ModalFrame>
   );
 }
 

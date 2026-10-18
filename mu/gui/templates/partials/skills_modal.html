@@ -1,0 +1,120 @@
+<!-- Skills modal (.w-modal, G§9.17): list view and edit view -->
+<div class="modal-backdrop w-modal"
+     x-data
+     x-dialog="$store.skills.modalOpen"
+     x-cloak
+     x-show="$store.skills.modalOpen"
+     x-transition.opacity.duration.120ms
+     @dialog-close="$store.skills.modalOpen && $store.skills.view === 'list' && $store.skills.closeModal()">
+    <section class="modal modal-lg w-modal__dialog skills-dialog" data-size="lg" @click.stop role="dialog" aria-modal="true" :aria-labelledby="$store.skills.view === 'edit' ? 'skills-modal-edit-title' : 'skills-modal-title'" aria-labelledby="skills-modal-title">
+        <template x-if="$store.skills.view === 'list'">
+            <div class="skills-view">
+                <header class="modal-head w-modal__head">
+                    <h2 class="modal-title w-modal__title" id="skills-modal-title">Skills</h2>
+                    <button type="button" class="w-btn" data-variant="icon" @click="$store.skills.closeModal()" aria-label="Close" title="Close">
+                        <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                    </button>
+                </header>
+                <div class="skills-toolbar">
+                    <span class="skills-count w-chip" data-variant="meta" x-text="$store.skills.enabledCount() + '/' + $store.skills.list.length + ' enabled'"></span>
+                    <div class="skills-toolbar-btns">
+                        <button type="button" class="modal-add-btn w-btn" data-variant="ghost" data-size="sm" @click="$store.skills.reload()">
+                            <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg><span>Reload</span>
+                        </button>
+                        <button type="button" class="modal-add-btn w-btn" data-variant="secondary" data-size="sm" @click="$store.skills.startCreate()">
+                            <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>New skill</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body w-modal__body skills-body">
+                    <ul class="skills-list">
+                        <template x-for="s in $store.skills.list" :key="s.name">
+                            <li class="skill-row" :class="{ disabled: !s.enabled }">
+                                <button type="button" class="skill-toggle-sw"
+                                        role="switch"
+                                        :class="{ on: s.enabled }"
+                                        :aria-checked="s.enabled ? 'true' : 'false'"
+                                        :aria-label="(s.enabled ? 'Disable ' : 'Enable ') + s.name"
+                                        @click="$store.skills.toggle(s.name)"
+                                        :title="s.enabled ? 'Disable' : 'Enable'"></button>
+                                <div class="skill-info">
+                                    <div class="skill-name" x-text="s.name"></div>
+                                    <div class="skill-desc" x-text="s.description || '(no description)'" x-show="s.description"></div>
+                                    <div class="skill-meta">
+                                        <span x-text="s.trigger ? 'trigger: ' + s.trigger : 'no trigger'"></span>
+                                        <span> · </span>
+                                        <span x-text="$store.skills.isBuiltin(s) ? 'built-in' : (s.source.includes('/.mu/skills/') ? (s.source.startsWith('/root/.mu/') || s.source.startsWith(String.fromCharCode(126) + '/.mu/') ? 'global' : 'workspace') : 'built-in')"></span>
+                                    </div>
+                                </div>
+                                <div class="skill-actions">
+                                    <button type="button" class="modal-add-btn small w-btn" data-variant="ghost" data-size="sm"
+                                            @click="$store.skills.startEdit(s)"
+                                            :title="$store.skills.isBuiltin(s) ? 'View (built-in, read-only)' : 'Edit'">
+                                        <span x-text="$store.skills.isBuiltin(s) ? 'View' : 'Edit'"></span>
+                                    </button>
+                                    <button type="button" class="modal-remove-btn w-btn" data-variant="icon" data-size="sm"
+                                            x-show="!$store.skills.isBuiltin(s)"
+                                            @click="$store.confirm.ask('Delete skill \'' + s.name + '\'?', $event, () => $store.skills.deleteSkill(s.name), {danger:true})"
+                                            :aria-label="'Delete skill ' + s.name"
+                                            title="Delete">
+                                        <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-trash-2"></use></svg>
+                                    </button>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="empty-row skills-empty" x-show="!$store.skills.list.length">No skills found</div>
+                </div>
+            </div>
+        </template>
+
+        <template x-if="$store.skills.view === 'edit'">
+            <div class="skills-view">
+                <header class="modal-head w-modal__head">
+                    <button type="button" class="w-btn" data-variant="icon" @click="$store.skills.backToList()" aria-label="Back to list" title="Back to list">
+                        <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-chevron-left"></use></svg>
+                    </button>
+                    <h2 class="modal-title w-modal__title" id="skills-modal-edit-title" x-text="$store.skills.editing ? 'Edit skill' : 'New skill'"></h2>
+                    <button type="button" class="w-btn" data-variant="icon" @click="$store.skills.closeModal()" aria-label="Close" title="Close">
+                        <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                    </button>
+                </header>
+                <div class="modal-body w-modal__body w-form skills-form">
+                    <div class="modal-field w-field">
+                        <label class="modal-label w-field__label" for="skill-form-name">Name</label>
+                        <input type="text" class="w-input" data-mono id="skill-form-name" x-model="$store.skills.form.name" placeholder="my-skill (alphanumeric, hyphens, underscores)" :disabled="!!$store.skills.editing" @keydown.stop />
+                    </div>
+                    <div class="modal-field w-field">
+                        <label class="modal-label w-field__label" for="skill-form-description">Description</label>
+                        <input type="text" class="w-input" id="skill-form-description" x-model="$store.skills.form.description" placeholder="What this skill does" @keydown.stop />
+                    </div>
+                    <div class="modal-field w-field">
+                        <label class="modal-label w-field__label" for="skill-form-trigger">Trigger regex</label>
+                        <input type="text" class="w-input" data-mono id="skill-form-trigger" x-model="$store.skills.form.trigger" placeholder="\b(commit|message)\b (optional)" @keydown.stop />
+                    </div>
+                    <div class="modal-field w-field">
+                        <label class="modal-label w-field__label" for="skill-form-scope">Scope</label>
+                        <span class="w-select">
+                            <select class="w-select__control" id="skill-form-scope" x-model="$store.skills.form.scope">
+                                <option value="global">global (~/.mu/skills/)</option>
+                                <option value="workspace">workspace (.mu/skills/)</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div class="modal-field w-field">
+                        <label class="modal-label w-field__label" for="skill-form-body">Body (markdown)</label>
+                        <textarea class="w-textarea" data-mono id="skill-form-body"
+                                  x-model="$store.skills.form.body"
+                                  placeholder="Skill instructions in markdown…"
+                                  rows="10"
+                                  @keydown.stop></textarea>
+                    </div>
+                </div>
+                <footer class="modal-actions w-modal__foot">
+                    <button type="button" class="w-btn" data-variant="secondary" @click="$store.skills.backToList()"><span>Cancel</span></button>
+                    <button type="button" class="w-btn" data-variant="primary" @click="$store.skills.save()"><span>Save skill</span></button>
+                </footer>
+            </div>
+        </template>
+    </section>
+</div>

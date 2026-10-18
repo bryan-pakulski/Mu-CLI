@@ -12,7 +12,7 @@ from providers.base import StreamEvent
 from mu.jobs.core.artifacts import JobArtifacts
 from mu.jobs.sandbox.docker_proxy import LABEL_SESSION, ProxyContext, decide
 from mu.jobs.sandbox.model_relay import ModelRelay, RelayDenied, price_usd
-from mu.jobs.sandbox.policy import SandboxPolicy, container_args, repository_allow_paths, workspace_precheck
+from mu.jobs.sandbox.policy import SandboxGuardError, SandboxPolicy, container_args, repository_allow_paths, workspace_precheck
 
 
 @pytest.fixture(autouse=True)
@@ -261,27 +261,37 @@ def test_default_job_cap_is_100_and_zero_means_unlimited(tmp_path):
 # ------------------------------------------------------------------ 3. workspace pre-check
 
 
-def test_tracked_secret_fixture_blocks_until_allowed_by_base_commit(tmp_path):
+def test_test_fixtures_pass_and_other_secret_files_need_the_base_commit_allow_list(tmp_path):
     repo = _repo(tmp_path)
+    # Secret-looking files under a test/fixture directory are test data: allowed, tracked or not
+    # (a job worktree is a fresh checkout, so they come from the repository or the agent).
     (repo / "tests" / "fixtures").mkdir(parents=True)
     (repo / "tests" / "fixtures" / "server.key").write_text("-----BEGIN TEST KEY-----\n")
-    _git(repo, "add", "-A")
+    (repo / "spec").mkdir()
+    (repo / "spec" / "credentials.json").write_text("{}")  # untracked, agent-made
+    _git(repo, "add", "tests")
     _git(repo, "commit", "-qm", "fixture")
-    with pytest.raises(ValueError, match="tests/fixtures/server.key"):
+    workspace_precheck(str(repo))
+    # Elsewhere a tracked secret file still blocks until the base commit allow-lists it.
+    (repo / "config").mkdir()
+    (repo / "config" / "server.key").write_text("x")
+    _git(repo, "add", "config")
+    _git(repo, "commit", "-qm", "config key")
+    with pytest.raises(SandboxGuardError, match="config/server.key"):
         workspace_precheck(str(repo))
     (repo / ".mucli").mkdir()
-    (repo / ".mucli" / "jobs.toml").write_text('[sandbox]\nallow_paths = ["tests/fixtures/*.key"]\n')
+    (repo / ".mucli" / "jobs.toml").write_text('[sandbox]\nallow_paths = ["config/*.key"]\n')
     job = SimpleNamespace(worktree=str(repo), base_sha=_git(repo, "rev-parse", "HEAD"))
     assert repository_allow_paths(job) == ()  # not committed at the base: a stage cannot allow itself
-    _git(repo, "add", "-A")
+    _git(repo, "add", ".mucli")
     _git(repo, "commit", "-qm", "allow")
     job.base_sha = _git(repo, "rev-parse", "HEAD")
     allow = repository_allow_paths(job)
-    assert allow == ("tests/fixtures/*.key",)
+    assert allow == ("config/*.key",)
     workspace_precheck(str(repo), allow_paths=allow)
-    # Untracked secrets are never allowed, even when a glob matches.
-    (repo / "tests" / "fixtures" / "other.key").write_text("x")
-    with pytest.raises(ValueError, match="other.key"):
+    # Untracked secrets outside fixture directories are never allowed, even when a glob matches.
+    (repo / "config" / "other.key").write_text("x")
+    with pytest.raises(SandboxGuardError, match="other.key"):
         workspace_precheck(str(repo), allow_paths=allow)
 
 
@@ -366,9 +376,12 @@ def test_guard_scans_binary_diff_disabled_and_large_untracked_files(tmp_path, mo
     (repo / "big.txt").write_text("x" * (3 * 1024 * 1024) + "\nopaque-credential-0123456789\n")
     with pytest.raises(runner.SandboxGuardError, match="big.txt"):
         runner._guard(job, SandboxPolicy(), literals=["opaque-credential-0123456789"])
-    # ... and one the scan cannot cover is refused.
-    with pytest.raises(ValueError, match="big.txt"):
-        runner.worktree_patch(job, max_untracked_bytes=1024)
+    # ... including far above the scan's chunk size: streamed in pieces, never refused or skipped.
+    from mu.security.diff_scan import scan_patch
+    pieces = list(runner.worktree_patches(job, chunk_bytes=1024))
+    assert len(pieces) > 100
+    found = [f for piece in pieces for f in scan_patch(piece, literals=["opaque-credential-0123456789"])]
+    assert [(f.path, f.line) for f in found] == [("big.txt", 2)]
 
 
 def test_guard_runs_the_workspace_precheck(tmp_path, monkeypatch):
@@ -402,7 +415,10 @@ def test_injected_literals_cover_env_and_credential_files(monkeypatch):
     ("error", "connection reset by peer", "provider_transient"),
     ("error", "Stage cost budget exhausted: $1.00 of $1.00", "fatal"),
     ("error", "429 insufficient_quota", "fatal"),
-    ("error", "prompt is too long: 300000 tokens", "fatal"),
+    # Overflow is still never a transient (backoff) retry; it is its own class, which the
+    # sandbox runner retries once with a fresh, summary-seeded conversation.
+    ("error", "prompt is too long: 300000 tokens", "context_overflow"),
+    ("context_overflow", "", "context_overflow"),
     ("error", "KeyError: 'x'", "fatal"),
 ])
 def test_error_classes(status, error, expected):
@@ -465,3 +481,24 @@ def test_stale_runtime_image_warns_on_the_job_once(monkeypatch):
     assert len(events) == 1 and meta["runtime_image_warning"] == warning
     docker.label = "new"
     assert runner.check_runtime_image(service, job, docker, "docker", SandboxPolicy()) == ""
+
+
+def test_guard_allows_large_committed_files_and_still_scans_them(tmp_path, monkeypatch):
+    """No changed-file size limit: a large file the agent produced (and a checkpoint committed)
+    passes the guard; it leaves the in-memory diff and is streamed through the secret scan."""
+    from mu.jobs.sandbox import runner
+    from mu.security.diff_scan import scan_patch
+    monkeypatch.setattr("mu.jobs.core.plan_ops.approved_plan_text", lambda job: "")
+    repo = _repo(tmp_path)
+    job = _guard_job(repo, _git(repo, "rev-parse", "HEAD"))
+    (repo / "asset.bin").write_bytes(b"\x00" * (6 * 1024 * 1024))  # above SCAN_CHUNK_BYTES
+    _git(repo, "add", "asset.bin")
+    _git(repo, "commit", "-qm", "big asset")
+    runner._guard(job, SandboxPolicy())
+    diff = next(runner.worktree_patches(job))
+    assert "asset.bin" not in diff  # streamed, not held in the diff
+    (repo / "asset.bin").write_bytes(b"\x00" * (6 * 1024 * 1024) + b"\nKEY = 'AKIAABCDEFGHIJKLMNOP'\n")
+    _git(repo, "commit", "-qam", "leak in the big file")
+    with pytest.raises(runner.SandboxGuardError, match="asset.bin"):
+        runner._guard(job, SandboxPolicy())
+    assert any(f.path == "asset.bin" for p in runner.worktree_patches(job) for f in scan_patch(p))

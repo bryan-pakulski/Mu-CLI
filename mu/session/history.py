@@ -918,7 +918,11 @@ class HistoryMixin:
             else set()
         )
         from .context_maintenance import protected_indices, retention_for_parts
-        protected = protected_indices(self, include_signatures=True)
+        # Overflow recovery (strip_degrade rung) lifts signed-bundle protection:
+        # its retry sends no replay data, so the bundle may be edited.
+        protected = protected_indices(
+            self, include_signatures=not getattr(self, "_degrade_ignore_signatures", False)
+        )
         retention = retention_for_parts(self)
         for msg_idx, message in enumerate(self.history[self.summary_anchor :], start=self.summary_anchor):
             if msg_idx in floor_indices or msg_idx in protected:

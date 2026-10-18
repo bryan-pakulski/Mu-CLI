@@ -1,9 +1,10 @@
 """UI adapter for autonomous durable job execution.
 
-The adapter never blocks on stdin or a browser. Human interactions become a
-control-flow signal which the outer job runner persists as NEEDS_HUMAN. A later
-control-plane response is persisted and consumed exactly once by the next
-isolated worker attempt.
+Jobs run unattended (``mu.jobs.unattended``): the adapter never blocks on stdin or a
+browser and never parks the job. Tool approvals are decided by stage (implement/checks
+approve, plan/review deny writes) and agent questions are answered automatically; each
+decision is recorded as an ``auto_permission`` / ``auto_answered`` event. A human response
+recorded for a job that parked before this rule is still consumed exactly once.
 """
 
 from __future__ import annotations
@@ -12,15 +13,15 @@ from contextlib import contextmanager
 from typing import Any, Dict
 
 from mu.ui.base import BaseUI
-from mu.ui.exceptions import InteractionRequired
 
 from .service import JobService
 
 
 class JobUI(BaseUI):
-    def __init__(self, service: JobService, job_id: str):
+    def __init__(self, service: JobService, job_id: str, *, stage: str | None = None):
         self.service = service
         self.job_id = job_id
+        self.stage = stage
         self._variables: Dict[str, Any] = {}
         self._responses = self._load_pending_responses()
 
@@ -120,9 +121,45 @@ class JobUI(BaseUI):
     def stream_tool_call(self, tool_name: str):
         self._event("tool_call_ui", payload={"tool_name": str(tool_name or "")})
 
+    # ------------------------------------------------------------ unattended decisions
+
+    def _stage(self) -> str:
+        """The agent stage this UI serves (``implement`` when it cannot be determined)."""
+        stage = getattr(self, "stage", None)
+        if stage:
+            return str(stage)
+        try:
+            from .core.states import JobState
+            from .unattended import stage_of_state
+            core = self.service.store.core_state(self.job_id)
+            state = core.paused_from if core.state == JobState.NEEDS_INPUT and core.paused_from else core.state
+            stage = stage_of_state(state)
+        except Exception:  # noqa: BLE001 - an unknown stage is treated as the writing stage
+            stage = "implement"
+        self.stage = stage
+        return stage
+
     def request_tool_approval(self, **kwargs):
+        """Jobs run unattended: never prompts. Read-only stages (plan, review) deny writes with a
+        message for the agent; implement/checks approve inside the sandbox. A human decision
+        already recorded for this call (a job parked before jobs ran unattended) is honoured in a
+        writing stage."""
+        from .unattended import decide, permission_event
         tool_name = str(kwargs.get("tool_name") or "tool")
+        stage = self._stage()
+        allow, message = decide(stage)
+        if not allow:
+            self._decided(permission_event(stage, tool_name, allow=False))
+            return "e", message
+        if kwargs.get("can_approve") is False:
+            # Nothing to approve (the modification preview failed): tell the agent why.
+            detail = str(kwargs.get("preview_error") or "the change could not be previewed")
+            self._decided({**permission_event(stage, tool_name, allow=False), "message": detail})
+            return "e", f"This tool call cannot run: {detail}"
         response = self._take_response("approval_required", tool_name=tool_name)
+        if response is not None and response.get("auto"):
+            # Decided (and recorded) by the host's unattended fallback.
+            return ("y", None) if response.get("decision") == "approve" else ("e", str(response.get("detail") or ""))
         if response is not None:
             decision = str(response.get("decision") or "").lower()
             detail = str(response.get("detail") or "").strip() or None
@@ -135,34 +172,39 @@ class JobUI(BaseUI):
                 # "User denied this tool call. Reason: <detail>".
                 return "e", detail
             return "n", None
-        raise InteractionRequired(
-            "approval_required",
-            f"Approval required for {tool_name}",
-            payload={
-                "tool_name": tool_name,
-                "tool_args": kwargs.get("tool_args") or kwargs.get("display_args") or {},
-                "can_approve": bool(kwargs.get("can_approve", True)),
-                "preview_error": kwargs.get("preview_error"),
-                "error_code": kwargs.get("error_code"),
-                "modifications": kwargs.get("modifications") or [],
-            },
-        )
+        self._decided(permission_event(stage, tool_name, allow=True))
+        return "y", None
+
+    def _decided(self, payload):
+        from .unattended import event_reason
+        self._event("auto_permission", payload=payload, reason=event_reason("auto_permission", payload))
+
+    def _auto_answer(self, shape: str, question: str = ""):
+        from .unattended import AUTO_ANSWER, answered_event
+        if not getattr(self, "_host_answered", False):
+            from .unattended import event_reason
+            payload = answered_event(self._stage(), shape, question)
+            self._event("auto_answered", payload=payload, reason=event_reason("auto_answered", payload))
+        return AUTO_ANSWER
+
+    def _human_answer(self):
+        """A human answer recorded for a job that parked on a question before jobs ran
+        unattended (consumed exactly once); None otherwise (the answer is automatic)."""
+        response = self._take_response("question")
+        self._host_answered = bool(response is not None and response.get("auto"))
+        return None if response is None or response.get("auto") else response
 
     def prompt(self, message, default=None):
-        response = self._take_response("question")
+        response = self._human_answer()
         if response is not None:
             if response.get("value") is not None:
                 return response.get("value")
             detail = str(response.get("detail") or "").strip()
             return detail if detail else default
-        raise InteractionRequired(
-            "question",
-            str(message or "Input required"),
-            payload={"shape": "input", "default": default},
-        )
+        return self._auto_answer("input", str(message or ""))
 
     def confirm(self, message, default=True):
-        response = self._take_response("question")
+        response = self._human_answer()
         if response is not None:
             value = response.get("value")
             if isinstance(value, bool):
@@ -173,14 +215,12 @@ class JobUI(BaseUI):
             if decision in {"deny", "no", "false"}:
                 return False
             return bool(default)
-        raise InteractionRequired(
-            "question",
-            str(message or "Confirmation required"),
-            payload={"shape": "confirm", "default": bool(default)},
-        )
+        # A yes/no cannot carry the note; the stage proceeds with the default.
+        self._auto_answer("confirm", str(message or ""))
+        return bool(default)
 
     def prompt_choices(self, message, choices, default=None):
-        response = self._take_response("question")
+        response = self._human_answer()
         if response is not None:
             if response.get("value") is not None:
                 return response.get("value")
@@ -189,24 +229,22 @@ class JobUI(BaseUI):
                 return selected[0]
             detail = str(response.get("detail") or "").strip()
             return detail or default
-        raise InteractionRequired(
-            "question",
-            str(message or "Choice required"),
-            payload={"shape": "choices", "choices": list(choices or []), "default": default},
-        )
+        self._auto_answer("choices", str(message or ""))
+        if default is not None:
+            return default
+        options = list(choices or [])
+        return options[0] if options else ""
 
     def run_quiz(self, questions):
-        response = self._take_response("question")
+        response = self._human_answer()
         if response is not None and isinstance(response.get("value"), dict):
             return dict(response["value"])
-        raise InteractionRequired(
-            "question",
-            "Quiz response required",
-            payload={"shape": "quiz", "questions": list(questions or [])},
-        )
+        self._auto_answer("quiz", "; ".join(str((q or {}).get("question") if isinstance(q, dict) else q)
+                                            for q in list(questions or [])[:5]))
+        return {}
 
     def ask_user_choice(self, question, options, *, multi_select=False, description="", allow_other=False):
-        response = self._take_response("question")
+        response = self._human_answer()
         if response is not None:
             selected = list(response.get("selected") or [])
             if not selected and response.get("value") is not None:
@@ -216,14 +254,5 @@ class JobUI(BaseUI):
                 "other_text": str(response.get("detail") or ""),
                 "cancelled": False,
             }
-        raise InteractionRequired(
-            "question",
-            str(question or "Choice required"),
-            payload={
-                "shape": "choice",
-                "options": list(options or []),
-                "multi_select": bool(multi_select),
-                "description": str(description or ""),
-                "allow_other": bool(allow_other),
-            },
-        )
+        answer = self._auto_answer("choice", str(question or ""))
+        return {"selected": [], "other_text": answer, "cancelled": False}

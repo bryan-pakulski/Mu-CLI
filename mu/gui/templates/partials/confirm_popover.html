@@ -1,0 +1,27 @@
+<!-- Confirm popover (anchored near click). Level-2 .w-popover; Cancel is the
+     first control so x-dialog gives it default focus (G§9.17). Destructive
+     confirmations ($store.confirm.danger) use the danger button, and the
+     action repeats the message's leading verb ("Delete session …?" → Delete). -->
+<div class="confirm-pop w-popover"
+     x-data
+     x-dialog="$store.confirm.open"
+     x-cloak
+     x-show="$store.confirm.open"
+     x-transition.opacity.duration.120ms
+     :style="`left:${$store.confirm.x}px; top:${$store.confirm.y}px;`"
+     :data-tone="$store.confirm.danger ? 'danger' : null"
+     @click.outside="$store.confirm.cancel()"
+     @dialog-close="$store.confirm.cancel()"
+     @keydown.enter.window="$store.confirm.open && $store.confirm.confirm()"
+     role="dialog" aria-modal="true" aria-labelledby="confirm-pop-message">
+    <p class="confirm-message" id="confirm-pop-message" x-text="$store.confirm.message"></p>
+    <div class="confirm-actions">
+        <button type="button" class="w-btn" data-variant="secondary" data-size="sm"
+                @click="$store.confirm.cancel()"><span>Cancel</span></button>
+        <button type="button" class="w-btn" data-size="sm"
+                :class="{ danger: $store.confirm.danger }"
+                :data-variant="$store.confirm.danger ? 'danger' : 'primary'"
+                @click="$store.confirm.confirm()"
+                x-text="(String($store.confirm.message || '').match(/^([A-Z][a-z]+)\b/) || [null, 'Confirm'])[1]">Confirm</button>
+    </div>
+</div>

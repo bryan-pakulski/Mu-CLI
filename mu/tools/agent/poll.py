@@ -37,7 +37,9 @@ def poll_subagent(args: Dict[str, Any], context) -> Dict[str, Any]:
     ui = getattr(parent, "ui", None)
     if ui is not None and hasattr(ui, "show_info") and registry.has_active():
         try:
-            ui.show_info(registry.tracker.render_panel())
+            from mu.ui.markup import show_renderable
+
+            show_renderable(ui, registry.tracker.render_panel())
         except Exception:
             pass
     elif ui is None:

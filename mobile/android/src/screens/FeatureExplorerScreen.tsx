@@ -1,16 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import {
   featureApi,
   FeatureDiffProposal,
@@ -23,8 +14,9 @@ import {
   FeatureTask,
 } from '../api/feature';
 import { useTheme } from '../theme/ThemeContext';
-import { Card, EmptyState, ErrorState, ModeWorkspaceHeader, Skeleton, Text, useModeWorkspaceView } from '../components';
+import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
 import { spacing, fontWeights, fonts, radii, tracking, touchTarget, typography } from '../theme/tokens';
+import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon, type IconName } from '../ui';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
 
@@ -194,7 +186,7 @@ export function FeatureExplorerScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <View style={styles.loadingWrap}>
           <Skeleton height={52} style={styles.loadingBlock} />
           <Skeleton height={112} style={styles.loadingBlock} />
@@ -206,14 +198,14 @@ export function FeatureExplorerScreen() {
 
   if (error && !state) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
         <ErrorState message={error} onRetry={() => load(false)} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />}
         contentContainerStyle={styles.content}
@@ -225,7 +217,7 @@ export function FeatureExplorerScreen() {
             <Text variant="xl" style={styles.pageTitle}>Features</Text>
             <Text variant="sm" dim>Preview, load, and inspect every feature plan without changing the active feature.</Text>
           </View>
-          {previewLoading ? <ActivityIndicator color={colors.accent} /> : null}
+          {previewLoading ? <ActivityIndicator color={colors.accent.ink} /> : null}
         </View>
 
         {workspaceView.shows('overview') ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
@@ -233,19 +225,19 @@ export function FeatureExplorerScreen() {
             const active = filter === item.key;
             const count = countForFilter(state?.features || [], item.key);
             return (
-              <TouchableOpacity
+              <Pressable
                 key={item.key}
                 onPress={() => setFilter(item.key)}
                 hitSlop={{ top: spacing.xs, bottom: spacing.xs }}
                 style={[
                   styles.filterChip,
-                  { backgroundColor: active ? colors.accentSubtle : colors.surface, borderWidth: 1, borderColor: active ? colors.accent : colors.border },
+                  { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline },
                 ]}
               >
-                <Text variant="xs" style={{ color: active ? colors.accentFg : colors.textSoft, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
+                <Text variant="xs" style={{ color: active ? colors.accent.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
                   {item.label} · {count}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
         </ScrollView> : null}
@@ -270,9 +262,9 @@ export function FeatureExplorerScreen() {
         ))}
 
         {error ? (
-          <View style={[styles.errorBox, { backgroundColor: colors.errorSubtle }]}>
-            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger }}>✗</Text>
-            <Text variant="xs" style={{ color: colors.error, flex: 1 }}>{error}</Text>
+          <View style={[styles.errorBox, { backgroundColor: colors.danger.wash }]}>
+            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
+            <Text variant="xs" style={{ color: colors.danger.ink, flex: 1 }}>{error}</Text>
           </View>
         ) : null}
 
@@ -348,12 +340,12 @@ export function FeatureExplorerScreen() {
 function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; selected: boolean; onPress: () => void }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       activeOpacity={0.72}
       style={[
         styles.featureRow,
-        { backgroundColor: selected ? colors.accentSubtle : 'transparent' },
+        { backgroundColor: selected ? colors.accent.wash : 'transparent' },
       ]}
     >
       <View style={[styles.featureStatusDot, { backgroundColor: statusColor(item.status, item.archived, colors) }]} />
@@ -362,12 +354,12 @@ function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; se
         <Text variant="xs" dim>{item.archived ? 'Archived' : formatStatus(item.status)}</Text>
       </View>
       {item.is_active ? (
-        <View style={[styles.activeBadge, { backgroundColor: colors.accentSubtle }]}>
-          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Loaded</Text>
+        <View style={[styles.activeBadge, { backgroundColor: colors.accent.wash }]}>
+          <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Loaded</Text>
         </View>
       ) : null}
-      <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-    </TouchableOpacity>
+      <Icon name="chevron-right" size="md" color={colors.ink3} />
+    </Pressable>
   );
 }
 
@@ -410,21 +402,21 @@ function FeatureOverview({
 
       {plan.directory ? (
         <View style={styles.pathBox}>
-          <Ionicons name="folder-outline" size={16} color={colors.textDim} />
+          <Icon name="folder" size="sm" color={colors.ink3} />
           <Text variant="xs" style={styles.pathText} numberOfLines={2}>{plan.directory}</Text>
         </View>
       ) : null}
 
       <View style={styles.actionRow}>
-        {!plan.approved && !item?.archived ? <ActionButton label="Approve" icon="checkmark-circle-outline" onPress={onApprove} primary /> : null}
+        {!plan.approved && !item?.archived ? <ActionButton label="Approve" icon="circle-check" onPress={onApprove} primary /> : null}
         {item?.is_active ? (
-          <ActionButton label="Unload" icon="pause-circle-outline" onPress={onUnload} />
+          <ActionButton label="Unload" icon="pause" onPress={onUnload} />
         ) : item?.archived ? (
-          <ActionButton label="Restore" icon="archive-outline" onPress={onUnarchive} primary />
+          <ActionButton label="Restore" icon="archive" onPress={onUnarchive} primary />
         ) : (
-          <ActionButton label="Load" icon="play-circle-outline" onPress={onLoad} primary={plan.approved} />
+          <ActionButton label="Load" icon="play" onPress={onLoad} primary={plan.approved} />
         )}
-        {!item?.is_active && !item?.archived ? <ActionButton label="Archive" icon="archive-outline" onPress={onArchive} /> : null}
+        {!item?.is_active && !item?.archived ? <ActionButton label="Archive" icon="archive" onPress={onArchive} /> : null}
       </View>
     </Card>
   );
@@ -451,14 +443,14 @@ function PhaseDetail({
   const completed = phase.tasks.filter(task => ['completed', 'archived'].includes(normalizeStatus(task.status))).length;
   return (
     <Card style={styles.phaseCard}>
-      <TouchableOpacity onPress={onToggle} style={styles.phaseHeader} activeOpacity={0.72}>
+      <Pressable onPress={onToggle} style={styles.phaseHeader} activeOpacity={0.72}>
         <View style={styles.phaseCopy}>
           <Text variant="base" style={styles.phaseTitle}>{phase.title}</Text>
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
         </View>
         <StatusPill label={phase.status || 'pending'} />
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
-      </TouchableOpacity>
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
+      </Pressable>
 
       {expanded ? (
         <View style={styles.taskList}>
@@ -491,15 +483,15 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
   const { colors } = useTheme();
   return (
     <View style={styles.task}>
-      <TouchableOpacity onPress={onToggle} style={styles.taskHeader} activeOpacity={0.72}>
+      <Pressable onPress={onToggle} style={styles.taskHeader} activeOpacity={0.72}>
         <View style={styles.taskIndex}><Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.id}</Text></View>
         <View style={styles.taskCopy}>
           <Text variant="sm" style={styles.taskTitle}>{task.title}</Text>
           <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.verified_exit_criteria?.length || 0}/{task.exit_criteria?.length || 0} criteria verified</Text>
         </View>
         <StatusPill label={task.status} />
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={colors.textDim} />
-      </TouchableOpacity>
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="sm" color={colors.ink3} />
+      </Pressable>
 
       {expanded ? (
         <View style={styles.taskBody}>
@@ -512,8 +504,8 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
                 const verified = task.verified_exit_criteria?.includes(criterion);
                 return (
                   <View key={`${criterion}-${index}`} style={styles.criteriaRow}>
-                    <Ionicons name={verified ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={verified ? colors.success : colors.textDim} />
-                    <Text variant="xs" style={{ flex: 1, color: verified ? colors.textSoft : colors.text }}>{criterion}</Text>
+                    <Icon name={verified ? 'circle-check' : 'circle'} size="sm" color={verified ? colors.ok.ink : colors.ink3} />
+                    <Text variant="xs" style={{ flex: 1, color: verified ? colors.ink2 : colors.ink }}>{criterion}</Text>
                   </View>
                 );
               })}
@@ -522,10 +514,10 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           {task.notes ? <TextBlock title="Notes" value={task.notes} /> : null}
           {task.blocked_reason ? <TextBlock title="Blocked reason" value={task.blocked_reason} error /> : null}
           {activeFeature && normalizeStatus(task.status) === 'in_progress' ? (
-            <TouchableOpacity onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent }]}>
-              <Ionicons name="checkmark" size={16} color={colors.accentOn} />
-              <Text variant="xs" style={{ color: colors.accentOn, fontWeight: fontWeights.medium }}>Mark completed</Text>
-            </TouchableOpacity>
+            <Pressable onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent.ink }]}>
+              <Icon name="check" size="sm" color={colors.onInk} />
+              <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Mark completed</Text>
+            </Pressable>
           ) : null}
         </View>
       ) : null}
@@ -639,13 +631,13 @@ function ExpandableRecord({ title, subtitle, expanded, onToggle, children }: {
   const { colors } = useTheme();
   return (
     <Card style={styles.recordCard}>
-      <TouchableOpacity onPress={onToggle} activeOpacity={0.72} style={styles.recordHeader}>
+      <Pressable onPress={onToggle} activeOpacity={0.72} style={styles.recordHeader}>
         <View style={styles.recordCopy}>
           <Text variant="sm" style={styles.recordTitle}>{title}</Text>
           <Text variant="xs" dim numberOfLines={2} style={{ fontVariant: ['tabular-nums'] }}>{subtitle}</Text>
         </View>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
-      </TouchableOpacity>
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
+      </Pressable>
       {expanded ? <View style={styles.recordBody}>{children}</View> : null}
     </Card>
   );
@@ -664,19 +656,19 @@ function StatusPill({ label }: { label: string }) {
   const { colors } = useTheme();
   const normalized = normalizeStatus(label);
   const foreground = normalized === 'completed'
-    ? colors.success
+    ? colors.ok.ink
     : normalized === 'blocked'
-      ? colors.error
+      ? colors.danger.ink
       : normalized === 'in_progress'
-        ? colors.info
-        : colors.textSoft;
+        ? colors.info.ink
+        : colors.ink2;
   const background = normalized === 'completed'
-    ? colors.successSubtle
+    ? colors.ok.wash
     : normalized === 'blocked'
-      ? colors.errorSubtle
+      ? colors.danger.wash
       : normalized === 'in_progress'
-        ? colors.infoSubtle
-        : colors.bgHover;
+        ? colors.info.wash
+        : colors.sunken;
   return (
     <View style={[styles.statusPill, { backgroundColor: background }]}>
       <View style={[styles.statusMiniDot, { backgroundColor: foreground }]} />
@@ -687,22 +679,22 @@ function StatusPill({ label }: { label: string }) {
 
 function ActionButton({ label, icon, onPress, primary = false }: {
   label: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   onPress: () => void;
   primary?: boolean;
 }) {
   const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       activeOpacity={0.72}
       style={[styles.actionButton, primary
-        ? { backgroundColor: colors.accent, borderColor: colors.accent }
-        : { backgroundColor: 'transparent', borderColor: colors.border }]}
+        ? { backgroundColor: colors.accent.ink, borderColor: colors.accent.ink }
+        : { backgroundColor: 'transparent', borderColor: colors.hairline }]}
     >
-      <Ionicons name={icon} size={16} color={primary ? colors.accentOn : colors.text} />
-      <Text variant="xs" style={{ color: primary ? colors.accentOn : colors.text, fontWeight: fontWeights.medium }}>{label}</Text>
-    </TouchableOpacity>
+      <Icon name={icon} size="sm" color={primary ? colors.onInk : colors.ink} />
+      <Text variant="xs" style={{ color: primary ? colors.onInk : colors.ink, fontWeight: fontWeights.medium }}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -719,7 +711,7 @@ function StringList({ title, values }: { title: string; values: string[] }) {
   if (!values.length) return null;
   return (
     <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
+      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
       {values.map((value, index) => <Text key={`${value}-${index}`} variant="xs" style={styles.bulletLine}>• {value}</Text>)}
     </View>
   );
@@ -729,8 +721,8 @@ function TextBlock({ title, value, error = false }: { title: string; value: stri
   const { colors } = useTheme();
   return (
     <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
-      <Text variant="xs" style={{ color: error ? colors.error : colors.text }}>{value}</Text>
+      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
+      <Text variant="xs" style={{ color: error ? colors.danger.ink : colors.ink }}>{value}</Text>
     </View>
   );
 }
@@ -740,8 +732,8 @@ function JsonBlock({ title, value, raw = false }: { title: string; value: unknow
   const text = raw ? String(value) : safeJson(value);
   return (
     <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title.toUpperCase()}</Text>
-      <View style={[styles.jsonBox, { backgroundColor: colors.bg }]}>
+      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
+      <View style={[styles.jsonBox, { backgroundColor: colors.canvas }]}>
         <Text variant="xs" style={styles.jsonText} selectable>{text}</Text>
       </View>
     </View>
@@ -769,12 +761,12 @@ function countForFilter(features: FeatureListItem[], filter: FeatureFilter): num
 }
 
 function statusColor(status: string, archived: boolean, colors: any): string {
-  if (archived) return colors.textDim;
+  if (archived) return colors.ink3;
   const normalized = normalizeStatus(status);
-  if (normalized === 'completed') return colors.success;
-  if (normalized === 'blocked') return colors.error;
-  if (normalized === 'in_progress') return colors.info;
-  return colors.textDim;
+  if (normalized === 'completed') return colors.ok.ink;
+  if (normalized === 'blocked') return colors.danger.ink;
+  if (normalized === 'in_progress') return colors.info.ink;
+  return colors.ink3;
 }
 
 function formatDate(timestamp?: number | null): string {

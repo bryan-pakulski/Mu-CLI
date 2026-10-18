@@ -472,7 +472,7 @@ def build_live_status_line(session):
     parts = []
     # Plan mode comes first so its presence is unmissable when active.
     if metrics["plan"]["enabled"]:
-        parts.append("🔒 PLAN")
+        parts.append("PLAN")
     parts += [
         f"yolo:{'on' if metrics['yolo']['enabled'] else 'off'}",
         build_inline_meter("ctx", metrics["ctx"]["current"], metrics["ctx"]["maximum"]),
@@ -517,8 +517,8 @@ def build_live_status_line(session):
         overall_pct = int(teacher_metrics.get("overall_pct", 0) or 0)
         avg = int(teacher_metrics.get("average_score_pct", 0) or 0)
         if module_idx and lesson_idx:
-            parts.append(f"📚 {subject} M{module_idx}/L{lesson_idx} {overall_pct:>3}% avg{avg:>3}%")
+            parts.append(f"teach {subject} M{module_idx}/L{lesson_idx} {overall_pct:>3}% avg{avg:>3}%")
         else:
-            parts.append(f"📚 {subject} {overall_pct:>3}% avg{avg:>3}%")
+            parts.append(f"teach {subject} {overall_pct:>3}% avg{avg:>3}%")
 
     return " ".join(parts)

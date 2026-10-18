@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import type { ChatMessage } from '../hooks/useChatSession';
 import { radii, spacing } from '../theme/tokens';
+import { Pressable, Icon } from '../ui';
 
 interface Props {
   messages: ChatMessage[];
@@ -65,10 +65,10 @@ export function ConversationStageRail({
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.list, { backgroundColor: colors.bgLift, borderColor: colors.hairline }]}
+        contentContainerStyle={[styles.list, { backgroundColor: colors.surface, borderColor: colors.hairline }]}
       >
         {hasMoreHistory ? (
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="History continues above — tap to load older messages"
             disabled={loadingHistory}
@@ -77,19 +77,19 @@ export function ConversationStageRail({
             style={styles.marker}
           >
             <View style={styles.moreBadge}>
-              <Ionicons
-                name={loadingHistory ? 'hourglass-outline' : 'chevron-up'}
-                size={13}
-                color={colors.textSoft}
+              <Icon
+                name={loadingHistory ? 'hourglass' : 'chevron-up'}
+                size="sm"
+                color={colors.ink2}
               />
             </View>
-          </TouchableOpacity>
+          </Pressable>
         ) : null}
         {stages.map((stage, index) => {
           const active = index === activeStage;
           const label = stage.message.text.replace(/\s+/g, ' ').trim() || 'Attachment';
           return (
-            <TouchableOpacity
+            <Pressable
               key={stage.key}
               accessibilityRole="button"
               accessibilityLabel={`Jump to prompt ${index + 1}: ${label.slice(0, 80)}`}
@@ -99,10 +99,10 @@ export function ConversationStageRail({
             >
               <View style={[
                 styles.dot,
-                { backgroundColor: active ? colors.accent : colors.border },
+                { backgroundColor: active ? colors.accent.ink : colors.hairline },
                 active && styles.activeDot,
               ]} />
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
       </ScrollView>

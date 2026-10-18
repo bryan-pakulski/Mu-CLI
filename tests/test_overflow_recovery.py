@@ -268,9 +268,13 @@ def test_recovery_escalation_loop_caps_attempts_per_turn():
             turn_start_index=0,
         )
 
-    # 3 compactions (escalating keep_recent 4→2→1) + 1 final call that
-    # hits the cap and re-raises = cap + 1 provider calls.
-    assert len(calls) == _MAX_OVERFLOW_RECOVERIES_PER_TURN + 1
+    # The breaker counts rungs: all four rungs (compact, strip_degrade,
+    # full_compact, truncate) are applied, then the next overflow re-raises.
+    # A rung that does not shrink the request by 10% is not retried as-is:
+    # strip_degrade finds nothing over its budget here, so full_compact runs
+    # before the provider is called again. 1 initial call + retries after
+    # compact, full_compact and truncate = cap provider calls (not cap + 1).
+    assert len(calls) == _MAX_OVERFLOW_RECOVERIES_PER_TURN
     assert session._overflow_recoveries_this_turn == _MAX_OVERFLOW_RECOVERIES_PER_TURN
 
 
@@ -490,7 +494,11 @@ def test_recovery_escalation_ladder_compacts_harder_each_retry():
     # Escalation ladder in order: keep_recent shrinks, margin grows, floor
     # lifted from the 2nd recovery on.
     assert compact_calls == [(4, 0.20, False), (2, 0.30, True)]
-    assert session._overflow_recoveries_this_turn == 2
+    # The 2nd rung (strip_degrade) found nothing over its budget, so it did
+    # not shrink the request by 10%: the 3rd rung (full_compact) ran before
+    # the retry instead of re-sending an unchanged request. The breaker
+    # counts rungs applied.
+    assert session._overflow_recoveries_this_turn == 3
     # 2 overflows + 1 success = 3 provider calls.
     assert len(calls) == 3
 

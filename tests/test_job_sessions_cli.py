@@ -119,8 +119,8 @@ def test_create_with_session_uses_saved_session_and_records_origin(home, service
     assert job.repository == str(ws)
     assert job.metadata["origin_session"] == "other"
     assert job.execution["agent_mode"] == "plan"
-    # Session YOLO is never inherited: unattended sandbox writes are an explicit choice.
-    assert job.execution["auto_approve_writes"] is False
+    # Session YOLO is irrelevant: jobs always run unattended in their sandbox.
+    assert job.execution["auto_approve_writes"] is True
     assert job.execution["stages"]["plan"] == {"provider": "anthropic", "model": "claude-x"}
 
 

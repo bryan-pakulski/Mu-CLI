@@ -24,25 +24,28 @@ def _missing_executable(text):
 
 
 def run_suite_in_container(job, workspace, suite, *, runner=None, service=None, restart_cursor=None,
-                           environment=None, states=()):
-    """Run one suite in the build environment that owns it (``environment``; None = shared runtime)."""
+                           environment=None, states=(), guard=True):
+    """Run one suite in the build environment that owns it (``environment``; None = shared runtime).
+
+    ``guard=False``: the caller (the checks stage) guards the worktree itself, after it has
+    discarded the suites' byproducts, so a leftover the stage deletes anyway never blocks."""
     return _run_container(job, workspace, [suite], runner=runner, service=service, restart_cursor=restart_cursor,
-                          environment=environment, states=states)[0]
+                          environment=environment, states=states, guard=guard)[0]
 
 
 def run_suites_in_container(job, workspace, suites, *, runner=None, service=None, restart_cursor=None,
-                            environment=None, states=()):
+                            environment=None, states=(), guard=True):
     """Run several suites of one build environment in a single container (one start-up, not one
     per suite). Falls back to one container per suite for a runtime image that predates batching."""
     suites = list(suites)
     if len(suites) <= 1:
         return [run_suite_in_container(job, workspace, s, runner=runner, service=service, restart_cursor=restart_cursor,
-                                       environment=environment, states=states) for s in suites]
+                                       environment=environment, states=states, guard=guard) for s in suites]
     results = _run_container(job, workspace, suites, runner=runner, service=service, restart_cursor=restart_cursor,
-                             environment=environment, states=states)
+                             environment=environment, states=states, guard=guard)
     if all(r.get("batch_unsupported") for r in results):
         return [run_suite_in_container(job, workspace, s, runner=runner, service=service, restart_cursor=restart_cursor,
-                                       environment=environment, states=states) for s in suites]
+                                       environment=environment, states=states, guard=guard) for s in suites]
     return results
 
 
@@ -51,7 +54,7 @@ def _spec(suite, timeout):
 
 
 def _run_container(job, workspace, suites, *, runner=None, service=None, restart_cursor=None,
-                   environment=None, states=()):
+                   environment=None, states=(), guard=True):
     runner = runner or CommandRunner()
     policy = with_build_environment(SandboxPolicy.for_stage("checks"), job, environment, stage="checks")
     docker = require_image(runner, policy, environment)
@@ -75,10 +78,12 @@ def _run_container(job, workspace, suites, *, runner=None, service=None, restart
             index = chunk.get("suite_index")
             return suites[index].name if isinstance(index, int) and 0 <= index < len(suites) else suites[0].name
 
+        should_guard = guard
+
         def guard():
             # Checks mount the worktree read-write: the same host guard as after implement
             # (changed paths, secret files, credentials in the diff). Not for the baseline copy.
-            if workspace == job.worktree and getattr(job, "worktree", ""):
+            if should_guard and workspace == job.worktree and getattr(job, "worktree", ""):
                 _guard(job, policy)
 
         def finish(result):

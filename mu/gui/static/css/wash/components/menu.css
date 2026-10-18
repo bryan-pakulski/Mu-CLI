@@ -1,0 +1,94 @@
+/* Menu and popover (G§9.17) — level 2, radius-sm, 6px padding, 32px items.
+ *
+ *   <div class="w-menu" role="menu" aria-label="Job actions">
+ *     <button class="w-menu__item" role="menuitem">
+ *       <svg class="w-icon">…</svg><span class="w-menu__label">Retry</span><kbd class="w-menu__shortcut">R</kbd>
+ *     </button>
+ *     <hr class="w-menu__separator">
+ *     <div class="w-menu__heading">Danger zone</div>
+ *     <button class="w-menu__item" role="menuitem" data-tone="danger">Delete</button>
+ *   </div>
+ *
+ *   <div class="w-popover" role="dialog" aria-label="…">free content</div>
+ *
+ * Positioning is the caller's job (floating_popouts.js geometry, anchor CSS
+ * or a positioned wrapper). Selected items: aria-checked/aria-selected.
+ */
+.w-menu,
+.w-popover {
+    z-index: var(--wash-z-popover);
+    min-width: 180px;
+    max-width: min(360px, calc(100vw - 24px));
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-sm);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift-2);
+    animation: w-menu-in var(--wash-motion-small) var(--wash-ease-small) both;
+}
+
+.w-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px;
+    max-height: min(420px, 70vh);
+    overflow-y: auto;
+}
+.w-menu > * { flex-shrink: 0; }   /* items keep their height when the menu scrolls */
+.w-popover { padding: var(--wash-space-4); }
+.w-menu__item {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    width: 100%;
+    min-height: 32px;
+    padding: 0 var(--wash-space-2);
+    border: 0;
+    border-radius: var(--wash-radius-xs);
+    background: transparent;
+    color: var(--w-tone-ink, var(--wash-ink));
+    font: inherit;
+    font-size: var(--wash-type-body-size);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.w-menu__item:hover,
+.w-menu__item:focus-visible,
+.w-menu__item[data-active] { background: var(--w-glass-fill-subtle); text-decoration: none; }
+.w-menu__item:focus-visible { outline-offset: -2px; }
+.w-menu__item:is([aria-checked="true"], [aria-selected="true"]) { background: var(--wash-accent-wash); }
+.w-menu__item:is([aria-checked="true"], [aria-selected="true"])::after { content: "✓"; margin-left: auto; color: var(--wash-accent-ink); }
+.w-menu__item:disabled,
+.w-menu__item[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; background: transparent; }
+.w-menu__item :is(svg, .w-icon) { flex: none; width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); color: var(--w-tone-ink, var(--wash-ink-3)); }
+.w-menu__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-menu__shortcut {
+    margin-left: auto;
+    color: var(--wash-ink-3);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+}
+.w-menu__separator {
+    width: 100%;
+    height: 1px;
+    margin: 4px 0;
+    border: 0;
+    background: var(--wash-hairline);
+}
+.w-menu__heading {
+    padding: var(--wash-space-2) var(--wash-space-2) 2px;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-label-weight);
+}
+@keyframes w-menu-in {
+    from { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+    to { opacity: 1; transform: none; filter: none; }
+}
+@media (pointer: coarse) {
+    .w-menu__item { min-height: var(--wash-size-touch); }
+}

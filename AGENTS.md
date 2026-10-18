@@ -46,7 +46,7 @@ python3 mucli.py --gui
 python3 -m pytest tests/ -q
 ```
 
-- The full suite is approximately 2,400 tests and normally takes about 30s.
+- The full suite is approximately 4,250 tests and normally takes about 2.5 minutes.
 - `tests/` intentionally has no `__init__.py`; do not add one.
 - Never weaken, skip, or delete tests to make a change pass.
 - Fix product code first; change a test only when the specified behavior changes.
@@ -82,13 +82,33 @@ python3 -m pytest tests/ -q
   finished turn's tool results into the durable result store, then rolls the turn
   into L2 when it exceeds `turn_keep_budget_tokens`. Answered tool-call args above
   `tool_call_arg_stub_threshold_chars` are stubbed in the projected request only;
-  `session.history` is never rewritten. `compactor._pressure_clear` runs even with
+  `session.history` is never rewritten. Provider replay blobs (`thought_signature`:
+  thinking signatures, encrypted reasoning) are excluded from every token estimate
+  and dropped from older turns in the request projection (`providers.base.project_replay`). `compactor._pressure_clear` runs even with
   `auto_compaction_enabled=False`. With `prompt_prefix_stable` the system prompt is
   byte-stable per turn; volatile blocks ride in the trailing RUNTIME STATE message
   (never persisted). Every history shrink records a ledger kind (`turn_fold`,
   `turn_roll`, `pressure_clear`, `pressure_forced`, ...).
+- UI follows the Wash design system (`documentation/design/wash_design_guide.md`).
+  Colours, type, spacing and the job/status vocabulary come only from
+  `mu/design/tokens.json` and `vocabulary.json`; after editing them run
+  `python3 scripts/design/build_tokens.py` (web CSS/JS + Android TS are
+  generated; tests fail when stale). Web uses `.w-*` components and
+  `--wash-*` variables inside `static/css/wash/` cascade layers; Android uses
+  `mobile/android/src/ui`; the terminal uses `mu/ui/theme` (`get_console()`,
+  `wash.*` Rich styles). Escape non-literal values with `mu.ui.markup.esc`
+  before putting them in Rich markup.
 - Do not bypass approval gates for mutations. Write-side tools require approval
   unless the user explicitly enables YOLO mode; plan mode remains read-only.
+  Jobs (`mu/jobs`) run unattended by user decision (2026-10-15): stage tool
+  calls are never prompted. Implement/checks auto-approve inside the sandbox;
+  plan/review are read-only and deny writes automatically; agent questions are
+  auto-answered. Container isolation, egress allowlists, the secret scan and the
+  plan/push pipeline gates are the controls. When checks can't run, an
+  unattended repair stage may install dependencies in a repair container (wider
+  package-registry egress, root inside the container with dropped
+  capabilities); its result is committed as a job-scoped image. Interactive
+  chat keeps its approval gates.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.
 - Runtime state defaults to `~/.mucli/`; `MUCLI_HOME` overrides that root.
 - Saved sessions are under `~/.mucli/sessions/`.

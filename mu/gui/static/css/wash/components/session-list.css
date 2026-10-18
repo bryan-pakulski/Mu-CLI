@@ -1,0 +1,150 @@
+/* Sessions and threads list (G§9.20) — rows in the sidebar.
+ *
+ *   <div class="w-sessions__head"><span class="w-sessions__title">Sessions</span><span class="w-count">4</span></div>
+ *   <ul class="w-sessions">
+ *     <li><div class="w-session" role="button" tabindex="0" [aria-current="true"] [data-busy] [data-attention]>
+ *       <span class="w-session__avatar">….w-avatar (components/avatar.css)…</span>
+ *       <span class="w-session__name">atlas-api</span>
+ *       <span class="w-session__status"><span class="w-session__state" data-state="running|waiting|error|paused|done|loaded" data-tone="…">
+ *         ink drop or glyph + label</span></span>   (sessions store state(): background sessions show what they are doing)
+ *       <span class="w-session__actions">…ghost buttons on hover/focus…</span>
+ *     </div></li>
+ *   </ul>
+ *
+ * The active row is a glass-strong pill (like .w-nav__item), no side bar. Rows are
+ * role=button + tabindex=0 for sessions and threads alike; row actions show
+ * on hover or keyboard focus.
+ */
+.w-sessions__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    margin: var(--wash-space-4) var(--wash-space-3) var(--wash-space-1);
+}
+.w-sessions__title {
+    flex: 1 1 auto;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-eyebrow-weight);
+    line-height: var(--wash-type-caption-line);
+}
+.w-sessions {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.w-session {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-height: 36px;
+    padding: 0 var(--wash-space-2) 0 var(--wash-space-3);
+    border-radius: var(--wash-radius-sm);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    cursor: pointer;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-micro), color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-session:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
+.w-session:focus-visible { outline-offset: -2px; }
+.w-session[aria-current="true"] {
+    background: var(--w-glass-fill-strong);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift-2);
+}
+.w-session__icon { display: inline-flex; flex: none; width: 16px; height: 16px; color: var(--wash-ink-3); }
+.w-session__icon svg { width: 16px; height: 16px; }
+.w-session__avatar { display: inline-flex; flex: none; margin-right: var(--wash-space-1); transition: opacity var(--wash-motion-small) var(--wash-ease-small); }
+/* Unloaded sessions sit back a little; the active and loaded ones are at full strength. */
+.w-session:not([aria-current="true"]) .w-session__avatar:not([data-loaded]) { opacity: 0.78; }
+.w-session:hover .w-session__avatar { opacity: 1; }
+.w-session__avatar[data-busy] .w-avatar { animation: w-avatar-breathe calc(var(--wash-motion-medium) * 4) var(--wash-ease-micro) infinite; }
+@keyframes w-avatar-breathe { 50% { transform: scale(0.92); } }
+.w-session__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-session__status { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.w-session__unread {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--wash-accent-wash);
+    color: var(--wash-accent-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: 18px;
+    text-align: center;
+}
+.w-session__attention { color: var(--wash-attention-ink); font-weight: 600; }
+/* A loaded session's state: running, needs you, error, paused, done (finished while away). */
+.w-session__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 var(--wash-space-2);
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-tone-wash, var(--wash-neutral-wash));
+    color: var(--w-tone-ink, var(--wash-ink-2));
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-label-weight);
+    line-height: 1;
+    white-space: nowrap;
+}
+.w-session__state-glyph { font-size: var(--wash-type-caption-size); }
+/* Loaded and idle: a quiet dot; the label stays for screen readers and the tooltip. */
+.w-session__state[data-state="loaded"] { padding: 0 var(--wash-space-1); background: none; }
+.w-session__state[data-state="loaded"]::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--wash-ok-pigment);
+}
+.w-session__state[data-state="loaded"] .w-session__state-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+/* Row actions overlay the state on hover/focus instead of reserving width, so names keep room. */
+.w-session__actions {
+    position: absolute;
+    top: 50%;
+    right: var(--wash-space-2);
+    display: inline-flex;
+    gap: 2px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%);
+    transition: opacity var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-session:is(:hover, :focus-within) .w-session__actions { opacity: 1; pointer-events: auto; }
+.w-session:is(:hover, :focus-within) .w-session__status { visibility: hidden; }
+@media (hover: none) {
+    /* No hover on touch screens: actions sit inline and the state stays visible. */
+    .w-session__actions { position: static; opacity: 1; pointer-events: auto; transform: none; }
+    .w-session:is(:hover, :focus-within) .w-session__status { visibility: visible; }
+}
+.w-session__action {
+    display: inline-grid;
+    place-items: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: var(--wash-radius-pill);
+    background: transparent;
+    color: var(--wash-ink-3);
+    font: inherit;
+    font-size: var(--wash-type-caption-size);
+    cursor: pointer;
+}
+.w-session__action:hover:not(:disabled) { background: var(--w-glass-fill-strong); color: var(--wash-ink); }
+.w-session__action[data-tone="danger"]:hover:not(:disabled) { color: var(--wash-danger-ink); }
+.w-session__action:disabled { opacity: 0.35; cursor: not-allowed; }

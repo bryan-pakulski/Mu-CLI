@@ -6,15 +6,16 @@ import base64
 import subprocess
 import shutil
 import io
-from rich.console import Console
+from mu.ui.theme import get_console
 from rich.markup import escape as safe_markup  # noqa: F401  re-export
+from rich.markup import escape as esc
 from .config import HAS_PIL, SESSION_DIR
 
 # Need local PIL import logic for helper
 if HAS_PIL:
     from PIL import Image
 
-console = Console()
+console = get_console()
 
 
 def get_safe_mime_type(file_path):
@@ -41,7 +42,7 @@ def display_image_in_terminal(
     Saves image to disk and attempts to display it inline using CLI protocols.
     """
     if not HAS_PIL:
-        console.print("[yellow]PIL not installed. Cannot process image bytes.[/yellow]")
+        console.print("[wash.caution]PIL not installed. Cannot process image bytes.[/wash.caution]")
         return
 
     timestamp = int(time.time())
@@ -60,7 +61,7 @@ def display_image_in_terminal(
             # 1. Print clickable link
             file_url = f"file://{filepath}"
             console.print(
-                f"\n[bold cyan]Image Generated:[/bold cyan] [link={file_url}]{filepath}[/link]"
+                f"\n[wash.accent.bold]Image Generated:[/wash.accent.bold] [link={esc(file_url)}]{esc(str(filepath))}[/link]"
             )
 
         # 2. Attempt Inline Display
@@ -82,7 +83,7 @@ def display_image_in_terminal(
         elif shutil.which("catimg"):
             subprocess.run(["catimg", "-w", "100", filepath], check=False)
         else:
-            console.print(f"[dim](Image size: {image.size[0]}x{image.size[1]})[/dim]")
+            console.print(f"[wash.muted](Image size: {image.size[0]:d}x{image.size[1]:d})[/wash.muted]")
 
     except Exception as e:
-        console.print(f"[red]Failed to display image: {e}[/red]")
+        console.print(f"[wash.danger]Failed to display image: {esc(str(e))}[/wash.danger]")

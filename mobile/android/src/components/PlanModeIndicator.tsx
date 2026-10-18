@@ -1,10 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { PLAN_MODE_TOOLTIP, setPlanModeRemote } from '../api/planMode';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Icon, Pressable, Text } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 export const PLAN_MODE_PLACEHOLDER = 'Plan mode: read-only — writing is blocked';
 
@@ -54,23 +55,25 @@ export function PlanModeBadge() {
   const { planMode, busy, confirmTurnOff } = usePlanMode();
   if (!planMode) return null;
   return (
-    <TouchableOpacity
+    <Pressable
       testID="plan-mode-badge"
       accessibilityRole="button"
       accessibilityLabel="Plan mode on: read-only, writing is blocked. Tap to turn off."
       accessibilityHint={PLAN_MODE_TOOLTIP}
       disabled={busy}
       onPress={confirmTurnOff}
-      style={[styles.badge, { backgroundColor: colors.planSubtle, borderColor: colors.plan }]}
+      style={[styles.badge, { backgroundColor: colors.plan.wash, borderColor: colors.plan.ink }]}
     >
-      <Text variant="xs" style={[styles.badgeText, { color: colors.plan }]}>🔒 Plan</Text>
-    </TouchableOpacity>
+      <Icon name="lock" size="sm" color={colors.plan.ink} testID="plan-mode-badge-lock" />
+      <Text variant="xs" style={[styles.badgeText, { color: colors.plan.ink }]}>Plan</Text>
+    </Pressable>
   );
 }
 
 /** Persistent strip above the composer — rendered only while plan mode is on. */
 export function PlanModeStrip() {
   const { colors } = useTheme();
+  const glass = useGlass();
   const { planMode, busy, turnOff } = usePlanMode();
   if (!planMode) return null;
   return (
@@ -78,29 +81,35 @@ export function PlanModeStrip() {
       testID="plan-mode-strip"
       accessibilityRole="summary"
       accessibilityLabel="Plan mode, read-only. Writing is blocked."
-      style={[styles.strip, { backgroundColor: colors.planSubtle, borderColor: colors.plan }]}
+      // Lilac state strip (G§9.16): the plan wash mixed into glass with plan
+      // mode's dashed outline (G§3.4); no side rule.
+      style={[styles.strip, { backgroundColor: glass.tint('plan'), borderColor: colors.plan.ink }]}
     >
-      <Text variant="xs" style={[styles.stripText, { color: colors.text }]}>
-        <Text variant="xs" style={{ color: colors.plan, fontWeight: fontWeights.semibold }}>🔒 Plan mode</Text>
+      <Icon name="lock" size="sm" color={colors.plan.ink} testID="plan-mode-strip-lock" />
+      <Text variant="xs" style={[styles.stripText, { color: colors.ink }]}>
+        <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>Plan mode</Text>
         {' — read-only. Writing is blocked.'}
       </Text>
-      <TouchableOpacity
+      <Pressable
         accessibilityRole="button"
         accessibilityLabel="Turn off plan mode"
         disabled={busy}
         onPress={() => { void turnOff(); }}
-        style={[styles.stripButton, { borderColor: colors.plan }, busy && styles.disabled]}
+        style={[styles.stripButton, { borderColor: colors.plan.ink }, busy && styles.disabled]}
       >
-        <Text variant="xs" style={{ color: colors.plan, fontWeight: fontWeights.semibold }}>
+        <Text variant="xs" style={{ color: colors.plan.ink, fontWeight: fontWeights.semibold }}>
           {busy ? 'Turning off…' : 'Turn off'}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radii.pill,
@@ -115,7 +124,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     marginBottom: spacing.sm,
     borderWidth: 1,
-    borderLeftWidth: 3,
+    borderStyle: 'dashed',
     borderRadius: radii.sm,
   },
   stripText: { flex: 1 },

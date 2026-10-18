@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { FlatList, View, RefreshControl, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
 import { promptsApi, type PendingPrompt } from '../api/prompts';
 import { elevation, fonts, spacing, radii } from '../theme/tokens';
-import { SafeAreaModal } from '../components/SafeAreaModal';
+import { Button, Card, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text } from '../ui';
 
 function promptText(prompt: PendingPrompt | null | undefined): string {
   if (!prompt) return '';
@@ -66,7 +65,7 @@ export function PromptsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3].map(i => <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />)}
         </View>
@@ -76,7 +75,7 @@ export function PromptsScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={() => void load()} />
       </SafeAreaView>
     );
@@ -84,14 +83,14 @@ export function PromptsScreen() {
 
   if (pending.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No pending prompts" message="The agent has no prompts awaiting your response" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <FlatList
         data={pending}
         keyExtractor={item => item.id}
@@ -99,7 +98,7 @@ export function PromptsScreen() {
         contentContainerStyle={{ padding: spacing.base }}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-            <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.xs, fontFamily: fonts.mono }}>{item.id}</Text>
+            <Text variant="sm" style={{ color: colors.ink3, marginBottom: spacing.xs, fontFamily: fonts.mono }}>{item.id}</Text>
             <Text variant="base" style={{ marginBottom: spacing.sm }}>{promptText(item)}</Text>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <Button title="Answer" onPress={() => { setAnswering(item); setAnswerText(''); }} />
@@ -108,26 +107,26 @@ export function PromptsScreen() {
           </Card>
         )}
       />
-      <SafeAreaModal visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
-        <TouchableOpacity style={{ flex: 1, backgroundColor: colors.scrim }} onPress={() => setAnswering(null)} activeOpacity={1}>
+      <ModalFrame statusBarTranslucent={false} visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: colors.scrim }} onPress={() => setAnswering(null)} activeOpacity={1}>
           <View style={[elevation(2, colors, isDark), { margin: spacing.base, marginTop: spacing['3xl'], borderRadius: radii.lg, padding: spacing.base }]}>
             <Text variant="lg" style={{ marginBottom: spacing.sm }}>Answer prompt</Text>
-            <Text variant="sm" style={{ color: colors.textDim, marginBottom: spacing.sm }}>{promptText(answering)}</Text>
+            <Text variant="sm" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{promptText(answering)}</Text>
             <TextInput
               value={answerText}
               onChangeText={setAnswerText}
               placeholder="Your answer…"
-              placeholderTextColor={colors.textDim}
+              placeholderTextColor={colors.ink3}
               multiline
-              style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.base }}
+              style={{ color: colors.ink, borderWidth: 1, borderColor: colors.hairline, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.base }}
             />
             <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }}>
               <Button title="Cancel" variant="ghost" onPress={() => setAnswering(null)} />
               <Button title="Send" onPress={() => void submitAnswer()} disabled={!answerText.trim()} />
             </View>
           </View>
-        </TouchableOpacity>
-      </SafeAreaModal>
+        </Pressable>
+      </ModalFrame>
     </SafeAreaView>
   );
 }

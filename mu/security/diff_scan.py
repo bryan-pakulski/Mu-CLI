@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from mu.security.secret_paths import _SECRET_PATTERNS
+from mu.security.secret_paths import _SECRET_PATTERNS, is_test_fixture
 
 # Literal values shorter than this are too likely to collide with ordinary text.
 _MIN_LITERAL = 12
@@ -51,12 +51,15 @@ def _added_lines(patch: str):
             line += 1
 
 
-def scan_patch(patch: str, literals: Iterable[str] = ()) -> list[DiffSecret]:
+def scan_patch(patch: str, literals: Iterable[str] = (), *, allow_fixtures: bool = False) -> list[DiffSecret]:
     """Return secrets found on added lines of ``patch``.
 
     ``literals`` are exact secret values known to the host (for example the
     credential injected into the agent container); they are matched verbatim
     and never echoed back in findings.
+
+    ``allow_fixtures``: in files under a test or fixture directory (``is_test_fixture``) the
+    generic patterns (fake AWS keys, test PEM keys) do not count; ``literals`` always do.
     """
     if not patch:
         return []
@@ -67,6 +70,8 @@ def scan_patch(patch: str, literals: Iterable[str] = ()) -> list[DiffSecret]:
             if value in text:
                 findings.append(DiffSecret(path, line, "injected credential"))
                 break
+        if allow_fixtures and is_test_fixture(path):
+            continue
         for label, pattern in _SECRET_PATTERNS:
             if label == "PEM private key":
                 if "PRIVATE KEY-----" in text and text.lstrip().startswith("-----BEGIN"):

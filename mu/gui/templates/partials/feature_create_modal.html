@@ -1,0 +1,126 @@
+<!-- Feature: create feature modal (.w-modal, G§9.17) -->
+<div class="modal-backdrop w-modal"
+     x-data
+     x-dialog="$store.feature.showCreateModal"
+     x-cloak
+     x-show="$store.feature.showCreateModal"
+     x-transition.opacity.duration.120ms
+     @dialog-close="$store.feature.showCreateModal && $store.feature.closeCreateModal()">
+    <section class="modal modal-lg w-modal__dialog" @click.stop role="dialog" aria-modal="true" aria-labelledby="feature-create-title">
+        <header class="modal-head w-modal__head">
+            <h2 class="modal-title w-modal__title" id="feature-create-title">New feature</h2>
+            <button type="button" class="w-btn" data-variant="icon" @click="$store.feature.closeCreateModal()" aria-label="Close" title="Close">
+                <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+            </button>
+        </header>
+        <div class="modal-body w-modal__body feature-create-body">
+            <div class="modal-field w-field">
+                <label class="modal-label w-field__label" for="feature-create-name">Name</label>
+                <input type="text" class="w-input" id="feature-create-name"
+                       x-model="$store.feature.createForm.name"
+                       placeholder="Feature name"
+                       @keydown.stop />
+            </div>
+            <div class="modal-field w-field">
+                <label class="modal-label w-field__label" for="feature-create-request">Description</label>
+                <textarea class="w-textarea" id="feature-create-request"
+                          x-model="$store.feature.createForm.request"
+                          placeholder="What should this feature do?"
+                          rows="3"
+                          @keydown.stop></textarea>
+            </div>
+            <div class="modal-field w-field">
+                <label class="modal-label w-field__label" for="feature-create-directory">Directory</label>
+                <div class="feature-create-inline">
+                    <input type="text" class="w-input" data-mono id="feature-create-directory"
+                           x-model="$store.feature.createForm.directory"
+                           placeholder="Working directory (default: cwd)"
+                           @keydown.stop />
+                    <button type="button" class="w-btn" data-variant="secondary"
+                            @click="$store.fileBrowser.show('folder', p => $store.feature.createForm.directory = p)"><span>Browse</span></button>
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <div class="modal-section-head">
+                    <h3 class="modal-label feature-create-heading">Phases</h3>
+                    <button type="button" class="modal-add-btn w-btn" data-variant="ghost" data-size="sm" @click="$store.feature.addPhase()">
+                        <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Phase</span>
+                    </button>
+                </div>
+                <template x-for="(phase, pi) in ($store.feature.createForm.phases || [])" :key="pi">
+                    <div class="modal-phase">
+                        <div class="modal-phase-head">
+                            <span class="modal-phase-num mono" x-text="'Phase ' + (pi + 1)"></span>
+                            <button type="button" class="modal-remove-btn w-btn" data-variant="icon" data-size="sm" @click="$store.feature.removePhase(pi)" aria-label="Remove phase" title="Remove phase">
+                                <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                            </button>
+                        </div>
+                        <div class="modal-field-row">
+                            <input type="text" class="w-input" x-model="phase.title" placeholder="Phase title" aria-label="Phase title" @keydown.stop />
+                            <input type="text" class="w-input" x-model="phase.goal" placeholder="Goal (optional)" aria-label="Phase goal" @keydown.stop />
+                        </div>
+
+                        <div class="modal-tasks">
+                            <div class="modal-section-head small">
+                                <span class="modal-label feature-create-subheading">Tasks</span>
+                                <button type="button" class="modal-add-btn small w-btn" data-variant="ghost" data-size="sm" @click="$store.feature.addTask(pi)">
+                                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Task</span>
+                                </button>
+                            </div>
+                            <template x-for="(task, ti) in (phase.tasks || [])" :key="ti">
+                                <div class="modal-task">
+                                    <div class="modal-task-head">
+                                        <span class="feature-create-caption mono" x-text="'Task ' + (ti + 1)"></span>
+                                        <button type="button" class="modal-remove-btn w-btn" data-variant="icon" data-size="sm" @click="$store.feature.removeTask(pi, ti)" aria-label="Remove task" title="Remove task">
+                                            <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                                        </button>
+                                    </div>
+                                    <div class="modal-field">
+                                        <input type="text" class="w-input" x-model="task.title" placeholder="Task title" aria-label="Task title" @keydown.stop />
+                                    </div>
+                                    <div class="modal-list-field">
+                                        <span class="modal-label feature-create-subheading">Objectives</span>
+                                        <template x-for="(obj, oi) in (task.objectives || [])" :key="oi">
+                                            <div class="modal-list-row">
+                                                <input type="text" class="w-input" x-model="task.objectives[oi]" placeholder="Objective" aria-label="Objective" @keydown.stop />
+                                                <button type="button" class="modal-remove-btn w-btn" data-variant="icon" data-size="sm" @click="$store.feature.removeListItem(pi, ti, 'objectives', oi)" aria-label="Remove objective" title="Remove objective">
+                                                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                                                </button>
+                                            </div>
+                                        </template>
+                                        <button type="button" class="modal-add-btn small w-btn" data-variant="ghost" data-size="sm" @click="$store.feature.addListItem(pi, ti, 'objectives')">
+                                            <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Objective</span>
+                                        </button>
+                                    </div>
+                                    <div class="modal-list-field">
+                                        <span class="modal-label feature-create-subheading">Exit criteria</span>
+                                        <template x-for="(crit, ci) in (task.exit_criteria || [])" :key="ci">
+                                            <div class="modal-list-row">
+                                                <input type="text" class="w-input" x-model="task.exit_criteria[ci]" placeholder="Criterion" aria-label="Exit criterion" @keydown.stop />
+                                                <button type="button" class="modal-remove-btn w-btn" data-variant="icon" data-size="sm" @click="$store.feature.removeListItem(pi, ti, 'exit_criteria', ci)" aria-label="Remove criterion" title="Remove criterion">
+                                                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                                                </button>
+                                            </div>
+                                        </template>
+                                        <button type="button" class="modal-add-btn small w-btn" data-variant="ghost" data-size="sm" @click="$store.feature.addListItem(pi, ti, 'exit_criteria')">
+                                            <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Criterion</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <p class="feature-create-empty"
+                   x-show="!($store.feature.createForm.phases || []).length">
+                    No phases yet. The agent can plan them later, or you can add them now.
+                </p>
+            </div>
+        </div>
+        <footer class="modal-actions w-modal__foot">
+            <button type="button" class="w-btn" data-variant="secondary" @click="$store.feature.closeCreateModal()"><span>Cancel</span></button>
+            <button type="button" class="w-btn" data-variant="primary" @click="$store.feature.submitCreateFeature()"><span>Create feature</span></button>
+        </footer>
+    </section>
+</div>

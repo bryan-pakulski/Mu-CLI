@@ -13,8 +13,10 @@ def test_model_pricing_is_first_class_in_settings():
     product = (ROOT / "mu/gui/static/js/product.js").read_text(encoding="utf-8")
     app = (ROOT / "mu/gui/static/js/app.js").read_text(encoding="utf-8")
     shell = (ROOT / "mu/gui/static/js/web_shell.js").read_text(encoding="utf-8")
-    css = (ROOT / "mu/gui/static/css/pricing_settings.css").read_text(encoding="utf-8")
-    rows_css = (ROOT / "mu/gui/static/css/pricing_rows.css").read_text(encoding="utf-8")
+    # Wash W4: pricing pane + row creator styles live in the settings pattern
+    # (pricing_settings.css / pricing_rows.css are retired).
+    css = (ROOT / "mu/gui/static/css/wash/patterns/settings.css").read_text(encoding="utf-8")
+    rows_css = css
     providers = (ROOT / "mu/gui/routers/providers.py").read_text(encoding="utf-8")
 
     assert "Alpine.store('pricingSettings'" in app
@@ -51,7 +53,10 @@ def test_model_pricing_is_first_class_in_settings():
     assert "Operator-added pricing row." in shell
     assert "input_modalities" in shell
     assert "capabilities" in shell
-    assert "pricing_rows.css" in shell
+    # Wash W2/W4: no runtime stylesheet injection; the chat page bundle
+    # imports the settings pattern (pricing row styles) behind wash.css.
+    assert '@import url("settings.css") layer(patterns);' in (ROOT / "mu/gui/static/css/wash/patterns/chat.css").read_text(encoding="utf-8")
+    assert "createElement('link')" not in shell
 
     assert '@router.get("/pricing")' in providers
     assert '@router.put("/pricing")' in providers

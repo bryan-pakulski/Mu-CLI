@@ -88,12 +88,12 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                 from rich import box
                 from rich.table import Table
 
-                table = Table(title="Memory Status", box=box.ROUNDED)
-                table.add_column("Type", style="cyan")
-                table.add_column("Entries", style="green", justify="right")
-                table.add_column("Hits", style="yellow", justify="right")
-                table.add_column("Avg Hits", style="magenta", justify="right")
-                table.add_column("Description", style="dim")
+                table = Table(title="Memory Status", box=box.SIMPLE_HEAD)
+                table.add_column("Type", style="wash.accent")
+                table.add_column("Entries", style="wash.ok", justify="right")
+                table.add_column("Hits", style="wash.caution", justify="right")
+                table.add_column("Avg Hits", style="wash.plum", justify="right")
+                table.add_column("Description", style="wash.muted")
                 table.add_row(
                     "Task Memory",
                     str(task_stats["entries"]),
@@ -123,16 +123,16 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                 def print_top(title, stats):
                     from rich.text import Text
 
-                    console.print(f"[bold cyan]{safe_markup(title)} Top Entries[/bold cyan]")
+                    console.print(f"[wash.accent.bold]{safe_markup(title)} Top Entries[/wash.accent.bold]")
                     if not stats["top_entries"]:
-                        console.print("[dim]No entries yet.[/dim]")
+                        console.print("[wash.muted]No entries yet.[/wash.muted]")
                         return
-                    top = Table(box=box.SIMPLE)
-                    top.add_column("ID", style="dim", justify="right")
-                    top.add_column("Hits", style="yellow", justify="right")
-                    top.add_column("Tags", style="magenta")
-                    top.add_column("Source", style="blue")
-                    top.add_column("Preview", style="white")
+                    top = Table(box=box.SIMPLE_HEAD)
+                    top.add_column("ID", style="wash.muted", justify="right")
+                    top.add_column("Hits", style="wash.caution", justify="right")
+                    top.add_column("Tags", style="wash.plum")
+                    top.add_column("Source", style="wash.info")
+                    top.add_column("Preview", style="wash.ink")
                     for entry in stats["top_entries"]:
                         tags = ", ".join(entry.get("tags", [])) or "-"
                         preview = str(entry.get("content", "")).replace("\n", " ").strip()
@@ -150,12 +150,12 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                 print_top("Task Memory", task_stats)
                 print_top("Scratchpad", scratch_stats)
 
-                layer_table = Table(title="Hierarchical Context Layers", box=box.SIMPLE)
-                layer_table.add_column("Layer", style="cyan")
-                layer_table.add_column("Name", style="white")
-                layer_table.add_column("Usage", style="yellow", justify="right")
-                layer_table.add_column("Fill", style="green", justify="right")
-                layer_table.add_column("Description", style="dim")
+                layer_table = Table(title="Hierarchical Context Layers", box=box.SIMPLE_HEAD)
+                layer_table.add_column("Layer", style="wash.accent")
+                layer_table.add_column("Name", style="wash.ink")
+                layer_table.add_column("Usage", style="wash.caution", justify="right")
+                layer_table.add_column("Fill", style="wash.ok", justify="right")
+                layer_table.add_column("Description", style="wash.muted")
                 from rich.text import Text as _Text
 
                 for layer in layer_stats:
@@ -175,8 +175,11 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                 # the raw window ÷ the safety/drift factor, so the ratio is
                 # the true real-token fill even though numerator and
                 # denominator are in different absolute units.
+                # Same pressure thresholds as the meters: caution ≥65%, danger ≥85%.
                 total_color = (
-                    "red" if total_pct >= 85 else "yellow" if total_pct >= 60 else "green"
+                    "wash.danger.bold"
+                    if total_pct >= 85
+                    else "wash.caution.bold" if total_pct >= 65 else "wash.ok.bold"
                 )
                 cap_label = (
                     f"All layers vs. effective cap (÷{safety_factor:.1f})"
@@ -194,8 +197,8 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                     "[bold]TOTAL[/bold]",
                     f"[bold]{cap_label}[/bold]",
                     f"[bold]{total_tokens}/{context_limit}[/bold]",
-                    f"[bold {total_color}]{total_pct}%[/bold {total_color}]",
-                    f"[dim]{cap_desc}[/dim]",
+                    f"[{total_color}]{total_pct}%[/{total_color}]",
+                    f"[wash.muted]{cap_desc}[/wash.muted]",
                 )
                 console.print(layer_table)
 
@@ -208,10 +211,10 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                     eff = collect_efficiency_metrics(session)
                     eff_table = Table(
                         title="Tool-Output Efficiency (this turn)",
-                        box=box.SIMPLE,
+                        box=box.SIMPLE_HEAD,
                     )
-                    eff_table.add_column("Metric", style="cyan")
-                    eff_table.add_column("Value", style="green", justify="right")
+                    eff_table.add_column("Metric", style="wash.accent")
+                    eff_table.add_column("Value", style="wash.ok", justify="right")
                     eff_table.add_row(
                         "Raw tool-output tokens",
                         f"{eff.get('raw_tool_tokens', 0):,}",
@@ -304,11 +307,11 @@ def _print_durable_table(console, items, title: str = "Cross-session Memory Ledg
     from rich.table import Table
     from rich.text import Text
 
-    table = Table(title=title, box=box.SIMPLE)
-    table.add_column("ID", style="dim")
-    table.add_column("Scope", style="cyan")
-    table.add_column("Kind", style="magenta")
-    table.add_column("State", style="yellow")
+    table = Table(title=title, box=box.SIMPLE_HEAD)
+    table.add_column("ID", style="wash.muted")
+    table.add_column("Scope", style="wash.accent")
+    table.add_column("Kind", style="wash.plum")
+    table.add_column("State", style="wash.caution")
     table.add_column("Use", justify="right")
     table.add_column("Statement")
     for item in items:
@@ -316,12 +319,12 @@ def _print_durable_table(console, items, title: str = "Cross-session Memory Ledg
             item.id.split("-")[0],
             item.scope_type,
             item.kind,
-            ("📌 " if item.pinned else "") + item.lifecycle,
+            ("pinned · " if item.pinned else "") + item.lifecycle,
             str(item.recall_count),
             Text(item.statement or "(content forgotten)"),
         )
     if not items:
-        console.print("[dim]No durable memories matched.[/dim]")
+        console.print("[wash.muted]No durable memories matched.[/wash.muted]")
     else:
         console.print(table)
 
@@ -404,7 +407,7 @@ def remember_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
     )
     console = _console(session) if allow_prompt else None
     if console is not None:
-        console.print(f"[green]{safe_markup(message)}[/green]")
+        console.print(f"[wash.ok]{safe_markup(message)}[/wash.ok]")
     return CommandResult(ok=True, message=message, data={"memory": item.to_dict()})
 
 
@@ -456,24 +459,25 @@ def _durable_why(session: Any, receipt_id: str, allow_prompt: bool) -> CommandRe
     if allow_prompt and _console(session) is not None:
         console = _console(session)
         console.print(
-            f"[bold cyan]Recall {receipt['id']}[/bold cyan] · "
-            f"{len(receipt['included'])} included · {receipt['token_count']} tokens"
+            f"[wash.accent.bold]Recall {safe_markup(str(receipt['id']))}[/wash.accent.bold] · "
+            f"{len(receipt['included'])} included · {safe_markup(str(receipt['token_count']))} tokens"
         )
         for candidate in receipt["included"]:
             memory = candidate.get("memory", {})
             reasons = candidate.get("reasons", {})
             console.print(
-                f"[green]used[/green] {str(memory.get('id', ''))[:8]} "
-                f"[{memory.get('scope', {}).get('type', '')}] "
-                f"score={candidate.get('score')} · {memory.get('statement', '')}"
+                f"[wash.ok]used[/wash.ok] {safe_markup(str(memory.get('id', ''))[:8])} "
+                f"{safe_markup('[' + str(memory.get('scope', {}).get('type', '')) + ']')} "
+                f"score={safe_markup(str(candidate.get('score')))} · "
+                f"{safe_markup(str(memory.get('statement', '')))}"
             )
-            console.print(f"  [dim]{safe_markup(json.dumps(reasons, sort_keys=True))}[/dim]")
+            console.print(f"  [wash.muted]{safe_markup(json.dumps(reasons, sort_keys=True))}[/wash.muted]")
         for candidate in receipt["excluded"][:10]:
             memory = candidate.get("memory", {})
             console.print(
-                f"[dim]skip {str(memory.get('id', ''))[:8]} · "
-                f"{candidate.get('exclusion_reason', '')} · "
-                f"{memory.get('statement', '')}[/dim]"
+                f"[wash.muted]skip {safe_markup(str(memory.get('id', ''))[:8])} · "
+                f"{safe_markup(str(candidate.get('exclusion_reason', '')))} · "
+                f"{safe_markup(str(memory.get('statement', '')))}[/wash.muted]"
             )
     return CommandResult(ok=True, message=f"Recall receipt {receipt['id']}", data=receipt)
 
@@ -500,7 +504,7 @@ def _durable_action(
         return CommandResult(ok=False, message=f"Memory action failed: {exc}")
     message = f"Memory {memory_id} → {item.lifecycle}"
     if allow_prompt and _console(session) is not None:
-        _console(session).print(f"[green]{safe_markup(message)}[/green]")
+        _console(session).print(f"[wash.ok]{safe_markup(message)}[/wash.ok]")
     return CommandResult(ok=True, message=message, data={"memory": item.to_dict()})
 
 
@@ -642,20 +646,25 @@ def _layer_content(session: Any, layer_id: str) -> str:
 def _status_style(status: str) -> str:
     """Rich style for a memory entry's lifecycle status.
 
-    active=green, done=dim, superseded=yellow, archived=dim+strike, stale=red.
+    active=ok, done=muted, superseded=caution, archived=muted+strike,
+    stale=danger.
     """
+    from rich.style import Style
+
+    from mu.ui.theme import style as wash_style
+
     s = (status or "active").lower()
     if s == "active":
-        return "green"
+        return "wash.ok"
     if s == "done":
-        return "dim"
+        return "wash.muted"
     if s == "superseded":
-        return "yellow"
+        return "wash.caution"
     if s == "archived":
-        return "dim strike"
+        return wash_style("wash.muted") + Style(strike=True)
     if s == "stale":
-        return "red"
-    return "white"
+        return "wash.danger"
+    return "wash.ink"
 
 
 def _print_store_table(console, store, title) -> None:
@@ -663,16 +672,16 @@ def _print_store_table(console, store, title) -> None:
     from rich.table import Table
 
     if not store.entries:
-        console.print(f"[dim]No entries in {safe_markup(title)}.[/dim]")
+        console.print(f"[wash.muted]No entries in {safe_markup(title)}.[/wash.muted]")
         return
     from rich.text import Text
 
-    table = Table(title=title, box=box.SIMPLE)
-    table.add_column("ID", style="dim", justify="right")
+    table = Table(title=title, box=box.SIMPLE_HEAD)
+    table.add_column("ID", style="wash.muted", justify="right")
     table.add_column("Status", justify="left")
-    table.add_column("Hits", style="yellow", justify="right")
-    table.add_column("Tags", style="yellow")
-    table.add_column("Source", style="blue")
+    table.add_column("Hits", style="wash.caution", justify="right")
+    table.add_column("Tags", style="wash.caution")
+    table.add_column("Source", style="wash.info")
     table.add_column("Content")
     for entry in store.entries:
         tags = ", ".join(entry.tags) if entry.tags else "-"
@@ -707,9 +716,9 @@ def _print_layer_panel(console, session, layer_id: str) -> None:
             break
     title = f"{layer_id} — {label} ({cur}/{mx} tokens)"
     if not body:
-        console.print(Panel(Text("(empty)", style="dim"), title=title, border_style="dim"))
+        console.print(Panel(Text("(empty)", style="wash.muted"), title=title, border_style="wash.border"))
         return
-    console.print(Panel(Text(body), title=title, border_style="cyan"))
+    console.print(Panel(Text(body), title=title, border_style="wash.border"))
 
 
 def _list(session: Any, target: str, allow_prompt: bool) -> CommandResult:
@@ -782,7 +791,7 @@ def _clear(session: Any, target: str, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[green]{msg}[/green]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg)
@@ -822,7 +831,7 @@ def _save_memory(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[green]{msg}[/green]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg, data={"saved_count": len(entries), "filepath": filepath})
@@ -860,7 +869,7 @@ def _load_memory(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[green]{msg}[/green]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg, data={"loaded_count": loaded, "filepath": filepath})
@@ -874,7 +883,7 @@ def _list_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
             console = _console(session)
             if console is not None:
                 try:
-                    console.print(f"[dim]{msg}[/dim]")
+                    console.print(f"[wash.muted]{safe_markup(str(msg))}[/wash.muted]")
                 except Exception:
                     pass
         return CommandResult(ok=True, message=msg, data={"saved_files": []})
@@ -901,10 +910,10 @@ def _list_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
                 from rich import box
                 from rich.table import Table
 
-                table = Table(title="Saved Memory Files", box=box.SIMPLE)
-                table.add_column("Name", style="cyan")
-                table.add_column("Entries", style="green", justify="right")
-                table.add_column("Saved", style="dim")
+                table = Table(title="Saved Memory Files", box=box.SIMPLE_HEAD)
+                table.add_column("Name", style="wash.accent")
+                table.add_column("Entries", style="wash.ok", justify="right")
+                table.add_column("Saved", style="wash.muted")
                 for item in saved:
                     ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(item["saved_at"])) if item["saved_at"] else "-"
                     table.add_row(item["name"], str(item["entries"]), ts)
@@ -935,7 +944,7 @@ def _clear_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
         console = _console(session)
         if console is not None:
             try:
-                console.print(f"[green]{msg}[/green]")
+                console.print(f"[wash.ok]{safe_markup(str(msg))}[/wash.ok]")
             except Exception:
                 pass
     return CommandResult(ok=True, message=msg, data={"cleared_count": cleared})

@@ -34,6 +34,21 @@
     const envHintEl = document.getElementById('job-environments-hint');
     const envResetBtn = document.getElementById('job-environments-reset');
     let envOverride = null, envPreview = null, envRequest = 0;
+    // "Run in" (job_templates.md §3.1): default runtime, a template, an environment or Advanced….
+    const runInHost = document.getElementById('job-run-in');
+    const runIn = runInHost && window.MuRunInPicker ? window.MuRunInPicker.create(runInHost, { api, ui, toast: (t, k) => toast(t, k),
+        idPrefix: 'job-run-in-trigger', onChange: () => { syncRunIn(); } }) : null;
+    // The picker owns Advanced…; the legacy row button stays in the markup only as the
+    // no-picker fallback, so there is one way to open the environments editor.
+    if (runIn) {
+        const legacyChange = document.getElementById('job-environments-change');
+        if (legacyChange) legacyChange.hidden = true;
+    }
+    function syncRunIn() {
+        const v = runIn?.value();
+        envOverride = v?.kind === 'advanced' && v.bindings?.length ? v.bindings : null;
+        renderEnvField();
+    }
     // Agent per stage (mucli / Claude Code / Codex) on the New job sheet.
     let agentPicker = null;
     const lines = value => String(value || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean);
@@ -86,13 +101,14 @@
 
     /* ------------------------------------------------------------ status chips (planos StatusChips) */
     let knownNeeds = null;
+    // Top-bar status chips are Wash status chips: tone via data-tone, glyph + label always.
+    const CHIP_TONE = { muted: 'neutral', warn: 'attention' };
     function chip(name, tone, text, active) {
         const el = root.querySelector(`[data-chip="${name}"]`);
         if (!el) return;
-        el.className = `work-chip tone-${tone}`;
+        el.dataset.tone = CHIP_TONE[tone] || tone;
         el.querySelector('[data-chip-text]').textContent = text;
-        const glyph = el.querySelector('[aria-hidden="true"]');
-        if (glyph) glyph.className = active ? 'status-icon active' : '';
+        el.toggleAttribute('data-active', !!active);
     }
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
     function renderStatus(st) {
@@ -138,7 +154,7 @@
     }
     function onConnection(live) {
         const el = root.querySelector('[data-chip="live"]');
-        el.className = `work-chip ${live ? 'tone-ok' : 'tone-warn'}`;
+        el.dataset.tone = live ? 'ok' : 'caution';
         el.title = live ? 'Live updates connected' : 'Reconnecting to mucli…';
         el.querySelector('[data-chip-glyph]').textContent = live ? '●' : '○';
         el.querySelector('[data-chip-text]').textContent = live ? 'live' : 'offline';
@@ -169,24 +185,38 @@
             : route.name === 'jobs' ? [{ label: 'Jobs' }]
             : route.name === 'setup' && route.params?.get('tab') === 'doctor' ? [{ label: 'Setup', to: '#/setup' }, { label: 'Doctor' }]
             : PAGES[route.name] ? [{ label: PAGES[route.name] }] : [{ label: 'Dashboard' }];
-        crumbsEl.innerHTML = trail.map((c, i) => `<li>${c.to && i < trail.length - 1 ? `<a href="${c.to}">${esc(c.label)}</a>` : `<span aria-current="${i === trail.length - 1 ? 'page' : 'false'}">${esc(c.label)}</span>`}</li>`).join('');
-        document.title = `${trail[trail.length - 1].label} · mucli jobs`;
+        // The shared top-bar breadcrumb (μcli › Work › …): Work links back to the dashboard.
+        crumbsEl.innerHTML = [{ label: 'Work', to: '#/' }, ...trail].map((c, i, all) => `<li class="w-breadcrumb__item">${c.to && i < all.length - 1 ? `<a href="${c.to}">${esc(c.label)}</a>` : `<span aria-current="${i === all.length - 1 ? 'page' : 'false'}">${esc(c.label)}</span>`}</li>`).join('');
+        document.title = `${trail[trail.length - 1].label} · Work · μcli`;
     }
     async function applyRoute() {
         const next = parseHash();
         if (!next) return;
+        const changed = !route || route.name !== next.name;
         route = next;
-        root.querySelectorAll('[data-route]').forEach(s => { s.hidden = s.dataset.route !== route.name; });
+        const swap = () => { root.querySelectorAll('[data-route]').forEach(s => { s.hidden = s.dataset.route !== route.name; }); };
+        // Fade between sections like a page navigation (base.css names the stage w-stage);
+        // tab and job changes within a section swap in place.
+        if (changed && document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            document.startViewTransition(swap);
+        } else {
+            swap();
+        }
         root.querySelectorAll('[data-nav]').forEach(a => {
             const on = a.dataset.nav === route.name || (route.name === 'job' && a.dataset.nav === 'jobs');
             if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
         });
         if (route.name !== 'job') view.leave();
         setCrumbs();
-        document.getElementById('work-main').scrollTop = 0;
+        (document.getElementById('w-main') || document.getElementById('work-main')).scrollTop = 0;
         window.dispatchEvent(new CustomEvent('mu:work-route', { detail: { name: route.name, params: route.params || new URLSearchParams() } }));
         if (route.name === 'job') {
-            try { await view.select(route.id, { tab: route.tab }); } catch (e) { detailEl.innerHTML = `<div class="error-box" role="alert">✗ ${esc(/not found|404/i.test(e.message) ? `Job ${route.id} not found.` : e.message)}</div>`; }
+            try { await view.select(route.id, { tab: route.tab }); } catch (e) {
+                const missing = /not found|404/i.test(e.message);
+                detailEl.innerHTML = `<div class="w-empty" data-variant="error" role="alert"><div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-alert-circle"></use></svg></div>
+                    <h3 class="w-empty__title">${missing ? 'Job not found' : 'Couldn’t open this job'}</h3><p class="w-empty__body">${esc(missing ? `Job ${route.id} not found.` : e.message)}</p>
+                    <div class="w-empty__actions"><a class="w-btn" data-variant="secondary" href="#/jobs">All jobs</a></div></div>`;
+            }
             setCrumbs();
         }
     }
@@ -209,7 +239,7 @@
 
     /* ------------------------------------------------------------ global commands */
     function registerGlobal() {
-        const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+        const dusk = window.MuTheme ? window.MuTheme.current() === 'dusk' : document.documentElement.getAttribute('data-theme') === 'dusk';
         ui.register('global', [
             { id: 'nav:dashboard', label: 'Go to Dashboard', group: 'Navigate', key: 'g h', run: () => go('#/') },
             { id: 'nav:jobs', label: 'Go to Jobs', group: 'Navigate', key: 'g t', run: () => go('#/jobs') },
@@ -219,11 +249,11 @@
             { id: 'nav:settings', label: 'Go to Settings', group: 'Navigate', key: 'g s', run: () => go('#/settings') },
             { id: 'nav:setup', label: 'Go to Setup (checklist)', group: 'Navigate', key: 'g u', run: () => go('#/setup') },
             { id: 'nav:doctor', label: 'Go to Setup → Doctor (check everything)', group: 'Navigate', key: 'g d', run: () => go('#/doctor') },
-            { id: 'nav:analysis', label: 'Open job analysis', group: 'Navigate', run: () => { location.href = '/static/job_trace.html'; } },
-            { id: 'nav:pricing', label: 'Open model pricing', group: 'Navigate', run: () => { location.href = '/static/model_costs.html'; } },
+            { id: 'nav:analysis', label: 'Open job analysis', group: 'Navigate', run: () => { location.href = '/jobs/trace'; } },
+            { id: 'nav:pricing', label: 'Open model pricing', group: 'Navigate', run: () => { location.href = '/models/costs'; } },
             { id: 'job:new', label: 'New job', group: 'Jobs', key: 'n', run: openCreate },
             { id: 'job:refresh', label: 'Refresh', group: 'Jobs', run: () => refreshBoard({ refreshSelected: true }).catch(e => toast(e.message, 'danger')) },
-            { id: 'pref:theme', label: `Switch to ${dark ? 'light' : 'dark'} theme`, group: 'Preferences', run: () => { root.querySelector('[data-route-theme]')?.click(); registerGlobal(); } },
+            { id: 'pref:theme', label: `Switch to ${dusk ? 'Paper' : 'Dusk'} theme`, group: 'Preferences', run: () => { root.querySelector('[data-route-theme]')?.click(); registerGlobal(); } },
             { id: 'pref:density', label: `Switch to ${prefs.density === 'compact' ? 'comfortable' : 'compact'} density`, group: 'Preferences', run: toggleDensity },
             { id: 'pref:notify', label: `${prefs.notify ? 'Disable' : 'Enable'} desktop notifications`, group: 'Preferences', run: () => void toggleNotify() },
             { id: 'help', label: 'Keyboard shortcuts', group: 'Help', key: '?', run: ui.help },
@@ -262,7 +292,7 @@
     function renderWorkspaceChips() {
         const recent = recentWorkspaces(sessions || []);
         document.getElementById('job-workspace-recent').innerHTML = recent.map(w => `<option value="${esc(w)}"></option>`).join('');
-        workspaceChips.innerHTML = recent.map(w => `<button type="button" class="btn sm ghost mono" data-workspace="${esc(w)}" aria-pressed="${sameWorkspace(w, chosenWorkspace())}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('');
+        workspaceChips.innerHTML = recent.map(w => `<button type="button" class="w-chip work-mono" data-variant="filter" data-workspace="${esc(w)}" aria-pressed="${sameWorkspace(w, chosenWorkspace())}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('');
     }
     function syncSessionHints() {
         const path = chosenWorkspace();
@@ -293,7 +323,19 @@
     function renderEnvField() {
         const E = window.MuJobEnvironments;
         if (!envSummaryEl || !E) return;
-        envResetBtn.hidden = !envOverride;
+        const choice = runIn?.value() || { kind: 'default' };
+        envResetBtn.hidden = !envOverride && choice.kind === 'default';
+        if (choice.kind === 'template') {
+            const t = (runIn.templates() || []).find(x => x.name === choice.template);
+            envSummaryEl.textContent = `template:${choice.template}`;
+            envHintEl.textContent = `Every stage runs in a snapshot of ${choice.template}, taken at start.${(t?.job_setup || []).length ? ` Its job setup (${t.job_setup.length} command${t.job_setup.length === 1 ? '' : 's'}) runs before planning.` : ''}`;
+            return;
+        }
+        if (choice.kind === 'environment') {
+            envSummaryEl.textContent = choice.spec;
+            envHintEl.textContent = 'Every stage runs in a snapshot of this environment, taken at start.';
+            return;
+        }
         if (envOverride) {
             envSummaryEl.textContent = envOverride.length ? E.summary(envOverride) : 'shared runtime image';
             envHintEl.textContent = 'Set for this job (overrides repo config, session and settings).';
@@ -315,17 +357,18 @@
         const offers = [...(suggestion ? [suggestion] : []), ...pending].filter(o => o && o.fingerprint);
         if (!offers.length || envOverride) { host.hidden = true; host.innerHTML = ''; return; }
         host.hidden = false;
-        host.innerHTML = offers.map((o, i) => `<div class="note-box col" style="gap:var(--s-half)">
-            <div class="row wrap"><span class="tone-warn" aria-hidden="true">◆</span><strong>This repository declares a build environment</strong></div>
-            ${envPreview?.suggestion?.message && o === suggestion ? `<div class="small">${esc(envPreview.suggestion.message)}</div>` : ''}
-            <dl class="work-env-approval-facts small">
+        host.innerHTML = offers.map((o, i) => `<div class="w-card work-env-offer" data-state="attention">
+            <header class="w-card__head"><span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Needs you</span></span><strong class="w-card__title">This repository declares a build environment</strong></header>
+            <div class="w-card__body">
+            ${envPreview?.suggestion?.message && o === suggestion ? `<p>${esc(envPreview.suggestion.message)}</p>` : ''}
+            <dl class="work-env-approval-facts">
                 <dt>Kind</dt><dd>${esc(o.kind === 'build' ? 'Dockerfile build' : o.kind === 'image' ? 'image' : (o.kind || 'image'))}</dd>
-                ${o.label ? `<dt>What</dt><dd class="mono">${esc(o.label)}</dd>` : ''}
-                ${o.ref ? `<dt>Image</dt><dd class="mono">${esc(o.ref)}</dd>` : ''}
-                <dt>Fingerprint</dt><dd class="mono">${esc(o.fingerprint)}</dd>
+                ${o.label ? `<dt>What</dt><dd class="work-mono">${esc(o.label)}</dd>` : ''}
+                ${o.ref ? `<dt>Image</dt><dd class="work-mono">${esc(o.ref)}</dd>` : ''}
+                <dt>Fingerprint</dt><dd class="work-mono">${esc(o.fingerprint)}</dd>
             </dl>
-            <div class="row wrap"><button type="button" class="btn sm tone-warn" data-env-approve="${i}">Approve for this repository</button>
-                <span class="small muted">Not approved: jobs on this repository park until you approve it or pick an environment under Advanced.</span></div></div>`).join('');
+            <div class="work-toolbar"><button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-env-approve="${i}">Approve for this repository</button>
+                <span class="work-meta">Not approved: jobs on this repository park until you approve it or pick an environment under Advanced.</span></div></div></div>`).join('');
         host.querySelectorAll('[data-env-approve]').forEach(b => { b.onclick = async () => {
             const offer = offers[Number(b.dataset.envApprove)];
             if (!await ui.confirm(`Approve ${offer.label || offer.ref || offer.fingerprint} as the build environment for ${path}?${offer.kind === 'build' ? '\n\nBuilding runs the Dockerfile\'s RUN steps on your container engine with network access.' : ''}`,
@@ -341,15 +384,23 @@
     async function refreshEnvPreview() {
         const path = chosenWorkspace();
         envPreview = null; renderEnvField(); renderEnvApproval();
-        if (path && isRepoUrl(path)) { if (envSummaryEl) envSummaryEl.textContent = 'Resolved from the repository after it is cloned.'; return; }
+        if (path && isRepoUrl(path)) { void runIn?.refresh({ workspace: path, session: '' }); if (envSummaryEl) envSummaryEl.textContent = 'Resolved from the repository after it is cloned.'; return; }
+        if (!path) void runIn?.refresh({ workspace: '', session: '' });
         if (!path || !window.MuJobEnvironments) return;
         const request = ++envRequest;
         try {
-            const data = await window.MuJobEnvironments.sources(api, { repository: path, session: sessionForWorkspace(path)?.name || '', images: false });
+            let data;
+            if (runIn) {
+                await runIn.refresh({ workspace: path, session: sessionForWorkspace(path)?.name || '' });
+                data = runIn.info() || {};
+            } else {
+                data = await window.MuJobEnvironments.sources(api, { repository: path, session: sessionForWorkspace(path)?.name || '', images: false });
+            }
             if (request === envRequest) { envPreview = data.resolved || { bindings: [], source: 'default' }; renderEnvField(); renderEnvApproval(); }
         } catch (error) { if (request === envRequest) { envPreview = { error: error.message, bindings: [] }; renderEnvField(); } }
     }
     async function changeEnvironments() {
+        if (runIn) { await runIn.advanced(); syncRunIn(); return; }  // "Advanced…": the multi-environment editor
         const E = window.MuJobEnvironments;
         const path = chosenWorkspace();
         const result = await E.editor({ api, ui, title: 'Build environments for the new job',
@@ -371,25 +422,36 @@
         return new Promise(resolve => {
             let result = null;
             const form = document.createElement('form');
-            form.className = 'col';
+            form.className = 'work-stack';
             const recent = recentWorkspaces(list);
-            form.innerHTML = `<div class="field"><label class="label" for="work-import-workspace">Workspace</label>
-                <input id="work-import-workspace" data-autofocus required list="work-import-workspace-recent" autocomplete="off" spellcheck="false"
+            form.innerHTML = `<div class="w-field"><label class="w-field__label" for="work-import-workspace">Workspace</label>
+                <input class="w-input" data-mono id="work-import-workspace" data-autofocus required list="work-import-workspace-recent" autocomplete="off" spellcheck="false"
                     placeholder="/home/me/src/project — or https://github.com/org/repo.git" value="${esc(initial)}">
                 <datalist id="work-import-workspace-recent">${recent.map(w => `<option value="${esc(w)}"></option>`).join('')}</datalist>
-                <div class="row wrap work-workspace-recent" role="group" aria-label="Recent workspaces">${recent.map(w =>
-                    `<button type="button" class="btn sm ghost mono" data-import-workspace="${esc(w)}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('')}</div>
-                <span class="hint" data-import-hint></span></div>
-                <div class="field"><label class="label" for="work-import-session">Session (optional)</label>
-                <select id="work-import-session"><option value="">Match by workspace</option>${list.map(s =>
-                    `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(describeSession(s))}</option>`).join('')}</select></div>
-                <label class="row" style="gap:var(--s-half)"><input type="checkbox" id="work-import-force" ${force ? 'checked' : ''}>
-                    <span>Run again <span class="muted small">— also start a new job for tickets whose latest job is done</span></span></label>
-                <span class="error" data-error></span>
-                <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(okLabel)}</button></div>`;
+                <div class="w-chip-row work-workspace-recent" role="group" aria-label="Recent workspaces">${recent.map(w =>
+                    `<button type="button" class="w-chip work-mono" data-variant="filter" data-import-workspace="${esc(w)}" title="${esc(w)}">${esc(w.split('/').filter(Boolean).pop() || w)}</button>`).join('')}</div>
+                <p class="w-field__hint" data-import-hint></p></div>
+                <div class="w-field" id="work-import-run-in-field"><span class="w-field__label" id="work-import-run-in-label">Run in</span>
+                <div class="work-runin-host" data-import-run-in role="group" aria-labelledby="work-import-run-in-label"></div>
+                <p class="w-field__hint">Applies to every ticket in this import.</p></div>
+                <div class="w-field"><label class="w-field__label" for="work-import-session">Session (optional)</label>
+                <span class="w-select"><select class="w-select__control" id="work-import-session"><option value="">Match by workspace</option>${list.map(s =>
+                    `<option value="${esc(s.name)}">${esc(s.name)} — ${esc(describeSession(s))}</option>`).join('')}</select></span></div>
+                <label class="w-check"><input class="w-check__input" type="checkbox" id="work-import-force" ${force ? 'checked' : ''}>
+                    <span>Run again <span class="work-meta">— also start a new job for tickets whose latest job is done</span></span></label>
+                <p class="w-field__error work-form-error" data-error></p>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${esc(okLabel)}</button></div>`;
             const d = ui.dialog({ title, body: form, onClose: () => resolve(result) });
             const input = form.querySelector('#work-import-workspace'), hint = form.querySelector('[data-import-hint]');
             const sessionSelect = form.querySelector('#work-import-session');
+            const importRunIn = window.MuRunInPicker ? window.MuRunInPicker.create(form.querySelector('[data-import-run-in]'),
+                { api, ui, toast: (t, k) => toast(t, k), idPrefix: 'work-import-run-in' }) : null;
+            let runInTimer = 0;
+            const refreshRunIn = () => {
+                const path = input.value.trim();
+                const s = sessionSelect.value || (path && !isRepoUrl(path) ? (sessionForWorkspace(path)?.name || '') : '');
+                void importRunIn?.refresh({ workspace: path, session: s });
+            };
             const sync = () => {
                 const path = input.value.trim();
                 form.querySelectorAll('[data-import-workspace]').forEach(b => b.setAttribute('aria-pressed', String(sameWorkspace(b.dataset.importWorkspace, path))));
@@ -399,8 +461,9 @@
                     : chosen ? `Runs in ${path} with the model, mode and environment of session ${chosen.name}.`
                     : `Runs in ${path}. Models come from Settings → Stage models (or the current session).`;
             };
-            form.querySelectorAll('[data-import-workspace]').forEach(b => { b.onclick = () => { input.value = b.dataset.importWorkspace; sync(); }; });
-            input.addEventListener('input', sync); sessionSelect.addEventListener('change', sync); sync();
+            form.querySelectorAll('[data-import-workspace]').forEach(b => { b.onclick = () => { input.value = b.dataset.importWorkspace; sync(); refreshRunIn(); }; });
+            input.addEventListener('input', () => { sync(); clearTimeout(runInTimer); runInTimer = setTimeout(refreshRunIn, 400); });
+            sessionSelect.addEventListener('change', () => { sync(); refreshRunIn(); }); sync(); refreshRunIn();
             form.querySelector('[data-cancel]').onclick = () => d.close();
             form.onsubmit = e => {
                 e.preventDefault();
@@ -409,6 +472,10 @@
                 const session = sessionSelect.value || (isRepoUrl(path) ? '' : (sessionForWorkspace(path)?.name || ''));
                 result = { workspace: path, session, force: form.querySelector('#work-import-force').checked,
                            defaults: isRepoUrl(path) ? { repository: path } : { workspace_root: path } };
+                // "Run in" for every imported ticket: defaults.execution.template (+ remember_template).
+                const runInPayload = importRunIn ? importRunIn.payload() : {};
+                if (Object.keys(runInPayload).length) result.defaults.execution = runInPayload;
+                importRunIn?.commit();
                 d.close();
             };
         });
@@ -420,11 +487,11 @@
         return new Promise(resolve => {
             let result = null;
             const form = document.createElement('form');
-            form.className = 'col';
-            form.innerHTML = `<div class="field"><label class="label" for="work-choose-session">Session</label>
-                <select id="work-choose-session" data-autofocus required>${sessionOptions(list, entrySession)}</select>
-                <span class="hint" data-session-hint></span><span class="error" data-error></span></div>
-                <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(okLabel)}</button></div>`;
+            form.className = 'work-stack';
+            form.innerHTML = `<div class="w-field"><label class="w-field__label" for="work-choose-session">Session</label>
+                <span class="w-select"><select class="w-select__control" id="work-choose-session" data-autofocus required>${sessionOptions(list, entrySession)}</select></span>
+                <p class="w-field__hint" data-session-hint></p><p class="w-field__error work-form-error" data-error></p></div>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${esc(okLabel)}</button></div>`;
             const d = ui.dialog({ title, body: form, onClose: () => resolve(result) });
             const select = form.querySelector('select'), hint = form.querySelector('[data-session-hint]');
             const sync = () => { const s = list.find(x => x.name === select.value); hint.textContent = s ? describeSession(s) : 'Jobs run in the chosen session’s workspace.'; };
@@ -465,15 +532,14 @@
             if (costInput) costInput.placeholder = costPlaceholder(values['defaults.max_cost_usd']);
             syncCostHint();
             fill('job-runtime', values['defaults.max_runtime_seconds']);
-            // "Run unattended in sandbox" starts from the Settings default (off unless turned on there).
-            const unattended = document.getElementById('job-auto-approve');
-            if (!unattended.dataset.touched) { unattended.checked = values['defaults.run_unattended'] === true; unattended.dispatchEvent(new Event('change')); }
         } catch (_) { /* older server: keep the form's own defaults */ }
     }
 
     async function openCreate() {
         createError.textContent = '';
-        backdrop.hidden = false;
+        // The shared dialog stack (dialogs.js): Tab stays inside, Esc sends
+        // `dialog-close`, focus returns to the opener. Focus is set below.
+        window.MuDialog.open(backdrop, { focus: false });
         const list = await loadSessions(true);
         if (!workspaceInput.dataset.touched) {
             const entry = list.find(s => s.name === entrySession) || list.find(s => s.current);
@@ -485,13 +551,13 @@
         void refreshEnvPreview();
         void prefillDefaults();
         if (!agentPicker && window.MuJobAgents) agentPicker = window.MuJobAgents.sheet(document.getElementById('job-agents'),
-            { api, autoApprove: () => document.getElementById('job-auto-approve') });
+            { api });
         void agentPicker?.refresh();
         (chosenWorkspace() ? document.getElementById('job-title') : workspaceInput).focus();
     }
 
     function closeCreate() {
-        backdrop.hidden = true;
+        window.MuDialog.close(backdrop);
         newBtn.focus();
     }
 
@@ -499,6 +565,7 @@
         createForm.reset();
         createForm.querySelectorAll('[data-touched]').forEach(el => { delete el.dataset.touched; });
         envOverride = null;
+        runIn?.setDefault();
         agentPicker?.reset();
         workspaceInput.dataset.chosen = workspace;
         syncTitleHint();
@@ -522,12 +589,14 @@
         // 0 is sent explicitly (unlimited); blank lets the server apply the Settings default.
         if (cost !== undefined) common.max_cost_usd = cost;
         if (runtime > 0) common.max_runtime_seconds = runtime;
-        // Unattended sandbox writes are always sent explicitly: the job never inherits session YOLO.
-        const execution = { auto_approve_writes: document.getElementById('job-auto-approve').checked };
+        // Jobs always run unattended inside their sandbox: there is no per-job auto-approve choice.
+        const execution = {};
         if (mode) execution.agent_mode = mode;
         const stages = agentPicker?.collectModels() || {};
         if (Object.keys(stages).length) execution.stages = stages;
         if (envOverride && envOverride.length) execution.environments = envOverride.map(({ label, ...binding }) => binding);
+        // Run in: execution.template (+ remember_template) or an environment spec (server normalises).
+        if (runIn) Object.assign(execution, runIn.payload());
         const stageAgents = agentPicker?.collect();
         if (stageAgents) execution.stage_agents = stageAgents;
         common.execution = execution;
@@ -552,6 +621,7 @@
                 const response = await api('/api/jobs', { method: 'POST', body: payload });
                 jobId = response.job.id; label = `Queued: ${response.job.title}`;
             }
+            runIn?.commit();
             resetCreate(workspace);
             closeCreate();
             toast(label, 'ok');
@@ -579,9 +649,8 @@
         syncSessionHints(); void refreshEnvPreview();
     });
     document.getElementById('job-title').addEventListener('input', syncTitleHint);
-    document.getElementById('job-auto-approve').addEventListener('input', e => { e.target.dataset.touched = '1'; });
     document.getElementById('job-environments-change')?.addEventListener('click', () => void changeEnvironments());
-    envResetBtn?.addEventListener('click', () => { envOverride = null; renderEnvField(); });
+    envResetBtn?.addEventListener('click', () => { envOverride = null; if (runIn) runIn.setDefault(); else renderEnvField(); });
     ['job-retries', 'job-cost', 'job-runtime'].forEach(id => document.getElementById(id)?.addEventListener('input', e => { e.target.dataset.touched = '1'; }));
     document.getElementById('job-cost')?.addEventListener('input', syncCostHint);
     syncSessionHints();
@@ -593,7 +662,8 @@
     document.getElementById('work-create-cancel').addEventListener('click', closeCreate);
     backdrop.addEventListener('click', e => { if (e.target === backdrop) closeCreate(); });
     createForm.addEventListener('submit', submitCreate);
-    window.addEventListener('keydown', e => { if (e.key === 'Escape' && !backdrop.hidden) closeCreate(); });
+    // The New job modal (.w-modal) is on the shared dialog stack: Esc closes it.
+    backdrop.addEventListener('dialog-close', closeCreate);
     document.getElementById('work-palette-open').addEventListener('click', ui.palette);
     document.getElementById('work-help-open').addEventListener('click', ui.help);
     document.getElementById('work-density').addEventListener('click', toggleDensity);

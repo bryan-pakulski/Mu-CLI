@@ -22,12 +22,13 @@
  * panel shows, how to read it, and which harness decision it informs.
  */
 
-// Shared palette — within-panel colors are distinct; cross-panel reuse is
-// intentional only for semantically-identical signals (e.g. red = error/bad
-// everywhere). Canvas cannot read var(), so every colour is resolved from the
-// design tokens (tokens.css --viz-N and state tokens) at draw time by
-// refreshTracePalette(); the values below are filled in before each render.
-const PALETTE = { attribution: {}, status: {} };
+// Shared palette — Wash pigments (documentation/visualization_style_guide.md
+// "Colour"): categorical series cycle --wash-series-1..7, context layers use
+// --wash-layer-*, and semantic marks use the semantic pigment step (ok,
+// danger, caution, running, accent). Text uses the ink steps. Canvas cannot
+// read var(), so refreshTracePalette() resolves every colour from the current
+// theme at draw time; the trace app redraws on `mucli-theme-change`.
+const PALETTE = { attribution: {}, status: {}, layers: {} };
 
 // Read a CSS custom property from the document root (current theme).
 function traceToken(name) {
@@ -54,43 +55,70 @@ function traceAlpha(name, alpha) {
     return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// Chart labels use the Wash UI face (Inter), falling back to the body font.
+function traceFont() {
+    return traceToken("--wash-font-sans") || getComputedStyle(document.body).fontFamily;
+}
+
+// Legend entry: the glyph carries the series pigment, the label stays in the
+// ink-3 text step (pigments are not text-safe; style guide "Colour").
+function traceLegendText(ctx, color, text, x, y) {
+    const glyph = String(text).slice(0, 1), rest = String(text).slice(1);
+    const align = ctx.textAlign;
+    const gw = ctx.measureText(glyph).width, rw = ctx.measureText(rest).width;
+    const x0 = align === "right" || align === "end" ? x - gw - rw : align === "center" ? x - (gw + rw) / 2 : x;
+    ctx.textAlign = "left";
+    ctx.fillStyle = color; ctx.fillText(glyph, x0, y);
+    ctx.fillStyle = traceToken("--wash-ink-3"); ctx.fillText(rest, x0 + gw, y);
+    ctx.textAlign = align;
+}
+
 function refreshTracePalette() {
-    const v = (n) => traceToken("--viz-" + n);
+    const s = (n) => traceToken("--wash-series-" + n);   // lagoon apricot lilac meadow rose sky sun
+    const p = (name) => traceToken("--wash-" + name + "-pigment");
     Object.assign(PALETTE, {
-        actual: v(3),             // real prompt tokens
-        est: v(8),                // harness estimate (dashed)
-        drift: v(6),              // tokenizer drift (the headline line)
-        tokIn: v(3),
-        tokOut: v(2),
-        tokCached: v(5),
-        tokReasoning: v(6),
-        taskMem: v(2),
-        scratchpad: v(3),         // distinct from taskMem
-        subBar: v(5),
-        read: v(5),
-        redundant: traceToken("--error"),
-        ok: v(5),
-        err: traceToken("--error"),
-        cache: v(2),
-        stuck: traceToken("--error"),
-        stall: traceToken("--warning"),
-        limit: traceAlpha("--error", 0.55),
-        compaction: traceAlpha("--viz-5", 0.7),
-        warnBand: traceAlpha("--warning", 0.12),
-        heat: traceRgb(traceToken("--accent-solid")),  // accent ramp for the layer heat strip
-        driftPos: traceRgb(v(7)),                       // positive drift (est > actual)
-        driftNeg: traceRgb(traceToken("--error")),     // negative drift (est < actual)
-        statusDefault: v(8),
+        actual: s(1),             // real prompt tokens
+        est: traceToken("--wash-ink-3"),  // harness estimate (dashed, neutral)
+        drift: s(3),              // tokenizer drift (the headline line)
+        tokIn: s(1),
+        tokOut: s(2),
+        tokCached: s(6),
+        tokReasoning: s(3),
+        taskMem: s(4),
+        scratchpad: s(2),         // distinct from taskMem
+        subBar: s(6),
+        read: s(1),
+        redundant: p("danger"),
+        ok: p("ok"),
+        err: p("danger"),
+        cache: s(4),
+        stuck: p("danger"),
+        stall: p("caution"),
+        limit: traceAlpha("--wash-danger-pigment", 0.55),
+        compaction: traceAlpha("--wash-running-pigment", 0.7),
+        warnBand: traceAlpha("--wash-caution-pigment", 0.16),
+        warn: traceAlpha("--wash-caution-pigment", 0.9),
+        heat: traceRgb(p("accent")),                 // fallback ramp for unknown layers
+        driftPos: traceRgb(s(1)),                    // positive drift (est > actual): lagoon
+        driftNeg: traceRgb(p("danger")),             // negative drift (est < actual): rose
+        savedBand: traceAlpha("--wash-series-2", 0.18),
+        injectedFill: traceAlpha("--wash-series-4", 0.32),
+        latency: traceAlpha("--wash-series-6", 0.6),
+        statusDefault: traceToken("--wash-neutral-pigment"),
     });
     PALETTE.attribution = {
-        system: v(1), user: v(5), assistant: v(2),
-        tool_calls: v(3), tool_results: v(4),
-        files_images: v(7), other: v(8), tool_schemas: v(6),
+        system: traceToken("--wash-layer-L0"), user: s(1), assistant: s(2),
+        tool_calls: s(3), tool_results: s(4),
+        files_images: s(5), other: traceToken("--wash-neutral-pigment"), tool_schemas: s(6),
     };
     PALETTE.status = {           // memory by_status colors
-        active: v(2), stale: v(3), done: v(5),
-        pending: v(6), pruned: v(8),
+        active: p("running"), stale: p("caution"), done: p("ok"),
+        pending: traceToken("--wash-plan-pigment"), pruned: traceToken("--wash-neutral-pigment"),
     };
+    PALETTE.layers = {};         // heat-strip rows: each layer in its own pigment
+    for (const key of ["L0", "L1A", "L1B", "L2", "L3", "L4", "L4B", "L5"]) {
+        PALETTE.layers[key.toLowerCase()] = traceRgb(traceToken("--wash-layer-" + key));
+    }
     return PALETTE;
 }
 
@@ -125,7 +153,7 @@ function traceApp() {
         hoverRef: null,         // canvas ref under the cursor (chip owner)
         session: "",            // session scope (?session=) — traces are per-session
         runBounds: [],           // per-run global [start,end] for the combined view
-        theme: "dark",          // current data-theme (for the toggle button glyph)
+        theme: "paper",         // current Wash theme (paper | dusk)
         expandedTools: {},      // toolKey -> true: that tool's result preview is expanded
         expandedCards: {},      // cardKey -> true: all tool previews in that turn expanded
         VIEW_CAP: 100,          // default iters in view (the "latest" window)
@@ -144,7 +172,13 @@ function traceApp() {
             // per-run picker.
             const qs = new URLSearchParams(window.location.search);
             this.session = (qs.get("session") || "").trim();
-            this.theme = document.documentElement.getAttribute("data-theme") || "dark";
+            this.theme = window.MuTheme ? window.MuTheme.current() : "paper";
+            // The shared top-bar toggle (route_theme.js) switches the theme;
+            // canvases cannot inherit CSS variables, so redraw on every change.
+            window.addEventListener("mucli-theme-change", (event) => {
+                this.theme = (event.detail && event.detail.wash) || "paper";
+                this.renderAll();
+            });
             // Re-render canvases on resize (debounced) — _setupCanvas reads
             // clientWidth at draw time, so a re-render picks up the new CSS size.
             this._resizeHandler = () => {
@@ -213,7 +247,13 @@ function traceApp() {
 
         async clearRun() {
             if (!this.runId || this.session) return;
-            if (!window.confirm("Clear this trace run? This deletes the JSONL file.")) return;
+            const confirmed = await window.WashConfirm({
+                title: "Clear this trace run?",
+                message: "This deletes the run's JSONL trace file. It cannot be undone.",
+                confirmLabel: "Delete trace",
+                tone: "danger",
+            });
+            if (!confirmed) return;
             try {
                 const r = await fetch("/api/traces/" + encodeURIComponent(this.runId), {
                     method: "DELETE",
@@ -259,15 +299,9 @@ function traceApp() {
             this.infoOpen = (this.infoOpen === key) ? null : key;
         },
 
-        // Mirror the chat's $store.theme.toggle() (app.js): flip data-theme and
-        // persist to localStorage. app.css themes via html[data-theme=...], so
-        // setting the attribute is enough — no stylesheet swapping needed here
-        // (that's only for the chat's hljs code blocks).
+        // Kept for keyboard/legacy callers: delegate to the shared controller.
         toggleTheme() {
-            this.theme = (this.theme === "dark") ? "light" : "dark";
-            document.documentElement.setAttribute("data-theme", this.theme);
-            try { localStorage.setItem("mucli-theme", this.theme); } catch (e) {}
-            this.renderAll();   // re-render canvases against the new theme vars
+            if (window.MuTheme) window.MuTheme.toggle();
         },
 
         // ---- helpers ---------------------------------------------------
@@ -291,6 +325,10 @@ function traceApp() {
         },
         statusTone(status) {
             return ({done: "tone-ok", active: "tone-running", waiting: "tone-warn", failed: "tone-danger", pending: "tone-muted"})[this.statusKind(status)];
+        },
+        // Wash semantic for the shared vocabulary (data-tone on .w-chip).
+        washTone(status) {
+            return ({done: "ok", active: "running", waiting: "attention", failed: "danger", pending: "neutral"})[this.statusKind(status)] || "neutral";
         },
         attributionLabel(key) {
             return ({system: "system", user: "user", assistant: "assistant",
@@ -543,7 +581,7 @@ function traceApp() {
             const sw = this._slotW(pad, w);
             const x0 = this._xAtPos(lo, pad, w) - sw / 2, x1 = this._xAtPos(hi, pad, w) + sw / 2;
             const t = this._theme();
-            ctx.fillStyle = traceAlpha("--text-tertiary", 0.16);
+            ctx.fillStyle = traceAlpha("--wash-ink-3", 0.16);
             ctx.fillRect(x0, pad.t, x1 - x0, h - pad.t - pad.b);
             ctx.strokeStyle = t.accent; ctx.lineWidth = 1; ctx.setLineDash([]);
             ctx.beginPath(); ctx.moveTo(x0, pad.t); ctx.lineTo(x0, h - pad.b);
@@ -771,11 +809,11 @@ function traceApp() {
         _runMarks(ctx, w, h, pad) {
             if (!this.runBounds || this.runBounds.length < 2) return;
             const t = this._theme();
-            ctx.font = "9px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "9px " + traceFont();
             for (let bi = 1; bi < this.runBounds.length; bi++) {
                 const x = this._xOf(this.runBounds[bi].start_iter, pad, w);
                 if (x == null) continue;
-                ctx.strokeStyle = traceAlpha("--text-tertiary", 0.22);
+                ctx.strokeStyle = traceAlpha("--wash-ink-3", 0.22);
                 ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
                 ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
                 ctx.setLineDash([]);
@@ -795,11 +833,11 @@ function traceApp() {
         _theme() {
             refreshTracePalette();
             return {
-                text: traceToken("--text-primary"),
-                dim: traceToken("--text-tertiary"),
-                border: traceToken("--hairline-color"),
-                accent: traceToken("--accent-solid"),
-                bg: traceToken("--bg"),
+                text: traceToken("--wash-ink"),
+                dim: traceToken("--wash-ink-3"),
+                border: traceToken("--wash-hairline"),
+                accent: traceToken("--wash-accent-pigment"),
+                bg: traceToken("--wash-surface"),
             };
         },
 
@@ -831,7 +869,7 @@ function traceApp() {
         _drawAxes(ctx, w, h, pad, ys, opts = {}) {
             const t = this._theme();
             ctx.strokeStyle = t.border; ctx.fillStyle = t.dim;
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.lineWidth = 1;
             const unit = opts.unit || "";
             // y gridlines + labels
@@ -859,7 +897,7 @@ function traceApp() {
             const all = this.iters || [];
             if (!all.length) return;
             const sw = this._slotW(pad, w);
-            ctx.fillStyle = t.dim; ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.fillStyle = t.dim; ctx.font = "10px " + traceFont();
             ctx.textAlign = "center"; ctx.textBaseline = "top";
             const want = Math.max(1, Math.min(c, Math.floor((w - pad.l - pad.r) / 64)));
             const used = new Set();
@@ -878,7 +916,7 @@ function traceApp() {
 
         _empty(ctx, w, h, msg) {
             const t = this._theme();
-            ctx.fillStyle = t.dim; ctx.font = "11px " + (getComputedStyle(document.body).fontFamily);
+            ctx.fillStyle = t.dim; ctx.font = "11px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             ctx.fillText(msg, 8, 12);
         },
@@ -965,7 +1003,7 @@ function traceApp() {
             ctx.globalAlpha = 1; ctx.setLineDash([]);
             if (!mine || !label) return;
             // chip
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             const tw = ctx.measureText(label).width + 10;
             const cx = Math.min(Math.max(pad.l + 2, x + 6), w - pad.r - tw - 2);
             ctx.fillStyle = t.bg; ctx.strokeStyle = t.border;
@@ -1028,7 +1066,7 @@ function traceApp() {
                 }
                 if ((point.delta || 0) > 0) {
                     const top = h - pad.b - ((point.total || 0) / max * plotH);
-                    ctx.fillStyle = point.delta > max * 0.1 ? PALETTE.err : traceAlpha("--warning", 0.85);
+                    ctx.fillStyle = point.delta > max * 0.1 ? PALETTE.err : PALETTE.warn;
                     ctx.beginPath(); ctx.moveTo(x + barW / 2, Math.max(pad.t + 2, top - 7));
                     ctx.lineTo(x + barW / 2 - 3, Math.max(pad.t + 8, top - 1));
                     ctx.lineTo(x + barW / 2 + 3, Math.max(pad.t + 8, top - 1));
@@ -1036,7 +1074,7 @@ function traceApp() {
                 }
             });
             this._runMarks(ctx, w, h, pad);
-            ctx.font = "9px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "9px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             let lx = pad.l + 2, ly = 3;
             for (const key of keys) {
@@ -1100,10 +1138,10 @@ function traceApp() {
             this._runMarks(ctx, w, h, pad);
 
             // legend
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.actual; ctx.fillText("● actual (provider)", w - pad.r - 168, 4);
-            ctx.fillStyle = PALETTE.est; ctx.fillText("┄ cl100k est", w - pad.r - 80, 4);
+            traceLegendText(ctx, PALETTE.actual, "● actual (provider)", w - pad.r - 168, 4);
+            traceLegendText(ctx, PALETTE.est, "┄ cl100k est", w - pad.r - 80, 4);
 
             // hover + selected
             const hp = this._hoverPoint(ctxData);
@@ -1154,7 +1192,7 @@ function traceApp() {
             const rowH = rowsH / layers.length;
 
             // layer heat rows
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textBaseline = "middle";
             this._clipPlot(ctx, w, h, pad);
             layers.forEach((key, ri) => {
@@ -1164,7 +1202,8 @@ function traceApp() {
                     const v = row[sp.ci] || 0;
                     if (v > 0) {
                         const a = 0.06 + (v / 255) * 0.9;
-                        ctx.fillStyle = `rgba(${PALETTE.heat[0]},${PALETTE.heat[1]},${PALETTE.heat[2]},${a})`;
+                        const rgb = PALETTE.layers[String(key).toLowerCase()] || PALETTE.heat;
+                        ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
                         ctx.fillRect(sp.x0, y + 0.5, Math.max(0.6, sp.x1 - sp.x0 - 0.4), rowH - 1);
                     }
                 }
@@ -1270,7 +1309,7 @@ function traceApp() {
             ctx.setLineDash([]);
 
             // y labels
-            ctx.fillStyle = t.dim; ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.fillStyle = t.dim; ctx.font = "10px " + traceFont();
             ctx.textAlign = "right"; ctx.textBaseline = "middle";
             const ticks = useLog ? [-CLAMP, -15, 0, 15, CLAMP] : [-CLAMP, -15, 0, 15, CLAMP];
             for (const v of ticks) ctx.fillText((v > 0 ? "+" : "") + Math.round(v) + "%", pad.l - 4, toY(v));
@@ -1308,11 +1347,11 @@ function traceApp() {
             this._runMarks(ctx, w, h, pad);
 
             // legend
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "right"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.drift; ctx.fillText("● drift", w - pad.r - 2, 2);
+            traceLegendText(ctx, PALETTE.drift, "● drift", w - pad.r - 2, 2);
             ctx.textAlign = "left";
-            ctx.fillStyle = traceAlpha("--warning", 0.9); ctx.fillRect(pad.l + 2, h - pad.b - 14, 8, 8);
+            ctx.fillStyle = PALETTE.warn; ctx.fillRect(pad.l + 2, h - pad.b - 14, 8, 8);
             ctx.fillStyle = t.dim; ctx.fillText("±15% warn", pad.l + 12, h - pad.b - 16);
 
             // selected + hover
@@ -1373,7 +1412,7 @@ function traceApp() {
             const cv = this.$refs.readCanvas;
             if (cv) cv._geom = { pad, rowH, rows: shownRows, byRow, redundant, w, h };
 
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textBaseline = "middle";
             shownRows.forEach((r, ri) => {
                 const y = pad.t + ri * rowH;
@@ -1414,7 +1453,7 @@ function traceApp() {
             // hover tooltip (filename popup on mouse-over)
             if (this.hoverRef === "readCanvas" && this.readHover && this.readHover.label) {
                 const { x, y, label } = this.readHover;
-                ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+                ctx.font = "10px " + traceFont();
                 const tw = ctx.measureText(label).width + 10;
                 let cx = x + 10, cy = y - 18;
                 if (cx + tw > w - pad.r) cx = x - tw - 10;
@@ -1493,11 +1532,11 @@ function traceApp() {
             }
             this._runMarks(ctx, w, h, pad);
             // legend
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.subBar; ctx.fillText("● active", w - pad.r - 130, 2);
-            ctx.fillStyle = PALETTE.stuck; ctx.fillText("■ stuck", w - pad.r - 70, 2);
-            ctx.fillStyle = PALETTE.stall; ctx.fillText("■ stall", w - pad.r - 24, 2);
+            traceLegendText(ctx, PALETTE.subBar, "● active", w - pad.r - 130, 2);
+            traceLegendText(ctx, PALETTE.stuck, "■ stuck", w - pad.r - 70, 2);
+            traceLegendText(ctx, PALETTE.stall, "■ stall", w - pad.r - 24, 2);
             const hp = this._hoverPoint(sa);
             this._overlays(ctx, w, h, pad, hp
                 ? hp.active + " active" + (hp.stuck ? " · " + hp.stuck + " stuck" : "") + (hp.stall ? " · " + hp.stall + " stall" : "")
@@ -1560,11 +1599,11 @@ function traceApp() {
             this._runMarks(ctx, w, h, pad);
 
             // legend (counts + status)
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             let lx = w - pad.r - 150;
-            ctx.fillStyle = PALETTE.taskMem; ctx.fillText("● task_memory", lx, 2); lx += 78;
-            ctx.fillStyle = PALETTE.scratchpad; ctx.fillText("┄ scratchpad", lx, 2);
+            traceLegendText(ctx, PALETTE.taskMem, "● task_memory", lx, 2); lx += 78;
+            traceLegendText(ctx, PALETTE.scratchpad, "┄ scratchpad", lx, 2);
             // status legend along the bottom-left
             let sx = pad.l + 2; const sy = h - pad.b - 12;
             for (const k of statusKeys) {
@@ -1614,12 +1653,12 @@ function traceApp() {
             ctx.restore();
             this._runMarks(ctx, w, h, pad);
             // stacked vertical legend (4 entries × 32px collided)
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             const lg = [["in", PALETTE.tokIn], ["out", PALETTE.tokOut], ["cached", PALETTE.tokCached], ["reasoning", PALETTE.tokReasoning]];
             lg.forEach(([k, c], i) => {
                 const y = 2 + i * 12;
-                ctx.fillStyle = c; ctx.fillText("● " + k, w - pad.r - 70, y);
+                traceLegendText(ctx, c, "● " + k, w - pad.r - 70, y);
             });
             const hp = this._hoverPoint(tk);
             this._overlays(ctx, w, h, pad, hp
@@ -1671,13 +1710,13 @@ function traceApp() {
             this._clipPlot(ctx, w, h, pad);
             // saved band: between raw (top) and injected (bottom) — tokens kept
             // out of context by storing raw externally + observing.
-            ctx.fillStyle = traceAlpha("--viz-3", 0.18);
+            ctx.fillStyle = PALETTE.savedBand;
             ctx.beginPath();
             for (let i = 0; i < n; i++) ctx.lineTo(xs[i], y(eff[i].raw_tokens));
             for (let i = n - 1; i >= 0; i--) ctx.lineTo(xs[i], y(eff[i].injected_tokens));
             ctx.closePath(); ctx.fill();
             // injected tokens — filled area (what actually entered context)
-            ctx.fillStyle = traceAlpha("--viz-2", 0.32);
+            ctx.fillStyle = PALETTE.injectedFill;
             ctx.beginPath();
             for (let i = 0; i < n; i++) ctx.lineTo(xs[i], y(eff[i].injected_tokens));
             ctx.lineTo(xs[n - 1], pad.t + plotH); ctx.lineTo(xs[0], pad.t + plotH);
@@ -1702,13 +1741,13 @@ function traceApp() {
             ctx.restore();
             this._runMarks(ctx, w, h, pad);
             // legend
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
             // right-aligned legend, measured so the two entries never overlap
             ctx.textAlign = "right";
-            ctx.fillStyle = PALETTE.tokOut; ctx.fillText("● injected (kept)", w - pad.r - 2, 2);
+            traceLegendText(ctx, PALETTE.tokOut, "● injected (kept)", w - pad.r - 2, 2);
             const injW = ctx.measureText("● injected (kept)").width;
-            ctx.fillStyle = PALETTE.actual; ctx.fillText("┄ raw (would-be)", w - pad.r - 2 - injW - 12, 2);
+            traceLegendText(ctx, PALETTE.actual, "┄ raw (would-be)", w - pad.r - 2 - injW - 12, 2);
             ctx.textAlign = "left";
             const hp = this._hoverPoint(eff);
             this._overlays(ctx, w, h, pad, hp
@@ -1738,7 +1777,7 @@ function traceApp() {
                 if (cx == null) continue;
                 const x = cx - barW / 2;
                 const bh = (lat[i].wall_ms / max) * plotH;
-                ctx.fillStyle = (this.selectedIter === lat[i].iter) ? PALETTE.actual : traceAlpha("--viz-8", 0.6);
+                ctx.fillStyle = (this.selectedIter === lat[i].iter) ? PALETTE.actual : PALETTE.latency;
                 ctx.fillRect(x, pad.t + plotH - bh, barW, bh);
             }
             this._runMarks(ctx, w, h, pad);
@@ -1783,15 +1822,39 @@ function traceApp() {
             }
             this._runMarks(ctx, w, h, pad);
             // legend
-            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.font = "10px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.ok; ctx.fillText("● ok", w - pad.r - 96, 2);
-            ctx.fillStyle = PALETTE.err; ctx.fillText("● error", w - pad.r - 60, 2);
-            ctx.fillStyle = PALETTE.cache; ctx.fillText("▬ cache hit", w - pad.r - 24, 2);
+            traceLegendText(ctx, PALETTE.ok, "● ok", w - pad.r - 96, 2);
+            traceLegendText(ctx, PALETTE.err, "● error", w - pad.r - 60, 2);
+            traceLegendText(ctx, PALETTE.cache, "▬ cache hit", w - pad.r - 24, 2);
             const calls = this.hoverIter != null ? ts.filter(d => d.iter === this.hoverIter) : [];
             this._overlays(ctx, w, h, pad, calls.length
                 ? calls.map(d => this.fmtMs(d.latency_ms) + (d.ok ? "" : " ✗") + (d.cache_hit ? " (cache)" : "")).join(" · ")
                 : "iter " + this.hoverIter + " · no calls");
         },
     };
+}
+
+// Command palette (static/js/wash/palette.js): run selection, reload, clear,
+// and a jump to every analysis section on the page.
+if (window.WashPalette) {
+    window.WashPalette.register("trace", () => {
+        const app = window.Alpine && document.body ? window.Alpine.$data(document.body) : null;
+        const items = [
+            { id: "trace:run", group: "Actions", label: "Choose a trace run", icon: "list-checks",
+              run: () => document.getElementById("trace-run-select")?.focus() },
+            { id: "trace:reload", group: "Actions", label: "Reload trace runs", icon: "refresh-cw",
+              run: () => app && app.loadRuns() },
+        ];
+        if (app && app.runId && !app.session) {
+            items.push({ id: "trace:clear", group: "Actions", label: "Clear this trace run…", icon: "trash-2",
+                         run: () => app.clearRun() });
+        }
+        document.querySelectorAll(".trace-h2[id]").forEach((heading) => {
+            if (!heading.offsetParent) return;
+            items.push({ id: "trace:section:" + heading.id, group: "Navigate", label: "Jump to " + heading.textContent.trim(),
+                         icon: "arrow-down", run: () => heading.scrollIntoView({ block: "start" }) });
+        });
+        return items;
+    }, { priority: 10 });
 }

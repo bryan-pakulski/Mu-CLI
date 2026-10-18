@@ -340,7 +340,12 @@ def test_generation_live_emits_thinking_block_as_dim_italic(monkeypatch):
         p for p in printed if isinstance(p, Text) and "think about this" in str(p)
     ]
     assert thinking_prints, "expected a Text print containing the thinking content"
-    assert thinking_prints[0].style == "dim italic"
+    # Thinking is de-emphasised with the named wash.thinking style, which
+    # resolves to italic plus the muted colour.
+    assert thinking_prints[0].style == "wash.thinking"
+    from mu.ui.theme import style as wash_style
+
+    assert wash_style("wash.thinking").italic
 
 
 def test_generation_live_clears_streamed_flag_on_enter_then_sets_on_delta(monkeypatch):

@@ -1,0 +1,245 @@
+/* Messages (G§9.7) — the transcript column and what sits in it.
+ *
+ *   <div class="w-transcript" data-mode-tint="feature">        reading column, max 760
+ *     <div class="w-msg" data-role="user"><div class="w-msg__body">…</div></div>
+ *     <div class="w-msg" data-role="assistant">
+ *       <div class="w-msg__head"><span class="w-mark w-msg__mark"></span><span class="w-msg__model">…</span></div>
+ *       <div class="w-msg__body w-markdown">…</div>
+ *       <div class="w-msg__actions">…ghost icon buttons…</div>
+ *     </div>
+ *     <div class="w-msg" data-role="info|error|command"> … </div>
+ *     <div class="w-thinking" [data-open] [data-live]>…</div>
+ *     <div class="w-worked" [data-open]><div class="w-worked__row">Worked for 2m · 14 steps ›</div>…</div>
+ *     <div class="w-resolved" data-outcome="approved|denied|auto">✓ Approved · write_file routes.py · 14:02</div>
+ *     <button class="w-jump">Jump to latest ↓</button>
+ *   </div>
+ *
+ * User: right-aligned accent-wash bubble (radius-lg, 6px bottom-right),
+ * max 80%. Assistant: no bubble, body-lg prose on canvas. A streaming
+ * assistant ends in a soft caret in the mode pigment (--w-mode-pigment).
+ */
+.w-transcript {
+    --w-reading: var(--wash-size-reading);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-3);
+    min-height: 0;
+    padding: var(--wash-space-6) max(var(--wash-space-6), calc((100% - var(--w-reading)) / 2)) var(--wash-space-7);
+    overflow-y: auto;
+    overflow-anchor: none;
+    scrollbar-gutter: stable;
+}
+.w-transcript > * { flex: none; }
+
+/* ------------------------------------------------------------ message */
+.w-msg {
+    position: relative;
+    min-width: 0;
+    margin: 0;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+}
+.w-msg[data-role="user"] {
+    align-self: flex-end;
+    max-width: 80%;
+    padding: var(--wash-space-3) var(--wash-space-4);
+    border-radius: var(--wash-radius-lg) var(--wash-radius-lg) 6px var(--wash-radius-lg);
+    /* accent-tinted glass: ≥70% wash keeps ink text at contrast (G§9.7) */
+    background: color-mix(in srgb, var(--wash-accent-wash) 78%, var(--w-glass-fill));
+    box-shadow: var(--w-glass-lift-flat);
+    color: var(--wash-ink);
+    white-space: normal;
+}
+.w-msg[data-role="assistant"] { align-self: stretch; padding: 0; background: none; }
+.w-msg__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    margin-bottom: var(--wash-space-1);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.w-msg__mark { width: 16px; height: 16px; border-radius: 4px; }
+.w-msg__model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-msg__body { min-width: 0; overflow-wrap: anywhere; }
+.w-msg__body:empty { display: none; }
+.w-msg__attachments { display: flex; flex-wrap: wrap; gap: var(--wash-space-1); margin-top: var(--wash-space-2); }
+.w-msg__actions {
+    display: flex;
+    gap: 2px;
+    margin-top: var(--wash-space-1);
+    opacity: 0;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small);
+}
+.w-msg:is(:hover, :focus-within) .w-msg__actions { opacity: 1; }
+@media (hover: none) { .w-msg__actions { opacity: 1; } }
+
+/* streaming caret: a soft pigment bar after the live text */
+.w-msg[data-role="assistant"][data-streaming] .w-msg__body:not([style*="display: none"])::after {
+    content: "";
+    display: inline-block;
+    width: 3px;
+    height: 1.05em;
+    margin-left: 3px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-mode-pigment, var(--wash-accent-pigment));
+    vertical-align: -0.15em;
+    animation: w-msg-caret 1.1s var(--wash-ease-bleed) infinite;
+}
+@keyframes w-msg-caret { 50% { opacity: 0.25; } }
+
+/* quiet system lines */
+.w-msg:is([data-role="info"], [data-role="error"]) {
+    display: flex;
+    align-items: baseline;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-2) var(--wash-space-3);
+    border-radius: var(--wash-radius-md);
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.w-msg[data-role="error"] {
+    background: color-mix(in srgb, var(--wash-danger-wash) 78%, var(--w-glass-fill));
+    color: var(--wash-danger-ink);
+}
+.w-msg__glyph { flex: none; font-weight: 600; }
+.w-msg[data-role="info"] .w-msg__glyph { color: var(--wash-info-pigment); font-size: var(--wash-type-caption-size); }
+.w-msg[data-role="command"] {
+    padding: var(--wash-space-3) var(--wash-space-4);
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-md);
+    background: var(--w-glass-fill);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.w-msg--diff { align-self: stretch; }
+.w-msg[data-role="visualization"] {
+    padding: var(--wash-space-3);
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-lg);
+    background: var(--w-glass-fill);
+}
+
+/* ------------------------------------------------------------ thinking */
+.w-thinking { color: var(--wash-ink-3); font-size: var(--wash-type-body-size); }
+.w-thinking__head {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-height: 28px;
+    padding: 0 var(--wash-space-2);
+    margin-left: calc(var(--wash-space-2) * -1);
+    border: 0;
+    border-radius: var(--wash-radius-sm);
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-style: italic;
+    cursor: pointer;
+}
+.w-thinking__head:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink-2); }
+.w-thinking__caret { display: inline-block; transition: transform var(--wash-motion-small) var(--wash-ease-small); font-style: normal; }
+.w-thinking[data-open] .w-thinking__caret { transform: rotate(90deg); }
+.w-thinking__meta { font-style: normal; font-size: var(--wash-type-caption-size); }
+.w-thinking__body {
+    max-height: 320px;
+    margin: var(--wash-space-1) 0 var(--wash-space-2);
+    padding: var(--wash-space-1) 0 var(--wash-space-1) var(--wash-space-4);
+    overflow-y: auto;
+    border-left: 1px solid var(--wash-hairline-strong);
+    color: var(--wash-ink-3);
+    font-style: italic;
+    line-height: var(--wash-type-body-line);
+    white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------ worked (interim collapse) */
+.w-worked { align-self: stretch; margin: 0; padding: 0; border: 0; }
+.w-worked__row {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    min-height: 36px;
+    padding: 0 var(--wash-space-3);
+    border-radius: var(--wash-radius-md);
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    cursor: pointer;
+    user-select: none;
+}
+.w-worked__row:hover { color: var(--wash-ink); }
+.w-worked__row .w-icon { color: var(--wash-ink-3); }
+.w-worked__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.w-worked__meta { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-weight: 400; font-variant-numeric: tabular-nums; }
+.w-worked__chevron { color: var(--wash-ink-3); transition: transform var(--wash-motion-small) var(--wash-ease-small); }
+.w-worked[data-open] .w-worked__chevron { transform: rotate(90deg); }
+.w-worked__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-2);
+    margin: var(--wash-space-2) 0 0 var(--wash-space-3);
+    padding-left: var(--wash-space-4);
+    border-left: 1px solid var(--wash-hairline);
+}
+
+/* ------------------------------------------------------------ resolved breadcrumb */
+.w-resolved {
+    align-self: stretch;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.w-resolved__line { display: flex; align-items: center; gap: var(--wash-space-2); flex-wrap: wrap; min-height: 24px; }
+.w-resolved__glyph { color: var(--wash-ok-ink); font-weight: 600; }
+.w-resolved[data-outcome="denied"] .w-resolved__glyph { color: var(--wash-danger-ink); }
+.w-resolved[data-outcome="auto"] .w-resolved__glyph { color: var(--wash-caution-ink); }
+.w-resolved__verb { color: var(--wash-ink-2); font-weight: var(--wash-type-label-weight); }
+.w-resolved__subject { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); color: var(--wash-ink-2); overflow-wrap: anywhere; }
+.w-resolved__subject::before,
+.w-resolved__time::before { content: "·"; margin-right: var(--wash-space-2); color: var(--wash-ink-3); font-family: var(--wash-font-sans); }
+.w-resolved__time { font-variant-numeric: tabular-nums; }
+.w-resolved__time:empty { display: none; }
+.w-resolved__auto { height: 18px; padding: 0 var(--wash-space-2); font-size: var(--wash-type-caption-size); }
+
+/* ------------------------------------------------------------ jump to latest */
+.w-jump {
+    position: sticky;
+    bottom: var(--wash-space-2);
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    height: 32px;
+    padding: 0 var(--wash-space-4);
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift-2);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    cursor: pointer;
+    z-index: var(--wash-z-raised);
+}
+
+@media (width < 840px) {
+    .w-transcript { padding: var(--wash-space-5) var(--wash-space-4) var(--wash-space-6); }
+    .w-msg[data-role="user"] { max-width: 92%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .w-msg[data-role="assistant"][data-streaming] .w-msg__body::after { animation: none; }
+}

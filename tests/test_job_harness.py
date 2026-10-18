@@ -143,7 +143,9 @@ def test_status_reports_problems_and_setup(home, monkeypatch):
     job_settings.save_settings({"harness": {"codex": {"binary": str(fake)}}})
     codex = harness.status()["codex"]
     assert codex["ready"] and codex["version"] == "codex-cli 9.9" and codex["binary_kind"] == "static"
-    assert any("automatic approval review" in w for w in codex["warnings"])
+    # Jobs run unattended: Codex never routes commands through its approval review, so the
+    # gated-implement caveat is retired.
+    assert not any("approval review" in w for w in codex["warnings"])
 
 
 def test_binary_mounts_and_state_copy(home):
@@ -166,24 +168,29 @@ def test_binary_mounts_and_state_copy(home):
 
 
 def test_claude_args_follow_the_approval_policy():
-    gated = cli.claude_args(model="m", read_only=False, auto_approve=False, resume="sid", system="SYS", effort="max")
-    assert gated[:2] == [cli.CLAUDE_BIN, "-p"] and "--dangerously-skip-permissions" not in gated
-    assert gated[gated.index("--permission-mode") + 1] == "manual" and "--permission-prompt-tool" in gated
-    assert gated[gated.index("--resume") + 1] == "sid" and gated[gated.index("--effort") + 1] == "max"
-    assert "--strict-mcp-config" in gated
-    plan = cli.claude_args(model="m", read_only=True, auto_approve=False)
+    # Jobs run unattended: no stage asks for permission and no stage may ask the user a question.
+    implement = cli.claude_args(model="m", read_only=False, resume="sid", system="SYS", effort="max")
+    assert implement[:2] == [cli.CLAUDE_BIN, "-p"] and "--dangerously-skip-permissions" in implement
+    assert "--permission-mode" not in implement and "--permission-prompt-tool" in implement
+    assert implement[implement.index("--resume") + 1] == "sid" and implement[implement.index("--effort") + 1] == "max"
+    assert "--strict-mcp-config" in implement
+    disallowed = implement[implement.index("--disallowed-tools") + 1:]
+    assert "AskUserQuestion" in disallowed and not set(cli.READ_ONLY_DISALLOWED) & set(disallowed[:len(cli.NO_QUESTION_TOOLS)])
+    plan = cli.claude_args(model="m", read_only=True)
     assert "--dangerously-skip-permissions" in plan and plan[plan.index("--disallowed-tools") + 1:][:3] == list(cli.READ_ONLY_DISALLOWED)
-    yolo = cli.claude_args(model="m", read_only=False, auto_approve=True)
-    assert "--dangerously-skip-permissions" in yolo and "--disallowed-tools" not in yolo
+    assert "AskUserQuestion" in plan[plan.index("--disallowed-tools") + 1:][:4]
+    assert "unattended" in cli.stage_system("implement", False) and "unattended" in cli.stage_system("plan", True)
     assert cli.claude_env(60)["BASH_MAX_TIMEOUT_MS"] == "60000"
 
 
 def test_codex_args_follow_the_approval_policy():
-    gated = cli.codex_args(model="", read_only=False, auto_approve=False, effort="max")
-    assert gated[:2] == [f"{cli.CODEX_ROOT}/bin/codex", "exec"] and "--approve-for-me" in gated and gated[-1] == "-"
-    assert "-m" not in gated and "model_reasoning_effort=xhigh" in gated
-    assert "--dangerously-bypass-approvals-and-sandbox" in cli.codex_args(model="x", read_only=True, auto_approve=False)
-    resumed = cli.codex_args(model="gpt-5.5", read_only=False, auto_approve=True, resume="th")
+    # Jobs run unattended: Codex never waits on (or reviews) an approval in any stage.
+    implement = cli.codex_args(model="", read_only=False, effort="max")
+    assert implement[:2] == [f"{cli.CODEX_ROOT}/bin/codex", "exec"] and implement[-1] == "-"
+    assert "--approve-for-me" not in implement and "--dangerously-bypass-approvals-and-sandbox" in implement
+    assert "-m" not in implement and "model_reasoning_effort=xhigh" in implement
+    assert "--dangerously-bypass-approvals-and-sandbox" in cli.codex_args(model="x", read_only=True)
+    resumed = cli.codex_args(model="gpt-5.5", read_only=False, resume="th")
     assert resumed[2:4] == ["resume", "th"] and resumed[resumed.index("-m") + 1] == "gpt-5.5"
 
 

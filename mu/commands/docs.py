@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from typing import Any, List, Optional, Tuple
 
+from mu.ui.markup import esc, show_markup, to_plain
+
 from . import CommandResult, command
 
 
@@ -79,8 +81,9 @@ def _render_markdown(session: Any, content: str, allow_prompt: bool) -> None:
         return
     try:
         from rich.markdown import Markdown
+        from mu.ui.theme.pygments import syntax_theme
 
-        console.print(Markdown(content))
+        console.print(Markdown(content, code_theme=syntax_theme()))
     except Exception:
         # Fall back to plain text if Markdown rendering fails for any reason.
         console.print(content, markup=False)
@@ -100,12 +103,15 @@ def _list_docs(session: Any, allow_prompt: bool) -> CommandResult:
         summary = _summarize(path)
         entries.append({"name": stem, "summary": summary, "path": path})
         lines.append(
-            f"  • [bold]{stem}[/bold]" + (f" — {summary}" if summary else "")
+            f"  • [bold]{esc(stem)}[/bold]" + (f" — {esc(summary)}" if summary else "")
         )
     lines.append("")
-    lines.append("[dim]Show one with[/dim] [bold]/docs <name>[/bold]")
-    _emit_info(session, "\n".join(lines), allow_prompt)
-    return CommandResult(ok=True, message="\n".join(lines), data={"docs": entries})
+    lines.append("[wash.muted]Show one with[/wash.muted] [bold]/docs <name>[/bold]")
+    body = "\n".join(lines)
+    ui = getattr(session, "ui", None)
+    if ui is not None and hasattr(ui, "show_info") and allow_prompt:
+        show_markup(ui, body)
+    return CommandResult(ok=True, message=to_plain(body), data={"docs": entries})
 
 
 def _show_doc(session: Any, name: str, allow_prompt: bool) -> CommandResult:

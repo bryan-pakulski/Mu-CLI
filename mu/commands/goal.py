@@ -107,12 +107,12 @@ def _set(session: Any, text: str) -> CommandResult:
             pass
     if previous and previous != cleaned:
         msg = (
-            f"🎯 Session goal updated.\n"
+            f"Session goal updated.\n"
             f"  Previous: {previous!r}\n"
             f"  Current:  {cleaned!r}"
         )
     else:
-        msg = f"🎯 Session goal pinned: {cleaned!r}"
+        msg = f"Session goal pinned: {cleaned!r}"
     return CommandResult(ok=True, message=msg, data={"session_goal": cleaned})
 
 
@@ -131,7 +131,7 @@ def _clear(session: Any) -> CommandResult:
     _persist(session)
     return CommandResult(
         ok=True,
-        message=f"🎯 Session goal cleared (was: {previous!r}).",
+        message=f"Session goal cleared (was: {previous!r}).",
         data={"session_goal": ""},
     )
 
@@ -148,7 +148,7 @@ def _show(session: Any) -> CommandResult:
         )
     return CommandResult(
         ok=True,
-        message=f"🎯 Session goal: {current!r}",
+        message=f"Session goal: {current!r}",
         data={"session_goal": current},
     )
 

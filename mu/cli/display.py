@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import time
 
-from rich import box
-from rich.console import Console
-from rich.panel import Panel
+from rich.console import Group
 from rich.table import Table
 from rich.text import Text
+
+from mu.design import load_tokens
+from mu.ui.theme import get_console
+from mu.ui.theme.components import gradient_rule, notice_text, table as wash_table
+from mu.ui.theme.glyphs import WORDMARK
 
 import os
 
@@ -22,10 +25,9 @@ from mu.feature.engine import (
 )
 from mu.session.session import derive_feature_state_status
 from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
-from utils.helpers import safe_markup
 
 
-console = Console()
+console = get_console()
 
 
 def build_stats_snapshot(session):
@@ -208,46 +210,32 @@ def print_help():
     if extra is not None:
         groups.append(extra)
     for group_name, entries in groups:
-        table = Table(title=group_name, box=box.SIMPLE, show_header=False, padding=(0, 1))
-        table.add_column("Command", style="cyan", no_wrap=True)
-        table.add_column("Alias", style="magenta")
-        table.add_column("Description", style="white")
+        table = wash_table(title=group_name, show_header=False, padding=(0, 1))
+        table.add_column("Command", style="wash.accent", no_wrap=True)
+        table.add_column("Alias", style="wash.muted")
+        table.add_column("Description", style="wash.ink2")
         for cmd, alias, desc in entries:
             table.add_row(cmd, alias, desc)
         console.print(table)
     console.print(
-        "[dim]Tip: end a line with '\\' to continue typing on the next line. "
-        "Tab to autocomplete every command.[/dim]"
+        "[wash.hint]Tip: end a line with '\\\\' to continue typing on the next line. "
+        "Tab to autocomplete every command.[/]"
     )
 
 
-def print_splash(session):
-    welcome_text = Text()
+def build_splash(session):
+    """The Wash splash (G§8.4): a one-line ``μcli`` wordmark with a pigment
+    gradient rule, then a 3-row info grid (session, model, workspace).
 
-    # Neon μCLI Cyberpunk Ascii Art
-    welcome_text.append(" ██╗   ██╗", style="bold magenta")
-    welcome_text.append("  ██████╗ ██╗     ██╗\n", style="bold cyan")
-    welcome_text.append(" ██║   ██║", style="bold magenta")
-    welcome_text.append(" ██╔════╝ ██║     ██║\n", style="bold cyan")
-    welcome_text.append(" ██║   ██║", style="bold magenta")
-    welcome_text.append(" ██║      ██║     ██║\n", style="bold cyan")
-    welcome_text.append(" ██║   ██║", style="bold magenta")
-    welcome_text.append(" ██║      ██║     ██║\n", style="bold cyan")
-    welcome_text.append(" ███████╔╝", style="bold magenta")
-    welcome_text.append(" ╚██████╗ ███████╗██║\n", style="bold cyan")
-    welcome_text.append(" ██╔════╝ ", style="bold magenta")
-    welcome_text.append("  ╚═════╝ ╚══════╝╚═╝\n", style="bold cyan")
-    welcome_text.append(" ██║      \n", style="bold magenta")
-    welcome_text.append(" ╚═╝      \n", style="bold magenta")
-
-    welcome_text.append("\n > _AUTONOMOUS_AGENT_READY\n", style="bold yellow")
-
-    sys_status = "SET" if session.system_instruction else "NONE"
-    agent_mode = session.variables.get("agent_mode", "default")
-    session_type = session.variables.get("session_type", "workspace")
-    mode_meta = AGENT_MODE_METADATA.get(str(agent_mode), {})
-    mode_description = mode_meta.get("description", "")
-    yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
+    Every value is added as literal ``Text`` (never parsed as markup), so
+    session, model and folder names can contain brackets safely (B5).
+    Returns ``(renderable, context_warning_or_None)``.
+    """
+    sys_status = "set" if session.system_instruction else "none"
+    agent_mode = str(session.variables.get("agent_mode", "default"))
+    session_type = str(session.variables.get("session_type", "workspace"))
+    yolo_on = bool(session.variables.get("yolo", False))
+    plan_on = bool(session.variables.get("plan_mode", False))
     _session_type_glyph = {"chat": "○", "workspace": "▱", "container": "◇"}
     session_type_glyph = _session_type_glyph.get(session_type, "▱")
 
@@ -255,25 +243,16 @@ def print_splash(session):
     folders = session.folder_context.folders
     folder_count = len(folders)
     if folder_count == 0:
-        folder_list = "None"
+        folder_list = "none attached"
     elif folder_count == 1:
-        folder_list = folders[0]
+        folder_list = str(folders[0])
     else:
         folder_list = f"{folder_count} folders: " + ", ".join(
             [os.path.basename(f) for f in folders[:3]]
         )
         if folder_count > 3:
-            folder_list += " ..."
+            folder_list += " …"
 
-    info_grid = f"""                                                                   
-    [bold magenta]Session:[/bold magenta]  [bold yellow]{session.session_manager.current_session_name}[/bold yellow]
-    [bold magenta]System:[/bold magenta]   {sys_status}                                
-    [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
-    [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
-    [bold magenta]Type:[/bold magenta]     [bold cyan]{session_type_glyph} {session_type}[/bold cyan]
-    [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
-    [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
-"""
     # Total context (sum of all layers) vs. the compactor's effective
     # ceiling (drift_corrected_context_limit), not the raw provider window.
     # The compactor fires on the effective ceiling — the raw
@@ -295,25 +274,90 @@ def print_splash(session):
     context_tokens = int(estimate_active_context_tokens(session) or 0)
     threshold_tokens = int(context_limit * trim_threshold)
     cap_note = (
-        f" [dim](effective cap ÷ safety; raw {raw_limit:,})[/dim]"
-        if context_limit < raw_limit
-        else ""
+        f" (effective cap ÷ safety; raw {raw_limit:,})" if context_limit < raw_limit else ""
     )
+
+    splash = splash_renderable(
+        session_name=str(session.session_manager.current_session_name),
+        session_type=f"{session_type_glyph} {session_type}",
+        agent_mode=agent_mode,
+        model_name=str(session.provider.model_name),
+        flags=(
+            f"thinking {'on' if session.thinking else 'off'} · "
+            f"agentic {'on' if session.agentic else 'off'} · "
+            f"yolo {'on' if yolo_on else 'off'} · system {sys_status}"
+        ),
+        context=f"ctx {context_tokens:,} / {context_limit:,}{cap_note}",
+        workspace=folder_list,
+        has_workspace=bool(folder_count),
+        plan=plan_on,
+        yolo=yolo_on,
+    )
+
+    warning = None
     if context_tokens >= threshold_tokens:
-        info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens  [bold yellow]⚠[/bold yellow] [dim](trim threshold: {int(trim_threshold * 100)}%)[/dim]{cap_note}"""
-    else:
-        info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens{cap_note}"""
-
-    info_grid += "\n    "
-
-    console.print(
-        Panel(
-            Text.assemble(welcome_text, Text.from_markup(info_grid)),
-            title="[bold yellow] // μCLI TERMINAL // [/bold yellow]",
-            border_style="cyan",
-            box=box.HEAVY,
+        warning = (
+            f"Context is {context_tokens:,} / {context_limit:,} tokens, past the "
+            f"{int(trim_threshold * 100)}% trim threshold.{cap_note}"
         )
-    )
-    console.print("[dim] Type '/help' for commands.[/dim]\n")
+    return splash, warning
+
+
+def splash_renderable(
+    *,
+    session_name: str,
+    session_type: str,
+    agent_mode: str,
+    model_name: str,
+    flags: str,
+    context: str,
+    workspace: str,
+    has_workspace: bool = True,
+    plan: bool = False,
+    yolo: bool = False,
+):
+    """Wordmark + gradient rule + the 3-row info grid. All values are literal."""
+
+    def sep(text):
+        text.append("  ·  ", style="wash.muted")
+
+    wordmark = Text()
+    wordmark.append(f"{WORDMARK}  ", style="wash.wordmark")
+    wordmark.append_text(gradient_rule(40))
+
+    session_row = Text()
+    session_row.append(session_name, style="wash.ink.bold")
+    sep(session_row)
+    session_row.append(session_type, style="wash.ink2")
+    sep(session_row)
+    mode_style = f"wash.mode.{agent_mode}" if agent_mode in load_tokens()["mode"] else "wash.ink2"
+    session_row.append(agent_mode, style=mode_style)
+    if plan:
+        session_row.append("  [plan]", style="wash.chip.plan")
+    if yolo:
+        session_row.append("  [yolo]", style="wash.chip.yolo")
+
+    model_row = Text()
+    model_row.append(model_name, style="wash.ink.bold")
+    sep(model_row)
+    model_row.append(flags, style="wash.muted")
+    sep(model_row)
+    model_row.append(context, style="wash.ink2")
+
+    workspace_row = Text(workspace, style="wash.path" if has_workspace else "wash.muted")
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="wash.muted", no_wrap=True)
+    grid.add_column()
+    grid.add_row("session", session_row)
+    grid.add_row("model", model_row)
+    grid.add_row("workspace", workspace_row)
+    return Group(wordmark, Text(""), grid)
+
+
+def print_splash(session):
+    splash, warning = build_splash(session)
+    console.print(splash)
+    if warning:
+        console.print(notice_text("caution", warning))
+    console.print("[wash.hint]Type /help for commands.[/]\n")

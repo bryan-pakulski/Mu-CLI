@@ -1,64 +1,72 @@
-<div class="welcome welcome-launcher" x-data="welcomeView()" x-init="load()">
-    <header class="welcome-hero">
-        <div class="welcome-mark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 32 32"><circle cx="8" cy="16" r="4" class="l1"/><circle cx="16" cy="16" r="4" class="l2"/><circle cx="24" cy="16" r="3.2" class="l3"/></svg><span>mucli</span></div>
-        <div>
-            <p class="welcome-kicker">MuCLI control centre</p>
-            <h1>Choose where to begin.</h1>
-            <p class="lede">Resume work, create a session, or prepare an isolated container environment.</p>
+{% import "macros/wash.html" as w %}
+{#- Welcome / launcher (G§9.18): the Dawn wash hero dissolving into paper, the
+    display headline, three choice cards (Continue, Start new, Environments)
+    and the control footnote. The sessions list and the creation wizard open
+    as Wash modals. -#}
+<div class="welcome welcome-launcher w-welcome" x-data="welcomeView()" x-init="load()">
+    <header class="welcome-hero w-hero" data-art="hero" data-size="lg">
+        <span class="w-eyebrow welcome-kicker"><i class="w-eyebrow__swatch"></i>Your AI workspace</span>
+        <h1 class="w-hero__title">What are we building today?</h1>
+        <p class="w-hero__lede lede">Pick up a session, start something new, or spin up an isolated environment. Your models and code stay under your control.</p>
+        <div class="w-btn-row w-welcome__actions">
+            <button type="button" class="w-btn" data-variant="primary" data-size="lg" @click="openCreate()">Start something new</button>
+            <button type="button" class="w-btn" data-variant="secondary" data-size="lg" @click="openSessions()">Continue a session <span class="w-btn__chevron" aria-hidden="true">›</span></button>
         </div>
     </header>
 
-    <div class="welcome-entry-grid" aria-label="Start options">
-        <button class="welcome-entry" @click="openSessions()">
-            <span class="welcome-entry-icon">↗</span>
-            <span class="welcome-entry-copy">
-                <strong>Sessions</strong>
-                <small x-text="sessions.length ? `${sessions.length} saved · load or remove` : 'No saved sessions yet'"></small>
+    <div class="welcome-entry-grid w-welcome__choices" role="list" aria-label="Start options">
+        <button type="button" class="welcome-entry w-welcome__choice" role="listitem" @click="openSessions()">
+            <span class="welcome-entry-icon w-welcome__icon" data-tone="accent" aria-hidden="true">{{ w.icon("arrow-up-right") }}</span>
+            <span class="welcome-entry-copy w-choice__copy">
+                <strong class="w-welcome__title">Continue</strong>
+                <small class="w-welcome__meta" x-text="sessions.length
+                    ? `${sortedSessions()[0].name} · ${sessions.length} saved session${sessions.length === 1 ? '' : 's'}`
+                    : 'No saved sessions yet'">Your saved sessions</small>
             </span>
-            <span class="welcome-entry-arrow">→</span>
+            <span class="welcome-entry-arrow w-welcome__arrow" aria-hidden="true">›</span>
         </button>
-        <button class="welcome-entry" @click="openCreate()">
-            <span class="welcome-entry-icon">＋</span>
-            <span class="welcome-entry-copy">
-                <strong>Create new</strong>
-                <small>Guided chat, workspace, or container setup</small>
+        <button type="button" class="welcome-entry w-welcome__choice" role="listitem" @click="openCreate()">
+            <span class="welcome-entry-icon w-welcome__icon" data-tone="attention" aria-hidden="true">{{ w.icon("plus") }}</span>
+            <span class="welcome-entry-copy w-choice__copy">
+                <strong class="w-welcome__title">Start new</strong>
+                <small class="w-welcome__meta">Chat, workspace or isolated container</small>
             </span>
-            <span class="welcome-entry-arrow">→</span>
+            <span class="welcome-entry-arrow w-welcome__arrow" aria-hidden="true">›</span>
         </button>
-        <a class="welcome-entry" href="/containers">
-            <span class="welcome-entry-icon session-type-icon" x-html="sessionIcon('container')" aria-hidden="true"></span>
-            <span class="welcome-entry-copy">
-                <strong>Container management</strong>
-                <small x-text="`${containers.length} environments · ${templates.length} templates`"></small>
+        <a class="welcome-entry w-welcome__choice" role="listitem" href="/containers">
+            <span class="welcome-entry-icon w-welcome__icon session-type-icon" data-tone="ok" x-html="sessionIcon('container')" aria-hidden="true"></span>
+            <span class="welcome-entry-copy w-choice__copy">
+                <strong class="w-welcome__title">Environments</strong>
+                <small class="w-welcome__meta" x-text="`${containers.length} environment${containers.length === 1 ? '' : 's'} · ${templates.length} template${templates.length === 1 ? '' : 's'}`">Isolated Docker workspaces</small>
             </span>
-            <span class="welcome-entry-arrow">→</span>
+            <span class="welcome-entry-arrow w-welcome__arrow" aria-hidden="true">›</span>
         </a>
     </div>
 
-    <footer class="welcome-footnote">
-        <span>Providers use credentials configured on the MuCLI host.</span>
-        <button class="subtle" @click="$store.theme.toggle()">toggle theme</button>
+    <footer class="welcome-footnote w-welcome__foot">
+        <span>Your models, workspace and environments stay under your control. Providers use credentials configured on the μcli host.</span>
     </footer>
 
     <!-- Sessions -->
-    <div class="welcome-modal-backdrop" x-dialog="modal === 'sessions'"
+    <div class="welcome-modal-backdrop w-modal" x-dialog="modal === 'sessions'"
          x-show="modal === 'sessions'" x-cloak
          x-transition:enter="welcome-fade-enter" x-transition:enter-start="welcome-fade-start"
          x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
          @dialog-close="modal === 'sessions' && closeModal()">
-        <section class="welcome-modal welcome-modal-medium" @click.stop
+        <section class="welcome-modal welcome-modal-medium w-modal__dialog" data-size="md" @click.stop
+                 role="dialog" aria-modal="true" aria-labelledby="welcome-sessions-title"
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
-            <header class="welcome-modal-head">
-                <div><span class="welcome-modal-eyebrow">Saved work</span><h2>Sessions</h2></div>
-                <button class="icon-btn" @click="closeModal()" aria-label="Close">×</button>
+            <header class="welcome-modal-head w-modal__head">
+                <div><span class="welcome-modal-eyebrow w-eyebrow">Saved work</span><h2 class="w-modal__title" id="welcome-sessions-title">Sessions</h2></div>
+                <button type="button" class="w-btn" data-variant="icon" @click="closeModal()" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </header>
-            <div class="welcome-modal-body session-modal-body">
+            <div class="welcome-modal-body session-modal-body w-modal__body">
                 <div class="welcome-session-load-error" x-show="error" x-cloak role="alert" aria-live="assertive">
                     <strong>Session could not be loaded</strong>
                     <pre x-text="error"></pre>
                 </div>
                 <template x-if="!sessions.length">
-                    <div class="welcome-empty"><strong>No saved sessions</strong><span>Create one to begin.</span></div>
+                    <div class="welcome-empty w-empty" data-size="sm"><div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-folder-open"></use></svg></div><h3 class="w-empty__title">No saved sessions</h3><p class="w-empty__body">Create one to begin.</p></div>
                 </template>
                 <template x-for="s in sortedSessions()" :key="s.name">
                     <article class="welcome-session-row" role="button" tabindex="0"
@@ -67,7 +75,7 @@
                              @keydown.enter.prevent="loadSession(s.name)"
                              @keydown.space.prevent="loadSession(s.name)"
                              :aria-label="`Open session ${s.name}${sessionState(s) ? ' (' + sessionState(s).toLowerCase() + ')' : ''}`">
-                        <span class="session-kind" x-text="sessionGlyph(s.session_type)" aria-hidden="true"></span>
+                        <span class="session-kind" x-html="sessionAvatarMarkup(s.name, s.session_type, 'lg')" aria-hidden="true"></span>
                         <div class="welcome-session-copy">
                             <strong x-text="s.name"></strong>
                             <small x-text="`${s.session_type || 'workspace'} · ${formatDate(s.modified_at)}`"></small>
@@ -84,27 +92,28 @@
                     </article>
                 </template>
             </div>
-            <footer class="welcome-modal-foot welcome-modal-foot-light">
-                <button class="quiet-action" @click="closeModal()">Close</button>
-                <button class="quiet-action quiet-action-accent" @click="openCreate()"><span aria-hidden="true">＋</span> Create session</button>
+            <footer class="welcome-modal-foot welcome-modal-foot-light w-modal__foot">
+                <button type="button" class="quiet-action w-btn" data-variant="ghost" @click="closeModal()">Close</button>
+                <button type="button" class="quiet-action quiet-action-accent w-btn" data-variant="primary" @click="openCreate()"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Create session</span></button>
             </footer>
         </section>
     </div>
 
     <!-- Guided creation -->
-    <div class="welcome-modal-backdrop" x-dialog="modal === 'create'"
+    <div class="welcome-modal-backdrop w-modal" x-dialog="modal === 'create'"
          x-show="modal === 'create'" x-cloak
          x-transition:enter="welcome-fade-enter" x-transition:enter-start="welcome-fade-start"
          x-transition:leave="welcome-fade-leave" x-transition:leave-end="welcome-fade-start"
          @dialog-close="modal === 'create' && !creating && closeModal()">
-        <section class="welcome-modal welcome-wizard" @click.stop
+        <section class="welcome-modal welcome-wizard w-modal__dialog" data-size="md" @click.stop
+                 role="dialog" aria-modal="true" aria-labelledby="welcome-create-title"
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
-            <header class="welcome-modal-head wizard-head">
-                <div><span class="welcome-modal-eyebrow">New session</span><h2 x-text="stepTitle"></h2></div>
-                <button class="icon-btn" @click="closeModal()" :disabled="creating" aria-label="Close">×</button>
+            <header class="welcome-modal-head wizard-head w-modal__head">
+                <div><span class="welcome-modal-eyebrow w-eyebrow">New session</span><h2 class="w-modal__title" id="welcome-create-title" x-text="stepTitle"></h2></div>
+                <button type="button" class="w-btn" data-variant="icon" @click="closeModal()" :disabled="creating" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </header>
 
-            <nav class="wizard-progress" aria-label="Creation progress">
+            <nav class="wizard-progress w-welcome__steps" aria-label="Creation progress">
                 <template x-for="n in 4" :key="n">
                     <button type="button" :class="{active: step === n, complete: step > n}"
                             @click="n < step && !creating && (step = n)">
@@ -113,11 +122,11 @@
                 </template>
             </nav>
 
-            <div class="welcome-modal-body wizard-body">
+            <div class="welcome-modal-body wizard-body w-modal__body">
                 <!-- Step 1 -->
                 <div x-show="step === 1" x-transition.opacity.duration.200ms>
                     <p class="wizard-intro">Name the session and choose its execution boundary.</p>
-                    <label class="wizard-field"><span>Session name</span>
+                    <label class="wizard-field w-field"><span>Session name</span>
                         <input x-model.trim="form.name" @input="syncContainerName()" placeholder="project-research" autofocus>
                     </label>
                     <div class="wizard-choice-grid three">
@@ -136,7 +145,7 @@
                 <!-- Step 2 -->
                 <div x-show="step === 2" x-transition.opacity.duration.200ms>
                     <p class="wizard-intro">Select the provider and model used for this session.</p>
-                    <label class="wizard-field"><span>Provider</span>
+                    <label class="wizard-field w-field"><span>Provider</span>
                         <select x-model="form.provider" @change="onProviderChange()">
                             <option value="">Select a provider</option>
                             <template x-for="p in providers" :key="p.name">
@@ -148,12 +157,12 @@
                         <button type="button" :class="{selected: form.ollamaMode === 'local'}" @click="setOllamaMode('local')">local</button>
                         <button type="button" :class="{selected: form.ollamaMode === 'cloud'}" @click="setOllamaMode('cloud')">cloud</button>
                     </div>
-                    <label class="wizard-field" x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
+                    <label class="wizard-field w-field" x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
                         <span>Ollama cloud API key</span>
                         <input type="password" x-model="form.ollamaApiKey" @change="loadModels()"
                                :placeholder="form.ollamaKeySet ? 'key available — type to replace' : 'API key'" autocomplete="off">
                     </label>
-                    <label class="wizard-field"><span>Model</span>
+                    <label class="wizard-field w-field"><span>Model</span>
                         <select x-model="form.model" x-show="models.length">
                             <option value="">Select a model</option>
                             <template x-for="m in models" :key="m"><option :value="m" x-text="m"></option></template>
@@ -175,7 +184,7 @@
                             <button type="button" class="folder-picker-button" @click="browseWorkspace()">
                                 <span class="folder-picker-icon session-type-icon" x-html="sessionIcon('workspace')" aria-hidden="true"></span><div><strong x-text="form.workspace || 'Choose workspace folder'"></strong><small>Browse folders on the MuCLI host</small></div><span>browse</span>
                             </button>
-                            <button class="subtle compact-clear" x-show="form.workspace" @click="form.workspace = ''">clear selection</button>
+                            <button class="w-btn compact-clear" data-variant="secondary" x-show="form.workspace" @click="form.workspace = ''">clear selection</button>
                         </div>
                     </template>
                     <template x-if="form.sessionType === 'container'">
@@ -198,8 +207,8 @@
                             </div>
 
                             <div x-show="form.containerSource === 'new'" x-cloak class="container-new-stack">
-                                <label class="wizard-field"><span>Container name</span><input x-model.trim="form.containerName" placeholder="mucli-project"></label>
-                                <label class="wizard-field"><span>Base</span>
+                                <label class="wizard-field w-field"><span>Container name</span><input x-model.trim="form.containerName" placeholder="mucli-project"></label>
+                                <label class="wizard-field w-field"><span>Base</span>
                                     <select x-model="form.templateName">
                                         <option value="">Editable Dockerfile</option>
                                         <template x-for="item in templates" :key="item.name"><option :value="item.name" x-text="`Template · ${item.name}`"></option></template>
@@ -218,7 +227,7 @@
                                             <span>→</span>
                                             <input x-model="mount.container_path" aria-label="Container mount path">
                                             <select x-model="mount.mode" aria-label="Mount mode"><option value="rw">rw</option><option value="ro">ro</option></select>
-                                            <button type="button" class="icon-btn" @click="form.mounts.splice(index, 1)">×</button>
+                                            <button type="button" class="w-btn" data-variant="icon" data-size="sm" @click="form.mounts.splice(index, 1)" aria-label="Remove mount" title="Remove mount">{{ w.icon("x", size="sm") }}</button>
                                         </div>
                                     </template>
                                 </div>
@@ -229,14 +238,14 @@
                                         <label x-show="form.gpuMode === 'selected'" x-cloak>GPU indexes or UUIDs<input x-model.trim="form.gpuSelection" placeholder="0,1 or GPU-uuid"></label>
                                     </div>
                                     <small x-text="gpuReason()"></small>
-                                    <template x-for="(device,index) in form.devices" :key="device.host_path + index"><div class="wizard-device-row"><span>⌁</span><div><strong x-text="device.container_path"></strong><small x-text="`${device.host_path} · ${device.permissions}`"></small></div><button type="button" class="icon-btn" @click="form.devices.splice(index,1)">×</button></div></template>
+                                    <template x-for="(device,index) in form.devices" :key="device.host_path + index"><div class="wizard-device-row"><span>⌁</span><div><strong x-text="device.container_path"></strong><small x-text="`${device.host_path} · ${device.permissions}`"></small></div><button type="button" class="w-btn" data-variant="icon" data-size="sm" @click="form.devices.splice(index,1)" aria-label="Remove device" title="Remove device">{{ w.icon("x", size="sm") }}</button></div></template>
                                     <div class="wizard-device-add">
                                         <input x-model.trim="form.deviceHost" @input="!form.deviceTarget && (form.deviceTarget=form.deviceHost)" placeholder="/dev/video0">
                                         <input x-model.trim="form.deviceTarget" placeholder="Container device path">
                                         <select x-model="form.devicePermissions"><option value="r">r</option><option value="rw">rw</option><option value="rwm">rwm</option></select>
                                         <button type="button" @click="addDevice()" :disabled="!form.deviceHost">add device</button>
                                     </div>
-                                    <label class="wizard-field" x-show="hardwareDevices().length"><span>Detected devices</span><select x-model="form.devicePreset" @change="addDevicePreset()"><option value="">Choose a detected device…</option><template x-for="item in hardwareDevices()" :key="item.host_path"><option :value="item.host_path" x-text="`${item.name || item.host_path} · ${item.kind || 'device'}`"></option></template></select></label>
+                                    <label class="wizard-field w-field" x-show="hardwareDevices().length"><span>Detected devices</span><select x-model="form.devicePreset" @change="addDevicePreset()"><option value="">Choose a detected device…</option><template x-for="item in hardwareDevices()" :key="item.host_path"><option :value="item.host_path" x-text="`${item.name || item.host_path} · ${item.kind || 'device'}`"></option></template></select></label>
                                     <p class="wizard-hardware-warning">MUCLI_CONTAINER_HARDWARE_V1: Attach only hardware required by this workload.</p>
                                 </section>
                             </div>
@@ -271,29 +280,29 @@
                 </div>
             </div>
 
-            <footer class="welcome-modal-foot wizard-foot">
+            <footer class="welcome-modal-foot wizard-foot w-modal__foot">
                 <div class="wizard-error" x-text="error"></div>
-                <button x-show="step > 1" @click="step--" :disabled="creating">back</button>
+                <button type="button" class="w-btn" data-variant="ghost" x-show="step > 1" @click="step--" :disabled="creating">Back</button>
                 <span class="spacer"></span>
-                <button x-show="step < 4" class="primary" @click="nextStep()" :disabled="!canContinue">continue</button>
-                <button x-show="step === 4" class="primary" @click="createSession()" :disabled="creating">
-                    <span x-show="!creating">create & load</span><span x-show="creating">working…</span>
+                <button type="button" x-show="step < 4" class="w-btn" data-variant="primary" @click="nextStep()" :disabled="!canContinue">Continue</button>
+                <button type="button" x-show="step === 4" class="w-btn" data-variant="primary" @click="createSession()" :disabled="creating" :aria-busy="creating ? 'true' : null">
+                    <span x-show="!creating">Create and open</span><span x-show="creating">Working…</span>
                 </button>
             </footer>
         </section>
     </div>
 
     <!-- Editors -->
-    <div class="container-editor-backdrop" x-dialog="editorModal"
+    <div class="container-editor-backdrop w-modal" x-dialog="editorModal"
          x-show="editorModal" x-cloak @dialog-close="editorModal && (editorModal = null)">
-        <section class="container-editor-modal" @click.stop>
-            <header class="container-editor-header"><div><strong x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button class="icon-btn" @click="editorModal = null">×</button></header>
+        <section class="container-editor-modal w-modal__dialog" data-size="lg" @click.stop role="dialog" aria-modal="true" aria-labelledby="welcome-editor-title">
+            <header class="container-editor-header"><div><strong id="welcome-editor-title" x-text="editorModal === 'dockerfile' ? 'Worker image template' : 'Egress policy'"></strong><span x-text="editorModal === 'dockerfile' ? 'Edit the worker image before creation.' : 'Blocklist entries override the allowlist.'"></span></div><button type="button" class="w-btn" data-variant="icon" @click="editorModal = null" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></header>
             <div class="container-editor-body" :class="{'container-network-editor': editorModal === 'network'}">
                 <textarea x-show="editorModal === 'dockerfile'" x-model="form.dockerfile" spellcheck="false"></textarea>
                 <template x-if="editorModal === 'network'"><label>Allowlist<small>One domain or IPv4 address per line.</small><textarea x-model="form.egressAllow" spellcheck="false"></textarea></label></template>
                 <template x-if="editorModal === 'network'"><label>Blocklist<small>Entries here take precedence.</small><textarea x-model="form.egressDeny" spellcheck="false"></textarea></label></template>
             </div>
-            <footer class="container-editor-footer"><button class="primary" @click="editorModal = null">done</button></footer>
+            <footer class="container-editor-footer w-modal__foot"><button type="button" class="w-btn" data-variant="primary" @click="editorModal = null">Done</button></footer>
         </section>
     </div>
 </div>
@@ -339,7 +348,6 @@ function welcomeView() {
         closeModal(){ if(this.creating)return; this.modal=null; },
         nextStep(){ this.error=null; if(!this.canContinue){this.error='Complete the required fields before continuing.';return;} this.step=Math.min(4,this.step+1); },
         sessionIcon(type){ return sessionTypeIconMarkup(type, 'session-type-svg'); },
-        sessionGlyph(type){ return type === 'container' ? '◇' : type === 'chat' ? '○' : '▱'; },
         sessionState(s){ if(!s) return ''; if(s.is_current) return 'Active'; if(s.is_busy) return 'Working'; if(s.is_loaded) return 'Loaded'; return ''; },
         sessionStateHint(s){ const st=this.sessionState(s); return st==='Active' ? 'Currently focused in this window' : st==='Working' ? 'Loaded and mid-turn' : st==='Loaded' ? 'Loaded in memory' : ''; },
         sessionRank(s){ return s.is_current ? 0 : s.is_busy ? 1 : s.is_loaded ? 2 : 3; },

@@ -1,0 +1,71 @@
+/* Drawer (G§9.17) — a side panel (settings, file browser), 420px wide,
+ * full width below 840. Same x-dialog contract as the modal.
+ *
+ *   <div class="w-drawer" x-data x-dialog="open" x-show="open" @dialog-close="open = false"
+ *        @click.self="open = false" data-side="right|left">
+ *     <aside class="w-drawer__panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+ *       <header class="w-drawer__head"><h2 class="w-drawer__title" id="drawer-title">Settings</h2>…close…</header>
+ *       <div class="w-drawer__body">…</div>
+ *       <footer class="w-drawer__foot">…</footer>
+ *     </aside>
+ *   </div>
+ */
+.w-drawer {
+    position: fixed;
+    inset: 0;
+    z-index: var(--wash-z-modal);
+    display: flex;
+    justify-content: flex-end;
+    background: var(--wash-scrim);
+    animation: w-drawer-fade var(--wash-motion-medium) var(--wash-ease-medium) both;
+}
+.w-drawer[data-side="left"] { justify-content: flex-start; }
+.w-drawer:focus { outline: none; }
+.w-drawer__panel {
+    display: flex;
+    flex-direction: column;
+    width: min(420px, 100%);
+    height: 100%;
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift-3);
+    animation: w-drawer-in-right var(--wash-motion-medium) var(--wash-ease-medium) both;
+}
+.w-drawer[data-side="left"] .w-drawer__panel { animation-name: w-drawer-in-left; }
+.w-drawer__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    min-height: var(--wash-size-topbar);
+    padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) var(--wash-space-5);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.w-drawer__title {
+    flex: 1 1 auto;
+    margin: 0;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+}
+.w-drawer__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: var(--wash-space-5);
+    overflow: auto;
+}
+.w-drawer__foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-3) var(--wash-space-5);
+    border-top: 1px solid var(--wash-hairline);
+}
+@keyframes w-drawer-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes w-drawer-in-right { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes w-drawer-in-left { from { transform: translateX(-32px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (width < 840px) {
+    .w-drawer__panel { width: 100%; }
+}

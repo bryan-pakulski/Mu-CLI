@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
+import { FlatList, View, RefreshControl, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Skeleton, ErrorState, EmptyState } from '../components';
 import { modesApi, ModeInfo } from '../api/modes';
 import { spacing, fontWeights, radii, tracking } from '../theme/tokens';
+import { EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
+import { useGlass } from '../ui/Glass';
 
 const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: string }> = {
   default: { title: 'General workspace', lenses: ['plan', 'tools', 'verification'], purpose: 'Flexible coding and codebase assistance.' },
@@ -20,6 +20,7 @@ const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: 
 
 export function ModesScreen() {
   const { colors } = useTheme();
+  const glass = useGlass();
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,7 +70,7 @@ export function ModesScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4].map(i => (
             <Skeleton key={i} height={64} style={{ marginBottom: spacing.sm }} />
@@ -81,7 +82,7 @@ export function ModesScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={load} />
       </SafeAreaView>
     );
@@ -89,14 +90,14 @@ export function ModesScreen() {
 
   if (modes.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No modes" message="No agent modes available" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <FlatList
         data={modes}
         keyExtractor={item => item.name}
@@ -105,14 +106,14 @@ export function ModesScreen() {
         ListHeaderComponent={
           <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
             <View style={styles.eyebrowRow}>
-              <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>Modes</Text>
-              <Text variant="xs" style={{ color: colors.textDim }}>/</Text>
-              <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.success : colors.warning }}>
+              <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>Modes</Text>
+              <Text variant="xs" style={{ color: colors.ink3 }}>/</Text>
+              <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.ok.ink : colors.attention.ink }}>
                 {sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
               </Text>
             </View>
             <Text variant="lg" style={styles.headerTitle}>Choose the operating harness</Text>
-            <Text variant="xs" style={[styles.headerCopy, { color: colors.textSoft }]}>
+            <Text variant="xs" style={[styles.headerCopy, { color: colors.ink2 }]}>
               A mode changes how the model investigates and acts. Its explorer presents the facts, evidence, and controls that belong to that workflow.
             </Text>
           </View>
@@ -122,28 +123,30 @@ export function ModesScreen() {
           const surface = MODE_SURFACES[item.name] || { title: item.display_name, lenses: [], purpose: item.description };
           const accent = modeAccent(item.name, colors);
           return (
-            <TouchableOpacity
+            <Pressable
               onPress={() => !item.disabled && selectMode(item.name)}
               disabled={item.disabled || selecting !== null}
               activeOpacity={0.7}
               style={[
                 styles.modeRow,
+                // Active mode: a glass-strong pill, never a coloured side bar (G§3.4, G§9.4).
+                isActive && glass.activePill,
                 { opacity: item.disabled ? 0.42 : 1 },
               ]}
             >
-              <View style={[styles.modeRail, { backgroundColor: isActive ? accent : 'transparent' }]} />
+              <View style={[styles.modeDot, { backgroundColor: accent }]} />
               <View style={styles.modeCopy}>
                 <View style={styles.modeTitleRow}>
-                  <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{surface.title}</Text>
-                  {isActive && <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.medium }}>Current</Text>}
-                  {item.disabled && <Text variant="xs" style={{ color: colors.warning }}>Workspace required</Text>}
+                  <Text variant="base" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{surface.title}</Text>
+                  {isActive && <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Current</Text>}
+                  {item.disabled && <Text variant="xs" style={{ color: colors.attention.ink }}>Workspace required</Text>}
                 </View>
-                <Text variant="xs" style={{ color: colors.textSoft, marginTop: spacing.xs }}>{surface.purpose}</Text>
-                <Text variant="xs" style={[styles.lenses, { color: colors.textDim }]}>{surface.lenses.join('  ·  ')}</Text>
+                <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{surface.purpose}</Text>
+                <Text variant="xs" style={[styles.lenses, { color: colors.ink3 }]}>{surface.lenses.join('  ·  ')}</Text>
               </View>
-              {isActive && <Ionicons name="checkmark" size={18} color={accent} />}
-              {selecting === item.name && !isActive && <Ionicons name="hourglass-outline" size={17} color={colors.textDim} />}
-            </TouchableOpacity>
+              {isActive && <Icon name="check" size="md" color={accent} />}
+              {selecting === item.name && !isActive && <Icon name="hourglass" size="sm" color={colors.ink3} />}
+            </Pressable>
           );
         }}
       />
@@ -156,8 +159,9 @@ const styles = StyleSheet.create({
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.lg, letterSpacing: tracking.tight },
   headerCopy: { marginTop: spacing.xs, maxWidth: 430 },
-  modeRow: { minHeight: 96, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base },
-  modeRail: { alignSelf: 'stretch', width: 2, borderRadius: radii.pill, marginRight: spacing.md },
+  modeRow: { minHeight: 96, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base, paddingHorizontal: spacing.md, borderRadius: radii.md, borderWidth: 1, borderColor: 'transparent' },
+  // The mode's categorical pigment dot (G§1.4), on every row.
+  modeDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },
   modeCopy: { flex: 1 },
   modeTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' },
   lenses: { marginTop: spacing.sm },
@@ -166,5 +170,5 @@ const styles = StyleSheet.create({
 // Mode identity is neutral: the active mode is carried by its label plus the
 // single accent (selection), never by a per-mode colour.
 function modeAccent(_mode: string, colors: ReturnType<typeof useTheme>['colors']) {
-  return colors.accent;
+  return colors.accent.ink;
 }

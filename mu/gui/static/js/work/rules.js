@@ -39,30 +39,30 @@
         const attrs = `id="${id}" data-rule="${esc(field.path)}" aria-describedby="${id}-hint"`;
         switch (field.kind) {
             case 'bool':
-                return `<button type="button" class="switch" role="switch" aria-checked="${Boolean(value)}" ${attrs} aria-label="${esc(field.label)}"></button>`;
+                return `<button type="button" class="work-switch" role="switch" aria-checked="${Boolean(value)}" ${attrs} aria-label="${esc(field.label)}"></button>`;
             case 'int': case 'float':
-                return `<span class="row"><input type="number" ${attrs} value="${value ?? ''}" step="${field.kind === 'int' ? 1 : 'any'}"${field.min != null ? ` min="${field.min}"` : ''}${field.max != null ? ` max="${field.max}"` : ''} placeholder="${field.optional ? 'default' : ''}" style="max-width:200px">${field.unit ? `<span class="muted small">${esc(field.unit)}</span>` : ''}</span>`;
+                return `<span class="work-toolbar"><input class="w-input work-rule-number" type="number" ${attrs} value="${value ?? ''}" step="${field.kind === 'int' ? 1 : 'any'}"${field.min != null ? ` min="${field.min}"` : ''}${field.max != null ? ` max="${field.max}"` : ''} placeholder="${field.optional ? 'default' : ''}">${field.unit ? `<span class="work-meta">${esc(field.unit)}</span>` : ''}</span>`;
             case 'select':
-                return `<select ${attrs}>${field.options.map(([v, l]) => `<option value="${esc(v)}" ${v === (value ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+                return `<span class="w-select"><select class="w-select__control" ${attrs}>${field.options.map(([v, l]) => `<option value="${esc(v)}" ${v === (value ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></span>`;
             case 'list':
-                return `<textarea ${attrs} rows="3" placeholder="one per line">${esc((value || []).join('\n'))}</textarea>`;
+                return `<textarea class="w-textarea" data-mono ${attrs} rows="3" placeholder="one per line">${esc((value || []).join('\n'))}</textarea>`;
             case 'suites':
-                return `<div class="col" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
-                    ${(value || []).map((s, i) => `<div class="row work-rule-suite" data-index="${i}">
-                        <input type="text" data-suite-key="name" aria-label="Suite name" placeholder="name" value="${esc(s.name || '')}" style="max-width:140px">
-                        <input type="text" data-suite-key="command" aria-label="Suite command" placeholder="command" value="${esc(s.command || '')}" class="grow">
-                        <input type="text" data-suite-key="junit" aria-label="JUnit report path (optional)" placeholder="junit path (optional)" value="${esc(s.junit || '')}" style="max-width:180px">
-                        <button type="button" class="btn ghost icon sm tone-danger" data-suite-remove aria-label="Remove suite">×</button></div>`).join('')}
-                    <button type="button" class="btn sm" data-suite-add style="align-self:flex-start">+ Add suite</button></div>`;
+                return `<div class="work-stack-tight" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
+                    ${(value || []).map((s, i) => `<div class="work-toolbar work-rule-suite" data-index="${i}">
+                        <input class="w-input work-rule-suite__name" type="text" data-suite-key="name" aria-label="Suite name" placeholder="name" value="${esc(s.name || '')}">
+                        <input class="w-input work-grow" data-mono type="text" data-suite-key="command" aria-label="Suite command" placeholder="command" value="${esc(s.command || '')}">
+                        <input class="w-input work-rule-suite__junit" type="text" data-suite-key="junit" aria-label="JUnit report path (optional)" placeholder="junit path (optional)" value="${esc(s.junit || '')}">
+                        <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-suite-remove aria-label="Remove suite" title="Remove suite"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></div>`).join('')}
+                    <button type="button" class="w-btn work-rule-add" data-variant="secondary" data-size="sm" data-suite-add><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Add suite</span></button></div>`;
             case 'rows':
-                return `<div class="col" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
-                    ${(value || []).map((row, i) => `<div class="row work-rule-suite" data-index="${i}">
-                        ${field.columns.map(c => `<input type="text" data-row-key="${esc(c.key)}" aria-label="${esc(c.label)}" placeholder="${esc(c.placeholder || c.label)}" value="${esc(row[c.key] || '')}" class="grow">`).join('')}
-                        <button type="button" class="btn ghost icon sm tone-danger" data-row-remove aria-label="Remove row">×</button></div>`).join('')}
-                    <button type="button" class="btn sm" data-row-add style="align-self:flex-start">+ Add</button>
-                    ${field.path === 'sandbox.toolchains' ? '<div class="col" data-toolchain-status style="gap:var(--s-half)"></div>' : ''}</div>`;
+                return `<div class="work-stack-tight" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
+                    ${(value || []).map((row, i) => `<div class="work-toolbar work-rule-suite" data-index="${i}">
+                        ${field.columns.map(c => `<input class="w-input work-grow" type="text" data-row-key="${esc(c.key)}" aria-label="${esc(c.label)}" placeholder="${esc(c.placeholder || c.label)}" value="${esc(row[c.key] || '')}">`).join('')}
+                        <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-row-remove aria-label="Remove row" title="Remove row"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></div>`).join('')}
+                    <button type="button" class="w-btn work-rule-add" data-variant="secondary" data-size="sm" data-row-add><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Add</span></button>
+                    ${field.path === 'sandbox.toolchains' ? '<div class="work-stack-tight" data-toolchain-status></div>' : ''}</div>`;
             default:
-                return `<input type="text" ${attrs} value="${esc(value ?? '')}">`;
+                return `<input class="w-input" type="text" ${attrs} value="${esc(value ?? '')}">`;
         }
     }
 
@@ -70,28 +70,69 @@
         FIELD = Object.fromEntries(rules.schema.flatMap(s => s.fields).map(f => [f.path, f]));
         host.innerHTML = rules.schema.map(section => {
             const changed = section.fields.some(f => dirty.has(f.path));
-            return `<section class="panel" aria-labelledby="rules-${esc(section.id)}"><header><h2 id="rules-${esc(section.id)}">${esc(section.title)}</h2>${changed ? '<span class="pill tone-warn">◆ unsaved</span>' : ''}<span class="spacer"></span></header>
-                <form class="panel-body work-form" data-section="${esc(section.id)}" novalidate>
+            return `<section class="w-card work-card" aria-labelledby="rules-${esc(section.id)}"><header class="w-card__head"><span class="w-eyebrow">Run rules</span><h2 class="w-card__title" id="rules-${esc(section.id)}">${esc(section.title)}</h2>${changed ? '<span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Unsaved</span></span>' : ''}</header>
+                <form class="w-card__body work-form" data-section="${esc(section.id)}" novalidate>
                     ${section.hint ? `<p class="work-jira-muted">${esc(section.hint)}</p>` : ''}
-                    ${section.id === 'build_environments' ? '<div class="col work-env-status" data-env-status></div>' : ''}
-                    ${section.id === 'harness' ? '<div class="col work-agents-status" data-agents-status></div>' : ''}
+                    ${section.id === 'build_environments' ? '<div class="work-stack-tight work-env-status" data-env-status></div>' : ''}
+                    ${section.id === 'harness' ? '<div class="work-stack-tight work-agents-status" data-agents-status></div>' : ''}
+                    ${section.id === 'publish' ? '<div class="work-stack-tight work-publish-tokens" data-publish-tokens></div>' : ''}
                     ${section.fields.map((f, i) => {
                         const id = `rule-${section.id}-${i}`;
                         const overridden = Object.prototype.hasOwnProperty.call(rules.overrides, f.path) && dirty.get(f.path) !== null;
                         const meta = overridden || (dirty.has(f.path) && dirty.get(f.path) !== null)
-                            ? `<span class="small"><span class="tone-accent">set</span> · default ${esc(fmt(f, f.default))} · <button type="button" class="link-btn small" data-reset="${esc(f.path)}">Reset</button></span>`
-                            : `<span class="small muted">default</span>`;
+                            ? `<span class="work-meta"><span class="work-accent">set</span> · default ${esc(fmt(f, f.default))} · <button type="button" class="work-link-btn" data-reset="${esc(f.path)}">Reset</button></span>`
+                            : `<span class="work-meta">default</span>`;
                         return `<div class="work-field work-rule${errorSection === section.id && errorText.includes(f.label) ? ' has-error' : ''}">
-                            <span><label for="${id}">${esc(f.label)}</label>${f.hint ? `<small class="hint" id="${id}-hint">${esc(f.hint)}</small>` : `<small id="${id}-hint"></small>`}</span>
-                            <div class="col" style="gap:var(--s-half)">${control(f, id)}${meta}</div></div>`;
+                            <span><label class="w-field__label" for="${id}">${esc(f.label)}</label>${f.hint ? `<small class="w-field__hint" id="${id}-hint">${esc(f.hint)}</small>` : `<small id="${id}-hint"></small>`}</span>
+                            <div class="work-stack-tight">${control(f, id)}${meta}</div></div>`;
                     }).join('')}
-                    ${errorSection === section.id ? `<p class="error-box small" role="alert">✗ ${esc(errorText)}</p>` : ''}
-                    <footer class="work-form-actions"><button type="button" class="btn" data-discard ${changed ? '' : 'disabled'}>Discard</button><button type="submit" class="btn primary" ${changed ? '' : 'disabled'}>Save ${esc(section.title.toLowerCase())}</button></footer>
+                    ${errorSection === section.id ? `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(errorText)}</p></div>` : ''}
+                    <footer class="work-form-actions"><button type="button" class="w-btn" data-variant="secondary" data-discard ${changed ? '' : 'disabled'}>Discard</button><button type="submit" class="w-btn" data-variant="primary" ${changed ? '' : 'disabled'}>Save ${esc(section.title.toLowerCase())}</button></footer>
                 </form></section>`;
         }).join('');
         bind();
         void environmentStatus(host.querySelector('[data-env-status]'));
         void window.MuJobAgents?.card(host.querySelector('[data-agents-status]'), { api, toast });
+        void publishTokens(host.querySelector('[data-publish-tokens]'));
+    }
+
+    // Push: PR/MR provider tokens (GET/PUT /api/jobs/publish/tokens). Values are never shown;
+    // stored tokens live host-side (0600) and never reach a job container.
+    const PROVIDERS = [['gitea', 'Gitea / Forgejo'], ['gitlab', 'GitLab'], ['github', 'GitHub'], ['bitbucket', 'Bitbucket']];
+    async function publishTokens(target) {
+        if (!target) return;
+        let tokens;
+        try { tokens = (await api('/api/jobs/publish/tokens')).tokens || {}; }
+        catch (error) { target.innerHTML = `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(error.message)}</p></div>`; return; }
+        const where = source => source === 'environment' ? 'set in the environment' : source === 'stored' ? 'stored' : 'not set';
+        target.innerHTML = `<div class="work-stack-tight"><span class="w-field__label">PR / MR tokens</span>
+            <small class="w-field__hint">Used when a job pushes and opens its pull or merge request. Environment variables win over stored tokens.</small>
+            ${PROVIDERS.map(([id, name]) => {
+                const t = tokens[id] || {};
+                return `<div class="work-stack-tight work-caption" role="group" aria-label="${esc(name)} token" data-publish-token="${id}">
+                    <label for="publish-token-${id}" class="work-publish-token__label">${esc(name)} <span class="work-muted">${esc(t.variable || '')} · ${where(t.source)}</span></label>
+                    <div class="w-btn-row work-publish-token__row">
+                        <input id="publish-token-${id}" type="password" autocomplete="off" class="w-input work-grow" placeholder="paste a ${esc(name)} access token">
+                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-token-save>Save</button>
+                        ${t.source === 'stored' ? '<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-token-clear>Clear</button>' : ''}
+                    </div>
+                </div>`;
+            }).join('')}</div>`;
+        target.querySelectorAll('[data-publish-token]').forEach(row => {
+            const provider = row.dataset.publishToken, input = row.querySelector('input');
+            const put = async value => {
+                try {
+                    await api('/api/jobs/publish/tokens', { method: 'PUT', body: { provider, value } });
+                    toast(value ? 'Token saved' : 'Token cleared', 'ok');
+                } catch (error) { toast(error.message, 'danger'); }
+                void publishTokens(target);
+            };
+            const save = () => { const value = input.value.trim(); input.value = ''; if (value) void put(value); };
+            row.querySelector('[data-token-save]').addEventListener('click', save);
+            // Inside the section's <form>: Enter saves the token instead of submitting the section.
+            input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+            row.querySelector('[data-token-clear]')?.addEventListener('click', () => void put(''));
+        });
     }
 
     // Build environments: Docker-in-Docker (Sysbox) status + install steps, GPUs, kept jobs.
@@ -104,13 +145,13 @@
         }
         const fmtBytes = window.MuJobEnvironments?.bytes || (n => `${n} B`);
         const dind = envStatus.docker_in_docker || {}, gpu = envStatus.gpu || {}, kept = envStatus.kept_jobs || [];
-        target.innerHTML = `<div class="row wrap small">
-                <span class="pill tone-${dind.available ? 'ok' : 'muted'}"><span aria-hidden="true">${dind.available ? '✓' : '○'}</span>Docker-in-Docker: ${dind.available ? `available (${esc(dind.engine || 'sysbox')})` : 'Sysbox not installed'}</span>
-                <span class="pill tone-${gpu.supported ? 'ok' : 'muted'}" title="${esc(gpu.reason || '')}"><span aria-hidden="true">${gpu.supported ? '✓' : '○'}</span>GPUs: ${gpu.supported ? esc(gpu.reason || 'available') : 'unavailable'}</span></div>
-            ${dind.available ? '' : `<details class="small"><summary>Install Sysbox to enable Docker = yes bindings</summary><ol>${(dind.install || []).map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>`}
-            <div class="col" style="gap:var(--s-half)"><span class="small"><strong>Kept jobs</strong> <span class="muted">(exempt from idle retention)</span></span>
-                ${kept.length ? `<ul class="plain col" style="gap:var(--s-half)">${kept.map(j => `<li class="row wrap small"><a class="mono" href="#/job/${esc(j.id)}">#${esc(String(j.id).slice(0, 8))}</a><span class="grow ellipsis" title="${esc(j.bindings || '')}">${esc(j.title || '')}${j.bindings ? ` · <span class="muted">${esc(j.bindings)}</span>` : ''}</span><span class="num muted">${esc(fmtBytes(j.bytes) || '—')}</span><button type="button" class="btn sm" data-unkeep="${esc(j.id)}">Unkeep</button></li>`).join('')}</ul>`
-                    : '<span class="small muted">No kept jobs.</span>'}</div>`;
+        target.innerHTML = `<div class="w-chip-row">
+                <span class="w-chip" data-tone="${dind.available ? 'ok' : 'neutral'}"><span class="w-chip__glyph" aria-hidden="true">${dind.available ? '✓' : '○'}</span><span>Docker-in-Docker: ${dind.available ? `available (${esc(dind.engine || 'sysbox')})` : 'Sysbox not installed'}</span></span>
+                <span class="w-chip" data-tone="${gpu.supported ? 'ok' : 'neutral'}" title="${esc(gpu.reason || '')}"><span class="w-chip__glyph" aria-hidden="true">${gpu.supported ? '✓' : '○'}</span><span>GPUs: ${gpu.supported ? esc(gpu.reason || 'available') : 'unavailable'}</span></span></div>
+            ${dind.available ? '' : `<details class="work-details"><summary>Install Sysbox to enable Docker = yes bindings</summary><ol>${(dind.install || []).map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>`}
+            <div class="work-stack-tight"><span><strong>Kept jobs</strong> <span class="work-meta">(exempt from idle retention)</span></span>
+                ${kept.length ? `<ul class="work-list">${kept.map(j => `<li class="work-toolbar"><a class="work-mono" href="#/job/${esc(j.id)}">#${esc(String(j.id).slice(0, 8))}</a><span class="work-grow work-ellipsis" title="${esc(j.bindings || '')}">${esc(j.title || '')}${j.bindings ? ` · <span class="work-meta">${esc(j.bindings)}</span>` : ''}</span><span class="work-num work-meta">${esc(fmtBytes(j.bytes) || '—')}</span><button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-unkeep="${esc(j.id)}">Unkeep</button></li>`).join('')}</ul>`
+                    : '<span class="work-meta">No kept jobs.</span>'}</div>`;
         target.querySelectorAll('[data-unkeep]').forEach(b => b.addEventListener('click', async () => {
             b.disabled = true;
             try { await api('/api/jobs/cmd', { method: 'POST', body: { type: 'keepEnvironments', job_id: b.dataset.unkeep, args: { keep: false } } }); toast('Unkept: its images follow idle retention again', 'ok'); }
@@ -212,15 +253,15 @@
         clearTimeout(toolchainTimer);
         let list = [];
         try { list = (await api('/api/jobs/toolchains')).toolchains || []; } catch (_) { target.innerHTML = ''; return; }
-        if (!list.length) { target.innerHTML = '<span class="small muted">Save a row to build its image.</span>'; return; }
-        const tone = { built: 'ok', building: 'running', failed: 'danger', missing: 'muted' };
+        if (!list.length) { target.innerHTML = '<span class="work-meta">Save a row to build its image.</span>'; return; }
+        const tone = { built: 'ok', building: 'running', failed: 'danger', missing: 'neutral' };
         const glyph = { built: '✓', building: '●', failed: '✗', missing: '○' };
-        target.innerHTML = list.map(t => `<div class="col" style="gap:2px"><div class="row wrap small">
-            <span class="pill tone-${tone[t.status] || 'muted'}"><span aria-hidden="true" class="${t.status === 'building' ? 'status-icon active' : ''}">${glyph[t.status] || '○'}</span>${esc(t.status === 'missing' ? 'not built' : t.status)}</span>
-            <span class="mono ellipsis" title="${esc(t.repository)}">${esc(t.repository)}</span><span class="muted">←</span><code>${esc(t.base_image)}</code>
-            <span class="spacer"></span>${t.status === 'building' ? '' : `<button type="button" class="btn sm" data-build="${esc(t.base_image)}">${t.status === 'built' ? 'Rebuild' : 'Build'}</button>`}</div>
-            ${t.error ? `<div class="small tone-danger">${esc(t.error)}</div>` : ''}
-            ${t.log_tail && t.status !== 'built' ? `<details><summary class="small muted">Build log</summary><pre class="work-log">${esc(t.log_tail)}</pre></details>` : ''}</div>`).join('');
+        target.innerHTML = list.map(t => `<div class="work-stack-tight"><div class="work-toolbar">
+            <span class="w-chip" data-tone="${tone[t.status] || 'neutral'}">${t.status === 'building' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-chip__glyph" aria-hidden="true">${glyph[t.status] || '○'}</span>`}<span>${esc(t.status === 'missing' ? 'not built' : t.status)}</span></span>
+            <span class="work-mono work-ellipsis" title="${esc(t.repository)}">${esc(t.repository)}</span><span class="work-meta" aria-hidden="true">←</span><code>${esc(t.base_image)}</code>
+            <span class="work-spacer"></span>${t.status === 'building' ? '' : `<button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-build="${esc(t.base_image)}">${t.status === 'built' ? 'Rebuild' : 'Build'}</button>`}</div>
+            ${t.error ? `<div class="work-del">${esc(t.error)}</div>` : ''}
+            ${t.log_tail && t.status !== 'built' ? `<details class="work-details"><summary>Build log</summary><pre class="work-log">${esc(t.log_tail)}</pre></details>` : ''}</div>`).join('');
         target.querySelectorAll('[data-build]').forEach(b => b.addEventListener('click', async () => {
             b.disabled = true;
             try { await api('/api/jobs/toolchains/build', { method: 'POST', body: { base_image: b.dataset.build } }); toast('Building toolchain image…', 'running'); }
@@ -233,11 +274,11 @@
     async function load() {
         try {
             const data = await api('/api/jobs/settings');
-            if (!data.rules) { host.innerHTML = '<p class="empty">This server has no configurable run rules.</p>'; return; }
+            if (!data.rules) { host.innerHTML = '<p class="work-empty-line">This server has no configurable run rules.</p>'; return; }
             rules = data.rules;
             if (!dirty.size) render();
         } catch (error) {
-            host.innerHTML = `<div class="error-box" role="alert">✗ Could not load run rules: ${esc(error.message)}</div>`;
+            host.innerHTML = `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">Could not load run rules: ${esc(error.message)}</p></div>`;
         }
     }
 

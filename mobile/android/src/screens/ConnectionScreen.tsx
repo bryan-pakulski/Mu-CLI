@@ -5,12 +5,11 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeContext';
 import { refreshPendingMutations, useConnectionStore } from '../store/connection';
-import { Text, Input, Button } from '../components';
-import { Field, Panel, StatusIcon } from '../components/planos';
 import { checkHealth } from '../api/client';
 import { validateBaseUrl } from '../api/urlSafety';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { fontWeights, spacing } from '../theme/tokens';
+import { Button, Field, Panel, StatusIcon, Text, TextField, WashBackground } from '../ui';
 
 export function ConnectionScreen() {
   const { colors } = useTheme();
@@ -81,15 +80,17 @@ export function ConnectionScreen() {
           // failure; never block navigation on it.
         });
       if (navigation.canGoBack()) navigation.goBack();
-      else navigation.navigate('Chat');
+      else navigation.navigate('Tabs', { screen: 'Chat' });
     } finally {
       setTesting(false);
     }
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ flex: 1, padding: spacing.base, gap: spacing.base }}>
+    <WashBackground art="dawn" height={220} testID="connection-wash">
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
+      {/* Content starts where the Dawn wash has dissolved into canvas (G§6.2.1). */}
+      <View style={{ flex: 1, padding: spacing.base, paddingTop: 150, gap: spacing.base }}>
         <Text variant="lg" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>
           Connection Settings
         </Text>
@@ -98,7 +99,7 @@ export function ConnectionScreen() {
           right={<StatusIcon status={isConnected ? 'done' : 'failed'} label={isConnected ? 'Connected' : 'Not connected'} showLabel size="xs" />}
         >
           <Field label="Server URL" hint="The mucli GUI address, e.g. http://192.168.1.20:30311. The saved host only changes after it answers.">
-            <Input
+            <TextField
               value={url}
               onChangeText={setUrl}
               placeholder="http://localhost:30311"
@@ -108,9 +109,10 @@ export function ConnectionScreen() {
             />
           </Field>
           <Button title={testing ? 'Testing…' : 'Test Connection'} onPress={testConnection} disabled={testing} />
-          {testing && <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.sm }} />}
+          {testing && <ActivityIndicator color={colors.accent.ink} style={{ marginTop: spacing.sm }} />}
         </Panel>
       </View>
     </SafeAreaView>
+    </WashBackground>
   );
 }

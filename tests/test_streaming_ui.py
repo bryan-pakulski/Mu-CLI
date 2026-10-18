@@ -102,10 +102,11 @@ def test_streaming_delta_prints_tokens_with_end_empty_string():
 def test_thinking_delta_uses_dim_italic_style():
     ui, captured = _make_rich_ui_with_recording_console()
     ui.stream_thinking_delta("planning the fix")
-    # The dim-italic style markup should be in the printed argument.
+    # The muted-italic thinking style (wash.thinking) is on the printed argument.
     matching = [t for (k, t, kw) in captured if k == "print" and "planning" in t]
     assert matching
-    assert "dim italic" in matching[0]
+    assert "wash.thinking" in matching[0]
+    _assert_thinking_style_is_muted_italic()
 
 
 def test_streaming_end_is_a_noop_outside_live():
@@ -276,8 +277,8 @@ def test_thinking_deltas_route_to_thinking_method_via_renderer():
     renderer.consume(provider, provider.stream(messages=[]))
 
     text_lines = [t for (k, t, kw) in captured if k == "print"]
-    # thinking text appears with dim italic styling
-    assert any("thinking about it" in line and "dim italic" in line for line in text_lines)
+    # thinking text appears with the muted-italic wash.thinking style
+    assert any("thinking about it" in line and "wash.thinking" in line for line in text_lines)
     # answer appears as plain stream
     assert "answer" in text_lines
 
@@ -384,6 +385,18 @@ def test_ollama_think_tags_route_to_thinking_via_streaming(monkeypatch):
     assert "</think>" not in response.text
     assert "Plain " in response.text
     assert "answer" in response.text
-    # The dim-italic thinking style fired with the inside-of-tag text.
+    # The muted-italic thinking style fired with the inside-of-tag text.
     text_lines = [t for (k, t, kw) in captured if k == "print"]
-    assert any("dim italic" in line and "internal" in line for line in text_lines)
+    assert any("wash.thinking" in line and "internal" in line for line in text_lines)
+
+
+def _assert_thinking_style_is_muted_italic():
+    """wash.thinking resolves to italic + the muted (ink-3) colour."""
+    from mu.ui.theme import mode, style, theme
+    from mu.ui.theme.palette import role_color
+
+    resolved = style("wash.thinking")
+    assert resolved.italic
+    muted = role_color("ink-3", mode(), theme())
+    if muted:
+        assert resolved.color is not None and resolved.color.name.lower() == muted.lower()

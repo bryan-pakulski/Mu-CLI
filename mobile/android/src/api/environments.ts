@@ -30,13 +30,23 @@ export interface JobBuildEnvironments {
 export interface JobEnvironmentsSummary { count: number; kept: boolean; source: string; summary: string; status: BindingStatus; bytes: number }
 
 export interface EnvironmentSourceOption { name: string; spec: string; image?: string; status?: string; gpus?: string; size?: string; description?: string; container?: string; sessions?: string[] }
+/** What a template is missing for the chosen workspace (`detect.py` over its lockfiles). */
+export interface TemplateFit { missing_egress: string[]; toolchains: string[] }
+/** A container template as a job environment (job_templates.md §3.1). */
+export interface TemplateSourceOption extends EnvironmentSourceOption {
+  size_bytes?: number; job_setup?: string[]; egress_allow?: string[];
+  /** Sent only when the request names a workspace or repository. */
+  fit?: TemplateFit | null;
+}
 export interface KeptJob { id: string; title: string; bytes: number; bindings: string }
 export interface EnvironmentsVM {
-  environments: EnvironmentSourceOption[]; templates: EnvironmentSourceOption[]; images: EnvironmentSourceOption[];
+  environments: EnvironmentSourceOption[]; templates: TemplateSourceOption[]; images: EnvironmentSourceOption[];
   docker_in_docker: { available: boolean; engine: string; message: string; install: string[] };
   gpu: { supported: boolean; reason: string; devices?: unknown[] };
   resolved: ResolvedEnvironments;
   kept_jobs?: KeptJob[];
+  /** The repository's remembered template (Settings → Toolchains row), e.g. `template:rsq-node-build`. */
+  remembered?: { source: string } | null;
 }
 
 /** What the repository asks to use/build (devcontainer.approval_request). */
@@ -66,9 +76,12 @@ export function pendingEnvironmentApprovals(resolved: ResolvedEnvironments | nul
 
 export const environmentsApi = {
   /** Sources + the set a new job for this repository/session would resolve to. */
-  get: (query: { repository?: string; session?: string; images?: boolean } = {}) =>
+  get: (query: { repository?: string; workspace?: string; session?: string; images?: boolean } = {}) =>
     api.get<EnvironmentsVM>('/api/jobs/environments', {
-      query: { repository: query.repository || undefined, session: query.session || undefined, images: query.images === false ? 'false' : undefined },
+      query: {
+        repository: query.repository || undefined, workspace: query.workspace || undefined,
+        session: query.session || undefined, images: query.images === false ? 'false' : undefined,
+      },
       timeoutMs: 15_000,
     }),
   /** Approve the image/devcontainer the repository declares (explicit human action; server re-checks the fingerprint). */
@@ -156,7 +169,7 @@ export function draftError(d: EnvironmentDraft): string | null {
   return null;
 }
 
-/** `run_in_environment` tool calls fold to `[env] command` (planos: `› [node-build] npm test`). */
+/** `run_in_environment` tool calls fold to `[env] command` (`› [node-build] npm test`). */
 export function runInEnvironmentSummary(args: unknown): string | null {
   let value = args;
   if (typeof value === 'string') {

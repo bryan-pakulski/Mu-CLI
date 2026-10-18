@@ -1,0 +1,93 @@
+/* Tabs and segmented control (G§9.4)
+ *
+ *   <div class="w-tabs" role="tablist" aria-label="…">
+ *     <button class="w-tabs__tab" role="tab" aria-selected="true">Overview</button>
+ *     <button class="w-tabs__tab" role="tab" aria-selected="false">Diff <span class="w-count">3</span></button>
+ *   </div>
+ *
+ *   <div class="w-segmented" role="group" aria-label="View">
+ *     <button class="w-segmented__option" aria-pressed="true">Unified</button>
+ *     <button class="w-segmented__option" aria-pressed="false">Split</button>
+ *   </div>
+ *
+ * Tabs: label type, 2px accent underline on the active tab; arrow-key
+ * navigation is the page's job (role=tablist). Segmented: sunken pill track,
+ * surface thumb; also accepts role=radio + aria-checked.
+ */
+.w-tabs {
+    display: flex;
+    gap: var(--wash-space-1);
+    min-width: 0;
+    border-bottom: 1px solid var(--wash-hairline);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.w-tabs__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: var(--wash-size-field);
+    margin: 0 0 -1px;
+    padding: 0 var(--wash-space-3);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    color: var(--wash-ink-3);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color var(--wash-motion-micro) var(--wash-ease-micro), border-color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-tabs__tab:hover { color: var(--wash-ink); }
+.w-tabs__tab:is([aria-selected="true"], [aria-current="page"]) {
+    border-bottom-color: var(--wash-accent-ink);
+    color: var(--wash-ink);
+}
+.w-tabs__tab:focus-visible { outline-offset: -2px; border-radius: var(--wash-radius-xs); }
+.w-tabs__panel:focus-visible { outline-offset: 4px; border-radius: var(--wash-radius-xs); }
+
+/* segmented */
+.w-segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-glass-fill-subtle);
+}
+.w-segmented__option {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 var(--wash-space-3);
+    border: 0;
+    border-radius: var(--wash-radius-pill);
+    background: transparent;
+    color: var(--wash-ink-2);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background-color var(--wash-motion-small) var(--wash-ease-small),
+        box-shadow var(--wash-motion-small) var(--wash-ease-small),
+        color var(--wash-motion-small) var(--wash-ease-small);
+}
+.w-segmented__option:hover { color: var(--wash-ink); }
+.w-segmented__option:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
+    background: var(--w-glass-fill-strong);
+    color: var(--wash-ink);
+    box-shadow: var(--wash-glass-highlight), 0 1px 2px color-mix(in srgb, var(--wash-plum) 12%, transparent), 0 0 0 1px var(--wash-glass-edge);
+}
+.w-segmented__option :is(svg, .w-icon) { width: var(--wash-size-icon-sm); height: var(--wash-size-icon-sm); }
+.w-segmented[data-size="sm"] .w-segmented__option { height: 24px; padding: 0 var(--wash-space-2); font-size: var(--wash-type-caption-size); }
+@media (pointer: coarse) {
+    .w-segmented__option { min-height: 38px; }
+}

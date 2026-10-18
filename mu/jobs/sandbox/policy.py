@@ -7,7 +7,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 IMAGE = "mucli-job-runtime:latest"
-STAGES = ("plan", "implement", "review", "checks")
+STAGES = ("plan", "implement", "review", "checks", "repair")
+# Environment repair (documentation/plans/job_templates.md §7): root inside the container with
+# every capability dropped except these, a writable rootfs, still ``no-new-privileges``.
+REPAIR_CAPS = ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "FSETID")
+# The repair container's entrypoint: run the stage worker, then hand everything it wrote in the
+# bind mounts back to the host user (``MUCLI_REPAIR_CHOWN``) before the host commits the image.
+REPAIR_WRAPPER = ('py="$0"; mod="$1"; shift; for kv in "$@"; do export "$kv"; done; '
+                  '"$py" -m "$mod" & pid=$!; trap \'kill -TERM "$pid" 2>/dev/null\' TERM INT; wait "$pid"; rc=$?; '
+                  'wait "$pid" 2>/dev/null; for d in /workspace /cache /output /harness/state; do '
+                  '[ -d "$d" ] && chown -R "$MUCLI_REPAIR_CHOWN" "$d" 2>/dev/null; done; '
+                  ': > /output/.chowned 2>/dev/null; exit $rc')
 
 # Committed dotenv templates (`.env.example`, `.env.inference.example`,
 # `.env.sample`, ...) hold placeholders, not secrets. Real dotenv files
@@ -27,7 +37,6 @@ class SandboxPolicy:
     memory: str = "8g"
     timeout: int = 900
     egress_extra: tuple[str, ...] = ()
-    max_file_bytes: int = 20 * 1024 * 1024
     # Per-stage model budget. Tokens count only NEW tokens (input that was not a
     # cache read, plus output) unless count_cache_reads is set: every turn re-sends
     # the whole context, so counting cache reads exhausts a stage after ~20 turns.
@@ -51,6 +60,10 @@ class SandboxPolicy:
     # Tracked files the secret-path pre-check may mount anyway, from the base commit's
     # `.mucli/jobs.toml` `[sandbox] allow_paths = [glob, ...]` (never from the worktree).
     allow_paths: tuple[str, ...] = ()
+    # Mount the host's job code read-only over the image's copy (build.code_overlay_mounts), so
+    # stages never run stale worker code from an image built by an older mucli
+    # (`sandbox.code_overlay`, default on).
+    code_overlay: bool = False
 
     @classmethod
     def for_stage(cls, stage: str, settings: dict | None = None):
@@ -66,19 +79,23 @@ class SandboxPolicy:
         memory = str(raw.get("memory") or "8g")
         if not re.fullmatch(r"[1-9][0-9]*[kmgKMG]?", memory):
             raise ValueError("invalid sandbox memory limit")
-        extra = raw.get("egress_extra") or []
+        # Effective rule: the saved list (an explicit [] locks jobs down), else the schema
+        # default, which allows the common package registries (job_settings PACKAGE_REGISTRY_EGRESS).
+        from ..job_settings import rule
+        extra = rule("sandbox.egress_extra", settings)
+        extra = [] if extra is None else extra
         if not isinstance(extra, list) or any(not re.fullmatch(r"(?:\*\.)?[a-zA-Z0-9.-]+", str(x)) for x in extra):
             raise ValueError("sandbox.egress_extra must contain domain names")
         return cls(
             image=image, cpu=max(.1, min(64, float(raw.get("cpu", 4)))), memory=memory,
             timeout=max(1, min(86400, int((raw.get("stage_timeout_s") or {}).get(
                 stage, 3600)))),
-            egress_extra=tuple(extra) if stage in ("implement", "checks") else (),
-            max_file_bytes=max(1, int(raw.get("max_file_bytes", 20 * 1024 * 1024))),
+            egress_extra=tuple(extra) if stage in ("implement", "checks", "repair") else (),
             max_tokens=max(1, int(raw.get("max_tokens", 50_000_000))),
             max_cost_usd=max(0, float(raw.get("max_cost_usd", 50))),
             count_cache_reads=bool(raw.get("count_cache_reads", False)),
             pids_limit=max(64, min(1_000_000, int(raw.get("pids_limit") or 4096))),
+            code_overlay=bool(raw.get("code_overlay", True)),
         )
 
 
@@ -91,17 +108,29 @@ def with_build_environment(policy: "SandboxPolicy", job, state, *, stage: str = 
     allow = tuple(dict.fromkeys((*policy.allow_paths, *repository_allow_paths(job))))
     egress = tuple(dict.fromkeys((*policy.egress_extra, *repository_egress(job, stage))))
     if not state:
+        # An environment repair of the shared runtime (job_templates.md §7) gives the job its own
+        # committed image; cleanup removes it with the job and drops this key.
+        repaired = str((getattr(job, "metadata", None) or {}).get("runtime_repair_image") or "")
+        image = repaired if repaired and re.fullmatch(r"[\w./:@-]+", repaired) else policy.image
         return replace(policy, job_id=str(getattr(job, "id", "") or ""), allow_paths=allow, egress_extra=egress,
-                       cache_dir=stage_cache_dir(job, None, stage, settings))
+                       cache_dir=stage_cache_dir(job, None, stage, settings), image=image)
     from ..job_settings import rule
     from .environments import filter_model_hosts
     from .toolchain import VENV_PYTHON
-    if stage in ("implement", "checks") and rule("environments.inherit_egress", settings):
+    if stage in ("implement", "checks", "repair") and rule("environments.inherit_egress", settings):
         egress = tuple(dict.fromkeys((*egress, *filter_model_hosts(state.get("egress_allow") or []))))
     gpus = str(state.get("gpus") or "") if rule("sandbox.gpus_enabled", settings) else ""
     return replace(policy, image=str(state["job_image"]), python=str(state.get("python") or VENV_PYTHON),
                    cache_dir=stage_cache_dir(job, state, stage, settings), egress_extra=egress,
                    job_id=str(job.id), binding=str(state["name"]), gpus=gpus, allow_paths=allow)
+
+
+def guard_policy(job, stage: str) -> "SandboxPolicy":
+    """The policy a host guard checks the worktree against: the stage's, plus the base commit's
+    ``[sandbox] allow_paths``."""
+    from dataclasses import replace
+    base = SandboxPolicy.for_stage(stage)
+    return replace(base, allow_paths=tuple(dict.fromkeys((*base.allow_paths, *repository_allow_paths(job)))))
 
 
 def cache_toolchain_key(state) -> str:
@@ -147,15 +176,29 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
     Only the disposable output directory is writable apart from implement's
     worktree. The gitdir crosses the boundary read-only (see ``git_vcs_mounts``);
     credentials, remotes and hooks never do.
+
+    ``repair`` (environment repair, job_templates.md §7) differs only where package managers
+    need it: root inside the container with ``--cap-drop ALL`` plus :data:`REPAIR_CAPS`, a
+    writable rootfs, and an entrypoint that chowns the bind mounts back to the host user when
+    the worker exits. Still ``no-new-privileges``, network none (egress bridge), no Docker
+    socket, no GPUs, no credentials.
     """
     if stage not in STAGES:
         raise ValueError("unknown stage")
     from .cli import bind_mount, is_podman, selinux_enforcing, user_args
     podman, selinux = is_podman(), selinux_enforcing()
+    repair = stage == "repair"
+    if repair and (policy.docker_socket or policy.gpus):
+        raise ValueError("the repair container gets no Docker socket and no GPUs")
+    caps = [arg for cap in REPAIR_CAPS for arg in ("--cap-add", cap)] if repair else []
+    users = ["--user", "0:0"] if repair else user_args(podman=podman)
     args = ["create", "--name", name, "--pull", "never", "--network", "none",
-            "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-            "--read-only", "--pids-limit", str(int(policy.pids_limit)), "--cpus", str(policy.cpu),
-            "--memory", policy.memory, *user_args(podman=podman),
+            "--cap-drop", "ALL", *caps, "--security-opt", "no-new-privileges:true",
+            *([] if repair else ["--read-only"]), "--pids-limit", str(int(policy.pids_limit)), "--cpus", str(policy.cpu),
+            "--memory", policy.memory, *users,
+            # No core dumps: a crashing test or tool would otherwise drop a multi-MB core.<pid>
+            # into the worktree, which the changed-file size guard then fails the stage on.
+            "--ulimit", "core=0",
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
             "--workdir", "/workspace", "--label", f"io.mucli.role={role}"]
     if policy.job_id:
@@ -166,12 +209,15 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
         args += ["--label", f"io.mucli.binding={policy.binding}"]
     if policy.gpus:
         args += ["--gpus", gpus_arg(policy.gpus), "--label", f"io.mucli.gpus={policy.gpus}"]
-    mounts = [(workspace, "/workspace", stage not in ("implement", "checks")),
+    mounts = [(workspace, "/workspace", stage not in ("implement", "checks", "repair")),
               (inputs, "/artifacts", True), (output, "/output", False), (relay, "/relay", True)]
     if policy.cache_dir:
         mounts.append((policy.cache_dir, "/cache", False))
     if policy.docker_socket:
         mounts.append((policy.docker_socket, "/var/run/docker.sock", False))
+    if policy.code_overlay:
+        from .build import code_overlay_mounts
+        mounts += [(src, dst, True) for src, dst in code_overlay_mounts()]
     # Claude Code / Codex stages: the host CLI (read-only), the copied credential (read-only)
     # and the CLI's session store. Only these fixed destinations are accepted.
     for src, dst, readonly in harness_mounts:
@@ -219,7 +265,31 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
         args += ["-e", "DOCKER_HOST=unix:///var/run/docker.sock"]
     if module not in ("mu.jobs.sandbox.worker", "mu.jobs.sandbox.harness_worker"):
         raise ValueError(f"unsupported stage worker {module}")
+    if repair:
+        # The stage environment travels as wrapper arguments, not ``-e``: the host commits this
+        # container as an image, and ``docker commit`` keeps the container's Env (the relay token,
+        # stage paths) but its entrypoint/command are replaced by the base image's.
+        # IS_SANDBOX: Claude Code refuses to skip permissions as root unless told it is sandboxed.
+        env = ["IS_SANDBOX=1", f"MUCLI_REPAIR_CHOWN={repair_owner(podman=podman)}"]
+        kept: list[str] = []
+        index = 0
+        while index < len(args):
+            if args[index] == "-e" and index + 1 < len(args):
+                env.append(args[index + 1])
+                index += 2
+                continue
+            kept.append(args[index])
+            index += 1
+        return kept + ["--entrypoint", "/bin/sh", policy.image, "-c", REPAIR_WRAPPER, policy.python, module, *env]
     return args + ["--entrypoint", policy.python, policy.image, "-m", module]
+
+
+def repair_owner(*, podman: bool = False) -> str:
+    """``uid:gid`` the repair container chowns the bind mounts to: the host user, or ``0:0`` under
+    rootless Podman (where the container's root already maps to the host user)."""
+    if podman and os.getuid() != 0:
+        return "0:0"
+    return f"{os.getuid()}:{os.getgid()}"
 
 
 # In-container layout of the read-only git metadata (see git_vcs_mounts).
@@ -465,7 +535,7 @@ def repository_egress(job, stage: str) -> tuple[str, ...]:
     """``[sandbox] egress`` from the base commit: implement and checks only (plan and review
     reach nothing but the model relay), and only once the user approved it for the repository
     (unapproved, it is not applied; see ``repo_config.egress_approval``)."""
-    if stage not in ("implement", "checks") or not str(getattr(job, "base_sha", "") or ""):
+    if stage not in ("implement", "checks", "repair") or not str(getattr(job, "base_sha", "") or ""):
         return ()
     from .repo_config import approved_repository_egress
     return approved_repository_egress(job)
@@ -482,6 +552,12 @@ def _allowed(relative: str, allow_paths, *, is_dir: bool = False) -> bool:
     return False
 
 
+class SandboxGuardError(ValueError):
+    """The worktree holds something the host must not mount, commit or push (a secret file, a
+    secret in the diff, an escaping path or symlink, an unapproved CI workflow). The job parks
+    for a human (attention ``unsafe_action``) instead of failing."""
+
+
 def workspace_precheck(workspace: str, *, allow_paths=()) -> None:
     """Fail closed before a worktree is mounted: no escaping symlinks, no secret files.
 
@@ -489,7 +565,7 @@ def workspace_precheck(workspace: str, *, allow_paths=()) -> None:
     gitignored untracked paths and vendor/build trees without tracked files. A tracked
     denied file may be mounted when the base commit's ``.mucli/jobs.toml`` lists it in
     ``[sandbox] allow_paths``."""
-    from mu.security.secret_paths import is_denied_path
+    from mu.security.secret_paths import is_denied_path, is_test_fixture
     root = Path(workspace)
     real_root = root.resolve()
     view = _git_view(workspace)
@@ -511,29 +587,29 @@ def workspace_precheck(workspace: str, *, allow_paths=()) -> None:
             if relative in ignored:
                 continue
             if path.is_symlink() and not path.resolve().is_relative_to(real_root):
-                raise ValueError(f"workspace symlink escapes the sandbox: {relative}")
-            if is_denied_path(str(path))[0] and not is_env_template(filename):
+                raise SandboxGuardError(f"workspace symlink escapes the sandbox: {relative}")
+            if is_denied_path(str(path))[0] and not is_env_template(filename) and not is_test_fixture(relative):
                 is_dir = relative in tracked_dirs
                 if (relative in tracked or is_dir) and _allowed(relative, allow_paths, is_dir=is_dir):
                     continue
                 # Fail closed: an arbitrary shell could bypass a tool-level
                 # denylist if secret files were mounted with the workspace.
-                raise ValueError(f"secret path must be removed from the job worktree before sandboxing: {relative} "
-                                 "(or, if it is a test fixture, list it under [sandbox] allow_paths in the "
-                                 "repository's .mucli/jobs.toml)")
+                raise SandboxGuardError(
+                    f"secret path must be removed from the job worktree before sandboxing: {relative} (test "
+                    "fixtures under a tests/, fixtures/ or testdata/ directory are allowed; elsewhere list it "
+                    "under [sandbox] allow_paths in the repository's .mucli/jobs.toml)")
 
 
-def validate_changes(workspace: str, paths: list[str], *, allowed_workflows=(),
-                     max_file_bytes: int = 20 * 1024 * 1024) -> None:
+def validate_changes(workspace: str, paths: list[str], *, allowed_workflows=()) -> None:
+    """Changed paths the host may commit: inside the worktree, not .git, and CI workflows only
+    when the approved plan lists them. File size is not limited (the secret scan streams big files)."""
     root = Path(workspace).resolve()
     for name in paths:
         relative = Path(name)
         if relative.is_absolute() or ".." in relative.parts or ".git" in relative.parts:
-            raise ValueError(f"unsafe changed path: {name}")
+            raise SandboxGuardError(f"unsafe changed path: {name}")
         if name.startswith(".github/workflows/") and name not in allowed_workflows:
-            raise ValueError(f"workflow change is not in the approved plan: {name}")
+            raise SandboxGuardError(f"workflow change is not in the approved plan: {name}")
         path = root / relative
         if not path.resolve().is_relative_to(root):
-            raise ValueError(f"changed path escapes the worktree: {name}")
-        if path.is_file() and path.stat().st_size > max_file_bytes:
-            raise ValueError(f"changed file exceeds sandbox size limit: {name}")
+            raise SandboxGuardError(f"changed path escapes the worktree: {name}")

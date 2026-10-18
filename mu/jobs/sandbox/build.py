@@ -14,6 +14,14 @@ SOURCE_DIRS = ("mu", "providers", "utils", "prompts", "documentation")
 CODE_DIRS = ("mu", "providers", "utils", "prompts")
 CODE_FILES = ("mucli.py", "requirements.txt", "config/model_pricing.json", "mu/jobs/sandbox/Dockerfile")
 SOURCE_LABEL = "io.mucli.source"
+# What only a rebuild can bring: Python dependencies and the image recipe. Job code itself is
+# mounted over the baked copy at stage start (``code_overlay_mounts``).
+DEPS_FILES = ("requirements.txt", "mu/jobs/sandbox/Dockerfile")
+DEPS_LABEL = "io.mucli.deps"
+# The host's job code, mounted read-only over the image's /opt/mucli copy in every stage
+# container, so a stage always runs the code the host runs, whatever mucli version built the
+# image (a template or repaired image built before an upgrade otherwise runs old worker code).
+OVERLAY_ENTRIES = ("mu", "providers", "utils", "prompts", "mucli.py", "config/model_pricing.json")
 IMAGE = "mucli-job-runtime:latest"
 
 
@@ -37,6 +45,44 @@ def source_digest(source: Path | None = None) -> str:
     return digest.hexdigest()[:16]
 
 
+def deps_digest(source: Path | None = None) -> str:
+    """Fingerprint of what the code overlay cannot replace (dependencies, the image recipe)."""
+    source = source or repo_root()
+    digest = hashlib.sha256()
+    for name in DEPS_FILES:
+        path = source / name
+        if path.is_file():
+            digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:16]
+
+
+_OVERLAY_CACHE: dict = {}
+
+
+def code_overlay_mounts(source: Path | None = None) -> list[tuple[str, str]]:
+    """``[(host path, container path)]`` read-only mounts of the host's job code over /opt/mucli.
+
+    Empty when the source tree holds a file the secret-path policy denies (the image build
+    leaves such files out, so the overlay must not mount them); the stage then runs the code
+    baked into its image. Cached per code fingerprint."""
+    source = source or repo_root()
+    entries = {}
+    for name in OVERLAY_ENTRIES:
+        path = source / name
+        if path.exists() and not path.is_symlink():
+            entries[name] = [path] if path.is_file() else [p for p in path.rglob("*") if "__pycache__" not in p.parts]
+    # Every mounted path's name is part of the key: a secret file added anywhere is noticed.
+    key = (str(source), tuple(str(p) for files in entries.values() for p in files))
+    if key in _OVERLAY_CACHE:
+        return list(_OVERLAY_CACHE[key])
+    from mu.security.secret_paths import is_denied_path
+    denied = any(p.is_symlink() or is_denied_path(str(p))[0] for files in entries.values() for p in files)
+    mounts = [(str((source / name).resolve()), f"/opt/mucli/{name}") for name in entries]
+    _OVERLAY_CACHE.clear()  # one tree per host process; old keys only grow memory
+    _OVERLAY_CACHE[key] = [] if denied else mounts
+    return list(_OVERLAY_CACHE[key])
+
+
 def image_digest(tag: str = IMAGE) -> str | None:
     """The source fingerprint label of a built image ("" = built before labels; None = missing)."""
     from .cli import container_cli
@@ -54,7 +100,8 @@ def build_image(tag: str = IMAGE, log=None) -> None:
         source = repo_root()
         prepare_context(source, Path(tmp))
         from .cli import container_cli
-        command = [container_cli(), "build", "--label", f"{SOURCE_LABEL}={source_digest(source)}", "-t", tag, tmp]
+        command = [container_cli(), "build", "--label", f"{SOURCE_LABEL}={source_digest(source)}",
+                   "--label", f"{DEPS_LABEL}={deps_digest(source)}", "-t", tag, tmp]
         if log is None:
             subprocess.run(command, check=True)
             return

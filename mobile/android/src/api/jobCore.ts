@@ -67,8 +67,13 @@ export interface EnvironmentApproval {
 }
 /** Current worktree diff against the base commit while a job is active. */
 export interface LiveDiff { patch: string; files: string[]; untracked: string[]; untracked_total?: number; truncated: boolean; base_sha: string; generated_at: number; bytes: number }
+/** Why a check could not run (missing tool, project tool resolved globally, …) and the fix. */
+export interface CheckUnrunnable { tool: string; cause: string; hint: string }
 export interface CheckSuite {
   suite: string; command: string; passed: boolean; stdout: string; stderr: string; preexisting_failures: string[];
+  /** `unrunnable` when the check never really ran (job_templates.md §5); never triaged as pre-existing. */
+  status?: 'passed' | 'failed' | 'unrunnable' | string;
+  unrunnable?: CheckUnrunnable | null;
   duration_ms?: number;
   /** Build environment (binding name) that ran the suite; '' = shared runtime image. */
   environment?: string;
@@ -78,7 +83,19 @@ export interface CheckRun {
   run: number; passed: boolean; head_sha: string;
   new_failures: number | string[]; preexisting_failures: number | string[];
   suites: CheckSuite[];
-  started_at?: number; duration_ms?: number; trigger?: 'auto' | 'recheck' | 'fix' | string; finished_at?: number;
+  started_at?: number; duration_ms?: number; trigger?: 'auto' | 'recheck' | 'fix' | 'repair' | string; finished_at?: number;
+  /** Verification summary: false when any check was unrunnable (the run is unverified, not failed). */
+  verified?: boolean;
+  /** Number of unrunnable checks in the run. */
+  unrunnable?: number;
+}
+/** One environment repair attempt (job_templates.md §7): an unattended repair stage made checks runnable. */
+export interface EnvironmentRepair {
+  attempt: number; binding: string; source?: string; template?: string;
+  trigger_suites?: Array<{ suite?: string; command?: string; kind?: string; tool?: string; cause?: string }>;
+  commands?: string[]; project_commands?: string[]; image?: string; cost_usd?: number;
+  outcome: 'running' | 'committed' | 'repaired' | 'unresolved' | 'failed' | 'timed_out' | 'budget_exhausted' | 'error' | string;
+  error?: string; reverted_files?: string[]; agent?: string; transcript?: string; started_at?: number; finished_at?: number | null;
 }
 /** `suite` is the check-suite name (same key as history); the JUnit classname is in `classname`. */
 export interface FailedCase { run: number; suite: string; name: string; id: string; message: string; new: boolean; classname?: string }
@@ -91,7 +108,9 @@ export interface JobVM extends JobSummary {
   diff?: { patch: string | null; viewed?: string[]; live?: LiveDiff | null };
   budget?: JobBudget;
   environment_approval?: EnvironmentApproval | null;
-  checks?: { live?: AuditEvent[]; runs: CheckRun[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]> };
+  /** Jobs run unattended: a failed template job setup is a warning (the job continued). */
+  setup_warning?: { binding: string; command?: string; index?: number; exit_code?: number | null; template?: string; message?: string; error?: string } | null;
+  checks?: { live?: AuditEvent[]; runs: CheckRun[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]>; repairs?: EnvironmentRepair[] };
   session?: { session_name?: string; approval?: { tool_name: string; tool_args: Record<string, unknown> | string; reason?: string; detail?: string } | null; live: boolean; events: AuditEvent[]; stages: Record<string, Array<{ role: string; parts: TranscriptPart[] }>> };
   costs?: { total_usd: number; by_stage: Record<string, number>; events: AuditEvent[] };
   /** Per-binding build environment state (job environments panel). */
@@ -106,6 +125,9 @@ export interface CommandResult { ok: boolean; parts: JobPart[]; data: { version?
 export interface PushPreview {
   title: string; body: string; branch: string; base: string; mode: string; remote: string; draft: boolean;
   requires_override: boolean; verdict: string; head_sha: string; reason: string;
+  /** PR/MR token the push will use (never the value); source '' means it is not set. */
+  token?: { provider: string; variable: string; source: '' | 'environment' | 'stored' } | null;
+  provider?: string;
 }
 /** CONTRACT §2 push args. */
 export interface PushArgs { pr_title?: string; pr_body?: string; draft?: boolean; override_reason?: string }

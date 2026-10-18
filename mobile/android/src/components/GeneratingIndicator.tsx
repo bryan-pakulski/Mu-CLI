@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { useMotionPreference } from '../hooks/useMotionPreference';
 import { easings, motion, radii, spacing } from '../theme/tokens';
+import { Text } from '../ui';
 
 export type GeneratingIndicatorProps = {
   label?: string;
@@ -52,11 +52,11 @@ export function GeneratingIndicator({ label = 'Thinking' }: GeneratingIndicatorP
         {dots.map((opacity, index) => (
           <Animated.View
             key={index}
-            style={[styles.dot, { backgroundColor: colors.running, opacity }]}
+            style={[styles.dot, { backgroundColor: colors.running.ink, opacity }]}
           />
         ))}
       </View>
-      <Text variant="sm" style={{ color: colors.textDim, flexShrink: 1 }}>{label}</Text>
+      <Text variant="sm" style={{ color: colors.ink3, flexShrink: 1 }}>{label}</Text>
     </View>
   );
 }

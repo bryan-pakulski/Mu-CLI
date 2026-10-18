@@ -1,0 +1,208 @@
+/* Composer (G§9.6) — the most-used control.
+ *
+ *   <div class="w-composer" data-mode-tint="feature" [data-plan] [data-busy]>
+ *     <div class="w-composer__attachments">…removable .w-chip…</div>
+ *     <form class="w-composer__form">
+ *       <div class="w-composer__input">
+ *         <div class="w-composer__slash" role="listbox">
+ *           <div class="w-composer__slash-item" role="option" aria-selected="true"><span class="mono">/help</span><span>…</span></div>
+ *         </div>
+ *         <textarea class="w-composer__textarea">…</textarea>       body-lg, auto-grow
+ *       </div>
+ *       <div class="w-composer__bar">
+ *         (+)  [◉ Feature ▾]  [Effort ▾]  [Plan]   ……   ⚙  🎤  (↑)
+ *         .w-composer__mode-dot  .w-composer__effort  .w-composer__spacer
+ *         .w-composer__send (36px ink circle)  /  .w-composer__stop (secondary, danger square)
+ *       </div>
+ *     </form>
+ *     <div class="w-composer__hint">…</div>
+ *   </div>
+ *
+ * Surface, radius-lg, level 1; the accent focus halo on focus-within. A 3px
+ * wash glow along the top edge takes the mode pigment. Plan mode adds a
+ * lilac dashed outline.
+ */
+.w-composer {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-2);
+    width: min(100%, calc(var(--wash-size-reading) + var(--wash-space-6) * 2));
+    margin: 0 auto;
+    padding: 0 var(--wash-space-6) var(--wash-space-4);
+}
+.w-composer__form {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--wash-space-1);
+    padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-2);
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-lg);
+    background: var(--w-glass-fill);
+    box-shadow:
+        inset 0 3px 0 -1px color-mix(in srgb, var(--w-mode-pigment, var(--wash-accent-pigment)) 70%, transparent),
+        var(--w-glass-lift);
+    transition: box-shadow var(--wash-motion-small) var(--wash-ease-small), border-color var(--wash-motion-small) var(--wash-ease-small);
+}
+.w-composer__form:focus-within {
+    border-color: var(--wash-accent-ink);
+    box-shadow:
+        inset 0 3px 0 -1px color-mix(in srgb, var(--w-mode-pigment, var(--wash-accent-pigment)) 70%, transparent),
+        0 0 0 3px var(--wash-accent-wash);
+}
+.w-composer[data-plan] .w-composer__form {
+    outline: 1.5px dashed var(--wash-plan-ink);
+    outline-offset: 2px;
+}
+.w-composer__input { position: relative; min-width: 0; }
+.w-composer__textarea {
+    display: block;
+    width: 100%;
+    min-height: 28px;
+    max-height: calc(var(--wash-type-body-lg-line) * 12);
+    padding: var(--wash-space-1);
+    border: 0;
+    background: transparent;
+    color: var(--wash-ink);
+    font: inherit;
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+    resize: none;
+    box-shadow: none;
+}
+.w-composer__textarea::placeholder { color: var(--wash-ink-3); }
+.w-composer__textarea:focus,
+.w-composer__textarea:focus-visible { outline: none; box-shadow: none; }
+
+.w-composer__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.w-composer__spacer { flex: 1 1 auto; }
+.w-composer__mode-dot {
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--w-mode-pigment, var(--wash-accent-pigment));
+}
+.w-composer__effort { position: relative; flex: none; gap: 4px; width: max-content; max-width: none; cursor: pointer; }
+.w-composer__effort > .w-composer__effort-label { flex: none; overflow: visible; color: var(--wash-ink-3); }
+.w-composer__effort-select {
+    appearance: none;
+    -webkit-appearance: none;
+    height: 100%;
+    margin: 0;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--wash-ink);
+    font: inherit;
+    font-weight: var(--wash-type-label-weight);
+    cursor: pointer;
+    box-shadow: none;
+}
+.w-composer__effort-select:focus-visible { outline: none; box-shadow: none; }
+.w-composer__effort:focus-within { outline: 2px solid var(--wash-accent-ink); outline-offset: 2px; }
+
+.w-composer__send,
+.w-composer__stop {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.w-composer__send {
+    border: 0;
+    background: var(--wash-ink);
+    color: var(--wash-on-ink);
+    transition: transform var(--wash-motion-micro) var(--wash-ease-micro), opacity var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-composer__send:hover:not(:disabled) { background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas)); }
+.w-composer__send:active:not(:disabled) { transform: scale(0.96); }
+.w-composer__send:disabled { opacity: 0.4; cursor: not-allowed; }
+.w-composer__stop-glyph {
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--wash-danger-ink);
+}
+
+/* slash-command menu: a level-2 popover above the input */
+.w-composer__slash {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + var(--wash-space-3));
+    z-index: var(--wash-z-popover);
+    max-height: min(320px, 46vh);
+    padding: 6px;
+    overflow-y: auto;
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-sm);
+    background: var(--w-glass-fill-strong);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    box-shadow: var(--w-glass-lift-2);
+}
+.w-composer__slash-item {
+    display: flex;
+    align-items: baseline;
+    gap: var(--wash-space-3);
+    min-height: 32px;
+    padding: 6px var(--wash-space-2);
+    border-radius: var(--wash-radius-xs);
+    color: var(--wash-ink);
+    cursor: pointer;
+}
+.w-composer__slash-item > :first-child { flex: none; font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
+.w-composer__slash-item > :nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-composer__slash-item:hover { background: var(--w-glass-fill-subtle); }
+.w-composer__slash-item[aria-selected="true"] { background: var(--wash-accent-wash); }
+
+.w-composer__attachments { display: flex; flex-wrap: wrap; gap: var(--wash-space-1); }
+.w-composer__hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--wash-space-3);
+    flex-wrap: wrap;
+    min-height: 20px;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
+.w-composer__hint > span { display: inline-flex; align-items: center; gap: var(--wash-space-2); }
+.w-composer__hint-attention { color: var(--wash-attention-ink); }
+
+@media (width < 840px) {
+    .w-composer { padding: 0 var(--wash-space-3) var(--wash-space-3); }
+}
+@media (width < 600px) {
+    .w-composer__effort { display: none; }
+    .w-composer__bar { flex-wrap: nowrap; gap: var(--wash-space-1); }
+}
+@media (pointer: coarse) {
+    .w-composer__send,
+    .w-composer__stop { width: 44px; height: 44px; }
+}

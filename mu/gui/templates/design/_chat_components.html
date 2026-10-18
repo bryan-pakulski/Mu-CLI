@@ -1,0 +1,189 @@
+{#- Gallery states for the chat signature components (G§9.6–§9.18), rendered
+    once per theme column. Static markup mirrors what the live templates emit;
+    [data-g-*] blocks are filled by static/js/wash/gallery_chat.js through the
+    real renderers (renderToolCards, renderDiffHTML). No ids here: the macro
+    renders twice. The live replay of a whole conversation through
+    routeEvent() is the full-width "Chat" section in gallery.html. -#}
+{%- import "macros/wash.html" as w -%}
+
+{%- macro g_section(id, eyebrow, title, theme) -%}
+<section class="g-section" aria-labelledby="g-{{ id }}-{{ theme }}">
+    <header class="g-section__head">
+        <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>{{ eyebrow }}</span>
+        <h2 class="g-section__title" id="g-{{ id }}-{{ theme }}">{{ title }}</h2>
+    </header>
+    {{ caller() }}
+</section>
+{%- endmacro -%}
+
+{%- macro composer(tint, placeholder, plan=False, busy=False) -%}
+<div class="w-composer g-composer" data-mode-tint="{{ tint }}"{% if plan %} data-plan{% endif %}{% if busy %} data-busy{% endif %}>
+    <div class="w-composer__form">
+        <div class="w-composer__input"><textarea class="w-composer__textarea" rows="1" placeholder="{{ placeholder }}" aria-label="Composer sample"></textarea></div>
+        <div class="w-composer__bar">
+            {{ w.btn("Attach a file", variant="icon", icon="plus") }}
+            <span class="w-chip" data-variant="meta"><span class="w-composer__mode-dot" aria-hidden="true"></span><span>{{ tint | capitalize }}</span><span class="w-chip__caret" aria-hidden="true">▾</span></span>
+            <span class="w-chip w-composer__effort" data-variant="meta"><span class="w-composer__effort-label">Effort</span><span>high</span><span class="w-chip__caret" aria-hidden="true">▾</span></span>
+            {%- if plan %}<span class="w-chip" data-tone="plan">Plan</span>{% endif %}
+            <span class="w-composer__spacer"></span>
+            {%- if busy %}
+            <button type="button" class="w-composer__stop w-btn" data-variant="secondary" aria-label="Stop generating"><span class="w-composer__stop-glyph" aria-hidden="true"></span></button>
+            {%- else %}
+            <button type="button" class="w-composer__send" aria-label="Send">{{ w.icon("arrow-up") }}</button>
+            {%- endif %}
+        </div>
+    </div>
+</div>
+{%- endmacro -%}
+
+{%- macro chat_components(theme) -%}
+{# ------------------------------------------------------------ composer #}
+{% call g_section("composer", "Composer", "Mode glow, plan outline, Send and Stop", theme) %}
+<div class="g-stack">
+    {{ composer("feature", "Ask μcli anything…") }}
+    <div class="w-composer g-composer" data-mode-tint="default">
+        <div class="w-composer__form">
+            <div class="w-composer__input">
+                <div class="w-composer__slash g-static" role="listbox" aria-label="Commands sample">
+                    <div class="w-composer__slash-item" role="option" aria-selected="true"><span>/help</span><span>List commands</span></div>
+                    <div class="w-composer__slash-item" role="option" aria-selected="false"><span>/plan</span><span>Read-only planning mode</span></div>
+                    <div class="w-composer__slash-item" role="option" aria-selected="false"><span>/mode</span><span>Switch the agent mode</span></div>
+                </div>
+                <textarea class="w-composer__textarea" rows="1" aria-label="Composer with slash menu">/</textarea>
+            </div>
+            <div class="w-composer__bar"><span class="w-chip" data-variant="meta"><span class="w-composer__mode-dot" aria-hidden="true"></span><span>Default</span></span><span class="w-composer__spacer"></span><button type="button" class="w-composer__send" aria-label="Send">{{ w.icon("arrow-up") }}</button></div>
+        </div>
+    </div>
+    {{ composer("research", "Plan mode — read-only. Ask for a plan…", plan=True) }}
+    {{ composer("debug", "Working…", busy=True) }}
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ messages #}
+{% call g_section("messages", "Messages", "User, assistant, thinking, worked, breadcrumbs", theme) %}
+<div class="w-transcript g-transcript" data-mode-tint="feature">
+    <div class="w-msg" data-role="user"><div class="w-msg__body">Move token refresh into the auth middleware and add tests.</div></div>
+    <div class="w-msg" data-role="assistant" data-streaming>
+        <div class="w-msg__head"><span class="w-mark w-msg__mark" data-state="working"></span><span class="w-msg__model">claude-opus-5-5</span></div>
+        <div class="w-msg__body w-markdown"><p>I'll read the middleware first, then move <code>refresh_token()</code> behind <code>AuthMiddleware</code>.</p>
+            <div class="w-code" data-lang="python"><div class="w-code__head"><span class="w-code__lang">python</span><button class="w-code__copy" type="button" aria-label="Copy code">{{ w.icon("copy", size="sm") }}<span class="w-code__copy-label">Copy</span></button></div><pre class="w-code__pre"><code class="hljs language-python"><span class="hljs-keyword">def</span> <span class="hljs-title function_">refresh_token</span>(<span class="hljs-params">req</span>):
+    <span class="hljs-keyword">return</span> req.headers.get(<span class="hljs-string">"Authorization"</span>)  <span class="hljs-comment"># 1 call site</span></code></pre></div>
+            <blockquote><p>Blockquotes are a subtle glass inset in italic, with no side rule.</p></blockquote>
+        </div>
+    </div>
+    <div class="w-thinking" data-live><button type="button" class="w-thinking__head" aria-expanded="false"><span class="w-inkdrop" data-size="sm" data-tone="neutral"></span><span class="w-thinking__label">Thinking</span></button></div>
+    <div class="w-thinking" data-open><button type="button" class="w-thinking__head" aria-expanded="true"><span class="w-thinking__caret" aria-hidden="true">›</span><span class="w-thinking__label">Thought</span><span class="w-thinking__meta">21 words</span></button><div class="w-thinking__body">The helper is called from three places; moving it into the middleware lets routes drop their checks.</div></div>
+    <div class="w-worked"><div class="w-worked__row" role="button" tabindex="0" aria-expanded="false">{{ w.icon("sparkles", size="sm") }}<span class="w-worked__label">Worked for 2m 4s · 14 steps</span><span class="w-worked__meta">38.2k tokens</span><span class="w-worked__chevron" aria-hidden="true">›</span></div></div>
+    <div class="w-resolved" data-outcome="approved"><div class="w-resolved__line"><span class="w-resolved__glyph" aria-hidden="true">✓</span><span class="w-resolved__verb">Approved</span><span class="w-resolved__subject">write_file routes.py</span><time class="w-resolved__time">14:02</time></div></div>
+    <div class="w-resolved" data-outcome="auto"><div class="w-resolved__line"><span class="w-resolved__glyph" aria-hidden="true">✓</span><span class="w-resolved__verb">Auto-approved</span><span class="w-resolved__subject">bash pytest</span><span class="w-chip w-resolved__auto" data-tone="caution">auto</span><time class="w-resolved__time">14:03</time></div></div>
+    <div class="w-resolved" data-outcome="denied"><div class="w-resolved__line"><span class="w-resolved__glyph" aria-hidden="true">✗</span><span class="w-resolved__verb">Denied</span><span class="w-resolved__subject">bash git push</span><time class="w-resolved__time">14:05</time></div></div>
+    <div class="w-msg" data-role="info"><span class="w-msg__glyph" aria-hidden="true">●</span><div class="w-msg__body">Another μcli process updated this session — reloading history.</div></div>
+    <div class="w-msg" data-role="error"><span class="w-msg__glyph" aria-hidden="true">✗</span><div class="w-msg__body">Couldn't reach Ollama at localhost:11434. Is it running?</div></div>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ tool cards #}
+{% call g_section("toolcards", "Tool card", "Running, done → neutral, grouped, failed, blocked, expanded", theme) %}
+<div class="w-trace" data-g-toolcards="states"></div>
+<div class="w-trace" data-g-toolcards="expanded"></div>
+{% endcall %}
+
+{# ------------------------------------------------------------ approval #}
+{% call g_section("approval", "Approval card", "Needs you · danger escalation · question", theme) %}
+<div class="g-stack">
+    <section class="w-approval" data-tone="attention" role="group" aria-labelledby="g-ap-{{ theme }}-1">
+        <header class="w-approval__head">
+            <span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Needs you</span></span>
+            <h3 class="w-approval__title" id="g-ap-{{ theme }}-1" tabindex="-1">Permission to edit middleware.py</h3>
+            <nav class="w-approval__queue" aria-label="Pending prompts sample">{{ w.btn("Previous prompt", variant="icon", icon="chevron-left", size="sm") }}<span class="w-approval__count">1 of 3</span>{{ w.btn("Next prompt", variant="icon", icon="chevron-right", size="sm") }}</nav>
+        </header>
+        <div class="w-approval__body">
+            <div class="w-approval__target"><span class="w-approval__toolname">write_file</span><span class="w-approval__path">src/auth/middleware.py</span><span class="w-approval__stat"><span class="w-diff__added">+2</span><span class="w-diff__removed">−2</span></span></div>
+            <div class="w-approval__preview" data-g-diff="approval"></div>
+            <footer class="w-approval__foot">
+                <div class="w-approval__meta"><span class="w-approval__risk" data-tone="attention">{{ w.icon("alert-triangle", size="sm") }}<span>Modifies files</span></span><label class="w-check w-approval__remember"><input class="w-check__input" type="checkbox"><span>Always allow write_file this session</span></label></div>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary">Deny</button><button type="button" class="w-btn" data-variant="primary"><span aria-hidden="true">✓</span><span>Approve</span><kbd class="w-keycap" aria-hidden="true">⏎</kbd></button></div>
+            </footer>
+        </div>
+    </section>
+    <section class="w-approval" data-tone="danger" role="group" aria-labelledby="g-ap-{{ theme }}-2">
+        <header class="w-approval__head">
+            <span class="w-chip" data-tone="danger"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Needs you</span></span>
+            <h3 class="w-approval__title" id="g-ap-{{ theme }}-2" tabindex="-1">Run <code>git push --force origin main</code></h3>
+        </header>
+        <div class="w-approval__body">
+            <div class="w-approval__target"><span class="w-approval__toolname">bash</span></div>
+            <pre class="w-approval__command">$ git push --force origin main</pre>
+            <footer class="w-approval__foot">
+                <div class="w-approval__meta"><span class="w-approval__risk" data-tone="danger">{{ w.icon("alert-triangle", size="sm") }}<span>High-risk action</span></span><label class="w-check w-approval__remember"><input class="w-check__input" type="checkbox"><span>Always allow bash this session</span></label></div>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="danger">Deny</button><button type="button" class="w-btn" data-variant="primary"><span aria-hidden="true">✓</span><span>Approve</span><kbd class="w-keycap" aria-hidden="true">⏎</kbd></button></div>
+            </footer>
+        </div>
+    </section>
+    <section class="w-approval" data-tone="accent" role="group" aria-labelledby="g-ap-{{ theme }}-3">
+        <header class="w-approval__head">
+            <span class="w-chip" data-tone="accent"><span class="w-chip__glyph" aria-hidden="true">?</span><span>Question</span></span>
+            <h3 class="w-approval__title" id="g-ap-{{ theme }}-3" tabindex="-1">Which storage should the cache use?</h3>
+        </header>
+        <div class="w-approval__body">
+            <div class="w-prompt__options" role="radiogroup" aria-labelledby="g-ap-{{ theme }}-3">
+                <label class="w-prompt__option" data-selected><input class="w-prompt__input" type="radio" name="g-q-{{ theme }}" checked><span class="w-prompt__key" aria-hidden="true">1</span><span class="w-prompt__label">Redis, with a 15 minute TTL</span><span class="w-prompt__check" aria-hidden="true">✓</span></label>
+                <label class="w-prompt__option"><input class="w-prompt__input" type="radio" name="g-q-{{ theme }}"><span class="w-prompt__key" aria-hidden="true">2</span><span class="w-prompt__label">In-process <code>lru_cache</code></span><span class="w-prompt__check" aria-hidden="true">✓</span></label>
+                <label class="w-prompt__option"><input class="w-prompt__input" type="radio" name="g-q-{{ theme }}"><span class="w-prompt__key" aria-hidden="true">3</span><span class="w-prompt__label">No cache yet</span><span class="w-prompt__check" aria-hidden="true">✓</span></label>
+            </div>
+            <footer class="w-approval__foot"><div class="w-approval__meta"></div><div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary">Cancel</button><button type="button" class="w-btn" data-variant="primary"><span>OK</span><kbd class="w-keycap" aria-hidden="true">⏎</kbd></button></div></footer>
+        </div>
+    </section>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ diff #}
+{% call g_section("diff", "Diff", "Unified, split (≥1200px), intra-line, collapsed", theme) %}
+<div class="g-stack">
+    <div data-g-diff="unified"></div>
+    <div data-g-diff="split"></div>
+    <div data-g-diff="collapsed"></div>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ meters #}
+{% call g_section("meters", "Meters", "Context ring and stacked L0–L5 layer bar", theme) %}
+<div class="g-row">
+    <span class="w-ring" data-size="sm" style="--w-fill: 18%" role="img" aria-label="Context 18% full"></span>
+    <span class="w-ring" style="--w-fill: 42%" role="img" aria-label="Context 42% full"></span>
+    <span class="w-ring" data-level="caution" style="--w-fill: 71%" role="img" aria-label="Context 71% full"></span>
+    <span class="w-ring" data-level="danger" style="--w-fill: 91%" role="img" aria-label="Context 91% full"></span>
+    <span class="w-ring" data-size="lg" style="--w-fill: 42%" role="img" aria-label="Context 42% full"><span class="w-ring__label">42%</span></span>
+    <span class="w-ring" data-size="lg" data-level="danger" style="--w-fill: 88%" role="img" aria-label="Context 88% full"><span class="w-ring__label">88%</span></span>
+</div>
+<div class="w-layerbar" role="img" aria-label="Context layers sample: L0 6%, L1A 9%, L1B 4%, L2 7%, L3 3%, L4 10%, L4B 4%, L5 18%">
+    <div class="w-layerbar__track">
+        {%- for layer, pct in [("L0", 6), ("L1A", 9), ("L1B", 4), ("L2", 7), ("L3", 3), ("L4", 10), ("L4B", 4), ("L5", 18)] %}
+        <span class="w-layerbar__seg" data-layer="{{ layer }}" style="--w-seg: {{ pct }}%" title="{{ layer }} · {{ pct }}%">{% if pct >= 6 %}<span class="w-layerbar__label">{{ layer }}</span>{% endif %}</span>
+        {%- endfor %}
+        <span class="w-layerbar__tick" data-kind="cap" style="--w-tick: 80%"></span>
+        <span class="w-layerbar__tick" data-kind="real" style="--w-tick: 92%"><span class="w-layerbar__tick-label">real</span></span>
+    </div>
+    <ul class="w-layerbar__legend">
+        {%- for layer, name in [("L0", "System"), ("L1A", "Workspace"), ("L1B", "Skills"), ("L2", "Summary"), ("L3", "Goals"), ("L4", "Tools"), ("L4B", "Retrieved"), ("L5", "Live")] %}
+        <li class="w-layerbar__key" data-layer="{{ layer }}"><i class="w-layerbar__swatch"></i><span class="w-layerbar__key-id">{{ layer }}</span> {{ name }}</li>
+        {%- endfor %}
+    </ul>
+</div>
+{% endcall %}
+
+{# ------------------------------------------------------------ palette + sessions #}
+{% call g_section("palette", "Palette and sessions", "⌘K palette, sessions and threads rows", theme) %}
+<div class="g-row">
+    <button type="button" class="w-btn" data-variant="secondary" onclick="WashPalette.open()">{{ w.icon("command", size="sm") }}<span>Open the palette</span><kbd class="w-keycap">⌘K</kbd></button>
+</div>
+<div class="g-sessions">
+    <div class="w-sessions__head"><span class="w-sessions__title">Sessions</span><span class="w-count">3</span></div>
+    <ul class="w-sessions">
+        <li><div class="w-session" role="button" tabindex="0" aria-current="true"><span class="w-session__icon">{{ w.icon("folder", size="sm") }}</span><span class="w-session__name">atlas-api</span><span class="w-session__status"><span class="w-inkdrop" data-size="sm" data-tone="running" aria-label="Working"></span></span></div></li>
+        <li><div class="w-session" role="button" tabindex="0"><span class="w-session__icon">{{ w.icon("message-circle", size="sm") }}</span><span class="w-session__name">docs-site</span><span class="w-session__status"><span class="w-session__attention" aria-label="Awaiting your input">◆</span></span><span class="w-session__actions"><button type="button" class="w-session__action" aria-label="Unload session docs-site">unload</button><button type="button" class="w-session__action" data-tone="danger" aria-label="Delete session docs-site">×</button></span></div></li>
+        <li><div class="w-session" role="button" tabindex="0"><span class="w-session__icon">{{ w.icon("box", size="sm") }}</span><span class="w-session__name">mobile-0.4</span><span class="w-session__status"><span class="w-session__unread" aria-label="2 unread">2</span></span></div></li>
+    </ul>
+</div>
+{% endcall %}
+{%- endmacro -%}

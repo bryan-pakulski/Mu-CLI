@@ -132,8 +132,7 @@ def test_unapproved_repo_egress_is_offered_once_without_parking_the_stage(tmp_pa
 
 
 def test_cloned_repository_environments_come_from_the_base_commit_and_need_approval(tmp_path, home):
-    from mu.jobs.sandbox.environments import (EnvironmentBlocked, _require_approval, is_cloned_repository, preview,
-                                              resolve_bindings)
+    from mu.jobs.sandbox.environments import is_cloned_repository, preview, repository_approval, resolve_bindings
     toml = '[[environments]]\nenv = "image:rust:1.88"\ndocker = true\n'
     repo = _repo(tmp_path, {".mucli/jobs.toml": toml})
     local = _job(repo)
@@ -150,15 +149,17 @@ def test_cloned_repository_environments_come_from_the_base_commit_and_need_appro
     assert origin == "repo" and [b.ref for b in bindings] == ["rust:1.88"]
     fp = bindings[0].approval
     assert fp.startswith("environment:")
-    events = []
-    service = SimpleNamespace(store=SimpleNamespace(append_event=lambda *a, **k: events.append((a, k))))
-    with pytest.raises(EnvironmentBlocked, match="Approve") as info:
-        _require_approval(service, cloned, bindings)
-    approval = info.value.approval
+    approval = repository_approval(cloned, bindings)  # unapproved: needs the user's approval
+    assert "Approve" in approval["message"]
     assert approval["kind"] == "environment" and approval["fingerprint"] == fp and "rust:1.88" in approval["ref"]
     assert any(r["fingerprint"] == fp for r in preview(cloned, settings={})["approval_required"])
+    # Jobs run unattended: an unattended resolution skips it and falls back (here: the default runtime).
+    skipped = []
+    assert resolve_bindings(cloned, {}, skipped=skipped) == ([], "default")
+    assert [s["approval"]["fingerprint"] for s in skipped] == [fp]
     devcontainer.approve(approval["repository"], fp, kind="environment", ref=approval["ref"])
-    _require_approval(service, cloned, bindings)  # approved: proceeds
+    assert repository_approval(cloned, bindings) is None  # approved: usable
+    assert resolve_bindings(cloned, {}, skipped=[])[1] == "repo"
 
     # A different binding set (e.g. docker or GPUs toggled) is a new fingerprint.
     (repo / ".mucli/jobs.toml").write_text('[[environments]]\nenv = "image:rust:1.88"\ndocker = false\n')
@@ -285,19 +286,20 @@ def test_implicit_devcontainer_is_suggested_until_approved_then_used(tmp_path):
     assert resolve_bindings(_job(repo), {}) == ([], "default")
 
 
-def test_explicit_repository_image_parks_the_job_until_approved(tmp_path):
-    from mu.jobs.sandbox.environments import EnvironmentBlocked, _require_approval, resolve_bindings
+def test_explicit_repository_image_is_skipped_until_approved(tmp_path):
+    from mu.jobs.sandbox.environments import repository_approval, resolve_bindings
     repo = _repo(tmp_path, {".mucli/jobs.toml": SANDBOX_TOML})
     job = _job(repo)
     bindings, origin = resolve_bindings(job, {})
     assert origin == "repo-image" and bindings[0].ref == "ghcr.io/acme/builder:2"
-    events = []
-    service = SimpleNamespace(store=SimpleNamespace(append_event=lambda *a, **k: events.append((a, k))))
-    with pytest.raises(EnvironmentBlocked, match="Approve") as info:
-        _require_approval(service, job, bindings)
-    assert info.value.approval["fingerprint"] == "image:ghcr.io/acme/builder:2" and events
+    approval = repository_approval(job, bindings)
+    assert approval["fingerprint"] == "image:ghcr.io/acme/builder:2" and "Approve" in approval["message"]
+    # Jobs run unattended: never parks; resolution falls back to the next source.
+    skipped = []
+    assert resolve_bindings(job, {}, skipped=skipped) == ([], "default")
+    assert skipped[0]["origin"] == "repo-image"
     devcontainer.approve(str(repo), "image:ghcr.io/acme/builder:2")
-    _require_approval(service, job, bindings)  # approved: no exception
+    assert repository_approval(job, bindings) is None  # approved: usable
     # A job override (the user's own choice) is never subject to repository approval.
     override = _job(repo, )
     override.execution = {"environments": ["image:rust:1.88"]}

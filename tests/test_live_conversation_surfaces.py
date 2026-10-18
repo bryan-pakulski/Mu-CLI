@@ -65,7 +65,7 @@ def test_web_subagent_surface_lingers_and_exposes_live_progress():
 def test_web_subagent_cards_have_titles_iteration_progress_and_activity_drilldown():
     source = read("mu/gui/static/js/app.js")
     template = read("mu/gui/templates/fragments/chat.html")
-    css = read("mu/gui/static/css/app.css")
+    css = read("mu/gui/static/css/wash/patterns/conversation.css")
 
     assert "subagentTitle(a)" in template
     assert "Iteration progress" in template
@@ -96,12 +96,10 @@ def test_mobile_handoff_does_not_fold_on_tool_or_thinking_activity():
 def test_mobile_visualizations_never_render_inside_interim_disclosures():
     hook = read("mobile/android/src/hooks/useChatSession.ts")
     product = read("mobile/android/src/screens/ChatScreenProduct.tsx")
-    legacy = read("mobile/android/src/screens/ChatScreen.tsx")
 
     assert "isTimelineAnchor" in hook
     assert "appendCollapsedSegments" in hook
     assert "child.role === 'visualization'" not in product
-    assert "child.role === 'visualization'" not in legacy
     assert "item.role === 'visualization'" in product
 
 
@@ -135,13 +133,20 @@ def test_mobile_input_required_banner_is_centered_and_prominent():
     assert "top: '50%'" in style
     assert "transform: [{ translateY: -38 }]" in style
     assert "bottom:" not in style
-    # planos approval banner: raised surface with a warn-tone left border + ◆.
-    assert "backgroundColor: colors.raised" in source
-    assert "borderLeftColor: colors.warn" in source
+    # Wash glass (G§3.3, G§3.4, G§9.9 M): the banner keeps the attention
+    # styling as level-2 glass chrome with the attention wash mixed into the
+    # glass and the ◆ glyph, and no coloured side rule.
+    assert "glass.style(2), styles.pendingBanner" in source
+    assert "<GlassBackdrop level={2}" in source
+    assert "glass.tint('attention')" in source
+    assert "vocabulary.status.waiting.glyph" in source
+    assert "borderLeftWidth" not in style and "borderLeftColor" not in source
 
 
 def test_handoff_animations_exist_on_both_clients():
-    css = read("mu/gui/static/css/conversation.css")
+    # Wash W4: conversation.css is retired; the hand-off motion lives in the
+    # chat page patterns.
+    css = read("mu/gui/static/css/wash/patterns/chat.css")
     mobile = read("mobile/android/src/screens/ChatScreenProduct.tsx")
 
     assert "interim-handoff-in" in css

@@ -386,15 +386,21 @@ def stepper(steps: Sequence[Dict[str, Any]], width: int, *, tick: Optional[int] 
 def panel(body: Sequence[Line], width: int, height: int, *, title: str = "", badge: str = "",
           badge_tone: str = "muted", focused: bool = False, tone: str = "", pad_x: int = 0,
           top: int = 0) -> List[Line]:
-    """Rounded panel with a title (and badge) in the top border; body clipped."""
+    """Rounded panel with a title (and badge) in the top border; body clipped.
+
+    Borders are neutral (or accent while focused, as a focus indicator). A
+    semantic ``tone`` colours the title only: Wash never paints panel edges
+    with state colour (G§3.4).
+    """
     if width < 4 or height < 2:
         return [fit_line(l, width) for l in list(body)[:max(0, height)]]
-    border = tone or ("accent" if focused else "muted")
+    border = "accent" if focused else "muted"
     head: Line = [(border, "╭")]
     used = 1
     if title:
         t = fit(title, max(1, width - 4))
-        head += [("", " "), ("bold accent" if focused else "bold", t)]
+        title_style = f"bold {tone}" if tone else ("bold accent" if focused else "bold")
+        head += [("", " "), (title_style, t)]
         used += 1 + cwidth(t)
         if badge and used + 2 + cwidth(badge) < width - 1:
             head.append((badge_tone, " " + badge))

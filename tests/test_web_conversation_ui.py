@@ -3,7 +3,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_SHELL = ROOT / "mu" / "gui" / "static" / "js" / "web_shell.js"
-CONVERSATION_CSS = ROOT / "mu" / "gui" / "static" / "css" / "conversation.css"
+WASH = ROOT / "mu" / "gui" / "static" / "css" / "wash"
+MESSAGE_CSS = WASH / "components" / "message.css"
+CHAT_CSS = WASH / "patterns" / "chat.css"
+CHAT_HTML = ROOT / "mu" / "gui" / "templates" / "fragments" / "chat.html"
 
 
 def test_history_waits_for_authoritative_session_focus():
@@ -39,21 +42,31 @@ def test_completed_model_turns_receive_worked_duration_metadata():
 
 
 def test_interim_updates_are_compact_and_do_not_stack_horizontal_rules():
-    css = CONVERSATION_CSS.read_text(encoding="utf-8")
-    assert ".chat-history .collapse-group" in css
-    assert "margin: var(--space-1) 0 var(--space-3) !important" in css
-    assert ".chat-history .collapse-header" in css
-    assert "min-height: 28px !important" in css
-    assert ".chat-history .collapse-body" in css
-    assert "border-left: 1px solid var(--hairline) !important" in css
-    assert ".chat-history .collapse-body .trace" in css
-    assert "border-top: 0 !important" in css
-    assert ".turn-worked-breadcrumb" in css
+    # Wash W3 (G§9.7): interim turns collapse into one sunken "Worked for 2m ·
+    # 14 steps ›" row (radius-md, 36px); expanded children hang off a single
+    # hairline, never a stack of rules. conversation.css is retired.
+    css = MESSAGE_CSS.read_text(encoding="utf-8")
+    html = CHAT_HTML.read_text(encoding="utf-8")
+    row = css.split(".w-worked__row {", 1)[1].split("}", 1)[0]
+    assert "min-height: 36px" in row
+    assert "background: var(--w-glass-fill-subtle)" in row
+    assert "border-radius: var(--wash-radius-md)" in row
+    body = css.split(".w-worked__body {", 1)[1].split("}", 1)[0]
+    assert "border-left: 1px solid var(--wash-hairline)" in body
+    assert "border-top" not in css.split(".w-worked", 1)[1]
+    assert 'class="collapse-group w-worked"' in html
+    assert 'x-text="summarizeCollapse(t)"' in html
+    assert ".turn-worked-breadcrumb" in CHAT_CSS.read_text(encoding="utf-8")
+    assert "!important" not in css
 
 
 def test_main_response_spacing_is_compact():
-    css = CONVERSATION_CSS.read_text(encoding="utf-8")
-    assert ".chat-history > .turn-wrap > .msg" in css
-    # planos transcript rhythm: bubbles sit 12px apart.
-    assert "margin-bottom: var(--space-3) !important" in css
-    assert "padding-top: var(--space-6) !important" in css
+    # Wash W3: the transcript is one flex column with a 12px rhythm (gap) and
+    # a 24px top inset; messages carry no margins of their own.
+    css = MESSAGE_CSS.read_text(encoding="utf-8")
+    transcript = css.split(".w-transcript {", 1)[1].split("}", 1)[0]
+    assert "gap: var(--wash-space-3)" in transcript
+    assert "padding: var(--wash-space-6)" in transcript
+    assert ".chat-history .msg { margin: 0; border: 0; }" in CHAT_CSS.read_text(encoding="utf-8")
+
+

@@ -1,0 +1,217 @@
+/* patterns/overlays.css — shared dialogs on Wash (imported by wash.css into
+ * the patterns layer): the legacy modal hooks (.modal-*) composed with
+ * .w-modal, skills and tool-cache modals, confirm popover, feature-creation
+ * modal, file browser and the shared loading spinner. Toasts are the
+ * Wash toast component (components/toast.css). */
+
+.skill-row {
+    border-radius: var(--wash-radius-sm);
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small);
+}
+.skill-row.disabled {
+    opacity: 0.5;
+}
+.skill-info {
+    flex: 1;
+    min-width: 0;
+}
+.skill-info .skill-desc {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.file-browser-backdrop {
+    justify-content: center;
+}
+.file-browser {
+    border: 0;
+}
+.fb-head {
+    justify-content: space-between;
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.fb-current {
+    white-space: nowrap;
+}
+.fb-entry {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-1) var(--wash-space-4);
+    cursor: pointer;
+    font-size: var(--wash-type-label-size);
+    color: var(--wash-ink-2);
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small), color var(--wash-motion-micro) var(--wash-ease-small);
+}
+.fb-entry:hover {
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+}
+.fb-entry.is-dir {
+    color: var(--wash-ink);
+}
+.fb-icon {
+    font-size: var(--wash-type-body-size);
+    text-align: center;
+}
+.fb-icon:where(:not(.w-icon)) {
+    flex-shrink: 0;
+    width: 20px;
+}
+.fb-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fb-size {
+    font-size: var(--wash-type-caption-size);
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+.fb-empty {
+    font-size: var(--wash-type-label-size);
+}
+.fb-folder-input {
+    outline: none;
+}
+.modal-backdrop {
+    justify-content: center;
+}
+.modal {
+    min-height: 0;
+    border: 0;
+}
+.modal-head {
+    justify-content: space-between;
+}
+.modal-label {
+    display: block;
+}
+.modal-label:where(:not(.w-field__label)) {
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+}
+.modal-phase {
+    background: var(--w-glass-fill);
+    border: 0;
+    border-radius: var(--wash-radius-sm);
+    padding: var(--wash-space-3);
+    margin-bottom: var(--wash-space-2);
+}
+.modal-phase-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--wash-space-2);
+}
+.modal-phase-num {
+    font-size: var(--wash-type-caption-size);
+}
+.modal-field-row {
+    display: flex;
+    gap: var(--wash-space-2);
+    margin-bottom: var(--wash-space-2);
+}
+.modal-field-row input {
+    flex: 1;
+    font-size: var(--wash-type-label-size);
+    padding: var(--wash-space-2) var(--wash-space-2);
+}
+.modal-tasks {
+    margin-top: var(--wash-space-3);
+}
+.modal-task {
+    background: var(--w-glass-fill-subtle);
+    border: 0;
+    border-radius: var(--wash-radius-sm);
+    padding: var(--wash-space-2) var(--wash-space-3);
+    margin-bottom: var(--wash-space-2);
+}
+.modal-task-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--wash-space-1);
+}
+.modal-task .modal-field {
+    margin-bottom: var(--wash-space-2);
+}
+.modal-task .modal-field input {
+    font-size: var(--wash-type-caption-size);
+    padding: var(--wash-space-1) var(--wash-space-2);
+}
+.modal-list-field {
+    margin-bottom: var(--wash-space-2);
+}
+.modal-list-row {
+    display: flex;
+    gap: var(--wash-space-1);
+    align-items: center;
+    margin-bottom: var(--wash-space-1);
+}
+.modal-list-row input {
+    flex: 1;
+    font-size: var(--wash-type-caption-size);
+    padding: var(--wash-space-1) var(--wash-space-2);
+}
+.confirm-pop button.danger:where(:not(.w-btn)) {
+    background: var(--wash-danger-ink);
+    color: var(--wash-on-ink);
+}
+.confirm-pop button.danger:hover:where(:not(.w-btn)) {
+    background: color-mix(in srgb, var(--wash-danger-ink) 85%, var(--wash-ink));
+    color: var(--wash-on-ink);
+}
+.ui-loading-region::before {
+    content: "";
+    display: inline-block;
+    flex: 0 0 auto;
+}
+.work-loading::before {
+    content: "";
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    border: 2px solid var(--wash-accent-wash);
+    border-top-color: var(--wash-accent-ink);
+    border-radius: var(--wash-radius-pill);
+    animation: container-create-spin calc(var(--wash-motion-medium) * 3) linear infinite;
+}
+.container-log-text {
+    color:var(--wash-ink-2);
+    min-width:0;
+}
+html.has-dialog,
+html.has-dialog body {
+    overflow: hidden;
+}
+.modal-head,
+.modal-actions,
+.fb-head,
+.fb-actions {
+    flex-shrink: 0;
+}
+.modal-body {
+    overscroll-behavior: contain;
+}
+.modal-title,
+.fb-current {
+    overflow-wrap: anywhere;
+}
+.modal-actions {
+    flex-wrap: wrap;
+}
+.confirm-pop {
+    overflow-wrap: anywhere;
+}
+
+/* The shared file browser opens from inside the welcome / guided-creation
+ * and environment-editor modals, so it stacks one step above them. */
+.file-browser-backdrop.w-modal { z-index: calc(var(--wash-z-modal) + 10); }
+
+/* Shared loading spinner (welcome creation status, /work and /trace loading regions). */
+@keyframes container-create-spin {
+    to { transform: rotate(360deg); }
+}

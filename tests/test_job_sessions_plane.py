@@ -59,8 +59,8 @@ def test_job_created_in_a_saved_session_that_is_not_loaded(home):
     job = c.post("/api/jobs", json={"title": "SCRUM-50", "session_name": "rsq-cloud"}).json()["job"]
     assert job["metadata"]["origin_session"] == "rsq-cloud"
     stored = app.state.job_service.get(job["id"])
-    # The session's mode is inherited; its YOLO is not (unattended writes are an explicit per-job choice).
-    assert stored.execution["agent_mode"] == "feature" and stored.execution["auto_approve_writes"] is False
+    # The session's mode is inherited; its YOLO is irrelevant (jobs always run unattended in their sandbox).
+    assert stored.execution["agent_mode"] == "feature" and stored.execution["auto_approve_writes"] is True
     assert (home / "ws" / "rsq").samefile(stored.metadata.get("repository_root") or stored.repository or str(home / "ws" / "rsq"))
     assert c.post("/api/jobs", json={"title": "x", "session_name": "nope"}).status_code == 404
     assert c.post("/api/jobs", json={"title": "x", "session_name": "../../etc"}).status_code == 404

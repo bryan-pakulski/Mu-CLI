@@ -2,12 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { jobCoreApi, optional, type JobAction, type PushArgs, type PushPreview } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Banner, Field, KV, Loading, Pill, PlanosButton, SwitchRow, TextField } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fonts, radii, spacing } from '../theme/tokens';
 import { verdictStyle } from '../theme/status';
+import { Banner, Button, Field, KV, Loading, Pill, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 export type JobPushDialogProps = {
   visible: boolean;
@@ -19,7 +17,7 @@ export type JobPushDialogProps = {
 };
 
 /**
- * planos push dialog (CONTRACT §2): prefilled from
+ * Wash push dialog (CONTRACT §2): prefilled from
  * GET /api/jobs/vm/job/{id}/push-preview, editable PR/MR title and body, a
  * draft switch and — when the review blocks the push — a required override
  * reason. Older servers without push-preview still get the dialog with the
@@ -65,11 +63,11 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
   const [vTone, vLabel] = verdictStyle(preview?.verdict);
 
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title={action?.label || 'Push'}>
+    <Sheet visible={visible} onClose={onClose} title={action?.label || 'Push'}>
       {loading ? <Loading label="Preparing the pull request…" /> : (
         <View style={styles.root} testID="job-push-dialog">
           {preview ? (
-            <View style={[styles.meta, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+            <View style={[styles.meta, { borderColor: colors.hairline, backgroundColor: colors.canvas }]}>
               <KV label="Branch"><Text variant="xs" style={{ fontFamily: fonts.mono }}>{preview.branch || '—'} → {preview.base || '—'}</Text></KV>
               <KV label="Publish via"><Text variant="xs">{preview.mode || 'none'}{preview.remote ? ` · ${preview.remote}` : ''}</Text></KV>
               {preview.head_sha ? <KV label="Verified head"><Text variant="xs" style={{ fontFamily: fonts.mono }}>{preview.head_sha.slice(0, 12)}</Text></KV> : null}
@@ -78,6 +76,10 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
           ) : null}
           {missing ? <Banner tone="muted" glyph="ℹ" title="This server has no push preview. Leave the fields blank to use the default title and description." /> : null}
           {preview?.reason ? <Banner tone="warn" glyph="◆" title={preview.reason} /> : null}
+          {preview?.token && !preview.token.source ? (
+            <Banner tone="warn" glyph="◆" testID="push-token-missing"
+              title={`No ${preview.token.variable} is set, so the branch will be pushed but no ${preview.token.provider === 'gitlab' ? 'merge request' : 'pull request'} can be opened. Add a ${preview.token.provider} token in Settings → Push on the web.`} />
+          ) : null}
           <Field label="Title" hint="Pull request / merge request title.">
             <TextField accessibilityLabel="Pull request title" value={title} onChangeText={setTitle} maxLength={200} placeholder="Default title" />
           </Field>
@@ -92,12 +94,12 @@ export function JobPushDialog({ visible, jobId, action, busy, onClose, onSubmit 
           ) : null}
           {error && !(needsOverride && !reason.trim()) ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
           <View style={styles.actions}>
-            <PlanosButton label="Cancel" onPress={onClose} />
-            <PlanosButton primary tone={needsOverride ? 'warn' : 'ok'} loading={busy} label={needsOverride ? 'Override and push' : draft ? 'Push draft' : 'Push'} onPress={submit} testID="push-submit" />
+            <Button label="Cancel" onPress={onClose} />
+            <Button primary tone={needsOverride ? 'warn' : 'ok'} loading={busy} label={needsOverride ? 'Override and push' : draft ? 'Push draft' : 'Push'} onPress={submit} testID="push-submit" />
           </View>
         </View>
       )}
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

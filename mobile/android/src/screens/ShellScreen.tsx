@@ -1,23 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
-} from 'react-native';
+import { View, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Badge } from '../components';
 import { useConnectionStore } from '../store/connection';
 import { sessionsApi } from '../api/sessions';
 import { spacing, fontSizes, fontWeights, fonts, radii, typography, touchTarget } from '../theme/tokens';
+import { Chip, Pressable, Text, Icon } from '../ui';
 
 const MUCLI_SHELL_QOL_V1 = true;
 const SHELL_HISTORY = new Map<string, string[]>();
@@ -292,7 +281,7 @@ export function ShellScreen() {
   }, []);
 
   const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: 'transparent' },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -305,12 +294,12 @@ export function ShellScreen() {
     headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     headerActions: { flexDirection: 'row', gap: spacing.xs },
     actionBtn: { minWidth: touchTarget, minHeight: touchTarget, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm },
-    outputWrap: { flex: 1, paddingHorizontal: spacing.sm, backgroundColor: colors.codeBg },
+    outputWrap: { flex: 1, paddingHorizontal: spacing.sm, backgroundColor: colors.code },
     output: {
       fontFamily: fonts.mono,
       fontSize: fontSizes.xs,
       lineHeight: typography.xs.lineHeight,
-      color: colors.text,
+      color: colors.ink,
       includeFontPadding: false,
     },
     inputBar: {
@@ -325,18 +314,18 @@ export function ShellScreen() {
     prompt: {
       fontFamily: fonts.mono,
       fontSize: fontSizes.sm,
-      color: colors.textDim,
+      color: colors.ink3,
     },
     input: {
       flex: 1,
       fontFamily: fonts.mono,
       fontSize: fontSizes.sm,
-      color: colors.text,
+      color: colors.ink,
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.sm,
-      backgroundColor: colors.bg,
+      backgroundColor: colors.canvas,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: colors.hairline,
       borderRadius: radii.sm,
       minHeight: touchTarget,
     },
@@ -352,7 +341,7 @@ export function ShellScreen() {
     errorBar: {
       paddingHorizontal: spacing.base,
       paddingVertical: spacing.xs,
-      backgroundColor: colors.errorSubtle,
+      backgroundColor: colors.danger.wash,
     },
     emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.base },
   });
@@ -361,42 +350,42 @@ export function ShellScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Ionicons name="terminal-outline" size={18} color={colors.textSoft} />
+          <Icon name="terminal" size="md" color={colors.ink2} />
           <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>Shell</Text>
-          <Badge
+          <Chip
             label={connected ? 'Connected' : connecting ? 'Connecting…' : 'Disconnected'}
-            variant={connected ? 'success' : 'neutral'}
+            tone={connected ? 'ok' : 'neutral'}
           />
         </View>
         <View style={styles.headerActions}>
           {!followingOutput && output ? (
-            <TouchableOpacity onPress={() => jumpToEnd()} style={styles.actionBtn} accessibilityLabel="Jump to latest shell output">
-              <Ionicons name="arrow-down-circle-outline" size={20} color={colors.textSoft} />
-            </TouchableOpacity>
+            <Pressable onPress={() => jumpToEnd()} style={styles.actionBtn} accessibilityLabel="Jump to latest shell output">
+              <Icon name="arrow-down" size="md" color={colors.ink2} />
+            </Pressable>
           ) : null}
-          <TouchableOpacity onPress={clear} style={styles.actionBtn} accessibilityLabel="Clear output">
-            <Ionicons name="trash-outline" size={20} color={colors.textDim} />
-          </TouchableOpacity>
+          <Pressable onPress={clear} style={styles.actionBtn} accessibilityLabel="Clear output">
+            <Icon name="trash-2" size="md" color={colors.ink3} />
+          </Pressable>
           {connected ? (
-            <TouchableOpacity onPress={disconnect} style={styles.actionBtn} accessibilityLabel="Disconnect">
-              <Ionicons name="close-circle-outline" size={20} color={colors.error || colors.textDim} />
-            </TouchableOpacity>
+            <Pressable onPress={disconnect} style={styles.actionBtn} accessibilityLabel="Disconnect">
+              <Icon name="circle-x" size="md" color={colors.danger.ink || colors.ink3} />
+            </Pressable>
           ) : (
-            <TouchableOpacity
+            <Pressable
               onPress={connect}
               disabled={connecting}
               style={styles.actionBtn}
               accessibilityLabel="Connect"
             >
-              <Ionicons name="play-circle-outline" size={20} color={colors.accent} />
-            </TouchableOpacity>
+              <Icon name="play" size="md" color={colors.accent.ink} />
+            </Pressable>
           )}
         </View>
       </View>
 
       {error ? (
         <View style={styles.errorBar}>
-          <Text variant="xs" style={{ color: colors.error || colors.textDim }}>{error}</Text>
+          <Text variant="xs" style={{ color: colors.danger.ink || colors.ink3 }}>{error}</Text>
         </View>
       ) : null}
 
@@ -427,7 +416,7 @@ export function ShellScreen() {
               value={input}
               onChangeText={setInput}
               placeholder="Type a command…"
-              placeholderTextColor={colors.textDim}
+              placeholderTextColor={colors.ink3}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="send"
@@ -441,21 +430,21 @@ export function ShellScreen() {
               }}
               editable={connected}
             />
-            <TouchableOpacity onPress={complete} disabled={!connected} style={styles.keyButton} accessibilityLabel="Complete shell input">
-              <Text variant="xs" style={{ color: colors.textDim, fontWeight: fontWeights.semibold }}>TAB</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => cycleHistory(-1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Previous shell command">
-              <Ionicons name="chevron-up" size={17} color={colors.textDim} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => cycleHistory(1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Next shell command">
-              <Ionicons name="chevron-down" size={17} color={colors.textDim} />
-            </TouchableOpacity>
+            <Pressable onPress={complete} disabled={!connected} style={styles.keyButton} accessibilityLabel="Complete shell input">
+              <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>TAB</Text>
+            </Pressable>
+            <Pressable onPress={() => cycleHistory(-1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Previous shell command">
+              <Icon name="chevron-up" size="sm" color={colors.ink3} />
+            </Pressable>
+            <Pressable onPress={() => cycleHistory(1)} disabled={!connected} style={styles.keyButton} accessibilityLabel="Next shell command">
+              <Icon name="chevron-down" size="sm" color={colors.ink3} />
+            </Pressable>
           </View>
         </KeyboardAvoidingView>
       ) : (
         <View style={styles.emptyWrap}>
-          <Ionicons name="terminal-outline" size={48} color={colors.textDim} />
-          <Text variant="sm" style={{ color: colors.textDim, marginTop: spacing.sm, textAlign: 'center' }}>
+          <Icon name="terminal" size="lg" color={colors.ink3} />
+          <Text variant="sm" style={{ color: colors.ink3, marginTop: spacing.sm, textAlign: 'center' }}>
             {'No shell connected.\nTap the connect button to open an interactive terminal into the session container.'}
           </Text>
         </View>

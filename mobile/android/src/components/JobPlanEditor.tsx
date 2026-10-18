@@ -1,13 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import Markdown from 'react-native-markdown-display';
-import { Text } from './Text';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import type { ThemeColors } from '../theme/tokens';
 import {
-  type PlanRow, type PlanSection, planMarkdownStyles, planProse, replaceRows, rowsFrom,
+  type PlanRow, type PlanSection, planProse, replaceRows, rowsFrom,
 } from './planMarkdown';
 import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
+import { Markdown, Pressable, Text } from '../ui';
 
 const PLAN_SECTIONS: PlanSection[] = ['Acceptance criteria', 'Checks'];
 
@@ -15,14 +14,14 @@ type Btn = { label: string; onPress: () => void; disabled?: boolean; tone?: 'acc
 
 function PlanButton({ label, onPress, disabled, tone = 'quiet', a11y }: Btn) {
   const { colors } = useTheme();
-  const fg = tone === 'danger' ? colors.error : tone === 'accent' ? colors.accentOn : colors.text;
+  const fg = tone === 'danger' ? colors.danger.ink : tone === 'accent' ? colors.onInk : colors.ink;
   return <Pressable accessibilityRole="button" accessibilityLabel={a11y} accessibilityState={{ disabled: !!disabled }}
-    disabled={disabled} onPress={onPress} android_ripple={{ color: colors.bgHover }}
+    disabled={disabled} onPress={onPress} android_ripple={{ color: colors.sunken }}
     style={({ pressed }) => [styles.button, {
-      borderColor: tone === 'accent' ? colors.accent : tone === 'danger' ? colors.danger : colors.border,
+      borderColor: tone === 'accent' ? colors.accent.ink : tone === 'danger' ? colors.danger.ink : colors.hairline,
       backgroundColor: tone === 'accent'
-        ? (pressed ? colors.accentHover : colors.accent)
-        : pressed ? (tone === 'danger' ? colors.errorSubtle : colors.hover) : colors.raised,
+        ? (pressed ? colors.accent.ink : colors.accent.ink)
+        : pressed ? (tone === 'danger' ? colors.danger.wash : colors.sunken) : colors.raised,
       opacity: disabled ? 0.5 : 1,
     }]}>
     <Text variant="sm" style={{ color: fg, fontWeight: fontWeights.medium }}>{label}</Text>
@@ -37,8 +36,8 @@ export function PlanCriteriaCards({ markdown }: { markdown: string }) {
     if (!rows.length) return null;
     return <View key={title} style={styles.root}>
       <SectionTitle title={title} count={rows.length} colors={colors} />
-      {rows.map((row, i) => <View key={i} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text variant="xs" style={[styles.badge, { color: colors.textSoft, backgroundColor: colors.bgHover }]}>{row.key}</Text>
+      {rows.map((row, i) => <View key={i} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+        <Text variant="xs" style={[styles.badge, { color: colors.ink2, backgroundColor: colors.sunken }]}>{row.key}</Text>
         <Text selectable variant="sm" style={[styles.wrap, title === 'Checks' && styles.mono]}>{row.text || '—'}</Text>
       </View>)}
     </View>;
@@ -47,7 +46,7 @@ export function PlanCriteriaCards({ markdown }: { markdown: string }) {
 
 function SectionTitle({ title, count, colors }: { title: string; count: number; colors: ThemeColors }) {
   return <View style={styles.sectionTitle}>
-    <Text style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{title}</Text>
+    <Text style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{title}</Text>
     <Text variant="xs" dim style={styles.count}>{count}</Text>
   </View>;
 }
@@ -56,24 +55,23 @@ function SectionTitle({ title, count, colors }: { title: string; count: number; 
 export function JobPlanEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const { colors } = useTheme();
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
-  const md = useMemo(() => planMarkdownStyles(colors), [colors]);
-  const input = { color: colors.text, borderColor: colors.border, backgroundColor: colors.bg };
+  const input = { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas };
   const prose = planProse(value);
   return <View style={styles.root}>
     <View style={styles.row}>
       <SectionTitle title="Plan" count={value.split('\n').length} colors={colors} />
-      <View style={[styles.segment, { borderColor: colors.border }]}>
+      <View style={[styles.segment, { borderColor: colors.hairline }]}>
         {(['preview', 'edit'] as const).map(m => <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: mode === m }}
           onPress={() => setMode(m)} style={({ pressed }) => [styles.segmentItem, {
-            backgroundColor: mode === m ? colors.raised : pressed ? colors.hover : 'transparent' }]}>
-          <Text variant="sm" style={{ color: mode === m ? colors.text : colors.muted, fontWeight: mode === m ? fontWeights.semibold : fontWeights.medium }}>
+            backgroundColor: mode === m ? colors.raised : pressed ? colors.sunken : 'transparent' }]}>
+          <Text variant="sm" style={{ color: mode === m ? colors.ink : colors.ink3, fontWeight: mode === m ? fontWeights.semibold : fontWeights.medium }}>
             {m === 'preview' ? 'Preview' : 'Edit Markdown'}</Text>
         </Pressable>)}
       </View>
     </View>
     {mode === 'preview'
-      ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Markdown style={md}>{prose || '_No plan text yet._'}</Markdown></View>
+      ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
+          <Markdown variant="document">{prose || '_No plan text yet._'}</Markdown></View>
       : <TextInput accessibilityLabel="Plan Markdown" multiline value={value} onChangeText={onChange} autoCapitalize="none"
           style={[styles.editor, input]} />}
     {PLAN_SECTIONS.map(title => <RowsEditor key={title} title={title} value={value} onChange={onChange} />)}
@@ -83,15 +81,15 @@ export function JobPlanEditor({ value, onChange }: { value: string; onChange: (v
 function RowsEditor({ title, value, onChange }: { title: PlanSection; value: string; onChange: (v: string) => void }) {
   const { colors } = useTheme();
   const rows = rowsFrom(value, title);
-  const input = { color: colors.text, borderColor: colors.border, backgroundColor: colors.bg };
+  const input = { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas };
   const update = (next: PlanRow[]) => onChange(replaceRows(value, title, next));
   const change = (index: number, patch: Partial<PlanRow>) => update(rows.map((row, i) => i === index ? { ...row, ...patch } : row));
   const move = (index: number, offset: number) => { const next = [...rows]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; update(next); };
   return <View style={styles.root}>
     <SectionTitle title={title} count={rows.length} colors={colors} />
-    {rows.map((row, index) => <View key={index} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    {rows.map((row, index) => <View key={index} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
       <TextInput accessibilityLabel={`${title} ${index + 1} identifier`} value={row.key} onChangeText={key => change(index, { key })}
-        autoCapitalize="none" style={[styles.keyInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.bg }]} />
+        autoCapitalize="none" style={[styles.keyInput, { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas }]} />
       <TextInput accessibilityLabel={`${title} ${index + 1} text`} value={row.text} onChangeText={text => change(index, { text: text.replace(/\n/g, ' ') })}
         autoCapitalize="none" multiline scrollEnabled={false} style={[styles.input, input, title === 'Checks' && styles.mono]} />
       <View style={styles.row}>

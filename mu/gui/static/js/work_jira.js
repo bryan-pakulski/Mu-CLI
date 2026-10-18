@@ -160,7 +160,7 @@
     };
     const tracker = (function buildTrackerSection() {
         const box = document.createElement('div');
-        box.className = 'work-jira-trackers stack';
+        box.className = 'work-jira-trackers';
         box.innerHTML = `
             <h3 class="work-jira-section">Jira deployment</h3>
             <label class="work-field work-field-wide"><span>Deployment</span>
@@ -182,8 +182,12 @@
             <label class="work-jira-inline"><input data-tr="watch-enabled" type="checkbox"> Import new tickets from saved queries automatically</label>
             <label class="work-field work-field-wide"><span>Check every (minutes)</span>
                 <input data-tr="watch-interval" type="number" min="1" step="1"></label>
-            <label class="work-field work-field-wide"><span>Queries — one per line: tracker | query | workspace path</span>
-                <textarea data-tr="watch-queries" rows="3" placeholder="jira | project = ABC AND labels = mucli | /home/me/src/abc&#10;github | repo:acme/api is:open label:mucli | /home/me/src/api"></textarea></label>
+            <div class="w-field work-field work-field-wide work-watch" data-tr="watch-queries" role="group" aria-labelledby="work-watch-queries-label">
+                <span class="w-field__label" id="work-watch-queries-label">Saved queries</span>
+                <div class="work-watch__rows" data-tr="watch-rows"></div>
+                <div class="work-toolbar"><button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-tr="watch-add">+ Add query</button></div>
+                <small class="w-field__hint">Each query imports new tickets into its workspace. Run in: the container template the imported jobs run in (Default = the workspace's usual resolution).</small>
+            </div>
             <small class="work-jira-muted" data-tr="github-status"></small>`;
         els.form.insertBefore(box, els.settingsMsg);
         const q = name => box.querySelector(`[data-tr="${name}"]`);
@@ -191,9 +195,52 @@
             box, deployment: q('deployment'), acceptance: q('acceptance'), wbEnabled: q('wb-enabled'),
             wbSource: q('wb-source'), wbLinkPr: q('wb-linkpr'), events: q('events'),
             watchEnabled: q('watch-enabled'), watchInterval: q('watch-interval'), watchQueries: q('watch-queries'),
+            watchRows: q('watch-rows'), watchAdd: q('watch-add'),
             githubStatus: q('github-status'),
         };
     })();
+
+    // Ticket watcher entries: tracker, query, workspace and "Run in" template per row.
+    let watchRows = [], watchTemplates = [];
+    async function loadWatchTemplates() {
+        try {
+            const data = await api('/api/jobs/environments?images=false');
+            watchTemplates = (data.templates || []).map(t => t.name);
+        } catch (_) { watchTemplates = []; }
+        readWatchRows();
+        renderWatchRows();
+    }
+    function readWatchRows() {
+        tracker.watchRows.querySelectorAll('[data-watch-row]').forEach(row => {
+            const item = watchRows[Number(row.dataset.watchRow)];
+            if (!item) return;
+            row.querySelectorAll('[data-watch-key]').forEach(el => { item[el.dataset.watchKey] = el.value; });
+        });
+    }
+    function renderWatchRows() {
+        const options = names => ['<option value="">Default</option>', ...names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)].join('');
+        tracker.watchRows.innerHTML = watchRows.length ? watchRows.map((w, i) => {
+            const names = w.template && !watchTemplates.includes(w.template) ? [...watchTemplates, w.template] : watchTemplates;
+            return `<div class="work-watch__row" data-watch-row="${i}">
+                <span class="w-select" data-size="sm"><select class="w-select__control" data-watch-key="tracker" aria-label="Tracker of query ${i + 1}">
+                    <option value="jira"${w.tracker === 'jira' ? ' selected' : ''}>Jira</option><option value="github"${w.tracker === 'github' ? ' selected' : ''}>GitHub</option></select></span>
+                <input class="w-input" data-mono type="text" data-watch-key="query" aria-label="Query ${i + 1}" placeholder="project = ABC AND labels = mucli" value="${escapeHtml(w.query)}">
+                <input class="w-input" data-mono type="text" data-watch-key="workspace_root" aria-label="Workspace of query ${i + 1}" placeholder="/home/me/src/abc" value="${escapeHtml(w.workspace_root)}">
+                <span class="w-select" data-size="sm"><select class="w-select__control" data-watch-key="template" aria-label="Run in for query ${i + 1}" data-watch-template>${options(names)}</select></span>
+                <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-watch-remove="${i}" aria-label="Remove query ${i + 1}" title="Remove query ${i + 1}">×</button></div>`;
+        }).join('') : '<p class="work-jira-muted">No saved queries.</p>';
+        tracker.watchRows.querySelectorAll('[data-watch-row]').forEach(row => {
+            const sel = row.querySelector('[data-watch-template]');
+            if (sel) sel.value = watchRows[Number(row.dataset.watchRow)]?.template || '';
+        });
+        tracker.watchRows.querySelectorAll('[data-watch-remove]').forEach(b => { b.onclick = () => { readWatchRows(); watchRows.splice(Number(b.dataset.watchRemove), 1); renderWatchRows(); }; });
+    }
+    tracker.watchAdd.onclick = () => {
+        readWatchRows();
+        watchRows.push({ tracker: 'jira', query: '', workspace_root: '', session_name: '', template: '' });
+        renderWatchRows();
+        tracker.watchRows.querySelector(`[data-watch-row="${watchRows.length - 1}"] [data-watch-key="query"]`)?.focus();
+    };
 
     function fillTrackerForm() {
         const s = settings || {};
@@ -217,8 +264,10 @@
         const watch = (s.trackers || {}).watch || {};
         tracker.watchEnabled.checked = !!watch.enabled;
         tracker.watchInterval.value = Math.max(1, Math.round((watch.interval_seconds || 900) / 60));
-        tracker.watchQueries.value = (watch.queries || [])
-            .map(w => [w.tracker, w.query, w.workspace_root].join(' | ')).join('\n');
+        watchRows = (watch.queries || []).map(w => ({ tracker: w.tracker || 'jira', query: w.query || '',
+            workspace_root: w.workspace_root || '', session_name: w.session_name || '', max_results: w.max_results, template: w.template || '' }));
+        renderWatchRows();
+        void loadWatchTemplates();
         const gh = (s.trackers || {}).github || {};
         tracker.githubStatus.textContent = gh.mode === 'token' ? 'GitHub Issues: using GITHUB_TOKEN/GH_TOKEN from the server environment.'
             : gh.mode === 'gh' ? 'GitHub Issues: using the gh CLI login on the server.'
@@ -234,11 +283,11 @@
                 github: row.querySelector('[data-field="github"]').value.trim(),
             };
         });
-        const queries = tracker.watchQueries.value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-            const parts = line.split('|').map(p => p.trim());
-            if (parts.length < 3) return null;
-            return { tracker: parts[0].toLowerCase(), query: parts.slice(1, -1).join(' | '), workspace_root: parts[parts.length - 1] };
-        }).filter(Boolean);
+        readWatchRows();
+        // Each scheduled entry carries its "Run in" template ('' = default resolution).
+        const queries = watchRows.filter(w => w.query.trim()).map(w => ({ tracker: w.tracker, query: w.query.trim(),
+            workspace_root: w.workspace_root.trim(), ...(w.session_name ? { session_name: w.session_name } : {}),
+            ...(w.max_results ? { max_results: w.max_results } : {}), template: w.template || '' }));
         const body = {
             deployment: tracker.deployment.value,
             acceptance_field: tracker.acceptance.value.trim(),
@@ -466,7 +515,7 @@
                 <td><input type="checkbox" data-select-ticket="${escapeHtml(t.key)}"
                            aria-label="Select ${escapeHtml(t.key)}" ${live ? 'disabled title="Already has an active job"' : ''}
                            ${selected.has(t.key) ? 'checked' : ''}></td>
-                <td><a href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" class="mono">${escapeHtml(t.key)}</a></td>
+                <td><a href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" class="work-mono">${escapeHtml(t.key)}</a></td>
                 <td class="work-jira-summary">${escapeHtml(t.summary)}
                     ${t.issue_type ? `<small>${escapeHtml(t.issue_type)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</small>` : ''}</td>
                 <td><span class="work-jira-ticket-status" data-category="${escapeHtml(t.status_category)}">${escapeHtml(t.status || '—')}</span></td>
@@ -566,7 +615,7 @@
         try {
             const body = { keys: [...selected] };
             if (target) {
-                body.defaults = { ...target.defaults };
+                body.defaults = { ...target.defaults };  // includes defaults.execution.template (Run in)
                 if (target.session) body.session_name = target.session;
                 if (target.force) body.force = true;
             } else {
@@ -597,7 +646,9 @@
         if (!keys.length || !els.browseMsg) return;
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn sm';
+        btn.className = 'w-btn';
+        btn.dataset.variant = 'secondary';
+        btn.dataset.size = 'sm';
         btn.dataset.jiraRunAgain = '';
         btn.textContent = `Run again (${keys.length})`;
         btn.title = `Start a new job for ${keys.join(', ')}`;

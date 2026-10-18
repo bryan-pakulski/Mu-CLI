@@ -61,7 +61,7 @@
         if (!events.length && !hasLog && !failure) {
             const empty = document.createElement('section');
             empty.className = 'work-section work-diagnostics-section';
-            empty.innerHTML = '<p class="empty">✓ No diagnostics recorded for this job.</p>';
+            empty.innerHTML = '<div class="w-empty work-empty-inline"><p class="w-empty__body">✓ No diagnostics recorded for this job.</p></div>';
             host.appendChild(empty);
             return;
         }
@@ -74,7 +74,7 @@
                     <h3>Job diagnostics</h3>
                     <p class="work-muted">Execution, worker and Git-preflight telemetry. Filter the trace, then expand only the event you need.</p>
                 </div>
-                <a class="btn sm work-export-link" href="/api/jobs/${encodeURIComponent(snapshot.job_id)}/debug-export">Export debug bundle</a>
+                <a class="w-btn work-export-link" data-variant="secondary" data-size="sm" href="/api/jobs/${encodeURIComponent(snapshot.job_id)}/debug-export">Export debug bundle</a>
             </div>
 
             <div class="work-diagnostic-facts">

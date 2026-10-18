@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from rich.markup import escape as esc
+
 from mu.tools._envelope import infer_tool_error_code
 from mu.tools.descriptors import (
     get_modifications,
@@ -123,6 +125,40 @@ def build_approval_plan(
     )
 
 
+def auto_approved_by_yolo(
+    tool_name: str,
+    tool_args: dict,
+    *,
+    strict_mode: bool = False,
+    yolo: bool = False,
+) -> bool:
+    """True when a call skipped its approval prompt only because YOLO is on.
+
+    Mirrors :func:`build_approval_plan`: the call would have required approval
+    without YOLO (strict mode or a write-side tool) and its policy is not
+    ``always_human`` (those still prompt under YOLO). Read-only helper used to
+    make auto-approvals visible after the fact; it never changes a decision.
+    """
+    if not yolo:
+        return False
+    if tool_approval_policy(tool_name, tool_args) == "always_human":
+        return False
+    return bool(strict_mode or tool_requires_approval(tool_name, tool_args))
+
+
+def notify_auto_approval(ui, tool_name: str, tool_args) -> None:
+    """Tell a UI that supports it (``WebUI.notify_auto_approved``) that a
+    tool call ran without asking. Informational only; failures are ignored so
+    the agent loop never depends on it."""
+    notify = getattr(ui, "notify_auto_approved", None)
+    if not callable(notify):
+        return
+    try:
+        notify(tool_name, tool_args)
+    except Exception:  # noqa: BLE001 - display-only side channel
+        pass
+
+
 def collect_approval_plans(
     tool_calls: list,
     folder_context,
@@ -150,15 +186,20 @@ def build_approval_prompt(
     display_args: dict,
     count_info: str,
 ) -> tuple[str, list[str], str]:
+    # Tool names and args come from the model; escape them so brackets in
+    # args (paths, regexes, JSON) can't be parsed as Rich markup.
+    tool_name = esc(str(approval_plan.tool_name))
+    args_text = esc(str(display_args))
+    count_text = esc(str(count_info))
     if approval_plan.can_approve:
         prompt_text = (
-            f"\n[bold yellow]Permission Required[/bold yellow] for tool: "
-            f"[cyan]{approval_plan.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
+            f"\n[wash.attention.bold]Permission Required[/wash.attention.bold] for tool: "
+            f"[wash.accent]{tool_name}[/wash.accent]{count_text}\nArgs: {args_text}\nAllow?"
         )
         return prompt_text, ["y", "n", "e"], "y"
 
     prompt_text = (
-        f"\n[bold red]Diff Failed[/bold red] for tool: "
-        f"[cyan]{approval_plan.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+        f"\n[wash.danger.bold]Diff Failed[/wash.danger.bold] for tool: "
+        f"[wash.accent]{tool_name}[/wash.accent]{count_text}\nArgs: {args_text}\nReject or Explain?"
     )
     return prompt_text, ["n", "e"], "n"

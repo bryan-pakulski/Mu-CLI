@@ -11,10 +11,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .actions import JobFacts, available_actions
 from .artifacts import artifacts_for
+from .notes import AUDIT_EXCLUDED
 from .pipeline import HistoryEntry, derive_pipeline, mini_indicator
 from .states import TERMINAL, CoreState, JobState, WAITING, from_legacy
 
-PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs")
+PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs", "notes")
 
 
 def get_default_job_service():
@@ -51,19 +52,8 @@ def session_defaults(*, workspace, provider, model, variables):
         **({"stages": stages} if stages else {}),
         "agent_mode": variables.get("agent_mode", "default"),
         "session_type": variables.get("session_type", "workspace"),
-        # Unattended sandbox writes are an explicit choice (Settings default or a per-job
-        # flag), never inherited from the chat session's YOLO.
-        "auto_approve_writes": unattended_default(),
+        # Jobs always run unattended (mu.jobs.unattended); no per-job auto-approve choice.
     }}
-
-
-def unattended_default() -> bool:
-    """Settings → New job defaults → "Run unattended in sandbox" (off unless the user turned it on)."""
-    try:
-        from ..job_settings import effective_rules
-        return bool(effective_rules().get("defaults.run_unattended", False))
-    except Exception:  # noqa: BLE001 - unreadable settings never grant auto-approve
-        return False
 
 
 def job_settings_vm():
@@ -209,11 +199,45 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         has_worker=bool(job.worker_id),
         environments=len(meta.get("build_environments") or []) or len(((job.execution or {}).get("environments") or [])),
         environments_kept=bool(meta.get("environments_kept")),
-        push_check_reason=push_check_reason(service, job) if core.state == JobState.REVIEW_DONE else "push is available after review",
+        push_check_reason=push_check_reason(service, job, allow_unverified=True) if core.state == JobState.REVIEW_DONE
+        else "push is available after review",
         environment_approval=environment_approval(service, job, core),
         pr_closed=isinstance(meta.get("pr"), dict) and meta["pr"].get("state") == "closed",
         limit_reached=_limit(job, core),
+        checks_unverified=_checks_unverified(art),
+        unverified_pending=core.state == JobState.NEEDS_INPUT and bool(meta.get("checks_unverified"))
+        and str(getattr(job.attention_reason, "value", job.attention_reason) or "") == "verification_required",
+        setup_failed=_setup_failed(job, core),
+        environment_repair=_environment_repair(job),
     )
+
+
+def _environment_repair(job) -> Optional[Dict[str, Any]]:
+    """The latest repair that committed an image (the repair card's actions)."""
+    from ..sandbox.repair import latest_repair
+    record = latest_repair(job, committed=True)
+    if not record:
+        return None
+    return {k: record.get(k) for k in ("attempt", "binding", "source", "template", "project_commands", "image",
+                                       "outcome")}
+
+
+def _checks_unverified(art) -> bool:
+    """The latest check run has unrunnable checks (honest gate, job_templates.md §5)."""
+    try:
+        summary = art.read_json("checks/summary.json", {}) if art.exists() else {}
+    except (OSError, ValueError):
+        return False
+    return isinstance(summary, dict) and summary.get("verified") is False
+
+
+def _setup_failed(job, core: CoreState) -> Optional[Dict[str, Any]]:
+    if core.state != JobState.NEEDS_INPUT:
+        return None
+    if str(getattr(job.attention_reason, "value", job.attention_reason) or "") != "environment_failure":
+        return None
+    from ..sandbox.job_setup import failed_setup
+    return failed_setup(job)
 
 
 def _limit(job, core: CoreState) -> Optional[Dict[str, Any]]:
@@ -230,6 +254,10 @@ def environment_approval(service, job, core: Optional[CoreState] = None) -> Opti
     * Blocking: the repository image/devcontainer of a job parked on an
       environment failure — latest ``build_environment_approval_required``
       event (payload = ``devcontainer.approval_request``). Approving requeues.
+    * Non-blocking: a repository image/devcontainer/environments list the job
+      skipped because it was not approved (jobs run unattended) — latest
+      ``repository_environment_skipped`` event. The job runs in the next
+      environment source; approving records it for future jobs.
     * Non-blocking: repository-declared egress (``[sandbox] egress``) — latest
       ``repository_egress_approval_required`` event of any non-terminal job.
       Stages keep running without the egress; approving only records it, and
@@ -245,6 +273,9 @@ def environment_approval(service, job, core: Optional[CoreState] = None) -> Opti
         found = _pending_approval(service, job, "build_environment_approval_required")
         if found is not None:
             return {**found, "blocking": True}
+    found = _pending_approval(service, job, "repository_environment_skipped")
+    if found is not None:
+        return {**found, "blocking": False}
     found = _pending_approval(service, job, "repository_egress_approval_required")
     return {**found, "blocking": False} if found is not None else None
 
@@ -324,6 +355,13 @@ def environments_vm(service=None, *, repository: str = "", session: str = "", en
     probe = SimpleNamespace(id="preview", repository=repository, metadata={"repository_root": repository, "origin_session": session},
                             execution={"environments": environments} if environments else {})
     out = {**list_sources(include_images=include_images), "resolved": preview(probe)}
+    out["remembered"] = None
+    if repository:
+        from ..sandbox.environments import remembered_template, template_fit
+        out["remembered"] = remembered_template(repository)
+        detected = (out["resolved"] or {}).get("detected") or {}
+        for row in out.get("templates") or []:
+            row["fit"] = template_fit(row.get("egress_allow") or [], detected)
     if service is not None:
         out["kept_jobs"] = kept_jobs(service)
     return out
@@ -346,6 +384,16 @@ def _stage_agents(job) -> Dict[str, Any]:
     return {s: {**cfg, "label": AGENT_LABELS.get(cfg["agent"], cfg["agent"])} for s, cfg in agents.items()}
 
 
+def _attention_headline(job, review: Dict[str, Any]) -> str:
+    from .notes import HEADLINE_CHARS, clean, first_sentence
+    detail = str(job.attention_detail or "").strip()
+    if not detail:
+        return ""
+    if review.get("headline") and detail in (review.get("summary"), review.get("headline")):
+        return clean(review["headline"])
+    return clean(detail) if len(detail) <= HEADLINE_CHARS else first_sentence(detail)
+
+
 def _summary(service, job, *, now: float) -> Dict[str, Any]:
     from ..models import resolve_stage_model
     core = service.store.core_state(job.id)
@@ -364,6 +412,8 @@ def _summary(service, job, *, now: float) -> Dict[str, Any]:
         "failed_from": core.failed_from.value if core.failed_from else None,
         "legacy_status": job.status.value,
         "attention_detail": job.attention_detail,
+        # One line for the banner and Needs-you rows; the full text stays in attention_detail.
+        "attention_headline": _attention_headline(job, review),
         "mini": mini_indicator(steps),
         "steps": [s.to_dict() for s in steps],
         "verdict": review.get("verdict") or "",
@@ -404,6 +454,12 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         facts = facts_for(service, job, core)
         out["actions"] = [a.to_dict() for a in available_actions(facts)]
         out["environment_approval"] = facts.environment_approval
+        # The pending tool approval rides in the cheap state part too, so the page can show the
+        # approval card without fetching the (large) session part.
+        out["approval"] = facts.pending_approval
+        # Jobs run unattended: a failed template job setup is a warning (the job continued).
+        from ..sandbox.job_setup import setup_warning
+        out["setup_warning"] = setup_warning(job)
         out["budget"] = budget_vm(service, job, now=now)
     if "plan" in wanted:
         try:
@@ -416,11 +472,22 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         out["review"] = _review(job)
     if "checks" in wanted:
         out["checks"] = _checks_part(service, job)
+        from ..sandbox.repair import describe_repairs
+        out["checks"]["repairs"] = describe_repairs(job)
+        # Screenshots, recordings and logs the agents captured (mu/jobs/evidence.py), newest first.
+        from ..evidence import manifest
+        out["checks"]["evidence"] = list(reversed(manifest(artifacts_for(job))))
     if "costs" in wanted:
         art = artifacts_for(job)
+        # The audit trail: agent tool traffic and raw check output live in the Session and
+        # Checks tabs, and were most of this part's bytes.
         out["costs"] = {"total_usd": max(float(job.cost_usd or 0.0), sum(art.stage_costs().values())),
                         "by_stage": art.stage_costs() if art.exists() else {},
-                        "events": [e.to_dict() for e in service.store.recent_events(job.id)]}
+                        "events": [e.to_dict() for e in service.store.recent_events(job.id)
+                                   if e.event_type not in AUDIT_EXCLUDED]}
+    if "notes" in wanted:
+        from .notes import job_notes
+        out["notes"] = job_notes(service, job)
     if "diff" in wanted:
         art = artifacts_for(job)
         out["diff"] = {"patch": (art.read_text("diff.patch") if art.exists() else None),
@@ -434,11 +501,21 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
     if "session" in wanted:
         art = artifacts_for(job)
         stages = {s: art.read_json(f"logs/{s}-transcript.json", []) or [] for s in ("plan", "implement", "review")}
+        # Environment repair (job_templates.md §7): the latest attempt's conversation.
+        repair = art.read_json("logs/repair-transcript.json", []) if art.exists() else []
+        if repair:
+            stages["repair"] = repair
         events = [e.to_dict() for e in service.store.recent_events(job.id) if e.event_type in
                   ("sandbox_event", "stage_message", "sandbox_starting", "sandbox_stopped", "runtime_error",
                    "build_environments_preparing", "build_environment_progress", "build_environment_ready",
                    "build_environment_failed", "build_environments_recreated", "environment_command_started",
-                   "environment_command")]
+                   "environment_command", "environment_setup", "environment_setup_dirty", "environment_setup_skipped",
+                   # Jobs run unattended: automatic decisions and non-blocking fallbacks.
+                   "auto_permission", "auto_answered", "environment_setup_failed", "repository_environment_skipped",
+                   "build_environment_skipped", "checks_unverified", "environment_repair")
+                  # The stage's own copy of an automatic decision is shown once, as the job event.
+                  and not (e.event_type == "sandbox_event"
+                           and (e.payload or {}).get("event") in ("auto_permission", "auto_answered"))]
         out["session"] = {"session_name": job.session_name, "live": bool(job.worker_id),
                           "stages": stages, "events": events,
                           "approval": facts_for(service, job, core).pending_approval}
@@ -503,6 +580,12 @@ def remove_container(service, name: str) -> Dict[str, Any]:
     ``CommandRejected`` (job still active)."""
     from .activity import remove_container as remove
     return remove(service, name)
+
+
+def publish_tokens_status() -> Dict[str, Dict[str, str]]:
+    """Where each PR/MR provider token is set (environment / stored / unset); never values."""
+    from ..publish_tokens import status
+    return status()
 
 
 def agents_status() -> Dict[str, Any]:

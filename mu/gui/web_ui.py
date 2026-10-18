@@ -35,7 +35,10 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from rich.protocol import is_renderable as _is_rich_renderable
+
 from mu.ui.base import BaseUI
+from mu.ui.markup import render_plain, to_plain
 
 from .bus import EventBus
 from .prompts import PromptStore
@@ -48,6 +51,25 @@ from .prompts import PromptStore
 # event, which routes through the flush-first :meth:`_publish`).
 _DELTAS_FLUSH_MS = 50.0
 _DELTAS_MAX_CHARS = 8192
+
+
+_APPROVAL_TARGET_KEYS = ("path", "file_path", "filename", "command", "cmd", "query", "url", "pattern")
+
+
+def _approval_target(tool_args: Any) -> str:
+    """Short human target for an auto-approval breadcrumb (path / command).
+
+    Only a single scalar argument is surfaced, truncated to 120 characters;
+    the full arguments already appear in the tool_call trace event.
+    """
+    if not isinstance(tool_args, dict):
+        return ""
+    for key in _APPROVAL_TARGET_KEYS:
+        value = tool_args.get(key)
+        if isinstance(value, str) and value.strip():
+            text = " ".join(value.split())
+            return text if len(text) <= 120 else text[:119] + "…"
+    return ""
 
 
 class WebUI(BaseUI):
@@ -171,7 +193,25 @@ class WebUI(BaseUI):
         self._publish({"kind": "error", "text": str(message)})
 
     def show_info(self, message):
+        if not isinstance(message, str) and _is_rich_renderable(message):
+            self.show_renderable(message)
+            return
         self._publish({"kind": "info", "text": str(message)})
+
+    def show_info_markup(self, message):
+        # Browser and mobile clients render plain text; drop terminal markup.
+        self._publish({"kind": "info", "text": to_plain(message)})
+
+    def show_error_markup(self, message):
+        self._publish({"kind": "error", "text": to_plain(message)})
+
+    def show_renderable(self, renderable):
+        self._publish({"kind": "info", "text": render_plain(renderable)})
+
+    def show_notice(self, kind, message):
+        # Mode banners / toggles. ``notice`` is an additive, optional field
+        # (info|ok|attention|caution|danger|plan) so clients can pick a tone.
+        self._publish({"kind": "info", "text": str(message), "notice": str(kind)})
 
     def show_status(self, message):
         return _NullStatus(self, str(message))
@@ -356,6 +396,26 @@ class WebUI(BaseUI):
                 "filename": str(filename),
                 "original": str(original_content or ""),
                 "new": str(new_content or ""),
+            }
+        )
+
+    def notify_auto_approved(self, tool_name=None, tool_args=None) -> None:
+        """Publish a resolved-approval breadcrumb for a call YOLO auto-approved.
+
+        Nothing is asked and nothing waits: the agent already decided. The
+        browser renders it like any other ``prompt_resolved`` breadcrumb,
+        tagged ``auto`` (G§9.9 "auto-approval is always visible after the
+        fact"). ``auto: True`` is the additive field; it is only ever set
+        here, never on prompts a person answered.
+        """
+        self._publish(
+            {
+                "kind": "prompt_resolved",
+                "id": f"auto-{uuid.uuid4()}",
+                "auto": True,
+                "shape": "tool_approval",
+                "tool_name": str(tool_name or ""),
+                "target": _approval_target(tool_args),
             }
         )
 

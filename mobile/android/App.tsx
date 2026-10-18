@@ -1,13 +1,29 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, View } from 'react-native';
+import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ThemeProvider } from './src/theme/ThemeContext';
+import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { PromptHost } from './src/components/PromptHost';
-import { AtmosphericBackground } from './src/components/AtmosphericBackground';
 import { refreshPendingMutations, useConnectionStore } from './src/store/connection';
+import { AmbientBackground } from './src/ui/Glass';
+
+// Hold the native splash (Paper canvas) until the bundled Wash fonts load,
+// so the first frame never flashes the platform font.
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function App() {
+  // One static family per weight (theme/tokens.ts `fontFamilies`): Android
+  // cannot select weights inside a variable or multi-weight custom family.
+  const [fontsLoaded, fontError] = useFonts({
+    Inter: require('./assets/fonts/Inter-Regular.ttf'),
+    'Inter-Medium': require('./assets/fonts/Inter-Medium.ttf'),
+    'Inter-SemiBold': require('./assets/fonts/Inter-SemiBold.ttf'),
+    JetBrainsMono: require('./assets/fonts/JetBrainsMono-Regular.ttf'),
+    'JetBrainsMono-SemiBold': require('./assets/fonts/JetBrainsMono-SemiBold.ttf'),
+  });
+  const fontsReady = fontsLoaded || !!fontError;
   const loadFromStorage = useConnectionStore((s) => s.loadFromStorage);
   const autoReconnect = useConnectionStore((s) => s.autoReconnect);
 
@@ -41,14 +57,36 @@ export default function App() {
     };
   }, [loadFromStorage, autoReconnect]);
 
+  React.useEffect(() => {
+    // A font failure still releases the splash: the app falls back to the
+    // platform font rather than hanging on launch.
+    if (fontsReady) SplashScreen.hideAsync().catch(() => undefined);
+  }, [fontsReady]);
+
+  if (!fontsReady) return null;
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AtmosphericBackground>
+        <AppCanvas>
           <AppNavigator />
           <PromptHost />
-        </AtmosphericBackground>
+        </AppCanvas>
       </ThemeProvider>
     </SafeAreaProvider>
+  );
+}
+
+/**
+ * Paper/Dusk canvas with the fixed ambient wash behind every screen
+ * (G§3.3, G§6.2). The navigator is transparent so the wash shows through its
+ * glass; "Reduce decoration" leaves the flat canvas.
+ */
+function AppCanvas({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.canvas }}>
+      <AmbientBackground>{children}</AmbientBackground>
+    </View>
   );
 }

@@ -5,7 +5,7 @@ import os
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHAT_HTML = os.path.join(REPO, "mu", "gui", "templates", "fragments", "chat.html")
-APP_CSS = os.path.join(REPO, "mu", "gui", "static", "css", "app.css")
+APP_CSS = os.path.join(REPO, "mu", "gui", "static", "css", "wash", "patterns", "chat.css")
 
 
 def test_settings_uses_a_consistent_side_modal_layout():
@@ -14,5 +14,7 @@ def test_settings_uses_a_consistent_side_modal_layout():
 
     assert "settings-side-modal" in markup
     assert "settings-close-btn" in markup
-    assert "width: min(620px, 48vw);" in css
-    assert "grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr);" in css
+    # Wash: a bounded popover above the composer, rows as a two-column grid.
+    assert "min-width: min(460px, calc(100vw - 20px));" in css
+    assert "max-width: min(590px, calc(100vw - 20px));" in css
+    assert "grid-template-columns: minmax(110px, 142px) minmax(0, 1fr);" in css

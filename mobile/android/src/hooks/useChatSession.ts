@@ -7,10 +7,12 @@ import {
 } from '../api/sessions';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
+import { useContextFillStore } from '../store/contextFill';
 import { revisionToken } from '../api/offlineQueue';
 import { isPlanModeBlocked, refreshPlanMode } from '../api/planMode';
 import type { ArtifactDescriptor } from '../api/artifacts';
 import type { AttachmentDescriptor } from '../api/attachments';
+import type { ToolCallView } from '../ui/ToolCard';
 
 const SESSION_POLL_MS = 5000;
 // Initial window size — the latest N turns to load on session open.
@@ -22,7 +24,7 @@ const MOBILE_HISTORY_CHECKPOINT_SCAN_PAGES = 6;
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'visualization' | 'subagent_panel' | 'collapse';
+  role: 'user' | 'assistant' | 'visualization' | 'subagent_panel' | 'collapse' | 'tool';
   text: string;
   turnId?: string;
   /** Durable server turn index; user messages sharing it are one checkpoint. */
@@ -42,6 +44,8 @@ export interface ChatMessage {
   collapseLive?: boolean;
   collapseUserId?: string;
   handoff?: 'entering' | 'leaving';
+  /** Tool invocation shown as a Wash ToolCard (role 'tool'). */
+  tool?: ToolCallView;
 }
 
 export interface LiveSubagentAction {
@@ -87,6 +91,10 @@ function asVisualization(value: unknown): ArtifactDescriptor | null {
 }
 
 export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
+  // Tool calls from history render as settled ToolCards; a later tool_result
+  // part (in its own `tool` turn) fills in the preview of the oldest call of
+  // the same name still waiting for one.
+  const awaitingResult: ChatMessage[] = [];
   // MUCLI_MOBILE_VISUALIZATION_HISTORY_V1: tool-result turns can contain durable visualization
   // descriptors even when their role is `tool`. Preserve those cards while
   // continuing to render ordinary text only for user/assistant turns.
@@ -126,6 +134,28 @@ export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
       ) {
         pendingAttachments.push(part.attachment as AttachmentDescriptor);
         continue;
+      }
+      if (part.type === 'tool_call' && typeof part.tool_name === 'string') {
+        flushText();
+        const toolMessage: ChatMessage = {
+          id: `history-tool-${turn.index}-${partIndex++}`,
+          role: 'tool',
+          text: '',
+          streaming: false,
+          origin: 'history',
+          tool: { id: `history-tool-${turn.index}-${partIndex}`, name: part.tool_name, args: part.tool_args, status: 'done' },
+        };
+        messages.push(toolMessage);
+        awaitingResult.push(toolMessage);
+        continue;
+      }
+      if (part.type === 'tool_result' && typeof part.preview === 'string') {
+        const name = typeof part.tool_name === 'string' ? part.tool_name : '';
+        const index = awaitingResult.findIndex(message => !name || message.tool?.name === name);
+        if (index >= 0) {
+          const [owner] = awaitingResult.splice(index, 1);
+          if (owner.tool) owner.tool = { ...owner.tool, result: part.preview };
+        }
       }
       const artifact = asVisualization(part.artifact);
       if (part.type === 'subagent_panel' && Array.isArray(part.agents)) {
@@ -341,6 +371,25 @@ function subagentFromEvent(
 // Collapse every completed exchange independently. Visualizations are timeline
 // anchors: compact disclosures may form on either side, but an artifact card
 // itself always remains top-level and in chronological order.
+/** Mark the oldest running live tool card done (or failed when blocked). */
+export function settleRunningTool(messages: ChatMessage[], result: string, failed: boolean): ChatMessage[] {
+  const index = messages.findIndex(message => message.role === 'tool' && message.tool?.status === 'running');
+  if (index < 0) return messages;
+  const message = messages[index];
+  const tool = message.tool!;
+  const updated = [...messages];
+  updated[index] = {
+    ...message,
+    tool: {
+      ...tool,
+      status: failed ? 'failed' : 'done',
+      result: result.length > 4000 ? `${result.slice(0, 4000)}…` : result,
+      durationMs: tool.startedAt ? Date.now() - tool.startedAt : undefined,
+    },
+  };
+  return updated;
+}
+
 function flattenCollapsedMessages(messages: ChatMessage[]): ChatMessage[] {
   const flattened: ChatMessage[] = [];
   for (const message of messages) {
@@ -684,6 +733,7 @@ export function useChatSession(activeSessionName: string | null) {
   const subscriptionRef = useRef<SSESubscription | null>(null);
   const messageIdRef = useRef(0);
   const seenAssistantTurnsRef = useRef(new Set<string>());
+  const liveToolSeqRef = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
   const busyRef = useRef(false);
   const sseConnectedRef = useRef(false);
@@ -1132,6 +1182,20 @@ export function useChatSession(activeSessionName: string | null) {
       setWaitingForFirstToken(true);
       const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
       setActivityLabel(toolName ? `Running ${toolName}` : 'Running tool');
+      // Keep the generating label and also show the call as a ToolCard.
+      // Buffered text lands first so the card sits after the words before it.
+      flushPendingDeltas();
+      const startedAt = Date.now();
+      const toolId = `live-tool-${startedAt}-${liveToolSeqRef.current++}`;
+      setMessages(current => [...current, {
+        id: toolId,
+        role: 'tool',
+        text: '',
+        streaming: false,
+        origin: 'stream',
+        turnId: typeof event.turn_id === 'string' ? event.turn_id : undefined,
+        tool: { id: toolId, name: toolName || 'tool', status: 'running', startedAt, live: true },
+      }]);
       return;
     }
 
@@ -1139,7 +1203,8 @@ export function useChatSession(activeSessionName: string | null) {
       busyRef.current = true;
       setStreaming(true);
       setWaitingForFirstToken(true);
-      if (isPlanModeBlocked(event.text)) {
+      const blocked = isPlanModeBlocked(event.text);
+      if (blocked) {
         // A write tool was refused by the plan-mode hook: say so, and make
         // sure the indicator is showing.
         useConnectionStore.getState().setPlanMode(true);
@@ -1147,11 +1212,21 @@ export function useChatSession(activeSessionName: string | null) {
       } else {
         setActivityLabel('Thinking');
       }
+      // Settle the oldest running ToolCard with this result.
+      const resultText = typeof event.text === 'string' ? event.text : '';
+      setMessages(current => settleRunningTool(current, resultText, blocked));
       return;
     }
 
     if (kind === 'plan_mode_changed') {
       useConnectionStore.getState().setPlanMode(Boolean(event.plan_mode));
+      return;
+    }
+
+    if (kind === 'context_snapshot') {
+      // Feeds the header context ring; replaces its periodic polling.
+      const owner = typeof event.session_name === 'string' ? event.session_name : activeSessionName;
+      useContextFillStore.getState().report(owner, event.fill_pct);
       return;
     }
 

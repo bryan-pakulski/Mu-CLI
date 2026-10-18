@@ -29,7 +29,7 @@
     // mucli the model is a provider + model (execution.stages); for an external agent it is that
     // agent's model (execution.stage_agents). Blank = Settings → Stage models, then the session.
     // host: element to render into. Returns { collect(), collectModels(), refresh(), reset() }.
-    function sheet(host, { api, autoApprove }) {
+    function sheet(host, { api }) {
         if (!host) return null;
         let data = null, touched = false, providers = [], stageDefaults = {};
         const modelLists = {};
@@ -40,12 +40,10 @@
             <select id="job-stage-${stage}-provider" data-stage-provider="${stage}" aria-label="${STAGE_LABEL[stage]} stage provider"><option value="">provider</option></select>
             <input id="job-agent-${stage}-model" data-agent-model="${stage}" list="job-agent-${stage}-models" placeholder="model" aria-label="${STAGE_LABEL[stage]} stage model">
             <datalist id="job-agent-${stage}-models"></datalist>
-            <small class="work-agent-hint" id="job-agent-${stage}-hint"></small>`).join('')}</div>
-            <p class="small tone-warn" data-codex-warning hidden></p>`;
+            <small class="work-agent-hint work-tone" id="job-agent-${stage}-hint"></small>`).join('')}</div>`;
         const select = stage => host.querySelector(`[data-agent-stage="${stage}"]`);
         const provider = stage => host.querySelector(`[data-stage-provider="${stage}"]`);
         const model = stage => host.querySelector(`[data-agent-model="${stage}"]`);
-        const warning = host.querySelector('[data-codex-warning]');
 
         async function fillModels(stage) {
             const list = host.querySelector(`#job-agent-${stage}-models`);
@@ -67,16 +65,12 @@
                 model(stage).placeholder = modelHint(data, stage, agent, stageDefaults);
                 const hint = host.querySelector(`#job-agent-${stage}-hint`);
                 hint.textContent = !mucli && info.ready === false ? `✗ ${info.problems?.[0] || `${label(agent)} is not ready`}` : '';
-                hint.classList.toggle('tone-danger', Boolean(hint.textContent));
+                if (hint.textContent) hint.dataset.tone = 'danger'; else delete hint.dataset.tone;
                 [...select(stage).options].forEach(o => {
                     const ready = o.value === 'mucli' || data?.[o.value]?.ready !== false;
                     o.textContent = label(o.value) + (ready ? '' : ' (not set up)');
                 });
             });
-            const codexGated = select('implement').value === 'codex' && !autoApprove()?.checked;
-            warning.hidden = !codexGated;
-            warning.textContent = codexGated ? `⚠ ${data?.codex?.warnings?.find(w => w.includes('approval review')) ||
-                'Codex implement without unattended mode sends every command through Codex’s automatic approval review, which may refuse to run tests.'}` : '';
         }
         host.addEventListener('change', e => {
             const stage = e.target.dataset.agentStage || e.target.dataset.stageProvider;
@@ -85,7 +79,6 @@
             sync();
         });
         host.addEventListener('input', e => { if (e.target.matches('[data-agent-stage]') && e.target.value) touched = true; });
-        autoApprove()?.addEventListener('change', sync);
 
         async function refresh() {
             const [agentsData, providerData, settings] = await Promise.all([
@@ -135,23 +128,23 @@
     async function card(target, { api, toast }) {
         if (!target) return;
         let data;
-        try { data = await load(api, true); } catch (error) { target.innerHTML = `<p class="error-box small">✗ ${esc(error.message)}</p>`; return; }
+        try { data = await load(api, true); } catch (error) { target.innerHTML = `<div class="w-banner work-banner-sm" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(error.message)}</p></div>`; return; }
         const secretSource = data.secrets?.CLAUDE_CODE_OAUTH_TOKEN || '';
-        target.innerHTML = `<div class="col" style="gap:var(--s-1)">${['claude', 'codex'].map(agent => {
+        target.innerHTML = `<div class="work-stack-tight work-agent-statuses">${['claude', 'codex'].map(agent => {
             const h = data[agent] || {};
-            return `<div class="col work-agent-status" data-agent-status="${agent}" style="gap:2px">
-                <div class="row wrap small"><span class="pill tone-${h.ready ? 'ok' : 'muted'}"><span aria-hidden="true">${h.ready ? '✓' : '○'}</span>${esc(h.label || label(agent))}: ${h.ready ? 'ready' : 'not ready'}</span>
-                    ${h.binary ? `<span class="mono ellipsis" title="${esc(h.binary)}">${esc(h.version || h.binary)}</span>` : ''}
-                    ${h.credential ? `<span class="muted">credential: ${esc(h.credential.replaceAll('_', ' '))}</span>` : ''}</div>
-                ${(h.problems || []).map(p => `<div class="small tone-danger">✗ ${esc(p)}</div>`).join('')}
-                ${(h.warnings || []).map(w => `<div class="small tone-warn">⚠ ${esc(w)}</div>`).join('')}
-                ${h.ready ? '' : `<details class="small"><summary>Set up ${esc(h.label || label(agent))}</summary><ol>${(data.setup?.[agent] || []).map(s => `<li>${esc(s)}</li>`).join('')}</ol></details>`}</div>`;
+            return `<div class="work-stack-tight work-agent-status" data-agent-status="${agent}">
+                <div class="work-toolbar work-caption"><span class="w-chip"${h.ready ? ' data-tone="ok"' : ''}><span class="w-chip__glyph" aria-hidden="true">${h.ready ? '✓' : '○'}</span><span>${esc(h.label || label(agent))}: ${h.ready ? 'ready' : 'not ready'}</span></span>
+                    ${h.binary ? `<span class="work-mono work-ellipsis" title="${esc(h.binary)}">${esc(h.version || h.binary)}</span>` : ''}
+                    ${h.credential ? `<span class="work-muted">credential: ${esc(h.credential.replaceAll('_', ' '))}</span>` : ''}</div>
+                ${(h.problems || []).map(p => `<div class="work-caption" data-tone="danger">✗ ${esc(p)}</div>`).join('')}
+                ${(h.warnings || []).map(w => `<div class="work-caption" data-tone="attention">⚠ ${esc(w)}</div>`).join('')}
+                ${h.ready ? '' : `<details class="work-caption"><summary>Set up ${esc(h.label || label(agent))}</summary><ol>${(data.setup?.[agent] || []).map(s => `<li>${esc(s)}</li>`).join('')}</ol></details>`}</div>`;
         }).join('')}
-            <div class="row wrap small" data-agent-secret role="group" aria-label="Claude setup token">
-                <label for="agent-oauth-token">Claude setup token <span class="muted">(${secretSource ? `set in ${esc(secretSource)}` : 'not set'})</span></label>
-                <input id="agent-oauth-token" type="password" autocomplete="off" placeholder="paste the output of claude setup-token" class="grow">
-                <button type="button" class="btn sm" data-secret-save>Save token</button>
-                ${secretSource === 'secrets.env' ? '<button type="button" class="btn ghost sm tone-danger" data-secret-clear>Clear</button>' : ''}
+            <div class="work-toolbar work-caption" data-agent-secret role="group" aria-label="Claude setup token">
+                <label for="agent-oauth-token">Claude setup token <span class="work-muted">(${secretSource ? `set in ${esc(secretSource)}` : 'not set'})</span></label>
+                <input id="agent-oauth-token" type="password" autocomplete="off" placeholder="paste the output of claude setup-token" class="w-input work-grow">
+                <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-secret-save>Save token</button>
+                ${secretSource === 'secrets.env' ? '<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-tone="danger" data-secret-clear>Clear</button>' : ''}
             </div></div>`;
         // Rendered inside the settings section's <form>: a nested form would be dropped, so this
         // is a plain group and Enter must not submit the section.
@@ -182,7 +175,7 @@
             const a = agents[stage] || { agent: 'mucli' };
             const m = a.agent === 'mucli' ? models[stage]?.model : (a.model || 'default model');
             if (a.agent === 'mucli' && !m) return '';
-            return `${esc(stage)} ${a.agent === 'mucli' ? '' : `<span class="pill tone-accent" data-stage-agent="${esc(a.agent)}">${esc(a.label || label(a.agent))}</span> `}<code>${esc(m)}</code>`;
+            return `${esc(stage)} ${a.agent === 'mucli' ? '' : `<span class="w-chip" data-tone="accent" data-stage-agent="${esc(a.agent)}">${esc(a.label || label(a.agent))}</span> `}<code>${esc(m)}</code>`;
         }).filter(Boolean);
         return parts.length ? parts.join(' · ') : 'unset';
     }

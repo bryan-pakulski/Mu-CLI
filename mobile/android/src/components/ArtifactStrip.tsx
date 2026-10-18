@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppState, ScrollView, StyleSheet, View } from 'react-native';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { fontWeights, radii, spacing } from '../theme/tokens';
+import { Pressable, Text, Icon } from '../ui';
 
 export function ArtifactStrip({
   sessionName,
@@ -59,27 +58,27 @@ export function ArtifactStrip({
       {visualizations.length > 0 && (
         <View style={styles.section}>
           <View style={styles.heading}>
-            <Text variant="xs" dim style={styles.label}>VISUALIZATIONS</Text>
+            <Text variant="xs" dim style={styles.label}>Visualizations</Text>
             <Text variant="xs" dim>{visualizations.length}</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {visualizations.map(artifact => {
               const isViz = artifact.kind === 'visualization';
               return (
-                <TouchableOpacity
+                <Pressable
                   key={artifact.artifact_id}
                   onPress={() => openExternalUrl(artifactsApi.viewUrl(sessionName, artifact.artifact_id))}
-                  style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+                  style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
                 >
-                  <Ionicons name="stats-chart-outline" size={16} color={colors.textSoft} />
+                  <Icon name="bar-chart-3" size="sm" color={colors.ink2} />
                   <View style={styles.copy}>
                     <Text variant="xs" style={styles.name} numberOfLines={1}>
                       {artifact.title || artifact.name}
                     </Text>
                     <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                   </View>
-                  <Ionicons name="open-outline" size={17} color={colors.textDim} />
-                </TouchableOpacity>
+                  <Icon name="external-link" size="sm" color={colors.ink3} />
+                </Pressable>
               );
             })}
           </ScrollView>
@@ -89,23 +88,23 @@ export function ArtifactStrip({
       {files.length > 0 && (
         <View style={styles.section}>
           <View style={styles.heading}>
-            <Text variant="xs" dim style={styles.label}>FILES</Text>
+            <Text variant="xs" dim style={styles.label}>Files</Text>
             <Text variant="xs" dim>{files.length}</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {files.map(artifact => (
-              <TouchableOpacity
+              <Pressable
                 key={artifact.artifact_id}
                 onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, artifact.artifact_id))}
-                style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+                style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
               >
-                <Ionicons name="document-attach-outline" size={16} color={colors.textSoft} />
+                <Icon name="paperclip" size="sm" color={colors.ink2} />
                 <View style={styles.copy}>
                   <Text variant="xs" style={styles.name} numberOfLines={1}>{artifact.name}</Text>
                   <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                 </View>
-                <Ionicons name="arrow-down-circle-outline" size={17} color={colors.textDim} />
-              </TouchableOpacity>
+                <Icon name="download" size="sm" color={colors.ink3} />
+              </Pressable>
             ))}
           </ScrollView>
         </View>

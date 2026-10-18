@@ -1,4 +1,5 @@
-import { darkColors, lightColors } from '../src/theme/tokens';
+import { duskColors, paperColors, SEMANTICS, type WashColors } from '../src/theme/tokens';
+import { dusk, paper } from '../src/theme/wash.generated';
 import { parsePatch, sessionItems, defaultTab, runCounts } from '../src/components/jobViews';
 import { stateStatus, stateLabel, STATUS } from '../src/theme/status';
 import { filterJobs } from '../src/screens/JobsListScreen';
@@ -37,7 +38,7 @@ it('folds tool calls to one summary line and keeps stage transcripts', () => {
   expect(plan[1]).toMatchObject({ kind: 'tool', summary: 'grep({"q":"x"})' });
 });
 
-it('maps job states onto the planos status vocabulary and default tabs', () => {
+it('maps job states onto the shared status vocabulary and default tabs', () => {
   expect(stateStatus('implementing')).toBe('active');
   expect(stateStatus('plan_review')).toBe('waiting');
   expect(STATUS[stateStatus('failed')].icon).toBe('✗');
@@ -70,7 +71,7 @@ it('keeps a bounded CPU/memory sample history per container and treats null as n
   expect(s.b).toBeUndefined();
 });
 
-/* WCAG 2.2 contrast of the planos palette (text tokens must reach 4.5:1). */
+/* WCAG 2.2 contrast of the Wash palette (text tokens must reach 4.5:1). */
 function lum(hex: string) {
   const n = parseInt(hex.slice(1), 16);
   const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
@@ -78,18 +79,28 @@ function lum(hex: string) {
 }
 const ratio = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
 
-it.each([['dark', darkColors], ['light', lightColors]] as const)('%s palette text tokens are >= 4.5:1 on bg, surface and raised', (_name, colors) => {
-  for (const fg of [colors.text, colors.muted, colors.accent, colors.ok, colors.warn, colors.danger, colors.running]) {
-    for (const bg of [colors.bg, colors.surface, colors.raised]) expect(ratio(fg, bg)).toBeGreaterThanOrEqual(4.5);
+it.each([['dusk', duskColors], ['paper', paperColors]] as const)('%s text tokens are >= 4.5:1 on every surface, and every semantic ink on its own wash', (_name, colors: WashColors) => {
+  const surfaces = [colors.canvas, colors.surface, colors.sunken, colors.raised];
+  const inks = [colors.ink, colors.ink2, colors.ink3, colors.plum, ...SEMANTICS.map(s => colors[s].ink)];
+  for (const fg of inks) {
+    for (const bg of surfaces) expect(ratio(fg, bg)).toBeGreaterThanOrEqual(4.5);
   }
-  expect(ratio(colors.accentOn, colors.accent)).toBeGreaterThanOrEqual(4.5);
+  for (const s of SEMANTICS) expect(ratio(colors[s].ink, colors[s].wash)).toBeGreaterThanOrEqual(4.5);
+  expect(ratio(colors.onInk, colors.ink)).toBeGreaterThanOrEqual(4.5);
+  // Primary/accent fills carry on-ink labels.
+  expect(ratio(colors.onInk, colors.accent.ink)).toBeGreaterThanOrEqual(4.5);
+  // Form-control boundaries are non-text UI: >= 3:1 on surface and sunken.
+  for (const bg of [colors.surface, colors.sunken]) expect(ratio(colors.controlBorder, bg)).toBeGreaterThanOrEqual(3);
 });
 
-it('uses the planos palette from CONTRACT §8', () => {
-  expect([darkColors.accent, darkColors.ok, darkColors.warn, darkColors.danger, darkColors.running, darkColors.muted, darkColors.text, darkColors.surface, darkColors.border, darkColors.bg, darkColors.raised, darkColors.hover])
-    .toEqual(['#7aa2f7', '#73c991', '#e0af68', '#f7768e', '#7dcfff', '#8b93b8', '#c0caf5', '#1a1b26', '#2f3549', '#16161e', '#1f2335', '#292e42']);
-  expect([lightColors.accent, lightColors.ok, lightColors.warn, lightColors.danger, lightColors.running, lightColors.muted, lightColors.text, lightColors.surface, lightColors.border, lightColors.bg, lightColors.raised, lightColors.hover])
-    .toEqual(['#2f5bd3', '#1a7f37', '#9a6700', '#cf222e', '#0969da', '#57606a', '#1f2328', '#ffffff', '#d0d7de', '#f6f8fa', '#ffffff', '#eaeef2']);
+it('uses the palette generated from mu/design/tokens.json', () => {
+  for (const [colors, source] of [[paperColors, paper], [duskColors, dusk]] as const) {
+    expect([colors.canvas, colors.surface, colors.sunken, colors.raised, colors.hairline, colors.hairlineStrong, colors.controlBorder, colors.ink, colors.ink2, colors.ink3, colors.plum, colors.onInk])
+      .toEqual([source.canvas, source.surface, source.sunken, source.raised, source.hairline, source['hairline-strong'], source['control-border'], source.ink, source['ink-2'], source['ink-3'], source.plum, source['on-ink']]);
+    for (const s of SEMANTICS) {
+      expect(colors[s]).toEqual({ wash: source[`${s}-wash`], pigment: source[`${s}-pigment`], ink: source[`${s}-ink`] });
+    }
+  }
 });
 
 test('session timeline names Claude Code / Codex sandboxes and harness tool results', () => {

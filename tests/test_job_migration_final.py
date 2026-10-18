@@ -94,15 +94,21 @@ def test_tool_approval_is_separate_from_plan_and_consumed_once_for_exact_args(tm
     assert view["state"] == "needs_input" and view["paused_from"] == "implementing"
     actions = {a["id"]:a for a in view["actions"]}
     assert not actions["approvePlan"]["enabled"]
-    assert not actions["resume"]["enabled"]
+    # Jobs run unattended: Resume resolves a parked approval automatically.
+    assert actions["resume"]["enabled"]
     assert actions["approveTool"]["enabled"]
     assert actions["approveTool"]["primary"]
     dispatch(service, {"type":"approveTool", "job_id":job.id, "args":actions["approveTool"]["args"]})
     payload = {"kind":"approval_required", **target}
-    assert claim_stage_response(service, job, "implement", {**payload, "tool_args":{"path":"other.py"}}) is None
-    assert claim_stage_response(service, job, "review", payload) is None
-    assert claim_stage_response(service, job, "implement", payload)["decision"] == "approve"
-    assert claim_stage_response(service, job, "implement", payload) is None
+    # The human decision is consumed once, for the exact args only; every other request is
+    # answered automatically (approve in implement, deny in the read-only review stage).
+    other = claim_stage_response(service, job, "implement", {**payload, "tool_args":{"path":"other.py"}})
+    assert other["auto"] and other["decision"] == "approve"
+    review = claim_stage_response(service, job, "review", payload)
+    assert review["auto"] and review["decision"] == "deny"
+    human = claim_stage_response(service, job, "implement", payload)
+    assert human["decision"] == "approve" and not human.get("auto")
+    assert claim_stage_response(service, job, "implement", payload)["auto"]
 
 
 def test_compatibility_routes_cannot_bypass_core_gates(tmp_path):

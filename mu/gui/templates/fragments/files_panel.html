@@ -9,21 +9,27 @@
             <div class="panel-title">Files</div>
             <div class="panel-subtitle">Browse the attached workspace. Editing stays in your normal development environment.</div>
         </div>
-        <button class="files-refresh" @click="$store.files.refreshTree()" title="Refresh workspace" aria-label="Refresh workspace">↻</button>
+        <button type="button" class="files-refresh w-btn" data-variant="icon" @click="$store.files.refreshTree()" title="Refresh workspace" aria-label="Refresh workspace"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg></button>
     </div>
 
     <template x-if="!$store.files.roots.length && !$store.files.loading && !$store.files.error">
-        <div class="files-empty">
-            <div class="files-empty-title">No workspace attached</div>
-            <p class="muted">Attach a folder to browse its structure.</p>
-            <button class="primary" @click="attachWorkspace()" title="Pick a workspace folder">Attach folder</button>
+        <div class="files-empty w-empty" data-size="sm" data-tone="accent">
+            <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-folder-open"></use></svg></div>
+            <h3 class="files-empty-title w-empty__title">No workspace attached</h3>
+            <p class="w-empty__body">Attach a folder to browse its structure.</p>
+            <div class="w-empty__actions">
+                <button type="button" class="w-btn" data-variant="primary" @click="attachWorkspace()" title="Pick a workspace folder">Attach folder</button>
+            </div>
         </div>
     </template>
 
-    <div class="files-error" x-show="$store.files.error" x-text="$store.files.error"></div>
+    <div class="files-error w-banner" data-tone="danger" role="alert" x-show="$store.files.error">
+        <span class="w-banner__glyph" aria-hidden="true">✗</span>
+        <p class="w-banner__msg" x-text="$store.files.error"></p>
+    </div>
 
     <div class="files-browser" x-show="$store.files.roots.length || $store.files.loading">
-        <div class="files-loading muted ui-loading-region" x-show="$store.files.loading">Loading workspace…</div>
+        <div class="files-loading muted ui-loading-region" role="status" x-show="$store.files.loading">Loading workspace…</div>
         <div class="files-tree" x-show="!$store.files.loading">
             <template x-for="root in $store.files.roots" :key="root.path">
                 <section class="files-root">
@@ -31,22 +37,24 @@
                     <template x-for="child in root.children" :key="child.path">
                         <div class="files-entry-wrap">
                             <template x-if="child.is_dir">
-                                <button class="files-entry dir"
+                                <button type="button" class="files-entry dir"
                                         :class="{ selected: $store.files.selectedPath === child.path }"
+                                        :aria-current="$store.files.selectedPath === child.path ? 'true' : null"
                                         @click="$store.files.selectedPath = child.path; $store.files.expand(child.path)"
                                         :title="child.path">
-                                    <span class="files-entry-chevron" x-text="$store.files.expanded[child.path] ? '⌄' : '›'"></span>
-                                    <svg class="files-entry-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h7l2 2H21v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z"></path><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5"></path></svg>
+                                    <span class="files-entry-chevron" aria-hidden="true" x-text="$store.files.expanded[child.path] ? '⌄' : '›'"></span>
+                                    <svg class="files-entry-icon w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-folder"></use></svg>
                                     <span class="name" x-text="child.name"></span>
                                 </button>
                             </template>
                             <template x-if="!child.is_dir">
-                                <button class="files-entry file"
+                                <button type="button" class="files-entry file"
                                         :class="{ selected: $store.files.selectedPath === child.path }"
+                                        :aria-current="$store.files.selectedPath === child.path ? 'true' : null"
                                         @click="$store.files.selectedPath = child.path"
                                         :title="child.path">
-                                    <span class="files-entry-chevron"></span>
-                                    <svg class="files-entry-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>
+                                    <span class="files-entry-chevron" aria-hidden="true"></span>
+                                    <svg class="files-entry-icon w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-file"></use></svg>
                                     <span class="name" x-text="child.name"></span>
                                 </button>
                             </template>
@@ -56,22 +64,22 @@
                                     <template x-for="sub in (child.children || [])" :key="sub.path">
                                         <div class="files-entry-wrap">
                                             <template x-if="sub.is_dir">
-                                                <button class="files-entry dir indent"
+                                                <button type="button" class="files-entry dir indent"
                                                         :class="{ selected: $store.files.selectedPath === sub.path }"
                                                         @click="$store.files.selectedPath = sub.path; $store.files.expand(sub.path)"
                                                         :title="sub.path">
-                                                    <span class="files-entry-chevron" x-text="$store.files.expanded[sub.path] ? '⌄' : '›'"></span>
-                                                    <svg class="files-entry-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h7l2 2H21v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z"></path><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5"></path></svg>
+                                                    <span class="files-entry-chevron" aria-hidden="true" x-text="$store.files.expanded[sub.path] ? '⌄' : '›'"></span>
+                                                    <svg class="files-entry-icon w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-folder"></use></svg>
                                                     <span class="name" x-text="sub.name"></span>
                                                 </button>
                                             </template>
                                             <template x-if="!sub.is_dir">
-                                                <button class="files-entry file indent"
+                                                <button type="button" class="files-entry file indent"
                                                         :class="{ selected: $store.files.selectedPath === sub.path }"
                                                         @click="$store.files.selectedPath = sub.path"
                                                         :title="sub.path">
-                                                    <span class="files-entry-chevron"></span>
-                                                    <svg class="files-entry-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>
+                                                    <span class="files-entry-chevron" aria-hidden="true"></span>
+                                                    <svg class="files-entry-icon w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-file"></use></svg>
                                                     <span class="name" x-text="sub.name"></span>
                                                 </button>
                                             </template>

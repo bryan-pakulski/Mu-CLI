@@ -3,18 +3,18 @@
 // provider/model, mode and approval policy it inherits.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import {
   jobsApi, defaultJobSession, defaultWorkspace, isRepositoryUrl, recentWorkspaces, sessionForWorkspace, sessionModelLabel,
   type JobSessionOption, type TicketImportTarget,
 } from '../api/jobs';
 import { isMissingEndpoint } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Banner, Empty, Field, Loading, PlanosButton, SwitchRow, TextField } from './planos';
-import { Text } from './Text';
+import { DEFAULT_RUN_IN, runInExecution, saveLastRunIn, type RunInSpec } from '../api/runIn';
+import { RunInPicker } from '../ui/RunInPicker';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
+import { Banner, Button, Empty, Field, Loading, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 export type JobSessionsState = {
   sessions: JobSessionOption[];
@@ -63,16 +63,16 @@ export function JobSessionPicker({ sessions, value, onChange, loading, error }: 
             accessibilityLabel={`Session ${s.name}${s.workspace ? `, ${s.workspace}` : ''}${meta ? `, ${meta}` : ''}`}
             accessibilityState={{ selected: on, checked: on }} onPress={() => onChange(s.name)}
             style={({ pressed }) => [styles.row, {
-              borderColor: on ? colors.accent : colors.border,
-              backgroundColor: on ? colors.accentSubtle : pressed ? colors.hover : colors.bg,
+              borderColor: on ? colors.accent.ink : colors.hairline,
+              backgroundColor: on ? colors.accent.wash : pressed ? colors.sunken : colors.canvas,
             }]}>
             <View style={styles.head}>
-              <Text variant="xs" style={{ color: on ? colors.accent : colors.muted }}>{on ? '◉' : '○'}</Text>
+              <Text variant="xs" style={{ color: on ? colors.accent.ink : colors.ink3 }}>{on ? '◉' : '○'}</Text>
               <Text variant="sm" style={{ fontWeight: fontWeights.semibold, flex: 1 }} numberOfLines={1}>{s.name}</Text>
-              {s.current ? <Text variant="xs" style={{ color: colors.muted }}>current</Text> : null}
+              {s.current ? <Text variant="xs" style={{ color: colors.ink3 }}>current</Text> : null}
             </View>
-            <Text variant="xs" style={{ color: colors.muted, fontFamily: fonts.mono }} numberOfLines={1}>{s.workspace || 'no workspace'}</Text>
-            {meta ? <Text variant="xs" style={{ color: colors.muted }} numberOfLines={1}>{meta}{s.agent_mode && s.agent_mode !== 'default' ? ` · ${s.agent_mode}` : ''}</Text> : null}
+            <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }} numberOfLines={1}>{s.workspace || 'no workspace'}</Text>
+            {meta ? <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{meta}{s.agent_mode && s.agent_mode !== 'default' ? ` · ${s.agent_mode}` : ''}</Text> : null}
           </Pressable>
         );
       })}
@@ -91,16 +91,16 @@ export function JobSessionSheet({ visible, title = 'Choose session', intro, defa
   useEffect(() => { if (visible) setValue(null); }, [visible]);
   const chosen = value ?? (supported ? defaultJobSession(sessions, defaultSession) : defaultSession);
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title={title}>
-      {intro ? <Text variant="xs" style={{ color: colors.muted, marginBottom: spacing.sm }}>{intro}</Text> : null}
+    <Sheet visible={visible} onClose={onClose} title={title}>
+      {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
       {supported
         ? <JobSessionPicker sessions={sessions} value={chosen} onChange={setValue} loading={loading} error={error} />
         : <Text variant="sm">{defaultSession ? `Session: ${defaultSession}` : 'This server cannot list sessions. Open jobs from a session first.'}</Text>}
       <View style={styles.actions}>
-        <PlanosButton label="Cancel" onPress={onClose} />
-        <PlanosButton primary testID="job-session-confirm" label={confirmLabel} disabled={!chosen} onPress={() => { if (chosen) onConfirm(chosen); }} />
+        <Button label="Cancel" onPress={onClose} />
+        <Button primary testID="job-session-confirm" label={confirmLabel} disabled={!chosen} onPress={() => { if (chosen) onConfirm(chosen); }} />
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -133,8 +133,8 @@ export function WorkspaceField({ sessions, value, onChange, hint, error, testID 
             return (
               <Pressable key={w} testID={`${testID}-${w}`} accessibilityRole="radio" accessibilityLabel={`Workspace ${w}`}
                 accessibilityState={{ selected: on, checked: on }} onPress={() => onChange(w)}
-                style={[styles.chip, { borderColor: on ? colors.accent : colors.border, backgroundColor: on ? colors.accentSubtle : colors.bg }]}>
-                <Text variant="xs" style={{ color: on ? colors.accent : colors.text, fontFamily: fonts.mono }} numberOfLines={1}>
+                style={[styles.chip, { borderColor: on ? colors.accent.ink : colors.hairline, backgroundColor: on ? colors.accent.wash : colors.canvas }]}>
+                <Text variant="xs" style={{ color: on ? colors.accent.ink : colors.ink, fontFamily: fonts.mono }} numberOfLines={1}>
                   {w.split('/').filter(Boolean).pop() || w}
                 </Text>
               </Pressable>
@@ -142,7 +142,7 @@ export function WorkspaceField({ sessions, value, onChange, hint, error, testID 
           })}
         </View>
       ) : null}
-      {error ? <Text variant="xs" style={{ color: colors.danger }}>{error}</Text> : null}
+      {error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{error}</Text> : null}
     </Field>
   );
 }
@@ -159,7 +159,10 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
   const [touched, setTouched] = useState(false);
   const [force, setForce] = useState(initialForce);
   const [problem, setProblem] = useState('');
-  useEffect(() => { if (visible) { setTouched(false); setForce(initialForce); setProblem(''); } }, [visible, initialForce]);
+  // "Run in" for every ticket in the import, sent as defaults.execution (template by name).
+  const [runIn, setRunIn] = useState<RunInSpec>(DEFAULT_RUN_IN);
+  const [remember, setRemember] = useState(false);
+  useEffect(() => { if (visible) { setTouched(false); setForce(initialForce); setProblem(''); setRemember(false); } }, [visible, initialForce]);
   useEffect(() => { if (visible && !touched) setWorkspace(defaultWorkspace(sessions, defaultSession)); }, [visible, touched, sessions, defaultSession]);
   const fallbackSession = !supported ? defaultSession : null;
   const pick = (path: string) => { setTouched(true); setWorkspace(path); setProblem(''); };
@@ -167,21 +170,29 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
     const path = workspace.trim();
     if (!path && !fallbackSession) { setProblem('Choose a workspace or repository for the imported jobs.'); return; }
     const matched = path && !isRepositoryUrl(path) ? sessionForWorkspace(sessions, path)?.name : undefined;
-    onConfirm({ workspace: path || undefined, session: matched || (path ? null : fallbackSession), force });
+    const execution = runInExecution(runIn, remember);
+    if (path) void saveLastRunIn(path, runIn);
+    onConfirm({
+      workspace: path || undefined, session: matched || (path ? null : fallbackSession), force,
+      ...(Object.keys(execution).length ? { execution } : {}),
+    });
   };
+  const matchedSession = workspace.trim() && !isRepositoryUrl(workspace.trim()) ? sessionForWorkspace(sessions, workspace.trim()) : undefined;
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title={title}>
-      {intro ? <Text variant="xs" style={{ color: colors.muted, marginBottom: spacing.sm }}>{intro}</Text> : null}
+    <Sheet visible={visible} onClose={onClose} title={title}>
+      {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
       <WorkspaceField sessions={sessions} value={workspace} onChange={pick} testID="job-import-workspace"
         hint={workspaceHint(sessions, workspace, fallbackSession)} error={error} />
+      <RunInPicker active={visible} workspace={workspace} session={matchedSession?.name || fallbackSession} sessionEnvironment={matchedSession?.environment || null}
+        value={runIn} onChange={setRunIn} remember={remember} onRememberChange={setRemember} testID="job-import-run-in" />
       <SwitchRow label="Run again" testID="job-import-force" value={force} onValueChange={setForce}
         hint="Also start a new job for tickets whose latest job is done." />
       {problem ? <Banner tone="danger" glyph="✗" role="alert" title={problem} /> : null}
       <View style={styles.actions}>
-        <PlanosButton label="Cancel" onPress={onClose} />
-        <PlanosButton primary testID="job-import-confirm" label={confirmLabel} onPress={confirm} />
+        <Button label="Cancel" onPress={onClose} />
+        <Button primary testID="job-import-confirm" label={confirmLabel} onPress={confirm} />
       </View>
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 

@@ -22,6 +22,8 @@ import os
 import subprocess
 from typing import Any
 
+from mu.ui.markup import esc, show_markup
+
 from . import CommandResult, command
 
 
@@ -37,6 +39,17 @@ def _emit(session: Any, body: str, allow_prompt: bool, *, error: bool = False) -
             fn(body)
         except Exception:
             pass
+
+
+def _emit_ok(session: Any, body: str, allow_prompt: bool) -> None:
+    """Show a success message in bold green on terminals, plain elsewhere."""
+    ui = getattr(session, "ui", None)
+    if ui is None or not allow_prompt:
+        return
+    try:
+        show_markup(ui, f"[wash.ok.bold]{esc(body)}[/wash.ok.bold]")
+    except Exception:
+        pass
 
 
 def _list(session: Any, allow_prompt: bool) -> CommandResult:
@@ -81,7 +94,7 @@ def _reload(session: Any, allow_prompt: bool) -> CommandResult:
     except Exception:
         pass
     msg = "Prompt cache cleared. File edits will apply on the next turn."
-    _emit(session, f"[bold green]{msg}[/bold green]", allow_prompt)
+    _emit_ok(session, msg, allow_prompt)
     return CommandResult(ok=True, message=msg)
 
 
@@ -115,7 +128,7 @@ def _init(session: Any, args: str, allow_prompt: bool) -> CommandResult:
         f"  {n} -> {p}" for n, p in written.items()
     )
     body += "\nEdit the file(s); changes apply after `/prompts reload`."
-    _emit(session, f"[bold green]{body}[/bold green]", allow_prompt)
+    _emit_ok(session, body, allow_prompt)
     return CommandResult(ok=True, message=body, data={"written": written})
 
 
@@ -165,11 +178,11 @@ def _validate(session: Any, args: str, allow_prompt: bool) -> CommandResult:
         text = runtime if (isinstance(runtime, str) and runtime.strip()) else get_resolved(name).text
         missing = validate(name, text)
         if not missing:
-            lines.append(f"  [green]{name}[/green]: OK")
+            lines.append(f"  [wash.ok]{name}[/wash.ok]: OK")
         else:
             any_missing = True
             lines.append(
-                f"  [red]{name}[/red]: missing critical anchors — "
+                f"  [wash.danger]{name}[/wash.danger]: missing critical anchors — "
                 + ", ".join(missing)
             )
     body = "\n".join(lines)

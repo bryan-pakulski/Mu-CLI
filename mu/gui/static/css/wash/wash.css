@@ -1,0 +1,54 @@
+@layer tokens, base, layout, components, patterns, utilities;
+
+/* Wash — the single shared stylesheet every page links (spec §4.1).
+ *
+ * Layer order is declared once, above; later layers win. There is no legacy
+ * layer any more: every rule lives in tokens / base / layout / components /
+ * patterns / utilities. Page bundles in patterns/ (chat.css, work.css,
+ * containers.css, trace.css, job-trace.css, model-costs.css, gallery.css)
+ * are linked right after this file by templates/_layout.html and add their
+ * page's rules to the same layers.
+ *
+ * Imports below are relative so the file also works from a file:// copy.
+ */
+
+/* ------------------------------------------------ Wash */
+@import url("tokens.css");                       /* generated; declares @layer tokens itself */
+@import url("base.css") layer(base);
+@import url("layout.css") layer(layout);
+@import url("components/icon.css") layer(components);
+@import url("components/button.css") layer(components);
+@import url("components/chip.css") layer(components);
+@import url("components/card.css") layer(components);
+@import url("components/nav.css") layer(components);
+@import url("components/tabs.css") layer(components);
+@import url("components/form.css") layer(components);
+@import url("components/modal.css") layer(components);
+@import url("components/drawer.css") layer(components);
+@import url("components/menu.css") layer(components);
+@import url("components/toast.css") layer(components);
+@import url("components/banner.css") layer(components);
+@import url("components/empty.css") layer(components);
+@import url("components/table.css") layer(components);
+@import url("components/progress.css") layer(components);
+@import url("components/stepper.css") layer(components);
+@import url("components/panel.css") layer(components);
+@import url("components/composer.css") layer(components);
+@import url("components/message.css") layer(components);
+@import url("components/markdown.css") layer(components);
+@import url("components/code.css") layer(components);
+@import url("components/toolcard.css") layer(components);
+@import url("components/approval.css") layer(components);
+@import url("components/prompt.css") layer(components);
+@import url("components/diff.css") layer(components);
+@import url("components/meter.css") layer(components);
+@import url("components/palette.css") layer(components);
+@import url("components/session-list.css") layer(components);
+@import url("components/avatar.css") layer(components);
+@import url("components/popout.css") layer(components);
+@import url("components/launcher.css") layer(components);
+@import url("hljs-wash.css");                    /* generated; declares @layer components itself */
+@import url("patterns/conversation.css") layer(patterns);
+@import url("patterns/overlays.css") layer(patterns);
+@import url("patterns/shell.css") layer(patterns);
+@import url("utilities.css") layer(utilities);

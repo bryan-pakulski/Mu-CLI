@@ -1,0 +1,42 @@
+<!-- Loop: add backlog item modal (.w-modal, G§9.17) -->
+<div class="modal-backdrop w-modal"
+     x-data
+     x-dialog="$store.loop.showAddItem"
+     x-cloak
+     x-show="$store.loop.showAddItem"
+     x-transition.opacity.duration.120ms
+     @click.self="$store.loop.closeAddItem()"
+     @dialog-close="$store.loop.showAddItem && $store.loop.closeAddItem()">
+    <section class="modal w-modal__dialog" data-size="sm" @click.stop role="dialog" aria-modal="true" aria-labelledby="loop-add-item-title">
+        <header class="modal-head w-modal__head">
+            <h2 class="modal-title w-modal__title" id="loop-add-item-title">Add backlog item</h2>
+            <button type="button" class="w-btn" data-variant="icon" @click="$store.loop.closeAddItem()" aria-label="Close" title="Close">
+                <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+            </button>
+        </header>
+        <div class="modal-body w-modal__body w-form">
+            <div class="modal-field w-field">
+                <label class="modal-label w-field__label" for="loop-add-item-content">Content</label>
+                <textarea class="w-textarea" id="loop-add-item-content"
+                          x-model="$store.loop.newItemContent"
+                          placeholder="What needs to be done?"
+                          rows="3"
+                          @keydown.stop></textarea>
+            </div>
+            <div class="modal-field w-field">
+                <label class="modal-label w-field__label" for="loop-add-item-status">Status</label>
+                <span class="w-select">
+                    <select class="w-select__control" id="loop-add-item-status" x-model="$store.loop.newItemStatus">
+                        <option value="pending">pending</option>
+                        <option value="in_progress">in progress</option>
+                        <option value="blocked">blocked</option>
+                    </select>
+                </span>
+            </div>
+        </div>
+        <footer class="modal-actions w-modal__foot">
+            <button type="button" class="w-btn" data-variant="secondary" @click="$store.loop.closeAddItem()"><span>Cancel</span></button>
+            <button type="button" class="w-btn" data-variant="primary" @click="$store.loop.addBacklogItem()"><span>Add item</span></button>
+        </footer>
+    </section>
+</div>

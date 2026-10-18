@@ -1,15 +1,14 @@
 """Regression tests for session-type icons in session list + during creation.
 
-Covers three surfaces:
-1. Web GUI welcome.html — sessionGlyph() for chat/workspace/container.
-2. Mobile SwipeSessionsDrawer — typeIcon() maps session_type to Ionicons.
+Covers these surfaces:
+1. Web GUI session lists (sidebar, welcome) — a session avatar (components/avatar.css) whose
+   corner badge shows the type: chat → message-circle, workspace → folder, container → box.
+2. Mobile SwipeSessionsDrawer — the same SessionAvatar (src/ui/SessionAvatar.tsx).
 3. TUI mucli — session picker shows glyph prefix; creation prompt shows glyph.
 4. SessionManager.get_session_list_with_type() — reads session_type from disk.
 
-Glyphs used across surfaces:
-  chat      → ○  (Ionicons: chatbubble-ellipses-outline)
-  workspace → ▱  (Ionicons: folder-open-outline)
-  container → ◇  (Ionicons: cube-outline)
+Terminal glyphs (the TUI keeps text glyphs; the graphical surfaces use avatars):
+  chat      → ○   workspace → ▱   container → ◇
 """
 
 import json
@@ -40,24 +39,15 @@ def read(path: Path) -> str:
 
 
 class TestWebGuiGlyphs:
-    """welcome.html must render session-type glyphs in both list + creation."""
+    """Web session lists render a session avatar whose badge shows the session type."""
 
-    def test_session_glyph_function_exists(self):
-        src = read(WELCOME_HTML)
-        assert "sessionGlyph" in src, "sessionGlyph function missing from welcome.html"
+    def test_avatar_badge_maps_all_three_types(self):
+        src = read(ROOT / "mu/gui/static/js/app.js")
+        assert 'workspace: "folder", container: "box", chat: "message-circle"' in src
 
-    def test_session_glyph_maps_all_three_types(self):
-        src = read(WELCOME_HTML)
-        # sessionGlyph returns ◇ for container, ○ for chat, ▱ for workspace
-        assert "◇" in src or "\\u25c7" in src, "container glyph ◇ missing"
-        assert "○" in src or "\\u25cb" in src, "chat glyph ○ missing"
-        assert "▱" in src or "\\u25b1" in src, "workspace glyph ▱ missing"
-
-    def test_session_list_uses_session_glyph(self):
-        src = read(WELCOME_HTML)
-        assert "sessionGlyph(s.session_type)" in src, (
-            "session list row does not call sessionGlyph()"
-        )
+    def test_session_lists_use_the_avatar(self):
+        assert "sessionAvatarMarkup(s.name, s.session_type, 'lg')" in read(WELCOME_HTML)
+        assert "sessionAvatarMarkup(s.name, s.session_type)" in read(ROOT / "mu/gui/templates/index.html")
 
     def test_creation_wizard_has_icons(self):
         src = read(WELCOME_HTML)
@@ -72,17 +62,13 @@ class TestWebGuiGlyphs:
 class TestMobileSessionDrawer:
     """SwipeSessionsDrawer must show type icons in session rows."""
 
-    def test_type_icon_function_exists(self):
+    def test_rows_render_the_session_avatar(self):
         src = read(SWIPE_DRAWER)
-        assert "typeIcon" in src, "typeIcon function missing from SwipeSessionsDrawer"
+        assert "<SessionAvatar name={session.name} type={session.session_type}" in src
 
-    def test_type_icon_maps_all_three_types(self):
-        src = read(SWIPE_DRAWER)
-        assert "cube-outline" in src, "container icon cube-outline missing"
-        assert "chatbubble-ellipses-outline" in src, (
-            "chat icon chatbubble-ellipses-outline missing"
-        )
-        assert "folder-open-outline" in src, "workspace icon folder-open-outline missing"
+    def test_avatar_badge_maps_all_three_types(self):
+        src = read(ROOT / "mobile/android/src/ui/SessionAvatar.tsx")
+        assert "{ workspace: 'folder', container: 'box', chat: 'message-circle' }" in src
 
     def test_type_icon_wrap_style_exists(self):
         src = read(SWIPE_DRAWER)
@@ -98,9 +84,9 @@ class TestMobileNewSessionSheet:
 
     def test_session_types_array_has_icons(self):
         src = read(NEW_SESSION)
-        assert "chatbubble-ellipses-outline" in src
-        assert "folder-open-outline" in src
-        assert "cube-outline" in src
+        assert "icon: 'message-circle'" in src
+        assert "icon: 'folder-open'" in src
+        assert "icon: 'box'" in src
 
 
 # ── TUI ──────────────────────────────────────────────────────────────────────

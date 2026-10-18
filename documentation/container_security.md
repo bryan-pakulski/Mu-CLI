@@ -68,7 +68,7 @@ dropped.
 
 | Key | Effect |
 |---|---|
-| `allow_paths = [glob, ...]` | Tracked secret-looking fixtures the pre-check may mount. Untracked files never. |
+| `allow_paths = [glob, ...]` | Tracked secret-looking files outside test directories the pre-check may mount. Untracked files there never. Files under a test or fixture directory (`tests/`, `test/`, `__tests__/`, `spec/`, `fixtures/`, `testdata/`, `__mocks__/`, `e2e/` …) need no entry: they are test data, and the diff scan's generic patterns do not count there (an injected credential always does). |
 | `egress = [domain, ...]` | Added to (never replacing) Settings → Extra egress domains, for implement and checks only, **once approved** (below). Host names only: IP literals, `*`, bare-TLD wildcards (`*.com`) and wildcards over a public suffix (`*.co.uk`) are dropped; `*.` over a registrable domain is allowed. Model-provider hosts are dropped. The egress bridge still validates every connection's port and resolved public address. |
 | `validation_allowlist = [prefix, ...]` | Extra check command prefixes, e.g. `./test.sh`, `bash scripts/ci.sh`, `bazel`. No shell operators; a bare shell or launcher (`bash`, `env`, `sudo` …) is refused unless followed by its script. |
 | `image = "ref"` | A local image used as the job's build environment (never pulled). `image = "devcontainer"` uses the repository's devcontainer. Both need approval (below). |

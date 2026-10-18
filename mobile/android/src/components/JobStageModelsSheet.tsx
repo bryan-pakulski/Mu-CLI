@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import {
   jobsApi,
@@ -8,11 +8,9 @@ import {
   type JobStageName,
 } from '../api/jobs';
 import { providersApi, type ProviderInfo } from '../api/providers';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Banner, Field, Loading, Panel, PlanosButton, SwitchRow, TextField } from './planos';
+import { Banner, Button, Field, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 const STAGE_LABELS: Record<JobStageName, string> = {
   plan: 'Plan',
@@ -36,9 +34,9 @@ export type JobStageModelsSheetProps = {
 
 export function JobStageModelsSheet({ visible, onClose, onSaved }: JobStageModelsSheetProps) {
   return (
-    <ModernBottomSheet visible={visible} onClose={onClose} title="Job stage models">
+    <Sheet visible={visible} onClose={onClose} title="Job stage models">
       <JobStageModelsForm active={visible} onCancel={onClose} onSaved={missing => { onSaved?.(missing); onClose(); }} />
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
@@ -114,7 +112,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
   return (
     <View style={styles.root}>
       <Panel title="Stage models">
-        <Text variant="xs" style={{ color: colors.muted }}>
+        <Text variant="xs" style={{ color: colors.ink3 }}>
           Default model for each pipeline stage. A model set on a job itself takes priority; a blank stage uses the job’s session model.
         </Text>
         {JOB_STAGE_NAMES.map(stage => {
@@ -124,15 +122,15 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
             .filter(name => !entry.model || name.toLowerCase().includes(entry.model.toLowerCase()))
             .slice(0, 8);
           return (
-            <View key={stage} style={[styles.stage, { borderTopColor: colors.border }]}>
+            <View key={stage} style={[styles.stage, { borderTopColor: colors.hairline }]}>
               <Text variant="sm" style={styles.stageTitle}>{STAGE_LABELS[stage]}</Text>
-              <Text variant="xs" style={[styles.stageHint, { color: colors.muted }]}>{STAGE_HINTS[stage]}</Text>
-              <Text variant="xs" style={{ color: colors.text, fontWeight: fontWeights.medium }}>Provider</Text>
+              <Text variant="xs" style={[styles.stageHint, { color: colors.ink3 }]}>{STAGE_HINTS[stage]}</Text>
+              <Text variant="xs" style={{ color: colors.ink, fontWeight: fontWeights.medium }}>Provider</Text>
               <View style={styles.chips} accessibilityLabel={`${STAGE_LABELS[stage]} provider`}>
                 {providers.map(item => {
                   const selected = item.name === provider;
                   return (
-                    <TouchableOpacity
+                    <Pressable
                       key={item.name}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
@@ -144,14 +142,14 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                       style={[
                         styles.chip,
                         {
-                          borderColor: selected ? colors.accent : colors.border,
-                          backgroundColor: selected ? colors.accentSubtle : colors.raised,
+                          borderColor: selected ? colors.accent.ink : colors.hairline,
+                          backgroundColor: selected ? colors.accent.wash : colors.raised,
                           opacity: item.configured ? 1 : 0.55,
                         },
                       ]}
                     >
-                      <Text variant="sm" style={{ color: selected ? colors.accent : colors.text, fontWeight: selected ? fontWeights.semibold : fontWeights.regular }}>{item.name}</Text>
-                    </TouchableOpacity>
+                      <Text variant="sm" style={{ color: selected ? colors.accent.ink : colors.ink, fontWeight: selected ? fontWeights.semibold : fontWeights.regular }}>{item.name}</Text>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -168,16 +166,16 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
                 />
               </Field>
               {openStage === stage && suggestions.length ? (
-                <View style={[styles.suggestions, { borderColor: colors.border, backgroundColor: colors.raised }]}>
+                <View style={[styles.suggestions, { borderColor: colors.hairline, backgroundColor: colors.raised }]}>
                   {suggestions.map(name => (
-                    <TouchableOpacity
+                    <Pressable
                       key={name}
                       accessibilityRole="button"
                       onPress={() => { setStage(stage, { model: name }); setOpenStage(null); }}
                       style={styles.suggestion}
                     >
-                      <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }}>{name}</Text>
-                    </TouchableOpacity>
+                      <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }}>{name}</Text>
+                    </Pressable>
                   ))}
                 </View>
               ) : null}
@@ -196,8 +194,8 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
       {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
       {notice ? <Banner tone="ok" glyph="✓" title={notice} /> : null}
       <View style={styles.actions}>
-        {onCancel ? <PlanosButton label="Cancel" onPress={onCancel} /> : null}
-        <PlanosButton primary label={saving ? 'Saving…' : 'Save'} disabled={saving} onPress={() => void save()} />
+        {onCancel ? <Button label="Cancel" onPress={onCancel} /> : null}
+        <Button primary label={saving ? 'Saving…' : 'Save'} disabled={saving} onPress={() => void save()} />
       </View>
     </View>
   );

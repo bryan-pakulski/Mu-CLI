@@ -1,0 +1,186 @@
+/* Approval card (G§9.9, safety-critical) — and the frame questions share.
+ *
+ *   <section class="w-approval" data-tone="attention|danger|accent" data-current
+ *            role="group" aria-labelledby="…" tabindex="-1">
+ *     <header class="w-approval__head">
+ *       <span class="w-chip" data-tone="attention">◆ Needs you</span>
+ *       <h3 class="w-approval__title" data-approval-heading tabindex="-1">Permission to edit routes.py</h3>
+ *       <nav class="w-approval__queue">‹ <span class="w-approval__count">1 of 3</span> ›</nav>
+ *     </header>
+ *     <div class="w-approval__body">
+ *       <div class="w-approval__target"><span class="w-approval__toolname">write_file</span>
+ *         <span class="w-approval__path">src/server/routes.py</span><span class="w-approval__stat">+18 −4</span></div>
+ *       <pre class="w-approval__command">$ pytest -q</pre>
+ *       <div class="w-approval__preview">…renderDiffHTML…</div>
+ *       <details class="w-approval__args">…</details>
+ *       <footer class="w-approval__foot">
+ *         <div class="w-approval__meta"><span class="w-approval__risk">…</span><label class="w-check w-approval__remember">…</label></div>
+ *         <div class="w-btn-row">( Deny ) ( ✓ Approve ⏎ )</div>
+ *       </footer>
+ *     </div>
+ *   </section>
+ *
+ * A state card on glass: a tone-wash header strip (72% wash mixed into the
+ * glass) carrying the "◆ Needs you" status chip. No side rule (G§3.4, §9.9).
+ * attention (apricot) for approvals, danger (rose) for high-risk calls,
+ * accent (lagoon) for questions. Approve is never auto-focused; the heading
+ * takes focus and shows the focus ring.
+ */
+.w-approval {
+    --w-approval-wash: var(--w-tone-wash, var(--wash-attention-wash));
+    align-self: stretch;
+    min-width: 0;
+    margin: var(--wash-space-2) 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--w-glass-line);
+    border-radius: var(--wash-radius-lg);
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    box-shadow: var(--w-glass-lift);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    animation: w-approval-in var(--wash-motion-bleed) var(--wash-ease-bleed) both;
+}
+.w-approval:focus { outline: none; }
+.w-approval:focus-visible { outline: 2px solid var(--wash-accent-ink); outline-offset: 2px; }
+
+@keyframes w-approval-in {
+    from { opacity: 0; filter: blur(6px); }
+    to { opacity: 1; filter: none; }
+}
+
+.w-approval__head {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    flex-wrap: wrap;
+    padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) var(--wash-space-5);
+    border-bottom: 1px solid var(--wash-hairline);
+    background: color-mix(in srgb, var(--w-approval-wash) 72%, var(--w-glass-fill));
+}
+.w-approval__title {
+    flex: 1 1 16rem;
+    min-width: 0;
+    margin: 0;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    font-weight: 600;
+    border-radius: var(--wash-radius-xs);
+}
+.w-approval__title :where(p) { margin: 0; }
+.w-approval__title code {
+    padding: 1px 5px;
+    border-radius: var(--wash-radius-xs);
+    background: var(--w-glass-fill-strong);
+    font-family: var(--wash-font-mono);
+    font-size: 0.9em;
+    font-weight: 500;
+}
+.w-approval__title:focus { outline: none; }
+.w-approval__title:focus-visible,
+.w-approval[data-focused] .w-approval__title:focus { outline: 2px solid var(--wash-accent-ink); outline-offset: 3px; }
+.w-approval__queue { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.w-approval__count {
+    padding: 0 var(--wash-space-1);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-caption-size);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.w-approval__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-3);
+    padding: var(--wash-space-4) var(--wash-space-4) var(--wash-space-4) var(--wash-space-5);
+}
+.w-approval__desc { color: var(--wash-ink-2); }
+.w-approval__tool { display: flex; flex-direction: column; gap: var(--wash-space-3); min-width: 0; }
+.w-approval__target {
+    display: flex;
+    align-items: baseline;
+    gap: var(--wash-space-2);
+    flex-wrap: wrap;
+    min-width: 0;
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-size);
+}
+.w-approval__toolname { color: var(--wash-ink); font-weight: 500; }
+.w-approval__path { min-width: 0; color: var(--wash-ink-2); overflow-wrap: anywhere; }
+.w-approval__stat { display: inline-flex; gap: var(--wash-space-1); font-family: var(--wash-font-sans); font-size: var(--wash-type-caption-size); font-weight: 600; }
+.w-approval__command {
+    margin: 0;
+    padding: var(--wash-space-3) var(--wash-space-4);
+    overflow-x: auto;
+    border-radius: var(--wash-radius-sm);
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-size);
+    line-height: var(--wash-type-mono-line);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.w-approval__preview { min-width: 0; }
+.w-approval__args { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+.w-approval__args > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    min-height: 24px;
+    border-radius: var(--wash-radius-xs);
+    cursor: pointer;
+    list-style: none;
+}
+.w-approval__args > summary::-webkit-details-marker { display: none; }
+.w-approval__args > summary::before { content: "›"; display: inline-block; transition: transform var(--wash-motion-small) var(--wash-ease-small); }
+.w-approval__args[open] > summary::before { transform: rotate(90deg); }
+.w-approval__args > summary:hover { color: var(--wash-ink); }
+.w-approval__args pre {
+    max-height: 280px;
+    margin: var(--wash-space-2) 0 0;
+    padding: var(--wash-space-3);
+    overflow: auto;
+    border-radius: var(--wash-radius-sm);
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+    line-height: var(--wash-type-mono-sm-line);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.w-approval__confirm { color: var(--wash-ink); }
+
+.w-approval__foot {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    flex-wrap: wrap;
+    padding-top: var(--wash-space-1);
+}
+.w-approval__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    flex: 1 1 14rem;
+    flex-wrap: wrap;
+    min-width: 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+.w-approval__risk { display: inline-flex; align-items: center; gap: 6px; color: var(--w-tone-ink, var(--wash-attention-ink)); font-weight: 500; }
+.w-approval__remember { font-size: var(--wash-type-caption-size); color: var(--wash-ink-2); }
+.w-approval .w-btn-row { margin-left: auto; }
+.w-approval[data-current] { scroll-margin: var(--wash-space-6); }
+
+@media (width < 600px) {
+    .w-approval__head,
+    .w-approval__body { padding-left: var(--wash-space-4); padding-right: var(--wash-space-3); }
+    .w-approval .w-btn-row { width: 100%; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .w-approval { animation: none; }
+}

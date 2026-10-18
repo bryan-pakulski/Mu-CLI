@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, RefreshControl, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, ScrollView, RefreshControl, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Text, Card, Skeleton, ErrorState, EmptyState, Badge } from '../components';
 import { filesApi, FileEntry } from '../api/files';
 import { spacing, fonts } from '../theme/tokens';
+import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
 
 export function FilesScreen() {
   const { colors } = useTheme();
@@ -58,7 +57,7 @@ export function FilesScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ padding: spacing.base }}>
           {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} height={44} style={{ marginBottom: spacing.xs }} />)}
         </View>
@@ -68,7 +67,7 @@ export function FilesScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <ErrorState message={error} onRetry={() => load(currentPath)} />
       </SafeAreaView>
     );
@@ -76,7 +75,7 @@ export function FilesScreen() {
 
   if (entries.length === 0 && !fileContent) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <EmptyState title="No files" message="No files found in workspace" />
       </SafeAreaView>
     );
@@ -84,17 +83,17 @@ export function FilesScreen() {
 
   if (fileContent) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
-          <TouchableOpacity onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text variant="sm" style={{ color: colors.text, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
+          <Pressable onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+            <Icon name="arrow-left" size="lg" color={colors.ink} />
+          </Pressable>
+          <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
             {fileContent.path}
           </Text>
         </View>
         <ScrollView contentContainerStyle={{ padding: spacing.base }}>
-          <Text variant="xs" style={{ color: colors.text, fontFamily: fonts.mono }}>
+          <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }}>
             {fileContent.content}
           </Text>
         </ScrollView>
@@ -103,14 +102,14 @@ export function FilesScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
         {currentPath && (
-          <TouchableOpacity onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
+          <Pressable onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
+            <Icon name="arrow-left" size="lg" color={colors.ink} />
+          </Pressable>
         )}
-        <Text variant="sm" style={{ color: colors.textDim, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
+        <Text variant="sm" style={{ color: colors.ink3, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
           {currentPath || '/'}
         </Text>
       </View>
@@ -119,23 +118,23 @@ export function FilesScreen() {
         contentContainerStyle={{ padding: spacing.base }}
       >
         {entries.map(entry => (
-          <TouchableOpacity key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
+          <Pressable key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
             <Card style={{ marginBottom: spacing.xs, minHeight: 44 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                <Ionicons
-                  name={entry.is_dir ? 'folder-outline' : 'document-outline'}
-                  size={20}
-                  color={entry.is_dir ? colors.textSoft : colors.textDim}
+                <Icon
+                  name={entry.is_dir ? 'folder' : 'file'}
+                  size="md"
+                  color={entry.is_dir ? colors.ink2 : colors.ink3}
                 />
                 <Text variant="sm" style={{ flex: 1 }} numberOfLines={1}>{entry.name}</Text>
                 {!entry.is_dir && entry.size !== null && (
-                  <Text variant="xs" style={{ color: colors.textDim, fontVariant: ['tabular-nums'] }}>
+                  <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>
                     {entry.size > 1024 ? `${Math.round(entry.size / 1024)}KB` : `${entry.size}B`}
                   </Text>
                 )}
               </View>
             </Card>
-          </TouchableOpacity>
+          </Pressable>
         ))}
       </ScrollView>
     </SafeAreaView>

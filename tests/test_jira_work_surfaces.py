@@ -13,8 +13,15 @@ WORK_JS = (ROOT / "mu/gui/static/js/work.js").read_text(encoding="utf-8")
 
 def test_assets_wired_into_work_page():
     assert '/static/js/work_jira.js' in TEMPLATE
-    assert '/static/css/work_jira.css' in TEMPLATE
-    assert (ROOT / "mu/gui/static/css/work_jira.css").exists()
+    # Wash W4: /work links its page bundle, whose Wash rules style the Jira
+    # link form and ticket browser; the legacy work_jira.css is retired.
+    assert '/static/css/wash/patterns/work.css' in TEMPLATE
+    bundle = (ROOT / "mu/gui/static/css/wash/patterns/work.css").read_text(encoding="utf-8")
+    for selector in (".work-jira-chip {", ".work-jira-table td", ".work-jira-status-chip[aria-pressed=\"true\"]",
+                     ".work-jira-message[data-kind=\"error\"]"):
+        assert selector in bundle, selector
+    assert "@import" not in bundle
+    assert not (ROOT / "mu/gui/static/css/work_jira.css").exists()
 
 
 def test_header_buttons_are_labelled():

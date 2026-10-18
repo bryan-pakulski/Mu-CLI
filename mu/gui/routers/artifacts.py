@@ -14,21 +14,28 @@ router = APIRouter()
 
 _THEME_BOOTSTRAP = r"""<script id="mucli-visualization-theme">
 (() => {
+  // Visualization theme contract: data-theme stays light|dark inside the
+  // frame. Wash names (paper|dusk) are accepted and mapped; every change
+  // reports both {theme: light|dark, wash: paper|dusk}.
   const allowed = new Set(['light', 'dark']);
-  const requested = new URLSearchParams(location.search).get('mucli_theme');
+  const wash = { paper: 'light', dusk: 'dark' };
+  const normalize = (value) => wash[value] || value;
+  const requested = normalize(new URLSearchParams(location.search).get('mucli_theme'));
   const initial = allowed.has(requested)
     ? requested
     : (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-  const apply = (theme) => {
+  const apply = (value) => {
+    const theme = normalize(value);
     if (!allowed.has(theme)) return;
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     window.__MUCLI_THEME__ = theme;
-    window.dispatchEvent(new CustomEvent('mucli-theme-change', { detail: { theme } }));
+    const detail = { theme, wash: theme === 'dark' ? 'dusk' : 'paper' };
+    window.dispatchEvent(new CustomEvent('mucli-theme-change', { detail }));
   };
   apply(initial);
   addEventListener('message', (event) => {
-    if (event.data && event.data.type === 'mucli-theme') apply(event.data.theme);
+    if (event.data && event.data.type === 'mucli-theme') apply(event.data.theme || event.data.wash);
   });
 })();
 </script>"""

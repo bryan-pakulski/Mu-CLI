@@ -5,62 +5,65 @@
 
     <!-- search bar -->
     <div class="history-search-bar">
-        <input type="text"
-               class="history-search-input"
+        <input type="search"
+               class="history-search-input w-input"
                x-model="$store.history.query"
                @keydown.enter="$store.history.search()"
                placeholder="Search conversation history…"
                aria-label="Search query">
-        <button class="history-search-btn"
+        <button type="button" class="history-search-btn w-btn" data-variant="secondary"
                 @click="$store.history.search()"
                 :disabled="$store.history.loading"
-                title="Search">search</button>
+                :aria-busy="$store.history.loading ? 'true' : null"
+                title="Search"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-search"></use></svg><span>Search</span></button>
     </div>
 
     <!-- filters -->
     <div class="history-filters">
-        <select x-model="$store.history.role" aria-label="Filter by role" class="history-filter-select">
-            <option value="">all roles</option>
-            <option value="user">user</option>
-            <option value="assistant">assistant</option>
-        </select>
+        <span class="w-select history-filter-select" data-size="sm"><select class="w-select__control" x-model="$store.history.role" aria-label="Filter by role">
+            <option value="">All roles</option>
+            <option value="user">User</option>
+            <option value="assistant">Assistant</option>
+        </select></span>
         <input type="text"
                x-model="$store.history.tool_name"
-               placeholder="tool name filter"
-               class="history-filter-input"
+               placeholder="Filter by tool name"
+               class="history-filter-input w-input"
                aria-label="Filter by tool name">
     </div>
 
     <!-- loading state -->
-    <div class="history-loading ui-loading-region" x-show="$store.history.loading">
-        <div class="thinking-dots"><span></span><span></span><span></span></div>
+    <div class="history-loading ui-loading-region" x-show="$store.history.loading" role="status" aria-live="polite">
         <span class="muted">Searching history…</span>
     </div>
 
     <!-- error state -->
-    <div class="history-error" x-show="$store.history.error">
-        <p class="err-text" x-text="$store.history.error"></p>
+    <div class="history-error w-banner" data-tone="danger" role="alert" x-show="$store.history.error">
+        <span class="w-banner__glyph" aria-hidden="true">✗</span>
+        <p class="err-text w-banner__msg" x-text="$store.history.error"></p>
     </div>
 
     <!-- empty state (no search yet) -->
-    <div class="panel-empty" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length === 0 && !$store.history.searched">
-        <h3>search history</h3>
-        <p class="muted">Search across all conversation messages — including those
+    <div class="panel-empty w-empty" data-size="sm" data-tone="accent" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length === 0 && !$store.history.searched">
+        <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-history"></use></svg></div>
+        <h3 class="w-empty__title">Search history</h3>
+        <p class="w-empty__body">Search across all conversation messages — including those
         compacted behind the summary anchor. Enter a query above to find
         past decisions, tool calls, and results.</p>
     </div>
 
     <!-- no results -->
-    <div class="panel-empty" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length === 0 && $store.history.searched">
-        <h3>no matches</h3>
-        <p class="muted">No messages matched your query. Try different keywords
+    <div class="panel-empty w-empty" data-size="sm" data-tone="accent" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length === 0 && $store.history.searched">
+        <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-history"></use></svg></div>
+        <h3 class="w-empty__title">No matches</h3>
+        <p class="w-empty__body">No messages matched your query. Try different keywords
         or remove filters.</p>
     </div>
 
     <!-- results -->
     <div class="history-results" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length > 0">
         <!-- summary line -->
-        <div class="history-results-summary muted mono">
+        <div class="history-results-summary">
             <span x-text="$store.history.totalMatches + ' match(es)'"></span>
             <span x-show="$store.history.hasMore" class="history-more-flag">· more available</span>
         </div>
@@ -71,16 +74,16 @@
                 <!-- header: index + role + anchor badge -->
                 <div class="history-result-header">
                     <span class="history-index mono" x-text="'[' + hit.index + ']'"></span>
-                    <span class="history-role" x-text="hit.role"></span>
-                    <span class="history-anchor-badge"
+                    <span class="history-role w-chip" data-variant="meta" x-text="hit.role"></span>
+                    <span class="history-anchor-badge w-chip" data-tone="caution"
                           x-show="hit.before_anchor"
-                          title="This message was compacted behind the summary anchor">compacted</span>
+                          title="This message was compacted behind the summary anchor">Compacted</span>
                 </div>
 
                 <!-- matched parts -->
                 <template x-for="(pm, pi) in hit.parts_matched" :key="pi">
                     <div class="history-match">
-                        <span class="history-match-tag" x-text="pm.match_type"></span>
+                        <span class="history-match-tag w-chip" data-tone="accent" x-text="pm.match_type"></span>
                         <span class="history-snippet" x-text="pm.snippet"></span>
                     </div>
                 </template>
@@ -118,7 +121,7 @@
     </div>
 
     <!-- footnote -->
-    <div class="panel-footnote muted mono" x-show="$store.history.results.length > 0">
+    <div class="panel-footnote" x-show="$store.history.results.length > 0">
         <span x-text="$store.history.totalMatches + ' total matches'"></span>
     </div>
 

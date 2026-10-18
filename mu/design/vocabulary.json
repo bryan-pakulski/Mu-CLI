@@ -1,0 +1,469 @@
+{
+  "$schema_version": 1,
+  "status": {
+    "done": {
+      "glyph": "✓",
+      "semantic": "ok",
+      "label": "done"
+    },
+    "active": {
+      "glyph": "●",
+      "semantic": "running",
+      "label": "in progress"
+    },
+    "waiting": {
+      "glyph": "◆",
+      "semantic": "attention",
+      "label": "needs you"
+    },
+    "failed": {
+      "glyph": "✗",
+      "semantic": "danger",
+      "label": "failed"
+    },
+    "unverified": {
+      "glyph": "?",
+      "semantic": "caution",
+      "label": "unverified"
+    },
+    "skipped": {
+      "glyph": "–",
+      "semantic": "neutral",
+      "label": "skipped"
+    },
+    "pending": {
+      "glyph": "○",
+      "semantic": "neutral",
+      "label": "not started"
+    }
+  },
+  "legacy_tone": {
+    "ok": "ok",
+    "running": "running",
+    "attention": "warn",
+    "caution": "warn",
+    "danger": "danger",
+    "neutral": "muted",
+    "accent": "accent",
+    "plan": "accent",
+    "info": "running"
+  },
+  "job_state": {
+    "selected": {
+      "status": "pending",
+      "label": "selected"
+    },
+    "provisioning": {
+      "status": "active",
+      "label": "preparing"
+    },
+    "planning": {
+      "status": "active",
+      "label": "planning"
+    },
+    "plan_review": {
+      "status": "waiting",
+      "label": "plan to approve"
+    },
+    "implementing": {
+      "status": "active",
+      "label": "implementing"
+    },
+    "checking": {
+      "status": "active",
+      "label": "checking"
+    },
+    "reviewing": {
+      "status": "active",
+      "label": "reviewing"
+    },
+    "review_done": {
+      "status": "waiting",
+      "label": "review done"
+    },
+    "pushing": {
+      "status": "active",
+      "label": "pushing"
+    },
+    "pushed": {
+      "status": "done",
+      "label": "pushed"
+    },
+    "done": {
+      "status": "done",
+      "label": "done"
+    },
+    "needs_input": {
+      "status": "waiting",
+      "label": "needs input"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "cancelled": {
+      "status": "skipped",
+      "label": "cancelled"
+    }
+  },
+  "pipeline": [
+    "provisioning",
+    "planning",
+    "plan_review",
+    "implementing",
+    "checking",
+    "reviewing",
+    "review_done",
+    "pushing",
+    "pushed"
+  ],
+  "job_status": {
+    "queued": {
+      "status": "pending",
+      "label": "queued"
+    },
+    "preparing": {
+      "status": "active",
+      "label": "preparing"
+    },
+    "running": {
+      "status": "active",
+      "label": "running"
+    },
+    "needs_human": {
+      "status": "waiting",
+      "label": "needs you"
+    },
+    "verifying": {
+      "status": "active",
+      "label": "verifying"
+    },
+    "planning": {
+      "status": "active",
+      "label": "planning"
+    },
+    "reviewing": {
+      "status": "active",
+      "label": "reviewing"
+    },
+    "publishing": {
+      "status": "active",
+      "label": "publishing"
+    },
+    "ready_for_review": {
+      "status": "waiting",
+      "label": "ready for review"
+    },
+    "recovering": {
+      "status": "active",
+      "label": "recovering"
+    },
+    "conflicted": {
+      "status": "waiting",
+      "label": "conflicted"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "timed_out": {
+      "status": "failed",
+      "label": "timed out"
+    },
+    "budget_exceeded": {
+      "status": "failed",
+      "label": "budget exceeded"
+    },
+    "environment_error": {
+      "status": "failed",
+      "label": "environment error"
+    },
+    "cancelled": {
+      "status": "skipped",
+      "label": "cancelled"
+    },
+    "merged": {
+      "status": "done",
+      "label": "merged"
+    }
+  },
+  "attention_reason": {
+    "": {
+      "label": "",
+      "action": ""
+    },
+    "question": {
+      "label": "question",
+      "action": "Answer"
+    },
+    "approval_required": {
+      "label": "approval required",
+      "action": "Review"
+    },
+    "ambiguous_requirement": {
+      "label": "unclear requirement",
+      "action": "Clarify"
+    },
+    "secret_required": {
+      "label": "secret required",
+      "action": "Provide secret"
+    },
+    "merge_conflict": {
+      "label": "merge conflict",
+      "action": "Resolve"
+    },
+    "budget_exceeded": {
+      "label": "budget exceeded",
+      "action": "Raise budget"
+    },
+    "environment_failure": {
+      "label": "environment failed",
+      "action": "Inspect"
+    },
+    "verification_required": {
+      "label": "verification required",
+      "action": "Verify"
+    },
+    "test_failure": {
+      "label": "tests failing",
+      "action": "Inspect"
+    },
+    "unsafe_action": {
+      "label": "unsafe action",
+      "action": "Review"
+    },
+    "worker_lost": {
+      "label": "worker lost",
+      "action": "Resume"
+    },
+    "review_stalled": {
+      "label": "review stalled",
+      "action": "Resume"
+    },
+    "review_done": {
+      "label": "review done",
+      "action": "Review"
+    },
+    "no_validation": {
+      "label": "no validation",
+      "action": "Review"
+    },
+    "publish_failed": {
+      "label": "push failed",
+      "action": "Retry push"
+    },
+    "provider_error": {
+      "label": "provider error",
+      "action": "Retry"
+    },
+    "models_unset": {
+      "label": "models not set",
+      "action": "Open settings"
+    },
+    "plan_review": {
+      "label": "plan to approve",
+      "action": "Review plan"
+    },
+    "pr_closed": {
+      "label": "PR closed",
+      "action": "Decide"
+    },
+    "limit_reached": {
+      "label": "limit reached",
+      "action": "Raise limit"
+    }
+  },
+  "verdict": {
+    "ready": {
+      "semantic": "ok",
+      "label": "ready to merge"
+    },
+    "ready_with_nits": {
+      "semantic": "ok",
+      "label": "ready with nits"
+    },
+    "needs_work": {
+      "semantic": "attention",
+      "label": "needs work"
+    },
+    "do_not_merge": {
+      "semantic": "danger",
+      "label": "do not merge"
+    }
+  },
+  "severity": {
+    "blocker": {
+      "semantic": "danger",
+      "rank": 0,
+      "label": "blocker"
+    },
+    "major": {
+      "semantic": "attention",
+      "rank": 1,
+      "label": "major"
+    },
+    "minor": {
+      "semantic": "caution",
+      "rank": 2,
+      "label": "minor"
+    },
+    "nit": {
+      "semantic": "neutral",
+      "rank": 3,
+      "label": "nit"
+    }
+  },
+  "check_status": {
+    "running": {
+      "status": "active",
+      "label": "running"
+    },
+    "passed": {
+      "status": "done",
+      "label": "passed"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "unrunnable": {
+      "status": "unverified",
+      "label": "unrunnable"
+    },
+    "error": {
+      "status": "failed",
+      "label": "error"
+    },
+    "cancelled": {
+      "status": "skipped",
+      "label": "cancelled"
+    }
+  },
+  "env_status": {
+    "preparing": {
+      "status": "active",
+      "label": "preparing"
+    },
+    "ready": {
+      "status": "done",
+      "label": "ready"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "cleaned": {
+      "status": "skipped",
+      "label": "cleaned"
+    }
+  },
+  "repair_outcome": {
+    "running": {
+      "status": "active",
+      "label": "repairing environment"
+    },
+    "committed": {
+      "status": "active",
+      "label": "re-running checks"
+    },
+    "repaired": {
+      "status": "done",
+      "label": "environment repaired"
+    },
+    "unresolved": {
+      "status": "unverified",
+      "label": "repaired, checks still can't run"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "repair failed"
+    },
+    "no_commands": {
+      "status": "failed",
+      "label": "repair changed nothing"
+    },
+    "timed_out": {
+      "status": "failed",
+      "label": "repair timed out"
+    },
+    "budget_exhausted": {
+      "status": "failed",
+      "label": "repair out of budget"
+    },
+    "error": {
+      "status": "failed",
+      "label": "repair stopped"
+    }
+  },
+  "coverage": {
+    "met": "done",
+    "partial": "waiting",
+    "unmet": "failed",
+    "unverifiable": "skipped"
+  },
+  "session_state": {
+    "active": {
+      "semantic": "accent",
+      "label": "active"
+    },
+    "working": {
+      "semantic": "running",
+      "label": "working"
+    },
+    "loaded": {
+      "semantic": "neutral",
+      "label": "loaded"
+    }
+  },
+  "tool_kind": {
+    "read": {
+      "label": "read",
+      "icon": "file-text"
+    },
+    "edit": {
+      "label": "edit",
+      "icon": "pencil"
+    },
+    "shell": {
+      "label": "sh",
+      "icon": "terminal"
+    },
+    "search": {
+      "label": "search",
+      "icon": "search"
+    },
+    "web": {
+      "label": "web",
+      "icon": "globe"
+    },
+    "agent": {
+      "label": "agent",
+      "icon": "bot"
+    },
+    "memory": {
+      "label": "memory",
+      "icon": "brain"
+    },
+    "plan": {
+      "label": "plan",
+      "icon": "list-checks"
+    },
+    "container": {
+      "label": "container",
+      "icon": "box"
+    },
+    "other": {
+      "label": "tool",
+      "icon": "wrench"
+    }
+  },
+  "spinner": {
+    "frames": [
+      "◌",
+      "○",
+      "◎",
+      "●"
+    ],
+    "interval_ms": 150
+  }
+}

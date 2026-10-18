@@ -1,0 +1,1099 @@
+/* Wash base layer — fonts, reset, element defaults, focus, selection,
+ * scrollbars and user-preference media queries (G§2, §3.4, §5, §11).
+ *
+ * Imported into `@layer base` by wash.css. Because every base rule beats
+ * every legacy rule regardless of specificity, this file deliberately sets
+ * only document-wide defaults that are safe on legacy markup: body type and
+ * colour, heading ink, the focus ring, selection and scrollbars. Component
+ * looks belong in components/*.css under `.w-*` names.
+ */
+
+/* ------------------------------------------------------------ element defaults
+ * Unclassed controls, links and the shared primitive hooks (.btn,
+ * .icon-btn, button.primary) that app.js / product.js still emit. They sit
+ * first in the base layer so every rule below, and every Wash layer above,
+ * wins over them. */
+body,
+.msg.prompt,
+.nav-item,
+.msg .body,
+button,
+input,
+textarea,
+select {
+    transition:
+        background-color var(--wash-motion-small) var(--wash-ease-small),
+        color var(--wash-motion-small) var(--wash-ease-small),
+        border-color var(--wash-motion-small) var(--wash-ease-small);
+}
+html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+body {
+    padding: 0;
+    height: 100%;
+}
+body {
+    -moz-osx-font-smoothing: grayscale;
+}
+a {
+    text-decoration: none;
+}
+.label-mono {
+    font-family: var(--wash-font-sans);
+}
+button,
+.btn {
+    background: transparent;
+    color: var(--wash-ink-2);
+    border: 0;
+    padding: var(--wash-space-2) var(--wash-space-4);
+    border-radius: var(--wash-radius-sm);
+    cursor: pointer;
+    font: inherit;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small), color var(--wash-motion-micro) var(--wash-ease-small);
+}
+button:hover,
+.btn:hover {
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+}
+button.primary {
+    font-weight: var(--wash-type-label-weight);
+}
+button:active {
+    transform: translateY(1px);
+}
+input {
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    border: 1px solid var(--wash-control-border);
+    border-radius: var(--wash-radius-sm);
+    padding: var(--wash-space-2) var(--wash-space-3);
+    font: inherit;
+    width: 100%;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small), border-color var(--wash-motion-micro) var(--wash-ease-small);
+}
+textarea {
+    border-radius: var(--wash-radius-sm);
+    font: inherit;
+    width: 100%;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small), border-color var(--wash-motion-micro) var(--wash-ease-small);
+}
+select {
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    border: 1px solid var(--wash-control-border);
+    border-radius: var(--wash-radius-sm);
+    padding: var(--wash-space-2) var(--wash-space-3);
+    font: inherit;
+    width: 100%;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small), border-color var(--wash-motion-micro) var(--wash-ease-small);
+}
+input:focus {
+    outline: none;
+    border-color: var(--wash-accent-ink);
+}
+textarea:focus {
+    outline: none;
+}
+select:focus {
+    outline: none;
+    border-color: var(--wash-accent-ink);
+}
+input::placeholder,
+textarea::placeholder {
+    color: var(--wash-ink-3);
+}
+@media (pointer: coarse) {
+    .nav-item,
+    .nav-action,
+    .fb-entry,
+    .files-entry,
+    .mode-option,
+    .cmd-complete-row,
+    .settings-var,
+    .skill-row,
+    .feature-row,
+    .msg-action-btn,
+    .code-copy-btn,
+    .welcome-row-icon,
+    .artifact-row-delete,
+    .artifact-row-download,
+    .panel-add-btn {
+        min-height: var(--wash-size-touch);
+    }
+    .msg-action-btn,
+    .welcome-row-icon,
+    .artifact-row-delete,
+    .artifact-row-download,
+    .panel-add-btn {
+        min-width: var(--wash-size-touch);
+    }
+}
+@keyframes mu-enter {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes mu-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ------------------------------------------------------------ surface hook fallbacks
+ * Declarations of the patterns/ surface rules (conversation, overlays,
+ * panels, settings, welcome) that a Wash rule overrides on some pages or
+ * elements but not on others (for example the skills modal, styled by
+ * patterns/settings.css on the chat page but not on /containers). They
+ * live here, beneath every Wash layer, so the Wash rule keeps winning
+ * wherever it applies. */
+.app {
+    grid-template-columns: var(--sidebar-w, 220px) 1fr;
+    grid-template-rows: 56px 1fr;
+    grid-template-areas:
+        "header  header"
+        "sidebar main";
+}
+.skills-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.skill-row {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-2) var(--wash-space-3);
+}
+.skill-row:hover {
+    background: var(--w-glass-fill-subtle);
+}
+.skill-info .skill-name {
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    color: var(--wash-ink);
+}
+.skill-info .skill-desc {
+    font-size: var(--wash-type-caption-size);
+    color: var(--wash-ink-3);
+}
+.skill-info .skill-meta {
+    font-size: var(--wash-type-caption-size);
+    color: var(--wash-ink-3);
+}
+.skill-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    flex-shrink: 0;
+}
+.skill-toggle-sw {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    background: var(--wash-accent-wash);
+    border: 0;
+    border-radius: var(--wash-radius-pill);
+    cursor: pointer;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-small);
+    flex-shrink: 0;
+}
+.skill-toggle-sw.on {
+    background: var(--wash-accent-ink);
+}
+.skill-toggle-sw::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: var(--wash-raised);
+    border-radius: var(--wash-radius-pill);
+    transition: transform var(--wash-motion-micro) var(--wash-ease-small);
+}
+.skill-toggle-sw.on::after {
+    transform: translateX(14px);
+}
+.skills-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--wash-space-4);
+    padding-bottom: var(--wash-space-3);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.skills-toolbar-btns {
+    display: flex;
+    gap: var(--wash-space-2);
+}
+.mode-panel {
+    display: none;
+}
+.feature-row:hover {
+    background: var(--w-glass-fill-subtle);
+}
+.modal-head {
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.modal-field {
+    margin-bottom: var(--wash-space-3);
+}
+.modal-label {
+    margin-bottom: var(--wash-space-1);
+}
+.modal-section {
+    margin-top: var(--wash-space-6);
+}
+.modal-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--wash-space-2);
+}
+.msg .body code {
+    border-radius: var(--wash-radius-sm);
+}
+.cache-popup-loading {
+    color: var(--wash-ink-3);
+}
+.cache-popup-error {
+    color: var(--wash-danger-ink);
+}
+.confirm-pop {
+    position: fixed;
+}
+.confirm-pop .confirm-message {
+    font-size: var(--wash-type-label-size);
+    color: var(--wash-ink);
+    margin-bottom: var(--wash-space-3);
+    line-height: 1.5;
+}
+.confirm-pop .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--wash-space-2);
+}
+.inspector .mono {
+    font-family: var(--wash-font-mono);
+}
+.rec-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--wash-radius-pill);
+    background: var(--wash-accent-ink);
+    display: inline-block;
+    animation: rec-pulse calc(var(--wash-motion-medium) * 3) var(--wash-ease-micro) infinite;
+}
+.composer .hint .down {
+    color: var(--wash-danger-ink);
+}
+.composer-mode-picker {
+    position: relative;
+}
+.composer-mode-popout {
+    position: absolute;
+    bottom: calc(100% + var(--wash-space-2));
+    left: 0;
+}
+.composer-settings {
+    position: relative;
+}
+.composer-settings-popout {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    max-height: min(560px, 80vh);
+    overflow-y: auto;
+}
+.settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: var(--wash-type-caption-size);
+    color: var(--wash-ink-3);
+    padding: var(--wash-space-1) 0 var(--wash-space-3);
+    margin-bottom: var(--wash-space-3);
+}
+.settings-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-caption-size);
+    padding: var(--wash-space-1) var(--wash-space-2);
+    cursor: pointer;
+}
+.settings-group-toggle:hover {
+    background: var(--w-glass-fill-subtle);
+}
+.settings-var {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr);
+    align-items: center;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-1) var(--wash-space-2);
+}
+.settings-var-key {
+    font-size: var(--wash-type-caption-size);
+    color: var(--wash-ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.settings-var-input {
+    flex-shrink: 0;
+}
+.provider-model-section {
+    padding-bottom: var(--wash-space-2);
+}
+.settings-group-note {
+    margin: 0 0 var(--wash-space-2);
+    font-size: var(--wash-type-caption-size);
+    color: var(--wash-ink-2);
+}
+.ollama-mode-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr);
+    align-items: center;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-1) var(--wash-space-2);
+}
+.ollama-key-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr);
+    align-items: center;
+    gap: var(--wash-space-2);
+    padding: var(--wash-space-1) var(--wash-space-2);
+}
+@media (width < 600px) {
+    .composer-settings-popout {
+        right: auto;
+    }
+    .settings-var,
+    .ollama-mode-row,
+    .ollama-key-row {
+        grid-template-columns: 1fr;
+    }
+}
+.context-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.context-chart-title span:not(.context-live-dot) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.context-resolution select {
+    border: 1px solid var(--wash-control-border);
+    border-radius: var(--wash-radius-sm);
+    padding: 2px var(--wash-space-1);
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+    font: var(--wash-type-caption-size) var(--wash-font-sans);
+}
+.ui-loading-region {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--wash-space-2);
+}
+.ui-loading-region::before {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--wash-accent-wash);
+    border-top-color: var(--wash-accent-ink);
+    border-radius: var(--wash-radius-pill);
+    animation: container-create-spin calc(var(--wash-motion-medium) * 3) linear infinite;
+}
+.registry-section-head span {
+    line-height:1.4;
+}
+.session-type-svg {
+    width: 18px;
+    height: 18px;
+}
+:where(button, input, select, textarea) {
+    font: inherit;
+}
+
+/* ------------------------------------------------------------ app-page element defaults
+ * The Alpine app pages (chat, /design) read unclassed buttons, fields,
+ * tablists and the planos primitives (.btn, .pill, .chip, .switch, .field)
+ * with these defaults. Scoped by body class at zero specificity; /work,
+ * /containers and the analyzers keep their own. */
+:where(.chat-body, .gallery-body) *,
+:where(.chat-body, .gallery-body) *::before,
+:where(.chat-body, .gallery-body) *::after {
+    box-sizing: border-box;
+}
+body:where(.chat-body, .gallery-body) {
+    font-weight: var(--wash-type-body-weight);
+    -moz-osx-font-smoothing: grayscale;
+}
+:where(.chat-body, .gallery-body) :where(h1, h2, h3, h4) {
+    color: var(--wash-ink);
+    font-family: var(--wash-font-sans);
+    font-weight: var(--wash-type-title-3-weight);
+    line-height: 1.25;
+}
+:where(.chat-body, .gallery-body) :where(a) {
+    text-decoration: none;
+}
+:where(.chat-body, .gallery-body) :where(a:hover) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+:where(.chat-body, .gallery-body) :focus {
+    outline: none;
+}
+:where(.chat-body, .gallery-body) ::-webkit-scrollbar-thumb {
+    background: var(--wash-accent-wash);
+}
+:where(.chat-body, .gallery-body) :where(button, .btn) {
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    line-height: 1.25;
+    color: var(--wash-ink);
+    border-radius: var(--wash-radius-pill);
+    cursor: pointer;
+    transition:
+        background-color var(--wash-motion-micro) var(--wash-ease-small),
+        color var(--wash-motion-micro) var(--wash-ease-small),
+        border-color var(--wash-motion-micro) var(--wash-ease-small),
+        opacity var(--wash-motion-micro) var(--wash-ease-small),
+        transform var(--wash-motion-micro) var(--wash-ease-small);
+}
+:where(.chat-body, .gallery-body) :where(button, .btn):not(:disabled):active {
+    transform: translateY(1px);
+}
+:where(.chat-body, .gallery-body) .btn:disabled,
+:where(.chat-body, .gallery-body) button[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+:where(.chat-body, .gallery-body) button.feature-row-control-primary {
+    background: var(--wash-ink);
+    color: var(--wash-on-ink);
+    border-color: transparent;
+}
+:where(.chat-body, .gallery-body) button.feature-row-control-primary:not(:disabled):hover,
+:where(.chat-body, .gallery-body) button.approve:not(:disabled):hover {
+    background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas));
+    color: var(--wash-on-ink);
+}
+:where(.chat-body, .gallery-body) :where(input, textarea, select) {
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-body-size);
+    color: var(--wash-ink);
+    transition:
+        border-color var(--wash-motion-micro) var(--wash-ease-small),
+        background-color var(--wash-motion-micro) var(--wash-ease-small);
+}
+:where(.chat-body, .gallery-body) input::placeholder,
+:where(.chat-body, .gallery-body) textarea::placeholder {
+    color: var(--wash-ink-3);
+    opacity: 1;
+}
+:where(.chat-body, .gallery-body) input:focus-visible,
+:where(.chat-body, .gallery-body) select:focus-visible {
+    border-color: transparent;
+}
+:where(.chat-body, .gallery-body) input:disabled,
+:where(.chat-body, .gallery-body) textarea:disabled,
+:where(.chat-body, .gallery-body) select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+:where(.chat-body, .gallery-body) input[type="checkbox"],
+:where(.chat-body, .gallery-body) input[type="radio"],
+:where(.chat-body, .gallery-body) input[type="range"] {
+    accent-color: var(--wash-accent-ink);
+}
+:where(.chat-body, .gallery-body) :where(pre) {
+    background: var(--wash-code);
+    border-radius: var(--wash-radius-sm);
+    font-size: var(--wash-type-label-size);
+    line-height: 1.5;
+}
+:where(.chat-body, .gallery-body) :where(:not(pre) > code) {
+    font-size: var(--wash-type-label-size);
+    background: var(--w-glass-fill-subtle);
+    border-radius: var(--wash-radius-sm);
+    padding: 0 var(--wash-space-1);
+}
+:where(.chat-body, .gallery-body) .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+@media (pointer: coarse) {
+    :where(.chat-body, .gallery-body) :where(button, .btn, select, [role="button"], [role="tab"]) {
+        min-height: var(--wash-size-touch);
+    }
+}
+:where(.chat-body, .gallery-body) kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 var(--wash-space-1);
+    border: 1px solid var(--wash-hairline);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--wash-raised);
+    text-align: center;
+    line-height: 1.5;
+}
+:where(.chat-body, .gallery-body) :is(.tone-ok) {
+    color: var(--wash-ok-ink);
+}
+:where(.chat-body, .gallery-body) :is(.tone-warn) {
+    color: var(--wash-attention-ink);
+}
+:where(.chat-body, .gallery-body) :is(.tone-danger) {
+    color: var(--wash-danger-ink);
+}
+:where(.chat-body, .gallery-body) :is(.tone-running) {
+    color: var(--wash-running-ink);
+}
+:where(.chat-body, .gallery-body) :is(.tone-muted) {
+    color: var(--wash-ink-3);
+}
+:where(.chat-body, .gallery-body) .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--wash-hairline-strong);
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    font: inherit;
+    font-size: var(--wash-type-body-size);
+    font-weight: var(--wash-type-label-weight);
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+}
+:where(.chat-body, .gallery-body) .btn:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--w-glass-fill-subtle);
+    text-decoration: none;
+}
+:where(.chat-body, .gallery-body) .btn:disabled,
+:where(.chat-body, .gallery-body) .btn[aria-disabled="true"] {
+    opacity: .5;
+    cursor: not-allowed;
+}
+:where(.chat-body, .gallery-body) .btn.sm {
+    height: calc(32px - 6px);
+    padding: 0 8px;
+    font-size: var(--wash-type-caption-size);
+}
+:where(.chat-body, .gallery-body) .btn.icon {
+    width: 32px;
+    padding: 0;
+}
+:where(.chat-body, .gallery-body) .btn.sm.icon {
+    width: calc(32px - 6px);
+}
+:where(.chat-body, .gallery-body) .btn.ghost {
+    background: transparent;
+    border-color: transparent;
+}
+:where(.chat-body, .gallery-body) .btn.ghost:hover:not(:disabled) {
+    background: var(--w-glass-fill-subtle);
+}
+:where(.chat-body, .gallery-body) .btn.primary {
+    background: var(--wash-ink);
+    border-color: var(--wash-ink);
+    color: var(--wash-on-ink);
+}
+:where(.chat-body, .gallery-body) .btn.primary:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: color-mix(in srgb, var(--wash-ink) 86%, var(--wash-canvas));
+    color: var(--wash-on-ink);
+}
+:where(.chat-body, .gallery-body) .btn.tone-ok {
+    color: var(--wash-ok-ink);
+    border-color: color-mix(in srgb, var(--wash-ok-ink) 50%, var(--wash-hairline));
+}
+:where(.chat-body, .gallery-body) .btn.tone-warn {
+    color: var(--wash-attention-ink);
+    border-color: color-mix(in srgb, var(--wash-attention-ink) 50%, var(--wash-hairline));
+}
+:where(.chat-body, .gallery-body) .btn.tone-danger {
+    color: var(--wash-danger-ink);
+    border-color: color-mix(in srgb, var(--wash-danger-ink) 50%, var(--wash-hairline));
+}
+:where(.chat-body, .gallery-body) .btn.solid.tone-ok {
+    background: var(--wash-ok-ink);
+    border-color: var(--wash-ok-ink);
+    color: var(--wash-surface);
+}
+:where(.chat-body, .gallery-body) .btn.solid.tone-danger {
+    background: var(--wash-danger-ink);
+    border-color: var(--wash-danger-ink);
+    color: var(--wash-surface);
+}
+:where(.chat-body, .gallery-body) .btn.solid.tone-warn {
+    background: var(--wash-attention-ink);
+    border-color: var(--wash-attention-ink);
+    color: var(--wash-surface);
+}
+:where(.chat-body, .gallery-body) .btn kbd {
+    font-size: calc(var(--wash-type-caption-size) - 2px);
+    min-width: 1.4em;
+    padding: 0 3px;
+    line-height: 1.3;
+    opacity: .85;
+    color: inherit;
+    background: transparent;
+    border-color: currentColor;
+}
+:where(.chat-body, .gallery-body) .btn svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+:where(.chat-body, .gallery-body) .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+    border-radius: 11px;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-label-weight);
+    white-space: nowrap;
+}
+:where(.chat-body, .gallery-body) .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    font-size: calc(var(--wash-type-caption-size) - 1px);
+    font-weight: var(--wash-type-title-3-weight);
+    font-variant-numeric: tabular-nums;
+}
+:where(.chat-body, .gallery-body) .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 var(--wash-space-2);
+    border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+    border-radius: 12px;
+    background: transparent;
+    font-size: var(--wash-type-caption-size);
+    font-weight: var(--wash-type-body-weight);
+    white-space: nowrap;
+    text-decoration: none;
+}
+:where(.chat-body, .gallery-body) :is(a, button).chip:hover {
+    background: var(--w-glass-fill-subtle);
+    text-decoration: none;
+}
+:where(.chat-body, .gallery-body) .status-glyph {
+    display: inline-block;
+    width: 1.1em;
+    text-align: center;
+    font-weight: 700;
+}
+:where(.chat-body, .gallery-body) .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-1);
+    min-width: 0;
+}
+:where(.chat-body, .gallery-body) .field > .label {
+    color: var(--wash-ink);
+    font-weight: var(--wash-type-label-weight);
+}
+:where(.chat-body, .gallery-body) .field .hint {
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+:where(.chat-body, .gallery-body) .field .error {
+    color: var(--wash-danger-ink);
+    font-size: var(--wash-type-caption-size);
+}
+:where(.chat-body, .gallery-body) button:where(:not([class])) {
+    min-height: 32px;
+    white-space: nowrap;
+}
+:where(.chat-body, .gallery-body) :is(button.subtle, button.primary, button.danger, .modal-actions button, .confirm-actions button) {
+    min-height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--wash-hairline-strong);
+    border-radius: var(--wash-radius-pill);
+    background: var(--w-glass-fill);
+    color: var(--wash-ink);
+    font-size: var(--wash-type-body-size);
+    font-weight: var(--wash-type-label-weight);
+    line-height: calc(32px - 2px);
+    white-space: nowrap;
+}
+:where(.chat-body, .gallery-body) :is(button.subtle, button.danger, .modal-actions button, .confirm-actions button):hover:not(:disabled) {
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+}
+:where(.chat-body, .gallery-body) :is(button.danger, .modal-actions button.danger) {
+    color: var(--wash-danger-ink);
+    border-color: color-mix(in srgb, var(--wash-danger-ink) 50%, var(--wash-hairline));
+}
+:where(.chat-body, .gallery-body) :is(button.primary.danger, .confirm-actions button.primary.danger) {
+    background: var(--wash-danger-ink);
+    border-color: var(--wash-danger-ink);
+    color: var(--wash-on-ink);
+}
+:where(.chat-body, .gallery-body) :is(button.primary.danger, .confirm-actions button.primary.danger):hover:not(:disabled) {
+    background: color-mix(in srgb, var(--wash-danger-ink) 85%, var(--wash-ink));
+    color: var(--wash-surface);
+}
+:where(.chat-body, .gallery-body) input:where(:not([type]), [type="text"], [type="search"], [type="password"], [type="number"], [type="url"], [type="email"]) {
+    min-height: 32px;
+    border: 1px solid var(--wash-hairline);
+    border-radius: var(--wash-radius-sm);
+    background-color: var(--w-glass-fill-subtle);
+}
+:where(.chat-body, .gallery-body) select {
+    min-height: 32px;
+    border: 1px solid var(--wash-hairline);
+    border-radius: var(--wash-radius-sm);
+    background-color: var(--w-glass-fill-subtle);
+    color: var(--wash-ink);
+}
+:where(.chat-body, .gallery-body) textarea {
+    border-radius: var(--wash-radius-sm);
+}
+:where(.chat-body, .gallery-body) [role="tablist"]:not([aria-orientation="vertical"]) {
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--wash-hairline);
+    border-radius: 0;
+    background: transparent;
+}
+:where(.chat-body, .gallery-body) [role="tablist"]:not([aria-orientation="vertical"]) > [role="tab"] {
+    min-height: 0;
+    box-shadow: none;
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ fonts (G§2.1)
+ * Self-hosted, no network requests. Only the shell face is preloaded by
+ * templates/_layout.html. */
+@font-face {
+    font-family: "Inter";
+    src: url("/static/fonts/InterVariable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Inter";
+    src: url("/static/fonts/InterVariable-Italic.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/static/fonts/JetBrainsMono-Variable.woff2") format("woff2");
+    font-weight: 100 800;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* ------------------------------------------------------------ reset */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    background: var(--wash-canvas);
+}
+
+/* The body is transparent so the fixed ambient wash (below) shows between
+ * the html canvas and the glass surfaces. */
+body {
+    margin: 0;
+    background: transparent;
+    color: var(--wash-ink);
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Display and title text use plum (G§2.2). Size stays with the component. */
+h1, h2, h3 { color: var(--wash-plum); }
+
+:where(code, kbd, samp, pre) {
+    font-family: var(--wash-font-mono);
+    font-variant-ligatures: none;
+}
+
+:where(time, .num, .tabular, [data-tabular]) { font-variant-numeric: tabular-nums; }
+
+:where(img, svg, video, canvas) { max-width: 100%; }
+
+/* ------------------------------------------------------------ tone channels
+ * Any element with data-tone exposes the three steps of its semantic as
+ * --w-tone-wash / --w-tone-ink / --w-tone-pigment; components read these
+ * (with their own fallbacks) so one attribute recolours chips, buttons,
+ * cards, banners and toasts consistently (G§1.3). */
+[data-tone="accent"] { --w-tone-wash: var(--wash-accent-wash); --w-tone-ink: var(--wash-accent-ink); --w-tone-pigment: var(--wash-accent-pigment); }
+[data-tone="running"] { --w-tone-wash: var(--wash-running-wash); --w-tone-ink: var(--wash-running-ink); --w-tone-pigment: var(--wash-running-pigment); }
+[data-tone="ok"] { --w-tone-wash: var(--wash-ok-wash); --w-tone-ink: var(--wash-ok-ink); --w-tone-pigment: var(--wash-ok-pigment); }
+[data-tone="attention"] { --w-tone-wash: var(--wash-attention-wash); --w-tone-ink: var(--wash-attention-ink); --w-tone-pigment: var(--wash-attention-pigment); }
+[data-tone="caution"] { --w-tone-wash: var(--wash-caution-wash); --w-tone-ink: var(--wash-caution-ink); --w-tone-pigment: var(--wash-caution-pigment); }
+[data-tone="danger"] { --w-tone-wash: var(--wash-danger-wash); --w-tone-ink: var(--wash-danger-ink); --w-tone-pigment: var(--wash-danger-pigment); }
+[data-tone="plan"] { --w-tone-wash: var(--wash-plan-wash); --w-tone-ink: var(--wash-plan-ink); --w-tone-pigment: var(--wash-plan-pigment); }
+[data-tone="info"] { --w-tone-wash: var(--wash-info-wash); --w-tone-ink: var(--wash-info-ink); --w-tone-pigment: var(--wash-info-pigment); }
+[data-tone="neutral"] { --w-tone-wash: var(--wash-neutral-wash); --w-tone-ink: var(--wash-neutral-ink); --w-tone-pigment: var(--wash-neutral-pigment); }
+
+/* Mode channels (G§1.4): any element with data-mode-tint exposes the mode's
+ * pigment as --w-mode-wash / --w-mode-ink / --w-mode-pigment (composer glow,
+ * mode chip dot, stage panel band, streaming caret). Plan is an overlay: it
+ * keeps lilac and components add a dashed edge. */
+[data-mode-tint] { --w-mode-wash: var(--wash-mode-default-wash); --w-mode-ink: var(--wash-mode-default-ink); --w-mode-pigment: var(--wash-mode-default); }
+[data-mode-tint="feature"] { --w-mode-wash: var(--wash-mode-feature-wash); --w-mode-ink: var(--wash-mode-feature-ink); --w-mode-pigment: var(--wash-mode-feature); }
+[data-mode-tint="research"] { --w-mode-wash: var(--wash-mode-research-wash); --w-mode-ink: var(--wash-mode-research-ink); --w-mode-pigment: var(--wash-mode-research); }
+[data-mode-tint="teacher"] { --w-mode-wash: var(--wash-mode-teacher-wash); --w-mode-ink: var(--wash-mode-teacher-ink); --w-mode-pigment: var(--wash-mode-teacher); }
+[data-mode-tint="security"] { --w-mode-wash: var(--wash-mode-security-wash); --w-mode-ink: var(--wash-mode-security-ink); --w-mode-pigment: var(--wash-mode-security); }
+[data-mode-tint="debug"] { --w-mode-wash: var(--wash-mode-debug-wash); --w-mode-ink: var(--wash-mode-debug-ink); --w-mode-pigment: var(--wash-mode-debug); }
+[data-mode-tint="loop"] { --w-mode-wash: var(--wash-mode-loop-wash); --w-mode-ink: var(--wash-mode-loop-ink); --w-mode-pigment: var(--wash-mode-loop); }
+[data-mode-tint="plan"] { --w-mode-wash: var(--wash-mode-plan-wash); --w-mode-ink: var(--wash-mode-plan-ink); --w-mode-pigment: var(--wash-mode-plan); }
+
+/* ------------------------------------------------------------ focus (G§3.4)
+ * 2px accent outline with a 2px offset on every interactive element. Inputs
+ * use offset 0 plus a 3px accent wash halo. Never outline:none without a
+ * replacement. */
+:focus-visible {
+    outline: 2px solid var(--wash-accent-ink);
+    outline-offset: 2px;
+}
+:is(input, textarea, select):focus-visible {
+    outline: 2px solid var(--wash-accent-ink);
+    outline-offset: 0;
+    box-shadow: 0 0 0 3px var(--wash-accent-wash);
+}
+
+/* ------------------------------------------------------------ selection */
+::selection {
+    background: var(--wash-accent-wash);
+    color: var(--wash-ink);
+}
+
+/* ------------------------------------------------------------ scrollbars */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--wash-hairline-strong) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--wash-hairline-strong);
+    border: 2px solid transparent;
+    border-radius: var(--wash-radius-pill);
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--wash-control-border); }
+
+/* ------------------------------------------------------------ preferences (G§11)
+ * Reduced motion's global "everything instant" rule needs !important to beat
+ * component animations, so it lives in utilities.css. */
+
+/* Higher contrast: hairlines become ink-3 and washes get stronger. */
+@media (prefers-contrast: more) {
+    :root, [data-theme] {
+        --wash-hairline: var(--wash-ink-3);
+        --wash-hairline-strong: var(--wash-ink-2);
+        --wash-control-border: var(--wash-ink-2);
+        --wash-ink-3: var(--wash-ink-2);
+    }
+}
+
+/* Windows high-contrast / forced colours: let the system palette through. */
+@media (forced-colors: active) {
+    :focus-visible { outline: 2px solid CanvasText; }
+    ::selection { background: Highlight; color: HighlightText; }
+}
+
+/* ------------------------------------------------------------ glass (G§3.3)
+ * The glass recipe. Surfaces read these instead of the raw tokens, so the
+ * fallback blocks below turn every pane solid in one place:
+ *
+ *   level 1   background: var(--w-glass-fill); border: 1px solid var(--w-glass-line);
+ *             box-shadow: var(--w-glass-lift). Planes and floating panes add
+ *             backdrop-filter: var(--w-glass-filter) (plus the -webkit- twin);
+ *             panes nested on a plane that already blurs skip their own blur.
+ *   level 1s  background: var(--w-glass-fill-subtle); no blur of its own.
+ *   level 2   background: var(--w-glass-fill-strong); box-shadow: var(--w-glass-lift-2);
+ *             backdrop-filter: var(--w-glass-filter-strong).
+ *   level 3   as level 2 with var(--w-glass-lift-3).
+ *
+ * Also declared on [data-theme], so a nested theme (the /design gallery's
+ * side-by-side panes) resolves its own glass. Edges are light, never
+ * pigment: the glass-border highlight plus a glass-edge outline ring. Text
+ * never sits on less than --wash-glass (the 62% floor). */
+:root, [data-theme] {
+    --w-glass-fill: var(--wash-glass);
+    --w-glass-fill-strong: var(--wash-glass-strong);
+    --w-glass-fill-subtle: var(--wash-glass-subtle);
+    --w-glass-line: var(--wash-glass-border);
+    --w-glass-ring: 0 0 0 1px var(--wash-glass-edge);
+    --w-glass-filter: blur(var(--wash-glass-blur)) saturate(var(--wash-glass-saturate));
+    --w-glass-filter-strong: blur(var(--wash-glass-blur-strong)) saturate(var(--wash-glass-saturate));
+    --w-glass-lift: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-glass-shadow);
+    --w-glass-lift-flat: var(--wash-glass-highlight), var(--w-glass-ring);
+    --w-glass-lift-2: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-elevation-2);
+    --w-glass-lift-3: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-elevation-3);
+}
+
+/* ------------------------------------------------------------ ambient wash (G§6.2)
+ * Every page sets body[data-ambient] (dawn | lagoon | meadow) from the
+ * _layout.html `ambient` block. A fixed, full-viewport painting sits behind
+ * everything as the glass backdrop. The tokens point at the 1920px art;
+ * screens below 840px get the 960px version. */
+:root,
+[data-theme="paper"],
+[data-theme="light"] {
+    --w-ambient-dawn-sm: url("/static/wash/art/ambient-dawn-paper-960.webp");
+    --w-ambient-lagoon-sm: url("/static/wash/art/ambient-lagoon-paper-960.webp");
+    --w-ambient-meadow-sm: url("/static/wash/art/ambient-meadow-paper-960.webp");
+}
+[data-theme="dusk"],
+[data-theme="dark"] {
+    --w-ambient-dawn-sm: url("/static/wash/art/ambient-dawn-dusk-960.webp");
+    --w-ambient-lagoon-sm: url("/static/wash/art/ambient-lagoon-dusk-960.webp");
+    --w-ambient-meadow-sm: url("/static/wash/art/ambient-meadow-dusk-960.webp");
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+        --w-ambient-dawn-sm: url("/static/wash/art/ambient-dawn-dusk-960.webp");
+        --w-ambient-lagoon-sm: url("/static/wash/art/ambient-lagoon-dusk-960.webp");
+        --w-ambient-meadow-sm: url("/static/wash/art/ambient-meadow-dusk-960.webp");
+    }
+}
+[data-ambient="dawn"] { --w-ambient: var(--wash-art-ambient-dawn); --w-ambient-sm: var(--w-ambient-dawn-sm); }
+[data-ambient="lagoon"] { --w-ambient: var(--wash-art-ambient-lagoon); --w-ambient-sm: var(--w-ambient-lagoon-sm); }
+[data-ambient="meadow"] { --w-ambient: var(--wash-art-ambient-meadow); --w-ambient-sm: var(--w-ambient-meadow-sm); }
+body[data-ambient]::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--wash-canvas) var(--w-ambient, none) center / cover no-repeat;
+    pointer-events: none;
+}
+@media (width < 840px) {
+    body[data-ambient]::before { background-image: var(--w-ambient-sm, none); }
+}
+
+/* ------------------------------------------------------------ solid fallbacks (G§3.3)
+ * No backdrop-filter support, prefers-reduced-transparency, "Reduce
+ * decoration" and forced colours: glass becomes the solid surface / raised /
+ * sunken colour and the ambient wash becomes flat canvas. */
+@supports not (backdrop-filter: blur(1px)) {
+    :root, [data-theme] {
+        --w-glass-fill: var(--wash-surface);
+        --w-glass-fill-strong: var(--wash-raised);
+        --w-glass-fill-subtle: var(--wash-sunken);
+        --w-glass-line: var(--wash-hairline);
+        --w-glass-filter: none;
+        --w-glass-filter-strong: none;
+    }
+}
+:root[data-decoration="reduced"],
+:root[data-decoration="reduced"] [data-theme] {
+    --w-glass-fill: var(--wash-surface);
+    --w-glass-fill-strong: var(--wash-raised);
+    --w-glass-fill-subtle: var(--wash-sunken);
+    --w-glass-line: var(--wash-hairline);
+    --w-glass-filter: none;
+    --w-glass-filter-strong: none;
+}
+:root[data-decoration="reduced"] body[data-ambient]::before { background: var(--wash-canvas); }
+@media (prefers-reduced-transparency: reduce) {
+    :root, [data-theme] {
+        --w-glass-fill: var(--wash-surface);
+        --w-glass-fill-strong: var(--wash-raised);
+        --w-glass-fill-subtle: var(--wash-sunken);
+        --w-glass-line: var(--wash-hairline);
+        --w-glass-filter: none;
+        --w-glass-filter-strong: none;
+    }
+    body[data-ambient]::before { background: var(--wash-canvas); }
+}
+@media (forced-colors: active) {
+    :root, [data-theme] {
+        --w-glass-fill: var(--wash-surface);
+        --w-glass-fill-strong: var(--wash-raised);
+        --w-glass-fill-subtle: var(--wash-sunken);
+        --w-glass-line: var(--wash-hairline);
+        --w-glass-filter: none;
+        --w-glass-filter-strong: none;
+    }
+    body[data-ambient]::before { background: var(--wash-canvas); }
+}
+
+/* ------------------------------------------------------------ page transitions (G§5)
+   Cross-document View Transitions: same-origin navigations (/, /work, /containers,
+   /trace, …) cross-fade instead of flashing white. The shell's top bar and sidebar are
+   named so they hold still; only the stage content fades and rises. The ambient wash
+   cross-fades with the root (pages use different washes). Browsers without cross-document
+   support use the scripted fade below. */
+@view-transition { navigation: auto; }
+
+.w-topbar { view-transition-name: w-topbar; }
+.w-sidebar { view-transition-name: w-sidebar; }
+.w-stage { view-transition-name: w-stage; }
+
+::view-transition-group(root),
+::view-transition-group(w-topbar),
+::view-transition-group(w-sidebar) { animation-duration: var(--wash-motion-medium); animation-timing-function: var(--wash-ease-medium); }
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: var(--wash-motion-medium); animation-timing-function: var(--wash-ease-medium); }
+::view-transition-old(w-stage) { animation: w-stage-out var(--wash-motion-small) var(--wash-ease-micro) both; }
+::view-transition-new(w-stage) { animation: w-stage-in var(--wash-motion-medium) var(--wash-ease-medium) both; }
+/* Same-page route changes (/work hash routes) reuse the stage animation. */
+::view-transition-group(w-stage) { animation-duration: var(--wash-motion-medium); }
+
+@keyframes w-stage-out { to { opacity: 0; } }
+@keyframes w-stage-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Scripted fallback (html[data-nav="fade"], set pre-paint; e.g. Firefox): the stage fades in
+   on load, and wash_shell.js adds .w-leaving and waits for the fade-out before following a
+   same-origin link. Back/forward-cache restores clear .w-leaving on pageshow. */
+html[data-nav="fade"] .w-stage { animation: w-stage-in var(--wash-motion-medium) var(--wash-ease-medium) both; }
+html[data-nav="fade"].w-leaving .w-stage {
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity var(--wash-motion-small) var(--wash-ease-micro), transform var(--wash-motion-small) var(--wash-ease-micro);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    @view-transition { navigation: none; }
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) { animation: none; }
+    .w-stage { animation: none; }
+    html[data-nav="fade"] .w-stage { animation: none; }
+    html[data-nav="fade"].w-leaving .w-stage { transition: none; }
+}

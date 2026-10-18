@@ -11,7 +11,9 @@ def read(path: str) -> str:
 def test_web_conversation_stage_rail_tracks_and_jumps_to_user_turns():
     template = read("mu/gui/templates/fragments/chat.html")
     script = read("mu/gui/static/js/app.js")
-    styles = read("mu/gui/static/css/product.css")
+    # Wash W4: product.css is retired; the transcript is .w-transcript
+    # (components/message.css) and the rail styles live in the chat patterns.
+    styles = read("mu/gui/static/css/wash/components/message.css")
 
     assert 'class="conversation-stage-rail"' in template
     assert ':data-turn-id="t.id"' in template
@@ -54,7 +56,8 @@ def test_web_history_loads_checkpoint_batches_without_forward_arrow_paging():
 def test_web_history_paging_preserves_content_and_layout_stability():
     script = read("mu/gui/static/js/app.js")
     template = read("mu/gui/templates/fragments/chat.html")
-    styles = read("mu/gui/static/css/product.css")
+    styles = read("mu/gui/static/css/wash/components/message.css")
+    page = read("mu/gui/static/css/wash/patterns/chat.css")
     index = read("mu/gui/templates/index.html")
 
     assert "const turns = flatten(slot.turns);" in script
@@ -63,10 +66,12 @@ def test_web_history_paging_preserves_content_and_layout_stability():
     assert ':data-history-index="t.historyIndex ?? null"' in template
     assert "scrollbar-gutter: stable" in styles
     assert "overflow-anchor: none" in styles
-    assert ".chat-history-loading {\n    position: absolute;" in styles
-    assert '<link id="mucli-conversation-css"' in index
-    assert index.index('/static/css/refinement.css') < index.index('/static/css/conversation.css')
-    assert index.index('/static/css/conversation.css') < index.index('/static/js/product.js')
+    assert ".chat-history-loading {\n        position: absolute;" in page
+    # Wash W4: the chat shell links one page bundle (the conversation rules are
+    # Wash components now), in <head> before product.js runs.
+    assert '<link id="mucli-chat-css" rel="stylesheet" href="/static/css/wash/patterns/chat.css">' in index
+    assert '@import url("panels.css") layer(patterns);' in page
+    assert index.index('/static/css/wash/patterns/chat.css') < index.index('/static/js/product.js')
 
 
 def test_mobile_conversation_stage_rail_uses_virtualized_list_indexes():

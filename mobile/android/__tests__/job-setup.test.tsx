@@ -8,7 +8,7 @@ import {
   doctorStatus, doctorSummary, firstAttention, promptInitials, setupApi, stepStatus,
   type DoctorReport, type SetupVM,
 } from '../src/api/setup';
-import { ToastHost } from '../src/components/planos';
+import { ToastHost } from '../src/ui';
 import { JobDoctorScreen } from '../src/screens/JobDoctorScreen';
 import { JobSetupScreen } from '../src/screens/JobSetupScreen';
 

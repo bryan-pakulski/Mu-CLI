@@ -1,24 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  PanResponder,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Alert, PanResponder, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi, type SessionSummary } from '../api/sessions';
 import { threadsApi, type ThreadStatus, type ThreadSummary } from '../api/threads';
 import { useConnectionStore } from '../store/connection';
 import { useTheme } from '../theme/ThemeContext';
-import { Text } from './Text';
 import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
-import { SafeAreaModal } from './SafeAreaModal';
-import { elevation, fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
+import { fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
+import { ModalFrame, Pressable, Text, Icon, SessionAvatar } from '../ui';
+import { GlassBackdrop, useGlass } from '../ui/Glass';
 
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
@@ -33,7 +24,8 @@ function threadStatusLabel(status: ThreadStatus): string {
 }
 
 export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }: SwipeSessionsDrawerProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
+  const glass = useGlass();
   const { activeSessionName, setActiveSession, setActiveProviderModel } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
@@ -180,54 +172,50 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
   };
 
   const threadStatusColor = (status: ThreadStatus) => {
-    if (status === 'error') return colors.error;
-    if (status === 'interrupted') return colors.warning;
-    if (ACTIVE_THREAD_STATUSES.includes(status)) return colors.accent;
-    return colors.textDim;
-  };
-
-  const typeIcon = (session: SessionSummary): keyof typeof Ionicons.glyphMap => {
-    if (session.session_type === 'container') return 'cube-outline';
-    if (session.session_type === 'chat') return 'chatbubble-ellipses-outline';
-    return 'folder-open-outline';
+    if (status === 'error') return colors.danger.ink;
+    if (status === 'interrupted') return colors.attention.ink;
+    if (ACTIVE_THREAD_STATUSES.includes(status)) return colors.accent.ink;
+    return colors.ink3;
   };
 
   const drawerVisible = visible && !createSessionOpen && !createThreadOpen;
 
   return (
     <>
-      <SafeAreaModal visible={drawerVisible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalFrame statusBarTranslucent={false} visible={drawerVisible} transparent animationType="fade" onRequestClose={onClose}>
         <View style={styles.overlay}>
           <View
             {...swipeResponder.panHandlers}
             style={[
               styles.drawer,
-              elevation(2, colors, isDark),
+              // Side panel = level-1 glass chrome (G§3.3) with a neutral 1px edge.
               {
                 borderWidth: 0,
                 borderRightWidth: 1,
-                backgroundColor: colors.glassStrong,
+                backgroundColor: 'transparent',
+                overflow: 'hidden',
                 borderRightColor: colors.hairline,
                 paddingTop: spacing.base,
               },
             ]}
           >
+            <GlassBackdrop level={1} testID="sessions-drawer-glass" />
             <View style={[styles.header, { borderBottomColor: colors.hairline }] }>
               <View style={styles.headerCopy}>
-                <Text style={[styles.title, { color: colors.text }]}>Threads</Text>
+                <Text style={[styles.title, { color: colors.ink }]}>Threads</Text>
                 <Text variant="xs" dim>Agent conversations and sessions</Text>
               </View>
               <View style={styles.headerActions}>
-                <TouchableOpacity
+                <Pressable
                   onPress={() => activeSessionName ? setCreateThreadOpen(true) : setCreateSessionOpen(true)}
                   style={styles.iconButton}
                   accessibilityLabel={activeSessionName ? 'Create thread' : 'Create session'}
                 >
-                  <Ionicons name="add" size={20} color={colors.textDim} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={onClose} style={styles.iconButton} accessibilityLabel="Close threads">
-                  <Ionicons name="close" size={20} color={colors.textDim} />
-                </TouchableOpacity>
+                  <Icon name="plus" size="md" color={colors.ink3} />
+                </Pressable>
+                <Pressable onPress={onClose} style={styles.iconButton} accessibilityLabel="Close threads">
+                  <Icon name="x" size="md" color={colors.ink3} />
+                </Pressable>
               </View>
             </View>
 
@@ -236,28 +224,28 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
               contentContainerStyle={styles.listContent}
             >
               {activeSessionName ? (
-                <TouchableOpacity
+                <Pressable
                   onPress={() => setCreateThreadOpen(true)}
                   activeOpacity={0.72}
-                  style={[styles.primaryAction, { backgroundColor: colors.accentSubtle }]}
+                  style={[styles.primaryAction, { backgroundColor: colors.accent.wash }]}
                 >
-                  <Ionicons name="git-branch-outline" size={18} color={colors.accentFg} />
-                  <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>New thread</Text>
-                  <Ionicons name="add" size={18} color={colors.accentFg} />
-                </TouchableOpacity>
+                  <Icon name="git-branch" size="md" color={colors.accent.ink} />
+                  <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>New thread</Text>
+                  <Icon name="plus" size="md" color={colors.accent.ink} />
+                </Pressable>
               ) : null}
 
               {hasThreadGroup ? (
                 <View style={styles.section}>
                   <SectionTitle label="THREAD GROUP" count={threads.length} />
                   {threads.map(thread => (
-                    <TouchableOpacity
+                    <Pressable
                       key={thread.thread_id}
                       onPress={() => void switchSession(thread.session_name)}
                       activeOpacity={0.7}
                       style={[
                         styles.row,
-                        activeSessionName === thread.session_name && { backgroundColor: colors.accentSubtle },
+                        activeSessionName === thread.session_name && glass.activePill,
                       ]}
                     >
                       <View style={styles.typeIconWrap}>
@@ -273,24 +261,24 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                         </Text>
                       </View>
                       {thread.unread_count > 0 ? (
-                        <View style={[styles.unreadBadge, { backgroundColor: colors.accentSubtle }] }>
-                          <Text variant="xs" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{thread.unread_count}</Text>
+                        <View style={[styles.unreadBadge, { backgroundColor: colors.accent.wash }] }>
+                          <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold, fontVariant: ['tabular-nums'] }}>{thread.unread_count}</Text>
                         </View>
                       ) : null}
                       {activeSessionName === thread.session_name ? (
-                        <Ionicons name="checkmark" size={17} color={colors.accentFg} />
+                        <Icon name="check" size="sm" color={colors.accent.ink} />
                       ) : !ACTIVE_THREAD_STATUSES.includes(thread.status) ? (
-                        <TouchableOpacity
+                        <Pressable
                           onPress={() => deleteThread(thread)}
                           style={styles.rowAction}
                           accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
                         >
-                          <Ionicons name="trash-outline" size={17} color={colors.textDim} />
-                        </TouchableOpacity>
+                          <Icon name="trash-2" size="sm" color={colors.ink3} />
+                        </Pressable>
                       ) : (
-                        <Ionicons name="chevron-forward" size={17} color={colors.textDim} />
+                        <Icon name="chevron-right" size="sm" color={colors.ink3} />
                       )}
-                    </TouchableOpacity>
+                    </Pressable>
                   ))}
                 </View>
               ) : null}
@@ -303,22 +291,23 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                   </View>
                 ) : null}
                 {loadError ? (
-                  <TouchableOpacity onPress={() => void load()} style={styles.retryAction}>
-                    <Text variant="sm" style={{ color: colors.accentFg, fontWeight: fontWeights.semibold }}>Retry</Text>
-                  </TouchableOpacity>
+                  <Pressable onPress={() => void load()} style={styles.retryAction}>
+                    <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
+                  </Pressable>
                 ) : null}
                 {sortSessions(sessions, activeSessionName).map(session => (
-                  <TouchableOpacity
+                  <Pressable
                     key={session.name}
                     onPress={() => void switchSession(session.name)}
                     activeOpacity={0.7}
                     style={[
                       styles.row,
-                      activeSessionName === session.name && { backgroundColor: colors.accentSubtle },
+                      activeSessionName === session.name && glass.activePill,
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
-                      <Ionicons name={typeIcon(session)} size={17} color={activeSessionName === session.name ? colors.accentFg : session.is_loaded ? colors.textSoft : colors.textDim} />
+                      <SessionAvatar name={session.name} type={session.session_type}
+                        dimmed={activeSessionName !== session.name && !session.is_loaded} />
                     </View>
                     <View style={styles.rowCopy}>
                       <Text variant="sm" style={styles.rowName} numberOfLines={1}>{session.name}</Text>
@@ -326,29 +315,29 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                         {switchingName === session.name ? 'Opening…' : session.session_type || 'workspace'}
                       </Text>
                     </View>
-                    <TouchableOpacity onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>
-                      <Ionicons name="remove-circle-outline" size={18} color={colors.textDim} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => deleteSession(session)} style={styles.rowAction} accessibilityLabel={`Delete ${session.name}`}>
-                      <Ionicons name="trash-outline" size={17} color={colors.textDim} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
+                    <Pressable onPress={() => unloadSession(session)} style={styles.rowAction} accessibilityLabel={`Unload ${session.name}`}>
+                      <Icon name="circle-minus" size="md" color={colors.ink3} />
+                    </Pressable>
+                    <Pressable onPress={() => deleteSession(session)} style={styles.rowAction} accessibilityLabel={`Delete ${session.name}`}>
+                      <Icon name="trash-2" size="sm" color={colors.ink3} />
+                    </Pressable>
+                  </Pressable>
                 ))}
               </View>
 
-              <TouchableOpacity
+              <Pressable
                 onPress={() => setCreateSessionOpen(true)}
                 activeOpacity={0.72}
-                style={[styles.secondaryAction, { borderColor: colors.border }]}
+                style={[styles.secondaryAction, { borderColor: colors.hairline }]}
               >
-                <Ionicons name="add-circle-outline" size={17} color={colors.textDim} />
+                <Icon name="plus" size="sm" color={colors.ink3} />
                 <Text variant="sm" dim style={{ fontWeight: fontWeights.semibold }}>New session</Text>
-              </TouchableOpacity>
+              </Pressable>
             </ScrollView>
           </View>
-          <TouchableOpacity style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
+          <Pressable accessibilityLabel="Close sessions" style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} activeOpacity={1} />
         </View>
-      </SafeAreaModal>
+      </ModalFrame>
       <NewSessionSheet
         visible={createSessionOpen}
         onClose={() => setCreateSessionOpen(false)}
@@ -368,7 +357,7 @@ function SectionTitle({ label, count }: { label: string; count: number }) {
   const { colors } = useTheme();
   return (
     <View style={styles.sectionTitleRow}>
-      <Text variant="xs" style={[styles.sectionTitle, { color: colors.textDim }]}>{label}</Text>
+      <Text variant="xs" style={[styles.sectionTitle, { color: colors.ink3 }]}>{label}</Text>
       <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{count}</Text>
     </View>
   );
@@ -434,8 +423,11 @@ const styles = StyleSheet.create({
     minHeight: 58,
     paddingHorizontal: spacing.sm,
     borderRadius: radii.sm,
+    // Same box as the active glass-strong pill, so selection never shifts layout.
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  typeIconWrap: { width: 28, alignItems: 'flex-start', justifyContent: 'center', marginRight: spacing.sm },
+  typeIconWrap: { width: 40, alignItems: 'flex-start', justifyContent: 'center', marginRight: spacing.sm },
   threadDot: { width: 8, height: 8, borderRadius: radii.pill },
   rowCopy: { flex: 1, paddingVertical: spacing.sm },
   rowName: { fontWeight: fontWeights.semibold },

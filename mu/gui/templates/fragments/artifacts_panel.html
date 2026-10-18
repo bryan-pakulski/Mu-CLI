@@ -7,14 +7,14 @@
          MUCLI_VIZ_SUBSECTIONS_V1: visualizations + files split into separate registries. -->
     <div class="artifacts-panel-head">
         <div>
-            <span class="label-mono">Session files</span>
+            <span class="label-mono w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Session files</span>
             <p x-show="$store.artifacts.current.length">Visualizations, files, and your uploads, kept in separate registries.</p>
             <p x-show="!$store.artifacts.current.length">No artifacts yet — outputs the agent publishes will appear here.</p>
         </div>
-        <button type="button" class="icon-btn"
+        <button type="button" class="w-btn" data-variant="icon"
                 @click="$store.artifacts.load($store.chat.currentName, true); $store.attachments.load($store.chat.currentName)"
                 :disabled="$store.artifacts.loading || $store.attachments.loading || $store.attachments.uploading"
-                title="Refresh session files" aria-label="Refresh session files">&#8635;</button>
+                title="Refresh session files" aria-label="Refresh session files"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg></button>
     </div>
 
     <div class="unified-registry-body">
@@ -24,7 +24,7 @@
                     <strong id="visualizations-title">Visualizations</strong>
                     <span>Charts and interactive views published by the agent.</span>
                 </div>
-                <span class="registry-count"
+                <span class="registry-count w-count"
                       x-text="$store.artifacts.visualizations().length"></span>
             </div>
 
@@ -40,15 +40,15 @@
                     <div class="artifact-row">
                         <a class="artifact-row-main" :href="a.view_url" target="_blank" rel="noopener noreferrer"
                            :title="'Open ' + (a.title || a.name)">
-                            <span class="artifact-row-icon">&#8599;</span>
+                            <span class="artifact-row-icon" aria-hidden="true"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-bar-chart-3"></use></svg></span>
                             <span class="artifact-row-copy">
                                 <strong x-text="a.title || a.name"></strong>
                                 <span x-text="$store.artifacts.formatSize(a.size) + ' · visualization'"></span>
                             </span>
                         </a>
-                        <button type="button" class="artifact-row-delete"
+                        <button type="button" class="artifact-row-delete w-btn" data-variant="icon" data-size="sm"
                                 title="Delete visualization" aria-label="Delete visualization"
-                                @click.stop="$store.confirm.ask(`Delete visualization '${a.name}'?`, $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})">×</button>
+                                @click.stop="$store.confirm.ask(`Delete visualization '${a.name}'?`, $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-trash-2"></use></svg></button>
                     </div>
                 </template>
             </div>
@@ -60,7 +60,7 @@
                     <strong id="model-artifacts-title">Files</strong>
                     <span>Documents, data, and other outputs from the agent.</span>
                 </div>
-                <span class="registry-count"
+                <span class="registry-count w-count"
                       x-text="$store.artifacts.files().length"></span>
             </div>
 
@@ -76,15 +76,15 @@
                     <div class="artifact-row">
                         <a class="artifact-row-main" :href="a.download_url" download
                            :title="'Download ' + a.name">
-                            <span class="artifact-row-icon">&#8595;</span>
+                            <span class="artifact-row-icon" aria-hidden="true"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-file-text"></use></svg></span>
                             <span class="artifact-row-copy">
                                 <strong x-text="a.title || a.name"></strong>
                                 <span x-text="$store.artifacts.formatSize(a.size) + ' · ' + (a.mime_type || 'file')"></span>
                             </span>
                         </a>
-                        <button type="button" class="artifact-row-delete"
+                        <button type="button" class="artifact-row-delete w-btn" data-variant="icon" data-size="sm"
                                 title="Delete artifact" aria-label="Delete artifact"
-                                @click.stop="$store.confirm.ask(`Delete artifact '${a.name}'?`, $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})">×</button>
+                                @click.stop="$store.confirm.ask(`Delete artifact '${a.name}'?`, $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-trash-2"></use></svg></button>
                     </div>
                 </template>
             </div>
@@ -97,12 +97,13 @@
                     <span>Select files to include with the next message.</span>
                 </div>
                 <div class="registry-section-actions">
-                    <span class="registry-count" x-text="$store.attachments.items().length"></span>
-                    <label class="registry-upload-button" :class="{ disabled: $store.attachments.uploading }">
+                    <span class="registry-count w-count" x-text="$store.attachments.items().length"></span>
+                    <label class="registry-upload-button w-btn" data-variant="secondary" data-size="sm" :class="{ disabled: $store.attachments.uploading }"
+                           :aria-disabled="$store.attachments.uploading ? 'true' : null">
                         <input type="file" multiple hidden
                                :disabled="$store.attachments.uploading"
                                @change="$store.attachments.uploadFiles($event.target.files); $event.target.value=''">
-                        <span x-text="$store.attachments.uploading ? 'uploading…' : '+ upload'"></span>
+                        <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-upload"></use></svg><span x-text="$store.attachments.uploading ? 'Uploading…' : 'Upload'"></span>
                     </label>
                 </div>
             </div>
@@ -125,18 +126,18 @@
                                 @click="$store.attachments.toggle(item)"
                                 :aria-pressed="$store.attachments.isSelected(item)"
                                 :title="$store.attachments.isSelected(item) ? 'Remove from next message' : 'Include with next message'">
-                            <span class="artifact-row-icon"
+                            <span class="artifact-row-icon" aria-hidden="true"
                                   x-text="$store.attachments.isSelected(item) ? '✓' : '○'"></span>
                             <span class="artifact-row-copy">
                                 <strong x-text="item.name"></strong>
                                 <span x-text="$store.artifacts.formatSize(item.size) + ' · ' + (item.mime_type || 'file')"></span>
                             </span>
                         </button>
-                        <a class="artifact-row-download" :href="item.download_url" download
-                           :title="'Download ' + item.name" aria-label="Download uploaded file">&#8595;</a>
-                        <button type="button" class="artifact-row-delete"
+                        <a class="artifact-row-download w-btn" data-variant="icon" data-size="sm" :href="item.download_url" download
+                           :title="'Download ' + item.name" aria-label="Download uploaded file"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-download"></use></svg></a>
+                        <button type="button" class="artifact-row-delete w-btn" data-variant="icon" data-size="sm"
                                 title="Delete uploaded file" aria-label="Delete uploaded file"
-                                @click.stop="$store.confirm.ask(`Delete uploaded file '${item.name}'?`, $event, () => $store.attachments.remove(item), {danger:true})">×</button>
+                                @click.stop="$store.confirm.ask(`Delete uploaded file '${item.name}'?`, $event, () => $store.attachments.remove(item), {danger:true})"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-trash-2"></use></svg></button>
                     </div>
                 </template>
             </div>

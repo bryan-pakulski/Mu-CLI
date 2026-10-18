@@ -51,12 +51,12 @@ def _show(session: Any, allow_prompt: bool) -> CommandResult:
         ui = getattr(session, "ui", None)
         console = getattr(ui, "console", None) if ui is not None else None
         if console is not None:
-            console.print("\n[bold cyan]Workspace folders:[/bold cyan]")
+            console.print("\n[wash.accent.bold]Workspace folders:[/wash.accent.bold]")
             if folders:
                 console.print(session.folder_context.get_tree_map(), markup=False)
             else:
-                console.print("[dim](none)[/dim]")
-            console.print("\n[bold cyan]Staged files:[/bold cyan]")
+                console.print("[wash.muted](none)[/wash.muted]")
+            console.print("\n[wash.accent.bold]Staged files:[/wash.accent.bold]")
             if staged:
                 for entry in staged:
                     if isinstance(entry, dict):
@@ -67,7 +67,7 @@ def _show(session: Any, allow_prompt: bool) -> CommandResult:
                     else:
                         console.print(f"  • {entry}", markup=False)
             else:
-                console.print("[dim](none)[/dim]")
+                console.print("[wash.muted](none)[/wash.muted]")
 
     return CommandResult(
         ok=True,

@@ -30,7 +30,7 @@ gates that matter (plan approval, push).
 | Default job cost cap | `$100` per job (`jobs.max_cost_usd`), `0` = unlimited, must be set explicitly |
 | Commit identity | Inherit the user's `git config user.name/email`; fall back to `MuCLI`. Checkpoints stay unsigned; publish squashes into one commit that honours `commit.gpgsign`, carries the ticket key and a `Mucli-Job: <id>` trailer |
 | Push gate after squash | Gate compares the **tree** of the pushed commit with the verified tree |
-| Unattended writes | Explicit per-job "Run unattended in sandbox" flag with a Settings default (off). No longer inherits session YOLO |
+| Unattended writes | Explicit per-job "Run unattended in sandbox" flag with a Settings default (off). No longer inherits session YOLO. *Superseded 2026-10-15: jobs always run unattended; the flag and setting are gone* |
 | State model | One transition table module; stored `status` column kept for compatibility, `JobState` derived by a total explicit mapping (no history heuristics) |
 | Trackers | `Tracker` protocol with Jira and GitHub Issues adapters; Linear documented as a plug-in point |
 | Service-dependent tests (testcontainers, compose) | Documented limitation plus "run checks inside the job engine" option is **deferred**; doctor explains it |
@@ -84,8 +84,14 @@ policy,worker,harness_worker,model_relay,check_runner,selftest}.py`,
    the base commit). The same check runs in `_guard` after implement so
    problems surface at the stage that caused them.
 4. `_guard` after implement and checks scans `diff.patch` with
-   `mu.security.diff_scan.scan_patch(patch, literals=<injected credentials>)`
-   and fails the stage on findings. The checks stage gets a `_guard` too.
+   `mu.security.diff_scan.scan_patch(patch, literals=<injected credentials>, allow_fixtures=True)`.
+   The checks stage runs it once, after every suite's byproducts are discarded.
+   Any guard finding (`SandboxGuardError`: a secret file or value, an escaping
+   path or symlink, an unapproved CI workflow) **parks** the job (attention
+   `unsafe_action`, event `guard_blocked`) instead of failing it; on resume the
+   implement prompt states what was blocked. Secret-looking files under test or
+   fixture directories (`secret_paths.is_test_fixture`) pass the pre-check, and
+   generic secret patterns there do not count; injected credentials always do.
 5. Transient error class: the container reports `error_class`
    (`provider_transient`, `rate_limited`, `iteration_limit`, `fatal`); runner
    sets `JobRunOutcome.transient` for the first two.
@@ -168,7 +174,7 @@ the Jira step in `mu/jobs/setup.py`.
    stage models, Jira credentials, Android tabs).
 3. Doctor as a tab of Setup; one Setup call-to-action banner; Boards renamed
    "Tickets"; nav trimmed.
-4. "Run unattended in sandbox" toggle (explicit, default from Settings, off).
+4. "Run unattended in sandbox" toggle (explicit, default from Settings, off). *Removed 2026-10-15: jobs always run unattended.*
 
 ### Wave 2 — simplify the core (single agent, after Wave 1 is green)
 

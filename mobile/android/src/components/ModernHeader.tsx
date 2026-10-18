@@ -1,110 +1,92 @@
+// Chat header (G§8.3): the μ mark opens sessions; the session name in
+// title-3 plum with the provider · model line; safety states (plan mode,
+// auto-approve) are always visible here (G§10.4); a compact context ring
+// opens the breakdown; trace, work and settings are icon buttons. Settings
+// is a real screen under More, not a sheet. The bar is level-1 glass chrome
+// (blurred ambient wash, G§3.3) with a neutral glass bottom edge; solid
+// surface with Reduce decoration.
+
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { queueIfOffline, useConnectionStore } from '../store/connection';
-import { inspectorApi } from '../api/inspector';
-import { AdvancedSettingsSheet } from './AdvancedSettingsSheet';
-import { EffortControl } from './EffortControl';
-import { ModernBottomSheet } from './ModernBottomSheet';
-import { PlanModeBadge, usePlanMode } from './PlanModeIndicator';
-import { Text } from './Text';
-import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
+import { useConnectionStore } from '../store/connection';
+import { memoryApi } from '../api/memory';
+import { normaliseFill, useContextFillStore } from '../store/contextFill';
+import { PlanModeBadge } from './PlanModeIndicator';
+import { radii, spacing } from '../theme/tokens';
+import { Chip, ContextRing, IconButton, Pressable, Text } from '../ui';
+import { GlassChrome, useGlass } from '../ui/Glass';
 
 export type ModernHeaderProps = {
   onOpenSessions: () => void;
   onOpenWork: () => void;
-  onOpenWorkspace: () => void;
   onOpenTraces: () => void;
-  onOpenThreads: () => void;
   onOpenConnection: () => void;
-  onOpenModes: () => void;
-  onOpenProviders: () => void;
-  onOpenArtifacts: () => void;
-  onOpenContainers: () => void;
+  onOpenSettings: () => void;
+  onOpenContext: () => void;
 };
+
+/**
+ * Context fill for the header ring (display only; G§9.14). The SSE
+ * `context_snapshot` event, reported by the chat session hook, is the
+ * source; /api/memory/state is polled only until the first snapshot for the
+ * open session arrives (for example a freshly opened, idle session).
+ */
+export const CONTEXT_POLL_MS = 20_000;
+
+export function useContextFill(sessionName: string | null, isConnected: boolean): number | null {
+  const [polledFill, setPolledFill] = useState<number | null>(null);
+  const snapshotFill = useContextFillStore(s => (sessionName && s.sessionName === sessionName ? s.fill : null));
+  const hasSnapshot = snapshotFill != null;
+  useEffect(() => {
+    setPolledFill(null);
+  }, [sessionName]);
+  useEffect(() => {
+    if (!sessionName || !isConnected || hasSnapshot) return undefined;
+    let cancelled = false;
+    const load = () => {
+      memoryApi.getState(8, 4)
+        .then(state => {
+          if (cancelled || !state || !state.active) return;
+          const fill = normaliseFill(state.fill_pct);
+          if (fill != null) setPolledFill(fill);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const timer = setInterval(load, CONTEXT_POLL_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [hasSnapshot, isConnected, sessionName]);
+  if (!sessionName || !isConnected) return null;
+  return snapshotFill ?? polledFill;
+}
 
 export function ModernHeader({
   onOpenSessions,
   onOpenWork,
-  onOpenWorkspace,
   onOpenTraces,
-  onOpenThreads,
   onOpenConnection,
-  onOpenModes,
-  onOpenProviders,
-  onOpenArtifacts,
-  onOpenContainers,
+  onOpenSettings,
+  onOpenContext,
 }: ModernHeaderProps) {
   const insets = useSafeAreaInsets();
-  const { colors, isDark, toggleTheme } = useTheme();
-  const {
-    activeSessionName,
-    activeProvider,
-    activeModel,
-    isConnected,
-    yolo,
-    setYolo,
-    pendingMutations,
-    lastReplay,
-  } = useConnectionStore();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [yoloSyncing, setYoloSyncing] = useState(false);
-  const plan = usePlanMode();
-
-  const refreshYolo = useCallback(async () => {
-    if (!isConnected || !activeSessionName) return;
-    try {
-      const response = await inspectorApi.getVariables(activeSessionName);
-      for (const group of response.groups || []) {
-        const variable = (group.variables || []).find(item => item.key === 'yolo');
-        if (variable) {
-          setYolo(Boolean(variable.value));
-          return;
-        }
-      }
-    } catch {
-      // Preserve the last known value during a transient disconnect.
-    }
-  }, [activeSessionName, isConnected, setYolo]);
-
-  useEffect(() => {
-    void refreshYolo();
-  }, [refreshYolo, menuOpen]);
-
-  const updateYolo = useCallback(async (next: boolean) => {
-    if (!activeSessionName || yoloSyncing) return;
-    // G5 (§3.6): offline toggles join the outbound queue and replay with
-    // If-Match on reconnect — the optimistic local value stays visible.
-    // F11: carry the last-known session revision for CAS protection.
-    if (await queueIfOffline('set_variable', { key: 'yolo', value: next }, {
-      sessionName: activeSessionName,
-      ifMatch: useConnectionStore.getState().sessionRevision ?? undefined,
-    })) {
-      setYolo(next);
-      return;
-    }
-    const previous = yolo;
-    setYolo(next);
-    setYoloSyncing(true);
-    try {
-      const response = await inspectorApi.setVariable('yolo', next, activeSessionName);
-      setYolo(Boolean(response.value));
-    } catch (error) {
-      setYolo(previous);
-      Alert.alert('Could not update auto-approve', String(error));
-    } finally {
-      setYoloSyncing(false);
-    }
-  }, [activeSessionName, isConnected, setYolo, yolo, yoloSyncing]);
+  const { colors } = useTheme();
+  const glass = useGlass();
+  const activeSessionName = useConnectionStore(s => s.activeSessionName);
+  const activeProvider = useConnectionStore(s => s.activeProvider);
+  const activeModel = useConnectionStore(s => s.activeModel);
+  const isConnected = useConnectionStore(s => s.isConnected);
+  const yolo = useConnectionStore(s => s.yolo);
+  const pendingMutations = useConnectionStore(s => s.pendingMutations);
+  const lastReplay = useConnectionStore(s => s.lastReplay);
+  const fill = useContextFill(activeSessionName, isConnected);
 
   const sessionTitle = activeSessionName || 'New session';
-  const sessionMeta = [activeProvider, activeModel].filter(Boolean).join(' · ') || (isConnected ? 'Connected' : 'Connect to MuCLI');
+  const sessionMeta = [activeProvider, activeModel].filter(Boolean).join(' · ') || (isConnected ? 'Connected' : 'Connect to Mucli');
 
-  // G5 (§3.6): user-visible badge for queued offline mutations, plus a
-  // conflict notice when a replay dropped stale state (409 from If-Match).
+  // User-visible count of queued offline mutations, plus a conflict notice
+  // when a replay dropped stale state (409 from If-Match).
   const queueBadge = pendingMutations > 0 ? ` · ${pendingMutations} queued` : '';
   useEffect(() => {
     if (lastReplay && lastReplay.conflicts > 0) {
@@ -115,234 +97,46 @@ export function ModernHeader({
     }
   }, [lastReplay]);
 
-  const openFromMenu = (action: () => void) => {
-    setMenuOpen(false);
-    action();
-  };
-
-  return (
+  const openContext = useCallback(() => onOpenContext(), [onOpenContext]);
+  const titleContent = (
     <>
-      <View
-        style={[
-          styles.container,
-          {
-            backgroundColor: colors.surface,
-            borderBottomColor: colors.border,
-            paddingTop: insets.top + spacing.xs,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Open sessions"
-          onPress={onOpenSessions}
-          style={styles.iconButton}
-        >
-          <Text style={[styles.brandMark, { color: colors.accent }]}>μ</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={isConnected ? 'Current session' : 'Configure MuCLI connection'}
-          disabled={isConnected}
-          onPress={onOpenConnection}
-          activeOpacity={0.72}
-          style={styles.titleBlock}
-        >
-          <View style={styles.titleRow}>
-            <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-              {sessionTitle}
-            </Text>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.ok : colors.danger }]} />
-            <PlanModeBadge />
-          </View>
-          <Text style={[styles.subtitle, { color: isConnected ? colors.muted : colors.danger }]} numberOfLines={1}>
-            {sessionMeta}{queueBadge}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Open engineering work"
-            disabled={!isConnected}
-            onPress={onOpenWork}
-            style={[styles.iconButton, !isConnected && styles.disabledAction]}
-          >
-            <Ionicons name="briefcase-outline" size={19} color={colors.muted} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Open Trace Analyzer"
-            disabled={!activeSessionName}
-            onPress={onOpenTraces}
-            style={[styles.iconButton, !activeSessionName && styles.disabledAction]}
-          >
-            <Ionicons name="analytics-outline" size={19} color={colors.muted} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Open settings"
-            onPress={() => setMenuOpen(true)}
-            style={styles.iconButton}
-          >
-            <Ionicons name="settings-outline" size={20} color={colors.muted} />
-          </TouchableOpacity>
-        </View>
+      <View style={styles.titleRow}>
+        <Text variant="title3" numberOfLines={1} style={styles.title}>{sessionTitle}</Text>
+        <View accessibilityLabel={isConnected ? 'Live' : 'Offline'} style={[styles.statusDot, { backgroundColor: isConnected ? colors.ok.pigment : colors.danger.pigment }]} />
       </View>
-
-      <ModernBottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title="Settings">
-        {!isConnected && (
-          <TouchableOpacity
-            onPress={() => openFromMenu(onOpenConnection)}
-            style={styles.connectionBanner}
-          >
-            <Ionicons name="wifi-outline" size={20} color={colors.muted} />
-            <View style={styles.menuCopy}>
-              <Text variant="base" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>Connect to MuCLI</Text>
-              <Text variant="xs" style={{ color: colors.textDim }}>Configure a reachable GUI server</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={17} color={colors.muted} />
-          </TouchableOpacity>
-        )}
-
-        <SettingsSection title="Session">
-          <MenuRow icon="options-outline" label="Mode" detail="Choose the active agent strategy" onPress={() => openFromMenu(onOpenModes)} />
-          <MenuRow
-            icon="git-branch-outline"
-            label="Agent threads"
-            detail={activeSessionName ? 'Switch conversations and review coordination activity' : 'Load a session to see its threads'}
-            onPress={() => openFromMenu(onOpenThreads)}
-          />
-          <MenuRow icon="server-outline" label="Provider and model" detail={[activeProvider, activeModel].filter(Boolean).join(' · ') || 'Not selected'} onPress={() => openFromMenu(onOpenProviders)} />
-          <EffortControl variant="row" />
-          <MenuRow icon="wifi-outline" label="Connection" detail={isConnected ? 'Connected to MuCLI' : 'Not connected'} onPress={() => openFromMenu(onOpenConnection)} />
-          <MenuRow
-            icon="document-attach-outline"
-            label="Session files"
-            detail={activeSessionName ? 'Visualizations, model artifacts, and uploads' : 'Load a session to view files'}
-            onPress={() => openFromMenu(onOpenArtifacts)}
-          />
-        </SettingsSection>
-
-        <SettingsSection title="Runtime">
-          <MenuRow
-            icon="briefcase-outline"
-            label="Engineering work"
-            detail="Autonomous jobs, approvals, verification and review"
-            onPress={() => openFromMenu(onOpenWork)}
-          />
-          <ToggleRow
-            icon="flash-outline"
-            label="Auto-approve writes"
-            detail={yoloSyncing ? 'Updating session…' : 'Apply to this running session'}
-            value={yolo}
-            onValueChange={updateYolo}
-            disabled={!isConnected || !activeSessionName || yoloSyncing}
-          />
-          <ToggleRow
-            icon="lock-closed-outline"
-            label="Plan mode (read-only)"
-            detail={plan.busy ? 'Updating session…' : 'Block file edits, shell writes and other write tools'}
-            value={plan.planMode}
-            onValueChange={next => { void plan.setPlanMode(next); }}
-            disabled={!plan.canToggle}
-          />
-          <MenuRow icon="grid-outline" label="Workspace tools" detail="Context, workflows, and runtime controls" onPress={() => openFromMenu(onOpenWorkspace)} />
-          <MenuRow
-            icon="cube-outline"
-            label="Containers"
-            detail="Create, inspect, start, stop, and remove containers"
-            onPress={() => openFromMenu(onOpenContainers)}
-          />
-        </SettingsSection>
-
-        <SettingsSection title="Configuration">
-          <MenuRow
-            icon="options-outline"
-            label="Session variables"
-            detail={activeSessionName ? 'Grouped runtime overrides for this session' : 'Load a session to edit variables'}
-            onPress={() => openFromMenu(() => setAdvancedOpen(true))}
-          />
-        </SettingsSection>
-
-        <SettingsSection title="Appearance">
-          <ToggleRow
-            icon={isDark ? 'moon-outline' : 'sunny-outline'}
-            label="Dark appearance"
-            detail="Use the alternate colour scheme"
-            value={isDark}
-            onValueChange={() => toggleTheme()}
-          />
-        </SettingsSection>
-      </ModernBottomSheet>
-      <AdvancedSettingsSheet visible={advancedOpen} onClose={() => setAdvancedOpen(false)} />
+      <Text variant="caption" numeric numberOfLines={1} style={{ color: isConnected ? colors.ink3 : colors.danger.ink }}>
+        {sessionMeta}{queueBadge}
+      </Text>
     </>
   );
-}
 
-function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
-  const { colors } = useTheme();
   return (
-    <View style={styles.section}>
-      <Text variant="xs" accessibilityRole="header" style={[styles.sectionTitle, { color: colors.muted }]}>{title}</Text>
-      <View style={[styles.sectionBody, { borderColor: colors.border, backgroundColor: colors.surface }]}>{children}</View>
-    </View>
-  );
-}
+    <GlassChrome level={1} edges={false} testID="chat-header-glass" style={[styles.container, { borderBottomColor: glass.edge, paddingTop: insets.top + spacing.xs }]}>
+      <Pressable accessibilityLabel="Open sessions" onPress={onOpenSessions} style={styles.mark}>
+        <Text variant="title2" style={{ color: colors.plum }}>μ</Text>
+      </Pressable>
 
-type MenuRowProps = {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  detail: string;
-  onPress: () => void;
-};
+      {/* Connected: the title is information, not a control (a disabled
+          pressable would dim it). Offline: tap to configure the connection. */}
+      {isConnected ? (
+        <View accessible accessibilityLabel={`Current session ${sessionTitle}, ${sessionMeta}${queueBadge}`} style={styles.titleBlock}>
+          {titleContent}
+        </View>
+      ) : (
+        <Pressable accessibilityLabel="Configure Mucli connection" onPress={onOpenConnection} scale={false} style={styles.titleBlock}>
+          {titleContent}
+        </Pressable>
+      )}
 
-function MenuRow({ icon, label, detail, onPress }: MenuRowProps) {
-  const { colors } = useTheme();
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.68}
-      style={styles.menuRow}
-    >
-      <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={19} color={colors.muted} />
+      <View style={styles.actions}>
+        <PlanModeBadge />
+        {yolo ? <Chip tone="caution" testID="header-yolo" accessibilityLabel="Auto-approve is on">auto</Chip> : null}
+        {fill != null ? <ContextRing fill={fill} showLabel={false} onPress={openContext} testID="header-context-ring" /> : null}
+        <IconButton icon="briefcase" label="Open engineering work" onPress={onOpenWork} disabled={!isConnected} />
+        <IconButton icon="activity" label="Open Trace Analyzer" onPress={onOpenTraces} disabled={!activeSessionName} />
+        <IconButton icon="settings" label="Open settings" onPress={onOpenSettings} />
       </View>
-      <View style={styles.menuCopy}>
-        <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{label}</Text>
-        <Text variant="xs" dim numberOfLines={2}>{detail}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={17} color={colors.muted} />
-    </TouchableOpacity>
-  );
-}
-
-type ToggleRowProps = Omit<MenuRowProps, 'onPress'> & {
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  disabled?: boolean;
-};
-
-function ToggleRow({ icon, label, detail, value, onValueChange, disabled = false }: ToggleRowProps) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.menuRow}>
-      <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={19} color={colors.muted} />
-      </View>
-      <View style={styles.menuCopy}>
-        <Text variant="sm" style={{ color: colors.text, fontWeight: fontWeights.semibold }}>{label}</Text>
-        <Text variant="xs" dim>{detail}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        disabled={disabled}
-        trackColor={{ false: colors.border, true: colors.accent }}
-        thumbColor={value ? colors.accentOn : colors.raised}
-      />
-    </View>
+    </GlassChrome>
   );
 }
 
@@ -351,44 +145,14 @@ const styles = StyleSheet.create({
     minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     paddingBottom: spacing.sm,
     borderBottomWidth: 1,
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 1 },
-  iconButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
-  disabledAction: { opacity: 0.32 },
-  brandMark: {
-    fontSize: fontSizes['2xl'],
-    lineHeight: typography['2xl'].lineHeight,
-    fontWeight: fontWeights.bold,
-    textAlign: 'center',
-    includeFontPadding: false,
-  },
-  titleBlock: { flex: 1, alignItems: 'flex-start', paddingHorizontal: spacing.sm },
+  mark: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill },
+  titleBlock: { flex: 1, alignItems: 'flex-start', paddingHorizontal: spacing.xs },
   titleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  title: { flexShrink: 1, maxWidth: '92%', fontSize: fontSizes.base, lineHeight: typography.base.lineHeight, fontWeight: fontWeights.semibold },
-  subtitle: { maxWidth: '100%', marginTop: 1, fontSize: fontSizes.xs, lineHeight: typography.xs.lineHeight, fontVariant: ['tabular-nums'] },
+  title: { flexShrink: 1 },
   statusDot: { width: 6, height: 6, borderRadius: radii.pill },
-  connectionBanner: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.xs,
-    marginBottom: spacing.base,
-  },
-  section: { marginBottom: spacing.lg },
-  sectionTitle: { fontWeight: fontWeights.semibold, marginBottom: spacing.sm, marginLeft: 2 },
-  sectionBody: { borderWidth: 1, borderRadius: radii.panel, overflow: 'hidden', paddingHorizontal: spacing.md },
-  menuRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: 2,
-    gap: spacing.xs,
-  },
-  menuIcon: { width: 24, alignItems: 'flex-start', justifyContent: 'center' },
-  menuCopy: { flex: 1, marginHorizontal: spacing.sm },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 0 },
 });

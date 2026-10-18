@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
-import { fontSizes, fontWeights, spacing, tint, typography } from '../theme/tokens';
+import { fontSizes, fontWeights, spacing, toneOf, typography } from '../theme/tokens';
+import { vocabulary } from '../theme/wash.generated';
+import { Text } from '../ui';
+import { STATUS } from '../theme/status';
 
 /** Minimal shape shared by every session list surface. */
 export type SessionStateSource = {
@@ -27,10 +29,12 @@ export function sessionState(session: SessionStateSource, active?: boolean): Ses
   return null;
 }
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** Canonical session-state labels from the shared vocabulary, sentence case. */
 export const SESSION_STATE_LABEL: Record<Exclude<SessionState, null>, string> = {
-  active: 'Active',
-  working: 'Working',
-  loaded: 'Loaded',
+  active: cap(vocabulary.session_state.active.label),
+  working: cap(vocabulary.session_state.working.label),
+  loaded: cap(vocabulary.session_state.loaded.label),
 };
 
 function rank(session: SessionStateSource, activeName?: string | null): number {
@@ -63,10 +67,11 @@ export function SessionStatusBadge({ session, active, size = 'md' }: SessionStat
   const state = sessionState(session, active);
   if (!state) return null;
   const label = SESSION_STATE_LABEL[state];
-  // planos pill: tone text + tint of the same tone; status glyph + label.
-  const tone = state === 'active' ? colors.accent : state === 'working' ? colors.running : colors.muted;
-  const glyph = state === 'loaded' ? '○' : '●';
-  const palette = { bg: tint(tone, 0.14), border: tint(tone, 0.4), text: state === 'loaded' ? colors.text : tone, dot: tone };
+  // Status chip: semantic wash fill, semantic ink text, glyph + label.
+  const tone3 = toneOf(colors, vocabulary.session_state[state].semantic);
+  const tone = tone3.ink;
+  const glyph = state === 'loaded' ? STATUS.pending.icon : STATUS.active.icon;
+  const palette = { bg: tone3.wash, border: tone3.wash, text: state === 'loaded' ? colors.ink2 : tone, dot: tone3.pigment };
   const sm = size === 'sm';
   return (
     <View

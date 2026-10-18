@@ -37,7 +37,8 @@ def test_subprocess_events_reach_partial_change_bus(tmp_path, monkeypatch):
     assert collect_durable_changes(service, bus, cursor) > cursor
     changes = bus.flush()
     parts = next(c.parts for c in changes if c.scope == "job")
-    assert set(parts) == {"session", "costs"}
+    # Agent traffic is not in the Cost & audit trail, so it refreshes the session only.
+    assert set(parts) == {"session"}
 
 
 def test_browser_plan_edit_save_approve_and_partial_refresh(tmp_path, monkeypatch):
@@ -71,8 +72,12 @@ def test_browser_plan_edit_save_approve_and_partial_refresh(tmp_path, monkeypatc
         page.route("http://jobs.test/**", route)
         page.goto("http://jobs.test/")
         page.evaluate("() => { window.EventSource = class { constructor() { window.stream=this; } addEventListener() {} close() {} }; }")
-        for name in ("plan_editor", "view"):
-            page.add_script_tag(path=str(ROOT / f"mu/gui/static/js/work/{name}.js"))
+        # Wash W4: view.js reads the shared status vocabulary (wash_tokens.js,
+        # loaded by _layout.html on every page) and renders diffs with
+        # the one Wash diff module (wash/diff.js), so the harness loads them first
+        # like work.html.
+        for script in ("wash_tokens.js", "wash/diff.js", "work/plan_editor.js", "work/view.js"):
+            page.add_script_tag(path=str(ROOT / f"mu/gui/static/js/{script}"))
         page.evaluate("""async () => {
             window.work = MuJobWork.create({
               api: async (path, opts={}) => { const r=await fetch(path, {method:opts.method, headers:{'content-type':'application/json'}, body:opts.body ? JSON.stringify(opts.body):undefined}); const data=await r.json(); if(!r.ok) throw Error(data.detail); return data; },
@@ -85,9 +90,12 @@ def test_browser_plan_edit_save_approve_and_partial_refresh(tmp_path, monkeypatc
         page.locator('[data-mode="structured"]').click()
         page.locator('[data-summary]').fill("Human approved content")
         assert page.locator('[data-plan-approve]').is_disabled()
-        page.evaluate("stream.onmessage({data:JSON.stringify({scope:'job',id:work.selectedId(),parts:['session','costs']})})")
+        page.evaluate("stream.onmessage({data:JSON.stringify({scope:'job',id:work.selectedId(),parts:['session','costs','notes']})})")
+        page.wait_for_timeout(200)
         assert page.locator('[data-summary]').input_value() == "Human approved content"
-        assert any("parts=session%2Ccosts" in p for p in requests)
+        # The visible-cheap part refetches; the heavy session/audit parts only go stale while hidden.
+        assert any(p.endswith("parts=notes") for p in requests)
+        assert not any("session" in p.split("parts=")[-1] or "costs" in p.split("parts=")[-1] for p in requests)
         page.locator('[data-plan-save]').click()
         page.wait_for_function("!document.querySelector('[data-plan-approve]').disabled")
         vm = client.get(f"/api/jobs/vm/job/{job.id}").json()

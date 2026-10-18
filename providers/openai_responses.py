@@ -13,7 +13,7 @@ import base64
 import json
 from typing import Any, Dict, Iterator, List, Optional
 
-from .base import Message, StreamEvent, ToolDefinition, tool_result_json
+from .base import REPLAY_CURRENT_TURN, Message, StreamEvent, ToolDefinition, project_replay, tool_result_json
 
 REASONING_MARKER = "openai_reasoning"
 
@@ -51,8 +51,12 @@ def _user_content(provider, message: Message) -> List[Dict[str, Any]]:
 
 
 def build_input(provider, messages: List[Message]) -> List[Dict[str, Any]]:
-    """Harness messages → Responses ``input`` items (reasoning replayed before its calls)."""
+    """Harness messages → Responses ``input`` items (reasoning replayed before its calls).
+
+    Encrypted reasoning is replayed for the current user turn only: the API ignores reasoning
+    items from earlier turns, so sending them is pure request size (``project_replay``)."""
     items: List[Dict[str, Any]] = []
+    messages = project_replay(messages, getattr(provider, "replay_scope", REPLAY_CURRENT_TURN))
     for message in messages:
         if message.role == "tool":
             for part in message.parts:

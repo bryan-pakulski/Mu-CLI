@@ -1,0 +1,18 @@
+/* Shared shell × components (patterns layer, every page).
+ *
+ * layout.css owns the shell geometry; these rules adjust components that sit
+ * inside it and therefore need to beat the `components` layer.
+ */
+
+/* lg: icon rail — nav items become 44px icon buttons, labels and counts hide. */
+@media (840px <= width < 1200px) {
+    .w-sidebar .w-nav__label,
+    .w-sidebar .w-count { display: none; }
+    .w-sidebar .w-nav__item { justify-content: center; width: 44px; padding: 0; }
+}
+
+/* sm: phones — the top-bar breadcrumb keeps only the current crumb. */
+@media (width < 600px) {
+    .w-topbar .w-breadcrumb__item:not(:last-child) { display: none; }
+    .w-topbar .w-breadcrumb__item + .w-breadcrumb__item::before { display: none; }
+}

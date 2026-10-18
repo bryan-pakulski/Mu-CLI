@@ -1,74 +1,90 @@
 <template x-teleport="body">
-<!-- Filesystem browser modal — shared by the workspace folder picker
-     and the chat file-attach button. Mode "folder" shows a "select this
-     folder" button; mode "file" lets you click individual files. -->
-<div class="file-browser-backdrop"
+<!-- Filesystem browser modal (.w-modal, G§9.17) — shared by the workspace
+     folder picker and the chat file-attach button. Mode "folder" shows a
+     "select this folder" button; mode "file" lets you click individual files.
+     Sits above the guided-creation modals (patterns/overlays.css
+     .file-browser-backdrop z-index), so the backdrop keeps its own class.
+     The dialog semantics sit on the surface, not the backdrop. -->
+<div class="file-browser-backdrop w-modal"
      x-dialog="$store.fileBrowser.open"
          x-show="$store.fileBrowser.open"
      x-cloak
-     role="dialog"
-     aria-modal="true"
      x-transition.opacity.duration.120ms
      @click.self="$store.fileBrowser.cancel()"
-     @dialog-close="$store.fileBrowser.cancel()" aria-label="File browser">
-    <div class="file-browser">
-        <div class="fb-head">
-            <span class="fb-title"
-                  x-text="$store.fileBrowser.mode === 'folder' ? 'Select folder' : 'Select file'"></span>
-            <button class="icon-btn" @click="$store.fileBrowser.cancel()" title="Close">×</button>
-        </div>
+     @dialog-close="$store.fileBrowser.cancel()">
+    <section class="file-browser w-modal__dialog" data-size="sm" role="dialog" aria-modal="true" aria-labelledby="file-browser-title">
+        <header class="fb-head w-modal__head">
+            <h2 class="fb-title w-modal__title" id="file-browser-title"
+                x-text="$store.fileBrowser.mode === 'folder' ? 'Select folder' : 'Select file'"></h2>
+            <button type="button" class="w-btn" data-variant="icon" @click="$store.fileBrowser.cancel()" title="Close" aria-label="Close">
+                <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+            </button>
+        </header>
 
         <div class="fb-path">
-            <button class="fb-up" @click="$store.fileBrowser.up()" title="Go up">↑</button>
+            <button type="button" class="fb-up w-btn" data-variant="icon" data-size="sm" @click="$store.fileBrowser.up()" title="Go up" aria-label="Go up">
+                <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-arrow-up"></use></svg>
+            </button>
             <span class="fb-current mono" x-text="$store.fileBrowser.path"></span>
         </div>
 
         <div class="fb-toolbar">
-            <button class="fb-new-folder"
+            <button type="button" class="fb-new-folder w-btn" data-variant="ghost" data-size="sm"
                     x-show="!$store.fileBrowser.creatingFolder"
                     @click="$store.fileBrowser.startCreateFolder()"
-                    title="Create new folder">+ folder</button>
+                    title="Create new folder">
+                <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Folder</span>
+            </button>
             <div class="fb-create-folder" x-show="$store.fileBrowser.creatingFolder">
                 <input type="text"
-                       class="fb-folder-input"
+                       class="fb-folder-input w-input"
                        x-model="$store.fileBrowser.newFolderName"
                        @keydown.enter="$store.fileBrowser.confirmCreateFolder()"
                        @keydown.escape="$store.fileBrowser.cancelCreateFolder()"
-                       placeholder="folder name"
+                       placeholder="Folder name"
+                       aria-label="New folder name"
                        x-effect="if ($store.fileBrowser.creatingFolder) $nextTick(() => $el.focus())" />
-                <button class="fb-create-confirm" @click="$store.fileBrowser.confirmCreateFolder()">✓</button>
-                <button class="fb-create-cancel" @click="$store.fileBrowser.cancelCreateFolder()">✕</button>
+                <button type="button" class="fb-create-confirm w-btn" data-variant="icon" data-size="sm" @click="$store.fileBrowser.confirmCreateFolder()" aria-label="Create folder" title="Create folder">
+                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-check"></use></svg>
+                </button>
+                <button type="button" class="fb-create-cancel w-btn" data-variant="icon" data-size="sm" @click="$store.fileBrowser.cancelCreateFolder()" aria-label="Cancel new folder" title="Cancel">
+                    <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>
+                </button>
             </div>
         </div>
 
-        <div class="fb-entries">
+        <div class="fb-entries w-modal__body">
             <template x-for="e in $store.fileBrowser.entries" :key="e.path">
                 <div class="fb-entry"
+                     role="button" tabindex="0"
                      :class="{ 'is-dir': e.is_dir }"
+                     :aria-label="(e.is_dir ? 'Folder ' : 'File ') + e.name"
                      @click="$store.fileBrowser.select(e)"
+                     @keydown.enter.prevent="e.is_dir ? $store.fileBrowser.navigate(e.path) : $store.fileBrowser.select(e)"
+                     @keydown.space.prevent="$store.fileBrowser.select(e)"
                      @dblclick="e.is_dir && $store.fileBrowser.navigate(e.path)">
-                    <span class="fb-icon" x-text="e.is_dir ? '📁' : '📄'"></span>
+                    <svg class="fb-icon w-icon" data-size="sm" aria-hidden="true" focusable="false"><use :href="'/static/icons/wash.svg#i-' + (e.is_dir ? 'folder' : 'file')"></use></svg>
                     <span class="fb-name" x-text="e.name"></span>
-                    <span class="fb-size mono muted"
+                    <span class="fb-size mono"
                           x-show="!e.is_dir && e.size !== null"
                           x-text="$store.fileBrowser.formatSize(e.size)"></span>
                 </div>
             </template>
-            <div class="fb-empty muted"
+            <div class="fb-empty"
                  x-show="!$store.fileBrowser.loading && !$store.fileBrowser.entries.length">
-                empty directory
+                Empty directory
             </div>
         </div>
 
-        <div class="fb-actions">
-            <button @click="$store.fileBrowser.cancel()">cancel</button>
-            <button class="primary"
+        <footer class="fb-actions w-modal__foot">
+            <button type="button" class="w-btn" data-variant="secondary" @click="$store.fileBrowser.cancel()"><span>Cancel</span></button>
+            <button type="button" class="w-btn" data-variant="primary"
                     x-show="$store.fileBrowser.mode === 'folder'"
                     @click="$store.fileBrowser.selectCurrent()">
-                select this folder
+                <span>Select this folder</span>
             </button>
-        </div>
-    </div>
+        </footer>
+    </section>
 </div>
 
 </template>

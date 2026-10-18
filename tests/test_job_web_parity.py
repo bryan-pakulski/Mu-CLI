@@ -12,12 +12,13 @@ VIEW = (STATIC / "js" / "work" / "view.js").read_text(encoding="utf-8")
 ACTIVITY = (STATIC / "js" / "work" / "activity.js").read_text(encoding="utf-8")
 SHELL = (STATIC / "js" / "work.js").read_text(encoding="utf-8")
 UI = (STATIC / "js" / "work" / "ui.js").read_text(encoding="utf-8")
-CSS = (STATIC / "css" / "work.css").read_text(encoding="utf-8")
+CSS = (STATIC / "css" / "wash" / "patterns" / "work.css").read_text(encoding="utf-8")  # Wash W4: /work rules live in its page bundle
 
 
 def test_activity_page_route_nav_and_assets():
     assert 'data-route="activity"' in HTML and 'id="work-activity"' in HTML
-    assert 'href="#/activity" class="work-navlink" data-nav="activity"' in HTML
+    # Wash W4: the Work sub-pages are .w-nav__item links in the shared sidebar.
+    assert 'href="#/activity" class="w-nav__item work-navlink" data-nav="activity"' in HTML
     assert HTML.index('/static/js/work/view.js') < HTML.index('/static/js/work/activity.js') < HTML.index('/static/js/work.js')
     assert "key: 'g a'" in SHELL and "['g a', 'activity']" in UI
 
@@ -61,7 +62,8 @@ def test_push_opens_the_push_dialog():
 
 
 def test_checks_tab_matches_planos_checks_tab():
-    for header in ('<th scope="col">Trigger</th>', '<th scope="col" class="num">Duration</th>', '<th scope="col">Started</th>'):
+    # Wash: numeric columns are right-aligned tabular via the .w-table [data-num] hook (G§9.19).
+    for header in ('<th scope="col">Trigger</th>', '<th scope="col" data-num>Duration</th>', '<th scope="col">Started</th>'):
         assert header in VIEW
     assert "job.checks?.failed_cases" in VIEW and "job.checks?.history" in VIEW
     assert "Failed test cases" in VIEW and "data-failure-filter" in VIEW

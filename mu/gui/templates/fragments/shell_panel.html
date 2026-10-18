@@ -5,33 +5,33 @@
        x-init="$watch('$store.mode.active', (val) => { if (val === 'shell') $store.shell.load(); else $store.shell.disconnect(); })">
     <div class="shell-panel-head">
         <div>
-            <span class="label-mono">Shell</span>
+            <span class="label-mono w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Shell</span>
             <p>Interactive shell into the attached container.</p>
         </div>
         <!-- MUCLI_SHELL_QOL_V1 -->
         <div class="shell-panel-actions">
-            <button type="button" class="icon-btn"
+            <button type="button" class="w-btn" data-variant="ghost" data-size="sm"
                     x-show="!$store.shell.followOutput"
                     @click="$store.shell.jumpToEnd()"
-                    title="Jump to latest output" aria-label="Jump to latest output">latest ↓</button>
-            <button type="button" class="icon-btn"
+                    title="Jump to latest output" aria-label="Jump to latest output"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-arrow-down"></use></svg><span>Latest</span></button>
+            <button type="button" class="w-btn" data-variant="ghost" data-size="sm"
                     @click="$store.shell.clear()"
-                    title="Clear output" aria-label="Clear output">clr</button>
-            <button type="button" class="icon-btn"
+                    title="Clear output" aria-label="Clear output">Clear</button>
+            <button type="button" class="w-btn" data-variant="secondary" data-size="sm"
                     @click="$store.shell.connected ? $store.shell.disconnect() : $store.shell.connect()"
                     :title="$store.shell.connected ? 'Disconnect' : 'Reconnect'"
                     aria-label="Toggle shell connection">
-                <span x-show="$store.shell.connected">disconnect</span>
-                <span x-show="!$store.shell.connected">connect</span>
+                <span x-show="$store.shell.connected">Disconnect</span>
+                <span x-show="!$store.shell.connected">Connect</span>
             </button>
         </div>
     </div>
 
-    <div class="shell-panel-status">
-        <span x-show="$store.shell.connecting" class="muted">Connecting…</span>
-        <span x-show="$store.shell.connected" class="shell-status-ok">connected</span>
-        <span x-show="!$store.shell.connected && !$store.shell.connecting && !$store.shell.error" class="muted">disconnected</span>
-        <span x-show="$store.shell.error" class="shell-status-err" x-text="$store.shell.error"></span>
+    <div class="shell-panel-status" role="status" aria-live="polite">
+        <span x-show="$store.shell.connecting" class="w-status" data-tone="caution"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>Connecting…</span>
+        <span x-show="$store.shell.connected" class="shell-status-ok w-status" data-tone="ok"><span class="w-status__glyph" aria-hidden="true">●</span>Connected</span>
+        <span x-show="!$store.shell.connected && !$store.shell.connecting && !$store.shell.error" class="w-status" data-tone="neutral"><span class="w-status__glyph" aria-hidden="true">○</span>Disconnected</span>
+        <span x-show="$store.shell.error" class="shell-status-err w-status" data-tone="danger"><span class="w-status__glyph" aria-hidden="true">✗</span><span x-text="$store.shell.error"></span></span>
         <span x-show="$store.shell.containerName" class="shell-container-name mono"
               x-text="'· ' + $store.shell.containerName"></span>
     </div>
@@ -40,9 +40,10 @@
          @scroll="$store.shell.onScroll($event)"></pre>
 
     <form class="shell-input-bar" @submit.prevent="$store.shell.send()">
-        <span class="shell-prompt mono">$</span>
+        <span class="shell-prompt mono" aria-hidden="true">$</span>
         <input type="text"
                class="shell-input"
+               aria-label="Shell command"
                x-model="$store.shell.input"
                @keydown.tab.prevent="$store.shell.complete()"
                @keydown.arrow-up.prevent="$store.shell.historyMove(-1)"

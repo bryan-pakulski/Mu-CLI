@@ -13,8 +13,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
+from .notes import AUDIT_EXCLUDED, NOTE_EVENTS
+
 SCOPES = ("home", "job", "board")
-PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs")
+PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs", "notes")
 
 
 @dataclass
@@ -128,7 +130,10 @@ def collect_durable_changes(service, bus: ChangeBus, cursor: int) -> int:
     for event in service.store.events_since(cursor):
         cursor = event.id
         kind = event.event_type
-        parts = {"costs"}  # costs includes the durable audit trail
+        # costs carries the audit trail, which leaves agent tool traffic and raw check output out.
+        parts = set() if kind in AUDIT_EXCLUDED else {"costs"}
+        if kind in NOTE_EVENTS:
+            parts.add("notes")
         if kind in ("job_created", "status_changed", "worker_lease_acquired", "worker_lease_released"):
             parts.update(("state", "pipeline", "session"))
         if kind.startswith("plan_"):
@@ -139,8 +144,14 @@ def collect_durable_changes(service, bus: ChangeBus, cursor: int) -> int:
             parts.add("checks")
         if kind.startswith(("sandbox_", "stage_", "agent_", "tool_", "runtime_")):
             parts.add("session")
+        if kind.startswith("environment_repair"):
+            # Environment repair (job_templates.md §7): the repair card (Checks tab, environments
+            # panel, state) and the session view.
+            parts.update(("checks", "session", "state"))
         if kind == "checkpoint_created":
             parts.add("diff")
+        if kind == "evidence_added":
+            parts.add("checks")
         if kind == "command":
             command = event.payload.get("command")
             if command == "savePlanDraft":

@@ -1,28 +1,28 @@
-// Job actions — the planos ActionVM flow shared by the dashboard, the jobs
+// Job actions — the Wash ActionVM flow shared by the dashboard, the jobs
 // list and the job page. Every button comes from `job.actions` (availability
 // is decided once, on the server; disabled commands are re-checked there and
 // answer 409). Tone, confirm text, input prompts, the push dialog and hidden
-// actions follow CONTRACT §7, with the planos defaults when an older server
+// actions follow CONTRACT §7, with the Wash defaults when an older server
 // omits them.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { jobCoreApi, type CommandResult, type EnvironmentApproval, type JobAction, type JobLimit, type JobPart, type PushArgs } from '../api/jobCore';
-import { ModernBottomSheet } from './ModernBottomSheet';
 import { JobPushDialog } from './JobPushDialog';
-import { Banner, Field, PlanosButton, Pre, TextField, useToast, type Tone } from './planos';
-import { Text } from './Text';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing } from '../theme/tokens';
 import { ACTION_LABEL, ACTION_TONE } from '../theme/status';
+import { Banner, Button, Field, Pre, Sheet, Text, TextField, type Tone, useToast } from '../ui';
 
 /** Actions kept out of action bars (CONTRACT §4/§7) and the ones the approval banner owns. */
 export const BAR_HIDDEN = new Set(['markFindings', 'markViewed', 'approveTool', 'denyTool',
   // Repository image/devcontainer approval lives in the environment approval banner.
   'approveEnvironment', 'rejectEnvironment',
   // Build environments live in the job's environments sheet (header pill).
-  'setEnvironments', 'refreshEnvironments', 'keepEnvironments']);
+  'setEnvironments', 'refreshEnvironments', 'keepEnvironments',
+  // Environment repair actions (job_templates.md §7) are offered on the web job page's repair card.
+  'addRepairToTemplate', 'saveRepairedTemplate']);
 
 export function actionTone(a: JobAction): Tone {
   if (a.tone) return a.tone;
@@ -104,7 +104,7 @@ export type JobCommandOptions = {
 };
 
 /**
- * Runs job commands with the planos flow: disabled → toast with the reason;
+ * Runs job commands with the Wash flow: disabled → toast with the reason;
  * confirm → confirm sheet; input → prompt sheet; push → push dialog; then
  * POST /api/jobs/cmd. Returns `invoke` plus the sheets to render.
  */
@@ -203,7 +203,7 @@ function PromptSheet({ pending, busy, onClose, onSubmit }: { pending: Extract<Pe
   const spec = pending?.spec;
   const action = pending?.action;
   return (
-    <ModernBottomSheet visible={!!pending} onClose={onClose} title={action ? actionLabel(action) : ''}>
+    <Sheet visible={!!pending} onClose={onClose} title={action ? actionLabel(action) : ''}>
       {spec && action ? (
         <View style={styles.sheet} testID="job-action-prompt">
           <Field label={spec.label} hint={spec.hint} optional={spec.optional && !/optional/i.test(spec.label)} error={error}>
@@ -211,8 +211,8 @@ function PromptSheet({ pending, busy, onClose, onSubmit }: { pending: Extract<Pe
               {...(spec.type === 'amount' ? { autoCapitalize: 'none' as const, autoCorrect: false, keyboardType: 'default' as const } : {})} testID="job-action-prompt-input" />
           </Field>
           <View style={styles.actions}>
-            <PlanosButton label="Cancel" onPress={onClose} />
-            <PlanosButton
+            <Button label="Cancel" onPress={onClose} />
+            <Button
               primary
               tone={actionTone(action)}
               loading={busy}
@@ -226,28 +226,28 @@ function PromptSheet({ pending, busy, onClose, onSubmit }: { pending: Extract<Pe
           </View>
         </View>
       ) : null}
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
 function ConfirmSheet({ pending, busy, onClose, onConfirm }: { pending: Extract<Pending, { kind: 'confirm' }> | null; busy: boolean; onClose: () => void; onConfirm: () => void }) {
   const action = pending?.action;
   return (
-    <ModernBottomSheet visible={!!pending} onClose={onClose} title={action ? actionLabel(action) : 'Confirm'}>
+    <Sheet visible={!!pending} onClose={onClose} title={action ? actionLabel(action) : 'Confirm'}>
       {pending && action ? (
         <View style={styles.sheet} testID="job-action-confirm">
           <Text variant="sm">{pending.text}</Text>
           <View style={styles.actions}>
-            <PlanosButton label="Cancel" onPress={onClose} />
-            <PlanosButton primary tone={actionTone(action) || 'danger'} loading={busy} label={actionLabel(action)} onPress={onConfirm} testID="job-action-confirm-submit" />
+            <Button label="Cancel" onPress={onClose} />
+            <Button primary tone={actionTone(action) || 'danger'} loading={busy} label={actionLabel(action)} onPress={onConfirm} testID="job-action-confirm-submit" />
           </View>
         </View>
       ) : null}
-    </ModernBottomSheet>
+    </Sheet>
   );
 }
 
-/** planos action bar: enabled primary first, then the rest, plus an "N unavailable" expander with reasons. */
+/** Wash action bar: enabled primary first, then the rest, plus an "N unavailable" expander with reasons. */
 export function JobActionBar({ actions, onInvoke, busy, exclude = [], planDirty }: { actions: JobAction[]; onInvoke: (a: JobAction) => void; busy?: boolean; exclude?: string[]; planDirty?: boolean }) {
   const { colors } = useTheme();
   const [showUnavailable, setShowUnavailable] = useState(false);
@@ -258,7 +258,7 @@ export function JobActionBar({ actions, onInvoke, busy, exclude = [], planDirty 
     <View accessibilityRole="toolbar" accessibilityLabel="Job actions" style={styles.bar} testID="job-action-bar">
       <View style={styles.wrap}>
         {enabled.length ? enabled.map(a => (
-          <PlanosButton
+          <Button
             key={a.id}
             testID={`job-action-${a.id}`}
             label={actionLabel(a)}
@@ -268,9 +268,9 @@ export function JobActionBar({ actions, onInvoke, busy, exclude = [], planDirty 
             accessibilityHint={a.id === 'approvePlan' && planDirty ? 'Save or cancel your plan edits first' : a.reason || undefined}
             onPress={() => onInvoke(a)}
           />
-        )) : <Text variant="xs" style={{ color: colors.muted }}>Nothing to do right now.</Text>}
+        )) : <Text variant="xs" style={{ color: colors.ink3 }}>Nothing to do right now.</Text>}
         {disabled.length ? (
-          <PlanosButton
+          <Button
             ghost
             small
             testID="job-actions-unavailable-toggle"
@@ -284,8 +284,8 @@ export function JobActionBar({ actions, onInvoke, busy, exclude = [], planDirty 
         <View accessibilityLabel="Unavailable actions" style={styles.unavailable}>
           {disabled.map(a => (
             <View key={a.id} style={styles.unavailableRow}>
-              <PlanosButton small ariaDisabled label={actionLabel(a)} tone={actionTone(a)} onPress={() => onInvoke(a)} accessibilityHint={a.reason} />
-              <Text variant="xs" style={{ color: colors.muted, flex: 1 }}>{a.reason || 'not available now'}</Text>
+              <Button small ariaDisabled label={actionLabel(a)} tone={actionTone(a)} onPress={() => onInvoke(a)} accessibilityHint={a.reason} />
+              <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>{a.reason || 'not available now'}</Text>
             </View>
           ))}
         </View>
@@ -302,13 +302,13 @@ export function ApprovalBanner({ approval, actions, onInvoke, busy }: { approval
   if (!approval || (!approve?.enabled && !deny?.enabled)) return null;
   const args = typeof approval.tool_args === 'string' ? approval.tool_args : JSON.stringify(approval.tool_args || {}, null, 2);
   return (
-    <Banner tone="warn" glyph="◆" role="alert" testID="job-approval-banner" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>The agent asks to use <Text variant="sm" style={{ fontFamily: fonts.mono, color: colors.text }}>{approval.tool_name || 'a tool'}</Text></Text>}>
+    <Banner tone="warn" glyph="◆" role="alert" testID="job-approval-banner" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>The agent asks to use <Text variant="sm" style={{ fontFamily: fonts.mono, color: colors.ink }}>{approval.tool_name || 'a tool'}</Text></Text>}>
       <Pre numberOfLines={12}>{args}</Pre>
-      {approval.reason || approval.detail ? <Text variant="xs" style={{ color: colors.muted }}>{approval.reason || approval.detail}</Text> : null}
+      {approval.reason || approval.detail ? <Text variant="xs" style={{ color: colors.ink3 }}>{approval.reason || approval.detail}</Text> : null}
       <View style={styles.wrap}>
-        {approve ? <PlanosButton primary={approve.enabled} tone="warn" disabled={busy || !approve.enabled} label={actionLabel(approve)} onPress={() => onInvoke(approve)} testID="job-approve-tool" /> : null}
-        {deny ? <PlanosButton tone="danger" disabled={busy || !deny.enabled} label={actionLabel(deny)} onPress={() => onInvoke(deny)} testID="job-deny-tool" /> : null}
-        {approve && !approve.enabled && approve.reason ? <Text variant="xs" style={{ color: colors.muted }}>{approve.reason}</Text> : null}
+        {approve ? <Button primary={approve.enabled} tone="warn" disabled={busy || !approve.enabled} label={actionLabel(approve)} onPress={() => onInvoke(approve)} testID="job-approve-tool" /> : null}
+        {deny ? <Button tone="danger" disabled={busy || !deny.enabled} label={actionLabel(deny)} onPress={() => onInvoke(deny)} testID="job-deny-tool" /> : null}
+        {approve && !approve.enabled && approve.reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{approve.reason}</Text> : null}
       </View>
     </Banner>
   );
@@ -335,13 +335,13 @@ export function EnvironmentApprovalBanner({ approval, actions, onInvoke, busy }:
   return (
     <Banner tone="warn" glyph="◆" role="alert" testID="job-environment-approval" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{approval.kind === 'egress' ? 'The repository asks for network egress (stages run without it until approved)' : `The repository asks to ${approval.kind === 'build' ? 'build and use' : 'use'} its own build environment`}</Text>}>
       {environmentApprovalLines(approval).map(([k, v]) => (
-        <Text key={k} variant="xs"><Text variant="xs" style={{ color: colors.muted }}>{k}: </Text><Text variant="xs" style={{ fontFamily: fonts.mono }} selectable>{v}</Text></Text>
+        <Text key={k} variant="xs"><Text variant="xs" style={{ color: colors.ink3 }}>{k}: </Text><Text variant="xs" style={{ fontFamily: fonts.mono }} selectable>{v}</Text></Text>
       ))}
-      {approval.kind === 'build' ? <Text variant="xs" style={{ color: colors.warn }}>Building runs the Dockerfile's RUN steps on your container engine with network access; review it first.</Text> : null}
-      {approval.message ? <Text variant="xs" style={{ color: colors.muted }}>{approval.message}</Text> : null}
+      {approval.kind === 'build' ? <Text variant="xs" style={{ color: colors.attention.ink }}>Building runs the Dockerfile's RUN steps on your container engine with network access; review it first.</Text> : null}
+      {approval.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{approval.message}</Text> : null}
       <View style={styles.wrap}>
-        {approve ? <PlanosButton primary={approve.enabled} tone="warn" disabled={busy || !approve.enabled} label={actionLabel(approve)} onPress={() => onInvoke(approve)} testID="job-approve-environment" /> : null}
-        {reject ? <PlanosButton tone="danger" disabled={busy || !reject.enabled} label={actionLabel(reject)} onPress={() => onInvoke(reject)} testID="job-reject-environment" /> : null}
+        {approve ? <Button primary={approve.enabled} tone="warn" disabled={busy || !approve.enabled} label={actionLabel(approve)} onPress={() => onInvoke(approve)} testID="job-approve-environment" /> : null}
+        {reject ? <Button tone="danger" disabled={busy || !reject.enabled} label={actionLabel(reject)} onPress={() => onInvoke(reject)} testID="job-reject-environment" /> : null}
       </View>
     </Banner>
   );
@@ -369,7 +369,7 @@ export function LimitBanner({ limit, actions, onInvoke, busy, error }: { limit: 
   const shown = invalid || error || '';
   return (
     <Banner tone="warn" glyph="◆" role="alert" testID="job-limit-banner" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{limit.message || limit.summary}</Text>}>
-      {limit.summary && limit.message ? <Text variant="xs" style={{ color: colors.muted }}>{limit.summary}</Text> : null}
+      {limit.summary && limit.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{limit.summary}</Text> : null}
       {raise ? (
         <Field label={label} hint={spec?.hint} error={shown}>
           <TextField accessibilityLabel={label} value={amount} onChangeText={t => { setAmount(t); setInvalid(''); }} autoCapitalize="none" autoCorrect={false}
@@ -378,14 +378,14 @@ export function LimitBanner({ limit, actions, onInvoke, busy, error }: { limit: 
       ) : null}
       <View style={styles.wrap}>
         {raise ? (
-          <PlanosButton primary={raise.enabled} tone="ok" loading={busy} disabled={busy || !raise.enabled} label={actionLabel(raise)} testID="job-limit-raise"
+          <Button primary={raise.enabled} tone="ok" loading={busy} disabled={busy || !raise.enabled} label={actionLabel(raise)} testID="job-limit-raise"
             onPress={() => {
               if (!amount.trim()) { setInvalid('Enter an amount, e.g. 25, 30m or 5M.'); return; }
               onInvoke(raise, { ...(raise.args || {}), [arg]: amount.trim() });
             }} />
         ) : null}
-        {cancel ? <PlanosButton tone="danger" disabled={busy || !cancel.enabled} label={actionLabel(cancel)} onPress={() => onInvoke(cancel)} testID="job-limit-cancel" /> : null}
-        {raise && !raise.enabled && raise.reason ? <Text variant="xs" style={{ color: colors.muted }}>{raise.reason}</Text> : null}
+        {cancel ? <Button tone="danger" disabled={busy || !cancel.enabled} label={actionLabel(cancel)} onPress={() => onInvoke(cancel)} testID="job-limit-cancel" /> : null}
+        {raise && !raise.enabled && raise.reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{raise.reason}</Text> : null}
       </View>
     </Banner>
   );

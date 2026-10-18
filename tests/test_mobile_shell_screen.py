@@ -93,7 +93,7 @@ def test_shell_screen_has_status_indicator():
     """ShellScreen must show connected/disconnected status."""
     src = read(SHELL_SCREEN)
     assert "connected" in src.lower(), "connected state not tracked"
-    assert "Badge" in src, "Badge component not used for status"
+    assert "<Chip" in src, "status chip not used for status"
 
 
 # ── workspace.ts ─────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ def test_shell_in_runtime_category():
     src = read(WORKSPACE_TS)
     # Find the runtime category block and verify Shell is in it.
     assert "screen: 'Shell'" in src, "Shell item not in any category"
-    assert "terminal-outline" in src, "Shell icon not set"
+    assert "icon: 'terminal'" in src, "Shell icon not set"
 
 
 # ── AppNavigator.tsx ─────────────────────────────────────────────────

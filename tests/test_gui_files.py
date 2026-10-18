@@ -38,6 +38,7 @@ INDEX_HTML = os.path.join(REPO, "mu", "gui", "templates", "index.html")
 BASE_HTML = os.path.join(REPO, "mu", "gui", "templates", "base.html")
 FILES_PANEL = os.path.join(REPO, "mu", "gui", "templates", "fragments", "files_panel.html")
 APP_CSS = os.path.join(REPO, "mu", "gui", "static", "css", "app.css")
+PANELS_CSS = os.path.join(REPO, "mu", "gui", "static", "css", "wash", "patterns", "panels.css")
 CM_JS = os.path.join(REPO, "mu", "gui", "static", "vendor", "codemirror.min.js")
 CM_CSS = os.path.join(REPO, "mu", "gui", "static", "vendor", "codemirror.min.css")
 CM_MODES = os.path.join(REPO, "mu", "gui", "static", "vendor", "codemirror-modes.min.js")
@@ -416,10 +417,10 @@ def test_files_panel_template_exists_with_cm_host_and_store():
 
 
 def test_css_has_files_panel_and_codemirror_theme():
-    src = open(APP_CSS, encoding="utf-8").read()
+    src = open(PANELS_CSS, encoding="utf-8").read()
     assert ".files-panel" in src
     assert ".files-tree" in src
-    assert "var(--bg)" in src
+    assert ".CodeMirror { background: var(--wash-canvas); color: var(--wash-ink); }" in src
 
 
 def test_todos_are_not_offered_as_a_separate_view():
@@ -437,7 +438,10 @@ def test_todos_are_not_offered_as_a_separate_view():
 
 def test_shell_animates_side_panels_and_centers_settings_modal():
     index = open(INDEX_HTML, encoding="utf-8").read()
-    css = open(APP_CSS, encoding="utf-8").read()
+    css = "".join(
+        open(os.path.join(REPO, "mu", "gui", "static", "css", "wash", "patterns", name), encoding="utf-8").read()
+        for name in ("conversation.css", "panels.css", "settings.css")
+    )
     inspector = open(
         os.path.join(REPO, "mu", "gui", "templates", "fragments", "inspector.html"),
         encoding="utf-8",
@@ -447,9 +451,9 @@ def test_shell_animates_side_panels_and_centers_settings_modal():
     assert ".app.sidebar-hidden .sidebar" in css
     assert "transform: translateX(-16px)" in css
     assert ".app.panel-hidden .mode-panel" in css
-    assert "flex-basis var(--dur-large)" in css
+    assert "flex-basis var(--wash-motion-medium)" in css
     assert "transform: translateX(16px)" in css
-    assert 'class="inspector-backdrop"' in inspector
+    assert 'class="inspector-backdrop w-drawer"' in inspector
     assert "place-items: center" in css
     assert 'role="dialog"' in inspector
     assert 'aria-modal="true"' in inspector

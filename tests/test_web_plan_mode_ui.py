@@ -1,5 +1,6 @@
-"""Web GUI: plan mode has an unmistakable header pill, a composer strip and a
-plan-mode placeholder, all driven by the planMode store."""
+"""Web GUI: plan mode has an unmistakable header pill, a plan banner under the
+top bar, a dashed lilac composer and a plan-mode placeholder, all driven by
+the planMode store."""
 import re
 from pathlib import Path
 
@@ -7,7 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = (ROOT / "mu/gui/static/js/app.js").read_text()
 INDEX = (ROOT / "mu/gui/templates/index.html").read_text()
 CHAT = (ROOT / "mu/gui/templates/fragments/chat.html").read_text()
-PRODUCT_CSS = (ROOT / "mu/gui/static/css/product.css").read_text()
+WASH = ROOT / "mu/gui/static/css/wash"
+CHIP_CSS = (WASH / "components/chip.css").read_text()
+BANNER_CSS = (WASH / "components/banner.css").read_text()
+COMPOSER_CSS = (WASH / "components/composer.css").read_text()
+TOOLCARD_JS = (ROOT / "mu/gui/static/js/wash/toolcard.js").read_text()
 
 
 def test_plan_mode_store_reads_and_writes_the_variable():
@@ -30,32 +35,50 @@ def test_header_pill_only_shows_while_on_and_sits_before_approvals():
     assert pill < INDEX.index("yolo-toggle product-yolo")
     li = INDEX.rfind("<li", 0, pill)
     assert 'x-show="$store.planMode.active"' in INDEX[li:pill]
-    assert "Plan mode" in INDEX[pill:pill + 800] and "🔒" in INDEX[pill:pill + 800]
+    # Wash: a lock sprite icon replaces the 🔒 emoji (no emoji in chrome, G§4).
+    assert "Plan mode" in INDEX[pill:pill + 800] and 'w.icon("lock"' in INDEX[pill:pill + 800]
+    assert "🔒" not in INDEX
     assert "turnOff({ confirmFirst: true })" in INDEX
     assert "File edits, shell writes and other write tools are blocked." in APP
 
 
 def test_composer_strip_and_placeholder():
-    strip = CHAT.index('data-testid="plan-mode-strip"')
-    assert 'x-show="$store.planMode.active"' in CHAT[strip:strip + 300]
-    assert "read-only. Writing is blocked." in CHAT
-    assert "$store.planMode.turnOff()" in CHAT and ">Turn off<" in CHAT
+    # Wash W3 (G§9.16): the plan strip is a lilac banner in the top-bar area of
+    # the chat stage (index.html), above the transcript and composer.
+    strip = INDEX.index('data-testid="plan-mode-strip"')
+    assert 'x-show="$store.planMode.active"' in INDEX[strip:strip + 300]
+    assert 'data-tone="plan"' in INDEX[INDEX.rfind("<div", 0, strip):strip]
+    assert "read-only. Writing is blocked." in INDEX
+    assert "$store.planMode.turnOff()" in INDEX and ">Turn off<" in INDEX
+    assert strip < INDEX.index('{% include "fragments/chat.html" %}')
     assert re.search(r":placeholder=\"\$store\.planMode\.active\s*\?\s*'Plan mode", CHAT)
-    # Strip sits above the composer input.
-    assert strip < CHAT.index('x-ref="input"')
+    # The composer itself adds a lilac dashed outline in plan mode (G§9.6).
+    assert ":data-plan=\"$store.planMode.active ? '' : null\"" in CHAT
+    assert ".w-composer[data-plan] .w-composer__form" in COMPOSER_CSS
 
 
 def test_plan_mode_has_its_own_colour_in_both_themes():
-    assert '--plan-mode: var(--viz-6' in PRODUCT_CSS
-    assert 'html[data-theme="light"] { --plan-mode' in PRODUCT_CSS
-    assert ".chip.plan-mode-pill" in PRODUCT_CSS and ".plan-mode-strip" in PRODUCT_CSS
-    pill_rules = PRODUCT_CSS[PRODUCT_CSS.index(".chip.plan-mode-pill {"):]
-    assert "var(--warn)" not in pill_rules.split("}")[0]
+    # Wash: plan mode is the `plan` semantic (lilac ink, defined per theme by
+    # the generated tokens), dashed so it is distinct from research and from
+    # attention/caution.
+    plan_chip = CHIP_CSS[CHIP_CSS.index('.w-chip[data-tone="plan"] {'):]
+    assert "1px dashed var(--wash-plan-ink)" in plan_chip.split("}")[0]
+    assert '.w-banner[data-tone="plan"] { outline: 1px dashed var(--wash-plan-ink);' in BANNER_CSS
+    composer = COMPOSER_CSS[COMPOSER_CSS.index(".w-composer[data-plan] .w-composer__form {"):]
+    rule = composer.split("}")[0]
+    assert "dashed var(--wash-plan-ink)" in rule
+    assert "attention" not in rule and "caution" not in rule
+    assert 'class="w-chip plan-mode-pill" data-tone="plan"' in INDEX
 
 
 def test_blocked_tool_results_are_labelled():
     assert "function isPlanModeBlockedResult" in APP
     assert '"plan_mode_blocked"' in APP
-    assert "Blocked by plan mode" in APP
     assert APP.count("planBlocked: isPlanModeBlockedResult(") == 2  # live + history
-    assert CHAT.count("te-plan-blocked") == 2
+    # Wash W3: the shared tool card renders a plan-blocked result as its own
+    # state (lock icon, lilac rule) with the label, for live and history traces.
+    assert "ev.planBlocked ? 'blocked'" in TOOLCARD_JS
+    assert "Blocked by plan mode" in TOOLCARD_JS
+    assert CHAT.count("renderToolCards(") == 2
+
+

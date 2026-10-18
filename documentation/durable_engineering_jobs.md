@@ -31,8 +31,9 @@ PROVISIONING → PLANNING → PLAN_REVIEW → IMPLEMENTING → CHECKING → REVI
 | `PUSHED` | The PR is open. Merges are detected automatically; a closed PR needs you | controller / **you** |
 | `DONE` | Finished; build environment images are released | — |
 
-`NEEDS_INPUT` pauses any active stage on a question, a tool approval, a reached
-limit or a stall. `FAILED` keeps the stage that failed so `retry` can restart it, and
+`NEEDS_INPUT` pauses a job on a reached limit, a stall or a genuine failure
+that needs a decision. Stages never pause on a tool approval or a question: jobs
+run unattended (see [Unattended stages](#unattended-stages)). `FAILED` keeps the stage that failed so `retry` can restart it, and
 `CANCELLED` is terminal. No limit ever fails, cancels or times out a job (see
 [Limits pause and ask](#limits-pause-and-ask)); the old `timed_out` and
 `budget_exceeded` statuses are no longer written and stay readable (and
@@ -121,6 +122,10 @@ Configured suites also run: `[[checks.suites]]` in the repository's
 `checks.suites` in job settings. Commands are validated again at execution and
 run without a shell. Pytest suites produce JUnit evidence automatically.
 
+Checks that could not run first get an unattended environment repair (see
+Build environments → Environment repair) and a re-run; only then is the run
+recorded unverified.
+
 A failed suite runs again on the job's base commit in a disposable worktree.
 Failures that also happen there are reported as preexisting. Only new failures
 start the repair loop, which is capped by `checks.max_fix_attempts` (default 2).
@@ -140,7 +145,10 @@ automatically. You decide what happens next:
 - push (`push`), or discard (`discard`).
 
 A blocking review (`do_not_merge`) needs an explicit, audited override reason to
-push. Passing checks are required either way. The pipeline never merges.
+push. Passing checks are required either way, except that checks which could
+not run (unverified) need no override: the review verdict is capped at needs
+work and the PR body starts with "⚠ Checks could not run (unverified):
+<tools/causes>". The pipeline never merges.
 
 ### Push and PR
 
@@ -245,19 +253,53 @@ running two minutes past the limit is asked once to pause
 cost cap never pauses for that cap. Per-request model and tool-command timeouts
 are not limits on the job and still apply as before.
 
-Implementation writes need your approval unless the job runs unattended. That
-is the explicit per-job `--auto-approve` flag, or the Settings default
-`defaults.run_unattended` (off). A pending write shows separate Approve tool /
-Deny tool actions (`/job approve-tool <id>`, `/job deny-tool <id> [reason]`).
-Each approval is consumed once, for the exact tool name and arguments.
+### Unattended stages
 
-Repo-declared images, environments and network access need approval too. A
-repository can ask for its own build image, devcontainer or Dockerfile and for
-extra egress. Nothing it declares is used until a human approves it, per
-repository and fingerprint. A job that hits an unapproved request pauses with
-**Approve environment** / **Reject environment** actions
-(`/job approve-environment <id>`, `/job reject-environment <id> [reason]`).
-The New job sheet offers the same approval up front, through
+Jobs run unattended (user decision, 2026-10-15). No stage prompts anyone or
+parks on an in-stage prompt, on every agent harness (mucli, Claude Code, Codex):
+
+- **Implement and checks** approve every tool call automatically. The sandbox is
+  the control: container isolation, a read-only root filesystem outside the
+  worktree, the egress allowlist and no credentials.
+- **Plan and review** are read-only. A write or side-effecting tool call is
+  denied automatically ("This is the read-only plan stage; describe the change
+  instead."); read-only tools run without asking. Claude Code and Codex run with
+  their permission prompts off and the write tools removed in these stages; a
+  permission request that still reaches the worker is decided the same way.
+- **Questions** (ask_user, choices, quizzes, confirmations, input) are answered
+  with: "No one is available to answer during an automated job stage. Proceed
+  with your best judgement, state the assumption in your summary, and continue."
+  Claude Code stages do not offer `AskUserQuestion`. The planner lists the
+  assumptions it made under the plan's **Risks / out of scope** section.
+
+Each automatic decision is recorded as an `auto_permission` or `auto_answered`
+event and shown in the job's session view. There is no per-job auto-approve
+choice: `execution.auto_approve_writes` is accepted for compatibility and always
+stored as true, `/job create --auto-approve` / `--no-auto-approve` are accepted
+and ignored, and the `defaults.run_unattended` setting is gone. A job that
+parked on a tool approval before this rule is resolved by the controller on its
+next tick (or by **Resume**): the pending call is approved in implement/checks
+or denied in plan/review, and the stage continues. **Approve tool** / **Deny
+tool** (`/job approve-tool <id>`, `/job deny-tool <id> [reason]`) still work for
+such a job until then.
+
+The human gates are pipeline gates, not in-stage prompts: plan approval
+(`plan_approval` → `PLAN_REVIEW`) and the push after `REVIEW_DONE`. Limits
+(cost, time, tokens, iterations) still pause and ask, and genuine failures
+(provider errors, a lost worker) still need you.
+
+Repo-declared images, environments and network access need approval before
+they are used. A repository can ask for its own build image, devcontainer or
+Dockerfile and for extra egress. Nothing it declares is used until a human
+approves it, per repository and fingerprint, but an unapproved request never
+parks the job: the job falls back to the next environment source (session
+environment, Toolchains, the default runtime) and records a
+`repository_environment_skipped` event. The job page offers **Approve
+environment** / **Reject environment** for it as a non-blocking card
+(`/job approve-environment <id>`, `/job reject-environment <id> [reason]`);
+the approval applies to future jobs on that repository, while the running job
+keeps the environment it started with. Unapproved repository egress is likewise
+left out until approved. The New job sheet offers the same approval up front, through
 `POST /api/jobs/environments/approve` with
 `{"repository": PATH, "fingerprint": "...", "session": ""}`. Only a fingerprint
 the repository currently requests is accepted (409 otherwise).
@@ -343,8 +385,9 @@ The container runs as the host UID/GID with dropped capabilities, a read-only
 root filesystem and `--network none`. A stage-scoped, authenticated model relay
 is exposed through a Unix socket, so provider credentials stay on the host. Plan
 and review mount the workspace read-only. Implementation may edit the worktree,
-and the host validates paths and creates the commits. Plan mode and tool
-approvals remain enforced.
+and the host validates paths and creates the commits. Plan mode stays
+enforced; tool approvals are decided automatically by stage (see
+[Unattended stages](#unattended-stages)).
 
 Git metadata is visible but read-only, so VCS-aware tools work (`go build`
 with `GOFLAGS=-buildvcs=auto`, setuptools-scm, `git status`/`log`/`describe`).
@@ -405,8 +448,10 @@ stage, from the first source that yields bindings. Sources are never merged.
 secrets, mucli state, shell history and caches are removed, and a `/root`
 volume is captured as a filtered tar. The login shell's PATH and toolchain
 homes are probed and baked in, and mucli's job layer is added. A secret scan
-of `/root`, `/home` and `/etc` follows. A scan hit parks the job and names the
-paths (allow paths with `environments.secret_scan_allow`). Images carry
+of `/root`, `/home` and `/etc` follows. A scan hit means the image is never
+used: the job falls back to the next environment source and records a
+`build_environment_skipped` event naming the paths (allow paths with
+`environments.secret_scan_allow`). Images carry
 `io.mucli.job=<id>` and are removed when the job is done, cancelled, pushed,
 archived or deleted. Failed and waiting jobs keep them for
 `jobs.environment_retention_h` (72 h) unless the job is kept
@@ -419,7 +464,7 @@ its `cwd`, else a path its command names, else the primary. With several
 bindings the implementer gets `run_in_environment(env, command, cwd)`, run in a
 sibling container with the same isolation (approval rules as `bash`).
 
-**Egress and GPUs.** Implement and checks may reach `sandbox.egress_extra` plus
+**Egress and GPUs.** Implement and checks may reach `sandbox.egress_extra` (by default the npm, Cargo/crates.io, Maven/Gradle and PyPI registries) plus
 the environment's egress allowlist (`environments.inherit_egress`).
 Model-provider hosts are always dropped. GPU bindings get `--gpus`
 (`sandbox.gpus_enabled` turns this off for all jobs). A host without a usable
@@ -437,11 +482,89 @@ only from registries on the job's egress allowlist. Services that tests start
 themselves (testcontainers, compose) need DinD. Running such checks inside the
 job engine is not supported yet.
 
+**Evidence** (`mu/jobs/evidence.py`). The implement and review prompts ask the
+agent to save what it observed while testing (screenshots, short recordings,
+text logs) to `/output/evidence/`, optionally with `index.json`
+(`[{"file", "caption"}]`). After each stage the host copies regular files (no
+symlinks or dotfiles) into `evidence/<stage>-<stamp>/` in the job's artifacts,
+appends them to `evidence/manifest.json`, redacts secrets from text files and
+emits `evidence_added` (Checks tab and a note refresh). The `checks` part lists
+them as `evidence`; `GET /api/jobs/{id}/evidence/{file}` serves only manifest
+files: images and video inline, anything else (SVG and HTML included) as a
+`text/plain` or binary download with `nosniff` and a sandboxing CSP. Evidence is
+never committed or pushed. The runtime image ships Playwright's headless
+Chromium (`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`, world-readable), so an
+agent can run `playwright screenshot --full-page <url> /output/evidence/x.png`;
+template-derived images install it best-effort at build (a base Playwright cannot
+provision still builds), and Playwright's browser hosts are in the default
+package egress so `playwright install chromium` works where it is missing.
+
+**Job code in stage containers.** Every stage, check and repair container
+mounts the host's job code (`mu`, `providers`, `utils`, `prompts`, `mucli.py`,
+`config/model_pricing.json`) read-only over the image's `/opt/mucli` copy
+(`sandbox.code_overlay`, default on; `build.code_overlay_mounts`). A template or
+repaired image built by an older mucli then still runs the current worker, so
+new stages and protocols work without a rebuild. Before this, such an image ran
+its baked worker, which treated every stage but implement as read-only, so a
+repair agent had no shell. The overlay is skipped when the tree holds a file
+the secret-path policy denies. With the overlay, only dependency drift
+(`io.mucli.deps`: `requirements.txt` and the Dockerfile) marks an image stale.
+
+**Environment repair** (`documentation/plans/job_templates.md` §7,
+`mu/jobs/sandbox/repair.py`). When a checks run has suites that could not run
+(unrunnable: a missing top-level executable, a missing nested tool, a missing
+module, a failed install), or every new failure is an environment symptom, the
+verify worker runs an unattended **repair** stage before it records the run:
+
+- the job's **implement** agent (mucli, Claude Code or Codex) with a repair
+  prompt (the unrunnable commands with output tails, `detect.py` findings, CI
+  files as hints; goal: make the commands *runnable*; don't modify tracked
+  files; prefer project-local installs; finish with the commands that fixed it);
+- in a repair container from the binding's current job image (or the shared
+  runtime image): root inside with `--cap-drop ALL` plus `CHOWN`,
+  `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, `FSETID`,
+  `no-new-privileges`, a writable rootfs, tmpfs `/tmp`, the worktree read-write
+  and `/cache`, no git or registry credentials, no Docker socket, no GPUs, the
+  model through the relay;
+- egress = the binding's allowlist ∪ (with `jobs.repair.registries = auto`) the
+  detected package registries ∪ OS mirrors ∪ toolchain installers, model hosts
+  dropped. Implement and checks keep their own allowlist.
+
+The container's entrypoint chowns `/workspace` and `/cache` back to the host
+uid:gid when the agent exits. The host then reverts tracked files the repair
+changed (`git status` before and after; never the implement stage's work),
+commits the container as `mucli/job-<job12>-<binding>-repair<n>` (job-labelled,
+removed with the job; the relay token and repair-only variables are reset, and
+the image is secret-scanned), points the binding's job image (or
+`metadata.runtime_repair_image` for the shared runtime) at it and re-runs the
+checks with trigger `repair`. At most `jobs.repair.max_attempts` (2) per job,
+each within `jobs.repair.max_cost_usd` ($3), `max_runtime_s` (1200) and
+`max_iterations` (40); the spend is the cost-ledger stage `repair`. A failure,
+timeout or exhausted budget is recorded and the job continues unverified; jobs
+never park for missing tools or dependencies. Only commands the agent actually
+ran count: a `REPAIR COMMANDS` line must match one of its shell calls. A repair
+that ran no shell commands commits nothing (outcome `no_commands`, with the
+commands it suggested in `error`). Records:
+`metadata.environment_repairs[]` (`attempt, binding, trigger_suites, commands,
+image, cost_usd, outcome, reverted_files, started_at, finished_at`, plus
+`project_commands`, `registries`, `error`, `transcript`) and
+`environment_repair` events (`phase` started / command / finished); the
+transcript is the session view's **Repair** source. Two non-blocking commands
+offer reuse: `addRepairToTemplate` (append the project-level commands to the
+binding's template `job_setup`; templates only) and `saveRepairedTemplate`
+(`{name}`, default `<template>-repaired`: a container template from the repaired
+image with the binding's egress plus the registries used, and its setup).
+
 ## Surfaces
 
 The terminal, web and Android show the same six-step pipeline and the same
 server-provided actions. Job detail has the same tabs everywhere: **Session,
-Plan, Diff, Review, Checks, Diagnostics, Cost & audit**. Setup includes Doctor as a
+Plan, Diff, Review, Checks, Diagnostics, Cost & audit**. The web adds **Notes**
+first, its default tab: the job's story in plain English (`notes` part, built
+from events by `mu/jobs/core/notes.py`). The words come from the agents: plan and
+review return `headline` and `notes` fields, and the implement stage ends its
+final message with a `HEADLINE:` / `NOTES:` hand-off; without one, the first
+sentence of the summary stands in. Setup includes Doctor as a
 tab (web Jobs → Setup, Android Job settings → Setup, terminal `g u` and `g d`).
 
 - Terminal: `/jobs` opens the keyboard dashboard. The `/job` subcommands are
@@ -451,6 +574,11 @@ tab (web Jobs → Setup, Android Job settings → Setup, terminal `g u` and `g d
 - Shared HTTP: `GET /api/jobs/vm/home`, `/vm/jobs`, `/vm/job/{id}` (optional
   `parts`); `POST /api/jobs/cmd` with `{type, job_id, args}`;
   `GET /api/jobs/events` (coalesced over 150 ms, naming the parts that changed).
+  The state part carries the pending tool `approval` and a one-line
+  `attention_headline`. The Cost & audit trail leaves out agent tool traffic and raw
+  check output (`sandbox_event`, `checks_output`), so those events refresh only
+  the session or checks part. The web loads the large `session` and `costs` parts
+  only while their tab is open.
   Disabled commands return 409 with their reason. Malformed commands return 400.
 
 ## Storage

@@ -205,6 +205,7 @@ class JobController:
         self._enforce_runtime_deadlines()
         self.service.recover_expired_leases()
         self._maybe_check_base_drift()
+        self._resume_parked_approvals()
         self._watch_attention()
         self._maybe_sweep_retention()
         self._maybe_sweep_environments()
@@ -238,6 +239,12 @@ class JobController:
             if self._spawn(job.id, phase):
                 started += 1
         return started
+
+    def _resume_parked_approvals(self) -> None:
+        """Jobs run unattended (``mu.jobs.unattended``): a job still parked on a tool approval
+        from before that rule is resolved automatically and resumed."""
+        from .unattended import resume_parked_approvals
+        resume_parked_approvals(self.service)
 
     # ------------------------------------------------------------ attention push
 

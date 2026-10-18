@@ -14,12 +14,12 @@
     }
 
     function syncHeaderAnalysisLink() {
-        const headerLink = document.querySelector('a.work-header-icon[href^="/static/job_trace.html"]');
+        const headerLink = document.querySelector('a.work-header-icon[href^="/jobs/trace"]');
         if (!headerLink) return;
         const jobId = selectedJobId();
         headerLink.href = jobId
-            ? `/static/job_trace.html?job=${encodeURIComponent(jobId)}`
-            : '/static/job_trace.html';
+            ? `/jobs/trace?job=${encodeURIComponent(jobId)}`
+            : '/jobs/trace';
         headerLink.title = jobId
             ? 'Analyze selected job'
             : 'Analyze jobs';
@@ -34,13 +34,15 @@
         let link = header.querySelector('.work-job-analyze-link');
         if (!link) {
             link = document.createElement('a');
-            link.className = 'btn sm work-job-analyze-link';
+            link.className = 'w-btn work-job-analyze-link';
+            link.dataset.variant = 'secondary';
+            link.dataset.size = 'sm';
             link.textContent = 'Analyze trace';
             link.title = 'Open retrospective Job Trace Analyzer';
             const right = header.querySelector('.work-detail-cost');
             if (right) {
                 const group = document.createElement('span');
-                group.className = 'row work-detail-head-actions';
+                group.className = 'work-toolbar work-detail-head-actions';
                 right.replaceWith(group);
                 group.appendChild(link);
                 group.appendChild(right);
@@ -48,7 +50,7 @@
                 header.appendChild(link);
             }
         }
-        link.href = `/static/job_trace.html?job=${encodeURIComponent(jobId)}`;
+        link.href = `/jobs/trace?job=${encodeURIComponent(jobId)}`;
     }
 
     function costMetric() {

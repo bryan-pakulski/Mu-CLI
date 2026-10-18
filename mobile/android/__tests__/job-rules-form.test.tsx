@@ -3,7 +3,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react-
 import { ApiError } from '../src/api/client';
 import { formatRuleValue, groupDigits, jobsApi, rulesPatch, type JobRuleField, type JobRules } from '../src/api/jobs';
 import { JobRulesForm, TOOLCHAIN_POLL_MS, parseRuleDraft } from '../src/components/JobRulesForm';
-import { ToastHost } from '../src/components/planos';
+import { ToastHost } from '../src/ui';
 
 jest.mock('../src/api/jobs', () => ({
   ...jest.requireActual('../src/api/jobs'),

@@ -14,6 +14,8 @@ import os
 import tempfile
 from typing import Any, Dict, List, Optional
 
+from mu.container.network import PACKAGE_REGISTRY_EGRESS
+
 from .models import STAGES
 
 _DEFAULTS: Dict[str, Any] = {"stage_models": {}, "plan_approval": True}
@@ -193,9 +195,7 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
            min=0, max=1_000_000, unit="USD"),
         _f("defaults.max_runtime_seconds", "Job runtime limit", "int", None, "Active (worker) time for the whole job. Reaching it pauses the running stage and asks you to approve more time or cancel. Blank = none.",
            min=1, max=7 * 24 * 3600, unit="seconds", optional=True),
-        _f("defaults.run_unattended", "Run unattended in sandbox", "bool", False,
-           "Default for the New job toggle. On: the implement stage auto-approves its writes inside the job's disposable "
-           "container. Off: each write waits for your approval. Never inherited from a chat session's auto-approve."),
+        # defaults.run_unattended retired 2026-10-15: jobs always run unattended (mu.jobs.unattended).
      ]},
     {"id": "iterations", "title": "Agent iterations", "hint": "How many agent loop turns one stage run may take; reaching it pauses the job and asks you to approve more or cancel. A job's own limit wins.",
      "fields": [
@@ -239,7 +239,7 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
            "Base image = an image that already has the project's toolchain (e.g. rust:1.88 or the project's CI image), "
            "template:<name> or environment:<name> (a container-mode environment). Paths limit the row to repository-relative "
            "components (comma-separated; blank = whole repository). Docker = yes gives the job a private Docker engine (needs Sysbox). "
-           "Add the package registries the build needs (crates.io, static.crates.io, index.crates.io, pypi.org …) to Extra egress domains.",
+           "npm, Cargo/crates.io, Maven/Gradle and PyPI registries are allowed by default (Extra egress domains); add any other registry the build needs there.",
            columns=[{"key": "repository", "label": "Repository path", "placeholder": "/home/me/src/project", "required": True},
                     {"key": "base_image", "label": "Base image", "placeholder": "rust:1.88-bookworm · environment:rust-build", "required": True,
                      "pattern": r"[\w./:@-]+"},
@@ -279,18 +279,22 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
         _f("sandbox.image", "Runtime image", "text", "mucli-job-runtime:latest", "Local image; it is never pulled.", pattern=r"[\w./:@-]+"),
         _f("sandbox.cpu", "CPUs", "float", 4, "", min=0.1, max=64),
         _f("sandbox.memory", "Memory limit", "text", "8g", "Docker memory value, e.g. 8g or 16384m.", pattern=r"[1-9][0-9]*[kmgKMG]?"),
-        _f("sandbox.max_file_bytes", "Largest changed file", "int", 20 * 1024 * 1024, "Changes with a bigger file are rejected.", min=1, max=2 ** 40, unit="bytes"),
         _f("sandbox.pids_limit", "Process limit", "int", 4096,
            "Most processes and threads one stage or check container may run (builds and parallel test runners need many).",
            min=64, max=1_000_000),
+        _f("sandbox.code_overlay", "Run current job code", "bool", True,
+           "Mount this mucli's job code read-only over the copy baked into each stage image, so images built "
+           "by an older mucli run the current stage worker. Off: stages run the image's own copy."),
         _f("sandbox.cache_max_gb", "Dependency cache cap", "int", 20,
            "Shared package caches reused across jobs; least recently used entries are pruned. 0 = unlimited.",
            min=0, max=10000, unit="GB"),
         _f("jobs.container_cli", "Container CLI", "select", "auto",
            "Auto uses Docker when present, else Podman. Podman cannot run the per-job Docker engine.",
            options=[["auto", "Auto"], ["docker", "Docker"], ["podman", "Podman"]]),
-        _f("sandbox.egress_extra", "Extra egress domains", "list", [],
-           "Domains implement and checks may reach in addition to the model relay, e.g. pypi.org or *.npmjs.org.", item_pattern=r"(?:\*\.)?[a-zA-Z0-9.-]+"),
+        _f("sandbox.egress_extra", "Extra egress domains", "list", list(PACKAGE_REGISTRY_EGRESS),
+           "Domains implement, checks and template job setup may reach in addition to the model relay. "
+           "Defaults to the npm, Cargo/crates.io, Maven/Gradle and PyPI registries; clear the list to lock jobs down.",
+           item_pattern=r"(?:\*\.)?[a-zA-Z0-9.-]+"),
      ]},
     {"id": "publish", "title": "Push", "hint": "What “Push / open PR” does.",
      "fields": [
@@ -356,7 +360,7 @@ RULES_SCHEMA += [
            "Remote whose host receives the PR/MR (also the base branch's remote). Differs from the push remote for forks.",
            pattern=r"[\w.-]+"),
         _f("publish.provider_hosts", "PR provider hosts", "list", [],
-           "Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea.",
+           "Self-hosted PR providers as host=kind (kind: github, gitlab, bitbucket, gitea), e.g. git.acme.dev=gitea. Self-hosted Gitea/Forgejo is also detected automatically; tokens are set below (PR / MR tokens).",
            item_pattern=r"[a-zA-Z0-9.-]+(?::\d+)?=(?:github|gitlab|bitbucket|gitea)", item_label="host=kind entries"),
         _f("publish.run_hooks", "Run commit-msg hook", "bool", False,
            "Run the repository's commit-msg hook on the squashed publish commit (checkpoints never run hooks)."),
@@ -388,6 +392,30 @@ for _section in RULES_SCHEMA:
                options=[["auto", "Auto"], ["off", "Off"]]),
         ]
 # --- end W8 block
+
+# --- Environment repair (documentation/plans/job_templates.md §7), owned by mu/jobs/sandbox/repair.py.
+RULES_SCHEMA += [
+    {"id": "repair", "title": "Environment repair",
+     "hint": "When checks can't run because the build environment lacks tools or dependencies, an unattended repair "
+             "stage (the job's implement agent) installs them in a repair container: root inside the container with "
+             "dropped capabilities and wider package-registry egress. The result is committed as a job-scoped image "
+             "that later stages and checks use. A failed repair never pauses the job; it continues unverified.",
+     "fields": [
+        _f("jobs.repair.enabled", "Repair the environment", "bool", True,
+           "Off: checks that can't run are reported unverified straight away."),
+        _f("jobs.repair.max_attempts", "Repair attempts per job", "int", 2, "", min=0, max=10),
+        _f("jobs.repair.registries", "Repair egress", "select", "auto",
+           "Auto: the build environment's allowlist plus the package registries detected for the repository, the OS "
+           "package mirrors and toolchain installers. Template: the allowlist plus mirrors and installers only. "
+           "Model-provider hosts are always dropped.",
+           options=[["auto", "Auto (detected registries)"], ["template", "Template allowlist"]]),
+        _f("jobs.repair.max_cost_usd", "Cost budget per repair", "float", 3.0,
+           "Counts toward the job's cost.", min=0, max=1000, unit="USD"),
+        _f("jobs.repair.max_runtime_s", "Time limit per repair", "int", 1200, "", min=60, max=86_400, unit="seconds"),
+        _f("jobs.repair.max_iterations", "Iterations per repair", "int", 40, "", min=1, max=10_000),
+     ]},
+]
+# --- end environment repair block
 
 FIELD_BY_PATH = {f["path"]: f for section in RULES_SCHEMA for f in section["fields"]}
 

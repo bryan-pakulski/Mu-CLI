@@ -1,13 +1,16 @@
-/* Jobs mode UI primitives — vanilla ports of the planos web components:
- * Dialog (focus trap, Esc, focus restore), confirm/prompt, toasts, the command
- * registry, the ctrl+k palette, the "?" help overlay and the global keyboard
- * handler (":" / ctrl+k, "?", "g x" chords, single-key page actions).
+/* Jobs mode UI primitives on the Wash components: Dialog (.w-modal markup on
+ * the shared dialog stack, static/js/dialogs.js: focus trap, Esc and focus
+ * restore), confirm/prompt, toasts (window.WashToast, the shared
+ * polite/assertive regions), the command registry (fed to the shared Wash
+ * command palette, static/js/wash/palette.js, which owns ⌘/Ctrl+K), the "?"
+ * help overlay and the global keyboard handler (":", "?", "g x" chords,
+ * single-key page actions).
  */
 (() => {
     'use strict';
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const X_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    const X_ICON = '<svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg>';
     const host = () => document.getElementById('work-app') || document.body;
     let idSeq = 0;
 
@@ -16,11 +19,11 @@
         const opener = document.activeElement;
         const titleId = `work-dlg-${++idSeq}`;
         const backdrop = document.createElement('div');
-        backdrop.className = `work-dialog-backdrop${sheet ? ' is-sheet' : ''}`;
-        backdrop.innerHTML = `<div class="work-dialog ${wide ? 'is-wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="${titleId}" tabindex="-1">
-            <header class="work-dialog-head"><h2 id="${titleId}">${esc(title)}</h2><span class="spacer"></span>
-            <button type="button" class="btn ghost icon" aria-label="Close" data-dialog-close>${X_ICON}</button></header>
-            <div class="work-dialog-body"></div>${footer ? '<footer class="work-dialog-foot"></footer>' : ''}</div>`;
+        backdrop.className = `w-modal work-dialog-backdrop${sheet ? ' is-sheet' : ''}`;
+        backdrop.innerHTML = `<section class="w-modal__dialog work-dialog${wide ? ' is-wide' : ''}" data-size="${wide ? 'lg' : 'sm'}" role="dialog" aria-modal="true" aria-labelledby="${titleId}" tabindex="-1">
+            <header class="w-modal__head work-dialog-head"><h2 class="w-modal__title" id="${titleId}">${esc(title)}</h2>
+            <button type="button" class="w-btn" data-variant="icon" aria-label="Close" title="Close" data-dialog-close>${X_ICON}</button></header>
+            <div class="w-modal__body work-dialog-body"></div>${footer ? '<footer class="w-modal__foot work-dialog-foot"></footer>' : ''}</section>`;
         const panel = backdrop.firstElementChild;
         const bodyEl = panel.querySelector('.work-dialog-body');
         if (typeof body === 'string') bodyEl.innerHTML = body; else bodyEl.append(body);
@@ -28,24 +31,19 @@
         let closed = false;
         const close = () => {
             if (closed) return; closed = true;
-            document.removeEventListener('keydown', onKey, true);
+            window.MuDialog.close(backdrop);
             backdrop.remove();
             if (opener && document.contains(opener)) opener.focus();
             onClose?.();
         };
-        const onKey = e => {
-            if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); return; }
-            if (e.key !== 'Tab') return;
-            const items = [...panel.querySelectorAll(FOCUSABLE)].filter(x => !x.hasAttribute('disabled') && x.offsetParent !== null);
-            if (!items.length) { e.preventDefault(); return; }
-            const first = items[0], last = items[items.length - 1];
-            if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(); }
-            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-        };
         backdrop.addEventListener('mousedown', e => { if (e.target === backdrop) close(); });
+        backdrop.addEventListener('dialog-close', close);
         panel.querySelector('[data-dialog-close]').onclick = close;
-        document.addEventListener('keydown', onKey, true);
+        backdrop.hidden = true;
         host().append(backdrop);
+        // The shared stack traps Tab and routes Esc to `dialog-close`; this
+        // function places the initial focus itself (below).
+        window.MuDialog.open(backdrop, { focus: false });
         const first = panel.querySelector('[data-autofocus]') || panel.querySelector('input:not([type=hidden]):not([disabled]), textarea, select') || panel.querySelector(FOCUSABLE);
         (first || panel).focus();
         return { el: panel, body: bodyEl, close };
@@ -55,12 +53,14 @@
         return new Promise(resolve => {
             let result = false;
             const foot = document.createElement('div');
-            foot.className = 'row';
-            foot.innerHTML = `<button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn ${tone === 'danger' ? 'solid tone-danger' : 'primary'}" data-ok data-autofocus>${esc(okLabel)}</button>`;
-            const d = dialog({ title, body: `<p>${esc(message)}</p>`, footer: foot, onClose: () => resolve(result) });
+            foot.className = 'w-btn-row';
+            // Destructive confirms (G§9.17): the danger button repeats the verb and Cancel gets default focus.
+            const danger = tone === 'danger';
+            foot.innerHTML = `<button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="button" class="w-btn" data-variant="${danger ? 'danger' : 'primary'}" data-ok>${esc(okLabel)}</button>`;
+            const d = dialog({ title, body: `<p class="work-dialog-message">${esc(message)}</p>`, footer: foot, onClose: () => resolve(result) });
             foot.querySelector('[data-cancel]').onclick = () => d.close();
             foot.querySelector('[data-ok]').onclick = () => { result = true; d.close(); };
-            foot.querySelector('[data-ok]').focus();
+            foot.querySelector(danger ? '[data-cancel]' : '[data-ok]').focus();
         });
     }
 
@@ -69,11 +69,11 @@
             let result = null;
             const id = `work-prompt-${++idSeq}`;
             const form = document.createElement('form');
-            form.className = 'col';
-            form.innerHTML = `<div class="field"><label class="label" for="${id}">${esc(label)}${optional ? ' <span class="muted small">(optional)</span>' : ''}</label>
-                ${multiline ? `<textarea id="${id}" rows="6" data-autofocus>${esc(value)}</textarea>` : `<input id="${id}" type="text" value="${esc(value)}" data-autofocus>`}
-                ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}<span class="error" data-error></span></div>
-                <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(okLabel)}</button></div>`;
+            form.className = 'work-stack';
+            form.innerHTML = `<div class="w-field"><label class="w-field__label" for="${id}">${esc(label)}${optional ? ' <span class="work-meta">(optional)</span>' : ''}</label>
+                ${multiline ? `<textarea class="w-textarea" id="${id}" rows="6" data-autofocus>${esc(value)}</textarea>` : `<input class="w-input" id="${id}" type="text" value="${esc(value)}" data-autofocus>`}
+                ${hint ? `<p class="w-field__hint">${esc(hint)}</p>` : ''}<p class="w-field__error" data-error></p></div>
+                <div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${esc(okLabel)}</button></div>`;
             const d = dialog({ title, body: form, onClose: () => resolve(result) });
             const input = form.querySelector(`#${id}`);
             form.querySelector('[data-cancel]').onclick = () => d.close();
@@ -87,23 +87,22 @@
     }
 
     /* ------------------------------------------------------------ toasts */
-    const GLYPH = { ok: '✓', danger: '✗', warn: '◆', running: '●' };
+    /* The shared Wash toast (G§9.16, wash_shell.js): info and success auto-dismiss in the
+     * polite region, errors persist in the assertive one. Jobs tones map onto Wash tones. */
+    const TOAST_TONE = { ok: 'ok', danger: 'danger', warn: 'attention', running: 'info', accent: 'info', muted: 'info' };
     function toast(text, tone = 'accent', action) {
-        const stack = document.querySelector('[data-toast-stack]');
-        if (!stack) return;
-        while (stack.children.length >= 5) stack.firstElementChild.remove();
-        const item = document.createElement('div');
-        item.className = `work-toast-item tone-${tone}`;
-        item.setAttribute('role', tone === 'danger' ? 'alert' : 'status');
-        item.innerHTML = `<span aria-hidden="true" class="work-toast-glyph">${GLYPH[tone] || 'ℹ'}</span><span class="work-toast-text">${esc(text)}</span>${action ? `<button type="button" class="btn sm" data-toast-action>${esc(action.label)}</button>` : ''}<button type="button" class="btn ghost icon sm" aria-label="Dismiss" data-toast-dismiss>${X_ICON}</button>`;
-        const dismiss = () => item.remove();
-        item.querySelector('[data-toast-dismiss]').onclick = dismiss;
-        if (action) item.querySelector('[data-toast-action]').onclick = () => { action.run(); dismiss(); };
-        stack.append(item);
-        // Danger toasts stay longer; hovering pauses the dismissal.
-        let ms = tone === 'danger' ? 9000 : tone === 'warn' ? 7000 : 4500, timer = setTimeout(dismiss, ms), started = Date.now();
-        item.addEventListener('mouseenter', () => { clearTimeout(timer); ms -= Date.now() - started; });
-        item.addEventListener('mouseleave', () => { started = Date.now(); timer = setTimeout(dismiss, Math.max(1500, ms)); });
+        const kind = TOAST_TONE[tone] || 'info';
+        const item = window.WashToast?.show(String(text || ''), kind, { timeout: kind === 'danger' ? 0 : kind === 'attention' ? 7000 : 5000 });
+        if (!item || !action) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'w-btn';
+        button.dataset.variant = 'ghost';
+        button.dataset.size = 'sm';
+        button.dataset.toastAction = '';
+        button.textContent = action.label;
+        button.onclick = () => { action.run(); item.remove(); };
+        item.insertBefore(button, item.querySelector('.w-toast__close'));
     }
 
     /* ------------------------------------------------------------ command registry */
@@ -112,59 +111,31 @@
     function commands() {
         return [...sources.values()].sort((a, b) => a.priority - b.priority).flatMap(s => s.items);
     }
-    function fuzzyScore(q, text) {
-        if (!q) return 0;
-        const t = text.toLowerCase(), needle = q.toLowerCase();
-        const at = t.indexOf(needle);
-        if (at >= 0) return 1000 - at;
-        let score = 0, pos = 0;
-        for (const ch of needle) { const i = t.indexOf(ch, pos); if (i < 0) return null; score += i === pos ? 5 : 1; pos = i + 1; }
-        return score;
-    }
 
-    function palette() {
-        if (document.querySelector('.work-dialog-backdrop')) return;
-        const listId = `work-palette-${++idSeq}`;
-        let sel = 0, results = [];
-        const body = document.createElement('div');
-        body.className = 'col';
-        body.innerHTML = `<div class="work-palette-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="text" role="combobox" aria-expanded="true" aria-controls="${listId}" aria-label="Search commands" placeholder="Go to… or run an action" data-autofocus></div>
-            <ul class="work-palette-list" id="${listId}" role="listbox" aria-label="Commands"></ul>`;
-        const input = body.querySelector('input'), list = body.querySelector('ul');
-        const d = dialog({ title: 'Command palette', body });
-        const choose = item => { if (!item) return; d.close(); setTimeout(() => item.run(), 0); };
-        const draw = () => {
+    /* The page's commands live in the shared Wash command palette
+     * (static/js/wash/palette.js, loaded by _layout.html on every page). */
+    if (window.WashPalette) {
+        window.WashPalette.configure({ goKeys: false });   // /work owns its `g x` chords
+        window.WashPalette.register('work', () => {
             const seen = new Set();
-            results = commands().filter(i => i.enabled !== false && !seen.has(i.id) && seen.add(i.id))
-                .map(i => ({ i, s: fuzzyScore(input.value, `${i.label} ${i.group} ${i.keywords || ''}`) }))
-                .filter(x => x.s != null).sort((a, b) => (input.value ? b.s - a.s : 0)).slice(0, 50).map(x => x.i);
-            sel = Math.min(sel, Math.max(0, results.length - 1));
-            list.innerHTML = results.map((i, n) => `<li id="${listId}-${n}" role="option" aria-selected="${n === sel}" data-index="${n}" class="work-palette-item"><span class="work-palette-group">${esc(i.group)}</span><span class="grow">${esc(i.label)}</span>${i.key ? `<kbd>${esc(i.key)}</kbd>` : ''}</li>`).join('') || '<li class="empty">No matching command</li>';
-            input.setAttribute('aria-activedescendant', results[sel] ? `${listId}-${sel}` : '');
-            list.querySelector(`[data-index="${sel}"]`)?.scrollIntoView({ block: 'nearest' });
-        };
-        list.addEventListener('mousemove', e => { const li = e.target.closest('[data-index]'); if (li && Number(li.dataset.index) !== sel) { sel = Number(li.dataset.index); draw(); } });
-        list.addEventListener('click', e => { const li = e.target.closest('[data-index]'); if (li) choose(results[Number(li.dataset.index)]); });
-        input.addEventListener('input', () => { sel = 0; draw(); });
-        input.addEventListener('keydown', e => {
-            if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(results.length - 1, sel + 1); draw(); }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); }
-            else if (e.key === 'Enter') { e.preventDefault(); choose(results[sel]); }
-        });
-        draw();
+            return commands().filter(i => !seen.has(i.id) && seen.add(i.id)).map(i => ({
+                id: `work:${i.id}`, group: i.group, label: i.label, key: i.key, keywords: i.keywords,
+                hint: i.enabled === false ? (i.reason || 'not available now') : '', enabled: i.enabled !== false, run: i.run,
+            }));
+        }, { priority: 5 });
     }
+    function palette() { window.WashPalette?.open(); }
 
-    const GLOBAL_KEYS = [['ctrl+k  or  :', 'command palette'], ['?', 'this help'], ['g h', 'dashboard'], ['g t', 'jobs'],
+    const GLOBAL_KEYS = [['⌘K / ctrl+k  or  :', 'command palette'], ['?', 'this help'], ['g h', 'dashboard'], ['g t', 'jobs'],
         ['g a', 'activity'], ['g b', 'tickets'], ['g r', 'history'], ['g s', 'settings'], ['g u', 'setup'], ['g d', 'setup → doctor'], ['n', 'new job'], ['Esc', 'close dialog'], ['← →', 'switch tabs (when a tab has focus)']];
     function help() {
         if (document.querySelector('.work-dialog-backdrop')) return;
         const seen = new Set();
         const page = commands().filter(i => i.key && !i.key.startsWith('g ') && !seen.has(i.key) && seen.add(i.key));
-        const row = (k, d, muted) => `<div class="row"><dt style="min-width:120px"><kbd>${esc(k)}</kbd></dt><dd style="margin:0" class="${muted ? 'muted' : ''}">${esc(d)}</dd></div>`;
-        dialog({ title: 'Keyboard shortcuts', wide: true, body: `<p class="muted small">Shortcuts work when no text field has focus. Job keys are the same in every mucli front end.</p>
-            <div class="grid-2"><section><h3>Everywhere</h3><dl class="col" style="gap:var(--s-half);margin:var(--s-1) 0 0">${GLOBAL_KEYS.map(([k, d]) => row(k, d)).join('')}</dl></section>
-            <section><h3>This page</h3>${page.length ? `<dl class="col" style="gap:var(--s-half);margin:var(--s-1) 0 0">${page.map(i => row(i.key, i.label + (i.enabled === false && i.reason ? ` (${i.reason})` : ''), i.enabled === false)).join('')}</dl>` : '<p class="muted">No page shortcuts.</p>'}</section></div>` });
+        const row = (k, d, muted) => `<div class="work-keys__row"><dt><kbd class="w-keycap">${esc(k)}</kbd></dt><dd${muted ? ' class="work-meta"' : ''}>${esc(d)}</dd></div>`;
+        dialog({ title: 'Keyboard shortcuts', wide: true, body: `<p class="work-meta">Shortcuts work when no text field has focus. Job keys are the same in every mucli front end.</p>
+            <div class="work-grid-2"><section><h3 class="work-subhead">Everywhere</h3><dl class="work-keys">${GLOBAL_KEYS.map(([k, d]) => row(k, d)).join('')}</dl></section>
+            <section><h3 class="work-subhead">This page</h3>${page.length ? `<dl class="work-keys">${page.map(i => row(i.key, i.label + (i.enabled === false && i.reason ? ` (${i.reason})` : ''), i.enabled === false)).join('')}</dl>` : '<p class="work-meta">No page shortcuts.</p>'}</section></div>` });
     }
 
     /* ------------------------------------------------------------ keyboard */
@@ -173,7 +144,6 @@
     function installKeys() {
         window.addEventListener('keydown', e => {
             if (e.defaultPrevented) return;
-            if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); palette(); return; }
             if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
             if (document.querySelector('[aria-modal="true"]:not([hidden])') && [...document.querySelectorAll('[aria-modal="true"]')].some(m => m.offsetParent !== null)) return;
             if (e.key === ':') { e.preventDefault(); palette(); return; }

@@ -1,0 +1,84 @@
+/* Choice, quiz, confirm and input prompts (G§9.10) — the option rows used
+ * inside the approval card frame (.w-approval[data-tone="accent"]).
+ *
+ *   <div class="w-prompt__options" role="radiogroup">
+ *     <label class="w-prompt__option" [data-selected]>
+ *       <input class="w-prompt__input" type="radio">     visually hidden, still focusable
+ *       <span class="w-prompt__key">1</span>               number shortcut (1–9)
+ *       <span class="w-prompt__label">Option</span>
+ *       <span class="w-prompt__check">✓</span>
+ *     </label>
+ *   </div>
+ *   <div class="w-prompt__quiz"><fieldset class="w-prompt__question"><legend>…</legend>…</fieldset></div>
+ *
+ * Rows are full width, radius-md, sunken on hover, accent wash plus ✓ when
+ * selected. The native input keeps keyboard and screen-reader semantics;
+ * focus shows on the row.
+ */
+.w-prompt__options { display: flex; flex-direction: column; gap: 2px; }
+.w-prompt__option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    min-height: 40px;
+    padding: var(--wash-space-2) var(--wash-space-3);
+    border-radius: var(--wash-radius-md);
+    color: var(--wash-ink);
+    cursor: pointer;
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-prompt__option:hover { background: var(--w-glass-fill-subtle); }
+.w-prompt__option:has(.w-prompt__input:checked),
+.w-prompt__option[data-selected] { background: var(--wash-accent-wash); }
+.w-prompt__option:has(.w-prompt__input:focus-visible) { outline: 2px solid var(--wash-accent-ink); outline-offset: -2px; }
+.w-prompt__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+.w-prompt__key {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 4px;
+    border-radius: var(--wash-radius-xs);
+    background: var(--w-glass-fill-subtle);
+    color: var(--wash-ink-2);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size);
+}
+.w-prompt__option:hover .w-prompt__key { background: var(--w-glass-fill); }
+.w-prompt__label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.w-prompt__label :where(p) { margin: 0; }
+.w-prompt__label code {
+    padding: 1px 5px;
+    border-radius: var(--wash-radius-xs);
+    background: var(--w-glass-fill-subtle);
+    font-family: var(--wash-font-mono);
+    font-size: 0.9em;
+}
+.w-prompt__check { flex: none; color: var(--wash-accent-ink); font-weight: 600; visibility: hidden; }
+.w-prompt__option:has(.w-prompt__input:checked) .w-prompt__check,
+.w-prompt__option[data-selected] .w-prompt__check { visibility: visible; }
+.w-prompt__other { flex: 1 1 auto; height: 32px; }
+
+.w-prompt__quiz { display: flex; flex-direction: column; gap: var(--wash-space-4); }
+.w-prompt__question {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.w-prompt__question > legend {
+    margin-bottom: var(--wash-space-2);
+    padding: 0;
+    color: var(--wash-ink);
+    font-weight: 500;
+}
+.w-prompt__question > legend :where(p) { margin: 0; }

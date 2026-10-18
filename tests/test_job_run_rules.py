@@ -115,7 +115,7 @@ def test_every_run_rule_is_described_with_a_default(home):
     from mu.jobs.job_settings import FIELD_BY_PATH, public_settings
     expected = {"sandbox.max_tokens", "sandbox.count_cache_reads", "sandbox.max_cost_usd", "limits.max_iterations",
                 "sandbox.stage_timeout_s.implement", "checks.max_fix_attempts", "checks.baseline_triage", "checks.suites",
-                "sandbox.image", "sandbox.cpu", "sandbox.memory", "sandbox.max_file_bytes", "sandbox.egress_extra", "publish.mode"}
+                "sandbox.image", "sandbox.cpu", "sandbox.memory", "sandbox.egress_extra", "publish.mode"}
     assert expected <= set(FIELD_BY_PATH)
     rules = public_settings()["rules"]
     assert rules["values"]["sandbox.max_tokens"] == 50_000_000 and rules["overrides"] == {}

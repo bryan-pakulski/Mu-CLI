@@ -1,5 +1,6 @@
 """Web GUI: jobs Setup checklist and Doctor pages (planos-style), and the setup/doctor REST API."""
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SETUP_JS = (ROOT / "mu/gui/static/js/work/setup.js").read_text()
 WORK = (ROOT / "mu/gui/static/js/work.js").read_text()
 HTML = (ROOT / "mu/gui/templates/work.html").read_text()
-CSS = (ROOT / "mu/gui/static/css/work.css").read_text()
+CSS = (ROOT / "mu/gui/static/css/wash/patterns/work.css").read_text()  # Wash W4: /work page bundle
 
 
 def test_jobs_menu_has_one_setup_entry_with_a_doctor_tab():
@@ -61,7 +62,9 @@ def test_dashboard_shows_one_setup_call_to_action():
     stage = (ROOT / "mu/gui/static/js/work_stage_models.js").read_text()
     assert "Set job models" not in stage and "work-stage-models-banner" not in stage
     assert "mu:stage-models" in stage and "mu:stage-models" in SETUP_JS
-    assert HTML.count('class="work-setup-cta"') == 1
+    # Wash W4: the one setup call to action is a caution .w-banner.
+    assert len(re.findall(r'class="[^"]*\bwork-setup-cta\b', HTML)) == 1
+    assert 'class="w-banner work-setup-cta" data-tone="caution"' in HTML
 
 
 @pytest.fixture

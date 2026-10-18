@@ -33,9 +33,11 @@ is recorded and the job continues unverified (§5). Records: ``metadata.environm
 """
 from __future__ import annotations
 
+import filecmp
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -54,12 +56,10 @@ OS_MIRRORS = ("deb.debian.org", "security.debian.org", "archive.ubuntu.com", "se
               "dl-cdn.alpinelinux.org")
 TOOLCHAIN_INSTALLERS = ("static.rust-lang.org", "sh.rustup.rs", "nodejs.org", "go.dev", "dl.google.com",
                         "objects.githubusercontent.com", "github.com")
-OUTCOMES = ("running", "repaired", "unresolved", "failed", "timed_out", "budget_exhausted", "error")
+OUTCOMES = ("running", "repaired", "unresolved", "failed", "no_commands", "timed_out", "budget_exhausted", "error")
 # Outcomes that committed an image (the actions offer it).
 COMMITTED = ("repaired", "unresolved")
 TAIL_CHARS = 3000
-SNAPSHOT_FILE_LIMIT = 4 * 1024 * 1024
-SNAPSHOT_TOTAL_LIMIT = 64 * 1024 * 1024
 LIMIT_STOP_GRACE_S = 30.0
 DEFAULTS = {"enabled": True, "max_attempts": 2, "registries": "auto", "max_cost_usd": 3.0, "max_runtime_s": 1200,
             "max_iterations": 40}
@@ -315,16 +315,25 @@ def _transcript_commands(transcript: Any) -> List[str]:
 
 def parse_commands(text: str, transcript: Any = None) -> List[str]:
     """The commands that fixed the environment: the agent's ``REPAIR COMMANDS`` block, else every
-    shell command from the transcript."""
+    shell command from the transcript.
+
+    With a transcript, only commands the agent actually ran count: a block line must appear in
+    one of its shell calls. An agent that could not run anything (a stage without a shell) lists
+    what it *would* run; those are suggestions, not repairs."""
+    executed = list(dict.fromkeys(_transcript_commands(transcript)))
     match = None
     for match in _COMMANDS_RE.finditer(str(text or "")):
         pass
     if match:
         lines = [line.strip() for line in match.group(1).splitlines()]
         found = [line for line in lines if line and not line.startswith("#")]
+        if transcript is not None:
+            squash = lambda c: " ".join(c.split())  # noqa: E731
+            ran = [squash(c) for c in executed]
+            found = [line for line in found if any(squash(line) in c for c in ran)]
         if found:
             return found[:50]
-    return list(dict.fromkeys(_transcript_commands(transcript)))[:50]
+    return executed[:50]
 
 
 def project_commands(commands: Iterable[str]) -> List[str]:
@@ -352,27 +361,34 @@ def _status(worktree: str) -> set:
         return set()
 
 
-def _snapshot(worktree: str, entries: set) -> Dict[str, Optional[bytes]]:
-    """Content of every file already changed before the repair (the implement stage's work)."""
-    saved: Dict[str, Optional[bytes]] = {}
-    total = 0
-    for code, path in sorted(entries, key=lambda e: e[1]):
+def _snapshot(worktree: str, entries: set, store: Path) -> Dict[str, Optional[Path]]:
+    """A copy, under ``store``, of every file already changed before the repair (the implement
+    stage's work), whatever its size; ``None`` for deletions. Copies on disk, not bytes in memory,
+    so no file is too big to protect."""
+    saved: Dict[str, Optional[Path]] = {}
+    for index, (code, path) in enumerate(sorted(entries, key=lambda e: e[1])):
         target = Path(worktree) / path
         if "D" in code or not target.is_file() or target.is_symlink():
             saved[path] = None
             continue
-        size = target.stat().st_size
-        if size > SNAPSHOT_FILE_LIMIT or total + size > SNAPSHOT_TOTAL_LIMIT:
-            continue
+        copy = store / str(index)
         try:
-            saved[path] = target.read_bytes()
-            total += size
+            store.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(target, copy)
+            saved[path] = copy
         except OSError:
             continue
     return saved
 
 
-def revert_tracked_changes(worktree: str, before: set, saved: Dict[str, Optional[bytes]]) -> Dict[str, List[str]]:
+def _same(target: Path, copy: Path) -> bool:
+    try:
+        return target.is_file() and not target.is_symlink() and filecmp.cmp(target, copy, shallow=False)
+    except OSError:
+        return False
+
+
+def revert_tracked_changes(worktree: str, before: set, saved: Dict[str, Optional[Path]]) -> Dict[str, List[str]]:
     """Undo tracked-file changes made since ``before``; never the implement stage's work.
 
     Returns ``{reverted, files}``: paths restored, and new untracked files the repair left (e.g.
@@ -389,20 +405,16 @@ def revert_tracked_changes(worktree: str, before: set, saved: Dict[str, Optional
             reverted.append(path)
         except (OSError, subprocess.SubprocessError):
             continue
-    for path, content in saved.items():
+    for path, copy in saved.items():
         target = Path(worktree) / path
-        if content is None:
+        if copy is None:
             continue
-        try:
-            current = target.read_bytes() if target.is_file() and not target.is_symlink() else None
-        except OSError:
-            current = None
-        if current != content:
+        if not _same(target, copy):
             try:
                 if target.is_symlink() or target.is_dir():
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(content)
+                shutil.copyfile(copy, target)
                 reverted.append(path)
             except OSError:
                 continue
@@ -410,11 +422,12 @@ def revert_tracked_changes(worktree: str, before: set, saved: Dict[str, Optional
         # A file the implement stage had changed that is now back at HEAD or gone.
         if path in saved and saved[path] is not None and path not in reverted:
             try:
-                (Path(worktree) / path).write_bytes(saved[path])  # type: ignore[arg-type]
+                shutil.copyfile(saved[path], Path(worktree) / path)  # type: ignore[arg-type]
                 reverted.append(path)
             except OSError:
                 pass
-    files = sorted({path for code, path in _status(worktree) - before if code == "??"})[:500]
+    from ..checks import collapse_untracked
+    files = collapse_untracked(worktree, {path for code, path in _status(worktree) - before if code == "??"})
     return {"reverted": sorted(dict.fromkeys(reverted)), "files": files}
 
 
@@ -453,6 +466,12 @@ def commit_changes(docker, base_image: str, env_keys: Sequence[str], labels: Dic
         changes += ["--change", f"{directive} {json.dumps(value if isinstance(value, list) else [])}"]
     changes += ["--change", "LABEL " + " ".join(f'{k}="{env_value(v)}"' for k, v in sorted(labels.items()))]
     return changes
+
+
+def pin_tag(job_id: str, attempt: int) -> str:
+    """Temporary tag that holds a repair's base image until the repair finishes."""
+    from .environments import job12
+    return f"mucli/job-{job12(job_id)}-repair-base:{int(attempt)}"
 
 
 def repaired_tag(job_id: str, binding: str, attempt: int) -> str:
@@ -551,6 +570,13 @@ def run_repair(service, job: Any, run: Any, target: Dict[str, Any], *, runner: O
         from .cli import container_cli
         docker_bin = runner.require(container_cli(settings) if settings is not None else container_cli())
         runner.run([docker_bin, "image", "inspect", policy.image], timeout=15)
+        # Pin the base image for the whole repair: a rebuild that moves its tag mid-repair
+        # (Setup → build the runtime image) otherwise leaves it untagged, the containerd image
+        # store collects its content, and the commit fails ("content digest … not found").
+        pinned = pin_tag(job.id, attempt)
+        runner.run([docker_bin, "tag", policy.image, pinned], timeout=30)
+        policy = replace(policy, image=pinned)
+        target = {**target, "base_ref": pinned}
         prompt = build_prompt(job, run, target, detected=detected)
         from .runner import claim_stage_response
         interaction = lambda payload: claim_stage_response(service, job, "repair", payload)  # noqa: E731
@@ -595,7 +621,7 @@ def run_repair(service, job: Any, run: Any, target: Dict[str, Any], *, runner: O
                 from .egress import EgressBridge
                 bridge = EgressBridge(relay_dir, policy.egress_extra).start()
             before = _status(job.worktree)
-            saved = _snapshot(job.worktree, before)
+            saved = _snapshot(job.worktree, before, root / "snapshot")
             args = repair_container_args(job, (inputs, outputs, relay_dir), name, policy, relay.token,
                                          harness_mounts=tuple(harness_mounts),
                                          module="mu.jobs.sandbox.harness_worker" if agent != "mucli" else "mu.jobs.sandbox.worker")
@@ -612,7 +638,7 @@ def run_repair(service, job: Any, run: Any, target: Dict[str, Any], *, runner: O
             try:
                 if (outputs / "transcript.json").is_file():
                     from .runner import _read_output
-                    transcript = _read_output(outputs, "transcript.json", limit=64 * 1024 * 1024)
+                    transcript = _read_output(outputs, "transcript.json")
                     art.write_json(record["transcript"], transcript)
                     art.write_json("logs/repair-transcript.json", transcript)
             except (RuntimeError, ValueError, OSError):
@@ -641,6 +667,12 @@ def run_repair(service, job: Any, run: Any, target: Dict[str, Any], *, runner: O
             elif status == "failed" or result.get("kind") != "completed":
                 error = str(result.get("error") or "") or "the repair container failed"
                 record.update(outcome="failed", error=redact_secrets(error)[0][:1000])
+            elif not _transcript_commands(transcript):
+                # Nothing ran, so nothing changed: committing would only relabel the same image.
+                suggested = parse_commands(str((result or {}).get("text") or ""))
+                record.update(outcome="no_commands", error=(
+                    "the repair agent ran no shell commands, so the environment is unchanged"
+                    + (f"; it suggested: {'; '.join(suggested[:6])}" if suggested else "")))
             else:
                 record["image"] = _commit(service, job, runner, name, target, attempt, args, record, settings)
                 record["outcome"] = "committed"
@@ -659,6 +691,11 @@ def run_repair(service, job: Any, run: Any, target: Dict[str, Any], *, runner: O
         if created:
             try:
                 runner.run([runner.require(_cli(settings)), "rm", "-f", name], check=False, timeout=60)
+            except (ContainerRuntimeError, OSError, subprocess.SubprocessError):
+                pass
+        if target.get("base_ref"):
+            try:  # untag only: the base keeps its own tag, the committed image its own layers
+                runner.run([runner.require(_cli(settings)), "rmi", target["base_ref"]], check=False, timeout=60)
             except (ContainerRuntimeError, OSError, subprocess.SubprocessError):
                 pass
         try:
@@ -739,7 +776,8 @@ def _commit(service, job, runner, name: str, target: Dict[str, Any], attempt: in
     tag = repaired_tag(job.id, binding, attempt)
     labels = {**job_labels(job.id), LABEL_BINDING: binding, LABEL_ROLE: "job-image", LABEL_HOME: home_id(),
               LABEL_SOURCE: f"repair:{binding}:{attempt}", "io.mucli.repair": str(attempt)}
-    changes = commit_changes(docker, str(target["image"]), _added_env_keys(args), labels)
+    # The base's config comes from the pinned base, not a tag a rebuild may have moved.
+    changes = commit_changes(docker, str(target.get("base_ref") or target["image"]), _added_env_keys(args), labels)
     docker.run("commit", *changes, name, tag, timeout=1800)
     try:
         allow = list(rule("environments.secret_scan_allow", settings) or [])
@@ -777,6 +815,9 @@ def finish(service, job_id: str, record: Dict[str, Any]) -> None:
     if outcome == "repaired":
         reason = (f"Environment repaired: build environment `{binding}` now runs the checks "
                   f"(image {record.get('image')}).")
+    elif outcome == "no_commands":
+        reason = (f"Environment repair of `{binding}` changed nothing: the repair agent ran no shell commands. "
+                  "The job continues unverified.")
     elif outcome == "unresolved":
         reason = (f"Environment repair committed image {record.get('image')} for `{binding}`, but some checks "
                   "still could not run.")

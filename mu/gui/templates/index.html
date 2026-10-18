@@ -26,7 +26,7 @@
 {% block body_class %}chat-body{% if not session_active %} welcome-body{% endif %}{% endblock %}
 {% block body_attrs %} x-data{% endblock %}
 {% block shell_attrs %}{% if session_active %} :data-sidebar-collapsed="$store.layout.sidebarOpen ? null : ''"{% endif %}{% endblock %}
-{% block drop_attrs %}{% if session_active %} :data-state="$store.chat.busy ? 'working' : null"{% endif %}{% endblock %}
+{% block mark_attrs %}{% if session_active %} :data-state="$store.chat.busy ? 'working' : null"{% endif %}{% endblock %}
 
 {#- Job-attention count on the sidebar's Work item. -#}
 {% set work_badge %}<span class="w-count product-attention-badge" data-tone="attention" x-cloak
@@ -105,15 +105,26 @@
                          @keydown.enter.prevent="$el.click()"
                          @keydown.space.prevent="$el.click()"
                          role="button" tabindex="0"
-                         :title="s.name + ($store.sessions.isLoaded(s.name) ? ' · loaded' : '') + ($store.sessions.isBusy(s.name) ? ' · busy' : '')">
-                        <span class="sidebar-session-type w-session__icon"
-                              :class="{ loaded: $store.sessions.isLoaded(s.name), busy: $store.sessions.isBusy(s.name) }"
-                              x-html="sessionTypeIconMarkup(s.session_type, 'session-type-svg')"></span>
+                         :title="s.name + ($store.sessions.state(s.name) ? ' · ' + $store.sessions.state(s.name).hint : '')">
+                        <span class="w-session__avatar"
+                              :data-loaded="$store.sessions.isLoaded(s.name) ? 'true' : null"
+                              :data-busy="$store.sessions.isBusy(s.name) ? 'true' : null"
+                              :title="(s.session_type || 'workspace') + ' session'"
+                              x-html="sessionAvatarMarkup(s.name, s.session_type)"></span>
                         <span class="name w-session__name" x-text="s.name"></span>
                         <span class="w-session__status">
-                            <span class="w-inkdrop" data-size="sm" data-tone="running" x-show="$store.sessions.isBusy(s.name)" aria-label="Working"></span>
-                            <span class="w-session__attention" aria-label="Awaiting your input"
-                                  x-show="s.name !== $store.chat.currentName && $store.prompts.queue.some(p => p.session_name === s.name)">◆</span>
+                            <template x-if="$store.sessions.state(s.name)">
+                                <span class="w-session__state" :data-state="$store.sessions.state(s.name).key"
+                                      :data-tone="$store.sessions.state(s.name).tone"
+                                      :aria-label="$store.sessions.state(s.name).hint">
+                                    <span class="w-inkdrop" data-size="sm" data-tone="running" aria-hidden="true"
+                                          x-show="$store.sessions.state(s.name).key === 'running'"></span>
+                                    <span class="w-session__state-glyph" aria-hidden="true"
+                                          x-show="$store.sessions.state(s.name).glyph && $store.sessions.state(s.name).key !== 'running'"
+                                          x-text="$store.sessions.state(s.name).glyph"></span>
+                                    <span class="w-session__state-label" x-text="$store.sessions.state(s.name).label"></span>
+                                </span>
+                            </template>
                         </span>
                         <span class="row-actions w-session__actions">
                             <button type="button" class="row-action w-session__action"

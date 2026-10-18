@@ -8,6 +8,8 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .core.notes import SCHEMA_FIELDS, bullets as note_bullets, clean
+from .evidence import INSTRUCTIONS as EVIDENCE_INSTRUCTIONS
 from .models import (
     AttentionReason,
     Job,
@@ -186,7 +188,9 @@ def build_plan_prompt(job: Job) -> str:
         "judgement and list each assumption you made in `assumptions`.",
         "Respond with JSON only:",
         '{"summary": "...", "steps": ["..."], "acceptance_criteria": ["..."], '
-        '"validation_commands": ["exact shell command run from the workspace root"], "assumptions": ["..."]}',
+        '"validation_commands": ["exact shell command run from the workspace root"], "assumptions": ["..."], '
+        + SCHEMA_FIELDS + '}',
+        "`headline` and `notes` are read by a human skimming the job: say what will change and why, without code.",
         "Validation commands must be deterministic, non-interactive test/lint/build commands",
         "(for example `python3 -m pytest tests/test_x.py -q`). No pipes, redirects or chained commands.",
     ])
@@ -205,6 +209,9 @@ def parse_plan(text: str) -> Dict[str, Any]:
         "acceptance_criteria": _str_list(data.get("acceptance_criteria")),
         "validation_commands": _str_list(data.get("validation_commands"), limit=20),
         "parsed": bool(data),
+        # Notes tab (core/notes.py): the planner's own one-line headline and bullets.
+        "headline": clean(data.get("headline")),
+        "notes": note_bullets(data.get("notes")),
         # Jobs run unattended: the planner's assumptions land in the plan's "Risks / out of
         # scope" section, where the human reviewing the plan sees them.
         **({"risks": [f"Assumption: {a}" for a in assumptions]} if assumptions else {}),
@@ -338,8 +345,12 @@ def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) ->
         '"category":"correctness|security|regression|tests|perf|maintainability|scope",'
         '"file":"path","line_start":1,"line_end":1,"title":"short",'
         '"detail":"why it matters","suggestion":"fix","confidence":"high|medium|low"}],'
-        '"out_of_scope_changes":[]}',
+        '"out_of_scope_changes":[], ' + SCHEMA_FIELDS + '}',
+        "`headline` and `notes` are read by a human skimming the job: give the bottom line (is it right, "
+        "what is risky or unverified) in plain English; the summary and findings carry the detail.",
         "Do not choose a workflow action or mark findings dismissed/fixed. The host computes readiness.",
+        "If you verify behaviour yourself (for example render a page or call an endpoint), you may save what you "
+        "saw: " + EVIDENCE_INSTRUCTIONS,
     ])
 
 
@@ -399,8 +410,9 @@ def apply_review_verdict(service, job_id: str, review: Dict[str, Any]) -> int:
     art.write_json("review.json", report.to_dict())
     art.write_json(f"logs/review.round{round_no}.json", payload)
     service.store.append_event(job_id, "review_completed", reason=report.verdict, payload=payload)
+    # The banner and Needs-you rows show the reviewer's one-line headline; the Review tab has the summary.
     service.require_human(job_id, AttentionReason.REVIEW_DONE,
-                          report.summary or "Review report ready. Choose push, re-prompt, recheck, or discard.",
+                          report.headline or report.summary or "Review report ready. Choose push, re-prompt, recheck, or discard.",
                           payload={"verdict": report.verdict, "merge_readiness": report.merge_readiness})
     return 0
 

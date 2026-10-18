@@ -25,6 +25,13 @@ COPY requirements.txt /opt/mucli/requirements.txt
 RUN pip install --no-cache-dir -r /opt/mucli/requirements.txt \
     && mkdir -p "$TIKTOKEN_CACHE_DIR" \
     && python3 -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+# Headless Chromium for job evidence (mu/jobs/evidence.py): agents screenshot the UI they changed,
+# e.g. `playwright screenshot --full-page http://localhost:5173 /output/evidence/home.png`.
+# Shared, world-readable browser path: stages run as the host uid, not root.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN python3 -m playwright install --with-deps --only-shell chromium \
+    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
 COPY . /opt/mucli
 WORKDIR /workspace
 ENTRYPOINT ["python3", "-m", "mu.jobs.sandbox.worker"]

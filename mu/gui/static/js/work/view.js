@@ -165,8 +165,12 @@
         const selectedFindings = new Set();
         const collapsed = new Set();
         const signatures = new Map();
-        const tabs = ['session', 'plan', 'diff', 'review', 'checks', 'diagnostics', 'costs'];
-        const labels = {plan:'Plan', session:'Session', diff:'Diff', review:'Review', checks:'Checks', diagnostics:'Diagnostics', costs:'Cost & audit'};
+        const tabs = ['notes', 'session', 'plan', 'diff', 'review', 'checks', 'diagnostics', 'costs'];
+        /* Heavy parts (agent transcripts, the audit trail) load only while their tab is open. */
+        const LAZY = ['session', 'costs'];
+        const stale = new Set();
+        const approvalOf = j => j?.approval ?? j?.session?.approval ?? null;
+        const labels = {notes:'Notes', plan:'Plan', session:'Session', diff:'Diff', review:'Review', checks:'Checks', diagnostics:'Diagnostics', costs:'Cost & audit'};
         const stepTabs = {plan:'plan', approve:'plan', implement:'session', checks:'checks', review:'review', push:'review'};
         const open = id => (onOpen ? onOpen(id) : select(id));
         /* "Viewed" marks are server-side (markViewed → diff.viewed); a file whose hunk changes drops out.
@@ -186,12 +190,9 @@
 
         function defaultTab(next) {
             const state = next.state;
-            if (next.session?.approval) return 'session';
+            if (approvalOf(next)) return 'session';
             if (state === 'plan_review') return 'plan';
-            if (state === 'review_done' || state === 'pushed' || state === 'done') return 'review';
-            if (state === 'checking') return 'checks';
-            if (state === 'failed') return 'diagnostics';
-            return 'session';
+            return 'notes';
         }
 
         /* ------------------------------------------------------------ commands */
@@ -589,8 +590,7 @@
                 </div>
                 <p class="work-detail-agents"><span>${failed && job.failed_from ? `<span class="work-failed-from">failed in ${esc(stateLabel(job.failed_from))}</span> · ` : ''}agents: ${window.MuJobAgents ? window.MuJobAgents.stageText(job) : (models.length ? models.map(([s, m]) => `${esc(s)} <code>${esc(m.model)}</code>`).join(' · ') : 'unset')}</span>
                     <button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-stage-models>${icon('sliders-horizontal')}<span>Job settings</span></button></p>
-                ${job.attention_detail && !(job.session?.approval && job.state === 'needs_input') && !(job.limit && job.state === 'needs_input')
-                    ? `<div class="w-banner" data-tone="${failed ? 'danger' : 'attention'}"${failed ? ' role="alert"' : ''}><span class="w-banner__glyph" aria-hidden="true">${failed ? '✗' : '◆'}</span><p class="w-banner__msg">${esc(job.attention_detail)}</p></div>` : ''}`;
+                ${job.attention_detail && !(approvalOf(job) && job.state === 'needs_input') && !(job.limit && job.state === 'needs_input') ? attentionBanner(job, failed) : ''}`;
             detailEl.querySelector('[data-stage-models]').onclick = () => window.muOpenStageModels?.();
             const envPill = detailEl.querySelector('[data-env-pill]');
             if (envPill) envPill.onclick = () => { envOpen = !envOpen; renderState(); };
@@ -670,8 +670,8 @@
             }
             const envHtml = renderEnvironmentApproval(host);
             // A non-blocking egress banner never hides a pending tool approval.
-            if (envHtml && !(job.environment_approval?.blocking === false && job.session?.approval)) { host.dataset.eventId = ''; host.innerHTML = envHtml; bindCommands(host); return; }
-            const ap = job.session?.approval;
+            if (envHtml && !(job.environment_approval?.blocking === false && approvalOf(job))) { host.dataset.eventId = ''; host.innerHTML = envHtml; bindCommands(host); return; }
+            const ap = approvalOf(job);
             const approve = job.actions.find(a => a.id === 'approveTool'), deny = job.actions.find(a => a.id === 'denyTool');
             if (!ap || (!approve?.enabled && !deny?.enabled)) { host.dataset.eventId = ''; host.innerHTML = renderSetupWarning(); return; }
             // planos ApprovalBanner: Approve · optional reason for the agent · Deny. Keep a typed reason across re-renders.
@@ -738,7 +738,7 @@
             const set = (t, html) => { const el = detailEl.querySelector(`[data-tab-badge="${t}"]`); if (el) el.innerHTML = html ? ` ${html}` : ''; };
             const dot = (tone, label) => `<span class="w-status" data-tone="${tone}" aria-label="${label}">${tone === 'running' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${tone === 'attention' ? '◆' : tone === 'ok' ? '✓' : '✗'}</span>`}</span>`;
             const live = stateStatus(job.state) === 'active' && ['planning', 'implementing', 'reviewing'].includes(job.state);
-            set('session', live ? dot('running', 'live') : job.session?.approval ? dot('attention', 'approval needed') : '');
+            set('session', live ? dot('running', 'live') : approvalOf(job) ? dot('attention', 'approval needed') : '');
             set('plan', job.plan?.draft ? dot('attention', 'unsaved draft') : job.state === 'plan_review' ? dot('attention', 'awaiting approval') : '');
             if (job.diff) { const files = parsePatch(diffPatch(job)); const a = files.reduce((n, f) => n + f.added, 0), r = files.reduce((n, f) => n + f.removed, 0);
                 set('diff', files.length ? `<span class="work-diffstat">${job.diff.live ? dot('running', 'live') : ''}<span class="work-add">+${a}</span><span class="work-del">−${r}</span></span>` : ''); }
@@ -810,7 +810,7 @@
                 ${findings.length ? `<div class="work-toolbar" role="toolbar" aria-label="Fix review findings"><span class="work-meta work-grow">Pick findings to fix in one targeted implement run (checks and review follow); the plan stays as it is.</span>
                     <button type="button" class="w-btn" data-variant="primary" data-size="sm" data-fix-selected ${fix?.enabled && selectedFindings.size ? '' : 'disabled'} title="${esc(fix?.enabled ? 'Fix the selected findings' : fix?.reason || 'not available')}">Fix ${selectedFindings.size || ''} selected${fix?.shortcut ? `<kbd class="w-keycap" aria-hidden="true">${esc(fix.shortcut)}</kbd>` : ''}</button></div>` : ''}
                 <div class="work-grid-2">
-                    ${card({id:'rv-sum', eyebrow:'Review', title:'Summary', body:`<div class="w-markdown work-markdown">${markdown(report.summary || '')}</div>`})}
+                    ${card({id:'rv-sum', eyebrow:'Review', title:'Summary', body:`${report.headline ? `<p class="work-headline">${esc(report.headline)}</p>` : ''}${(report.notes || []).length ? `<ul class="work-note__bullets">${report.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}<div class="w-markdown work-markdown">${markdown(report.summary || '')}</div>`})}
                     ${card({id:'rv-adh', eyebrow:'Plan', title:'Plan adherence', body:(report.plan_coverage || []).length ? `<ul class="work-list">${report.plan_coverage.map(c => `<li class="work-coverage">${statusIcon(coverageStatus(c.status), c.status)}<span class="work-mono work-nowrap">${esc(c.criterion_id)}</span><span class="work-grow">${esc(c.evidence || c.status)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No acceptance criteria were assessed.</p>'})}
                 </div>
                 ${(report.out_of_scope_changes || []).length ? banner('caution', '◆', `<strong>Out-of-scope changes</strong><ul>${report.out_of_scope_changes.map(x => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>`) : ''}
@@ -917,6 +917,27 @@
                 </svg><div class="work-legend"><span><i class="work-swatch" data-tone="ok" aria-hidden="true"></i>passed</span><span><i class="work-swatch" data-tone="danger" aria-hidden="true"></i>failed</span></div></section>`;
         }
         let failureFilter = '';
+        /* Evidence (mu/jobs/evidence.py): what the agents captured while testing, newest first. */
+        function evidenceCard(items) {
+            if (!items.length) return '';
+            const url = (e, view = '') => `/api/jobs/${encodeURIComponent(selectedId)}/evidence/${e.file.split('/').map(encodeURIComponent).join('/')}${view ? `?view=${view}` : ''}`;
+            const label = e => e.caption || e.name;
+            const meta = e => [e.stage, e.created_at ? when(e.created_at).slice(5, 16) : '', e.bytes ? bytesText(e.bytes) : ''].filter(Boolean).join(' · ');
+            const tile = e => {
+                const media = e.kind === 'image'
+                    ? `<a class="work-evidence__media" href="${esc(url(e))}" target="_blank" rel="noopener" aria-label="Open ${esc(label(e))} full size"><img src="${esc(url(e))}" alt="${esc(label(e))}" loading="lazy"></a>`
+                    : e.kind === 'video'
+                        ? `<div class="work-evidence__media"><video src="${esc(url(e))}" controls preload="metadata" aria-label="${esc(label(e))}"></video></div>`
+                        : `<div class="work-evidence__media work-evidence__file">${icon(e.kind === 'text' ? 'file-text' : 'file', 'lg')}<span class="work-mono work-ellipsis">${esc(e.name)}</span></div>`;
+                const links = e.kind === 'text' ? `<a href="${esc(url(e, 'text'))}" target="_blank" rel="noopener">View</a> · <a href="${esc(url(e))}">Download</a>`
+                    : e.kind === 'file' ? `<a href="${esc(url(e))}">Download</a>` : '';
+                return `<figure class="work-evidence__item" data-evidence-kind="${esc(e.kind)}">${media}
+                    <figcaption><span class="work-evidence__caption">${esc(label(e))}</span><span class="work-meta">${esc(meta(e))}${links ? ` · ${links}` : ''}</span></figcaption></figure>`;
+            };
+            return card({id:'evidence-h', eyebrow:'Evidence', title:'What the agent saw', meta:`<span class="w-count">${items.length}</span>`,
+                body:`<p class="work-meta">Screenshots, recordings and logs captured while testing. They stay with the job and are never pushed.</p><div class="work-evidence">${items.map(tile).join('')}</div>`});
+        }
+        function bytesText(n) { return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`; }
         function renderChecks(panel) {
             const runs = (job.checks?.runs || []).slice().reverse(); // newest first
             const recheck = job.actions.find(a => a.id === 'recheck');
@@ -943,7 +964,13 @@
                     <ul class="work-unverified__list">${rows.map(x => `<li data-unrunnable="${esc(x.suite || '')}"><strong class="work-mono">${esc(x.suite || '')}</strong>${x.tool ? ` · <code>${esc(x.tool)}</code>` : ''}${x.cause ? ` — ${esc(x.cause)}` : ''}${x.hint ? `<div class="work-meta">${esc(x.hint)}</div>` : ''}</li>`).join('')}</ul>
                     <div class="w-btn-row" role="toolbar" aria-label="Unverified checks">${prepare}${cont && !cont.hidden ? actionButton(cont) : ''}</div></div></section>`;
             };
-            const repair = ENV ? ENV.repairCard(job.checks?.repairs, {buttons:repairButtons()}) : '';
+            // A repair that failed or ended is history once a later run verified the checks: hide its
+            // card (a successful repair stays, with its save-to-template actions).
+            const repairs = job.checks?.repairs || [];
+            const lastRepair = repairs[repairs.length - 1];
+            const repairSuperseded = lastRepair && !['running', 'committed', 'repaired'].includes(lastRepair.outcome)
+                && latest && !isUnverified(latest) && Number(latest.started_at || 0) > Number(lastRepair.finished_at || lastRepair.started_at || 0);
+            const repair = ENV && !repairSuperseded ? ENV.repairCard(repairs, {buttons:repairButtons()}) : '';
             const started = r => r.started_at ? when(r.started_at).slice(5, 16) : '';
             const dur = r => { const ms = runDuration(r); return ms == null ? '' : duration(ms); };
             const liveLog = live.length && running ? card({id:'live-h', eyebrow:'Live', title:'Live log', meta:'running now', body:`<pre class="work-log" data-live-log role="log" aria-live="off">${ansi(live.map(e => `[${e.payload?.suite || 'check'}${e.payload?.baseline ? ' · baseline' : ''}] ${e.payload?.text || ''}`).join(''))}</pre>`}) : '';
@@ -954,6 +981,7 @@
                 ${liveLog}
                 ${repair}
                 ${unverifiedCard(latest)}
+                ${evidenceCard(job.checks?.evidence || [])}
                 ${runs.length ? `<div class="w-table-wrap"><table class="w-table work-runs" aria-label="Runs"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Result</th><th scope="col">Trigger</th><th scope="col" data-num>Duration</th><th scope="col">Started</th></tr></thead><tbody>${runs.map(r => { const k = total(r);
                     return `<tr class="clickable" aria-selected="${r === selected}" data-run="${esc(r.run)}"><td><button type="button" class="work-link-btn" aria-pressed="${r === selected}">Run ${esc(r.run)}</button></td><td>${runPill(r)}</td>
                         <td class="work-result-cell">${k.total ? `<div class="work-toolbar">${resultBar(k.passed, k.failed, k.skipped)}<span class="work-nowrap work-meta">${k.passed}✓ ${k.failed ? `<span class="work-del">${k.failed}✗</span>` : ''}</span></div>` : ''}</td>
@@ -989,14 +1017,58 @@
             const log = panel.querySelector('[data-live-log]'); if (log) log.scrollTop = log.scrollHeight;
         }
         /* ------------------------------------------------------------ session */
+        /* One line per tool call (mirrors core/notes.tool_summary for transcripts recorded before it). */
+        function toolLine(name, args) {
+            if (typeof args === 'string') return `${name} ${args.split('\n').find(l => l.trim()) || ''}`.slice(0, 160);
+            const a = args || {}, cmd = a.command ?? a.cmd;
+            if (cmd) { const text = Array.isArray(cmd) ? cmd.join(' ') : String(cmd), lines = text.split('\n').filter(l => l.trim());
+                return `$ ${(lines[0] || '').trim().slice(0, 160)}${lines.length > 1 ? ' …' : ''}`; }
+            const target = String(a.filename || a.file_path || a.path || '').replace('/workspace/', '') || (Array.isArray(a.files) ? a.files.slice(0, 3).join(', ') : '');
+            const query = a.pattern || a.query || a.url || a.description;
+            return [name, query ? `"${String(query).slice(0, 80)}"` : '', target].filter(Boolean).join(' ').slice(0, 160) || name;
+        }
+        /* A plan/review stage replies with its JSON report: show its headline, not the raw JSON. */
+        function replyItem(text, stage) {
+            const raw = String(text || '').trim(), body = raw.replace(/^```(?:json)?\s*|\s*```$/g, '');
+            if (!body.startsWith('{')) return {kind:'assistant', text:raw};
+            let data = null;
+            try { data = JSON.parse(body); } catch (_) { return {kind:'assistant', text:raw}; }
+            if (!data || typeof data !== 'object' || !('summary' in data || 'headline' in data)) return {kind:'assistant', text:raw};
+            const review = Array.isArray(data.findings) || Array.isArray(data.plan_coverage);
+            const first = String(data.summary || '').split(/(?<=[.!?])\s+/)[0];
+            return {kind:'reply', headline:String(data.headline || first || ''), bullets:(Array.isArray(data.notes) ? data.notes : []).map(String).slice(0, 4),
+                label:review ? `Review report${Array.isArray(data.findings) ? ` · ${data.findings.length} finding${data.findings.length === 1 ? '' : 's'}` : ''}` : stage === 'plan' || Array.isArray(data.steps) ? 'Plan' : 'Structured reply',
+                tab:review ? 'review' : stage === 'plan' || Array.isArray(data.steps) ? 'plan' : '', text:JSON.stringify(data, null, 2)};
+        }
+        /* ------------------------------------------------------------ notes */
+        function attentionBanner(j, failed) {
+            const full = String(j.attention_detail || ''), head = String(j.attention_headline || '') || full;
+            const more = head !== full && full.length > head.length;
+            return `<div class="w-banner" data-tone="${failed ? 'danger' : 'attention'}"${failed ? ' role="alert"' : ''}><span class="w-banner__glyph" aria-hidden="true">${failed ? '✗' : '◆'}</span><div class="w-banner__msg"><p>${esc(head)}</p>${more ? `<details class="work-banner-more"><summary>Full text</summary><p>${esc(full)}</p></details>` : ''}</div></div>`;
+        }
+        const NOTE_STAGE = {plan:'Plan', implement:'Implement', checks:'Checks', review:'Review', push:'Push', you:'You', job:'Job'};
+        function renderNotes(panel) {
+            const notes = job.notes || [];
+            const live = stateStatus(job.state) === 'active';
+            const note = n => `<li class="work-note" data-stage="${esc(n.stage)}"><span class="work-note__dot" data-tone="${esc(n.tone || 'neutral')}" aria-hidden="true"></span>
+                <div class="work-note__head"><span class="w-eyebrow">${esc(NOTE_STAGE[n.stage] || n.stage)}</span><strong class="work-note__title">${esc(n.title)}</strong>${n.count > 1 ? `<span class="w-count" aria-label="${esc(n.count)} times">×${esc(n.count)}</span>` : ''}
+                    <span class="work-meta work-nowrap">${esc(when(n.at))}${n.meta ? ` · ${esc(n.meta)}` : ''}</span>
+                    ${n.tab && tabs.includes(n.tab) ? `<button type="button" class="w-btn work-note__link" data-variant="ghost" data-size="sm" data-note-tab="${esc(n.tab)}"><span>${esc(labels[n.tab])}</span>${icon('chevron-right')}</button>` : ''}</div>
+                ${n.headline ? `<p class="work-note__headline">${esc(n.headline)}</p>` : ''}
+                ${(n.bullets || []).length ? `<ul class="work-note__bullets">${n.bullets.map(b => `<li>${/^\$ /.test(b) ? `<code>${esc(b)}</code>` : esc(b)}</li>`).join('')}</ul>` : ''}</li>`;
+            panel.innerHTML = `<div class="work-stack-tight">
+                <div class="work-toolbar"><span class="work-meta">What happened, in plain English. The Session tab has the full agent transcript.</span><span class="work-spacer"></span><span class="work-meta">${notes.length} notes</span></div>
+                ${notes.length ? `<ol class="work-notes" aria-label="Job notes">${notes.map(note).join('')}${live ? `<li class="work-note"><span class="work-note__dot" data-tone="running" aria-hidden="true"></span><div class="work-note__head"><span class="w-status" data-tone="running"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>${esc(stateLabel(job.state))}…</span></div></li>` : ''}</ol>` : '<p class="work-empty-line">No notes yet.</p>'}</div>`;
+            panel.querySelectorAll('[data-note-tab]').forEach(b => { b.onclick = () => selectTab(b.dataset.noteTab); });
+        }
         function sessionItems(data) {
             if (sessionStage) {
                 const items = [];
                 for (const m of data.stages?.[sessionStage] || []) for (const p of m.parts || []) {
-                    if (p.type === 'text' && p.text) items.push({kind:m.role === 'user' ? 'user' : 'assistant', text:p.text});
+                    if (p.type === 'text' && p.text) items.push(m.role === 'user' ? {kind:'user', text:p.text} : replyItem(p.text, sessionStage));
                     else if (p.type === 'tool_call') { const env = ENV?.toolSummary(p.tool_name, p.tool_args);
                         const args = typeof p.tool_args === 'string' ? p.tool_args : JSON.stringify(p.tool_args ?? '');
-                        items.push({kind:'tool', summary:env || `${p.tool_name}(${String(args || '').slice(0, 120)})`, text:`${p.tool_name}\n${args || ''}`}); }
+                        items.push({kind:'tool', summary:env || toolLine(p.tool_name, p.tool_args), text:`${p.tool_name}\n${typeof p.tool_args?.command === 'string' ? p.tool_args.command : args || ''}`}); }
                     else if (p.type === 'tool_result') { const result = typeof p.tool_result === 'string' ? p.tool_result : JSON.stringify(p.tool_result ?? '');
                         items.push({kind:'tool_result', summary:`${p.tool_name || 'result'}: ${String(result || '').split('\n')[0].slice(0, 160)}`, text:String(result || '')}); }
                 }
@@ -1029,9 +1101,9 @@
                 else if (e.event_type === 'build_environment_failed') items.push({kind:'error', text:`build environment ${e.payload?.binding || ''} failed: ${e.reason || ''}`});
                 else if (e.event_type === 'sandbox_stopped') items.push({kind:'workbench', text:`sandbox stopped${stage ? ` · ${stage}` : ''}`});
                 else if (e.event_type === 'runtime_error' || kind === 'runtime_error') items.push({kind:'error', text:stripAnsi(inner.text || e.reason || 'runtime error')});
-                else if (kind === 'agent_message') items.push({kind:inner.role === 'user' ? 'user' : 'assistant', text:inner.text || ''});
+                else if (kind === 'agent_message') items.push(inner.role === 'user' ? {kind:'user', text:inner.text || ''} : replyItem(inner.text || '', stage));
                 else if (kind === 'tool_call_ui' && inner.tool_name === 'run_in_environment') continue; // shown by environment_command
-                else if (kind === 'tool_call_ui') items.push({kind:'tool', summary:inner.tool_name || 'tool', text:JSON.stringify(inner, null, 2)});
+                else if (kind === 'tool_call_ui') items.push({kind:'tool', summary:inner.summary || inner.tool_name || 'tool', text:inner.summary ? '' : JSON.stringify(inner, null, 2)});
                 else if (kind === 'tool_result_ui') items.push({kind:'tool_result', summary:String(inner.preview || '').split('\n').find(Boolean)?.slice(0, 160) || 'result', text:String(inner.preview || '')});
                 else if (kind === 'runtime_status') continue;
                 else if (e.event_type === 'stage_message') items.push({kind:'assistant', text:inner.text || e.payload?.text || e.reason || ''});
@@ -1052,6 +1124,7 @@
             const item = it => {
                 switch (it.kind) {
                     case 'assistant': return `<div class="work-msg-assistant w-markdown work-markdown">${markdown(it.text)}</div>`;
+                    case 'reply': return `<div class="work-msg-assistant">${it.headline ? `<p class="work-headline">${esc(it.headline)}</p>` : ''}${it.bullets.length ? `<ul class="work-note__bullets">${it.bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}<div class="work-fold-item"><button type="button" class="work-fold" aria-expanded="false" data-fold>${icon('chevron-right')}<span class="work-meta">${esc(it.label)}${it.tab ? ` · full report on the ${esc(labels[it.tab])} tab` : ''}</span></button><pre class="work-fold-body" hidden>${esc(it.text)}</pre></div></div>`;
                     case 'user': return `<div class="work-msg-user"><span class="w-sr-only">You: </span><pre>${esc(it.text)}</pre></div>`;
                     case 'tool': case 'tool_result': { const multi = it.text && it.text !== it.summary;
                         return `<div class="work-fold-item"><button type="button" class="work-fold ${it.kind === 'tool' ? 'is-tool' : ''}" ${multi ? 'aria-expanded="false" data-fold' : 'disabled'}>${multi ? icon('chevron-right') : '<span class="work-fold-pad"></span>'}<span class="work-mono work-ellipsis">${it.kind === 'tool' ? '› ' : '↳ '}${esc(it.summary)}</span></button>${multi ? `<pre class="work-fold-body" hidden>${esc(it.text)}</pre>` : ''}</div>`; }
@@ -1123,9 +1196,10 @@
             if (id === selectedId) { const host = detailEl.querySelector('[data-attempts]'); if (host) host.innerHTML = attemptsTable(); }
         }
 
-        const renderers = {plan:renderPlan, session:renderSession, diff:renderDiff, review:renderReview, checks:renderChecks, diagnostics:renderDiagnostics, costs:renderCosts};
+        const renderers = {notes:renderNotes, plan:renderPlan, session:renderSession, diff:renderDiff, review:renderReview, checks:renderChecks, diagnostics:renderDiagnostics, costs:renderCosts};
         function renderPart(part, force = false) {
             if (!tabs.includes(part) || !job) return;
+            if (LAZY.includes(part) && (job[part] === undefined || stale.has(part))) { if (part === tab) loadLazy(part); if (job[part] === undefined) return; }
             const value = part === 'diff' && job.diff?.live ? {...job.diff, live:{...job.diff.live, generated_at:0}} : job[part];
             const signature = JSON.stringify([value, part === 'diff' ? job.review : null, job.actions, part === 'session' ? job.state : null]);
             if (!force && signatures.get(part) === signature) return;
@@ -1142,10 +1216,25 @@
             renderPart(tab);
             onRoute?.({id:selectedId, tab});
         }
+        /* Fetch a lazy part for the open tab; a change to it while hidden only marks it stale. */
+        const lazyLoading = new Set();
+        async function loadLazy(part) {
+            if (lazyLoading.has(part) || !selectedId) return;
+            lazyLoading.add(part);
+            const id = selectedId;
+            try {
+                const response = await api(`/api/jobs/vm/job/${encodeURIComponent(id)}?parts=${part}`);
+                if (id !== selectedId) return;
+                job = {...job, [part]:response[part]}; stale.delete(part);
+                if (part === tab) renderPart(part, true);
+            } catch (e) { notify(e.message, 'danger'); }
+            finally { lazyLoading.delete(part); }
+        }
         async function refreshParts(parts = tabs) {
             if (!selectedId) return;
             const id = selectedId;
-            const wanted = [...new Set(parts)].filter(p => p !== 'diagnostics');
+            const wanted = [...new Set(parts)].filter(p => p !== 'diagnostics' && (!LAZY.includes(p) || p === tab || (stale.add(p), false)));
+            if (!wanted.length) return;
             const response = await api(`/api/jobs/vm/job/${encodeURIComponent(id)}?parts=${encodeURIComponent(wanted.join(','))}`);
             if (id !== selectedId) return;
             job = {...job, ...response}; renderState();
@@ -1156,14 +1245,16 @@
             if (!id) return;
             if (id !== selectedId && editor && !editor.canLeave()) return;
             const request = ++fetchNumber;
-            const next = await api(`/api/jobs/vm/job/${encodeURIComponent(id)}`);
+            const eager = tabs.filter(t => t !== 'diagnostics' && (!LAZY.includes(t) || t === requested));
+            const next = await api(`/api/jobs/vm/job/${encodeURIComponent(id)}?parts=${encodeURIComponent(['state', 'pipeline', ...eager].join(','))}`);
             if (request !== fetchNumber) return;
             if (selectedId !== id) {
-                editor?.destroy(); editor = null; editing = false; selectedFindings.clear(); signatures.clear(); collapsed.clear();
+                editor?.destroy(); editor = null; editing = false; selectedFindings.clear(); signatures.clear(); collapsed.clear(); stale.clear();
                 sessionStage = ''; selectedRun = null; failureFilter = ''; showUnavailable = false; attempts = null;
                 tab = tabs.includes(requested) ? requested : defaultTab(next); selectedId = id; shell();
             } else if (tabs.includes(requested) && requested !== tab) { tab = requested; }
-            job = next; detailEl.dataset.jobId = id; renderState(); selectTab(tab); renderHome(); return true;
+            const kept = selectedId === id && job ? Object.fromEntries(LAZY.filter(p => job[p] !== undefined && next[p] === undefined).map(p => { stale.add(p); return [p, job[p]]; })) : {};
+            job = {...kept, ...next}; detailEl.dataset.jobId = id; renderState(); selectTab(tab); renderHome(); return true;
         }
         function leave() { ui.register('page:job', []); }
         /* Live diff: while the Diff tab of an active job is open, refetch only the diff part. */

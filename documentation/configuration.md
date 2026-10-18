@@ -167,11 +167,11 @@ the table is stale).
 | `sandbox.image` | `mucli-job-runtime:latest` | Runtime image. Local image; it is never pulled. |
 | `sandbox.cpu` | 4 | CPUs. |
 | `sandbox.memory` | `8g` | Memory limit. Docker memory value, e.g. 8g or 16384m. |
-| `sandbox.max_file_bytes` | 20,971,520 bytes | Largest changed file. Changes with a bigger file are rejected. |
 | `sandbox.pids_limit` | 4,096 | Process limit. Most processes and threads one stage or check container may run (builds and parallel test runners need many). |
+| `sandbox.code_overlay` | on | Run current job code. Mount this mucli's job code read-only over the copy baked into each stage image, so images built by an older mucli run the current stage worker. Off: stages run the image's own copy. |
 | `sandbox.cache_max_gb` | 20 GB | Dependency cache cap. Shared package caches reused across jobs; least recently used entries are pruned. 0 = unlimited. |
 | `jobs.container_cli` | `auto` | Container CLI. Auto uses Docker when present, else Podman. Podman cannot run the per-job Docker engine. |
-| `sandbox.egress_extra` | `registry.npmjs.org`, `registry.yarnpkg.com`, `crates.io`, `index.crates.io`, `static.crates.io`, `static.rust-lang.org`, `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org`, `pypi.org`, `files.pythonhosted.org`, `pythonhosted.org` | Extra egress domains. Domains implement, checks and template job setup may reach in addition to the model relay. Defaults to the npm, Cargo/crates.io, Maven/Gradle and PyPI registries; clear the list to lock jobs down. |
+| `sandbox.egress_extra` | `registry.npmjs.org`, `registry.yarnpkg.com`, `crates.io`, `index.crates.io`, `static.crates.io`, `static.rust-lang.org`, `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org`, `pypi.org`, `files.pythonhosted.org`, `pythonhosted.org`, `cdn.playwright.dev`, `playwright.download.prss.microsoft.com`, `playwright.azureedge.net` | Extra egress domains. Domains implement, checks and template job setup may reach in addition to the model relay. Defaults to the npm, Cargo/crates.io, Maven/Gradle and PyPI registries; clear the list to lock jobs down. |
 
 **Push**
 

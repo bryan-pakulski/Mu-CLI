@@ -860,6 +860,28 @@ async def delete_historic_job(
         raise _state_error(exc) from exc
 
 
+@router.get("/{job_id}/evidence/{file:path}")
+async def get_job_evidence(job_id: str, file: str, request: Request):
+    """One evidence file (mu/jobs/evidence.py). Only files in the job's evidence manifest are
+    served; images and video inline, everything else (SVG and HTML included) as a download."""
+    from fastapi.responses import FileResponse
+    from mu.jobs.core.artifacts import artifacts_for
+    from mu.jobs.evidence import media_type, resolve
+    service = _service(request)
+    job = _job_or_404(service, job_id)
+    entry = resolve(artifacts_for(job), file)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="evidence not found")
+    inline = entry["kind"] in ("image", "video") or request.query_params.get("view") == "text" and entry["kind"] == "text"
+    disposition = "inline" if inline else "attachment"
+    return FileResponse(entry["path"], media_type=media_type(entry["name"]), headers={
+        "Content-Disposition": f'{disposition}; filename="{re.sub(r"[^A-Za-z0-9._-]", "_", entry["name"])}"',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+        "Cache-Control": "private, max-age=3600",
+    })
+
+
 @router.get("/{job_id}/receipt")
 async def get_job_receipt(job_id: str, request: Request):
     service = _service(request)

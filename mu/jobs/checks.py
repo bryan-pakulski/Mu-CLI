@@ -74,8 +74,10 @@ def resolve_suites(job, settings=None):
 
 
 def parse_junit(text: str):
-    if len(text) > 8 * 1024 * 1024 or "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
-        raise ValueError("unsafe or oversized JUnit report")
+    # No size limit; DTDs and entities are refused (entity-expansion / external-entity attacks).
+    upper = text.upper()
+    if "<!DOCTYPE" in upper or "<!ENTITY" in upper:
+        raise ValueError("unsafe JUnit report (DOCTYPE or ENTITY declarations are not allowed)")
     root = ET.fromstring(text)
     cases = []
     suites = [root] if root.tag == "testsuite" else []
@@ -418,6 +420,23 @@ def status_entries(workspace):
     return out
 
 
+def collapse_untracked(workspace, paths, *, limit=500):
+    """Every path in ``paths``, uncapped; past ``limit`` entries each file collapses to its
+    outermost directory that holds no tracked file (``dir/``), so a setup or repair that leaves
+    thousands of files is recorded compactly and none of them is left out."""
+    paths = sorted(set(paths))
+    if len(paths) <= limit:
+        return paths
+    tracked = git(workspace, "ls-files", "-z").split("\0")
+    tracked_dirs = {"/".join(f.split("/")[:i]) for f in tracked if f for i in range(1, f.count("/") + 1)}
+    out = set()
+    for path in paths:
+        parts = path.split("/")
+        out.add(next(("/".join(parts[:i]) + "/" for i in range(1, len(parts))
+                      if "/".join(parts[:i]) not in tracked_dirs), path))
+    return sorted(out)
+
+
 def discard_byproducts(workspace, baseline, suite):
     """Undo what a suite left behind that is a build byproduct, not a source edit:
     new untracked files (removed) and rewritten lockfiles (restored to HEAD).
@@ -446,7 +465,7 @@ class ChecksStage:
             from .sandbox.check_runner import run_suite_in_container
             run_suite = lambda job, workspace, suite: run_suite_in_container(
                 job, workspace, suite, service=service, restart_cursor=self._restart_cursor,
-                environment=self._owners.get(suite.name), states=self._states)
+                environment=self._owners.get(suite.name), states=self._states, guard=False)
         self.run_suite = run_suite
         self.settings = settings
 
@@ -464,7 +483,8 @@ class ChecksStage:
             owner, members = group
             started = time.monotonic()
             results = run_suites_in_container(job, job.worktree, members, service=self.service,
-                                              restart_cursor=self._restart_cursor, environment=owner, states=self._states)
+                                              restart_cursor=self._restart_cursor, environment=owner, states=self._states,
+                                              guard=False)
             share = int((time.monotonic() - started) * 1000 / max(1, len(members)))
             for result in results:
                 result.setdefault("duration_ms", share)
@@ -531,6 +551,12 @@ class ChecksStage:
             except (TypeError, ValueError):
                 result["duration_ms"] = elapsed
             results.append(result)
+        if self._sandboxed:
+            # The host guard, once, after every suite's byproducts are gone: it sees exactly what
+            # the job would commit (a test's leftover file never blocks; a SandboxGuardError parks).
+            from .sandbox.policy import guard_policy
+            from .sandbox.runner import _guard
+            _guard(job, guard_policy(job, "checks"))
         failing = [r for r in results if not r.get("passed")]
         missing_tools = sorted({r["missing_executable"] for r in results if r.get("missing_executable")})
         missing_environments = {r["missing_executable"]: r.get("environment") or "" for r in results if r.get("missing_executable")}
@@ -627,7 +653,8 @@ def _without_setup_files(job, porcelain):
     kept = []
     for line in str(porcelain).splitlines():
         path = line[3:].strip().strip('"')
-        if path in produced or (path.endswith("/") and any(p.startswith(path) for p in produced)):
+        if (path in produced or (path.endswith("/") and any(p.startswith(path) for p in produced))
+                or any(p.endswith("/") and path.startswith(p) for p in produced)):
             continue
         kept.append(line)
     return "\n".join(kept)

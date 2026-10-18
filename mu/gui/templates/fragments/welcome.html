@@ -75,7 +75,7 @@
                              @keydown.enter.prevent="loadSession(s.name)"
                              @keydown.space.prevent="loadSession(s.name)"
                              :aria-label="`Open session ${s.name}${sessionState(s) ? ' (' + sessionState(s).toLowerCase() + ')' : ''}`">
-                        <span class="session-kind" x-text="sessionGlyph(s.session_type)" aria-hidden="true"></span>
+                        <span class="session-kind" x-html="sessionAvatarMarkup(s.name, s.session_type, 'lg')" aria-hidden="true"></span>
                         <div class="welcome-session-copy">
                             <strong x-text="s.name"></strong>
                             <small x-text="`${s.session_type || 'workspace'} · ${formatDate(s.modified_at)}`"></small>
@@ -348,7 +348,6 @@ function welcomeView() {
         closeModal(){ if(this.creating)return; this.modal=null; },
         nextStep(){ this.error=null; if(!this.canContinue){this.error='Complete the required fields before continuing.';return;} this.step=Math.min(4,this.step+1); },
         sessionIcon(type){ return sessionTypeIconMarkup(type, 'session-type-svg'); },
-        sessionGlyph(type){ return type === 'container' ? '◇' : type === 'chat' ? '○' : '▱'; },
         sessionState(s){ if(!s) return ''; if(s.is_current) return 'Active'; if(s.is_busy) return 'Working'; if(s.is_loaded) return 'Loaded'; return ''; },
         sessionStateHint(s){ const st=this.sessionState(s); return st==='Active' ? 'Currently focused in this window' : st==='Working' ? 'Loaded and mid-turn' : st==='Loaded' ? 'Loaded in memory' : ''; },
         sessionRank(s){ return s.is_current ? 0 : s.is_busy ? 1 : s.is_loaded ? 2 : 3; },

@@ -37,7 +37,8 @@ def test_mobile_uses_same_alpine_environmental_palette_as_web():
         assert value in generated
     for text in (text, generated):
         assert "#16161e" not in text and "#7aa2f7" not in text
-        assert "#1A1814" not in text
+        # The old canvas colour survives only as the μ app icon's ground (`mark-ground`).
+        assert "#1A1814" not in text.replace('"mark-ground": "#1A1814"', "")
     assert "#FAF8F5" not in text
     assert "#B0ACA0" not in text
     # The previous indigo palette is fully replaced by planos.

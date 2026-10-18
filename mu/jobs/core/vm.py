@@ -11,10 +11,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .actions import JobFacts, available_actions
 from .artifacts import artifacts_for
+from .notes import AUDIT_EXCLUDED
 from .pipeline import HistoryEntry, derive_pipeline, mini_indicator
 from .states import TERMINAL, CoreState, JobState, WAITING, from_legacy
 
-PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs")
+PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs", "notes")
 
 
 def get_default_job_service():
@@ -383,6 +384,16 @@ def _stage_agents(job) -> Dict[str, Any]:
     return {s: {**cfg, "label": AGENT_LABELS.get(cfg["agent"], cfg["agent"])} for s, cfg in agents.items()}
 
 
+def _attention_headline(job, review: Dict[str, Any]) -> str:
+    from .notes import HEADLINE_CHARS, clean, first_sentence
+    detail = str(job.attention_detail or "").strip()
+    if not detail:
+        return ""
+    if review.get("headline") and detail in (review.get("summary"), review.get("headline")):
+        return clean(review["headline"])
+    return clean(detail) if len(detail) <= HEADLINE_CHARS else first_sentence(detail)
+
+
 def _summary(service, job, *, now: float) -> Dict[str, Any]:
     from ..models import resolve_stage_model
     core = service.store.core_state(job.id)
@@ -401,6 +412,8 @@ def _summary(service, job, *, now: float) -> Dict[str, Any]:
         "failed_from": core.failed_from.value if core.failed_from else None,
         "legacy_status": job.status.value,
         "attention_detail": job.attention_detail,
+        # One line for the banner and Needs-you rows; the full text stays in attention_detail.
+        "attention_headline": _attention_headline(job, review),
         "mini": mini_indicator(steps),
         "steps": [s.to_dict() for s in steps],
         "verdict": review.get("verdict") or "",
@@ -441,6 +454,9 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         facts = facts_for(service, job, core)
         out["actions"] = [a.to_dict() for a in available_actions(facts)]
         out["environment_approval"] = facts.environment_approval
+        # The pending tool approval rides in the cheap state part too, so the page can show the
+        # approval card without fetching the (large) session part.
+        out["approval"] = facts.pending_approval
         # Jobs run unattended: a failed template job setup is a warning (the job continued).
         from ..sandbox.job_setup import setup_warning
         out["setup_warning"] = setup_warning(job)
@@ -458,11 +474,20 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
         out["checks"] = _checks_part(service, job)
         from ..sandbox.repair import describe_repairs
         out["checks"]["repairs"] = describe_repairs(job)
+        # Screenshots, recordings and logs the agents captured (mu/jobs/evidence.py), newest first.
+        from ..evidence import manifest
+        out["checks"]["evidence"] = list(reversed(manifest(artifacts_for(job))))
     if "costs" in wanted:
         art = artifacts_for(job)
+        # The audit trail: agent tool traffic and raw check output live in the Session and
+        # Checks tabs, and were most of this part's bytes.
         out["costs"] = {"total_usd": max(float(job.cost_usd or 0.0), sum(art.stage_costs().values())),
                         "by_stage": art.stage_costs() if art.exists() else {},
-                        "events": [e.to_dict() for e in service.store.recent_events(job.id)]}
+                        "events": [e.to_dict() for e in service.store.recent_events(job.id)
+                                   if e.event_type not in AUDIT_EXCLUDED]}
+    if "notes" in wanted:
+        from .notes import job_notes
+        out["notes"] = job_notes(service, job)
     if "diff" in wanted:
         art = artifacts_for(job)
         out["diff"] = {"patch": (art.read_text("diff.patch") if art.exists() else None),

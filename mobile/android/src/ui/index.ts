@@ -4,6 +4,7 @@
 export { Pressable, fireHaptic, type PressableProps, type Haptic } from './Pressable';
 export { Text, textStyle, type TextProps, type TextVariant, type TextTone } from './Text';
 export { Icon, type IconName, type IconProps } from './Icon';
+export { SessionAvatar, sessionMonogram, sessionPigment, AVATAR_PIGMENTS } from './SessionAvatar';
 export { Button, IconButton, resolveVariant, type ButtonProps, type ButtonVariant } from './Button';
 export { Chip, StatusChip, StatusIcon, StatusPill, Pill, Eyebrow, CountBadge, type ChipProps } from './Chip';
 export { Card, Panel, StatStrip, StatTile, KV, Pre, Empty, Loading, type CardProps, type StatItem } from './Card';

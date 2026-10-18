@@ -136,6 +136,16 @@ RUN if python3 -c 'import fastapi, httpx, tiktoken' 2>/dev/null; \\
     && /opt/mucli-venv/bin/pip install --no-cache-dir -r /opt/mucli/requirements.txt \\
     && mkdir -p /opt/mucli/.cache/tiktoken \\
     && TIKTOKEN_CACHE_DIR=/opt/mucli/.cache/tiktoken /opt/mucli-venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+# Headless Chromium for job evidence screenshots (mu/jobs/evidence.py). Best effort: a base whose
+# package manager Playwright cannot drive (e.g. Alpine) still builds, just without a browser.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+# Link the venv's CLI only when the base has none (a base with Playwright keeps its own).
+RUN if [ -x /opt/mucli-venv/bin/playwright ] && ! command -v playwright >/dev/null 2>&1; then \\
+        ln -s /opt/mucli-venv/bin/playwright /usr/local/bin/playwright; fi; \\
+    (/opt/mucli-venv/bin/python -m playwright install --with-deps --only-shell chromium \\
+        && chmod -R a+rX /opt/ms-playwright) \\
+    || echo "mucli toolchain image: headless Chromium unavailable on {base_image}; evidence screenshots need it"; \\
+    rm -rf /var/lib/apt/lists/* 2>/dev/null; true
 COPY . /opt/mucli
 # Toolchains installed under /root (rustup's default) must stay usable as the host user.
 RUN chmod -R a+rX /root /opt/mucli 2>/dev/null || true; mkdir -p /cache && chmod 1777 /cache

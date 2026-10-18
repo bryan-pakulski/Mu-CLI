@@ -245,6 +245,20 @@ def _verify(service, job, lease) -> int:
         from .sandbox.environments import EnvironmentBlocked
         if isinstance(exc, JobStateError):
             raise
+        from .sandbox.policy import SandboxGuardError
+        if isinstance(exc, SandboxGuardError):
+            # A security control (secret file or value, escaping path, unapproved workflow): park
+            # for a human, who removes or allows it and resumes; never a dead failed job.
+            try:
+                if lease.owned() and service.get(job_id).status == JobStatus.VERIFYING:
+                    from .sandbox.runner import guard_blocked
+                    detail = guard_blocked(service, service.get(job_id), "checks", exc)
+                    service.require_human(job_id, AttentionReason.UNSAFE_ACTION, detail[:2000],
+                                          payload={"stage": "checks", "guard": str(exc)[:1000]})
+                    _refresh_receipt(service, job_id)
+            except Exception:
+                pass
+            return 23
         if isinstance(exc, EnvironmentBlocked):
             try:
                 if lease.owned() and service.get(job_id).status == JobStatus.VERIFYING:

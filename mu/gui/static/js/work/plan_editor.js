@@ -52,6 +52,10 @@
             if (!allowed.has(el.tagName)) el.replaceWith(document.createTextNode(el.textContent));
             else [...el.attributes].forEach(attr => el.removeAttribute(attr.name));
         });
+        // marked escapes code spans again on top of the escape above (`</div>` showed as `&lt;/div&gt;`);
+        // undo one level as text, which can never become markup.
+        const entities = {'&lt;':'<', '&gt;':'>', '&quot;':'"', '&#39;':"'", '&#039;':"'", '&amp;':'&'};
+        template.content.querySelectorAll('code').forEach(el => { el.textContent = el.textContent.replace(/&(?:lt|gt|quot|#0?39|amp);/g, m => entities[m]); });
         return template.innerHTML;
     }
     /* planos plan editing: markdown with a live side-by-side preview (structured rows as an

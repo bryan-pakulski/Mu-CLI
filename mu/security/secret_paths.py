@@ -313,8 +313,24 @@ def redact_secrets(text: str) -> Tuple[str, int]:
     return out, total
 
 
+# Directories whose contents are test material. A secret-looking file in one (a fixture
+# `server.key`, a fake `credentials.json`) is test data, not a credential: job sandboxes allow
+# it, and the diff scan's pattern matches there do not block (injected credentials still do).
+TEST_FIXTURE_DIRS = frozenset({
+    "test", "tests", "__tests__", "spec", "specs", "fixture", "fixtures", "__fixtures__",
+    "testdata", "test_data", "test-data", "testing", "__mocks__", "mocks", "e2e",
+})
+
+
+def is_test_fixture(relative_path: str) -> bool:
+    """True when a repository-relative path lies under a test or fixture directory."""
+    parts = str(relative_path or "").replace("\\", "/").strip("/").split("/")[:-1]
+    return any(part.lower() in TEST_FIXTURE_DIRS for part in parts)
+
+
 __all__ = [
     "is_denied_path",
+    "is_test_fixture",
     "extract_paths_from_command",
     "redact_secrets",
 ]

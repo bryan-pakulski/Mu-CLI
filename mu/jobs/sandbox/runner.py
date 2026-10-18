@@ -43,8 +43,7 @@ class StageRestart(RuntimeError):
     pass
 
 
-class SandboxGuardError(ValueError):
-    """A finished stage left the worktree in a state that must not be committed or pushed."""
+from .policy import SandboxGuardError  # noqa: E402,F401 - re-exported: raised by every host guard
 
 
 # Shown on every surface (terminal, web, mobile): no terminal keys, no module invocations.
@@ -162,7 +161,13 @@ def run_stage_in_container(service, job, stage, prompt, **kwargs):
             raise
 
 
-def _read_output(directory: Path, name: str, limit=8 * 1024 * 1024):
+# Largest stage output file the host reads (result, transcript). Far above any real output: it
+# only stops a runaway container from making the host load an unbounded file. Check results
+# carry full stdout/stderr and JUnit reports, so a low cap failed honest, large test runs.
+OUTPUT_LIMIT = 256 * 1024 * 1024
+
+
+def _read_output(directory: Path, name: str, limit=OUTPUT_LIMIT):
     path = directory / name
     if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
         raise RuntimeError(f"invalid sandbox output: {name}")
@@ -174,32 +179,79 @@ def _git(job, *args, timeout=60):
                           capture_output=True, check=True, timeout=timeout)
 
 
-def worktree_patch(job, *, max_untracked_bytes=20 * 1024 * 1024) -> str:
-    """Everything the job would commit relative to its base: tracked changes (committed or
-    not) plus untracked, non-ignored files as additions. Read-only (no index changes).
+# Files above this size are kept out of the in-memory diff and streamed through the secret
+# scan in pieces instead: no file is too big to change, and none goes unscanned.
+SCAN_CHUNK_BYTES = 4 * 1024 * 1024
+# Bytes repeated across a split inside one very long line, so a secret cannot hide at the cut.
+SCAN_OVERLAP_BYTES = 4096
+
+
+def _file_patches(name: str, path: Path, *, chunk_bytes: int = SCAN_CHUNK_BYTES):
+    """The file's content as added-line patch text, in pieces of about ``chunk_bytes``.
+
+    Read in blocks, never whole: a line longer than a block (minified or binary content) is
+    split with an overlap of ``SCAN_OVERLAP_BYTES``; its pieces keep the line's number."""
+    header = f"diff --git a/{name} b/{name}\nnew file mode 100644\n--- /dev/null\n+++ b/{name}\n"
+    line_no, carry = 1, b""
+    with open(path, "rb") as fh:
+        while True:
+            block = fh.read(chunk_bytes)
+            eof = not block
+            lines = (carry + block).split(b"\n")
+            partial = False
+            if eof:
+                carry = b""
+                if lines and lines[-1] == b"":
+                    lines.pop()  # the trailing newline, or an empty file
+            else:
+                carry = lines.pop()
+                if len(carry) > chunk_bytes:
+                    lines.append(carry[:-SCAN_OVERLAP_BYTES])
+                    carry, partial = carry[-SCAN_OVERLAP_BYTES:], True
+            if lines:
+                text = [line.decode("utf-8", errors="replace") for line in lines]
+                yield header + f"@@ -0,0 +{line_no},{len(text)} @@\n" + "".join(f"+{t}\n" for t in text)
+                line_no += len(text) - (1 if partial else 0)
+            if eof:
+                return
+
+
+def worktree_patches(job, *, chunk_bytes: int = SCAN_CHUNK_BYTES):
+    """Everything the job would commit relative to its base, as patch text pieces: tracked
+    changes (committed or not) plus untracked, non-ignored files as additions. Read-only.
 
     ``--text``: binary files and paths a (job-written) ``.gitattributes`` marks ``-diff`` are
-    diffed as text, never hidden behind "Binary files differ". An untracked file larger than
-    ``max_untracked_bytes`` is refused (ValueError), never silently left unscanned."""
+    diffed as text, never hidden behind "Binary files differ". Files larger than
+    ``chunk_bytes`` are left out of the diff and streamed whole (their full content counts as
+    added), so a file of any size is scanned without being held in memory."""
     base = str(getattr(job, "base_sha", "") or "") or "HEAD"
-    patch = _git(job, "diff", "--no-color", "--text", "--no-ext-diff", "--no-textconv", base, "--").stdout.decode(
-        "utf-8", errors="replace")
-    parts = [patch]
-    untracked = _git(job, "ls-files", "-z", "--others", "--exclude-standard").stdout.decode("utf-8", "surrogateescape")
     root = Path(job.worktree)
-    for name in (n for n in untracked.split("\0") if n):
+
+    def large(name: str) -> bool:
+        path = root / name
+        try:
+            return not path.is_symlink() and path.is_file() and path.stat().st_size > chunk_bytes
+        except OSError:
+            return False
+    changed = [n for n in _git(job, "diff", "--name-only", "-z", base, "--").stdout.decode(
+        "utf-8", "surrogateescape").split("\0") if n]
+    big = [n for n in changed if large(n)]
+    yield _git(job, "diff", "--no-color", "--text", "--no-ext-diff", "--no-textconv", base, "--", ".",
+               *(f":(exclude,literal){n}" for n in big)).stdout.decode("utf-8", errors="replace")
+    untracked = _git(job, "ls-files", "-z", "--others", "--exclude-standard").stdout.decode("utf-8", "surrogateescape")
+    for name in big + [n for n in untracked.split("\0") if n]:
         path = root / name
         try:
             if path.is_symlink() or not path.is_file():
                 continue
-            if path.stat().st_size > max_untracked_bytes:
-                raise ValueError(f"untracked file exceeds the sandbox size limit and cannot be scanned: {name}")
-            lines = path.read_bytes().decode("utf-8", errors="replace").splitlines()
+            yield from _file_patches(name, path, chunk_bytes=chunk_bytes)
         except OSError:
             continue
-        parts.append(f"diff --git a/{name} b/{name}\nnew file mode 100644\n--- /dev/null\n+++ b/{name}\n"
-                     f"@@ -0,0 +1,{len(lines)} @@\n" + "".join(f"+{line}\n" for line in lines))
-    return "".join(parts)
+
+
+def worktree_patch(job, *, chunk_bytes: int = SCAN_CHUNK_BYTES) -> str:
+    """:func:`worktree_patches` as one string (small worktrees, tests)."""
+    return "".join(worktree_patches(job, chunk_bytes=chunk_bytes))
 
 
 def injected_literals(agent) -> list:
@@ -263,6 +315,19 @@ def _offer_repository_egress(service, job, stage) -> None:
         pass
 
 
+def guard_blocked(service, job, stage: str, exc: Exception) -> str:
+    """Record a host guard block (``guard_blocked`` event, read by the next implement prompt)
+    and return the attention text for the parked job."""
+    error = str(exc)[:2000]
+    try:
+        service.store.append_event(job.id, "guard_blocked", reason=error[:500], payload={"stage": stage, "error": error})
+    except Exception:  # noqa: BLE001 - the park itself carries the reason
+        pass
+    return (f"A safety check stopped the {stage} stage: {error}. Remove or move the file (test fixtures belong "
+            "under tests/, fixtures/ or testdata/), or allow it in the repository's .mucli/jobs.toml, then resume; "
+            "on resume the agent is told what was blocked.")
+
+
 def _guard(job, policy, *, literals=()):
     """Host check after a writing stage (implement, checks): the worktree may be committed and
     pushed only if its changed paths are safe, it holds no secret files, and the diff carries
@@ -283,16 +348,12 @@ def _guard(job, policy, *, literals=()):
     allowed = PlanDoc.parse(plan).files if plan else []
     from .policy import workspace_precheck
     try:
-        validate_changes(job.worktree, paths, allowed_workflows=allowed, max_file_bytes=policy.max_file_bytes)
+        validate_changes(job.worktree, paths, allowed_workflows=allowed)
         workspace_precheck(job.worktree, allow_paths=getattr(policy, "allow_paths", ()))
     except ValueError as exc:
         raise SandboxGuardError(str(exc)) from exc
     from mu.security.diff_scan import scan_patch, summarize
-    try:
-        patch = worktree_patch(job, max_untracked_bytes=policy.max_file_bytes)
-    except ValueError as exc:
-        raise SandboxGuardError(str(exc)) from exc
-    findings = scan_patch(patch, literals=literals)
+    findings = [f for piece in worktree_patches(job) for f in scan_patch(piece, literals=literals, allow_fixtures=True)]
     if findings:
         raise SandboxGuardError("the job's changes contain secrets and cannot be committed or pushed: "
                                 + summarize(findings))
@@ -302,7 +363,7 @@ def _keep_transcript(outputs, art, stage):
     """Persist the stage conversation from the container output (if it wrote one)."""
     try:
         if (outputs / "transcript.json").exists():
-            art.write_json(f"logs/{stage}-transcript.json", _read_output(outputs, "transcript.json", limit=64 * 1024 * 1024))
+            art.write_json(f"logs/{stage}-transcript.json", _read_output(outputs, "transcript.json"))
     except (RuntimeError, ValueError, OSError):
         pass
 
@@ -419,19 +480,34 @@ def runtime_image_warning(label, current, image) -> str:
             f"{SETUP_HINT}.")
 
 
+def deps_image_warning(label, current, image) -> str:
+    """Text when an image's Python dependencies (``io.mucli.deps``) predate this host's."""
+    if not label or label == current:
+        return ""
+    return (f"{image} was built with older mucli dependencies ({label} ≠ {current}); stages run the current "
+            f"job code but may miss a new Python package. {SETUP_HINT}.")
+
+
 def check_runtime_image(service, job, runner, docker, policy):
     """Warn on the job (once per fingerprint) when the stage image runs stale mucli code; never blocks."""
-    from .build import IMAGE, SOURCE_LABEL, source_digest
+    from .build import DEPS_LABEL, IMAGE, SOURCE_LABEL, code_overlay_mounts, deps_digest, source_digest
+    overlay = bool(getattr(policy, "code_overlay", False)) and bool(code_overlay_mounts())
+    # With the code overlay the stage runs the host's job code; only dependencies can be stale.
+    wanted = DEPS_LABEL if overlay else SOURCE_LABEL
     try:
-        out = runner.run([docker, "image", "inspect", "--format", "{{index .Config.Labels \"%s\"}}" % SOURCE_LABEL,
+        out = runner.run([docker, "image", "inspect", "--format", "{{index .Config.Labels \"%s\"}}" % wanted,
                           policy.image], check=False, timeout=15)
         if getattr(out, "returncode", 0):
             return ""
         label = str(getattr(out, "stdout", "") or "").strip()
         label = "" if label in ("", "<no value>") else label
-        if label == "" and policy.image != IMAGE:
+        if overlay:
+            # Images built before the deps label: unknown, not stale (their code is overlaid).
+            warning = deps_image_warning(label, deps_digest(), policy.image) if label else ""
+        elif label == "" and policy.image != IMAGE:
             return ""  # a derived build-environment image without the inherited label: unknown
-        warning = runtime_image_warning(label, source_digest(), policy.image)
+        else:
+            warning = runtime_image_warning(label, source_digest(), policy.image)
     except Exception:  # noqa: BLE001 - staleness is advisory
         return ""
     if not warning:
@@ -658,6 +734,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
                     runner.run([docker, "stop", "-t", "20", name], check=False, timeout=45)
                     completed.wait(30)
                     _keep_transcript(outputs, art, stage)
+                    from ..evidence import collect_for_stage
+                    collect_for_stage(service, job, outputs, art, stage)
                     _mark_resumable(service, job, stage, True)
                     if agent != "mucli":
                         try:
@@ -681,6 +759,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
             if not isinstance(result, dict) or result.get("kind") not in ("completed", "failed", "needs_human"):
                 raise RuntimeError("invalid sandbox result")
             _keep_transcript(outputs, art, stage)
+            from ..evidence import collect_for_stage
+            collect_for_stage(service, job, outputs, art, stage)
             _mark_resumable(service, job, stage, result["kind"] == "needs_human")
             if agent != "mucli":
                 _keep_harness_state(art, agent, stage, root / "state", result)
@@ -752,7 +832,12 @@ class SandboxJobRunner:
         except SandboxUnavailable:
             raise
         except SandboxGuardError as exc:
-            return JobRunOutcome(kind="failed", status="error", error=str(exc), cost_usd=_spent(exc), error_class="fatal")
+            # A security control stopped the change: park for a human (remove or allow-list the
+            # file, then resume, and the agent is told why), never a dead failed job.
+            detail = guard_blocked(self.service, job, "implement", exc)
+            return JobRunOutcome(kind="needs_human", attention_reason=AttentionReason.UNSAFE_ACTION,
+                                 attention_detail=detail, attention_payload={"stage": "implement", "guard": str(exc)},
+                                 cost_usd=_spent(exc))
         except Exception as exc:
             error_class = classify_error("error", str(exc))
             return JobRunOutcome(kind="failed", status="error", error=str(exc), cost_usd=_spent(exc),

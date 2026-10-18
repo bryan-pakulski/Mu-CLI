@@ -78,9 +78,13 @@ class RepairRunner:
     """Fake docker CLI: ``create`` records args; ``start`` plays the repair (writes the result and
     transcript, edits the worktree); ``commit``/``inspect``/``run`` (secret scan) are recorded."""
 
-    def __init__(self, *, result=None, worktree_edit=None, chowned=True, secret=""):
+    def __init__(self, *, result=None, worktree_edit=None, chowned=True, secret="", transcript=None):
         self.result = result or {"kind": "completed", "status": "completed",
                                  "text": "Installed.\nREPAIR COMMANDS:\n```\napt-get install -y jq\nnpm ci\n```"}
+        # The shell calls the agent made (the commands it reports must be among them).
+        self.transcript = transcript if transcript is not None else [{"role": "assistant", "parts": [
+            {"type": "tool_call", "tool_name": "bash", "tool_args": {"command": "apt-get update && apt-get install -y jq"}},
+            {"type": "tool_call", "tool_name": "bash", "tool_args": {"command": "npm ci"}}]}]
         self.worktree_edit = worktree_edit
         self.chowned = chowned
         self.secret = secret
@@ -108,8 +112,7 @@ class RepairRunner:
             if self.worktree_edit:
                 self.worktree_edit(ws)
             (outp / "result.json").write_text(json.dumps(self.result))
-            (outp / "transcript.json").write_text(json.dumps([{"role": "assistant", "parts": [
-                {"type": "tool_call", "tool_name": "bash", "tool_args": {"command": "npm ci"}}]}]))
+            (outp / "transcript.json").write_text(json.dumps(self.transcript))
             if self.chowned:
                 (outp / ".chowned").write_text("")
         elif verb == "image" and args[2] == "inspect" and "--format" in args:
@@ -282,16 +285,22 @@ def test_tracked_file_changes_are_reverted_but_never_the_implement_work(home, tm
     git(ws, "commit", "-m", "files")
     (ws / "src.txt").write_text("implement's change\n")      # the implement stage's work
     (ws / "new_feature.py").write_text("print('new')\n")     # implement's new file
+    big = b"implement asset " * (6 * 1024 * 1024 // 16)        # above the old 4 MiB snapshot cap
+    (ws / "src.txt").write_bytes(b"implement's change\n")
+    (ws / "asset.bin").write_bytes(big)
+    git(ws, "add", "asset.bin")
     before = _status(str(ws))
-    saved = _snapshot(str(ws), before)
-    # The repair: rewrites the manifest, edits implement's file, deletes a tracked file, installs.
+    saved = _snapshot(str(ws), before, tmp_path / "snapshot")
+    # The repair: rewrites the manifest, edits implement's files, deletes a tracked file, installs.
     (ws / "package.json").write_text("{}")
+    (ws / "asset.bin").write_bytes(b"clobbered")
     (ws / "src.txt").write_text("repair clobbered this\n")
     (ws / "gone.txt").unlink()
     (ws / "vendor-cache").mkdir()
     (ws / "vendor-cache" / "blob.bin").write_text("x")
     result = revert_tracked_changes(str(ws), before, saved)
-    assert sorted(result["reverted"]) == ["gone.txt", "package.json", "src.txt"]
+    assert sorted(result["reverted"]) == ["asset.bin", "gone.txt", "package.json", "src.txt"]
+    assert (ws / "asset.bin").read_bytes() == big  # large files are protected too
     assert (ws / "src.txt").read_text() == "implement's change\n"   # back to implement's version
     assert (ws / "gone.txt").read_text() == "keep me\n"
     assert "vitest" in (ws / "package.json").read_text()
@@ -668,7 +677,9 @@ def test_web_job_page_repair_card_contract():
     assert "function repairCard(" in env and "vocab.repair_outcome" in env and "w-card work-card work-repair" in env
     assert "data-repair-card" in env and "data-repair-transcript" in env and "'Repair failed'" in env
     assert "Environment repaired" in env and "repairCard, repairOutcome" in env
-    assert "ENV.repairCard(job.checks?.repairs, {buttons:repairButtons()})" in view
+    assert "ENV.repairCard(repairs, {buttons:repairButtons()})" in view
+    # A failed or ended repair is hidden once a later run verified the checks (it is history).
+    assert "repairSuperseded" in view and "!isUnverified(latest)" in view
     assert "ENV.panel(job.build_environments, buttons);" in view and "[data-repair-actions]" in view
     assert "data-repair-actions" in env
     assert "const REPAIR_ACTIONS = ['addRepairToTemplate', 'saveRepairedTemplate'];" in view
@@ -708,3 +719,127 @@ def test_repair_events_refresh_the_checks_and_session_parts(home, tmp_path):
     collect_durable_changes(service, bus, cursor)
     parts = {p for change in bus.flush(force=True) for p in change.parts}
     assert {"checks", "session", "state"} <= parts
+
+
+# ------------------------------------------------------------------ only what actually ran
+
+
+def test_parse_commands_counts_only_commands_that_ran():
+    from mu.jobs.sandbox.repair import parse_commands
+    text = "REPAIR COMMANDS:\n```\napt-get install -y nodejs\nnpm ci\n```"
+    ran = [{"parts": [{"type": "tool_call", "tool_name": "bash", "tool_args": {"command": "cd /workspace &&  npm ci"}}]}]
+    assert parse_commands(text, ran) == ["npm ci"]
+    assert parse_commands(text, []) == []  # a transcript with no shell calls: nothing ran
+    assert parse_commands(text) == ["apt-get install -y nodejs", "npm ci"]  # no transcript: the block
+
+
+def test_a_repair_that_ran_no_commands_commits_nothing(home, tmp_path):
+    """A repair agent without a shell (an image whose baked worker ran repair read-only) can only
+    suggest commands; the host must not commit an unchanged image and call it repaired."""
+    from mu.jobs.sandbox.repair import repair_and_recheck, repair_records
+    service, job = _job(tmp_path)
+    run = _unrunnable_run(service, job)
+    runner = RepairRunner(transcript=[{"role": "assistant", "parts": [
+        {"type": "tool_call", "tool_name": "read_file", "tool_args": {"filename": "package.json"}}]}],
+        result={"kind": "completed", "status": "completed",
+                "text": "I couldn't run anything.\nREPAIR COMMANDS:\n```\napt-get install -y nodejs\n```"})
+    rechecks = []
+    out = repair_and_recheck(service, job.id, run, verify=lambda fresh: rechecks.append(1) or run, runner=runner,
+                             relay_factory=FakeRelay, settings={"sandbox": {"egress_extra": []}})
+    assert out is run and not runner.commits()
+    record = repair_records(service.get(job.id))[0]
+    assert record["outcome"] == "no_commands" and record["commands"] == []
+    assert "ran no shell commands" in record["error"] and "apt-get install -y nodejs" in record["error"]
+    finished = [e for e in service.events(job.id) if e.event_type == "environment_repair"
+                and e.payload.get("phase") == "finished"][-1]
+    assert finished.payload["outcome"] == "no_commands" and "changed nothing" in finished.reason
+
+
+# ------------------------------------------------------------------ code overlay
+
+
+def test_stage_containers_run_the_hosts_job_code(home, tmp_path):
+    from mu.jobs.sandbox.build import code_overlay_mounts, repo_root
+    from mu.jobs.sandbox.policy import SandboxPolicy, container_args
+    service, job = _job(tmp_path)
+    policy = SandboxPolicy.for_stage("repair", {})
+    assert policy.code_overlay is True  # default on
+    dirs = [tmp_path / d for d in ("in", "out", "relay")]
+    for d in dirs:
+        d.mkdir()
+    args = container_args("c", "repair", job.worktree, *map(str, dirs), policy, "t", role="job-repair")
+    mounts = [a for a in args if a.startswith("type=bind")]
+    root = str(repo_root())
+    assert f"type=bind,src={root}/mu,dst=/opt/mucli/mu,readonly" in mounts
+    assert f"type=bind,src={root}/mucli.py,dst=/opt/mucli/mucli.py,readonly" in mounts
+    assert dict(code_overlay_mounts())[f"{root}/providers"] == "/opt/mucli/providers"
+    off = container_args("c", "checks", job.worktree, *map(str, dirs), replace(policy, code_overlay=False), "")
+    assert not any("/opt/mucli" in a for a in off)
+
+
+def test_code_overlay_is_skipped_when_the_tree_holds_a_denied_file(tmp_path):
+    from mu.jobs.sandbox.build import code_overlay_mounts
+    for name in ("mu", "providers", "utils"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "a.py").write_text("x = 1\n")
+    (tmp_path / "mucli.py").write_text("")
+    assert [dst for _src, dst in code_overlay_mounts(tmp_path)] == [
+        "/opt/mucli/mu", "/opt/mucli/providers", "/opt/mucli/utils", "/opt/mucli/mucli.py"]
+    (tmp_path / "utils" / ".env").write_text("SECRET=1\n")
+    assert code_overlay_mounts(tmp_path) == []
+
+
+def test_with_the_overlay_only_dependency_drift_marks_an_image_stale(home, tmp_path):
+    from mu.jobs.sandbox.build import DEPS_LABEL, deps_digest
+    from mu.jobs.sandbox.policy import SandboxPolicy
+    from mu.jobs.sandbox.runner import check_runtime_image
+    service, job = _job(tmp_path)
+    policy = SandboxPolicy.for_stage("implement", {})
+
+    def runner_for(labels):
+        def run(args, check=True, timeout=None, **_kw):
+            fmt = args[args.index("--format") + 1]
+            return SimpleNamespace(returncode=0, stdout=next((v for k, v in labels.items() if k in fmt), ""), stderr="")
+        return SimpleNamespace(run=run)
+    old_code = {"io.mucli.source": "0000000000000000", DEPS_LABEL: deps_digest()}
+    assert check_runtime_image(service, job, runner_for(old_code), "docker", policy) == ""
+    assert check_runtime_image(service, job, runner_for({"io.mucli.source": "0000"}), "docker", policy) == ""
+    stale = check_runtime_image(service, job, runner_for({DEPS_LABEL: "1111111111111111"}), "docker", policy)
+    assert "older mucli dependencies" in stale
+    # Without the overlay the code fingerprint still decides.
+    assert "older mucli code" in check_runtime_image(service, job, runner_for(old_code), "docker",
+                                                     replace(policy, code_overlay=False))
+
+
+# ------------------------------------------------------------------ robustness
+
+
+def test_repair_pins_its_base_image_against_a_concurrent_rebuild(home, tmp_path):
+    """Setup → build the runtime image can move the base tag mid-repair; on the containerd image
+    store the untagged base's content is then collected and `docker commit` fails. The repair
+    holds its own tag on the base and reads the base config from it."""
+    from mu.jobs.sandbox.repair import pin_tag, repair_and_recheck
+    service, job = _job(tmp_path)
+    run = _unrunnable_run(service, job)
+    runner = RepairRunner()
+    verified = _unrunnable_run(service, job, {"passed": True, "return_code": 0, "stdout": "1 passed"})
+    repair_and_recheck(service, job.id, run, verify=lambda fresh: verified, runner=runner, relay_factory=FakeRelay,
+                       settings={"sandbox": {"egress_extra": []}})
+    pinned = pin_tag(job.id, 1)
+    verbs = [c[1:] for c in runner.calls if c[1] in ("tag", "create", "commit", "rmi")]
+    assert verbs[0] == ["tag", STATE["job_image"], pinned]
+    assert pinned in runner.creates[0] and STATE["job_image"] not in runner.creates[0]
+    assert [v[0] for v in verbs] == ["tag", "create", "commit", "rmi"] and verbs[-1] == ["rmi", pinned]
+    inspected = [c for c in runner.calls if c[1] == "image" and "--format" in c]
+    assert inspected and all(c[-1] == pinned for c in inspected if "Config" in " ".join(c))
+
+
+def test_job_containers_never_write_core_dumps(home, tmp_path):
+    from mu.jobs.sandbox.policy import SandboxPolicy, container_args
+    service, job = _job(tmp_path)
+    dirs = [tmp_path / d for d in ("in2", "out2", "relay2")]
+    for d in dirs:
+        d.mkdir()
+    for stage in ("implement", "checks", "repair", "plan"):
+        args = container_args("c", stage, job.worktree, *map(str, dirs), SandboxPolicy.for_stage(stage, {}), "t")
+        assert args[args.index("--ulimit") + 1] == "core=0"

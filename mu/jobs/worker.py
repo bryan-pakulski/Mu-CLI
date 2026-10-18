@@ -28,13 +28,16 @@ from .service import JobService, JobStateError, get_default_job_service
 from .worktree import JobWorktreeManager, WorktreeError
 
 
-def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, label: str) -> str | None:
+def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, label: str,
+                blocked: Optional[list] = None) -> str | None:
+    """Guard and checkpoint the worktree. A host guard block (``SandboxGuardError``) is appended
+    to ``blocked`` when given, so the caller can park the job instead of failing it."""
     try:
         current = service.get(job_id)
         if current.worktree:
             from .sandbox.runner import _guard
-            from .sandbox.policy import SandboxPolicy
-            _guard(current, SandboxPolicy.for_stage("implement"))
+            from .sandbox.policy import guard_policy
+            _guard(current, guard_policy(current, "implement"))
         checkpoint = manager.checkpoint(current, label=label)
         if checkpoint and current.base_sha:
             from .core.artifacts import artifacts_for
@@ -42,6 +45,9 @@ def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, l
             artifacts_for(current).ensure().write_text("diff.patch", patch.stdout or "")
         return checkpoint
     except Exception as exc:
+        from .sandbox.policy import SandboxGuardError
+        if blocked is not None and isinstance(exc, SandboxGuardError):
+            blocked.append(exc)
         payload = {"label": label}
         if isinstance(exc, WorktreeError):
             payload.update(exc.to_dict())
@@ -131,7 +137,24 @@ def _apply_outcome(
         return 20
 
     if outcome.kind == "completed":
-        checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-implementation")
+        blocked: list = []
+        checkpoint = _checkpoint(manager, service, job_id, f"attempt-{attempt_number}-implementation", blocked)
+        if not checkpoint and blocked:
+            # A security control stopped the change: park for a human, never fail the job.
+            from .sandbox.runner import guard_blocked
+            detail = guard_blocked(service, current, "implement", blocked[0])
+            owned = service.store.finish_attempt_owned(
+                attempt_id, worker_id=worker_id, status="needs_human", cost_usd=outcome.cost_usd,
+                cost_add=outcome.cost_usd,
+                metadata={**common_metadata, "attention_reason": AttentionReason.UNSAFE_ACTION.value,
+                          "attention_detail": detail, "attention": {"stage": "implement", "guard": str(blocked[0])}},
+                target_status=JobStatus.NEEDS_HUMAN, transition_reason="human attention required",
+                transition_payload={"stage": "implement", "guard": str(blocked[0])},
+                attention_reason=AttentionReason.UNSAFE_ACTION, attention_detail=detail)
+            if not owned:
+                return 5
+            _refresh_receipt(service, job_id)
+            return 20
         if not checkpoint:
             owned = service.store.finish_attempt_owned(
                 attempt_id, worker_id=worker_id, status="failed", error="host checkpoint or path guard failed",

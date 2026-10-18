@@ -482,6 +482,34 @@ only from registries on the job's egress allowlist. Services that tests start
 themselves (testcontainers, compose) need DinD. Running such checks inside the
 job engine is not supported yet.
 
+**Evidence** (`mu/jobs/evidence.py`). The implement and review prompts ask the
+agent to save what it observed while testing (screenshots, short recordings,
+text logs) to `/output/evidence/`, optionally with `index.json`
+(`[{"file", "caption"}]`). After each stage the host copies regular files (no
+symlinks or dotfiles) into `evidence/<stage>-<stamp>/` in the job's artifacts,
+appends them to `evidence/manifest.json`, redacts secrets from text files and
+emits `evidence_added` (Checks tab and a note refresh). The `checks` part lists
+them as `evidence`; `GET /api/jobs/{id}/evidence/{file}` serves only manifest
+files: images and video inline, anything else (SVG and HTML included) as a
+`text/plain` or binary download with `nosniff` and a sandboxing CSP. Evidence is
+never committed or pushed. The runtime image ships Playwright's headless
+Chromium (`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`, world-readable), so an
+agent can run `playwright screenshot --full-page <url> /output/evidence/x.png`;
+template-derived images install it best-effort at build (a base Playwright cannot
+provision still builds), and Playwright's browser hosts are in the default
+package egress so `playwright install chromium` works where it is missing.
+
+**Job code in stage containers.** Every stage, check and repair container
+mounts the host's job code (`mu`, `providers`, `utils`, `prompts`, `mucli.py`,
+`config/model_pricing.json`) read-only over the image's `/opt/mucli` copy
+(`sandbox.code_overlay`, default on; `build.code_overlay_mounts`). A template or
+repaired image built by an older mucli then still runs the current worker, so
+new stages and protocols work without a rebuild. Before this, such an image ran
+its baked worker, which treated every stage but implement as read-only, so a
+repair agent had no shell. The overlay is skipped when the tree holds a file
+the secret-path policy denies. With the overlay, only dependency drift
+(`io.mucli.deps`: `requirements.txt` and the Dockerfile) marks an image stale.
+
 **Environment repair** (`documentation/plans/job_templates.md` §7,
 `mu/jobs/sandbox/repair.py`). When a checks run has suites that could not run
 (unrunnable: a missing top-level executable, a missing nested tool, a missing
@@ -513,7 +541,10 @@ checks with trigger `repair`. At most `jobs.repair.max_attempts` (2) per job,
 each within `jobs.repair.max_cost_usd` ($3), `max_runtime_s` (1200) and
 `max_iterations` (40); the spend is the cost-ledger stage `repair`. A failure,
 timeout or exhausted budget is recorded and the job continues unverified; jobs
-never park for missing tools or dependencies. Records:
+never park for missing tools or dependencies. Only commands the agent actually
+ran count: a `REPAIR COMMANDS` line must match one of its shell calls. A repair
+that ran no shell commands commits nothing (outcome `no_commands`, with the
+commands it suggested in `error`). Records:
 `metadata.environment_repairs[]` (`attempt, binding, trigger_suites, commands,
 image, cost_usd, outcome, reverted_files, started_at, finished_at`, plus
 `project_commands`, `registries`, `error`, `transcript`) and
@@ -528,7 +559,12 @@ image with the binding's egress plus the registries used, and its setup).
 
 The terminal, web and Android show the same six-step pipeline and the same
 server-provided actions. Job detail has the same tabs everywhere: **Session,
-Plan, Diff, Review, Checks, Diagnostics, Cost & audit**. Setup includes Doctor as a
+Plan, Diff, Review, Checks, Diagnostics, Cost & audit**. The web adds **Notes**
+first, its default tab: the job's story in plain English (`notes` part, built
+from events by `mu/jobs/core/notes.py`). The words come from the agents: plan and
+review return `headline` and `notes` fields, and the implement stage ends its
+final message with a `HEADLINE:` / `NOTES:` hand-off; without one, the first
+sentence of the summary stands in. Setup includes Doctor as a
 tab (web Jobs → Setup, Android Job settings → Setup, terminal `g u` and `g d`).
 
 - Terminal: `/jobs` opens the keyboard dashboard. The `/job` subcommands are
@@ -538,6 +574,11 @@ tab (web Jobs → Setup, Android Job settings → Setup, terminal `g u` and `g d
 - Shared HTTP: `GET /api/jobs/vm/home`, `/vm/jobs`, `/vm/job/{id}` (optional
   `parts`); `POST /api/jobs/cmd` with `{type, job_id, args}`;
   `GET /api/jobs/events` (coalesced over 150 ms, naming the parts that changed).
+  The state part carries the pending tool `approval` and a one-line
+  `attention_headline`. The Cost & audit trail leaves out agent tool traffic and raw
+  check output (`sandbox_event`, `checks_output`), so those events refresh only
+  the session or checks part. The web loads the large `session` and `costs` parts
+  only while their tab is open.
   Disabled commands return 409 with their reason. Malformed commands return 400.
 
 ## Storage

@@ -439,7 +439,7 @@ def scan_publish_diff(repo: str, base: str, head: str, *, literals=()) -> None:
     if proc.returncode != 0:
         raise PublishError(f"git diff failed: {proc.stderr.decode('utf-8', 'replace').strip()[:300]}")
     patch = proc.stdout.decode("utf-8", errors="replace")
-    findings = scan_patch(patch, literals=literals)
+    findings = scan_patch(patch, literals=literals, allow_fixtures=True)
     if findings:
         raise PublishError(f"refusing to push: {summarize(findings)}")
 

@@ -394,7 +394,7 @@ Rules:
   - the pre-paint theme script, reading `mucli-theme` with values
     `system`/`paper`/`dusk`; legacy `light`/`dark` values are migrated on
     read
-  - favicon (the wash drop mark)
+  - favicon (the μ mark: `static/icons/favicon.png`, plus `apple-touch-icon.png`)
   - font preload
   - `wash.css`
   - the vendor scripts each page declares
@@ -526,9 +526,8 @@ Each component PR deletes the legacy selectors it supersedes.
     (B-fix).
   - It renders `<StatusBar style>` from the theme.
   - There is a "Reduce decoration" preference.
-- `app.json`: set the splash and adaptive-icon background to Paper `canvas`,
-  with a dark variant via `expo-splash-screen` config, and a new icon (the wash
-  drop mark on paper).
+- `app.json`: the icon, adaptive icon and splash are the μ mark (the original
+  app icon), on its `mark-ground` background in light and dark.
 - Add a `tint(color, alpha)` replacement, `washOf(semantic)`. Ad-hoc alpha
   literals (0.08–0.6) are removed in favour of `wash` tokens.
 

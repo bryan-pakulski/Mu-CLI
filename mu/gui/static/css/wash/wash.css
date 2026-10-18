@@ -44,6 +44,7 @@
 @import url("components/meter.css") layer(components);
 @import url("components/palette.css") layer(components);
 @import url("components/session-list.css") layer(components);
+@import url("components/avatar.css") layer(components);
 @import url("components/popout.css") layer(components);
 @import url("components/launcher.css") layer(components);
 @import url("hljs-wash.css");                    /* generated; declares @layer components itself */

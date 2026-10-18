@@ -34,7 +34,7 @@
                      x-show="t.role === 'user' || !!t.text">
                     <div class="role w-sr-only" x-text="t.role"></div>
                     <div class="w-msg__head" x-show="t.role === 'assistant'" aria-hidden="true">
-                        <span class="w-drop w-msg__drop" :data-state="t.streaming ? 'working' : null"></span>
+                        <span class="w-mark w-msg__mark" :data-state="t.streaming ? 'working' : null"></span>
                         <span class="w-msg__model" x-text="$store.inspector.currentModel || 'μcli'"></span>
                     </div>
                     <!-- Round-47 F13: streaming turns render the plain-text

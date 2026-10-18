@@ -59,7 +59,8 @@ body.resizing * {
         scroll-behavior: auto !important;
     }
     .w-inkdrop,
-    .w-drop,
+    .w-mark,
+    .w-avatar,
     .w-skeleton,
     .w-progress__bar { animation: none !important; }
 }

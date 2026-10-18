@@ -3,26 +3,26 @@
     "name": "mucli",
     "slug": "mucli-mobile",
     "scheme": "mucli",
-    "version": "0.5.2",
+    "version": "0.5.3",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "android": {
       "package": "com.mucli.mobile",
-      "versionCode": 18,
+      "versionCode": 19,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F8F6F1"
+        "backgroundColor": "#1A1814"
       },
       "splash": {
         "image": "./assets/splash.png",
         "resizeMode": "contain",
-        "backgroundColor": "#F8F6F1",
+        "backgroundColor": "#1A1814",
         "dark": {
           "image": "./assets/splash.png",
           "resizeMode": "contain",
-          "backgroundColor": "#16131B"
+          "backgroundColor": "#1A1814"
         }
       }
     },
@@ -33,7 +33,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F8F6F1"
+      "backgroundColor": "#1A1814"
     },
     "assetBundlePatterns": [
       "**/*"

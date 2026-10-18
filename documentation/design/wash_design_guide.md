@@ -323,9 +323,11 @@ Rules:
   mono labels (`read`, `edit`, `sh`, …) instead of emoji. **No emoji in
   product chrome on any surface.** The current `🔨 ⚠ ⏹ 🔒 ✦` usages all go
   away.
-- **Wordmark:** `μcli` in Inter Display 500, `plum`, −0.03em, with a small
-  watercolour "drop" mark (a painted dot that cycles pigments slowly when the
-  agent is working). It replaces the three-dot logo and the ASCII block art.
+- **Wordmark:** `μcli` in Inter Display 500, `plum`, −0.03em, after the μ
+  mark: the app icon (a light serif μ, `mark-ink`, on `mark-ground`) as a small
+  rounded tile that pulses while the agent is working. The same artwork is the
+  favicon and the Android icon, adaptive icon and splash. It replaces the
+  three-dot logo and the ASCII block art.
 
 ---
 
@@ -652,7 +654,7 @@ This is the most-used control. Anatomy:
   (`accent-wash`), `ink` text, `radius-lg` with a 6px bottom-right corner, at
   most 80% of the column width.
 - **Assistant message:** no bubble. Full-width prose on canvas, in
-  `body-lg`. A small header row shows the wordmark drop, model in `caption`,
+  `body-lg`. A small header row shows the μ mark, model in `caption`,
   and elapsed time. Hover actions (copy, retry, fork) are ghost icon buttons
   that fade in.
 - **Thinking:** a collapsible "Thinking" row (`ink-3`, italic, with the ink

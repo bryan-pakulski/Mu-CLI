@@ -3,7 +3,7 @@
  *   <div class="w-transcript" data-mode-tint="feature">        reading column, max 760
  *     <div class="w-msg" data-role="user"><div class="w-msg__body">…</div></div>
  *     <div class="w-msg" data-role="assistant">
- *       <div class="w-msg__head"><span class="w-drop w-msg__drop"></span><span class="w-msg__model">…</span></div>
+ *       <div class="w-msg__head"><span class="w-mark w-msg__mark"></span><span class="w-msg__model">…</span></div>
  *       <div class="w-msg__body w-markdown">…</div>
  *       <div class="w-msg__actions">…ghost icon buttons…</div>
  *     </div>
@@ -62,7 +62,7 @@
     font-size: var(--wash-type-caption-size);
     line-height: var(--wash-type-caption-line);
 }
-.w-msg__drop { width: 10px; height: 10px; }
+.w-msg__mark { width: 16px; height: 16px; border-radius: 4px; }
 .w-msg__model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w-msg__body { min-width: 0; overflow-wrap: anywhere; }
 .w-msg__body:empty { display: none; }

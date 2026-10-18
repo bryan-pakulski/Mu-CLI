@@ -378,6 +378,10 @@
       "status": "failed",
       "label": "repair failed"
     },
+    "no_commands": {
+      "status": "failed",
+      "label": "repair changed nothing"
+    },
     "timed_out": {
       "status": "failed",
       "label": "repair timed out"

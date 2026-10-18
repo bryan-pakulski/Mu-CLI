@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
@@ -86,6 +87,9 @@ class EventBus:
         self._ingress_lock = threading.Lock()
         self._drain_scheduled = False
         self._dropped_count = 0
+        # How each session's last turn ended ({status, error, at}), so the session list can show
+        # a background session that errored or was interrupted, even after a page reload.
+        self.outcomes: Dict[str, Dict[str, Any]] = {}
 
     # ------------------------------------------------------------- loop
 
@@ -181,7 +185,24 @@ class EventBus:
 
     # ---------------------------------------------------------- publish
 
+    def _record_outcome(self, event: Dict[str, Any]) -> None:
+        name, kind = event.get("session_name"), event.get("kind")
+        if not name or kind not in ("turn_complete", "error"):
+            return
+        if kind == "error":
+            self.outcomes[name] = {"status": "error", "error": str(event.get("text") or "")[:500], "at": time.time()}
+            return
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        status = str(result.get("status") or "completed")
+        error = str(result.get("error") or "")[:500]
+        previous = self.outcomes.get(name) or {}
+        if status == "completed" and previous.get("status") == "error" and time.time() - previous.get("at", 0) < 2:
+            # An error event immediately followed by its turn_complete: the error stands.
+            return
+        self.outcomes[name] = {"status": status, "error": error, "at": time.time()}
+
     async def publish(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        self._record_outcome(event)
         stamp = dict(event)
         stamp["seq"] = next(self._seq)
         self._replay.append((stamp["seq"], stamp))

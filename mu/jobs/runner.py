@@ -75,6 +75,17 @@ def implement_prompt(service, job: Job) -> str:
         if event.event_type == "verification_failed":
             lines.extend(_verification_feedback(event.payload))
             break
+    # Typed query: service.events() returns only the oldest events of a long job.
+    for event in reversed(service.store.list_events_by_type(job.id, ("guard_blocked", "verification_pending"))):
+        # A host safety check parked the job; once resumed, the agent fixes what it flagged.
+        if event.event_type == "verification_pending":
+            break
+        if event.event_type == "guard_blocked":
+            lines.extend(["", f"The host's safety check blocked the previous {event.payload.get('stage') or 'stage'} "
+                          "result and parked the job:", str(event.payload.get("error") or event.reason),
+                          "Fix this before finishing: remove the flagged file or secret, or move test fixtures "
+                          "under tests/, fixtures/ or testdata/. Never put real credentials in the repository."])
+            break
     approved_text = None
     try:
         from .core.plan_ops import approved_plan_text
@@ -115,6 +126,8 @@ def implement_prompt(service, job: Job) -> str:
         if reprompt.get("guidance"):
             lines.extend(["Human guidance:", reprompt["guidance"]])
 
+    from .core.notes import HANDOFF_INSTRUCTIONS
+    from .evidence import INSTRUCTIONS as EVIDENCE_INSTRUCTIONS
     from .stages import stage_brief
     brief = stage_brief(job, "plan")
     if brief:
@@ -124,5 +137,9 @@ def implement_prompt(service, job: Job) -> str:
         "Implement the ticket and validate the result where possible.",
         "Work only inside the attached job workspace; do not modify the user's primary checkout.",
         "The controller, not the agent, decides whether the job is ready for review.",
+        "",
+        EVIDENCE_INSTRUCTIONS,
+        "",
+        HANDOFF_INSTRUCTIONS,
     ])
     return "\n".join(lines)

@@ -193,6 +193,9 @@ def _check_container(info, agent, stage):
         expected.update({release: False, "/harness/creds": False, "/harness/state": True})
     # W8: read-only git metadata for VCS-aware tools (present when the workspace is a worktree).
     expected.update({d: False for d in mounts if d.startswith("/mucli-git/")})
+    # The host's job code, read-only over the image's copy (build.code_overlay_mounts).
+    from mu.jobs.sandbox.build import code_overlay_mounts
+    expected.update({dst: False for _src, dst in code_overlay_mounts()})
     assert mounts == expected
     env = "\n".join(config.get("Env") or [])
     assert SECRET not in env and "ANTHROPIC_API_KEY" not in env and "OPENAI_API_KEY" not in env

@@ -84,11 +84,14 @@ def run_one(request, suite=None):
               "duration_ms": int((time.monotonic() - started) * 1000)}
     if junit:
         path = Path("/workspace") / junit
-        if (path.resolve().is_relative_to(Path("/workspace")) or path == Path(default_junit)) and path.is_file() and path.stat().st_size <= 8 * 1024 * 1024:
+        # Any size: a big test suite writes a big report (the entity check in parse_junit is
+        # the XML safety control, not the size).
+        if (path.resolve().is_relative_to(Path("/workspace")) or path == Path(default_junit)) and path.is_file():
             from mu.jobs.checks import parse_junit
             try:
-                result["junit"] = parse_junit(path.read_text())
-                result["junit_xml"] = path.read_text()
+                text = path.read_text(errors="replace")
+                result["junit"] = parse_junit(text)
+                result["junit_xml"] = text
                 if result["junit"]["failed"]:
                     result["passed"] = False
             except Exception as exc:

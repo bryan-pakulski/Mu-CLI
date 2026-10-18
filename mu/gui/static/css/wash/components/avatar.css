@@ -1,0 +1,61 @@
+/* Session avatar (G§9.20) — a pigment tile with the session's monogram and a type badge.
+ *
+ *   <span class="w-avatar" data-pigment="lagoon|meadow|sun|apricot|rose|lilac|sky|plum" [data-size="sm|lg"]>
+ *     <span class="w-avatar__mono">HH</span>
+ *     <span class="w-avatar__badge" data-type="workspace|container|chat"><svg class="w-icon">…</svg></span>
+ *   </span>
+ *
+ * Built by sessionAvatarMarkup() (static/js/app.js): the pigment is a stable hash of the session
+ * name, so a session keeps its colour on every page and in the Android drawer. The tile is the
+ * pigment's wash with a soft top-left glow; the monogram is the pigment's ink.
+ */
+.w-avatar {
+    --w-avatar-size: 28px;
+    position: relative;
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: var(--w-avatar-size);
+    height: var(--w-avatar-size);
+    border-radius: var(--wash-radius-sm);
+    background:
+        radial-gradient(circle at 28% 22%, color-mix(in srgb, var(--wash-raised) 55%, transparent), transparent 62%),
+        linear-gradient(145deg, var(--w-avatar-wash), color-mix(in srgb, var(--w-avatar-pigment) 38%, var(--w-avatar-wash)));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--w-avatar-pigment) 30%, transparent);
+    color: var(--w-avatar-ink);
+}
+.w-avatar[data-size="sm"] { --w-avatar-size: 22px; }
+.w-avatar[data-size="lg"] { --w-avatar-size: 40px; }
+.w-avatar__mono {
+    font-size: calc(var(--w-avatar-size) * 0.42);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    user-select: none;
+}
+.w-avatar__badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    display: grid;
+    place-items: center;
+    width: calc(var(--w-avatar-size) * 0.5);
+    height: calc(var(--w-avatar-size) * 0.5);
+    border-radius: 50%;
+    background: var(--wash-raised);
+    box-shadow: 0 0 0 1.5px var(--wash-canvas);
+    color: var(--w-avatar-ink);
+}
+.w-avatar__badge .w-icon {
+    width: calc(var(--w-avatar-size) * 0.32);
+    height: calc(var(--w-avatar-size) * 0.32);
+    stroke-width: 2.4;
+}
+.w-avatar[data-pigment="lagoon"]  { --w-avatar-wash: var(--wash-lagoon-wash);  --w-avatar-pigment: var(--wash-lagoon-pigment);  --w-avatar-ink: var(--wash-lagoon-ink); }
+.w-avatar[data-pigment="meadow"]  { --w-avatar-wash: var(--wash-meadow-wash);  --w-avatar-pigment: var(--wash-meadow-pigment);  --w-avatar-ink: var(--wash-meadow-ink); }
+.w-avatar[data-pigment="sun"]     { --w-avatar-wash: var(--wash-sun-wash);     --w-avatar-pigment: var(--wash-sun-pigment);     --w-avatar-ink: var(--wash-sun-ink); }
+.w-avatar[data-pigment="apricot"] { --w-avatar-wash: var(--wash-apricot-wash); --w-avatar-pigment: var(--wash-apricot-pigment); --w-avatar-ink: var(--wash-apricot-ink); }
+.w-avatar[data-pigment="rose"]    { --w-avatar-wash: var(--wash-rose-wash);    --w-avatar-pigment: var(--wash-rose-pigment);    --w-avatar-ink: var(--wash-rose-ink); }
+.w-avatar[data-pigment="lilac"]   { --w-avatar-wash: var(--wash-lilac-wash);   --w-avatar-pigment: var(--wash-lilac-pigment);   --w-avatar-ink: var(--wash-lilac-ink); }
+.w-avatar[data-pigment="sky"]     { --w-avatar-wash: var(--wash-sky-wash);     --w-avatar-pigment: var(--wash-sky-pigment);     --w-avatar-ink: var(--wash-sky-ink); }
+.w-avatar[data-pigment="plum"]    { --w-avatar-wash: var(--wash-plum-wash);    --w-avatar-pigment: var(--wash-plum-pigment);    --w-avatar-ink: var(--wash-plum-ink); }

@@ -75,13 +75,14 @@ describe('palette', () => {
 });
 
 describe('native chrome', () => {
-  it('paints the splash and adaptive icon with the Paper canvas (Dusk canvas for dark splash)', () => {
+  it('paints the splash and adaptive icon with the μ mark ground (light and dark)', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const app = require('../app.json').expo;
-    expect(app.splash.backgroundColor).toBe(paper.canvas);
-    expect(app.android.adaptiveIcon.backgroundColor).toBe(paper.canvas);
-    expect(app.android.splash.backgroundColor).toBe(paper.canvas);
-    expect(app.android.splash.dark.backgroundColor).toBe(dusk.canvas);
+    expect(paper['mark-ground']).toBe(dusk['mark-ground']);
+    expect(app.splash.backgroundColor).toBe(paper['mark-ground']);
+    expect(app.android.adaptiveIcon.backgroundColor).toBe(paper['mark-ground']);
+    expect(app.android.splash.backgroundColor).toBe(paper['mark-ground']);
+    expect(app.android.splash.dark.backgroundColor).toBe(dusk['mark-ground']);
   });
 });
 

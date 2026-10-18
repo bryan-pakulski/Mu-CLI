@@ -14,6 +14,12 @@ from fastapi import Request
 from providers.base import CacheHint, FileReference, ImageData, MediaData, Message, MessagePart, ToolDefinition
 
 
+
+# Largest model request the relay accepts from a stage: only a guard against a runaway client.
+# Well above the providers' own request limits (they reject first, with their own message);
+# JSON-encoded images and attachments make honest requests large.
+MAX_REQUEST_BYTES = 64 * 1024 * 1024
+
 def wire(value):
     if dataclasses.is_dataclass(value):
         return {f.name: wire(getattr(value, f.name)) for f in dataclasses.fields(value)}
@@ -435,7 +441,7 @@ class ModelRelay:
             raw = bytearray()
             async for chunk in request.stream():
                 raw.extend(chunk)
-                if len(raw) > 16 * 1024 * 1024:
+                if len(raw) > MAX_REQUEST_BYTES:
                     raise HTTPException(413, "model request is too large")
             try:
                 payload = json.loads(raw)

@@ -596,6 +596,45 @@
     .work-msg-box .w-textarea { flex: 1 1 auto; min-height: 44px; }
     .work-runtime-status { max-width: 420px; }
 
+    /* ------------------------------------------------------------ notes (the job's story, core/notes.py) */
+    .work-notes { display: flex; flex-direction: column; margin: 0 0 0 6px; padding: 0; list-style: none; border-left: 1px solid var(--wash-hairline-strong); }
+    .work-note { position: relative; display: flex; flex-direction: column; gap: var(--wash-space-1); min-width: 0; padding: var(--wash-space-2) 0 var(--wash-space-3) var(--wash-space-4); }
+    .work-note__dot { position: absolute; top: calc(var(--wash-space-2) + 7px); left: -5px; width: 9px; height: 9px; border-radius: 50%; background: var(--w-tone-pigment, var(--wash-ink-3)); }
+    .work-note__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--wash-space-2); min-width: 0; }
+    .work-note__title { color: var(--wash-plum); font-weight: var(--wash-type-title-3-weight); }
+    .work-note[data-stage="you"] .work-note__title { color: var(--wash-ink-2); font-weight: var(--wash-type-body-weight); }
+    .work-note__headline { max-width: 80ch; margin: 0; color: var(--wash-ink); }
+    .work-note__bullets { max-width: 80ch; margin: 0; padding-left: var(--wash-space-5); color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); }
+    .work-note__bullets li + li { margin-top: 2px; }
+    .work-note__bullets code { overflow-wrap: anywhere; }
+    .work-note__link { margin-left: auto; }
+    .w-banner__msg > p:first-child { margin: 0; }
+    .work-banner-more { margin-top: var(--wash-space-1); }
+    .work-banner-more summary { cursor: pointer; color: var(--w-tone-ink, var(--wash-ink-2)); font-size: var(--wash-type-caption-size); }
+    .work-banner-more p { margin: var(--wash-space-1) 0 0; }
+    .work-headline { margin: 0 0 var(--wash-space-2); color: var(--wash-ink); font-weight: var(--wash-type-title-3-weight); }
+
+    /* ------------------------------------------------------------ evidence (mu/jobs/evidence.py) */
+    .work-evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--wash-space-3); }
+    .work-evidence__item { display: flex; flex-direction: column; gap: var(--wash-space-2); min-width: 0; margin: 0; }
+    .work-evidence__media {
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        aspect-ratio: 16 / 10;
+        border-radius: var(--wash-radius-sm);
+        background: var(--wash-sunken);
+        box-shadow: inset 0 0 0 1px var(--wash-hairline);
+    }
+    /* Screenshots are often tall pages: the thumbnail shows the top; a click opens the full image. */
+    .work-evidence__media img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+    .work-evidence__media video { width: 100%; height: 100%; object-fit: contain; }
+    a.work-evidence__media:hover img { transform: scale(1.02); }
+    .work-evidence__media img { transition: transform var(--wash-motion-small) var(--wash-ease-small); }
+    .work-evidence__file { gap: var(--wash-space-2); padding: var(--wash-space-3); color: var(--wash-ink-3); }
+    .work-evidence__item figcaption { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .work-evidence__caption { color: var(--wash-ink); font-size: var(--wash-type-label-size); }
+
     /* ------------------------------------------------------------ cost & audit */
     .work-cost-row { display: grid; grid-template-columns: 110px 1fr 70px; align-items: center; gap: var(--wash-space-2); }
     .work-cost-label { color: var(--wash-ink-2); text-transform: capitalize; }

@@ -8,7 +8,7 @@ import { SessionStatusBadge, sortSessions } from './SessionStatusBadge';
 import { NewSessionSheet } from './NewSessionSheet';
 import { NewThreadSheet } from './NewThreadSheet';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, tracking } from '../theme/tokens';
-import { ModalFrame, Pressable, Text, Icon, type IconName } from '../ui';
+import { ModalFrame, Pressable, Text, Icon, SessionAvatar } from '../ui';
 import { GlassBackdrop, useGlass } from '../ui/Glass';
 
 export type SwipeSessionsDrawerProps = {
@@ -178,12 +178,6 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
     return colors.ink3;
   };
 
-  const typeIcon = (session: SessionSummary): IconName => {
-    if (session.session_type === 'container') return 'box';
-    if (session.session_type === 'chat') return 'message-circle';
-    return 'folder-open';
-  };
-
   const drawerVisible = visible && !createSessionOpen && !createThreadOpen;
 
   return (
@@ -312,7 +306,8 @@ export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }
                     ]}
                   >
                     <View style={styles.typeIconWrap}>
-                      <Icon name={typeIcon(session)} size="sm" color={activeSessionName === session.name ? colors.accent.ink : session.is_loaded ? colors.ink2 : colors.ink3} />
+                      <SessionAvatar name={session.name} type={session.session_type}
+                        dimmed={activeSessionName !== session.name && !session.is_loaded} />
                     </View>
                     <View style={styles.rowCopy}>
                       <Text variant="sm" style={styles.rowName} numberOfLines={1}>{session.name}</Text>
@@ -432,7 +427,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  typeIconWrap: { width: 28, alignItems: 'flex-start', justifyContent: 'center', marginRight: spacing.sm },
+  typeIconWrap: { width: 40, alignItems: 'flex-start', justifyContent: 'center', marginRight: spacing.sm },
   threadDot: { width: 8, height: 8, borderRadius: radii.pill },
   rowCopy: { flex: 1, paddingVertical: spacing.sm },
   rowName: { fontWeight: fontWeights.semibold },

@@ -188,7 +188,8 @@ class JobsApp:
                     pass
             elif not row.get("last"):
                 try:
-                    events = (self.data.job(row["id"], parts=["costs"]).get("costs") or {}).get("events") or []
+                    # The agent's live status rides in the session part (the audit trail leaves it out).
+                    events = (self.data.job(row["id"], parts=["session"]).get("session") or {}).get("events") or []
                     row["last"] = last_activity(events)
                 except Exception:  # noqa: BLE001 - the last line is cosmetic
                     pass

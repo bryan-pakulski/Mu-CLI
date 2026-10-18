@@ -86,9 +86,11 @@
     margin-top: 0;
 }
 .nav-item {
-    justify-content: space-between;
     margin: var(--wash-space-1) 0;
     animation: navItemIn var(--wash-motion-small) var(--wash-ease-small) both;
+}
+.nav-item:where(:not(.w-session)) {
+    justify-content: space-between;
 }
 .nav-item:where(:not(.w-session)) {
     position: relative;
@@ -120,6 +122,8 @@
 
 .nav-item .name {
     font-size: var(--wash-type-label-size);
+}
+.nav-item .name:where(:not(.w-session__name)) {
     max-width: 130px;
 }
 .nav-item .name:where(:not(.w-session__name)) {

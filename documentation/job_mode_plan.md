@@ -84,8 +84,14 @@ policy,worker,harness_worker,model_relay,check_runner,selftest}.py`,
    the base commit). The same check runs in `_guard` after implement so
    problems surface at the stage that caused them.
 4. `_guard` after implement and checks scans `diff.patch` with
-   `mu.security.diff_scan.scan_patch(patch, literals=<injected credentials>)`
-   and fails the stage on findings. The checks stage gets a `_guard` too.
+   `mu.security.diff_scan.scan_patch(patch, literals=<injected credentials>, allow_fixtures=True)`.
+   The checks stage runs it once, after every suite's byproducts are discarded.
+   Any guard finding (`SandboxGuardError`: a secret file or value, an escaping
+   path or symlink, an unapproved CI workflow) **parks** the job (attention
+   `unsafe_action`, event `guard_blocked`) instead of failing it; on resume the
+   implement prompt states what was blocked. Secret-looking files under test or
+   fixture directories (`secret_paths.is_test_fixture`) pass the pre-check, and
+   generic secret patterns there do not count; injected credentials always do.
 5. Transient error class: the container reports `error_class`
    (`provider_transient`, `rate_limited`, `iteration_limit`, `fatal`); runner
    sets `JobRunOutcome.transient` for the first two.

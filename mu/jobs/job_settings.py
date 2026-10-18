@@ -279,10 +279,12 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
         _f("sandbox.image", "Runtime image", "text", "mucli-job-runtime:latest", "Local image; it is never pulled.", pattern=r"[\w./:@-]+"),
         _f("sandbox.cpu", "CPUs", "float", 4, "", min=0.1, max=64),
         _f("sandbox.memory", "Memory limit", "text", "8g", "Docker memory value, e.g. 8g or 16384m.", pattern=r"[1-9][0-9]*[kmgKMG]?"),
-        _f("sandbox.max_file_bytes", "Largest changed file", "int", 20 * 1024 * 1024, "Changes with a bigger file are rejected.", min=1, max=2 ** 40, unit="bytes"),
         _f("sandbox.pids_limit", "Process limit", "int", 4096,
            "Most processes and threads one stage or check container may run (builds and parallel test runners need many).",
            min=64, max=1_000_000),
+        _f("sandbox.code_overlay", "Run current job code", "bool", True,
+           "Mount this mucli's job code read-only over the copy baked into each stage image, so images built "
+           "by an older mucli run the current stage worker. Off: stages run the image's own copy."),
         _f("sandbox.cache_max_gb", "Dependency cache cap", "int", 20,
            "Shared package caches reused across jobs; least recently used entries are pruned. 0 = unlimited.",
            min=0, max=10000, unit="GB"),

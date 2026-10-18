@@ -299,14 +299,9 @@
     background:var(--w-glass-fill-subtle);
 }
 .session-kind {
-    width:30px;
-    height:30px;
-    display:grid;
-    place-items:center;
-    border-radius:var(--wash-radius-sm);
-    background:var(--w-glass-fill-subtle);
-    color:var(--wash-ink-2);
-    font-family: var(--wash-font-sans);
+    /* Holds the session avatar (components/avatar.css). */
+    display:inline-flex;
+    flex:none;
 }
 .welcome-session-copy {
     min-width:0;
@@ -893,7 +888,7 @@
 .w-welcome .session-modal-body { display: flex; flex-direction: column; gap: 2px; }
 .w-welcome .welcome-session-row {
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr) auto auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: var(--wash-space-3);
     min-height: 52px;
@@ -905,7 +900,7 @@
 }
 .w-welcome .welcome-session-row:hover { background: var(--w-glass-fill-subtle); }
 .w-welcome .welcome-session-row.is-current { background: var(--w-glass-fill-strong); box-shadow: var(--w-glass-lift-2); }
-.w-welcome .session-kind { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--wash-radius-sm); background: var(--wash-accent-wash); color: var(--wash-accent-ink); }
+.w-welcome .session-kind { display: inline-flex; flex: none; }
 .w-welcome .welcome-session-copy { display: flex; flex-direction: column; min-width: 0; }
 .w-welcome .welcome-session-copy strong { overflow: hidden; color: var(--wash-ink); font-weight: var(--wash-type-label-weight); text-overflow: ellipsis; white-space: nowrap; }
 .w-welcome .welcome-session-copy small { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }

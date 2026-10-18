@@ -8,7 +8,7 @@
       ambient        the fixed ambient wash behind the glass (G§6.2):
                      dawn (default) | lagoon | meadow
       shell_attrs    extra attributes on .w-shell (e.g. Alpine bindings)
-      drop_attrs     extra attributes on the wordmark drop (data-state="working")
+      mark_attrs     extra attributes on the wordmark μ mark (data-state="working")
       page           the whole body content; defaults to the app shell below.
                      Pages with their own chrome (chat, work) replace it.
       crumbs         <li class="w-breadcrumb__item"> items after "μcli"
@@ -34,7 +34,8 @@
     <meta name="viewport" content="{% block viewport %}width=device-width, initial-scale=1, viewport-fit=cover{% endblock %}">
     <meta name="color-scheme" content="light dark">
     <title>{% block title %}μcli{% endblock %}</title>
-    <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/icons/favicon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     {% include "partials/theme_bootstrap.html" %}
     <link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/static/css/wash/wash.css">
@@ -68,7 +69,7 @@
                 aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
             {{ w.icon("menu") }}
         </button>
-        <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-drop" aria-hidden="true"{% block drop_attrs %}{% endblock %}></span>μcli</a>
+        <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-mark" aria-hidden="true"{% block mark_attrs %}{% endblock %}></span>μcli</a>
         <nav class="w-breadcrumb" aria-label="Breadcrumb">
             <ol class="w-breadcrumb__list"{% block crumbs_attrs %}{% endblock %}>{% block crumbs %}{% endblock %}</ol>
         </nav>

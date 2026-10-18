@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from .core.notes import tool_summary
+
 CLAUDE_BIN = "/opt/harness/claude"
 CODEX_ROOT = "/opt/harness/codex"  # the Codex release dir: bin/codex, codex-path/rg, codex-resources/
 READ_ONLY_DISALLOWED = ("Edit", "Write", "NotebookEdit")
@@ -275,7 +277,7 @@ def translate_claude(event: Dict[str, Any], state: Translation) -> List[Dict[str
                 name, args = _mucli_tool(str(block.get("name") or ""), block.get("input"))
                 entry["parts"].append({"type": "tool_call", "tool_name": name, "tool_args": args,
                                        "tool_call_id": str(block.get("id") or ""), "harness_tool": block.get("name")})
-                out.append({"event": "tool_call_ui", "payload": {"tool_name": name}})
+                out.append({"event": "tool_call_ui", "payload": {"tool_name": name, "summary": tool_summary(name, args)}})
     elif kind == "user":
         content = (event.get("message") or {}).get("content")
         if isinstance(content, list):
@@ -336,7 +338,8 @@ def translate_codex(event: Dict[str, Any], state: Translation) -> List[Dict[str,
         state._assistant()["parts"].append({"type": "tool_call", "tool_name": "bash", "tool_call_id": call_id,
                                             "tool_args": {"command": str(item.get("command") or "")},
                                             "harness_tool": "command_execution"})
-        out.append({"event": "tool_call_ui", "payload": {"tool_name": "bash"}})
+        out.append({"event": "tool_call_ui", "payload": {"tool_name": "bash",
+                                                         "summary": tool_summary("bash", {"command": str(item.get("command") or "")})}})
     elif kind == "item.completed":
         if itype == "agent_message" and str(item.get("text") or "").strip():
             state._assistant()["parts"].append({"type": "text", "text": item["text"]})
@@ -366,7 +369,8 @@ def translate_codex(event: Dict[str, Any], state: Translation) -> List[Dict[str,
                                                 "tool_args": {"files": paths}, "harness_tool": "file_change"})
             state._tool()["parts"].append({"type": "tool_result", "tool_call_id": call_id, "tool_name": "apply_patch",
                                            "tool_result": f"{item.get('status') or 'applied'}: {', '.join(paths)}"})
-            out.append({"event": "tool_call_ui", "payload": {"tool_name": "apply_patch"}})
+            out.append({"event": "tool_call_ui", "payload": {"tool_name": "apply_patch",
+                                                             "summary": tool_summary("apply_patch", {"files": paths})}})
         elif itype == "error":
             message = str(item.get("message") or "")
             out.append({"event": "runtime_error", "payload": {"text": message[:12000]}})

@@ -2,7 +2,7 @@
  *
  *   .w-shell             grid: top bar over sidebar + stage
  *   .w-topbar            56px sticky bar: menu, wordmark, breadcrumb, chips, tools
- *   .w-wordmark/.w-drop  μcli wordmark with the watercolour drop mark
+ *   .w-wordmark/.w-mark  μcli wordmark with the μ mark
  *   .w-sidebar           264px nav; 64px icon rail below 1200; drawer below 840
  *   .w-stage             the page content region
  *   .w-page              centred content column (max 1200, gutters 24/16)
@@ -108,21 +108,18 @@
     white-space: nowrap;
 }
 .w-wordmark:hover { text-decoration: none; }
-.w-drop {
+/* The μ mark: the app icon (mobile/android/assets/icon.png) as a small tile. */
+.w-mark {
     display: inline-block;
     flex: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50% 50% 50% 12%;
-    transform: rotate(-45deg);
-    background: radial-gradient(circle at 35% 35%,
-        var(--wash-apricot-pigment),
-        var(--wash-rose-pigment) 55%,
-        var(--wash-lilac-pigment));
+    width: 22px;
+    height: 22px;
+    border-radius: var(--wash-radius-xs);
+    background: var(--wash-mark-ground) url("/static/icons/mu-mark.png") center / cover no-repeat;
 }
-.w-drop[data-state="working"] { animation: w-drop-swell 1.6s var(--wash-ease-bleed) infinite; }
-@keyframes w-drop-swell {
-    50% { transform: rotate(-45deg) scale(1.18); filter: saturate(1.3); }
+.w-mark[data-state="working"] { animation: w-mark-pulse 1.6s var(--wash-ease-bleed) infinite; }
+@keyframes w-mark-pulse {
+    50% { transform: scale(1.12); }
 }
 
 /* ------------------------------------------------------------ sidebar */

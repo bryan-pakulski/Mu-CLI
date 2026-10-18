@@ -38,6 +38,11 @@ PACKAGE_REGISTRY_EGRESS = [
     "pypi.org",
     "files.pythonhosted.org",
     "pythonhosted.org",
+    # Playwright browser builds (`playwright install chromium`): headless browsers for the
+    # screenshots agents save as job evidence (mu/jobs/evidence.py).
+    "cdn.playwright.dev",
+    "playwright.download.prss.microsoft.com",
+    "playwright.azureedge.net",
 ]
 
 DEFAULT_EGRESS_ALLOW = [

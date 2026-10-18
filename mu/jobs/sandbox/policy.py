@@ -37,7 +37,6 @@ class SandboxPolicy:
     memory: str = "8g"
     timeout: int = 900
     egress_extra: tuple[str, ...] = ()
-    max_file_bytes: int = 20 * 1024 * 1024
     # Per-stage model budget. Tokens count only NEW tokens (input that was not a
     # cache read, plus output) unless count_cache_reads is set: every turn re-sends
     # the whole context, so counting cache reads exhausts a stage after ~20 turns.
@@ -61,6 +60,10 @@ class SandboxPolicy:
     # Tracked files the secret-path pre-check may mount anyway, from the base commit's
     # `.mucli/jobs.toml` `[sandbox] allow_paths = [glob, ...]` (never from the worktree).
     allow_paths: tuple[str, ...] = ()
+    # Mount the host's job code read-only over the image's copy (build.code_overlay_mounts), so
+    # stages never run stale worker code from an image built by an older mucli
+    # (`sandbox.code_overlay`, default on).
+    code_overlay: bool = False
 
     @classmethod
     def for_stage(cls, stage: str, settings: dict | None = None):
@@ -88,11 +91,11 @@ class SandboxPolicy:
             timeout=max(1, min(86400, int((raw.get("stage_timeout_s") or {}).get(
                 stage, 3600)))),
             egress_extra=tuple(extra) if stage in ("implement", "checks", "repair") else (),
-            max_file_bytes=max(1, int(raw.get("max_file_bytes", 20 * 1024 * 1024))),
             max_tokens=max(1, int(raw.get("max_tokens", 50_000_000))),
             max_cost_usd=max(0, float(raw.get("max_cost_usd", 50))),
             count_cache_reads=bool(raw.get("count_cache_reads", False)),
             pids_limit=max(64, min(1_000_000, int(raw.get("pids_limit") or 4096))),
+            code_overlay=bool(raw.get("code_overlay", True)),
         )
 
 
@@ -120,6 +123,14 @@ def with_build_environment(policy: "SandboxPolicy", job, state, *, stage: str = 
     return replace(policy, image=str(state["job_image"]), python=str(state.get("python") or VENV_PYTHON),
                    cache_dir=stage_cache_dir(job, state, stage, settings), egress_extra=egress,
                    job_id=str(job.id), binding=str(state["name"]), gpus=gpus, allow_paths=allow)
+
+
+def guard_policy(job, stage: str) -> "SandboxPolicy":
+    """The policy a host guard checks the worktree against: the stage's, plus the base commit's
+    ``[sandbox] allow_paths``."""
+    from dataclasses import replace
+    base = SandboxPolicy.for_stage(stage)
+    return replace(base, allow_paths=tuple(dict.fromkeys((*base.allow_paths, *repository_allow_paths(job)))))
 
 
 def cache_toolchain_key(state) -> str:
@@ -185,6 +196,9 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
             "--cap-drop", "ALL", *caps, "--security-opt", "no-new-privileges:true",
             *([] if repair else ["--read-only"]), "--pids-limit", str(int(policy.pids_limit)), "--cpus", str(policy.cpu),
             "--memory", policy.memory, *users,
+            # No core dumps: a crashing test or tool would otherwise drop a multi-MB core.<pid>
+            # into the worktree, which the changed-file size guard then fails the stage on.
+            "--ulimit", "core=0",
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
             "--workdir", "/workspace", "--label", f"io.mucli.role={role}"]
     if policy.job_id:
@@ -201,6 +215,9 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
         mounts.append((policy.cache_dir, "/cache", False))
     if policy.docker_socket:
         mounts.append((policy.docker_socket, "/var/run/docker.sock", False))
+    if policy.code_overlay:
+        from .build import code_overlay_mounts
+        mounts += [(src, dst, True) for src, dst in code_overlay_mounts()]
     # Claude Code / Codex stages: the host CLI (read-only), the copied credential (read-only)
     # and the CLI's session store. Only these fixed destinations are accepted.
     for src, dst, readonly in harness_mounts:
@@ -535,6 +552,12 @@ def _allowed(relative: str, allow_paths, *, is_dir: bool = False) -> bool:
     return False
 
 
+class SandboxGuardError(ValueError):
+    """The worktree holds something the host must not mount, commit or push (a secret file, a
+    secret in the diff, an escaping path or symlink, an unapproved CI workflow). The job parks
+    for a human (attention ``unsafe_action``) instead of failing."""
+
+
 def workspace_precheck(workspace: str, *, allow_paths=()) -> None:
     """Fail closed before a worktree is mounted: no escaping symlinks, no secret files.
 
@@ -542,7 +565,7 @@ def workspace_precheck(workspace: str, *, allow_paths=()) -> None:
     gitignored untracked paths and vendor/build trees without tracked files. A tracked
     denied file may be mounted when the base commit's ``.mucli/jobs.toml`` lists it in
     ``[sandbox] allow_paths``."""
-    from mu.security.secret_paths import is_denied_path
+    from mu.security.secret_paths import is_denied_path, is_test_fixture
     root = Path(workspace)
     real_root = root.resolve()
     view = _git_view(workspace)
@@ -564,29 +587,29 @@ def workspace_precheck(workspace: str, *, allow_paths=()) -> None:
             if relative in ignored:
                 continue
             if path.is_symlink() and not path.resolve().is_relative_to(real_root):
-                raise ValueError(f"workspace symlink escapes the sandbox: {relative}")
-            if is_denied_path(str(path))[0] and not is_env_template(filename):
+                raise SandboxGuardError(f"workspace symlink escapes the sandbox: {relative}")
+            if is_denied_path(str(path))[0] and not is_env_template(filename) and not is_test_fixture(relative):
                 is_dir = relative in tracked_dirs
                 if (relative in tracked or is_dir) and _allowed(relative, allow_paths, is_dir=is_dir):
                     continue
                 # Fail closed: an arbitrary shell could bypass a tool-level
                 # denylist if secret files were mounted with the workspace.
-                raise ValueError(f"secret path must be removed from the job worktree before sandboxing: {relative} "
-                                 "(or, if it is a test fixture, list it under [sandbox] allow_paths in the "
-                                 "repository's .mucli/jobs.toml)")
+                raise SandboxGuardError(
+                    f"secret path must be removed from the job worktree before sandboxing: {relative} (test "
+                    "fixtures under a tests/, fixtures/ or testdata/ directory are allowed; elsewhere list it "
+                    "under [sandbox] allow_paths in the repository's .mucli/jobs.toml)")
 
 
-def validate_changes(workspace: str, paths: list[str], *, allowed_workflows=(),
-                     max_file_bytes: int = 20 * 1024 * 1024) -> None:
+def validate_changes(workspace: str, paths: list[str], *, allowed_workflows=()) -> None:
+    """Changed paths the host may commit: inside the worktree, not .git, and CI workflows only
+    when the approved plan lists them. File size is not limited (the secret scan streams big files)."""
     root = Path(workspace).resolve()
     for name in paths:
         relative = Path(name)
         if relative.is_absolute() or ".." in relative.parts or ".git" in relative.parts:
-            raise ValueError(f"unsafe changed path: {name}")
+            raise SandboxGuardError(f"unsafe changed path: {name}")
         if name.startswith(".github/workflows/") and name not in allowed_workflows:
-            raise ValueError(f"workflow change is not in the approved plan: {name}")
+            raise SandboxGuardError(f"workflow change is not in the approved plan: {name}")
         path = root / relative
         if not path.resolve().is_relative_to(root):
-            raise ValueError(f"changed path escapes the worktree: {name}")
-        if path.is_file() and path.stat().st_size > max_file_bytes:
-            raise ValueError(f"changed file exceeds sandbox size limit: {name}")
+            raise SandboxGuardError(f"changed path escapes the worktree: {name}")

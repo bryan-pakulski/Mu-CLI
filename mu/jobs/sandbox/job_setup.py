@@ -171,7 +171,8 @@ def run_binding_setup(service, job: Any, state: Dict[str, Any], *, runner: Optio
                                            "error": tail[-2000:]})
             return record
     after = _status_entries(job.worktree)
-    new_files = sorted({path for _code, path in after - before})[:500]
+    from ..checks import collapse_untracked
+    new_files = collapse_untracked(job.worktree, {path for _code, path in after - before})
     record.update(status="ok", finished_at=time.time(), files=new_files)
     _save(service, job.id, name, record)
     if new_files:

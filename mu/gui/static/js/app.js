@@ -115,6 +115,39 @@ window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = 
     return `<svg class="${safeClass}" viewBox="0 0 512 512" aria-hidden="true" focusable="false">${MUCLI_SESSION_TYPE_ICON_CONTENT[normalized]}</svg>`;
 };
 
+// Session avatar (components/avatar.css): a pigment tile with the session's monogram and a
+// small session-type badge. The pigment is a stable hash of the name, so a session keeps its
+// colour everywhere (the Android drawer uses the same rule: src/ui/SessionAvatar.tsx).
+const MUCLI_AVATAR_PIGMENTS = Object.freeze(["lagoon", "meadow", "sun", "apricot", "rose", "lilac", "sky", "plum"]);
+const MUCLI_AVATAR_BADGE = Object.freeze({ workspace: "folder", container: "box", chat: "message-circle" });
+
+window.sessionMonogram = function sessionMonogram(name) {
+    const raw = String(name || "").trim();
+    const words = raw.replace(/([a-z])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean);
+    if (!words.length) return "?";
+    if (words.length === 1) {
+        const word = words[0];
+        return (word[0].toUpperCase() + (word[1] || "").toLowerCase());
+    }
+    return (words[0][0] + words[1][0]).toUpperCase();
+};
+
+window.sessionPigment = function sessionPigment(name) {
+    let hash = 0;
+    for (const ch of String(name || "")) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+    return MUCLI_AVATAR_PIGMENTS[hash % MUCLI_AVATAR_PIGMENTS.length];
+};
+
+window.sessionAvatarMarkup = function sessionAvatarMarkup(name, type, size = "") {
+    const normalized = type === "container" || type === "chat" ? type : "workspace";
+    const sizeAttr = size === "sm" || size === "lg" ? ` data-size="${size}"` : "";
+    // The monogram is letters and digits only (sessionMonogram), so it is safe as markup.
+    return `<span class="w-avatar" data-pigment="${sessionPigment(name)}"${sizeAttr} aria-hidden="true">`
+        + `<span class="w-avatar__mono">${sessionMonogram(name)}</span>`
+        + `<span class="w-avatar__badge" data-type="${normalized}"><svg class="w-icon" focusable="false">`
+        + `<use href="/static/icons/wash.svg#i-${MUCLI_AVATAR_BADGE[normalized]}"></use></svg></span></span>`;
+};
+
 // MUCLI_CONTAINER_PERSISTENCE_V1 — actionable session-load errors.
 window.describeSessionLoadError = function describeSessionLoadError(payload, fallbackTitle = "Session could not be loaded") {
     const root = payload && typeof payload === "object" ? payload : {};
@@ -2015,6 +2048,8 @@ document.addEventListener("alpine:init", () => {
         current: null,
         loaded: [],     // names currently resident in daemon memory
         busy: [],       // names with a turn in flight (server-side)
+        outcomes: {},   // name → {status: completed|error|interrupted, error, at}: how the last turn ended
+        unseen: {},     // name → true: a background session finished a turn you have not looked at
         async load() {
             const r = await fetch("/api/sessions");
             const data = await r.json();
@@ -2022,6 +2057,7 @@ document.addEventListener("alpine:init", () => {
             this.current = data.current;
             this.loaded = data.loaded || [];
             this.busy = data.busy || [];
+            this.outcomes = { ...(data.outcomes || {}), ...this._liveOutcomes() };
             const chat = Alpine.store("chat");
             // Sync server-reported busy into chat slots so the UI shows
             // "generating" after a page refresh mid-turn.
@@ -2036,6 +2072,44 @@ document.addEventListener("alpine:init", () => {
             if (!chat.currentName && this.current) chat.focus(this.current);
         },
         isLoaded(name) { return (this.loaded || []).includes(name); },
+        // Outcomes seen live in this tab win over the (older) server snapshot.
+        _liveOutcomes() {
+            return Object.fromEntries(Object.entries(this.outcomes || {}).filter(([, o]) => o && o.live));
+        },
+        recordOutcome(name, status, error = "") {
+            const previous = (this.outcomes || {})[name];
+            // An error event and its turn_complete arrive together: the error stands.
+            if (status === "completed" && previous && previous.status === "error" && previous.live
+                && Date.now() / 1000 - previous.at < 2) return;
+            this.outcomes = { ...this.outcomes, [name]: { status, error: String(error || ""), at: Date.now() / 1000, live: true } };
+            if (name !== Alpine.store("chat").currentName) this.unseen = { ...this.unseen, [name]: true };
+        },
+        markSeen(name) {
+            if (this.unseen && this.unseen[name]) {
+                const next = { ...this.unseen };
+                delete next[name];
+                this.unseen = next;
+            }
+        },
+        /* One state per session for the sidebar (Wash status vocabulary):
+         * running → needs you → error → paused → done (finished while you were away) → loaded.
+         * Null for a session that is not loaded. */
+        state(name) {
+            const vocab = (window.WASH && window.WASH.vocabulary && window.WASH.vocabulary.status) || {};
+            const make = (key, status, label, hint) => ({ key, label, hint, glyph: (vocab[status] || {}).glyph || "●",
+                tone: (vocab[status] || {}).semantic || "neutral" });
+            if (this.isBusy(name)) return make("running", "active", "running", "A turn is running");
+            if ((Alpine.store("prompts").queue || []).some(p => p.session_name === name))
+                return make("waiting", "waiting", "needs you", "Waiting for your answer");
+            if (!this.isLoaded(name)) return null;
+            const outcome = (this.outcomes || {})[name];
+            if (outcome && outcome.status === "error")
+                return make("error", "failed", "error", outcome.error ? `Last turn failed: ${outcome.error}` : "Last turn failed");
+            if (outcome && outcome.status === "interrupted")
+                return { ...make("paused", "unverified", "paused", "Paused; /continue resumes"), glyph: "‖" };
+            if (this.unseen && this.unseen[name]) return make("done", "done", "done", "Finished while you were away");
+            return { key: "loaded", label: "loaded", hint: "Loaded in the background", glyph: "", tone: "ok" };
+        },
         isBusy(name) {
             // Server-reported busy OR locally-tracked busy. The local
             // slot flag flips on /send before the server has echoed an
@@ -2064,6 +2138,7 @@ ${problem.text}`, "error", 14000);
                     return;
                 }
                 this.current = name;
+                this.markSeen(name);
                 Alpine.store("chat").focus(name);
                 // Ensure history is populated (it may be a session the
                 // browser has never rendered before, only resident in
@@ -2095,6 +2170,7 @@ ${problem.text}`, "error", 16000);
             }
             await this.load();
             this.current = name;
+            this.markSeen(name);
             Alpine.store("chat").focus(name);
             await Alpine.store("chat").loadHistory(name);
             await Alpine.store("mode").load();
@@ -7000,6 +7076,7 @@ function routeEvent(ev) {
             chat.addError(ev.text || "", name);
             slot.busy = false;
             chat.finishTurn(name);
+            Alpine.store("sessions").recordOutcome(name, "error", ev.text || "");
             break;
         case "status_start": break;  // spinner status; trace dots cover it
         case "status_end": break;
@@ -7042,6 +7119,8 @@ function routeEvent(ev) {
             }
             slot.busy = false;
             chat.finishTurn(name);
+            Alpine.store("sessions").recordOutcome(name, (ev.result && ev.result.status) || "completed",
+                                                   (ev.result && ev.result.error) || "");
             if (ev.result && ev.result.status === "interrupted") {
                 chat.addInfo(
                     "Execution paused. Type `/continue` to resume, or enter a new prompt.",

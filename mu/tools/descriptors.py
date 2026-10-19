@@ -273,16 +273,21 @@ OPTIONAL_TOOL_PHASES: dict[str, str] = {
     "trace": "agent-run trace analysis: list_traces/trace_summary/trace_series/trace_iteration",
     "browser": "headless-Chromium page snapshot + HTML self-review",
     "codex": "best_of_codex parallel read-only proposals",
+    "orchestration": "fleet orch_* tools (auto-on in orchestration sessions; unavailable elsewhere)",
 }
 
 
 def infer_contextual_tool_phases(session) -> list[str]:
     """Optional phases that should be active because live session state
-    makes them relevant: peer threads present -> ``thread``; uploaded
-    attachments present -> ``attachment``. Best-effort and read-only."""
+    makes them relevant: an orchestration session -> ``orchestration``; peer
+    threads present -> ``thread``; uploaded attachments present ->
+    ``attachment``. Best-effort and read-only."""
     phases: list[str] = []
     if session is None:
         return phases
+    variables = getattr(session, "variables", None) or {}
+    if str(variables.get("session_type") or "").lower() == "orchestration":
+        phases.append("orchestration")
     try:
         coordinator = getattr(session, "thread_coordinator", None)
         meta = getattr(session, "thread_meta", None)

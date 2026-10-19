@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-VALID_SESSION_TYPES = frozenset({"chat", "workspace", "container"})
+VALID_SESSION_TYPES = frozenset({"chat", "workspace", "container", "orchestration"})
 
 # Keep conversational sessions useful without exposing host filesystem/process
 # capabilities.  Artifact tools are safe because they write only to the
@@ -49,10 +49,43 @@ CHAT_TOOLS = frozenset(
     }
 )
 
+# Orchestration sessions (documentation/plans/orchestration.md §4) have no host shell or
+# filesystem: only the master-mediated orch_* tools plus research, memory and questions.
+ORCHESTRATION_PREFIX = "orch_"
+ORCHESTRATION_TOOLS = frozenset(
+    {
+        "orch_catalog_search",
+        "orch_tool_describe",
+        "orch_nodes_list",
+        "orch_node_facts",
+        "orch_tool_draft",
+        "orch_tool_update",
+        "orch_tool_lint",
+        "orch_tool_test",
+        "orch_tool_submit",
+        "orch_run_propose",
+        "orch_run_status",
+        "orch_run_results",
+        "orch_runbook_draft",
+        "orch_runbook_validate",
+        "orch_runbook_test",
+        "web_search",
+        "url_grounding",
+        "read_document",
+        "save_memory",
+        "search_memory",
+        "list_memory",
+        "search_history",
+        "ask_user_choice",
+        "set_session_goal",
+    }
+)
+
 SESSION_TYPE_TOOLS: dict[str, frozenset[str] | None] = {
     "chat": CHAT_TOOLS,
     "workspace": None,
     "container": None,
+    "orchestration": ORCHESTRATION_TOOLS,
 }
 
 
@@ -68,6 +101,10 @@ def allowed_tools(session_type: str) -> frozenset[str] | None:
 
 
 def is_tool_allowed(tool_name: str, session_type: str) -> bool:
+    session_type = normalize_session_type(session_type)
+    # Fleet tools exist only in orchestration sessions, never beside a host shell.
+    if str(tool_name).startswith(ORCHESTRATION_PREFIX) and session_type != "orchestration":
+        return False
     allowed = allowed_tools(session_type)
     return allowed is None or str(tool_name) in allowed
 
@@ -75,15 +112,12 @@ def is_tool_allowed(tool_name: str, session_type: str) -> bool:
 def filter_tools_for_session_type(
     tools: Iterable[Any], session_type: str
 ) -> list[Any]:
-    allowed = allowed_tools(session_type)
-    if allowed is None:
-        return list(tools)
-    return [tool for tool in tools if getattr(tool, "name", "") in allowed]
+    return [tool for tool in tools if is_tool_allowed(getattr(tool, "name", ""), session_type)]
 
 
 def tools_enabled_without_workspace(session_type: str) -> bool:
     """Whether provider tool schemas may be exposed without attached folders."""
-    return normalize_session_type(session_type) in {"chat", "container"}
+    return normalize_session_type(session_type) in {"chat", "container", "orchestration"}
 
 
 def session_type_from_context(context: Any) -> str:
@@ -110,6 +144,7 @@ def unrestricted_container_filesystem(session_type: str) -> bool:
 
 __all__ = [
     "CHAT_TOOLS",
+    "ORCHESTRATION_TOOLS",
     "SESSION_TYPE_TOOLS",
     "VALID_SESSION_TYPES",
     "allowed_tools",

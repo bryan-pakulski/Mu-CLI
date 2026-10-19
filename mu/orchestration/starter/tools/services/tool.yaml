@@ -1,0 +1,29 @@
+id: sys.services
+title: Services
+summary: List systemd services by state (running, failed or all loaded units).
+category: inventory
+effect: read_only
+idempotent: true
+targets: {requires: [systemd]}
+privilege: {run_as: nobody}
+inputs:
+  type: object
+  properties:
+    state: {type: string, enum: [running, failed, all], default: running}
+  additionalProperties: false
+outputs:
+  type: object
+  properties:
+    services:
+      type: array
+      items:
+        type: object
+        properties:
+          name: {type: string}
+          active: {type: string}
+          sub: {type: string}
+          description: {type: string}
+    count: {type: integer}
+  required: [services, count]
+implementation: {runtime: python3, entry: services.py}
+limits: {timeout_s: 60, max_output_kb: 256}

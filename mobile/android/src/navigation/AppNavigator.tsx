@@ -51,15 +51,22 @@ import { ShellScreen } from '../screens/ShellScreen';
 import { ArtifactsScreen } from '../screens/ArtifactsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { MoreScreen } from '../screens/MoreScreen';
+import { OrchestrationScreen } from '../screens/OrchestrationScreen';
+import { OrchRunScreen } from '../screens/OrchRunScreen';
+import { OrchNodesScreen } from '../screens/OrchNodesScreen';
+import { OrchNodeScreen } from '../screens/OrchNodeScreen';
 import { fontSizes, fontWeights, radii } from '../theme/tokens';
 import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
+import { OrchestrationNotifier } from '../components/OrchestrationNotifier';
+import { badgeText, useOrchBadge } from '../store/orchBadge';
 import { Icon, Pressable, Text, ToastHost, textStyle, type IconName } from '../ui';
 import { GlassChrome, Stage, glassStyle, routeAmbient, useAmbientController, useGlass } from '../ui/Glass';
 
-/** Bottom tabs (G§8.3): Chat, Work, Workspace, More. */
+/** Bottom tabs (G§8.3): Chat, Work, Orchestration, Workspace, More. */
 export type TabParamList = {
   Chat: undefined;
   Work: undefined;
+  Orchestration: undefined;
   Workspace: undefined;
   More: undefined;
 };
@@ -81,6 +88,11 @@ export type RootStackParamList = {
   /** Setup with its two tabs: the checklist (default) and Doctor. */
   JobSetup: { tab?: 'checklist' | 'doctor' } | undefined;
   JobDoctor: undefined;
+  /** Orchestration (orchestration.md §8): tab home, run detail, node health list and node detail. */
+  Orchestration: undefined;
+  OrchRun: { runId: string };
+  OrchNodes: undefined;
+  OrchNode: { nodeId: string };
   Workspace: undefined;
   WorkspaceCategory: { categoryId: WorkspaceCategoryId; title: string };
   Teacher: undefined;
@@ -120,7 +132,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
 /** Route names that live in the tab shell rather than the root stack. */
-export const TAB_ROUTES = new Set<string>(['Chat', 'Work', 'Workspace', 'More']);
+export const TAB_ROUTES = new Set<string>(['Chat', 'Work', 'Orchestration', 'Workspace', 'More']);
 
 /** Navigate from anywhere: tab routes go through the tab shell. */
 export function navigateTo(name: string, params?: object) {
@@ -132,7 +144,7 @@ export function navigateTo(name: string, params?: object) {
 const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
 const PANEL_SCREENS: {
-  name: Exclude<keyof RootStackParamList, 'Tabs' | 'Settings' | 'Chat' | 'Work' | 'JobDetail' | 'JobAnalysis' | 'JobSetup' | 'JobDoctor' | 'Workspace' | 'WorkspaceCategory' | JobsPageRoute>;
+  name: Exclude<keyof RootStackParamList, 'Tabs' | 'Settings' | 'Chat' | 'Work' | 'Orchestration' | 'OrchRun' | 'OrchNodes' | 'OrchNode' | 'JobDetail' | 'JobAnalysis' | 'JobSetup' | 'JobDoctor' | 'Workspace' | 'WorkspaceCategory' | JobsPageRoute>;
   title: string;
   component: React.ComponentType;
 }[] = [
@@ -239,6 +251,7 @@ function ChatScreenWithChrome() {
 const TAB_ICONS: Record<keyof TabParamList, IconName> = {
   Chat: 'message-circle',
   Work: 'briefcase',
+  Orchestration: 'server',
   Workspace: 'layout-dashboard',
   More: 'more-horizontal',
 };
@@ -251,6 +264,7 @@ function staged<P extends object>(Screen: React.ComponentType<P>) {
 }
 
 const WorkTab = staged(WorkScreen);
+const OrchestrationTab = staged(OrchestrationScreen);
 const WorkspaceTab = staged(WorkspaceScreen);
 const MoreTab = staged(MoreScreen);
 
@@ -271,6 +285,9 @@ function TabIcon({ name, focused }: { name: keyof TabParamList; focused: boolean
 function MainTabs() {
   const { colors } = useTheme();
   const glass = useGlass();
+  // What orchestration needs from you, visible from every tab (Chat included).
+  const orchCount = useOrchBadge(state => state.count);
+  const orchSummary = useOrchBadge(state => state.summary);
   return (
     <Tab.Navigator
       sceneContainerStyle={{ backgroundColor: 'transparent' }}
@@ -292,6 +309,12 @@ function MainTabs() {
     >
       <Tab.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false, tabBarAccessibilityLabel: 'Chat', tabBarTestID: 'tab-chat' }} />
       <Tab.Screen name="Work" component={WorkTab} options={{ title: 'Engineering work', tabBarLabel: 'Work', tabBarAccessibilityLabel: 'Work', tabBarTestID: 'tab-work' }} />
+      <Tab.Screen name="Orchestration" component={OrchestrationTab} options={{
+        title: 'Orchestration', tabBarTestID: 'tab-orchestration',
+        tabBarBadge: badgeText(orchCount),
+        tabBarBadgeStyle: { backgroundColor: colors.attention.wash, color: colors.attention.ink, fontWeight: fontWeights.semibold },
+        tabBarAccessibilityLabel: orchCount ? `Orchestration, ${orchSummary || `${orchCount} need you`}` : 'Orchestration',
+      }} />
       <Tab.Screen name="Workspace" component={WorkspaceTab} options={{ title: 'Workspace', tabBarAccessibilityLabel: 'Workspace', tabBarTestID: 'tab-workspace' }} />
       <Tab.Screen name="More" component={MoreTab} options={{ title: 'More', tabBarAccessibilityLabel: 'More', tabBarTestID: 'tab-more' }} />
     </Tab.Navigator>
@@ -333,6 +356,7 @@ export function AppNavigator() {
   return (
     <ToastHost>
     <NeedsYouNotifier />
+    <OrchestrationNotifier />
     <NavigationContainer ref={navRef} theme={navTheme} onReady={syncAmbient} onStateChange={syncAmbient}>
       <Stack.Navigator
         screenOptions={{
@@ -360,6 +384,9 @@ export function AppNavigator() {
           })}
         />
         <Stack.Screen name="JobAnalysis" component={JobAnalysisScreen} options={{ title: 'Job performance' }} />
+        <Stack.Screen name="OrchRun" component={OrchRunScreen} options={{ title: 'Run' }} />
+        <Stack.Screen name="OrchNodes" component={OrchNodesScreen} options={{ title: 'Node health' }} />
+        <Stack.Screen name="OrchNode" component={OrchNodeScreen} options={{ title: 'Node' }} />
         <Stack.Screen name="JobSetup" component={JobSetupScreen} options={{ title: 'Jobs setup' }} />
         <Stack.Screen name="JobDoctor" component={JobDoctorScreen} options={{ title: 'Jobs doctor' }} />
         {JOBS_PAGE_SCREENS.map(({ name, title, component }) => (

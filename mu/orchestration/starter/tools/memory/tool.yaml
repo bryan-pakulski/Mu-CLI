@@ -1,0 +1,19 @@
+id: sys.memory
+title: Memory
+summary: Report physical memory and swap use from /proc/meminfo.
+category: diagnostics
+effect: read_only
+idempotent: true
+privilege: {run_as: nobody}
+inputs: {type: object, properties: {}, additionalProperties: false}
+outputs:
+  type: object
+  properties:
+    total_bytes: {type: integer}
+    available_bytes: {type: integer}
+    used_pct: {type: [number, "null"]}
+    swap_total_bytes: {type: integer}
+    swap_free_bytes: {type: integer}
+  required: [total_bytes, available_bytes]
+implementation: {runtime: python3, entry: memory.py}
+limits: {timeout_s: 30, max_output_kb: 16}

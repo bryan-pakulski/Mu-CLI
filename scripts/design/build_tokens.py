@@ -55,6 +55,41 @@ def _em(value: float) -> str:
     return "0" if value == 0 else f"{value}em"
 
 
+# --- web density --------------------------------------------------------------
+
+
+def _round(value: float, step: float = 1.0) -> float:
+    out = int(value / step + 0.5) * step
+    return _num(out)
+
+
+def _num(value: float) -> float:
+    return int(value) if float(value).is_integer() else value
+
+
+def web_scale(tokens: dict) -> dict:
+    """``type``/``space``/``radius``/``size`` as the web GUI uses them: the design scale times
+    ``density.web`` (text rounded to half pixels and kept at ``min_text`` or above; sizes in
+    ``density.keep`` unscaled). Android uses the design scale as is."""
+    density = tokens.get("density") or {}
+    k = float(density.get("web", 1.0))
+    if k == 1.0:
+        return {name: tokens[name] for name in ("type", "space", "radius", "size")}
+    floor = float(density.get("min_text", 0))
+    keep = set(density.get("keep") or [])
+    type_ = {}
+    for name, spec in tokens["type"].items():
+        size = _num(max(_round(spec["size"] * k, 0.5), min(floor, spec["size"])))
+        line = max(_round(spec["line"] * k), _round(size * 1.25))
+        type_[name] = dict(spec, size=size, line=line)
+    return {
+        "type": type_,
+        "space": [max(2, _round(v * k)) for v in tokens["space"]],
+        "radius": {n: v if v >= 999 else max(2, _round(v * k)) for n, v in tokens["radius"].items()},
+        "size": {n: v if n in keep else _round(v * k) for n, v in tokens["size"].items()},
+    }
+
+
 # --- CSS ---------------------------------------------------------------------
 
 
@@ -109,16 +144,18 @@ def _static_block() -> list[str]:
     for role, ref in tokens["syntax"].items():
         target = f"var(--wash-{ref})" if ref.startswith("ink") else f"var(--wash-{ref}-ink)"
         lines.append(f"  --wash-syntax-{role}: {target};")
-    for name, spec in tokens["type"].items():
+    web = web_scale(tokens)
+    lines.append(f"  --wash-density: {(tokens.get('density') or {}).get('web', 1)};")
+    for name, spec in web["type"].items():
         lines.append(f"  --wash-type-{name}-size: {_px(spec['size'])};")
         lines.append(f"  --wash-type-{name}-line: {_px(spec['line'])};")
         lines.append(f"  --wash-type-{name}-weight: {spec['weight']};")
         lines.append(f"  --wash-type-{name}-tracking: {_em(spec['tracking'])};")
-    for index, value in enumerate(tokens["space"], start=1):
+    for index, value in enumerate(web["space"], start=1):
         lines.append(f"  --wash-space-{index}: {_px(value)};")
-    for name, value in tokens["radius"].items():
+    for name, value in web["radius"].items():
         lines.append(f"  --wash-radius-{name}: {_px(value)};")
-    for name, value in tokens["size"].items():
+    for name, value in web["size"].items():
         lines.append(f"  --wash-size-{name}: {_px(value)};")
     for name, spec in tokens["motion"].items():
         lines.append(f"  --wash-motion-{name}: {spec['duration']}ms;")
@@ -196,8 +233,10 @@ def _flat_theme(theme: str) -> dict:
     return flat
 
 
-def _payload() -> dict:
+def _payload(*, web: bool = True) -> dict:
+    """``web``: the density-scaled sizes the GUI uses (wash_tokens.js); Android gets the design scale."""
     tokens = load_tokens()
+    scaled = web_scale(tokens) if web else {name: tokens[name] for name in ("type", "space", "radius", "size")}
     return {
         "themes": {theme: _flat_theme(theme) for theme in THEMES},
         "semantic": tokens["semantic"],
@@ -207,10 +246,10 @@ def _payload() -> dict:
         "series": tokens["series"],
         "syntax": tokens["syntax"],
         "font": tokens["font"],
-        "type": tokens["type"],
-        "space": tokens["space"],
-        "radius": tokens["radius"],
-        "size": tokens["size"],
+        "type": scaled["type"],
+        "space": scaled["space"],
+        "radius": scaled["radius"],
+        "size": scaled["size"],
         "breakpoint": tokens["breakpoint"],
         "motion": tokens["motion"],
         "z": tokens["z"],
@@ -254,7 +293,7 @@ def build_js() -> str:
 
 
 def build_ts() -> str:
-    payload = _payload()
+    payload = _payload(web=False)
     themes = payload.pop("themes")
     vocabulary = payload.pop("vocabulary")
     lines = [header("//").rstrip("\n"), ""]

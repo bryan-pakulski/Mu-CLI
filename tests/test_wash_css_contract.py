@@ -564,6 +564,7 @@ def test_glass_has_solid_fallbacks_and_a_flat_ambient():
 PAGE_AMBIENTS = {
     "index.html": "dawn", "design/gallery.html": "dawn", "work.html": "lagoon", "trace.html": "lagoon",
     "job_trace.html": "lagoon", "model_costs.html": "lagoon", "containers.html": "meadow",
+    "orchestration.html": "lagoon",
 }
 
 

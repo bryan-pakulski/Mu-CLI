@@ -1,0 +1,70 @@
+{#- Orchestration (/orchestration) on the shared Wash shell (G§8.2;
+    documentation/plans/orchestration.md §8). The page is one routed view
+    (#orch-view) filled by static/js/orchestration/*.js. Hash routes: #/
+    overview, #/nodes, #/node/<id>, #/setup[/<token id>], #/catalog,
+    #/tool/<id>/<v>, #/runbook/<id>/<v>, #/studio[/<id>/<v>],
+    #/studio/runbook/<id>/<v> (or /new), #/runs, #/run/<id>, #/new-run,
+    #/approvals, #/audit and #/settings. Every mutation posts to
+    /api/orchestration/cmd with the CSRF token carried on #orch-app. -#}
+{% extends "_layout.html" %}
+{% import "macros/wash.html" as w %}
+{% block title %}Orchestration · μcli{% endblock %}
+{% block page_css %}
+<link id="mucli-orchestration-css" rel="stylesheet" href="/static/css/wash/patterns/orchestration.css">
+{% endblock %}
+{% block head_scripts %}
+    <script src="/static/vendor/highlight.min.js" defer></script>
+{% endblock %}
+{% block ambient %}lagoon{% endblock %}
+{% block body_class %}orch-body{% endblock %}
+
+{% block crumbs_attrs %} id="orch-crumbs"{% endblock %}
+{% block crumbs %}<li class="w-breadcrumb__item"><a href="#/">Orchestration</a></li><li class="w-breadcrumb__item"><span aria-current="page">Overview</span></li>{% endblock %}
+
+{% block topbar_chips_attrs %} id="orch-chips"{% endblock %}
+{% block topbar_chips %}
+<li data-orch-chip-slot="paused" hidden><a href="#/" class="w-chip" data-tone="danger" title="All dispatch is paused"><span class="w-chip__glyph" aria-hidden="true">✗</span><span>Dispatch paused</span></a></li>
+<li><a href="#/approvals" class="w-chip" data-tone="neutral" data-orch-chip="needs" title="Nothing needs you"><span class="w-chip__glyph" aria-hidden="true">◆</span><span data-chip-text>0 need you</span></a></li>
+<li class="w-optional"><span class="w-chip" data-tone="caution" data-orch-chip="live" title="Live updates reconnecting"><span class="w-chip__glyph" aria-hidden="true" data-chip-glyph>○</span><span data-chip-text>Connecting…</span></span></li>
+{% endblock %}
+
+{% block sidebar_extra %}
+<p class="w-sidebar__heading" id="w-sidebar-orch">Orchestration</p>
+<ul class="w-sidebar__section orch-side" aria-labelledby="w-sidebar-orch">
+    <li><a href="#/" class="w-nav__item" data-orch-nav="overview" title="Overview">{{ w.icon("layout-dashboard") }}<span class="w-nav__label">Overview</span></a></li>
+    <li><a href="#/approvals" class="w-nav__item" data-orch-nav="approvals" title="Approvals">{{ w.icon("shield-check") }}<span class="w-nav__label">Approvals</span><span class="w-count" data-tone="attention" id="orch-approvals-badge" hidden>0</span></a></li>
+    <li><a href="#/nodes" class="w-nav__item" data-orch-nav="nodes" title="Nodes">{{ w.icon("server") }}<span class="w-nav__label">Nodes</span></a></li>
+    <li><a href="#/catalog" class="w-nav__item" data-orch-nav="catalog" title="Catalog">{{ w.icon("book-open") }}<span class="w-nav__label">Catalog</span></a></li>
+    <li><a href="#/studio" class="w-nav__item" data-orch-nav="studio" title="Tool studio">{{ w.icon("sparkles") }}<span class="w-nav__label">Studio</span></a></li>
+    <li><a href="#/runs" class="w-nav__item" data-orch-nav="runs" title="Runs">{{ w.icon("play") }}<span class="w-nav__label">Runs</span></a></li>
+    <li><a href="#/audit" class="w-nav__item" data-orch-nav="audit" title="Audit log">{{ w.icon("history") }}<span class="w-nav__label">Audit</span></a></li>
+    <li><a href="#/settings" class="w-nav__item" data-orch-nav="settings" title="Settings">{{ w.icon("settings") }}<span class="w-nav__label">Settings</span></a></li>
+</ul>
+{% endblock %}
+
+{% block content %}
+<div class="orch-app" id="orch-app" data-csrf="{{ csrf_token }}">
+    <div class="w-page orch-page" id="orch-view">
+        <div class="orch-loading" role="status"><span class="w-inkdrop" data-tone="running" aria-hidden="true"></span>Loading…</div>
+    </div>
+    <noscript><div class="w-page"><p>Orchestration needs JavaScript.</p></div></noscript>
+</div>
+{% endblock %}
+
+{% block body_end %}
+<script src="/static/js/dialogs.js"></script>
+<script src="/static/js/wash/confirm.js"></script>
+<script src="/static/js/wash/diff.js"></script>
+<script src="/static/js/orchestration/api.js"></script>
+<script src="/static/js/orchestration/ui.js"></script>
+<script src="/static/js/orchestration/schema.js"></script>
+<script src="/static/js/orchestration/pickers.js"></script>
+<script src="/static/js/orchestration/nodes.js"></script>
+<script src="/static/js/orchestration/setup.js"></script>
+<script src="/static/js/orchestration/catalog.js"></script>
+<script src="/static/js/orchestration/studio.js"></script>
+<script src="/static/js/orchestration/runbooks.js"></script>
+<script src="/static/js/orchestration/runs.js"></script>
+<script src="/static/js/orchestration/settings.js"></script>
+<script src="/static/js/orchestration/view.js"></script>
+{% endblock %}

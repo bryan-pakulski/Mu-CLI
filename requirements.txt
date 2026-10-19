@@ -17,6 +17,10 @@ fastapi
 uvicorn[standard]
 jinja2
 python-multipart
+# Orchestration master: Ed25519 signing, TLS, AES-GCM secrets, YAML manifests.
+# (The node agent itself needs only the Python standard library.)
+cryptography>=41
+PyYAML>=6
 tomli>=2; python_version < "3.11"
 
 # For voice / audio capabilities (optional)

@@ -124,3 +124,30 @@ def test_safe_delete_session_silent_mode_detaches_ui(tmp_path, monkeypatch):
 
     assert original_ui.calls == []
     assert manager.ui is original_ui
+
+
+def test_launcher_offers_jobs_and_orchestration(session_manager, monkeypatch):
+    seen = []
+
+    def pick(title, options, **kwargs):
+        seen.append([key for key, *_ in options])
+        return "quit"
+
+    monkeypatch.setattr("mucli.prompt_choice", pick)
+    with pytest.raises(SystemExit):
+        mucli.choose_session(session_manager)
+    assert seen[0] == ["sessions", "create", "jobs", "orchestration", "containers", "quit"]
+
+
+def test_jobs_and_orchestration_return_to_launcher(session_manager, monkeypatch):
+    calls = []
+    _choice_sequence(monkeypatch, "jobs", "orchestration", "create", "chat")
+    _text_sequence(monkeypatch, "")
+    monkeypatch.setattr("mu.ui.jobs.can_open_tui", lambda *a, **k: True)
+    monkeypatch.setattr("mu.ui.jobs.open_jobs_tui", lambda **kw: calls.append(("jobs", kw.get("service") is not None)))
+    monkeypatch.setattr("mu.commands.orch.run_orchestration_menu", lambda: calls.append(("orch", True)))
+
+    action, name = mucli.choose_session(session_manager)
+
+    assert calls == [("jobs", True), ("orch", True)]
+    assert (action, name) == ("new", None)

@@ -129,3 +129,28 @@ export function bytes(value: number | null | undefined): string {
 }
 
 export const stripAnsi = (text: string | null | undefined) => String(text ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+
+// Orchestration vocabulary (orchestration.md §8): node status, run state, execution state and
+// tool status map onto the shared status rows; effects carry a semantic tone.
+export type OrchTable = 'orch_node_status' | 'orch_run_state' | 'orch_exec_state' | 'orch_tool_status';
+const orchEffectRows = vocabulary.orch_effect as Record<string, { semantic: string; label: string }>;
+
+/**
+ * Status + label for an orchestration key. A server `style` (the same vocabulary, sometimes
+ * with a contextual label such as "not started") wins; unknown keys fall back to pending.
+ */
+export function orchState(table: OrchTable, key: string | null | undefined, style?: { status?: string; label?: string } | null): { status: Status; label: string } {
+  const rows = vocabulary[table] as Record<string, { status: string; label: string }>;
+  const row = rows[String(key || '')];
+  const status = style?.status || row?.status;
+  const label = style?.label || row?.label || String(key || '').replace(/_/g, ' ');
+  return { status: asStatus(status), label };
+}
+
+/** Tool/run effect → semantic tone + label (read-only ok, mutating attention, destructive danger). */
+export function orchEffect(effect: string | null | undefined, style?: { semantic?: string; label?: string } | null): { tone: Semantic; label: string } {
+  const row = orchEffectRows[String(effect || '')];
+  // Unknown effects are treated as destructive, like the server's effect_style().
+  const semantic = style?.semantic || row?.semantic || 'danger';
+  return { tone: semantic as Semantic, label: style?.label || row?.label || String(effect || '').replace(/_/g, ' ') };
+}

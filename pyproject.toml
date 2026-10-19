@@ -31,6 +31,8 @@ dependencies = [
     "jinja2",
     "python-multipart",
     "sse-starlette",
+    "cryptography>=41",
+    "PyYAML>=6",
 ]
 
 [project.optional-dependencies]
@@ -62,6 +64,7 @@ exclude = ["tests*", "mobile*", "documentation*", ".mucli-loop*"]
 [tool.setuptools.package-data]
 "mu.gui" = ["templates/**/*.html", "static/**/*"]
 "mu.gui.static" = ["**/*"]
+"mu.orchestration.starter" = ["tools/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

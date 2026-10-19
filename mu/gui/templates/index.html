@@ -25,11 +25,11 @@
 {% block ambient %}dawn{% endblock %}
 {% block body_class %}chat-body{% if not session_active %} welcome-body{% endif %}{% endblock %}
 {% block body_attrs %} x-data{% endblock %}
-{% block shell_attrs %}{% if session_active %} :data-sidebar-collapsed="$store.layout.sidebarOpen ? null : ''"{% endif %}{% endblock %}
+{% block shell_attrs %}{% endblock %}
 {% block mark_attrs %}{% if session_active %} :data-state="$store.chat.busy ? 'working' : null"{% endif %}{% endblock %}
 
 {#- Job-attention count on the sidebar's Work item. -#}
-{% set work_badge %}<span class="w-count product-attention-badge" data-tone="attention" x-cloak
+{% set work_badge %}<span class="w-count w-nav__badge product-attention-badge" data-tone="attention" x-cloak
       x-show="$store.chat.jobAttentionCount > 0" x-text="$store.chat.jobAttentionCount"
       x-init="$store.chat.loadJobAttention()"
       :aria-label="$store.chat.jobAttentionCount + ' job(s) need you'"></span>{% endset %}
@@ -143,12 +143,6 @@
         <button type="button" class="nav-action sidebar-new-session w-btn" data-variant="ghost" data-size="sm"
                 @click="$store.sessions.deactivate()">+ new session</button>
     </section>
-    <button type="button" class="w-btn w-chat-sidebar__collapse" data-variant="ghost" data-size="sm"
-            @click="$store.layout.toggleSidebar()"
-            :aria-label="$store.layout.sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'"
-            :title="$store.layout.sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'">
-        {{ w.icon("panel-left", size="sm") }}<span class="w-nav__label" x-text="$store.layout.sidebarOpen ? 'Collapse' : 'Expand'">Collapse</span>
-    </button>
 </div>
 {% endif %}{% endblock %}
 

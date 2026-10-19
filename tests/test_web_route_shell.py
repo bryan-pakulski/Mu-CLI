@@ -66,7 +66,12 @@ def test_route_shell_css_matches_wash_shell_geometry():
     assert "backdrop-filter: var(--w-glass-filter);" in topbar
     assert "border-bottom: 1px solid var(--wash-glass-edge);" in topbar
     assert '.w-breadcrumb__item + .w-breadcrumb__item::before {\n    content: "›";' in nav
-    assert "--wash-size-topbar: 56px;" in _read(GUI / "static" / "css" / "wash" / "tokens.css")
+    # The design scale is 56px; the web GUI applies the token density (tokens.json `density.web`).
+    import json
+    tokens = json.loads(_read(GUI.parent / "design" / "tokens.json"))
+    assert tokens["size"]["topbar"] == 56
+    topbar_px = int(56 * tokens["density"]["web"] + 0.5)
+    assert f"--wash-size-topbar: {topbar_px}px;" in _read(GUI / "static" / "css" / "wash" / "tokens.css")
     # model pricing and the trace analyzer link their own pattern bundles;
     # the legacy route-product.css they used to share is gone (W4).
     assert "/static/css/wash/patterns/model-costs.css" in _read(PAGES["model_costs"])

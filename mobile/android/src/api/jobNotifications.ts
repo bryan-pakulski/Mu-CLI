@@ -145,3 +145,16 @@ export async function notifyNeedsYou(rows: JobSummary[]): Promise<number> {
   }
   return posted;
 }
+
+/** Post one free-form local notification (orchestration attention); resolves to whether it was posted. Never throws. */
+export async function notifyText(title: string, body: string, data: Record<string, unknown> = {}): Promise<boolean> {
+  if (!(await loadNotifyEnabled())) return false;
+  const mod = notificationsModule();
+  if (!mod) return false;
+  prepared = prepared || prepare(mod);
+  if (!(await prepared)) return false;
+  try {
+    await mod.scheduleNotificationAsync({ content: { title, body, data }, trigger: null });
+    return true;
+  } catch { return false; }
+}

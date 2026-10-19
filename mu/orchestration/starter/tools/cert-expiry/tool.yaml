@@ -1,0 +1,34 @@
+id: sys.cert-expiry
+title: Certificate expiry
+summary: Find PEM certificates under the given directories and report days until each expires.
+category: security
+effect: read_only
+idempotent: true
+targets: {requires: [openssl]}
+privilege: {run_as: root}
+inputs:
+  type: object
+  properties:
+    paths:
+      type: array
+      maxItems: 20
+      items: {type: string, pattern: "^/[A-Za-z0-9_./-]{0,200}$"}
+      default: [/etc/letsencrypt/live, /etc/nginx, /etc/ssl/certs/local]
+    warn_days: {type: integer, minimum: 1, maximum: 365, default: 30}
+  additionalProperties: false
+outputs:
+  type: object
+  properties:
+    certs:
+      type: array
+      items:
+        type: object
+        properties:
+          path: {type: string}
+          subject: {type: string}
+          not_after: {type: string}
+          days_left: {type: integer}
+    expiring: {type: integer}
+  required: [certs, expiring]
+implementation: {runtime: python3, entry: cert_expiry.py}
+limits: {timeout_s: 120, max_output_kb: 128}

@@ -3497,6 +3497,8 @@ ${problem.text}`, "error", 16000);
             // Opening the mobile app should reveal the conversation first.
             // Drawer visibility on a phone must not overwrite desktop prefs.
             if (window.matchMedia('(max-width: 760px)').matches) this.sidebarOpen = false;
+            // The shell owns the desktop collapse (wash_shell.js, every page): follow it.
+            document.addEventListener('mucli:sidebar', (e) => { this.sidebarOpen = !!(e.detail && e.detail.open); });
         },
         _persist() {
             try {
@@ -3509,6 +3511,10 @@ ${problem.text}`, "error", 16000);
             } catch (e) {}
         },
         toggleSidebar() {
+            if (window.WashShell && !window.matchMedia('(max-width: 760px)').matches) {
+                window.WashShell.toggleSidebar();   // fires mucli:sidebar, which updates sidebarOpen
+                return;
+            }
             this.sidebarOpen = !this.sidebarOpen;
             if (!window.matchMedia('(max-width: 760px)').matches) this._persist();
         },
@@ -6865,6 +6871,8 @@ function bootSSE() {
                 }
                 return;
             }
+            // Orchestration wants the operator: refresh the sidebar badge (wash_shell.js).
+            if (data && data.kind === "orchestration_attention") document.dispatchEvent(new CustomEvent("mucli:orch-attention"));
             routeEvent(data);
         };
         source.addEventListener("ping", bumpWatchdog);

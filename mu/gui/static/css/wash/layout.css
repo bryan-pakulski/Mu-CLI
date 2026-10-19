@@ -3,7 +3,10 @@
  *   .w-shell             grid: top bar over sidebar + stage
  *   .w-topbar            56px sticky bar: menu, wordmark, breadcrumb, chips, tools
  *   .w-wordmark/.w-mark  μcli wordmark with the μ mark
- *   .w-sidebar           264px nav; 64px icon rail below 1200; drawer below 840
+ *   .w-sidebar           nav (size-sidebar); icon rail (size-rail) below 1200 or when
+ *                        collapsed (html[data-sidebar="collapsed"]); drawer below 840.
+ *                        A size container: patterns/shell.css styles its contents as a
+ *                        rail whenever it is rail-width, whatever made it so.
  *   .w-stage             the page content region
  *   .w-page              centred content column (max 1200, gutters 24/16)
  *   .w-hero              page hero band: art that dissolves into the canvas
@@ -28,6 +31,7 @@
     min-height: 0;
     background: transparent;
     color: var(--wash-ink);
+    transition: grid-template-columns var(--wash-motion-medium) var(--wash-ease-medium);
 }
 /* The stage's glass plane (G§3.3 level 1). It is a pseudo-element grid item
  * in the stage's own cell rather than a backdrop-filter on .w-stage: a
@@ -130,7 +134,9 @@
     gap: var(--wash-space-1);
     min-height: 0;
     padding: var(--wash-space-4) var(--wash-space-3);
+    overflow-x: hidden;
     overflow-y: auto;
+    container: w-sidebar / inline-size;
     border-right: 1px solid var(--wash-glass-edge);
     background: var(--w-glass-fill);
     backdrop-filter: var(--w-glass-filter);
@@ -296,13 +302,14 @@
     .w-page { padding-left: var(--wash-space-7); padding-right: var(--wash-space-7); }
 }
 
-/* lg: the sidebar collapses to a 64px icon rail. */
+/* lg, or collapsed: the sidebar becomes an icon rail (contents: patterns/shell.css). */
 @media (width < 1200px) {
     .w-shell { --w-sidebar-w: var(--wash-size-rail); }
-    .w-sidebar { padding: var(--wash-space-3) var(--wash-space-2); align-items: center; }
+    .w-sidebar { padding: var(--wash-space-3) var(--wash-space-2); }
 }
-@media (840px <= width < 1200px) {
-    .w-sidebar .w-sidebar__heading { display: none; }
+@media (width >= 840px) {
+    :root[data-sidebar="collapsed"] .w-shell { --w-sidebar-w: var(--wash-size-rail); }
+    :root[data-sidebar="collapsed"] .w-sidebar { padding: var(--wash-space-3) var(--wash-space-2); }
 }
 
 /* md: the sidebar becomes an off-canvas drawer opened from the top bar. */

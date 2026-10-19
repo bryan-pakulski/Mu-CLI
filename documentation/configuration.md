@@ -34,12 +34,17 @@ Invoke via `python mucli.py [flags]`.
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini provider | API key for Google Gemini. |
 | `OLLAMA_HOST` | Ollama provider | URL of the Ollama server (also settable via `/set ollama_host`). |
 | `MUCLI_HOME` | Filesystem layout | Base directory for sessions and logs. Defaults to `~/.mucli/`. |
+| `MUCLI_GUI_ALLOWED_HOSTS` | GUI | Comma-separated host names (besides IP addresses and `localhost`) the GUI accepts on mutating orchestration requests; guards against DNS rebinding. |
+| `MUCLI_ORCH_ALLOW_PUBLIC_BIND` | Orchestration | `1` lets the node endpoint bind to `0.0.0.0` or a public address. Refused otherwise; see [orchestration.md](orchestration.md). |
+| `MUCLI_ORCH_DOCKER_TESTS` | Tests | `1` runs the Docker-backed orchestration container-node test. |
 
 Sessions and logs live under `MUCLI_HOME`:
 
 - `~/.mucli/sessions/` — saved session JSON files
 - `~/.mucli/logs/` — log output
 - `~/.mucli/trace/` — per-run JSONL traces (one file per run; see [tracing.md](tracing.md))
+- `~/.mucli/orchestration/` — orchestration store (`orch.sqlite3`), tool files (`blobs/`) and
+  master keys (`keys/`, mode 0700); see [orchestration.md](orchestration.md)
 - `~/.mucli/secrets.env` — agent-harness secrets (`CLAUDE_CODE_OAUTH_TOKEN`, optionally
   `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`), mode 0600; set with `/job agents secret KEY value`
   or Settings → Agents. Environment variables win over this file.

@@ -250,7 +250,7 @@
     }
 
     var goPending = 0;
-    var GO_KEYS = { c: '/', w: '/work', e: '/containers', t: '/trace' };
+    var GO_KEYS = { c: '/', w: '/work', o: '/orchestration', e: '/containers', t: '/trace' };
     document.addEventListener('keydown', function (event) {
         if (!settings.hotkey || document.body.getAttribute('data-palette-hotkey') === 'off') return;
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && String(event.key).toLowerCase() === 'k') {
@@ -273,6 +273,7 @@
     register('wash:navigate', [
         { id: 'nav:chat', group: 'Navigate', label: 'Chat', icon: 'message-circle', href: '/', key: 'g c' },
         { id: 'nav:work', group: 'Navigate', label: 'Work', icon: 'briefcase', href: '/work', key: 'g w' },
+        { id: 'nav:orchestration', group: 'Navigate', label: 'Orchestration', icon: 'server', href: '/orchestration', key: 'g o' },
         { id: 'nav:environments', group: 'Navigate', label: 'Environments', icon: 'box', href: '/containers', key: 'g e' },
         { id: 'nav:trace', group: 'Navigate', label: 'Trace', icon: 'activity', href: '/trace', key: 'g t' },
         { id: 'nav:job-analysis', group: 'Navigate', label: 'Job analysis', icon: 'bar-chart-3', href: '/jobs/trace' },

@@ -412,6 +412,12 @@ class InputHandler:
             _JOB_RULE_PATHS = {}
         _job_rule_paths = {path: None for path in _JOB_RULE_PATHS}
 
+        _ORCH_SUBCOMMAND_COMPLETER = NestedCompleter.from_nested_dict(
+            {sub: None for sub in ("status", "runs", "run", "nodes", "approve", "reject", "continue", "pause-run",
+                                   "cancel", "rollback", "accept", "quarantine", "release", "pause", "resume",
+                                   "update-agents")}
+        )
+
         _JOB_SUBCOMMAND_COMPLETER = NestedCompleter.from_nested_dict(
             {
                 "ui": None,
@@ -634,6 +640,9 @@ class InputHandler:
             "/job-analysis": None,
             "/jobs": _JOB_SUBCOMMAND_COMPLETER,
             "/job": _JOB_SUBCOMMAND_COMPLETER,
+            # orchestration (mu/commands/orch.py)
+            "/orch": _ORCH_SUBCOMMAND_COMPLETER,
+            "/orchestration": _ORCH_SUBCOMMAND_COMPLETER,
             # memory quick-write
             "/remember": None,
             # skills
@@ -832,11 +841,17 @@ class InputHandler:
     def build_input_toolbar_text(self):
         yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
         plan_segment = " | PLAN MODE ACTIVE — writes blocked" if self.is_plan_mode_enabled() else ""
+        try:  # orchestration waiting on you (cached, never starts orchestration)
+            from mu.commands.orch import toolbar_segment
+            orch_segment = toolbar_segment()
+        except Exception:
+            orch_segment = ""
         return (
             "[Meta+Enter] or [Esc] [Enter] to submit | [Shift+Left] threads | "
             f"[Shift+Tab] toggles YOLO ({yolo_status})"
             f"{plan_segment} | "
-            "/help for commands"
+            + (f"{orch_segment} | " if orch_segment else "")
+            + "/help for commands"
         )
 
     def build_choice_toolbar_text(self):

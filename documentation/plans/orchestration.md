@@ -1,6 +1,6 @@
 # Plan: Orchestration — a safe, AI-designed administration layer for a fleet of machines
 
-Status: accepted, decisions recorded 2026-10-18 (§12) · Owner: TBD · Builds on: `durable_engineering_jobs.md`, `job_templates.md`,
+Status: implemented 2026-10-18 (P0–P5, see §14) · decisions recorded 2026-10-18 (§12) · Owner: TBD · Builds on: `durable_engineering_jobs.md`, `job_templates.md`,
 `container_security.md` · Reference: Wash design guide
 
 ## 1. Idea
@@ -202,10 +202,12 @@ The AI's orchestration tools, all mediated by the master:
 | `orch_nodes_list`, `orch_node_facts` | read inventory and facts | none |
 | `orch_tool_draft` / `orch_tool_update` | write a **draft** | none (drafts can't run on nodes) |
 | `orch_tool_lint` | static checks on master | none |
-| `orch_tool_test` | run draft in check mode on a canary | human approval per test |
+| `orch_tool_test` | run draft in check mode on a canary | per the access policy's `run: test` rules; default: human approval per test |
 | `orch_run_propose` | create a **proposed** run | becomes a run only when approved |
 | `orch_run_status` / `orch_run_results` | read redacted results | none |
 | `orch_runbook_draft` | write a draft runbook | none |
+| `orch_runbook_validate` | check a runbook spec without saving | none |
+| `orch_runbook_test` | run a draft runbook in check mode on a canary | as `orch_tool_test` |
 
 There is **no** tool that publishes, approves, edits node policy, reads secrets or dispatches
 without a person. Proposals land in an **Approvals inbox** (web and mobile) using the
@@ -353,7 +355,12 @@ policy** is an ordered list of rules evaluated by a pure function
 ```
 
 Matches can use actor (`ai` or `operator`), effect, category, tool id glob and a label selector.
-Rules are edited in Settings, versioned, audited and exported with bundles. Every decision is
+Since the runbook editor plan (`runbook_editor.md` §3 item 7, decision §9.3) they can also use
+`run: test | run`: a rule without `run` matches ordinary runs only, and canary tests of drafts are
+decided by `run: test` rules (the shipped default confirms them, which keeps the earlier "every
+test is approved by the operator" behaviour unless you add an `allow` rule). Canary-only
+targeting, test-key signing, the digest freeze and typed confirmation for destructive effects
+hold whatever the rules say. Rules are edited in Settings, versioned, audited and exported with bundles. Every decision is
 shown in the run plan ("allowed by rule *AI diagnostics outside prod*"), and the node-local
 policy below still has the final veto.
 
@@ -529,3 +536,48 @@ enrolment dialog.
   exportable and reviewable as code, instead of a one-off shell session.
 - **The AI is most useful where it is safest.** It designs tools, reads redacted facts and
   results, composes runbooks and explains outcomes, while people keep the keys.
+
+## 14. Implementation status (2026-10-18)
+
+All six phases are implemented on branch `orchestration`. Operator guide:
+[`documentation/orchestration.md`](../orchestration.md). Code: `mu/orchestration/` (layout as §9,
+plus `service.py` (the master facade and scheduler loop), `runs.py` (planning, approval and
+applying scheduler actions), `catalog.py` (drafts, lint, review, publish), `selectors.py`,
+`schedules.py`, `server.py` (node endpoint), `zipapp.py`, `container_nodes.py`, `backup.py`,
+`cli.py`); `mu/gui/routers/orchestration.py`, `mu/gui/csrf.py`; Android
+`mobile/android/src/{api/orchestration.ts,screens/Orch*.tsx}`. Tests: `tests/test_orch_*.py`.
+
+Exit criteria and how they are covered:
+
+| Phase | Covered by | Not verified |
+|---|---|---|
+| P0 | Real TLS endpoint + node agents enrol over HTTPS long-poll, revoke refuses the next poll, audit chain verification and tamper detection, public/any-address binds refused (`test_orch_integration.py`, `test_orch_units.py`) | WireGuard configs are generated and unit-tested, but three NAT'd nodes through a real hub and a port scan of a hub were not run |
+| P1 | Signed read-only tool on three real agents; tampered blob, bad signature, replay, out-of-policy tool and invalid params each refused on the node | The systemd sandbox and root helper (`systemd-run`, sudo) are unit-tested by argv and by a fake helper, not run as root on a systemd host |
+| P2 | The AI drafts, lints, tests on a canary (operator-approved), submits; the operator publishes; the AI's proposal of the published mutating tool waits for approval (`test_orch_surfaces.py`) | A live model session in the Studio chat |
+| P3 | 3-step runbook over 20 nodes with canary + batches auto-pauses on injected failures, then rolls back (`test_orch_master.py`, in-process nodes) | The same over 20 *container* nodes; one container node is tested (opt-in `MUCLI_ORCH_DOCKER_TESTS=1`) |
+| P4 | Export, import into a fresh master: identical catalog, versions in review, secrets absent; trusted keys publish; tampered bundles refused (`test_orch_bundles.py`) | |
+| P5 | Master restart mid-rollout resumes; node offline mid-execution re-dispatches idempotent tools and marks others unreachable; quarantine, kill switch, rate limits, metrics counters, credential rotation, backup/restore, fact-change (drift) triggers | |
+
+Deviations from the plan text:
+
+- **Transient service instead of `systemd-run --scope`** (§6.5). Scopes cannot carry
+  `NoNewPrivileges`, `PrivateTmp` or `ProtectSystem`, so executions run as a transient service
+  (`systemd-run --wait --pipe --collect`) started by the root helper. Every execution goes through
+  `mucli-node-exec`, which re-verifies the signed envelope, parameters and node policy with
+  root-owned keys and policy before running anything (so a compromised agent user gains nothing).
+  `--insecure-no-sandbox` (plain subprocess, process-group kill) exists for development and the
+  disposable container nodes, and the node reports it (shown as a warning in the UI).
+- **Default node policy is read-only** (`max_effect: read_only`) when no policy file exists; the
+  owner opts nodes into changes.
+- **Test key acceptance** is node-local: a node accepts test-signed drafts only when its own
+  policy says `canary: true` (in addition to the master's canary marking).
+- **Bundles** are `.tar.zst` when the optional `zstandard` package is installed, otherwise
+  `.tar.gz`; import reads both.
+- **Integration tests** use HTTPS long-poll (per decision §12.2), not WebSockets (§11 text).
+- **CSRF**: tokens are per page load (HMAC-signed nonces), sent as `X-MuCLI-CSRF`; mutating
+  endpoints also reject foreign `Origin` headers and non-IP, non-localhost `Host` names (DNS
+  rebinding). Phones using a host name need `MUCLI_GUI_ALLOWED_HOSTS`.
+- **Tool lifecycle**: an approved test moves a draft to `testing`; editing it returns it to
+  `draft`. A test approved for one digest refuses to dispatch if the draft changes afterwards.
+- The AI's allowlist also includes `planRun` (a read-only plan preview, `dry_run`) and
+  `orch_tool_submit` (submit for review), which §4's table implies.

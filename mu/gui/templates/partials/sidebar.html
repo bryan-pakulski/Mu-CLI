@@ -1,15 +1,19 @@
 {#- Shared sidebar (G§8.1): primary navigation for every page on the Wash
-    shell. 264px; a 64px icon rail below 1200px; an off-canvas drawer below
+    shell. An icon rail below 1200px or when collapsed (the foot button,
+    html[data-sidebar="collapsed"], every page); an off-canvas drawer below
     840px (wash_shell.js toggles #w-shell[data-sidebar-open]).
     `nav_active` names the current item. Pages fill _layout.html's
     `sidebar_extra` block (markup rendered after Navigate: the chat page's
     Sessions and Threads, the Work sub-navigation) and may set `work_badge`
-    (top-level `{% set %}`), a count badge on the Work item. -#}
+    (top-level `{% set %}`), a count badge on the Work item. The Orchestration
+    item carries the orchestration attention badge on every page (wash_shell.js
+    fills it from /api/orchestration/badge, which never starts orchestration). -#}
 {%- import "macros/wash.html" as w -%}
 {%- set active = nav_active | default("") -%}
 {%- set primary = [
     ("chat", "/", "message-circle", "Chat"),
     ("work", "/work", "briefcase", "Work"),
+    ("orchestration", "/orchestration", "server", "Orchestration"),
     ("environments", "/containers", "box", "Environments"),
     ("trace", "/trace", "activity", "Trace"),
 ] -%}
@@ -20,7 +24,7 @@
 <aside class="w-sidebar" id="w-sidebar" aria-label="Main navigation">
     <ul class="w-sidebar__section" aria-label="Navigate">
         {%- for key, href, glyph, label in primary %}
-        <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span>{% if key == "work" and work_badge is defined %}{{ work_badge }}{% endif %}</a></li>
+        <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span>{% if key == "work" and work_badge is defined %}{{ work_badge }}{% endif %}{% if key == "orchestration" %}<span class="w-count w-nav__badge" data-tone="attention" data-orch-badge hidden></span>{% endif %}</a></li>
         {%- endfor %}
     </ul>
     {%- if sidebar_extra is defined and sidebar_extra|trim %}{{ sidebar_extra }}{% endif %}
@@ -30,4 +34,8 @@
         <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span></a></li>
         {%- endfor %}
     </ul>
+    <button type="button" class="w-btn w-sidebar__collapse" data-variant="ghost" data-size="sm" data-sidebar-toggle
+            aria-controls="w-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        {{ w.icon("panel-left", size="sm") }}<span class="w-nav__label" data-sidebar-toggle-label>Collapse</span>
+    </button>
 </aside>

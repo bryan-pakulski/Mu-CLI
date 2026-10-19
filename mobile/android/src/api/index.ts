@@ -32,3 +32,18 @@ export {
   CreateThreadResult,
   DeleteThreadResponse,
 } from './threads';
+export {
+  orchestrationApi,
+  subscribeToOrchestrationChanges,
+  subscribeToOrchestrationAttention,
+  OrchAction,
+  OrchAttention,
+  OrchNode,
+  OrchNodeDetail,
+  OrchExecution,
+  OrchRunBrief,
+  OrchRunDetail,
+  OrchOverview,
+  OrchApprovals,
+  OrchChange,
+} from './orchestration';

@@ -1,0 +1,17 @@
+id: sys.pending-updates
+title: Pending package updates
+summary: Count packages with available updates using the local package database (no refresh, no install).
+category: maintenance
+effect: read_only
+idempotent: true
+privilege: {run_as: nobody}
+inputs: {type: object, properties: {}, additionalProperties: false}
+outputs:
+  type: object
+  properties:
+    manager: {type: [string, "null"]}
+    count: {type: integer}
+    packages: {type: array, items: {type: string}}
+  required: [manager, count, packages]
+implementation: {runtime: python3, entry: pending_updates.py}
+limits: {timeout_s: 120, max_output_kb: 256}

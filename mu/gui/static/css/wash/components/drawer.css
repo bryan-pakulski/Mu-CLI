@@ -17,7 +17,7 @@
     display: flex;
     justify-content: flex-end;
     background: var(--wash-scrim);
-    animation: w-drawer-fade var(--wash-motion-medium) var(--wash-ease-medium) both;
+    animation: w-drawer-fade var(--wash-motion-medium) var(--wash-ease-medium) backwards;
 }
 .w-drawer[data-side="left"] { justify-content: flex-start; }
 .w-drawer:focus { outline: none; }
@@ -31,7 +31,7 @@
     -webkit-backdrop-filter: var(--w-glass-filter-strong);
     color: var(--wash-ink);
     box-shadow: var(--w-glass-lift-3);
-    animation: w-drawer-in-right var(--wash-motion-medium) var(--wash-ease-medium) both;
+    animation: w-drawer-in-right var(--wash-motion-medium) var(--wash-ease-medium) backwards;
 }
 .w-drawer[data-side="left"] .w-drawer__panel { animation-name: w-drawer-in-left; }
 .w-drawer__head {
@@ -63,6 +63,22 @@
     padding: var(--wash-space-3) var(--wash-space-5);
     border-top: 1px solid var(--wash-hairline);
 }
+/* Closing (MuDialog.close sets `hidden`): the panel slides back out as the scrim fades. */
+.w-drawer[hidden] {
+    display: none;
+    opacity: 0;
+    animation: none;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small),
+        display var(--wash-motion-small) var(--wash-ease-small) allow-discrete;
+}
+.w-drawer[hidden] .w-drawer__panel {
+    opacity: 0;
+    transform: translateX(24px);
+    animation: none;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small),
+        transform var(--wash-motion-small) var(--wash-ease-small);
+}
+.w-drawer[hidden][data-side="left"] .w-drawer__panel { transform: translateX(-24px); }
 @keyframes w-drawer-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes w-drawer-in-right { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes w-drawer-in-left { from { transform: translateX(-32px); opacity: 0; } to { transform: none; opacity: 1; } }

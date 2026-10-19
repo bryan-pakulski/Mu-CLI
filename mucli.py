@@ -352,6 +352,47 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
             session_manager.ui = prior_ui
 
 
+def _launcher_jobs_hint() -> str:
+    """Launcher description for Jobs: how many need you (never raises)."""
+    try:
+        from mu.jobs.core.vm import get_default_job_service
+
+        count = int(get_default_job_service().attention_summary().get("count", 0) or 0)
+    except Exception:  # noqa: BLE001 - the launcher must not depend on the jobs plane
+        count = 0
+    if count:
+        return f"Needs you: {count} job{'s' if count != 1 else ''}; open the job dashboard"
+    return "Engineering jobs across all sessions: board, review, respond"
+
+
+def _launcher_orch_hint() -> str:
+    try:
+        from mu.commands.orch import launcher_hint
+
+        return launcher_hint()
+    except Exception:  # noqa: BLE001
+        return "Fleet runs and nodes"
+
+
+def _launcher_open_jobs() -> None:
+    """The job dashboard from the launcher. No session is loaded yet, so it reviews, responds
+    and continues; creating a job needs a session (/jobs)."""
+    from mu.ui.jobs import can_open_tui, open_jobs_tui
+
+    try:
+        from mu.jobs.core.vm import get_default_job_service
+
+        service = get_default_job_service()
+        if not can_open_tui():
+            from mu.commands.job import attention_banner
+
+            console.print(attention_banner() or "No jobs need you.", markup=False)
+            return
+        open_jobs_tui(service=service)
+    except Exception as exc:  # noqa: BLE001 - never lose the launcher to a UI failure
+        console.print(f"[wash.danger]Job dashboard failed: {esc(str(exc))}[/wash.danger]")
+
+
 def choose_session(session_manager):
     """Top-level arrow-key launcher mirroring the web/mobile welcome flow."""
     while True:
@@ -362,6 +403,8 @@ def choose_session(session_manager):
             [
                 ("sessions", "Sessions", "Open, inspect, or delete a saved session"),
                 ("create", "Create new", "Create a chat, workspace, or container session"),
+                ("jobs", "Jobs", _launcher_jobs_hint()),
+                ("orchestration", "Orchestration", _launcher_orch_hint()),
                 ("containers", "Container management", "Create and manage standalone environments and templates"),
                 ("quit", "Quit", "Exit MuCLI"),
             ],
@@ -370,6 +413,17 @@ def choose_session(session_manager):
         )
         if action == "quit":
             raise SystemExit(0)
+        if action == "jobs":
+            _launcher_open_jobs()
+            continue
+        if action == "orchestration":
+            try:
+                from mu.commands.orch import run_orchestration_menu
+
+                run_orchestration_menu()
+            except Exception as exc:  # noqa: BLE001 - never lose the launcher
+                console.print(f"[wash.danger]Orchestration failed: {esc(str(exc))}[/wash.danger]")
+            continue
         if action == "containers":
             from mu.container.tui import run_container_manager
 
@@ -861,6 +915,11 @@ def _trace_analyze_cli(path: str) -> int:
 
 
 def main():
+    # `mucli orch ...`: orchestration commands (documentation/plans/orchestration.md §8).
+    if len(sys.argv) > 1 and sys.argv[1] == "orch":
+        from mu.orchestration.cli import main as orch_main
+
+        sys.exit(orch_main(sys.argv[2:]))
     logger.info("μCLI starting...")
 
     parser = argparse.ArgumentParser(description="Interactive AI CLI")
@@ -1112,6 +1171,15 @@ def main():
             ui.show_info(_jobs_banner)
     except Exception:
         logger.debug("job attention banner skipped", exc_info=True)
+    # Orchestration waiting on the operator (runs to approve, nodes to accept, ...): /orch.
+    try:
+        from mu.commands.orch import attention_banner as orch_attention_banner
+
+        _orch_banner = orch_attention_banner()
+        if _orch_banner:
+            ui.show_info(_orch_banner)
+    except Exception:
+        logger.debug("orchestration attention banner skipped", exc_info=True)
 
     # Cross-surface continuity phases 2+3 (G1+G4): inbound session watcher +
     # presence beacon. The watcher polls session.json only while another

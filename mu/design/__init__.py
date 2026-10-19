@@ -102,6 +102,17 @@ def state_style(state: Any) -> Dict[str, str]:
     }
 
 
+def table_style(table: str, key: Any) -> Dict[str, str]:
+    """Any ``{key: {status, label}}`` vocabulary table (``orch_run_state`` ...) → status, glyph,
+    semantic role and label, like ``state_style`` for job states."""
+    name = str(key or "")
+    row = load_vocabulary().get(table, {}).get(name)
+    status = row["status"] if row else "pending"
+    spec = status_spec(status)
+    return {"status": status, "glyph": spec["glyph"], "semantic": spec["semantic"],
+            "label": row["label"] if row else name.replace("_", " ")}
+
+
 def attention_label(reason: Any) -> str:
     row = load_vocabulary()["attention_reason"].get(str(reason or ""))
     return row["label"] if row else str(reason or "").replace("_", " ")

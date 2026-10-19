@@ -41,6 +41,7 @@ from .routers import (
     memory as memory_router,
     memories as memories_router,
     modes,
+    orchestration as orchestration_router,
     prompts as prompts_router,
     providers as providers_router,
     research as research_router,
@@ -225,6 +226,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(traces_router.router, prefix="/api/traces", tags=["traces"])
     app.include_router(chat.events_router, tags=["events"])
     app.include_router(design_router.router, tags=["design"])
+    app.include_router(orchestration_router.router, tags=["orchestration"])
 
     register_live_observability_hooks()
 
@@ -289,6 +291,10 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         app.state.thread_wake_scheduler.start()
         app.state.job_controller.start()
         app.state.watcher.start()
+        try:
+            orchestration_router.start_if_used(app)
+        except Exception:  # noqa: BLE001 - orchestration must never block the GUI
+            _logger.exception("orchestration services failed to start")
 
     @app.on_event("shutdown")
     async def _stop_services():
@@ -296,6 +302,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         if scheduler is not None:
             scheduler.stop(wait=False)
         app.state.watcher.stop()
+        orchestration_router.stop_services(app)
         # Active worker processes are intentionally not killed here. Their own
         # heartbeat/lease lets them survive daemon/browser restarts.
         app.state.job_controller.stop(wait=False)

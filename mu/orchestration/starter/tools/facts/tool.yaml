@@ -1,0 +1,11 @@
+id: sys.facts
+title: Collect facts
+summary: Run the node's built-in fact collectors (OS, kernel, CPU, memory, disks, services, binaries).
+category: inventory
+effect: read_only
+idempotent: true
+privilege: {run_as: nobody}
+inputs: {type: object, properties: {}, additionalProperties: false}
+outputs: {type: object}
+implementation: {runtime: builtin, entry: facts}
+limits: {timeout_s: 30, max_output_kb: 256}

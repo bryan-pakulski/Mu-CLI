@@ -4,12 +4,59 @@
  * inside it and therefore need to beat the `components` layer.
  */
 
-/* lg: icon rail — nav items become 44px icon buttons, labels and counts hide. */
-@media (840px <= width < 1200px) {
-    .w-sidebar .w-nav__label,
-    .w-sidebar .w-count { display: none; }
-    .w-sidebar .w-nav__item { justify-content: center; width: 44px; padding: 0; }
+/* Icon rail: whenever the sidebar is rail-width (narrow window, or collapsed by the foot
+ * button on any page) every row becomes a centred icon button of one size — nav items,
+ * page sections (chat sessions, Work and Orchestration sub-navigation), the primary action
+ * and the collapse button alike — and labels, headings, counts and row actions hide. */
+/* The sidebar foot's collapse button (every page; below 1200 the rail is automatic). */
+.w-sidebar .w-sidebar__collapse { align-self: flex-start; margin-top: auto; color: var(--wash-ink-3); }
+@media (width < 1200px) { .w-sidebar .w-sidebar__collapse { display: none; } }
+
+@container w-sidebar (width < 120px) {
+    .w-sidebar :is(.w-nav__label, .w-count, .w-sidebar__heading, .w-sessions__head, .w-session__name,
+        .w-session__actions, .w-session__state-label, .sidebar-new-session) { display: none; }
+    .w-shell .w-sidebar :is(.w-nav__item, .w-session, .sidebar-primary-action, .w-sidebar__collapse) {
+        justify-content: center;
+        width: var(--wash-size-control-lg);
+        min-width: 0;
+        padding: 0;
+        gap: 0;
+        margin-inline: auto;
+        align-self: center;
+    }
+    .w-sidebar .w-session__avatar { margin: 0; }
+    .w-sidebar .w-session__status { position: absolute; top: 2px; right: 2px; }
 }
+/* Attention badges on nav items (Work: jobs that need you; Orchestration: runs to approve,
+ * paused runs, reviews, nodes to accept): at the row's end, and on the icon in the rail. */
+.w-sidebar .w-nav__item { position: relative; }
+.w-sidebar .w-nav__badge { margin-left: auto; }
+@container w-sidebar (width < 120px) {
+    .w-sidebar .w-nav__item > .w-nav__badge:not([hidden]) {
+        display: inline-flex;
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        margin: 0;
+        font-size: var(--wash-type-caption-size);
+        line-height: 16px;
+        box-shadow: 0 0 0 2px var(--wash-canvas);
+        animation: w-menu-in var(--wash-motion-small) var(--wash-ease-small) backwards;
+    }
+}
+
+/* Labels never wrap while the sidebar animates between widths; they fade back in. */
+.w-sidebar .w-nav__label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small),
+        display var(--wash-motion-small) var(--wash-ease-small) allow-discrete;
+}
+@starting-style { .w-sidebar .w-nav__label { opacity: 0; } }
 
 /* sm: phones — the top-bar breadcrumb keeps only the current crumb. */
 @media (width < 600px) {

@@ -465,5 +465,178 @@
       "●"
     ],
     "interval_ms": 150
+  },
+  "orch_node_status": {
+    "pending": {
+      "status": "waiting",
+      "label": "awaiting acceptance"
+    },
+    "active": {
+      "status": "done",
+      "label": "active"
+    },
+    "offline": {
+      "status": "failed",
+      "label": "offline"
+    },
+    "quarantined": {
+      "status": "unverified",
+      "label": "quarantined"
+    },
+    "revoked": {
+      "status": "skipped",
+      "label": "revoked"
+    }
+  },
+  "orch_run_state": {
+    "proposed": {
+      "status": "waiting",
+      "label": "awaiting approval"
+    },
+    "approved": {
+      "status": "active",
+      "label": "starting"
+    },
+    "running": {
+      "status": "active",
+      "label": "running"
+    },
+    "paused": {
+      "status": "waiting",
+      "label": "paused"
+    },
+    "rolling_back": {
+      "status": "active",
+      "label": "rolling back"
+    },
+    "succeeded": {
+      "status": "done",
+      "label": "succeeded"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "cancelled": {
+      "status": "skipped",
+      "label": "cancelled"
+    },
+    "rejected": {
+      "status": "skipped",
+      "label": "rejected"
+    },
+    "rolled_back": {
+      "status": "skipped",
+      "label": "rolled back"
+    },
+    "expired": {
+      "status": "skipped",
+      "label": "expired"
+    }
+  },
+  "orch_exec_state": {
+    "queued": {
+      "status": "pending",
+      "label": "queued"
+    },
+    "dispatched": {
+      "status": "active",
+      "label": "dispatched"
+    },
+    "running": {
+      "status": "active",
+      "label": "running"
+    },
+    "succeeded": {
+      "status": "done",
+      "label": "succeeded"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "timed_out": {
+      "status": "failed",
+      "label": "timed out"
+    },
+    "cancelled": {
+      "status": "skipped",
+      "label": "cancelled"
+    },
+    "unreachable": {
+      "status": "unverified",
+      "label": "unreachable"
+    },
+    "refused": {
+      "status": "failed",
+      "label": "refused by node"
+    },
+    "skipped": {
+      "status": "skipped",
+      "label": "skipped"
+    }
+  },
+  "orch_tool_status": {
+    "draft": {
+      "status": "pending",
+      "label": "draft"
+    },
+    "testing": {
+      "status": "active",
+      "label": "testing"
+    },
+    "in_review": {
+      "status": "waiting",
+      "label": "in review"
+    },
+    "published": {
+      "status": "done",
+      "label": "published"
+    },
+    "deprecated": {
+      "status": "unverified",
+      "label": "deprecated"
+    },
+    "retired": {
+      "status": "skipped",
+      "label": "retired"
+    }
+  },
+  "orch_effect": {
+    "read_only": {
+      "semantic": "ok",
+      "label": "read-only"
+    },
+    "mutating": {
+      "semantic": "attention",
+      "label": "mutating"
+    },
+    "destructive": {
+      "semantic": "danger",
+      "label": "destructive"
+    }
+  },
+  "orch_stage": {
+    "intent": {
+      "label": "Intent"
+    },
+    "spec": {
+      "label": "Spec"
+    },
+    "discover": {
+      "label": "Discover"
+    },
+    "implement": {
+      "label": "Implement"
+    },
+    "test": {
+      "label": "Test"
+    },
+    "review": {
+      "label": "Review"
+    },
+    "publish": {
+      "label": "Publish"
+    }
   }
 }

@@ -23,23 +23,7 @@
     .chat-body .w-stage { overflow: hidden; display: flex; flex-direction: column; }
     .chat-body.welcome-body .w-stage { overflow: auto; display: block; }
 
-    /* Desktop sidebar collapse (top-bar-free toggle at the sidebar foot):
-     * the rail layout lg uses, at any width ≥ 840. */
-    @media (width >= 840px) {
-        .w-shell[data-sidebar-collapsed] { --w-sidebar-w: var(--wash-size-rail); }
-        .w-shell[data-sidebar-collapsed] .w-sidebar { padding: var(--wash-space-3) var(--wash-space-2); align-items: center; }
-        .w-shell[data-sidebar-collapsed] .w-sidebar :is(.w-nav__label, .w-sidebar__heading, .w-sessions__head, .w-session__name, .w-session__actions, .sidebar-new-session) { display: none; }
-        .w-shell[data-sidebar-collapsed] .w-sidebar .w-count { display: none; }
-        .w-shell[data-sidebar-collapsed] .w-sidebar .w-nav__item { justify-content: center; width: 44px; padding: 0; }
-        .w-shell[data-sidebar-collapsed] .w-session { justify-content: center; width: 44px; padding: 0; }
-        .w-shell[data-sidebar-collapsed] .sidebar-primary-action { width: 44px; padding: 0; }
-    }
-    @media (840px <= width < 1200px) {
-        .w-sidebar :is(.w-sessions__head, .w-session__name, .w-session__actions, .sidebar-new-session) { display: none; }
-        .w-sidebar .w-session { justify-content: center; width: 44px; padding: 0; }
-        .w-sidebar .sidebar-primary-action { width: 44px; padding: 0; }
-        .w-chat-sidebar__collapse { display: none; }
-    }
+    /* The collapsed sidebar (icon rail) is shared by every page: patterns/shell.css. */
 
     /* ------------------------------------------------------------ sidebar sections */
     .w-chat-sidebar {
@@ -57,7 +41,6 @@
     .w-chat-sidebar .w-btn .w-nav__label { flex: 1 1 auto; text-align: left; }
     .chat-body .w-toast-region { bottom: calc(var(--composer-height, 0px) + var(--wash-space-4)); }
     .w-chat-sidebar .sidebar-new-session { justify-content: flex-start; width: 100%; margin-top: var(--wash-space-1); color: var(--wash-ink-3); }
-    .w-chat-sidebar__collapse { justify-content: flex-start; margin-top: var(--wash-space-4); color: var(--wash-ink-3); }
     .w-session .session-type-svg { width: 16px; height: 16px; }
     .w-session .thread-status-dot { background: none; border: 0; }
 
@@ -108,18 +91,36 @@
     .turn-wrap { display: contents; }
 
     /* stage */
+    /* The workspace panel opens by growing in from the right edge and fading in; closing
+     * reverses it and display:none waits for the end (allow-discrete). Dragging the resize
+     * handle (body.resizing) turns the transition off so the panel follows the pointer. */
     .w-chat__stage {
         display: none;
         flex-direction: column;
-        flex: 0 0 clamp(360px, var(--panel-w, 520px), 62vw);
+        flex: 0 0 0;
         min-width: 0;
         min-height: 0;
         border-left: 1px solid var(--wash-glass-edge);
         background: var(--w-glass-fill);
+        opacity: 0;
+        translate: var(--wash-space-5) 0;
+        transition: flex-basis var(--wash-motion-medium) var(--wash-ease-medium),
+            opacity var(--wash-motion-small) var(--wash-ease-small),
+            translate var(--wash-motion-medium) var(--wash-ease-medium),
+            display var(--wash-motion-medium) var(--wash-ease-medium) allow-discrete;
     }
     /* The aside is the panel's glass; the panels inside it are not glassed again. */
     .w-chat__stage .w-panel { background: transparent; }
-    .w-chat.has-panel:not(.panel-hidden) .w-chat__stage { display: flex; }
+    .w-chat.has-panel:not(.panel-hidden) .w-chat__stage {
+        display: flex;
+        flex-basis: clamp(360px, var(--panel-w, 520px), 62vw);
+        opacity: 1;
+        translate: none;
+    }
+    @starting-style {
+        .w-chat.has-panel:not(.panel-hidden) .w-chat__stage { flex-basis: 0; opacity: 0; translate: var(--wash-space-5) 0; }
+    }
+    body.resizing .w-chat__stage { transition: none; }
     .w-chat__panels { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
     .w-chat__panels > .mode-panel {
         position: absolute;

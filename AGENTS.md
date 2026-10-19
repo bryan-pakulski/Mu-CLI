@@ -62,6 +62,9 @@ python3 -m pytest tests/ -q
 - `mu/ui/` — terminal input, rendering, selection, and streaming UI.
 - `mu/trace/` — JSONL trace emission, parsing, and snapshots.
 - `mu/jobs/` — job board, workers, review, verification, and receipts.
+- `mu/orchestration/` — fleet orchestration master: catalog, runs, signing,
+  access policy, node endpoint; `node/` is the node agent and must import only
+  the Python standard library (it ships as a zipapp; a test enforces this).
 - `providers/` — OpenAI, Gemini, Anthropic, Ollama, and provider base classes.
 - `utils/` — configuration, logging, metrics, token estimation, and helpers.
 - `tests/` — Python unit, integration, GUI, container, and regression tests.
@@ -110,6 +113,17 @@ python3 -m pytest tests/ -q
   capabilities); its result is committed as a job-scoped image. Interactive
   chat keeps its approval gates.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.
+- Orchestration (`documentation/orchestration.md`): every mutation goes through
+  `mu/orchestration/commands.dispatch`; the AI (`ai:*` actors) is limited to
+  `AI_COMMANDS` and can never publish, approve, dispatch, discard, or touch policy
+  or secrets. `orch_*` tools exist only in `orchestration` sessions. Nodes verify
+  signatures, parameters and their local policy before running anything. Tests of
+  drafts (`test`, `runbook_test`) are decided by `run: test` access rules (default
+  confirm), but canary-only targeting, test-key signing, the digest freeze and
+  typed confirmation for destructive effects are enforced in `runs`/`hub`, never by
+  policy. Runbook validation lives in `runbook.analyze` (structured problems with
+  field paths); the web pickers' `schema.js` mirrors `node/schema.py` (a test
+  compares them).
 - Runtime state defaults to `~/.mucli/`; `MUCLI_HOME` overrides that root.
 - Saved sessions are under `~/.mucli/sessions/`.
 - Per-run trace files are JSONL under `~/.mucli/trace/`.

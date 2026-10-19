@@ -1,0 +1,34 @@
+id: sys.disk-usage
+title: Disk usage
+summary: Report size, free space and use per mounted filesystem.
+category: diagnostics
+effect: read_only
+idempotent: true
+privilege: {run_as: nobody}
+inputs:
+  type: object
+  properties:
+    min_used_pct: {type: integer, minimum: 0, maximum: 100, default: 0, description: Only list filesystems at least this full.}
+  additionalProperties: false
+outputs:
+  type: object
+  properties:
+    disks:
+      type: array
+      items:
+        type: object
+        properties:
+          mount: {type: string}
+          fs: {type: string}
+          total_bytes: {type: integer}
+          free_bytes: {type: integer}
+          used_pct: {type: number}
+    max_used_pct: {type: [number, "null"]}
+  required: [disks]
+implementation: {runtime: python3, entry: disk_usage.py}
+limits: {timeout_s: 60, max_output_kb: 64}
+tests:
+  - name: lists filesystems
+    params: {}
+    check_mode: false
+    expect: {exit_code: 0, output_schema: true}

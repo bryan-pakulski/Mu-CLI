@@ -5,7 +5,9 @@
      localStorage `mucli-decoration` = reduced | full; when unset it follows
      prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
      which swaps every wash painting for a flat wash token. It also sets
-     html[data-nav] = vt | fade for page transitions. -->
+     html[data-nav] = vt | fade for page transitions, and html[data-sidebar] =
+     collapsed when the sidebar was collapsed (localStorage `mucli-layout`
+     .sidebarOpen === false; wash_shell.js toggles it on every page). -->
 <script>
 (function () {
     var root = document.documentElement, pref = 'system';
@@ -28,5 +30,9 @@
     // Transitions (pageswap/pagereveal) animate natively; the rest (e.g. Firefox) get the
     // scripted fade in wash_shell.js.
     root.setAttribute('data-nav', ('onpageswap' in window) ? 'vt' : 'fade');
+    try {
+        var layout = JSON.parse(localStorage.getItem('mucli-layout') || '{}');
+        if (layout && layout.sidebarOpen === false) root.setAttribute('data-sidebar', 'collapsed');
+    } catch (e) { /* default: expanded */ }
 })();
 </script>

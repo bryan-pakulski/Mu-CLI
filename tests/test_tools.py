@@ -187,8 +187,13 @@ def test_all_tools_return_schema_valid_envelope_on_invalid_args(tmp_path):
     ctx = FolderContext()
     ctx.add_folder(str(tmp_path))
 
+    from mu.tools.capabilities import is_tool_allowed
+
     for tool in TOOLS:
-        raw = execute_tool(tool.name, "bad-args", ctx)
+        # Exercise each tool in a session type that offers it (orch_* tools exist only in
+        # orchestration sessions; elsewhere the capability gate answers first).
+        variables = None if is_tool_allowed(tool.name, "workspace") else {"session_type": "orchestration"}
+        raw = execute_tool(tool.name, "bad-args", ctx, variables=variables)
         payload = json.loads(raw)
         _assert_tool_envelope(payload)
         assert payload["ok"] is False

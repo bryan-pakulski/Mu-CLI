@@ -32,8 +32,9 @@ def test_inspector_store_exposes_subagent_model_field():
 def test_composer_settings_has_subagent_model_picker():
     with open(CHAT_HTML_PATH, "r", encoding="utf-8") as f:
         content = f.read()
-    # The picker label + binding exist in the provider & model section.
-    assert "subagent model" in content
+    # The picker label + binding exist in the provider & model section
+    # (sentence-case label, Mu §5.7).
+    assert "subagent model" in content.lower()
     assert '$store.inspector.subagentModel' in content
     assert "$store.inspector.onSubagentModelChange" in content
     # It uses the dynamic models list (the same one the main model picker
@@ -59,13 +60,14 @@ def test_header_crumb_updates_live_on_model_switch():
     """The header crumb's provider/model must bind to the reactive inspector
     store (not just server-rendered Jinja) so it updates immediately when the
     model is switched — previously it stayed on the old name until refresh."""
+    # Mu §7.5: the provider·model lives in the composer foot (fragments/chat.html).
     index_path = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
-        "mu", "gui", "templates", "index.html",
+        "mu", "gui", "templates", "fragments", "chat.html",
     )
     with open(index_path, "r", encoding="utf-8") as f:
         content = f.read()
-    # The crumb binds to the live store values, with the Jinja values kept
+    # The label binds to the live store values, with the Jinja values kept
     # only as the pre-Alpine fallback inside the span.
     assert "$store.inspector.currentProvider" in content
     assert "$store.inspector.currentModel" in content

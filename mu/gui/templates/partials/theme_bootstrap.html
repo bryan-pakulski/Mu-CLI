@@ -4,7 +4,9 @@
      It also applies the "Reduce decoration" preference (G§6.2 rule 5):
      localStorage `mucli-decoration` = reduced | full; when unset it follows
      prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
-     which swaps every wash painting for a flat wash token. It also sets
+     which swaps every wash painting for a flat wash token. It applies the palette
+     (localStorage `mucli-palette`: darcula | one | material | tokyo → html[data-palette];
+     wash, the default, sets nothing). It also sets
      html[data-nav] = vt | fade for page transitions, and html[data-sidebar] =
      collapsed when the sidebar was collapsed (localStorage `mucli-layout`
      .sidebarOpen === false; wash_shell.js toggles it on every page). -->
@@ -26,6 +28,11 @@
     try { deco = localStorage.getItem('mucli-decoration'); } catch (e) {}
     try { quiet = !!(window.matchMedia && window.matchMedia('(prefers-reduced-transparency: reduce)').matches); } catch (e) {}
     if (deco === 'reduced' || (deco !== 'full' && quiet)) root.setAttribute('data-decoration', 'reduced');
+    // Palette (route_theme.js MuPalette): wash (default) | darcula | one | material | tokyo.
+    try {
+        var palette = localStorage.getItem('mucli-palette');
+        if (palette === 'darcula' || palette === 'one' || palette === 'material' || palette === 'tokyo') root.setAttribute('data-palette', palette);
+    } catch (e) { /* storage unavailable: wash */ }
     // Page navigation style (base.css "page transitions"): browsers with cross-document View
     // Transitions (pageswap/pagereveal) animate natively; the rest (e.g. Firefox) get the
     // scripted fade in wash_shell.js.

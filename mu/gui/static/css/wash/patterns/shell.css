@@ -8,13 +8,14 @@
  * button on any page) every row becomes a centred icon button of one size — nav items,
  * page sections (chat sessions, Work and Orchestration sub-navigation), the primary action
  * and the collapse button alike — and labels, headings, counts and row actions hide. */
-/* The sidebar foot's collapse button (every page; below 1200 the rail is automatic). */
-.w-sidebar .w-sidebar__collapse { align-self: flex-start; margin-top: auto; color: var(--wash-ink-3); }
-@media (width < 1200px) { .w-sidebar .w-sidebar__collapse { display: none; } }
+/* The rail foot's collapse button (every page; below 1200 the rail is automatic). */
+.w-sidebar .w-sidebar__collapse { width: 100%; color: var(--wash-ink-3); }
+@media (width < 1200px) { .w-sidebar li:has(> .w-sidebar__collapse) { display: none; } }
 
 @container w-sidebar (width < 120px) {
     .w-sidebar :is(.w-nav__label, .w-count, .w-sidebar__heading, .w-sessions__head, .w-session__name,
         .w-session__actions, .w-session__state-label, .sidebar-new-session) { display: none; }
+    .w-sidebar .w-sidebar__mark { align-self: center; margin-inline: auto; }
     .w-shell .w-sidebar :is(.w-nav__item, .w-session, .sidebar-primary-action, .w-sidebar__collapse) {
         justify-content: center;
         width: var(--wash-size-control-lg);
@@ -43,7 +44,7 @@
         margin: 0;
         font-size: var(--wash-type-caption-size);
         line-height: 16px;
-        box-shadow: 0 0 0 2px var(--wash-canvas);
+        box-shadow: 0 0 0 2px var(--w-rail-veil);
         animation: w-menu-in var(--wash-motion-small) var(--wash-ease-small) backwards;
     }
 }
@@ -58,8 +59,134 @@
 }
 @starting-style { .w-sidebar .w-nav__label { opacity: 0; } }
 
-/* sm: phones — the top-bar breadcrumb keeps only the current crumb. */
-@media (width < 600px) {
-    .w-topbar .w-breadcrumb__item:not(:last-child) { display: none; }
-    .w-topbar .w-breadcrumb__item + .w-breadcrumb__item::before { display: none; }
+
+/* The phone navigation button floats over the leaf's top-left corner, out of
+ * the grid flow (it must beat .w-btn's position, hence this layer). */
+.w-shell > .w-shell__menu {
+    position: fixed;
+    top: var(--wash-space-3);
+    left: var(--wash-space-3);
+    z-index: var(--wash-z-sticky);
+    background: var(--w-glass-fill-strong);
+    box-shadow: var(--w-glass-lift-2);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+}
+
+/* Floats inside the leaf (menus, popovers) sit on content that is itself on
+ * glass; nearly opaque so text never reads through them (Mu §2.1). */
+.w-stage :is(.w-menu, .w-popover) { background: color-mix(in srgb, var(--wash-raised) 95%, transparent); }
+.w-stage .w-sheet__panel { background: color-mix(in srgb, var(--wash-raised) 96%, transparent); }
+:root[data-decoration="reduced"] .w-stage :is(.w-menu, .w-popover, .w-sheet__panel) { background: var(--wash-raised); }
+
+/* ============================================================ the persistent shell
+ * (templates/shell.html, static/js/mu_shell.js; Mu §3 revision 2). One document; every
+ * destination is a keep-alive view (an iframe in embed mode) inside the flat leaf. */
+
+/* ------------------------------------------------------------ mode accent
+ * Each destination is a mode with its own pigment. The accent is a registered
+ * colour, so it eases from one pigment to the next instead of snapping, and the
+ * watercolour around the leaf cross-fades on the same slow beat. */
+@property --mu-accent {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+@property --mu-accent-ink {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: currentColor;
+}
+:root {
+    --mu-fade: 1400ms;
+    --mu-accent: var(--wash-lagoon-pigment);
+    --mu-accent-ink: var(--wash-lagoon-ink);
+    --mu-accent-wash: var(--wash-lagoon-wash);
+    transition: --mu-accent var(--mu-fade) var(--wash-ease-bleed), --mu-accent-ink var(--mu-fade) var(--wash-ease-bleed);
+}
+[data-mode="chat"] { --mu-accent: var(--wash-apricot-pigment); --mu-accent-ink: var(--wash-apricot-ink); --mu-accent-wash: var(--wash-apricot-wash); }
+[data-mode="work"] { --mu-accent: var(--wash-sky-pigment); --mu-accent-ink: var(--wash-sky-ink); --mu-accent-wash: var(--wash-sky-wash); }
+[data-mode="orchestration"] { --mu-accent: var(--wash-lilac-pigment); --mu-accent-ink: var(--wash-lilac-ink); --mu-accent-wash: var(--wash-lilac-wash); }
+[data-mode="environments"] { --mu-accent: var(--wash-meadow-pigment); --mu-accent-ink: var(--wash-meadow-ink); --mu-accent-wash: var(--wash-meadow-wash); }
+[data-mode="insights"] { --mu-accent: var(--wash-lagoon-pigment); --mu-accent-ink: var(--wash-lagoon-ink); --mu-accent-wash: var(--wash-lagoon-wash); }
+[data-mode="settings"] { --mu-accent: var(--wash-plum-pigment); --mu-accent-ink: var(--wash-plum-ink); --mu-accent-wash: var(--wash-plum-wash); }
+/* The accent marks where you are: the active rail item and the active tab. */
+.w-sidebar .w-nav__item[aria-current] :is(svg, .w-icon) { color: var(--mu-accent-ink); }
+.w-pagetabs__tab:is([aria-current="page"], [aria-selected="true"]) { box-shadow: inset 0 -2px 0 var(--mu-accent-ink); }
+
+/* ------------------------------------------------------------ the watercolour (shell only) */
+.mu-shell-body { background: transparent; }
+.mu-ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--wash-canvas); }
+.mu-ambient__layer {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    background:
+        radial-gradient(ellipse 60% 70% at 0% 0%, color-mix(in srgb, var(--mu-layer-tint) 70%, transparent), transparent 70%),
+        var(--mu-layer-art) center / cover no-repeat;
+    transition: opacity var(--mu-fade) var(--wash-ease-bleed);
+}
+.mu-ambient__layer[data-on] { opacity: 1; }
+.mu-ambient__layer[data-mode="chat"] { --mu-layer-art: var(--wash-art-ambient-dawn); --mu-layer-tint: var(--wash-apricot-wash); }
+.mu-ambient__layer[data-mode="work"] { --mu-layer-art: var(--wash-art-ambient-lagoon); --mu-layer-tint: var(--wash-sky-wash); }
+.mu-ambient__layer[data-mode="orchestration"] { --mu-layer-art: var(--wash-art-ambient-lagoon); --mu-layer-tint: var(--wash-lilac-wash); }
+.mu-ambient__layer[data-mode="environments"] { --mu-layer-art: var(--wash-art-ambient-meadow); --mu-layer-tint: var(--wash-meadow-wash); }
+.mu-ambient__layer[data-mode="insights"] { --mu-layer-art: var(--wash-art-ambient-lagoon); --mu-layer-tint: var(--wash-lagoon-wash); }
+.mu-ambient__layer[data-mode="settings"] { --mu-layer-art: var(--wash-art-ambient-dawn); --mu-layer-tint: var(--wash-plum-wash); }
+:root[data-decoration="reduced"] .mu-ambient__layer { background: var(--mu-layer-tint, var(--wash-canvas)); }
+@media (prefers-reduced-transparency: reduce) { .mu-ambient__layer { background: var(--mu-layer-tint, var(--wash-canvas)); } }
+@media (prefers-reduced-motion: reduce) {
+    :root { --mu-fade: 0ms; }
+}
+
+/* ------------------------------------------------------------ views */
+.mu-views { overflow: hidden; }
+.mu-view {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: inherit;
+    background: var(--wash-surface);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small), visibility 0s linear var(--wash-motion-small);
+}
+.mu-view[data-active] {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small);
+}
+.mu-view[data-active][data-loading] { opacity: 0.4; }
+.mu-view:focus { outline: none; }
+
+/* ------------------------------------------------------------ embed: a view's own document */
+html[data-embed] .w-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "stage";
+    background: var(--wash-surface);
+}
+html[data-embed] .w-shell:has(> .mu-viewside) {
+    grid-template-columns: var(--mu-viewside-w, 232px) minmax(0, 1fr);
+    grid-template-areas: "side stage";
+}
+html[data-embed] .w-shell::before { display: none; }
+html[data-embed] .w-stage { margin: 0; border-radius: 0; }
+html[data-embed] body[data-ambient]::before { background: var(--wash-surface); }
+html[data-embed] .w-shell > .mu-viewside {
+    position: static;
+    transform: none;
+    visibility: visible;
+    width: auto;
+    padding: var(--wash-space-5) var(--wash-space-3);
+    border-right: 1px solid var(--wash-hairline);
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+@media (width < 840px) {
+    html[data-embed] .w-shell:has(> .mu-viewside) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage"; }
+    html[data-embed] .w-shell > .mu-viewside { display: none; }
 }

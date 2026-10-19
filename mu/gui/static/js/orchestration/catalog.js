@@ -38,7 +38,7 @@
         return ui.table({
             label: 'Inputs', empty,
             cols: [{ label: 'Name' }, { label: 'Type' }, { label: 'Default' }, { label: 'Constraints' }, { label: 'Description' }],
-            rows: props.map(([name, p]) => [`<code class="orch-mono">${esc(name)}</code>${required.has(name) ? ' <span class="w-chip orch-tag" data-variant="meta">required</span>' : ''}`,
+            rows: props.map(([name, p]) => [`<code class="orch-mono">${esc(name)}</code>${required.has(name) ? ' <span class="orch-tag">required</span>' : ''}`,
                 esc(typeOf(p)), p.default !== undefined ? `<code class="orch-mono">${esc(JSON.stringify(p.default))}</code>` : '<span class="orch-muted">—</span>', esc(constraints(p)), esc(p.description || '')]),
         });
     }
@@ -54,13 +54,13 @@
 
     function lintTable(lint) {
         const findings = (lint || {}).findings || [];
-        const SEV = { error: ['danger', '✗'], warning: ['caution', '◆'], info: ['info', '●'] };
+        const SEV = { error: { status: 'failed', glyph: '✗' }, warning: { status: 'unverified', glyph: '◆' }, info: { status: 'pending', glyph: '●' } };
         return ui.table({
             label: 'Lint findings', empty: lint && !lint.stale && lint.at ? 'No findings. Lint passed.' : 'Lint hasn’t run on the current content yet.',
             cols: [{ label: 'Severity' }, { label: 'Rule' }, { label: 'Where' }, { label: 'Message' }],
             rows: findings.map(f => {
-                const [tone, glyph] = SEV[f.severity] || ['neutral', '○'];
-                return [`<span class="w-chip" data-tone="${tone}"><span class="w-chip__glyph" aria-hidden="true">${glyph}</span><span>${esc(ui.cap(f.severity))}</span></span>`,
+                const sev = SEV[f.severity] || { status: 'pending', glyph: '○' };
+                return [ui.chip({ ...sev, label: ui.cap(f.severity) }),
                     `<code class="orch-mono">${esc(f.rule)}</code>`, `<span class="orch-mono">${esc(f.file || '')}${f.line ? `:${esc(f.line)}` : ''}</span>`, esc(f.message)];
             }),
         });
@@ -105,11 +105,7 @@
         data.tools.forEach(v => { if (!byTool.has(v.tool_id)) byTool.set(v.tool_id, []); byTool.get(v.tool_id).push(v); });
         byTool.forEach(list => list.sort((a, b) => a.version - b.version));
         el.innerHTML = `
-            <header class="w-page__head orch-head">
-                <div><h1 class="w-page__title">Catalog</h1><p class="w-page__lede">Reviewed, signed tools and the runbooks built from them.</p></div>
-                <span class="orch-spacer"></span>
-                <div class="w-btn-row"><a class="w-btn" data-variant="secondary" href="#/studio">${icon('sparkles')}<span>Tool studio</span></a><a class="w-btn" data-variant="primary" href="#/new-run">${icon('play')}<span>New run</span></a></div>
-            </header>
+            <header class="orch-head"><h1 class="w-page__title">Catalog</h1></header>
             <div class="orch-stack">
                 <div class="orch-filters">
                     <div class="w-segmented" role="group" aria-label="Show">
@@ -120,15 +116,18 @@
                 </div>
                 <div data-cat-body></div>
                 <section class="orch-section" aria-labelledby="orch-rb-h">
-                    <header class="orch-section__head"><div><h2 class="orch-section__title" id="orch-rb-h">Runbooks</h2><p class="orch-muted">Ordered steps over pinned tool versions. Write them in the studio, or let the AI draft them in the studio chat.</p></div><span class="orch-spacer"></span><a class="w-btn" data-variant="secondary" data-size="sm" href="#/studio/runbook/new">${icon('plus', 'sm')}<span>New runbook</span></a></header>
-                    ${ui.table({ label: 'Runbooks', empty: 'No runbooks yet.', cols: [{ label: 'Runbook' }, { label: 'Version', num: true }, { label: 'Status' }, { label: 'Effect' }, { label: 'Steps', num: true }, { label: 'Problems' }],
-                        rows: data.runbooks.map(r => [`<a href="${runbookHref(r)}">${esc(r.title)}</a><span class="orch-sub orch-mono">${esc(r.runbook_id)}</span>`, esc(r.version), ui.chip(r.style), ui.effectChip(r.effect_style, r.effect), esc((r.steps || []).length),
-                            (r.problems || []).length ? `<span class="w-chip" data-tone="danger" title="${esc(r.problems.join('\n'))}"><span class="w-chip__glyph" aria-hidden="true">✗</span><span>${esc(ui.plural(r.problems.length, 'problem'))}</span></span>` : '<span class="orch-muted">—</span>']) })}
+                    <header class="orch-section__head"><h2 class="orch-section__title" id="orch-rb-h" title="Ordered steps over pinned tool versions">Runbooks</h2><span class="orch-spacer"></span><a class="w-textbtn" href="#/studio/runbook/new">New runbook</a></header>
+                    ${ui.rows(data.runbooks.map(r => ui.row({
+                        status: ui.statusKey(r.style), title: r.title, href: runbookHref(r),
+                        sub: ui.subline([`<span class="w-mono">${esc(r.runbook_id)} v${esc(r.version)}</span>`, ['published', 'deprecated'].includes(r.status) ? '' : esc(r.style?.label || r.status),
+                            ui.plural((r.steps || []).length, 'step'), ui.effectWord(r.effect_style, r.effect),
+                            (r.problems || []).length ? `<span data-tone="danger" title="${esc(r.problems.join('\n'))}">${esc(ui.plural(r.problems.length, 'problem'))}</span>` : '']),
+                    })), { label: 'Runbooks', empty: 'No runbooks yet. Write one in the studio, or let the AI draft it in the studio chat.' })}
                 </section>
             </div>`;
         const paint = () => {
             const q = el.querySelector('#orch-cat-search').value.toLowerCase();
-            const mode = Orch.parse().query.get('show') || 'published';
+            const mode = route.query.get('show') || 'published';
             const tools = [...byTool.values()].map(list => {
                 const visible = list.filter(v => mode === 'all' || (mode === 'open' ? OPEN.includes(v.status) : ['published', 'deprecated'].includes(v.status)));
                 return { list, visible, head: visible[visible.length - 1] || list[list.length - 1] };
@@ -141,12 +140,13 @@
                 return;
             }
             body.innerHTML = [...cats.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([cat, list]) => `
-                <section class="orch-section" aria-label="${esc(ui.cap(cat))}">
-                    <header class="orch-section__head"><h2 class="orch-section__title">${esc(ui.cap(cat))}</h2><span class="w-count">${list.length}</span></header>
-                    ${ui.table({ label: `${cat} tools`, cols: [{ label: 'Tool' }, { label: 'Effect' }, { label: 'Versions' }, { label: 'Summary' }],
-                        rows: list.map(t => [`<a href="${toolHref(t.head)}">${esc(t.head.title)}</a><span class="orch-sub orch-mono">${esc(t.head.tool_id)}</span>`, ui.effectChip(t.head.effect_style, t.head.effect),
-                            `<span class="orch-versions">${t.visible.map(v => `<a class="orch-version" href="${toolHref(v)}" title="${esc(v.ref)} · ${esc(v.style.label)}"><span class="orch-mono">v${esc(v.version)}</span> ${ui.chip(v.style, { sm: true })}</a>`).join('')}</span>`,
-                            `<span class="orch-clamp">${esc(t.head.summary)}</span>`]) })}
+                <section class="w-group" aria-label="${esc(ui.cap(cat))}">
+                    <h2 class="w-group__title">${esc(ui.cap(cat))}</h2>
+                    ${ui.rows(list.map(t => ui.row({
+                        status: ui.statusKey(t.head.style), title: t.head.title, href: toolHref(t.head),
+                        sub: ui.subline([`<span class="w-mono">${esc(t.head.tool_id)}</span>`, ui.effectWord(t.head.effect_style, t.head.effect),
+                            t.visible.map(v => `v${esc(v.version)}${['published'].includes(v.status) ? '' : ` ${esc(v.style.label)}`}`).join(', '), esc(t.head.summary || '')]),
+                    })), { label: `${cat} tools` })}
                 </section>`).join('');
         };
         paint();
@@ -157,6 +157,16 @@
             paint();
         }));
         return null;
+    }
+
+    /* The detail page's state sentence: status, effect, ref (Mu §4.2). */
+    function versionState(v) {
+        const st = ui.statusKey(v.style);
+        Orch.itemState([
+            { text: ui.cap(v.style?.label || v.status || ''), tone: st === 'waiting' ? 'attention' : (st === 'failed' ? 'danger' : '') },
+            v.effect_style ? { text: v.effect_style.label, tone: v.effect === 'destructive' ? 'danger' : '' } : null,
+            { text: v.ref },
+        ].filter(Boolean));
     }
 
     /* ------------------------------------------------------------ tool detail */
@@ -184,7 +194,7 @@
     function overviewPanel(t) {
         const review = t.review || {};
         return `<div class="orch-stack">
-            ${t.status === 'in_review' && (review.headline || (review.risks || []).length) ? `<article class="w-card orch-card" data-state="attention"><header class="w-card__head"><span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>In review</span></span><h2 class="w-card__title">${esc(review.headline || 'Submitted for review')}</h2><span class="w-card__meta">by ${esc(review.submitted_by || t.created_by)} · ${ui.time(review.submitted_at)}</span></header>
+            ${t.status === 'in_review' && (review.headline || (review.risks || []).length) ? `<article class="w-card orch-card" data-state="attention"><header class="w-card__head">${ui.chip({ status: 'waiting', glyph: '◆', label: 'In review' })}<h2 class="w-card__title">${esc(review.headline || 'Submitted for review')}</h2><span class="w-card__meta">by ${esc(review.submitted_by || t.created_by)} · ${ui.time(review.submitted_at)}</span></header>
                 <div class="w-card__body">${(review.risks || []).length ? `<p class="orch-label-text">Risks the author called out</p><ul class="orch-list">${review.risks.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}${review.notes ? `<p>${esc(review.notes)}</p>` : ''}
                 <p class="orch-muted">Check the Diff, Lint and Tests tabs before publishing.${t.effect === 'destructive' ? ' Destructive tools are published by typing the tool id.' : ''}</p></div></article>` : ''}
             ${t.summary ? `<p class="orch-lede">${esc(t.summary)}</p>` : ''}
@@ -245,18 +255,22 @@
         ];
         const editable = OPEN.includes(t.status);
         el.innerHTML = `
-            <header class="w-page__head orch-head">
-                <div class="orch-head__title">
-                    <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>${esc(ui.cap(t.category || 'tool'))}</span>
-                    <h1 class="w-page__title">${esc(t.title)} <span class="orch-version-tag orch-mono">v${esc(t.version)}</span></h1>
-                    <div class="orch-head__meta">${ui.chip(t.style)}${ui.effectChip(t.effect_style, t.effect)}<span class="orch-mono orch-sub">${esc(t.ref)}</span>${lintSummary(t)}${testsSummary(t)}</div>
+            <header class="orch-head"><h1 class="w-page__title">${esc(t.title)} v${esc(t.version)}</h1></header>
+            <div class="orch-detail">
+                <div class="orch-detail__main">
+                    ${ui.tabs('Tool views', tabList, tab)}
+                    <div class="w-tabs__panel orch-panel" id="orch-panel" role="tabpanel" aria-labelledby="orch-tab-${esc(tab)}" tabindex="0"></div>
                 </div>
-            </header>
-            <div class="orch-stack">
-                <div class="orch-toolbar">${ui.actionBar(t.actions, { label: 'Tool actions' })}${editable ? `<a class="w-btn" data-variant="ghost" href="#/studio/${encodeURIComponent(t.tool_id)}/${t.version}">${icon('pencil')}<span>Open in studio</span></a>` : ''}</div>
-                ${ui.tabs('Tool views', tabList, tab)}
-                <div class="w-tabs__panel orch-panel" id="orch-panel" role="tabpanel" aria-labelledby="orch-tab-${esc(tab)}" tabindex="0"></div>
+                <aside class="orch-detail__aside" aria-label="About this tool">
+                    <div class="orch-toolbar">${ui.actionBar(t.actions, { label: 'Tool actions' })}${editable ? `<a class="w-btn" data-variant="ghost" href="#/studio/${encodeURIComponent(t.tool_id)}/${t.version}">${icon('pencil')}<span>Open in studio</span></a>` : ''}</div>
+                    <p class="orch-head__meta orch-vchecks">${lintSummary(t)}${testsSummary(t)}</p>
+                    ${ui.kv([['Effect', ui.effectChip(t.effect_style, t.effect), true], ['Runs as', t.run_as || 'default'], ['Check mode', t.check_mode ? 'supported' : 'not supported'],
+                        ['Rollback', t.rollback ? `<code class="orch-mono">${esc(t.rollback)}</code>` : 'none', true], ['Category', t.category]])}
+                    <section class="w-group" aria-labelledby="orch-usage-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-usage-h">Recent runs</h2>${(t.usage || []).length > 6 ? '<button type="button" class="w-textbtn" data-tone="quiet" data-tab-link="usage">All runs</button>' : ''}</div>
+                        ${Orch.runs ? Orch.runs.runRows((t.usage || []).slice(0, 6), { empty: 'This version hasn’t run yet.' }) : ''}</section>
+                </aside>
             </div>`;
+        versionState(t);
         const panel = el.querySelector('#orch-panel');
         const paint = () => {
             panel.setAttribute('aria-labelledby', `orch-tab-${tab}`);
@@ -273,6 +287,7 @@
         };
         paint();
         ui.bindTabs(el, (next) => { tab = next; setQuery({ tab: next === 'overview' ? '' : next }); paint(); });
+        el.querySelector('[data-tab-link]')?.addEventListener('click', e => el.querySelector(`[role="tab"][data-tab="${e.currentTarget.dataset.tabLink}"]`)?.click());
         ui.bindActions(el, t.actions, { args: { ref: t.ref }, subject: t.ref, done: toolDone(t), dialogs: toolDialogs(t),
             overrides: { submitReview: () => Orch.studio?.submitDialog(t, () => Orch.refresh()) } });
         return null;
@@ -321,19 +336,15 @@
         ];
         const editorHref = `#/studio/runbook/${encodeURIComponent(r.runbook_id)}/${encodeURIComponent(r.version)}`;
         el.innerHTML = `
-            <header class="w-page__head orch-head">
-                <div class="orch-head__title">
-                    <span class="w-eyebrow" data-tone="plan"><i class="w-eyebrow__swatch"></i>Runbook</span>
-                    <h1 class="w-page__title">${esc(r.title)} <span class="orch-version-tag orch-mono">v${esc(r.version)}</span></h1>
-                    <div class="orch-head__meta">${ui.chip(r.style)}${ui.effectChip(r.effect_style, r.effect)}<span class="orch-mono orch-sub">${esc(r.ref)}</span>${errs ? ui.chip({ semantic: 'danger', glyph: '✗', label: ui.plural(errs, 'problem') }) : ''}${r.tests?.count ? ui.chip(r.tests.last?.passed ? { semantic: 'ok', glyph: '✓', label: `Last test passed · ${r.tests.passed}/${r.tests.count}` } : { semantic: 'danger', glyph: '✗', label: `Last test failed · ${r.tests.passed}/${r.tests.count}` }) : ''}</div>
-                </div>
-            </header>
+            <header class="orch-head"><h1 class="w-page__title">${esc(r.title)} v${esc(r.version)}</h1></header>
+            <p class="orch-head__meta orch-vchecks">${errs ? ui.chip({ semantic: 'danger', glyph: '✗', label: ui.plural(errs, 'problem') }) : ''}${r.tests?.count ? ui.chip(r.tests.last?.passed ? { semantic: 'ok', glyph: '✓', label: `Last test passed · ${r.tests.passed}/${r.tests.count}` } : { semantic: 'danger', glyph: '✗', label: `Last test failed · ${r.tests.passed}/${r.tests.count}` }) : ''}</p>
             <div class="orch-stack">
                 <div class="orch-toolbar">${ui.actionBar(r.actions, { label: 'Runbook actions' })}${['published', 'deprecated'].includes(r.status) ? `<button type="button" class="w-btn" data-variant="ghost" data-upgrade>${icon('refresh-cw')}<span>New version with upgraded tools</span></button>` : ''}</div>
                 ${!r.parses ? ui.banner('caution', '◆', 'The draft’s YAML doesn’t parse. The last valid version is shown here; open the editor to fix it.', `<a class="w-btn" data-variant="tonal" data-tone="caution" data-size="sm" href="${editorHref}">Open editor</a>`) : ''}
                 ${ui.tabs('Runbook views', tabList, tab)}
                 <div class="w-tabs__panel orch-panel" id="orch-panel" role="tabpanel" aria-labelledby="orch-tab-${esc(tab)}" tabindex="0"></div>
             </div>`;
+        versionState(r);
         const panel = el.querySelector('#orch-panel');
         const paint = () => {
             panel.setAttribute('aria-labelledby', `orch-tab-${tab}`);

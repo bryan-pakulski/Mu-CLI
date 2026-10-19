@@ -16,8 +16,11 @@
     const err = (form, e) => { const p = form.querySelector('[data-error]'); if (p) p.innerHTML = `<span aria-hidden="true">✗</span> ${esc(e.message || e)}`; };
     const clearErr = form => { const p = form.querySelector('[data-error]'); if (p) p.textContent = ''; };
     const copyBtn = (value, label) => `<button type="button" class="w-btn" data-variant="icon" data-size="sm" data-orch-copy data-copy-value="${esc(value)}" aria-label="Copy ${esc(label)}" title="Copy ${esc(label)}">${icon('copy', 'sm')}</button>`;
-    const section = (id, title, lede, body, tools = '') => `<section class="orch-section orch-settings__section" id="orch-set-${id}" aria-labelledby="orch-set-${id}-h">
-        <header class="orch-section__head"><div><h2 class="orch-section__title" id="orch-set-${id}-h">${esc(title)}</h2>${lede ? `<p class="orch-muted">${lede}</p>` : ''}</div><span class="orch-spacer"></span>${tools}</header>${body}</section>`;
+    /* A settings section is a form section (Mu §10.6): title, lede and section tools on the
+     * left (sticky from 1200px), the fields on the right. */
+    const section = (id, title, lede, body, tools = '') => `<section class="w-formsection orch-settings__section" id="orch-set-${id}" aria-labelledby="orch-set-${id}-h">
+        <header class="w-formsection__head"><h2 class="w-formsection__title" id="orch-set-${id}-h">${esc(title)}</h2>${lede ? `<p class="w-formsection__lede">${lede}</p>` : ''}${tools ? `<div class="orch-formsection__tools">${tools}</div>` : ''}</header>
+        <div class="w-formsection__body">${body}</div></section>`;
 
     /* The access policy editor shows {rules: [...]}; saveAccessPolicy wants the list. */
     function rulesListYaml(text) {
@@ -137,10 +140,10 @@
         const keyRow = (label, k) => k ? `<div class="orch-key"><p class="orch-label-text">${esc(label)}</p>${ui.kv([['Key id', `<code class="orch-mono">${esc(k.key_id)}</code>`, true], ['Public key', `<code class="orch-mono orch-break">${esc(k.public_key)}</code> ${copyBtn(k.public_key, `${label} public key`)}`, true]])}</div>` : '';
         el.innerHTML = `
             <header class="w-page__head orch-head">
-                <div><h1 class="w-page__title">Orchestration settings</h1><p class="w-page__lede">How nodes reach the master, who may run what, keys, secrets and defaults.</p></div>
+                <div><h1 class="w-page__title">Orchestration settings</h1></div>
             </header>
-            <nav class="w-chip-row orch-settings__nav" aria-label="Settings sections">${SECTIONS.map(([id, label]) => `<a class="w-chip" data-variant="meta" href="#/settings?section=${id}" data-section-link="${id}">${esc(label)}</a>`).join('')}</nav>
-            <div class="orch-stack orch-settings">
+            <nav class="orch-textfilters orch-settings__nav" aria-label="Settings sections">${SECTIONS.map(([id, label]) => `<a class="orch-textfilter" href="#/settings?section=${id}" data-section-link="${id}">${esc(label)}</a>`).join('')}</nav>
+            <div class="orch-settings">
                 ${section('network', 'Network', 'Nodes connect to a TLS endpoint on a private address you choose. The browser GUI stays on loopback.', `
                     <div class="orch-grid-2">
                         <form class="w-card orch-card" data-form="network" novalidate><div class="w-card__body orch-stack">
@@ -153,7 +156,7 @@
                             <p class="w-field__error" data-error role="alert"></p>
                             <div class="w-btn-row orch-form-actions"><button type="submit" class="w-btn" data-variant="primary">Save and restart endpoint</button></div>
                         </div></form>
-                        <div>${Orch.nodes.endpointCard(s.endpoint)}</div>
+                        <div>${Orch.nodes.endpointLine(s.endpoint, { link: false })}</div>
                     </div>`)}
                 ${section('overlay', 'WireGuard overlay', 'An optional private network between the master and nodes, for machines that share no private LAN.', ov.subnet ? `
                     <div class="orch-grid-2">
@@ -280,7 +283,7 @@
             try {
                 const o = await window.OrchPickers.options('run');
                 const ids = o.tools.map(t => t.id);
-                box.querySelector('p').outerHTML = ids.length ? `<p class="orch-labels">${ids.map(i => `<button type="button" class="w-chip" data-variant="meta" data-orch-copy data-copy-value="${esc(i)}" title="Copy ${esc(i)}">${esc(i)}</button>`).join('')}</p>` : '<p class="orch-muted">No published tools yet.</p>';
+                box.querySelector('p').outerHTML = ids.length ? `<p class="orch-labels">${ids.map(i => `<button type="button" class="w-textbtn orch-mono" data-tone="quiet" data-orch-copy data-copy-value="${esc(i)}" title="Copy ${esc(i)}">${esc(i)}</button>`).join('')}</p>` : '<p class="orch-muted">No published tools yet.</p>';
             } catch (e2) { box.querySelector('p').textContent = e2.message; }
         });
         submit('access', async f => {
@@ -427,7 +430,7 @@
         let entries = data.entries || [];
         el.innerHTML = `
             <header class="w-page__head orch-head">
-                <div><h1 class="w-page__title">Audit log</h1><p class="w-page__lede">Append-only and hash-chained: every proposal, approval, publish, dispatch, result, import and enrolment.</p></div>
+                <div><h1 class="w-page__title">Audit log</h1></div>
                 <span class="orch-spacer"></span>
                 <button type="button" class="w-btn" data-variant="secondary" data-verify>${icon('shield-check')}<span>Verify chain</span></button>
             </header>

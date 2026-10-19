@@ -84,7 +84,8 @@ def test_web_jobs_mode_asks_for_a_session_instead_of_using_the_entry_session():
     assert 'id="job-workspace" required' in html and 'id="job-session"' not in html
     assert "'/api/jobs/sessions'" in work and "Choose the workspace this job works in." in work
     assert "function recentWorkspaces(list)" in work and "sessionForWorkspace(workspace)" in work
-    assert "sessionEl.textContent = 'all sessions'" in work
+    # Every session's jobs are listed (the Jobs tab filters by session, default all).
+    assert '<option value="">All sessions</option>' in view
     # Ticket import is workspace/repository-first too (session optional).
     assert "window.MuWork.chooseImportTarget" in jira and "window.MuWork.chooseSession" not in jira
     assert "work-jobs-session" in view and "row.origin_session" in view

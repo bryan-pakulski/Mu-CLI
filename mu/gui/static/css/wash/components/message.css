@@ -14,16 +14,18 @@
  *     <button class="w-jump">Jump to latest ↓</button>
  *   </div>
  *
- * User: right-aligned accent-wash bubble (radius-lg, 6px bottom-right),
- * max 80%. Assistant: no bubble, body-lg prose on canvas. A streaming
- * assistant ends in a soft caret in the mode pigment (--w-mode-pigment).
+ * Mu §10.1: no bubbles. Your messages are prose prefixed by a quiet "You"
+ * label; the assistant's are body-lg prose on the leaf at the reading width
+ * (680). The model name is in the composer foot, so the assistant head is
+ * not shown. A streaming assistant ends in a soft caret in the mode pigment
+ * (--w-mode-pigment). System lines (info, error, command) are text, not boxes.
  */
 .w-transcript {
-    --w-reading: var(--wash-size-reading);
+    --w-reading: 680px;
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--wash-space-3);
+    gap: var(--wash-space-5);
     min-height: 0;
     padding: var(--wash-space-6) max(var(--wash-space-6), calc((100% - var(--w-reading)) / 2)) var(--wash-space-7);
     overflow-y: auto;
@@ -42,19 +44,26 @@
     line-height: var(--wash-type-body-lg-line);
 }
 .w-msg[data-role="user"] {
-    align-self: flex-end;
-    max-width: 80%;
-    padding: var(--wash-space-3) var(--wash-space-4);
-    border-radius: var(--wash-radius-lg) var(--wash-radius-lg) 6px var(--wash-radius-lg);
-    /* accent-tinted glass: ≥70% wash keeps ink text at contrast (G§9.7) */
-    background: color-mix(in srgb, var(--wash-accent-wash) 78%, var(--w-glass-fill));
-    box-shadow: var(--w-glass-lift-flat);
+    align-self: stretch;
+    max-width: none;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
     color: var(--wash-ink);
     white-space: normal;
 }
+.w-msg[data-role="user"]::before {
+    content: "You";
+    display: block;
+    margin-bottom: 2px;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+}
 .w-msg[data-role="assistant"] { align-self: stretch; padding: 0; background: none; }
 .w-msg__head {
-    display: flex;
+    display: none;
     align-items: center;
     gap: var(--wash-space-2);
     margin-bottom: var(--wash-space-1);
@@ -96,24 +105,21 @@
     display: flex;
     align-items: baseline;
     gap: var(--wash-space-2);
-    padding: var(--wash-space-2) var(--wash-space-3);
-    border-radius: var(--wash-radius-md);
-    background: var(--w-glass-fill-subtle);
+    padding: 0;
+    border-radius: 0;
+    background: none;
     color: var(--wash-ink-2);
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
 }
-.w-msg[data-role="error"] {
-    background: color-mix(in srgb, var(--wash-danger-wash) 78%, var(--w-glass-fill));
-    color: var(--wash-danger-ink);
-}
+.w-msg[data-role="error"] { color: var(--wash-danger-ink); }
 .w-msg__glyph { flex: none; font-weight: 600; }
 .w-msg[data-role="info"] .w-msg__glyph { color: var(--wash-info-pigment); font-size: var(--wash-type-caption-size); }
 .w-msg[data-role="command"] {
-    padding: var(--wash-space-3) var(--wash-space-4);
-    border: 1px solid var(--w-glass-line);
-    border-radius: var(--wash-radius-md);
-    background: var(--w-glass-fill);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
 }

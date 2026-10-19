@@ -178,3 +178,53 @@
     else sync();
     document.addEventListener('alpine:initialized', sync);
 })();
+
+// Palette (Mu revision 2) — one controller for every page and the shell.
+// Preference (localStorage `mucli-palette`): "wash" (the default: watercolour Paper /
+// Dusk) | "darcula" | "one" | "material" | "tokyo". Any other value reads as wash.
+// Applied as html[data-palette] (removed for wash; the pre-paint bootstrap does the
+// same) and combined with html[data-theme] for light or dark: every palette has both.
+// Controls: any [data-palette-choice="<name>"] button (aria-pressed is kept in sync).
+// A change dispatches `mucli-palette-change` and `mucli-theme-change` (charts redraw
+// from the tokens on the latter).
+(function () {
+    'use strict';
+    var KEY = 'mucli-palette';
+    var NAMES = ['wash', 'darcula', 'one', 'material', 'tokyo'];
+    function normalize(value) { return NAMES.indexOf(String(value || '')) >= 0 ? String(value) : 'wash'; }
+    function preference() {
+        try { return normalize(localStorage.getItem(KEY)); } catch (_) { return 'wash'; }
+    }
+    function apply(pref, opts) {
+        var name = normalize(pref || preference());
+        var root = document.documentElement;
+        if (name === 'wash') root.removeAttribute('data-palette');
+        else root.setAttribute('data-palette', name);
+        document.querySelectorAll('[data-palette-choice]').forEach(function (button) {
+            button.setAttribute('aria-pressed', button.getAttribute('data-palette-choice') === name ? 'true' : 'false');
+        });
+        if (!(opts && opts.silent)) {
+            window.dispatchEvent(new CustomEvent('mucli-palette-change', { detail: { palette: name } }));
+            if (window.MuTheme) {
+                var wash = window.MuTheme.current();
+                window.dispatchEvent(new CustomEvent('mucli-theme-change', {
+                    detail: { theme: window.MuTheme.legacyName(wash), wash: wash, preference: window.MuTheme.preference(), palette: name },
+                }));
+            }
+        }
+        return name;
+    }
+    function set(value) {
+        var name = normalize(value);
+        try { localStorage.setItem(KEY, name); } catch (_) { /* private mode */ }
+        return apply(name);
+    }
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest && event.target.closest('[data-palette-choice]');
+        if (button && !button.disabled) set(button.getAttribute('data-palette-choice'));
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue); });
+    window.MuPalette = { KEY: KEY, NAMES: NAMES, preference: preference, current: function () { return normalize(document.documentElement.getAttribute('data-palette')); }, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();

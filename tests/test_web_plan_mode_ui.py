@@ -31,14 +31,16 @@ def test_plan_mode_updates_live_from_sse_and_slash_commands():
 
 
 def test_header_pill_only_shows_while_on_and_sits_before_approvals():
-    pill = INDEX.index('data-testid="plan-mode-pill"')
-    assert pill < INDEX.index("yolo-toggle product-yolo")
-    li = INDEX.rfind("<li", 0, pill)
-    assert 'x-show="$store.planMode.active"' in INDEX[li:pill]
+    # Mu §10.1: there is no top bar; the plan-mode pill sits in the composer
+    # foot, before the auto-approve word, and shows only while plan mode is on.
+    pill = CHAT.index('data-testid="plan-mode-pill"')
+    assert pill < CHAT.index('class="w-composer__yolo"')
+    button = CHAT.rfind("<button", 0, pill)
+    assert 'x-show="$store.planMode.active"' in CHAT[button:pill + 200]
     # Wash: a lock sprite icon replaces the 🔒 emoji (no emoji in chrome, G§4).
-    assert "Plan mode" in INDEX[pill:pill + 800] and 'w.icon("lock"' in INDEX[pill:pill + 800]
-    assert "🔒" not in INDEX
-    assert "turnOff({ confirmFirst: true })" in INDEX
+    assert "Plan mode" in CHAT[pill:pill + 800] and 'w.icon("lock"' in CHAT[pill:pill + 800]
+    assert "🔒" not in INDEX and "🔒" not in CHAT
+    assert "turnOff({ confirmFirst: true })" in CHAT
     assert "File edits, shell writes and other write tools are blocked." in APP
 
 
@@ -68,7 +70,7 @@ def test_plan_mode_has_its_own_colour_in_both_themes():
     rule = composer.split("}")[0]
     assert "dashed var(--wash-plan-ink)" in rule
     assert "attention" not in rule and "caution" not in rule
-    assert 'class="w-chip plan-mode-pill" data-tone="plan"' in INDEX
+    assert 'class="w-chip plan-mode-pill" data-tone="plan"' in CHAT
 
 
 def test_blocked_tool_results_are_labelled():

@@ -55,13 +55,14 @@ def test_engineering_work_reuses_primary_product_chrome_and_theme_semantics():
     css = WORK_BUNDLE.read_text(encoding="utf-8")
     layout = WORK_LAYOUT.read_text(encoding="utf-8")
 
-    # Wash W4: /work no longer has its own header; it fills the shared top
-    # bar (status chips + tool icons) of _layout.html, whose theme switch is
-    # the shared sprite icon button.
+    # Mu §3–§4: /work has no header of its own; it fills the shared page header of
+    # _layout.html (title, state sentence, tabs, one primary action and a ⋯ menu holding the
+    # tool items). The theme is chosen in Settings (the global destination).
     assert '{% extends "_layout.html" %}' in template
     assert '{% block page %}' not in template and 'work-header product-header' not in template
-    assert '{% block topbar_tools %}' in template and 'work-header-icon' in template
-    assert '{{ w.theme_toggle() }}' in layout
+    assert '{% block page_actions %}' in template and 'work-header-icon' in template
+    assert 'id="work-tools-menu"' in template
+    assert 'data-theme-select' in (ROOT / "mu" / "gui" / "templates" / "settings.html").read_text(encoding="utf-8")
     assert 'data-route-theme' in (ROOT / "mu" / "gui" / "templates" / "macros" / "wash.html").read_text(encoding="utf-8")
     assert 'title="Analyze jobs"' in template
     assert 'title="Model pricing"' in template

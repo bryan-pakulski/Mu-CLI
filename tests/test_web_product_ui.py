@@ -15,6 +15,7 @@ PANEL_CSS = WASH / "components" / "panel.css"
 COMPOSER_CSS = WASH / "components" / "composer.css"
 PROMPT_CSS = WASH / "components" / "prompt.css"
 CHAT_HTML = ROOT / "mu" / "gui" / "templates" / "fragments" / "chat.html"
+SESSION_HEADER = ROOT / "mu" / "gui" / "templates" / "fragments" / "session_header.html"
 SIDEBAR = ROOT / "mu" / "gui" / "templates" / "partials" / "sidebar.html"
 # The chat page's retired legacy stylesheets (W4, web-shell ledger).
 RETIRED_CHAT_CSS = ("product.css", "crystal.css", "clarity.css", "refinement.css",
@@ -60,8 +61,10 @@ def test_left_navigation_groups_threads_and_sessions():
     # Threads scoped to the group roster and hidden when it is a singleton.
     assert '$store.threads.groupRoster.length > 1' in sidebar
     assert 'x-for="t in $store.threads.groupRoster"' in sidebar
-    # Sessions section iterates the full store list, not a roster-filtered view.
-    assert 'x-for="s in $store.sessions.list"' in sidebar
+    # Sessions section iterates the full store list, not a roster-filtered view; the
+    # only narrowing is the user's own filter text (shown once the list is long).
+    assert 'x-for="s in $store.sessions.list.filter(x => !q || x.name.toLowerCase().includes(q.trim().toLowerCase()))"' in sidebar
+    assert 'x-show="$store.sessions.list.length > 8"' in sidebar and 'x-model="q"' in sidebar
     assert 'otherSessions' not in sidebar
     # Row actions: switch on row click, unload + confirm-guarded delete.
     assert '$store.threads.switchTo(t)' in sidebar
@@ -69,8 +72,9 @@ def test_left_navigation_groups_threads_and_sessions():
     assert '$store.sessions.unload(s.name)' in sidebar
     assert '$store.sessions.remove(s.name)' in sidebar
     assert '$store.confirm.ask(' in sidebar
-    assert 'New thread' in sidebar
-    assert '+ new session' in sidebar
+    # Mu §3.2: "New thread" / "New session" are the + on each heading.
+    assert 'aria-label="New thread"' in sidebar and '$store.threads.create()' in sidebar
+    assert 'aria-label="New session"' in sidebar and '$store.sessions.deactivate()' in sidebar
     # Keyboard access on both row kinds.
     assert sidebar.count('role="button" tabindex="0"') >= 2
     assert sidebar.count('@keydown.enter.prevent="$el.click()"') >= 2
@@ -81,20 +85,23 @@ def test_left_navigation_groups_threads_and_sessions():
 
 
 def test_header_has_trace_action_and_centered_settings_cog():
-    # Wash W4 (G§8.1): Chat/Work/Environments/Trace are primary navigation in
-    # the sidebar, not top-bar icons. The session-scoped trace link lives in
-    # the stage view menu; the top bar keeps the settings cog (sprite icon).
-    text = INDEX.read_text(encoding="utf-8")
+    # Mu §3.2, §10.1: Trace is reached from the rail's Insights destination
+    # and from the session; the session header's ⋯ menu carries the settings
+    # entry (the old top-bar cog) and a session-scoped trace link.
+    header = SESSION_HEADER.read_text(encoding="utf-8")
     tabs = PANEL_TABS.read_text(encoding="utf-8")
     assert "'/trace?session=' + encodeURIComponent($store.chat.currentName || '')" in tabs
     assert 'aria-label="Open Trace Analyzer"' in tabs
-    assert '("trace", "/trace", "activity", "Trace")' in SIDEBAR.read_text(encoding="utf-8")
-    assert 'class="w-btn settings-cog-button" data-variant="icon"' in text
-    assert 'aria-label="Open settings">{{ w.icon("settings") }}' in text
+    assert '("insights", "/trace", "activity", "Insights")' in SIDEBAR.read_text(encoding="utf-8")
+    assert "'/trace?session=' + encodeURIComponent($store.chat.currentName || '')" in header
+    assert 'class="w-menu__item settings-cog-button"' in header
+    assert 'aria-label="Open settings">{{ w.icon("settings", size="sm") }}' in header
+    assert 'fragments/session_header.html' in INDEX.read_text(encoding="utf-8")
 
 
 def test_product_shell_keeps_core_navigation_contracts():
-    text = INDEX.read_text(encoding="utf-8")
+    # Mu §10.1: the top bar's controls moved into the session header's ⋯ menu.
+    text = INDEX.read_text(encoding="utf-8") + SESSION_HEADER.read_text(encoding="utf-8")
     assert '$store.sessions.switchTo(s.name)' in text
     assert '$store.inspector.openDrawer()' in text
     assert '$store.yolo.toggle()' in text
@@ -138,7 +145,7 @@ def test_product_css_covers_primary_web_surfaces():
     ]
     combined = ''.join(path.read_text(encoding="utf-8") for path in files)
     for selector in (
-        '.w-topbar', '.w-sidebar', '.w-transcript', '.w-msg[data-role="user"]',
+        '.w-chathead', '.w-sidebar', '.w-transcript', '.w-msg[data-role="user"]',
         '.w-composer', '.w-chat__stage', '.w-stage-head', '.inspector',
         '.w-welcome__choice', '.w-prompt__option',
         '.composer-mode-popout', '.composer-settings-popout',
@@ -336,8 +343,9 @@ def test_settings_drawer_is_spacious_clean_and_consistent():
 def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
     # Wash W4: the legacy trace.css / route-product.css are gone; the analyzer
     # styles live in its pattern bundle (+ the shared trace-common.css) with no
-    # legacy imports. Sections are flat Wash cards (no glass), charts sit in a
-    # plain rounded wrap, metrics are one hairline grid, and info popouts stay.
+    # legacy imports. Mu §5/§10.5: sections are groups on the leaf (no card, no
+    # eyebrow), charts sit in a plain rounded wrap, metrics are one hairline grid
+    # folded under "All metrics", and info popouts stay.
     assert not TRACE_CSS.exists() and not ROUTE_CSS.exists()
     patterns = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
     bundle = (patterns / "trace.css").read_text(encoding="utf-8")
@@ -345,9 +353,11 @@ def test_trace_analyzer_uses_floating_glass_panes_and_themed_charts():
     assert '@import url("trace-common.css") layer(patterns);' in bundle
     assert 'layer(legacy)' not in bundle
     html = (ROOT / "mu" / "gui" / "templates" / "trace.html").read_text(encoding="utf-8")
-    assert '<section class="w-card trace-section"' in html
-    assert 'class="w-eyebrow"' in html
-    assert '.trace-section.w-card' in css
+    assert '<section class="w-group trace-section"' in html
+    assert 'class="w-eyebrow"' not in html and 'w-card' not in html
+    assert '<details class="w-disclose trace-allmetrics"' in html
+    assert html.index('id="trace-h-harness-suspects"') < html.index('id="trace-h-overview"')
+    assert '.trace-section.w-group' in css
     assert 'border-radius: 22px' not in css + bundle
     assert all(v.strip().startswith('var(--w-glass-filter')
                for v in __import__('re').findall(r'backdrop-filter:\s*([^;]+);', css + bundle))
@@ -382,10 +392,10 @@ def test_container_management_uses_current_product_surface_without_breaking_ids(
     ):
         assert f'id="{dom_id}"' in template
 
-    # Cards, monitor grid and overflow menu are Wash components laid out by the bundle.
+    # Mu rows, the live facts and the overflow menu are components laid out by the bundle.
     script = (ROOT / "mu" / "gui" / "static" / "js" / "containers.js").read_text(encoding="utf-8")
-    assert 'class="w-card w-env-card" data-variant="interactive"' in script
+    assert '<li class="w-row w-env-item"' in script
     assert 'class="w-menu w-env-overflow__menu" role="menu"' in script
-    assert 'class="w-card-grid w-env-grid"' in template
+    assert 'class="w-rows w-env-list"' in template
     assert '.w-env-monitor__grid' in bundle
     assert '.w-env-overflow__menu' in bundle and '.w-env-meta' in bundle

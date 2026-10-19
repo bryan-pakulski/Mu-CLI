@@ -5,7 +5,6 @@
        x-init="$watch('$store.mode.active', (val) => { if (val === 'shell') $store.shell.load(); else $store.shell.disconnect(); })">
     <div class="shell-panel-head">
         <div>
-            <span class="label-mono w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Shell</span>
             <p>Interactive shell into the attached container.</p>
         </div>
         <!-- MUCLI_SHELL_QOL_V1 -->

@@ -48,7 +48,8 @@ def test_gui_exposes_first_class_engineering_work_surface():
     assert 'id="work-detail"' in template
     assert 'id="work-create-form"' in template
 
-    assert ".work-main {" in css and 'class="work-main work-layout"' in template
+    # Mu §11b: the work column is the main pane of the Work workspace.
+    assert ".work-main {" in css and 'class="w-pane work-main work-layout" data-pane="main"' in template
     assert ".work-job-card" in css
     assert ".work-action-panel" in css
     assert "clip-path" not in css

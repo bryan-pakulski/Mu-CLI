@@ -7,9 +7,8 @@
          MUCLI_VIZ_SUBSECTIONS_V1: visualizations + files split into separate registries. -->
     <div class="artifacts-panel-head">
         <div>
-            <span class="label-mono w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Session files</span>
-            <p x-show="$store.artifacts.current.length">Visualizations, files, and your uploads, kept in separate registries.</p>
-            <p x-show="!$store.artifacts.current.length">No artifacts yet — outputs the agent publishes will appear here.</p>
+            <!-- One sentence while the agent has published nothing; the empty sections hide (Mu §5.2). -->
+            <p x-show="!$store.artifacts.current.length && !$store.artifacts.loading">No artifacts yet. Charts from <code>publish_visualization</code> and files from <code>upload_artifact</code> appear here.</p>
         </div>
         <button type="button" class="w-btn" data-variant="icon"
                 @click="$store.artifacts.load($store.chat.currentName, true); $store.attachments.load($store.chat.currentName)"
@@ -18,11 +17,11 @@
     </div>
 
     <div class="unified-registry-body">
-        <section class="registry-section visualizations-registry" aria-labelledby="visualizations-title">
+        <section class="registry-section visualizations-registry" aria-labelledby="visualizations-title"
+                 x-show="$store.artifacts.loading || $store.artifacts.visualizations().length">
             <div class="registry-section-head">
                 <div>
                     <strong id="visualizations-title">Visualizations</strong>
-                    <span>Charts and interactive views published by the agent.</span>
                 </div>
                 <span class="registry-count w-count"
                       x-text="$store.artifacts.visualizations().length"></span>
@@ -54,11 +53,11 @@
             </div>
         </section>
 
-        <section class="registry-section model-artifacts-registry" aria-labelledby="model-artifacts-title">
+        <section class="registry-section model-artifacts-registry" aria-labelledby="model-artifacts-title"
+                 x-show="$store.artifacts.loading || $store.artifacts.files().length">
             <div class="registry-section-head">
                 <div>
                     <strong id="model-artifacts-title">Files</strong>
-                    <span>Documents, data, and other outputs from the agent.</span>
                 </div>
                 <span class="registry-count w-count"
                       x-text="$store.artifacts.files().length"></span>
@@ -94,7 +93,6 @@
             <div class="registry-section-head">
                 <div>
                     <strong id="file-uploads-title">File uploads</strong>
-                    <span>Select files to include with the next message.</span>
                 </div>
                 <div class="registry-section-actions">
                     <span class="registry-count w-count" x-text="$store.attachments.items().length"></span>
@@ -114,8 +112,7 @@
                  x-text="$store.attachments.selectedIds().length + ($store.attachments.selectedIds().length === 1 ? ' file selected for the next message' : ' files selected for the next message')"></div>
             <div class="registry-section-empty"
                  x-show="!$store.attachments.loading && !$store.attachments.items().length">
-                <strong>No file uploads</strong>
-                <span>Upload documents, archives, images, or datasets for this session.</span>
+                <span>Upload files to include them with your next message.</span>
             </div>
 
             <div class="registry-section-list" x-show="$store.attachments.items().length">

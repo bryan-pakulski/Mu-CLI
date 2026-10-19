@@ -27,8 +27,8 @@
             get toolList() { return $store.mode.views.filter(item => !item.external && $store.mode.panelModes.includes(item.name)); },
         }"
         @keydown.escape="menuOpen = false">
-    <span class="w-stage-head__eyebrow">Workspace</span>
-    <h2 class="w-panel__title" x-text="label($store.mode.active)">Workspace</h2>
+    <!-- Said once (Mu §6.1): when the active view is a quick tab, the tab names it. -->
+    <h2 class="w-panel__title" :class="{ 'w-visually-hidden': quick.includes($store.mode.active) }" x-text="label($store.mode.active)">Workspace</h2>
     <div class="w-panel__actions">
         <div class="w-segmented panel-segmented" data-size="sm" role="group" aria-label="Quick views">
             <template x-for="name in quick" :key="'panel-quick-' + name">

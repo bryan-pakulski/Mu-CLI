@@ -482,37 +482,38 @@ def test_no_inset_side_stripes_or_pseudo_element_bars():
 
 
 BASE_CSS = WASH / "base.css"
+# Mu revision 2 ("KISS flat", 2026-10-20): the surface recipe is flat paper — solid
+# fills, hairline edges, no blur — under the same variable names every component uses.
 GLASS_RECIPE = {
-    "--w-glass-fill": "var(--wash-glass)",
-    "--w-glass-fill-strong": "var(--wash-glass-strong)",
-    "--w-glass-fill-subtle": "var(--wash-glass-subtle)",
-    "--w-glass-line": "var(--wash-glass-border)",
-    "--w-glass-ring": "0 0 0 1px var(--wash-glass-edge)",
-    "--w-glass-filter": "blur(var(--wash-glass-blur)) saturate(var(--wash-glass-saturate))",
-    "--w-glass-filter-strong": "blur(var(--wash-glass-blur-strong)) saturate(var(--wash-glass-saturate))",
-    "--w-glass-lift": "var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-glass-shadow)",
+    "--w-glass-fill": "var(--wash-surface)",
+    "--w-glass-fill-strong": "var(--wash-raised)",
+    "--w-glass-fill-subtle": "var(--wash-sunken)",
+    "--w-glass-line": "var(--wash-hairline)",
+    "--w-glass-ring": "0 0 0 1px var(--wash-hairline)",
+    "--w-glass-filter": "none",
+    "--w-glass-filter-strong": "none",
+    "--w-glass-lift": "var(--w-glass-ring)",
 }
 SOLID = {"--w-glass-fill": "var(--wash-surface)", "--w-glass-fill-strong": "var(--wash-raised)",
          "--w-glass-fill-subtle": "var(--wash-sunken)", "--w-glass-filter": "none", "--w-glass-filter-strong": "none"}
-# (file, selector, fill recipe, blurs itself) — G§3.3 levels 1, 1s, 2 and 3.
+# (file, selector, fill recipe, blurs itself) — G§3.3 levels 1, 1s, 2 and 3. Mu §2.1:
+# there is no top bar, the rail sits on the wash, and the leaf is the one level-1 plane.
 GLASS_SURFACES = (
-    ("layout.css", ".w-topbar", "var(--w-glass-fill)", True),
-    ("layout.css", ".w-sidebar", "var(--w-glass-fill)", True),
-    ("layout.css", ".w-shell::before", "var(--w-glass-fill)", True),  # the stage plane
+    ("layout.css", ".w-shell::before", "var(--w-glass-fill)", True),  # the leaf
     ("components/card.css", ".w-card", "var(--w-glass-fill)", False),
-    ("components/approval.css", ".w-approval", "var(--w-glass-fill)", False),
     ("components/composer.css", ".w-composer__form", "var(--w-glass-fill)", False),
     ("components/table.css", ".w-table-wrap", "var(--w-glass-fill)", False),
     ("components/panel.css", ".w-panel", "var(--w-glass-fill)", False),
-    ("components/toolcard.css", ".w-toolcard", "var(--w-glass-fill-subtle)", False),
     ("components/menu.css", ".w-menu", "var(--w-glass-fill-strong)", True),
     ("components/menu.css", ".w-popover", "var(--w-glass-fill-strong)", True),
     ("components/toast.css", ".w-toast", "var(--w-glass-fill-strong)", True),
     ("components/palette.css", ".w-palette__dialog", "var(--w-glass-fill-strong)", True),
     ("components/modal.css", ".w-modal__dialog", "var(--w-glass-fill-strong)", True),
     ("components/drawer.css", ".w-drawer__panel", "var(--w-glass-fill-strong)", True),
+    ("components/mu.css", ".w-sheet__panel", "var(--w-glass-fill-strong)", True),
     ("components/nav.css", '.w-nav__item[aria-current="page"]', "var(--w-glass-fill-strong)", False),
-    ("components/session-list.css", '.w-session[aria-current="true"]', "var(--w-glass-fill-strong)", False),
+    # Mu §7.1: only the active destination is the strong pill; the current session row is subtle.
+    ("components/session-list.css", '.w-session[aria-current="true"]', "var(--w-glass-fill-subtle)", False),
 )
 
 
@@ -537,10 +538,12 @@ def test_glass_surfaces_use_the_recipe_with_backdrop_filter():
             assert body.get("backdrop-filter") == want, (name, selector)
             assert body.get("-webkit-backdrop-filter") == want, (name, selector)
     # Every backdrop-filter in the tree goes through the recipe (so the
-    # fallbacks reach it) and always carries its -webkit- twin.
+    # fallbacks reach it) or turns blur off (Mu §2.1: a surface de-boxed into
+    # the leaf), and always carries its -webkit- twin.
     for path, selectors, body, _ in _all_rules():
         if "backdrop-filter" in body:
-            assert body["backdrop-filter"].startswith("var(--w-glass-filter"), (_rel(path), selectors)
+            value = body["backdrop-filter"]
+            assert value == "none" or value.startswith("var(--w-glass-filter"), (_rel(path), selectors)
             assert body.get("-webkit-backdrop-filter") == body["backdrop-filter"], (_rel(path), selectors)
 
 
@@ -564,7 +567,7 @@ def test_glass_has_solid_fallbacks_and_a_flat_ambient():
 PAGE_AMBIENTS = {
     "index.html": "dawn", "design/gallery.html": "dawn", "work.html": "lagoon", "trace.html": "lagoon",
     "job_trace.html": "lagoon", "model_costs.html": "lagoon", "containers.html": "meadow",
-    "orchestration.html": "lagoon",
+    "orchestration.html": "lagoon", "settings.html": "dawn",
 }
 
 

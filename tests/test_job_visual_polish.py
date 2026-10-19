@@ -37,12 +37,12 @@ def test_engineering_work_uses_planos_chrome_and_theme_switcher():
     assert '@import' not in css
     for legacy in ("work.css", "work_polish.css", "work_management.css", "work_jira.css"):
         assert not (ROOT / "mu" / "gui" / "static" / "css" / legacy).exists(), legacy
-    # Sub-page navigation is a "Work" section of the shared sidebar; the top
-    # bar keeps the jobs breadcrumb and status chips.
-    assert '{% block sidebar_extra %}' in html
-    assert 'class="w-sidebar__section work-side" aria-labelledby="w-sidebar-work"' in html
-    assert '{% block crumbs_attrs %} id="work-crumbs" class="work-crumbs"' in html
-    assert '{% block topbar_chips_attrs %} id="work-chips"' in html
+    # Mu §3.2 / §4: sub-pages are tabs in the page header (the rail never grows a second
+    # level); the header carries the state sentence instead of status chips.
+    assert '{% block sidebar_extra %}' not in html
+    assert '{% block page_tabs %}' in html
+    assert 'class="w-pagetabs__tab work-navlink" data-nav="jobs"' in html
+    assert '{% block state_attrs %} id="work-state"' in html
     assert '/static/js/work/ui.js' in html
     # Jobs mode does not re-declare a palette: it reads the generated Wash
     # tokens (both themes) directly; the legacy alias file is gone. Density
@@ -55,17 +55,18 @@ def test_engineering_work_uses_planos_chrome_and_theme_switcher():
         assert f'--wash-{wash}:' in tokens
         assert f'var(--wash-{wash})' in css
     assert '[data-density="compact"]' in css
-    # The shared theme controller and toggle come from the layout.
+    # The shared theme controller comes from the layout; the theme is chosen in Settings.
     assert '/static/js/route_theme.js' in layout
-    assert '{{ w.theme_toggle() }}' in layout
-    assert 'class="w-btn work-header-icon' in html
+    assert 'data-theme-select' in (ROOT / "mu" / "gui" / "templates" / "settings.html").read_text(encoding="utf-8")
+    # The page tools are items of the header's ⋯ menu (Mu §4.4).
+    assert 'class="w-menu__item work-header-icon' in html
     assert 'title="Analyze jobs"' in html
     assert 'title="Model pricing"' in html
     assert 'title="Manage jobs"' in html
-    assert 'work-pane-head-controls' in html
+    assert 'id="work-tools-menu"' in html
     assert 'id="work-refresh"' in html
     assert 'work-manage-button' not in html
-    assert 'class="w-btn work-board-refresh" data-variant="icon" id="work-refresh"' in html
+    assert 'role="menuitem" id="work-refresh"' in html
     assert '.work-tools {' in css
     assert "localStorage.setItem('mucli-theme'" in theme
 
@@ -84,7 +85,7 @@ def test_job_management_boards_and_settings_are_routed_pages_not_dialogs():
         assert f'id="{page_id}"' in html
     for route in ('activity', 'boards', 'history', 'settings'):
         section = html.index(f'data-route="{route}"')
-        assert html.rfind('<section class="work-route w-page"', 0, section) > html.rfind('</section>', 0, section)
+        assert html.rfind('<section class="work-route w-leafbody"', 0, section) > html.rfind('</section>', 0, section)
         assert f'href="#/{route}"' in html
     assert html.index('id="work-management-backdrop"') > html.index('data-route="history"')
     assert html.index('id="work-jira-backdrop"') > html.index('data-route="boards"')
@@ -114,9 +115,10 @@ def test_job_trace_and_model_pricing_share_product_visual_language():
     trace = TRACE_HTML.read_text(encoding="utf-8")
     pricing = MODEL_HTML.read_text(encoding="utf-8")
 
-    # Wash W2: both pages share the app's visual language through the shared
-    # layout (top bar, sidebar, theme toggle, wash.css) and no longer load the
-    # chat CSS stack; each links only its own page bundle.
+    # Wash W2 / Mu §3: both pages share the app's visual language through the
+    # shared layout (rail, leaf, page header, wash.css) and no longer load the
+    # chat CSS stack; each links only its own page bundle. The theme is chosen
+    # in Settings (Mu §3.1), and both pages sit under Insights' tabs.
     css_dir = ROOT / "mu" / "gui" / "static" / "css" / "wash" / "patterns"
     for html, bundle in ((trace, "job-trace.css"), (pricing, "model-costs.css")):
         assert '{% extends "_layout.html" %}' in html
@@ -125,7 +127,8 @@ def test_job_trace_and_model_pricing_share_product_visual_language():
         bundle_css = (css_dir / bundle).read_text(encoding="utf-8")
         for chat_css in ("product.css", "crystal.css", "clarity.css", "refinement.css"):
             assert chat_css not in bundle_css
-    assert 'w.theme_toggle()' in (ROOT / "mu" / "gui" / "templates" / "_layout.html").read_text(encoding="utf-8")
+    assert 'data-theme-select' in (ROOT / "mu" / "gui" / "templates" / "settings.html").read_text(encoding="utf-8")
+    assert '{{ w.insights_tabs("jobs") }}' in trace and '{{ w.insights_tabs("costs") }}' in pricing
     assert 'Pricing registry' in pricing
     assert 'Input / 1M' in pricing
     assert 'Output / 1M' in pricing

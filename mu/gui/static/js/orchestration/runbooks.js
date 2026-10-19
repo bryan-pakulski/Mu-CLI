@@ -166,8 +166,8 @@
     async function renderNew(el, route, { setCrumbs }) {
         setCrumbs([{ label: 'Studio', to: '#/studio' }, { label: 'New runbook' }]);
         el.innerHTML = `
-            <header class="w-page__head orch-head"><div class="orch-head__title"><span class="w-eyebrow" data-tone="plan"><i class="w-eyebrow__swatch"></i>Runbook</span><h1 class="w-page__title">New runbook</h1>
-                <p class="w-page__lede">Ordered steps over published tool versions. Give it an id and a title; you add steps in the editor.</p></div></header>
+            <header class="w-page__head orch-head"><div class="orch-head__title"><h1 class="w-page__title">New runbook</h1>
+                </div></header>
             <form class="w-card orch-card orch-form-narrow" novalidate><div class="w-card__body orch-stack">
                 <div class="w-field"><label class="w-field__label" for="rb-new-id">Runbook id</label><input class="w-input" data-mono id="rb-new-id" placeholder="web.safe-deploy" autocomplete="off" spellcheck="false" data-autofocus>
                     <p class="w-field__hint">A dotted lowercase name. It can’t change after the runbook is created.</p></div>
@@ -312,7 +312,6 @@
         el.innerHTML = `
             <header class="w-page__head orch-head">
                 <div class="orch-head__title">
-                    <span class="w-eyebrow" data-tone="plan"><i class="w-eyebrow__swatch"></i>Runbook draft</span>
                     <h1 class="w-page__title" data-title>${esc(r.title)} <span class="orch-version-tag orch-mono">v${esc(r.version)}</span></h1>
                     <div class="orch-head__meta"><span data-rb-status>${ui.chip(r.style)}</span><span data-effect>${ui.effectChip(r.effect_style, r.effect)}</span><span class="orch-mono orch-sub">${esc(r.ref)}</span><span data-dirty hidden>${ui.chip({ semantic: 'caution', glyph: '◆', label: 'Unsaved changes' })}</span></div>
                 </div>

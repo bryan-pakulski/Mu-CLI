@@ -1,27 +1,22 @@
-/* Page bundle — Engineering work (/work), Wash W4.
+/* Page bundle — Engineering work (/work) on the Mu frame (mu_style_guide.md §10.2).
  *
- * /work sits on the shared shell (templates/_layout.html): the top bar
- * carries the jobs status chips and tools, the sidebar carries a "Work"
- * section with the sub-pages, and the stage scrolls the routed pages. The
- * dashboard opens with the Lagoon hero band (G§6.1).
+ * /work sits on the shared frame (templates/_layout.html): the rail, and the
+ * leaf whose page header carries the title, the state sentence, the tabs
+ * (Now · Jobs · Tickets · History + More), New job and the ⋯ tools menu.
+ * Lists are Mu rows (components/mu.css); there are no cards inside the leaf
+ * except the decision block (approval / limit / environment prompts), code
+ * and diffs on sunken, and floats (menus, dialogs, the New job sheet).
  *
  * Linked after wash.css, which declares the layer order. Two layers here:
  *
  *   @layer base      element defaults inside the jobs app only (headings,
- *                    links, tables, unclassed inputs, kbd, details). Every
- *                    /work module emits Wash components (.w-btn, .w-chip,
- *                    .w-card, .w-table, .w-field, …) or the page-scoped
- *                    .work-* patterns below; no legacy primitive classes.
- *   @layer patterns  the page itself: layout and text helpers, hero,
- *                    dashboard (stat strip,
- *                    needs-you state cards, job rows), job detail (stepper,
- *                    action bar, overflow menu, tabs), the Diff tab
- *                    (G§9.11), checks, session, costs, history, settings,
- *                    setup, activity and the New job modal.
- *
- * The retired legacy files (work.css, work_management.css,
- * work_polish.css, work_jira.css, and the theme.css import) are gone;
- * every rule /work still needed was rewritten here on --wash-* tokens.
+ *                    links, tables, unclassed inputs, kbd, details).
+ *   @layer patterns  the page itself: header menus, Now / Running / Recent
+ *                    rows, the job page (facts line, stepper, decision
+ *                    blocks, action bar, tabs), the Diff tab (G§9.11),
+ *                    checks, session, costs, history, settings, setup,
+ *                    activity and the New job modal. Wash cards used by the
+ *                    job modules are flattened to groups (Mu §2.1).
  */
 
 /* ======================================================================
@@ -212,165 +207,174 @@
     /* ------------------------------------------------------------ shell fit */
     .work-main { min-height: 100%; }
     .work-route[hidden] { display: none; }
-    .work-route.w-page { padding-top: var(--wash-space-6); }
+    .work-route.w-leafbody { padding-top: var(--wash-space-7); }
     .work-page { padding-top: var(--wash-space-2); }
-    .work-page-head { align-items: center; }
-    .work-page-head .w-page__title { display: inline-flex; align-items: center; gap: var(--wash-space-3); }
+
+    /* ------------------------------------------------------------ header (Mu §4) */
+    /* The ⋯ tools menu and the More tab: positioned floats under their toggle. */
     .work-tools { display: flex; align-items: center; gap: var(--wash-space-1); }
-    .work-chip[data-active] .w-chip__glyph { animation: work-pulse 1.6s var(--wash-ease-bleed) infinite; }
-    .w-topbar__chips > li:has(> .work-chip) { flex: none; }
-    /* Phones: the connection chip keeps its glyph; its label stays for assistive tech. */
-    @media (width < 600px) {
-        .work-chip[data-chip="live"] [data-chip-text] {
-            position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
-            overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-        }
-        .work-chip[data-chip="live"] { padding: 0 8px; }
-        /* The page title already names the route; the chips (needs you, live)
-         * matter more in the phone top bar than the breadcrumb. */
-        .work-app .w-topbar .w-breadcrumb { display: none; }
+    .work-menu-wrap { position: relative; display: inline-flex; }
+    .work-menu {
+        position: absolute;
+        top: calc(100% + var(--wash-space-1));
+        right: 0;
+        min-width: 220px;
+        padding: var(--wash-space-1);
+        /* Rows behind must not read through the menu (the leaf's blur isn't sampled here). */
+        background: color-mix(in srgb, var(--wash-raised) 96%, transparent);
     }
-    .work-session-context:empty { display: none; }
-    .w-topbar__chips > li:has(> .work-session-context:empty) { display: none; }
-    @media (840px <= width < 1200px) {
-        .work-side + .w-sidebar__heading { margin-top: var(--wash-space-3); }
-    }
-
-    /* ------------------------------------------------------------ dashboard (launcher layout)
-       The hero, choice cards and centred column come from components/launcher.css, the same
-       layout as the chat welcome. Only compact density and the board spacing live here. */
-    .work-page { width: 100%; max-width: var(--wash-size-content); margin-inline: auto; }
-    .work-app[data-density="compact"] .work-hero { min-height: 0; margin-bottom: var(--wash-space-5); padding-top: var(--wash-space-6); }
-    .work-app[data-density="compact"] .work-hero::before { background: none; }
-    .work-app[data-density="compact"] .w-hero__lede { display: none; }
-
-    .work-setup-cta { margin-bottom: var(--wash-space-6); }
-    @media (width < 600px) {
-        .work-setup-cta { flex-wrap: wrap; }
-        .work-setup-cta .w-banner__msg { flex-basis: calc(100% - 32px); }
-        .work-setup-cta .w-btn { margin-left: 28px; }
-    }
-
-
-
-    /* needs-you state cards */
-    .work-cards { margin: 0; padding: 0; list-style: none; }
-    .work-cards > li { display: flex; min-width: 0; }
-    .work-job-card { flex: 1 1 auto; cursor: pointer; }
-    .work-job-card.is-selected { border-color: var(--wash-accent-ink); }
-    .work-job-card .w-card__title { font-size: var(--wash-type-body-lg-size); line-height: var(--wash-type-body-lg-line); }
-    .work-job-card .w-card__title a { color: inherit; }
-    .work-job-card .w-card__title a:hover { color: var(--wash-accent-ink); text-decoration: none; }
-    .work-job-card .w-card__foot { justify-content: flex-start; }
-    .work-needs-reason { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .work-needs-reason__label { color: var(--w-tone-ink, var(--wash-attention-ink)); font-size: var(--wash-type-label-size); font-weight: var(--wash-type-label-weight); }
-    .work-job-card[data-state="danger"] .work-needs-reason__label { color: var(--wash-danger-ink); }
-    .work-needs-reason__detail { color: var(--wash-ink-2); overflow-wrap: anywhere; }
-
-    /* job rows (G§9.15): 56px, glyph · title · repo in mono · mini stepper · reason chip · time */
-    .work-job-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-    .work-job-row {
-        display: flex;
-        align-items: center;
-        gap: var(--wash-space-4);
-        min-height: 56px;
-        padding: var(--wash-space-2) var(--wash-space-4);
-        border-radius: var(--wash-radius-md);
-        cursor: pointer;
-        transition: background-color var(--wash-motion-micro) var(--wash-ease-micro);
-    }
-    .work-job-row + .work-job-row { box-shadow: inset 0 1px var(--wash-hairline); }
-    .work-job-row:hover,
-    .work-job-row:focus-within { background: var(--w-glass-fill-subtle); box-shadow: none; }
-    .work-job-row:hover + .work-job-row,
-    .work-job-row:focus-within + .work-job-row { box-shadow: none; }
-    .work-job-row.is-selected { background: var(--wash-accent-wash); }
-    .work-job-row > .w-status { flex: none; width: 16px; justify-content: center; }
-    .work-job-row__main { display: flex; align-items: baseline; gap: var(--wash-space-3); flex: 1 1 auto; min-width: 0; }
-    .work-job-row__title {
-        min-width: 0;
+    .w-pagetabs .work-menu { left: 0; right: auto; }
+    .work-menu[hidden] { display: none; }
+    .work-menu .w-menu__item { display: flex; align-items: center; gap: var(--wash-space-2); width: 100%; }
+    .work-menu .w-menu__item[aria-current="page"] { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
+    .work-menu .w-menu__item[aria-pressed="true"] .w-menu__label::after { content: " · on"; color: var(--wash-ink-3); }
+    .work-more { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: var(--wash-type-label-size); }
+    .work-more__badge { min-width: 16px; height: 16px; padding: 0 4px; font-size: var(--wash-type-caption-size); line-height: 16px; }
+    /* Mu §4.3: no counts on tabs — an attention dot, its words read out only. */
+    .work-tab-dot:not([hidden]) {
+        display: inline-block;
+        width: 7px; min-width: 0; height: 7px;
+        margin-left: 4px; padding: 0;
         overflow: hidden;
-        color: var(--wash-ink);
-        font-size: var(--wash-type-label-size);
-        font-weight: var(--wash-type-label-weight);
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        border-radius: 50%;
+        background: var(--w-tone-pigment, var(--wash-attention-pigment));
+        color: transparent;
+        font-size: 0;
+        vertical-align: 2px;
     }
-    .work-job-row__title:hover { color: var(--wash-accent-ink); text-decoration: none; }
-    .work-job-row__key {
-        margin-right: var(--wash-space-2);
-        color: var(--wash-ink-3);
-        font-family: var(--wash-font-mono);
-        font-size: var(--wash-type-mono-sm-size);
-        font-weight: var(--wash-type-mono-weight);
+    .work-alert { display: inline-flex; align-items: center; gap: var(--wash-space-2); }
+    /* More sits in the bar like any other tab: same box, same baseline. */
+    .w-pagetabs .work-menu-wrap { display: inline-flex; align-self: stretch; align-items: center; }
+    .w-pagetabs .work-more {
+        height: auto;
+        min-height: 0;
+        margin: 0;
+        padding: var(--wash-space-2) 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        line-height: var(--wash-type-label-line);
     }
-    .work-job-row__where {
-        display: block;
-        min-width: 0;
-        overflow: hidden;
-        color: var(--wash-ink-3);
-        font-family: var(--wash-font-mono);
-        font-size: var(--wash-type-mono-sm-size);
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .work-job-row__main .work-job-row__where { flex: 0 1 auto; }
-    .work-job-row__time { flex: none; min-width: 3ch; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; text-align: right; }
-    .work-job-row__cost { display: inline-flex; align-items: center; gap: var(--wash-space-1); flex: none; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; }
-    .work-job-row__cost .w-icon { color: var(--wash-running-ink); }
-    .work-job-row__detail { display: none; }
-    .work-job-row > .w-chip { flex: none; }
-    .work-mini { flex: none; max-width: 40%; }
-    .work-mini .w-stepper__step { height: 22px; }
-    .work-mini .w-inkdrop { width: 7px; height: 7px; }
-    .work-empty-line { text-align: left; padding-inline: var(--wash-space-4); }
+    .work-alert[hidden] { display: none; }
 
-    @media (width < 840px) {
-        .work-job-row { flex-wrap: wrap; gap: var(--wash-space-2) var(--wash-space-3); padding-inline: var(--wash-space-2); }
-        .work-job-row__main { flex-basis: calc(100% - 64px); flex-direction: column; gap: 2px; }
-        .work-mini { max-width: 100%; order: 3; margin-left: 28px; }
-        .work-job-row__time { order: 2; }
-    }
+    /* ------------------------------------------------------------ Now / Running / Recent (Mu §5) */
+    .work-dashboard .work-board > .w-group + .w-group { margin-top: var(--wash-space-8); }
+    /* Now collapses away when nothing waits (the setup row counts once it's shown). */
+    .work-board .w-group:has(.work-now-rows):not(:has(.w-row:not([hidden]))) { display: none; }
+    .work-setup-host { display: none; }
+    .work-setup-cta[hidden] { display: none; }
+    .work-job-row { cursor: pointer; }
+    .work-job-row.is-selected { background: var(--w-glass-fill-subtle); }
+    .work-job-row__detail { font-variant-numeric: tabular-nums; }
+    .work-first-run { margin-top: var(--wash-space-5); }
+    .work-empty-line { text-align: left; padding-inline: 0; }
+    .work-app[data-density="compact"] .w-row { min-height: 36px; padding-block: var(--wash-space-2); }
+    .work-app[data-density="compact"] .w-row__sub { display: none; }
+    /* Kept for job modules that still emit a card for a waiting job (legacy VMs). */
+    .work-job-card { cursor: pointer; }
 
-    /* ------------------------------------------------------------ jobs table */
-    .work-jobs-filters { justify-content: flex-end; }
-    .work-jobs-filters .w-input { width: min(240px, 100%); }
-    .work-jobs-table td.key a { font-weight: var(--wash-type-label-weight); }
-    .work-jobs-table tr.clickable { cursor: pointer; }
-    .work-jobs-table .work-mini { max-width: none; }
-    .work-summary-cell { max-width: 420px; }
+    /* ------------------------------------------------------------ Jobs tab */
+    .work-jobs-filters { margin-bottom: var(--wash-space-5); }
+    .work-jobs-filters .w-input { width: min(280px, 100%); }
+    .work-page-tools { margin-bottom: var(--wash-space-5); }
 
-    /* ------------------------------------------------------------ job detail (G§9.15) */
-    .work-detail-pane { display: flex; flex-direction: column; gap: var(--wash-space-5); }
-    .work-detail-head { display: flex; flex-direction: column; gap: var(--wash-space-3); }
-    .work-detail-header-top { display: flex; align-items: center; gap: var(--wash-space-3); flex-wrap: wrap; }
-    .work-detail-titlebar { display: flex; align-items: center; gap: var(--wash-space-3); flex-wrap: wrap; }
-    .work-detail-title { min-width: 0; overflow-wrap: anywhere; }
+    /* ------------------------------------------------------------ job page (Mu §10.2) */
+    .work-detail-pane { display: flex; flex-direction: column; gap: var(--wash-space-6); }
+    .work-detail-head { display: flex; flex-direction: column; gap: var(--wash-space-2); }
+    .work-detail-facts { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-detail-facts .w-icon { width: 13px; height: 13px; vertical-align: -2px; }
+    .work-detail-facts a { color: inherit; }
+    .work-detail-facts a:hover { color: var(--wash-ink); }
+    .work-detail-key { color: var(--wash-ink-2); }
     .work-detail-budget { display: inline-flex; align-items: baseline; gap: var(--wash-space-3); }
-    .work-detail-cost { color: var(--wash-plum); font-size: var(--wash-type-title-3-size); font-weight: var(--wash-type-title-3-weight); font-variant-numeric: tabular-nums; }
+    .work-detail-cost { color: var(--wash-ink-2); font-variant-numeric: tabular-nums; }
     .work-detail-cost[data-tone] { color: var(--w-tone-ink); }
-    .work-detail-cost .work-meta { font-weight: 400; }
-    .work-detail-budget .w-icon { width: 14px; height: 14px; margin-right: var(--wash-space-1); vertical-align: -2px; }
-    .work-detail-agents { display: flex; align-items: center; gap: var(--wash-space-2); flex-wrap: wrap; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-detail-cost .work-meta { font-size: inherit; }
+    .work-detail-budget .w-icon { width: 13px; height: 13px; margin-right: var(--wash-space-1); vertical-align: -2px; }
+    .work-detail-agents { display: flex; align-items: center; gap: var(--wash-space-3); flex-wrap: wrap; margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
     .work-detail-agents code { color: var(--wash-ink-2); }
     .work-failed-from { color: var(--wash-danger-ink); }
-    .work-detail-chips .w-chip .w-icon { width: 14px; height: 14px; }
+    .work-env-pill { font-size: inherit; font-weight: 400; color: inherit; }
+    .work-env-pill[data-tone="danger"] { color: var(--wash-danger-ink); }
+    .work-env-pill__glyph[data-state="active"] { animation: work-pulse 1.6s var(--wash-ease-bleed) infinite; }
 
     /* pipeline stepper: each step is a button that opens its tab */
-    .work-pipeline {
-        padding: var(--wash-space-3) var(--wash-space-4);
-        overflow-x: auto;
-        border-radius: var(--wash-radius-lg);
-        background: var(--w-glass-fill-subtle);
-    }
+    .work-pipeline { padding: 0; overflow-x: auto; }
     .work-stepper .w-stepper__step { height: auto; min-height: 30px; }
     /* The current step's wash pill sits on the step button, so the hairline
      * connector before it stays outside the pill. */
     .work-stepper .w-stepper__step:is([data-status="active"], [data-status="waiting"]) { padding: 0 2px; background: none; }
-    .work-stepper .w-stepper__step[data-status="active"] .work-step { padding: 4px 10px; background: var(--wash-running-wash); }
+    .work-stepper .w-stepper__step[data-status="active"] .work-step { padding: 4px 10px; background: var(--wash-running-wash); color: var(--wash-running-ink); }
     .work-stepper .w-stepper__step[data-status="waiting"] .work-step { padding: 4px 10px; background: var(--wash-attention-wash); }
     .work-mini .w-stepper__step:is([data-status="active"], [data-status="waiting"]) { padding: 0 2px; background: none; }
     .work-detail-pane > :is([data-environments], [data-approval], [data-actions]):empty { display: none; }
+    .work-job-main > :is([data-job-attention], [data-environments], [data-approval]):empty { display: none; }
+    .work-detail-pane[data-attention-from-review="true"]:has(#work-panel-review:not([hidden])) [data-job-attention] { display: none; }
+
+    /* Mu §5.4: a status / label is a word (with its sign), never a pill. Ink for the
+     * states that ask for your eyes; quiet otherwise. */
+    .work-tag { display: inline-flex; align-items: baseline; gap: 4px; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); font-weight: var(--wash-type-label-weight); white-space: nowrap; }
+    .work-tag:is([data-tone="attention"], [data-tone="caution"], [data-tone="warn"]) { color: var(--wash-attention-ink); }
+    .work-tag[data-tone="danger"] { color: var(--wash-danger-ink); }
+    .work-tag:is([data-tone="ok"], [data-tone="neutral"], [data-tone="accent"], [data-tone="running"], [data-tone="muted"]) { color: var(--wash-ink-2); }
+    .work-tag__glyph { font-size: 0.9em; }
+    .work-tag[data-tone="ok"] .work-tag__glyph { color: var(--wash-ink-3); }
+    .work-tag + .work-tag { margin-left: var(--wash-space-2); }
+
+    /* The job (Mu §11b): its work in the main pane, its context in the aside pane
+     * (the action the state asks for, facts, stages, budget, receipts). */
+    .work-job-layout { display: flex; flex-direction: column; gap: var(--wash-space-6); }
+    .work-job-main { display: flex; flex-direction: column; gap: var(--wash-space-6); min-width: 0; }
+    .work-job-side { display: flex; flex-direction: column; gap: var(--wash-space-6); min-width: 0; }
+    .work-job-side .work-detail-facts { gap: 6px var(--wash-space-4); grid-template-columns: max-content minmax(0, 1fr); font-size: var(--wash-type-caption-size); }
+    .work-job-side .work-detail-facts dd { color: var(--wash-ink-2); }
+    .work-job-side .work-detail-head { gap: var(--wash-space-3); align-items: flex-start; }
+    .work-job-side .work-detail-agents { display: inline; }
+    .work-job-receipts { display: flex; flex-direction: column; align-items: flex-start; gap: var(--wash-space-1); }
+    .work-job-receipts .w-group__title { margin-bottom: var(--wash-space-1); }
+    .work-pipeline .w-group__title { margin-bottom: var(--wash-space-2); }
+    /* Section titles in the aside read like the pane heads: quiet labels, not headings. */
+    .work-job-side .w-group__title { color: var(--wash-ink-2); font-size: var(--wash-type-label-size); line-height: var(--wash-type-label-line); font-weight: var(--wash-type-label-weight); }
+    /* The stages read top to bottom in the aside: a timeline with durations and costs. */
+    .work-job-side .work-stepper { flex-direction: column; align-items: stretch; overflow: visible; }
+    .work-job-side .work-stepper .w-stepper__step { min-height: 0; padding: 0; }
+    .work-job-side .work-stepper .w-stepper__step + .w-stepper__step { margin-left: 0; margin-top: 2px; }
+    .work-job-side .work-stepper .w-stepper__step + .w-stepper__step::before { display: none; }
+    .work-job-side .work-stepper .work-step { width: 100%; justify-content: flex-start; padding: 4px 8px; margin-left: -8px; border-radius: var(--wash-radius-sm); }
+    .work-job-side .work-stepper .work-step__meta { margin-left: auto; font-variant-numeric: tabular-nums; }
+    .work-job-side .work-stepper .w-stepper__step:is([data-status="active"], [data-status="waiting"]) .work-step { padding: 4px 8px; }
+    .work-budget-bar { display: block; width: 100%; margin: var(--wash-space-1) 0 2px; }
+    .work-detail-budget { display: inline-flex; flex-direction: column; min-width: 160px; }
+    /* Narrower than three panes, the job's context sits above its work (the decisive action
+     * stays in view): beside the list below 1200, alone with the job below 840. */
+    @media (width < 1200px) {
+        .work-app[data-route-name="job"] .work-panes {
+            grid-template-columns: var(--w-list-w) minmax(0, 1fr);
+            grid-template-rows: auto minmax(0, 1fr);
+            grid-template-areas: "list aside" "list main";
+        }
+        .work-app[data-route-name="job"] .work-panes > .work-list-pane { grid-area: list; }
+        .work-app[data-route-name="job"] .work-panes > .work-main { grid-area: main; }
+        .work-app[data-route-name="job"] .work-panes > .work-aside-pane {
+            display: block;
+            position: static;
+            grid-area: aside;
+            width: auto;
+            max-height: 38vh;
+            padding-block: var(--wash-space-4);
+            border-left: 0;
+            border-bottom: 1px solid var(--wash-hairline);
+            box-shadow: none;
+        }
+        .work-app[data-route-name="job"] .work-job-side { flex-flow: row wrap; align-items: flex-start; gap: var(--wash-space-4) var(--wash-space-7); }
+        .work-app[data-route-name="job"] .work-job-side > * { flex: 1 1 220px; min-width: 0; }
+        .work-app[data-route-name="job"] .work-job-side > .work-action-panel { flex-basis: 100%; }
+    }
+    @media (width < 840px) {
+        .work-app[data-route-name="job"] .work-panes { grid-template-columns: minmax(0, 1fr); grid-template-areas: "aside" "main"; }
+        .work-app[data-route-name="job"] .work-panes > .work-list-pane { display: none; }
+        .work-app[data-route-name="job"] .work-panes > .work-main { display: block; }
+    }
     .work-step {
         display: inline-flex;
         align-items: center;
@@ -559,11 +563,10 @@
         gap: var(--wash-space-3);
         min-height: 240px;
         max-height: calc(100dvh - 380px);
-        padding: var(--wash-space-4);
+        padding: var(--wash-space-2) 0;
         overflow-y: auto;
-        border: 1px solid var(--wash-hairline);
-        border-radius: var(--wash-radius-lg);
-        background: var(--w-glass-fill);
+        /* Mu §2.1: the transcript is prose on the leaf, scrolled between two hairlines. */
+        border-block: 1px solid var(--wash-hairline);
     }
     .work-msg-assistant { max-width: 92%; font-size: var(--wash-type-body-size); }
     .work-msg-user { align-self: flex-end; max-width: 80%; padding: var(--wash-space-2) var(--wash-space-4); border-radius: var(--wash-radius-lg) var(--wash-radius-lg) 6px var(--wash-radius-lg); background: var(--wash-accent-wash); }
@@ -673,9 +676,10 @@
     .work-form-error:not(:empty) { display: block; }
     .work-workspace-recent { margin-top: var(--wash-space-1); }
     .work-workspace-recent:empty { display: none; }
-    .work-advanced { border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-md); }
-    .work-advanced > summary { padding: var(--wash-space-3) var(--wash-space-4); color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
-    .work-advanced__body { display: flex; flex-direction: column; gap: var(--wash-space-5); padding: 0 var(--wash-space-4) var(--wash-space-4); }
+    /* Advanced options: a disclosure, not a box (Mu §9.5 "More options ▸"). */
+    .work-advanced { border: 0; border-top: 1px solid var(--wash-hairline); padding-top: var(--wash-space-3); }
+    .work-advanced > summary { padding: 0; color: var(--wash-ink-2); font-size: var(--wash-type-label-size); font-weight: var(--wash-type-label-weight); cursor: pointer; }
+    .work-advanced__body { display: flex; flex-direction: column; gap: var(--wash-space-5); padding: var(--wash-space-4) 0 0; }
     .work-env-field { flex-wrap: wrap; }
     /* Agent per stage (work/agents.js) */
     .work-agent-grid { display: grid; grid-template-columns: 5.5rem minmax(7rem, 8.5rem) minmax(7rem, 8.5rem) minmax(9rem, 1fr); gap: var(--wash-space-1) var(--wash-space-2); align-items: center; }
@@ -692,7 +696,24 @@
         .work-agent-hint { grid-column: 1 / -1; }
     }
 
-    /* ------------------------------------------------------------ settings (label column + control) */
+    /* ------------------------------------------------------------ settings (Mu §10.6 form sections) */
+    /* Sections (template + work/rules.js) are .w-formsection, separated by hairlines; the run
+     * rules host sits between them, so the separators are spelled out across it. */
+    .work-settings-page.work-stack { display: block; }
+    .work-settings-page > .w-formsection + #work-run-rules > .w-formsection:first-child,
+    .work-settings-page > #work-run-rules + .w-formsection {
+        margin-top: var(--wash-space-7);
+        padding-top: var(--wash-space-7);
+        border-top: 1px solid var(--wash-hairline);
+    }
+    #work-run-rules.work-stack { display: block; }
+    .work-settings-page .w-formsection__head > .w-textbtn { margin-top: var(--wash-space-2); }
+    .work-settings-page .w-formsection__head > .work-jira-status { margin: var(--wash-space-2) 0 0; max-width: none; white-space: normal; }
+    .work-unsaved { margin: var(--wash-space-2) 0 0; font-size: var(--wash-type-caption-size); }
+    /* A rule's control and its "default" note sit on one line. */
+    .work-rule > .work-stack-tight { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: var(--wash-space-1) var(--wash-space-3); }
+    .work-rule > .work-stack-tight > .work-meta { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-env-facts { margin: 0 0 var(--wash-space-3); }
     .work-settings-page .work-form { gap: 0; }
     .work-settings-page .work-form > :is(p, small) { margin: 0 0 var(--wash-space-2); }
     .work-settings-page .work-form > .work-field,
@@ -777,14 +798,16 @@
     .work-jira-job-link:hover { text-decoration: underline; text-underline-offset: 2px; }
     .work-jira-job-id { color: var(--wash-ink-3); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); }
     .work-jira-suggested { margin-left: var(--wash-space-2); padding: 0 var(--wash-space-2); border-radius: var(--wash-radius-pill); background: var(--wash-accent-wash); color: var(--wash-accent-ink); font-size: var(--wash-type-caption-size); }
-    .work-jira-status-chip { cursor: pointer; }
-    .work-jira-status-chip:hover { background: var(--w-glass-fill-subtle); }
-    .work-jira-status-chip[aria-pressed="true"] { border-color: var(--wash-ink); background: var(--wash-ink); color: var(--wash-on-ink); }
+    /* Status filters are text toggles (Mu §7.3): pressed ones in ink with an underline. */
+    .work-jira-status-chips { gap: var(--wash-space-5); }
+    .work-jira-status-chip { height: auto; padding: 0 0 var(--wash-space-1); border: 0; border-radius: 0; background: none; color: var(--wash-ink-3); font-size: var(--wash-type-label-size); cursor: pointer; box-shadow: inset 0 -2px 0 transparent; }
+    .work-jira-status-chip:hover { color: var(--wash-ink); background: none; }
+    .work-jira-status-chip[aria-pressed="true"] { color: var(--wash-ink); background: none; box-shadow: inset 0 -2px 0 var(--wash-ink); }
     .work-jira-board-toggle { display: flex; align-items: center; gap: var(--wash-space-2); flex-wrap: wrap; width: 100%; text-align: left; }
     .work-jira-board-toggle:hover { background: var(--w-glass-fill-subtle); }
     .work-jira-board-toggle small { margin-left: auto; color: var(--wash-ink-3); }
     #jira-board-results { max-height: 260px; overflow: auto; }
-    .work-status { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: var(--wash-radius-pill); background: var(--w-glass-fill-subtle); color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); font-weight: var(--wash-type-label-weight); white-space: nowrap; }
+    .work-status { display: inline-flex; align-items: center; gap: 6px; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); font-weight: var(--wash-type-label-weight); white-space: nowrap; }
     @media (width < 600px) {
         .work-jira-filters :is(.w-select, input) { flex: 1 1 100%; }
         .work-jira-table :is(th, td):nth-child(4),
@@ -893,10 +916,7 @@
         white-space: pre-wrap;
         word-break: break-word;
     }
-    .work-diagnostic-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--wash-space-4); margin: var(--wash-space-4) 0; }
-    .work-diagnostic-facts > div { min-width: 0; padding: var(--wash-space-2) 0; }
-    .work-diagnostic-facts span { display: block; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
-    .work-diagnostic-facts strong { display: block; margin-top: var(--wash-space-1); overflow: hidden; color: var(--wash-ink); font-size: var(--wash-type-label-size); font-weight: var(--wash-type-label-weight); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+    .work-diagnostic-facts { margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
     .work-diagnostic-failure { margin: var(--wash-space-4) 0; border-radius: var(--wash-radius-md); background: var(--wash-danger-wash); }
     .work-diagnostic-failure > summary { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: var(--wash-space-2); min-height: 44px; padding: var(--wash-space-2) var(--wash-space-4); list-style: none; cursor: pointer; }
     .work-diagnostic-failure summary::-webkit-details-marker { display: none; }
@@ -917,7 +937,6 @@
         .work-trace-toolbar { grid-template-columns: 1fr 1fr; }
         .work-trace-event > summary { grid-template-columns: 8px minmax(0, 1fr) 90px; }
         .work-trace-event time { display: none; }
-        .work-diagnostic-facts { grid-template-columns: repeat(2, 1fr); }
     }
     @media (width < 600px) {
         .work-management-query { grid-template-columns: 1fr; }
@@ -947,7 +966,7 @@
     .work-doctor-cta { margin-bottom: var(--wash-space-4); }
     .work-doctor-table { width: 100%; border-collapse: collapse; }
     .work-doctor-table :is(th, td) { padding: var(--wash-space-2) var(--wash-space-3); border-bottom: 1px solid var(--wash-hairline); text-align: left; vertical-align: top; }
-    .work-doctor-table th { background: var(--w-glass-fill-subtle); }
+    .work-doctor-table th { background: transparent; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-weight: 400; }
     .work-doctor-table td:first-child { width: 2em; }
     .work-doctor-table td:nth-child(2) { white-space: nowrap; }
     .work-doctor-table td:last-child { word-break: break-word; }
@@ -956,44 +975,23 @@
     }
 
     /* ------------------------------------------------------------ activity */
-    .work-activity-counts { margin: 0; padding: 0; list-style: none; }
-    .work-tree { display: flex; flex-direction: column; gap: var(--wash-space-4); }
-    .work-tree-job { display: flex; flex-direction: column; gap: var(--wash-space-1); padding-bottom: var(--wash-space-4); border-bottom: 1px solid var(--wash-hairline); }
-    .work-tree-job:last-child { padding-bottom: 0; border-bottom: 0; }
-    .work-tree-meta { padding-left: 28px; }
-    .work-tree-children { display: flex; flex-direction: column; gap: 2px; margin: var(--wash-space-1) 0 0 8px; padding: 0 0 0 20px; border-left: 1px solid var(--wash-hairline-strong); list-style: none; }
-    .work-tree-children.is-flat { margin: 0; padding: 0; border-left: 0; }
-    .work-tree-none { padding-block: 2px; }
-    .work-ctr {
-        display: grid;
-        grid-template-columns: minmax(180px, 1.4fr) minmax(90px, auto) minmax(150px, 1fr) minmax(150px, 1fr) auto;
-        align-items: center;
-        gap: var(--wash-space-4);
-        padding: var(--wash-space-1) var(--wash-space-2);
-        border-radius: var(--wash-radius-sm);
-    }
-    .work-ctr:hover { background: color-mix(in srgb, var(--wash-sunken) 60%, transparent); }
-    .work-ctr-name { min-width: 0; }
-    .work-ctr-metric { display: grid; grid-template-columns: 34px minmax(60px, 1fr) 64px; align-items: center; gap: var(--wash-space-2); min-width: 0; }
-    .work-ctr-metric .work-num { text-align: right; }
-    .work-ctr-actions { display: flex; justify-content: flex-end; }
-    .work-spark { display: block; width: 100%; height: 28px; color: var(--w-tone-pigment, var(--wash-accent-pigment)); }
+    /* Agents and checks are rows (Mu §5.1); a container is a row with its CPU and memory
+     * sparklines under the facts. The open run (containers + worker log) is in the dock. */
+    .work-ctr .w-row__main { gap: 3px; }
+    .work-ctr-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--wash-space-4); margin-top: var(--wash-space-1); max-width: 520px; }
+    .work-ctr-metric { display: grid; grid-template-columns: auto minmax(60px, 1fr) auto; align-items: center; gap: var(--wash-space-2); min-width: 0; }
+    .work-ctr-label { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-ctr-metric .work-num { color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); text-align: right; }
+    .work-spark { display: block; width: 100%; height: 24px; color: var(--w-tone-pigment, var(--wash-accent-pigment)); }
     .work-spark .line { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
     .work-spark .fill { fill: currentColor; opacity: 0.18; stroke: none; }
-    .work-spark-empty { display: block; text-align: center; }
-    @media (width < 1200px) {
-        .work-ctr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: "name state act" "cpu mem mem"; row-gap: var(--wash-space-1); }
-        .work-ctr-name { grid-area: name; }
-        .work-ctr-state { grid-area: state; }
-        .work-ctr-actions { grid-area: act; }
-        .work-ctr-metric:nth-of-type(3) { grid-area: cpu; }
-        .work-ctr-metric:nth-of-type(4) { grid-area: mem; }
-    }
+    .work-spark-empty { display: block; color: var(--wash-ink-3); text-align: center; }
+    .work-activity-row .w-row__sub code { font-size: 0.95em; }
+    .work-run__last { margin: 0; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); overflow-wrap: anywhere; }
+    .work-run .w-group__head { flex-wrap: wrap; }
+    .work-run .w-group__head .w-check { margin-left: auto; }
     @media (width < 600px) {
-        .work-tree-meta { padding-left: 0; }
-        .work-ctr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name act" "state state" "cpu cpu" "mem mem"; border-bottom: 1px solid var(--wash-hairline); border-radius: 0; }
-        .work-ctr:last-child { border-bottom: 0; }
-        .work-tree-children { margin-left: 0; padding-left: var(--wash-space-2); }
+        .work-ctr-metrics { grid-template-columns: 1fr; }
     }
 
     /* ------------------------------------------------------------ build environments (environments.js) */
@@ -1073,4 +1071,146 @@
         .work-app :is(.work-status-glyph, .w-chip__glyph)[data-state="active"],
         .work-chip[data-active] .w-chip__glyph { animation: none; }
     }
+}
+
+/* ======================================================================
+ * Mu: one leaf, no boxes inside it (mu_style_guide.md §2.1, §5.3, §5.6).
+ * The job modules still emit Wash cards and table wraps; on /work they read
+ * as groups separated by space and hairlines. The decision block (approval,
+ * limit and environment prompts) is the one tinted surface; code, logs and
+ * diffs stay on sunken; menus, dialogs and the New job sheet are floats.
+ * ==================================================================== */
+@layer patterns {
+    .work-route .w-card {
+        --w-card-pad: 0px;
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+    .work-route .w-card + .w-card,
+    .work-route .work-stack > .w-card + *,
+    .work-route .work-grid-2 > .w-card { margin-top: 0; }
+    .work-route .work-stack:has(> .w-card) { gap: var(--wash-space-8); }
+    .work-route .w-card__head { padding: 0 0 var(--wash-space-2); }
+    .work-route .w-card__title {
+        color: var(--wash-ink);
+        font-size: var(--wash-type-title-3-size);
+        line-height: var(--wash-type-title-3-line);
+        font-weight: var(--wash-type-title-3-weight);
+    }
+    .work-route .w-card__body { padding: var(--wash-space-2) 0 0; color: var(--wash-ink-2); }
+    .work-route .w-card__foot { padding: var(--wash-space-3) 0 0; border-top: 0; justify-content: flex-start; }
+    .work-route .w-card[data-state]:not(.work-approval) .w-card__head { padding: 0 0 var(--wash-space-2); border: 0; background: none; }
+    .work-route .w-card[data-state="plan"] { border: 0; }
+    /* Review findings: one per hairline-separated row; the severity sign and title lead. */
+    .work-route .work-finding-card + .work-finding-card { padding-top: var(--wash-space-4); border-top: 1px solid var(--wash-hairline); }
+    .work-route .work-finding-card .w-card__body { padding: 0; }
+    .work-route .work-finding-card .w-card__body > .work-toolbar:first-child { margin: 0 0 var(--wash-space-2); padding: 0; border: 0; background: none; }
+
+    /* The decision block (Mu §7.6): approval / limit / environment prompts. */
+    .work-route .w-card.work-approval {
+        --w-card-pad: var(--wash-space-5);
+        padding: var(--wash-space-5) var(--wash-space-5) var(--wash-space-4);
+        border-radius: var(--wash-radius-lg);
+        background: var(--wash-attention-wash);
+    }
+    .work-route .w-card.work-approval[data-state="danger"] { background: var(--wash-danger-wash); }
+    .work-route .w-card.work-approval[data-state="plan"] { background: var(--wash-plan-wash); }
+    .work-route .work-approval .w-card__head { padding: 0; border: 0; background: none; gap: var(--wash-space-2); flex-wrap: nowrap; align-items: baseline; }
+    .work-route .work-approval .w-card__title { color: var(--wash-ink); font-size: var(--wash-type-body-lg-size); line-height: var(--wash-type-body-lg-line); font-weight: var(--wash-type-label-weight); }
+    .work-route .work-approval .w-card__body { padding: var(--wash-space-2) 0 0; }
+    .work-route .work-approval .w-card__foot { padding: var(--wash-space-4) 0 0; }
+    .work-route .work-approval .work-code { background: color-mix(in srgb, var(--wash-surface) 72%, transparent); }
+
+    /* Tables: no outer box (Mu §5.6); hairline rows only. */
+    .work-route .w-table-wrap { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+
+    /* Banners inside a job page read as one line, not a box. */
+    .work-detail-head .w-banner { margin-top: var(--wash-space-2); }
+
+    /* History breakdown: sign + word, the count at the end of the line. */
+    .work-report-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--wash-space-4); padding: 3px 0; font-size: var(--wash-type-body-size); }
+    .work-report-breakdown { margin-bottom: var(--wash-space-6); align-items: start; }
+    .work-report-breakdown > .w-group + .w-group { margin-top: 0; }
+    .work-report-line { max-width: 520px; }
+    .work-management-row-actions { justify-content: flex-end; gap: var(--wash-space-4); }
+
+    /* Report numbers (History): a quiet line, not big stat tiles. */
+    .work-route .w-stats { padding-bottom: var(--wash-space-4); border-bottom: 0; }
+    .work-route .w-stat__value { color: var(--wash-ink); font-size: var(--wash-type-title-3-size); line-height: var(--wash-type-title-3-line); }
+
+    /* Filters sit on the leaf as one line of controls. */
+    .work-filters .work-card-body { padding-top: 0; }
+    .work-filters { margin-bottom: var(--wash-space-6); }
+    .work-plain { padding: 0; }
+    .work-note__stage { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-weight: var(--wash-type-label-weight); }
+
+    /* Setup's Checklist / Doctor tabs: text tabs like the page header's. */
+    .work-setup-tabs { margin-bottom: var(--wash-space-5); }
+
+    /* ------------------------------------------------------------ panes (Mu §11b) */
+    /* Pages inside a pane drop the leaf's own padding: the pane pads. */
+    .work-panes .w-leafbody { max-width: none; padding: 0; animation: none; }
+    /* Now: the board fills the main pane edge to edge (its cells pad). */
+    .work-app[data-route-name="dashboard"] .work-main { padding: 0; }
+    .work-app[data-route-name="dashboard"] .work-board-grid { border-top: 0; }
+    .work-app[data-route-name="dashboard"] .work-first-run { margin: var(--wash-space-8) auto; }
+    /* Pages that are one pane: Jobs, Tickets, History, Settings, Setup. */
+    .work-panes[data-layout="main"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; }
+    .work-panes[data-layout="main"] > .work-main { grid-area: auto; }
+    .work-panes[data-layout="main"] > :is(.work-list-pane, .work-aside-pane) { display: none; }
+    /* Activity: the page, and its running stage docked in the aside while there are rows. */
+    .work-app[data-route-name="activity"] .work-aside-pane > .work-job-side,
+    .work-app:not([data-route-name="job"]) .work-aside-pane > .work-job-side { display: none; }
+    .work-app[data-route-name="activity"] .work-panes:not(:has(.work-activity-row)) { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; }
+    .work-app[data-route-name="activity"] .work-panes:not(:has(.work-activity-row)) > .work-main { grid-area: auto; }
+    .work-app[data-route-name="activity"] .work-panes:not(:has(.work-activity-row)) > .work-aside-pane { display: none; }
+    .work-app[data-route-name="activity"] .work-aside-pane .w-dock__panel .w-sheet__close { top: 0; }
+    /* The list pane: a filter, then compact rows grouped Now / Running / Recent. */
+    .work-list-filter { display: flex; flex-direction: column; gap: var(--wash-space-2); margin-bottom: var(--wash-space-4); }
+    .work-list-filter .w-input { height: var(--wash-size-control); }
+    .work-list-group + .work-list-group { margin-top: var(--wash-space-5); }
+    .work-list-group__title {
+        display: flex;
+        justify-content: space-between;
+        margin: 0 0 var(--wash-space-1);
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
+        font-weight: var(--wash-type-label-weight);
+    }
+    .work-list-pane .work-job-row { min-height: 0; padding-block: var(--wash-space-2); }
+    .work-list-pane .w-row__title { font-size: var(--wash-type-label-size); }
+    .work-list-pane .w-row__key { display: none; }   /* the key leads the second line instead */
+    .work-list-pane .w-row__sub .work-mono { color: var(--wash-ink-3); }
+    .work-list-pane .w-row__when { font-size: var(--wash-type-caption-size); }
+    .work-list-pane .w-row__actions { display: none; }
+    .work-list-pane .work-job-row[aria-selected="true"] { background: var(--mu-accent-wash, var(--w-glass-fill-subtle)); }
+    .work-list-pane .work-job-row[aria-selected="true"] .w-row__title { color: var(--wash-ink); }
+    /* The board (Now with nothing open): flat cells side by side. */
+    .work-board-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); border-top: 0; }
+    .work-dashboard .work-board > .work-cell:first-child { border-bottom: 1px solid var(--wash-hairline); }
+    .work-board-grid > .w-board__cell { border-right: 0; }
+    /* Panes outside the layout never take an implicit grid row. */
+    .work-panes:not([data-layout="list-main-aside"], [data-layout="main-aside"]) > .work-aside-pane,
+    .work-panes:not([data-layout="list-main-aside"], [data-layout="list-main"]) > .work-list-pane { display: none; }
+    .work-cell .w-rows { margin-top: calc(-1 * var(--wash-space-2)); }
+    .work-cell:has(.work-now-rows):not(:has(.w-row:not([hidden]))):has(.work-quiet-line[hidden]) { display: none; }
+    .work-quiet-line { margin: 0; color: var(--wash-ink-3); }
+    .work-panes > .work-main { min-width: 0; }
+    /* Meters (SVG): the track on sunken, the value in its tone (the mode's accent by default). */
+    .work-meter { display: inline-block; width: 96px; height: 4px; vertical-align: middle; overflow: visible; }
+    .work-meter__track { fill: var(--wash-sunken); }
+    .work-meter__fill { fill: var(--mu-accent, var(--wash-accent-pigment)); }
+    .work-meter[data-tone="running"] .work-meter__fill { fill: var(--wash-running-pigment); }
+    .work-meter[data-tone="attention"] .work-meter__fill { fill: var(--wash-attention-pigment); }
+    .work-meter[data-tone="danger"] .work-meter__fill { fill: var(--wash-danger-pigment); }
+    .work-row-bar { margin-left: var(--wash-space-2); }
+    .work-spark { display: block; max-width: 100%; height: auto; margin-top: var(--wash-space-4); }
+    .work-spark rect { fill: var(--mu-accent, var(--wash-accent-pigment)); }
+    .work-spark rect:hover { fill: var(--mu-accent-ink, var(--wash-accent-ink)); }
+    @media (width < 840px) { .work-app .work-main { padding-inline: var(--wash-space-4); } }
 }

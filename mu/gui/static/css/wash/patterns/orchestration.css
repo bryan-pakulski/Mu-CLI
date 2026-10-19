@@ -1,12 +1,12 @@
-/* Page bundle — Orchestration (/orchestration).
+/* Page bundle — Orchestration (/orchestration), Mu (documentation/design/
+ * mu_style_guide.md §10.3).
  *
- * Linked after wash.css (which declares the layer order). The page is built
- * from Wash components (.w-hero, .w-card with data-state header strips,
- * .w-stats, .w-table, .w-tabs, .w-segmented, .w-stepper, .w-chip, .w-banner,
- * .w-modal, .w-drawer, .w-code, .w-diff, .w-empty); this file only lays them
- * out and styles the page-specific parts, all prefixed .orch-*. State is a
- * tinted header strip, a chip (glyph + label) or semantic ink — never a
- * coloured side accent (G§3.4).
+ * Linked after wash.css (which declares the layer order). Content sits on the
+ * leaf: groups, rows, facts, the decision block and text buttons (mu.css).
+ * Wash components the editors still use (.w-card, .w-table, .w-banner,
+ * .w-tabs) are de-boxed here: no glass inside the leaf, structure from space,
+ * type and hairlines. State is a sign plus a word (.w-signword) or semantic
+ * ink — never a pill or a coloured side accent (G§3.4).
  */
 @layer patterns {
     /* ------------------------------------------------------------ page */
@@ -137,22 +137,6 @@
     .orch-search { width: min(320px, 100%); margin-left: auto; }
     .orch-banner .w-banner__msg code { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size); }
 
-    /* ------------------------------------------------------------ overview */
-    .orch-hero { min-height: 240px; margin: calc(-1 * var(--wash-space-6)) calc(-1 * var(--wash-space-6)) var(--wash-space-6); }
-    .orch-hero__actions { margin-top: var(--wash-space-4); }
-    .orch-stats { margin: 0; }
-    .orch-stats a { color: inherit; text-decoration: none; }
-    .orch-stats a:hover { color: var(--wash-accent-ink); text-decoration: underline; }
-    .orch-stat-text { font-size: var(--wash-type-body-size); line-height: var(--wash-type-title-1-line); font-weight: var(--wash-type-label-weight); }
-    .orch-attn { display: flex; flex-direction: column; gap: var(--wash-space-3); margin: 0; padding: 0; list-style: none; }
-    .orch-attn__body { display: flex; flex-direction: column; gap: var(--wash-space-1); }
-    .orch-attn__body p { margin: 0; }
-    .orch-attn__title { margin: 0; color: var(--wash-ink); font-size: var(--wash-type-body-size); font-weight: var(--wash-type-title-3-weight); }
-    .orch-health { display: flex; flex-wrap: wrap; gap: var(--wash-space-2); }
-    .orch-health__item { text-decoration: none; border-radius: var(--wash-radius-pill); }
-    .orch-health__item:hover .w-chip { filter: brightness(0.97); }
-    .orch-kill { margin-top: var(--wash-space-4); }
-
     /* ------------------------------------------------------------ key/value lists */
     .orch-kv { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); gap: var(--wash-space-2) var(--wash-space-4); margin: 0; }
     .orch-kv__row { display: contents; }
@@ -232,7 +216,6 @@
     .orch-key + .orch-key { padding-top: var(--wash-space-3); border-top: 1px solid var(--wash-hairline); }
 
     /* ------------------------------------------------------------ plan */
-    .orch-plan__stats .w-stat__value { display: flex; align-items: center; min-height: var(--wash-type-title-1-line); }
     .orch-warnings { display: flex; flex-direction: column; gap: var(--wash-space-2); margin: 0; padding: 0; list-style: none; }
     .orch-batches { display: flex; flex-direction: column; gap: var(--wash-space-2); margin: 0; padding: 0; list-style: none; }
     .orch-batches li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-1); }
@@ -424,4 +407,311 @@
     @media (prefers-reduced-motion: reduce) {
         .orch-cell[data-status="active"] > span[aria-hidden="true"] { animation: none; }
     }
+
+    /* ------------------------------------------------------------ Mu: the leaf (§3, §4) */
+    .w-page.orch-page { max-width: none; margin: 0; padding: 0; }
+    .orch-page .orch-stack { gap: var(--wash-space-7); }
+    .orch-page .orch-stack-sm { gap: var(--wash-space-3); }
+    /* The route's own heading is said once, in the page header; what's left is its tools. */
+    .orch-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-4); margin-bottom: var(--wash-space-6); }
+    .orch-head:not(:has(> :not([hidden]):not(.orch-head__title))):not(:has(.orch-head__title > :not([hidden]))) { display: none; }
+    .orch-head .w-page__title[hidden] { display: none; }
+    .orch-head__tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-4); }
+    .orch-head__meta { color: var(--wash-ink-3); font-size: var(--wash-type-label-size); }
+    .orch-head__meta:empty { display: none; }
+    .orch-vchecks { margin: calc(-1 * var(--wash-space-5)) 0 0; gap: var(--wash-space-2) var(--wash-space-4); }
+    /* One primary per screen: on top routes the header's New run is it; a route's own
+     * primary reads as a text button. */
+    .orch-page:not([data-detail]) .orch-head .w-btn[data-variant="primary"] {
+        height: auto;
+        padding: 2px 0;
+        border: 0;
+        background: none;
+        box-shadow: none;
+        color: var(--wash-ink);
+    }
+    .orch-head-actions { display: flex; align-items: center; gap: var(--wash-space-4); }
+    /* The header title takes programmatic focus on route changes (screen readers); not a control. */
+    .orch-body #w-pagehead [data-head-title][tabindex="-1"]:focus { outline: none; }
+    /* No outlined pills (§7.3): secondary, tonal and ghost buttons read as text buttons; the
+     * primary ink pill and icon buttons stay. Danger actions take danger ink. */
+    .orch-page .w-btn:is([data-variant="secondary"], [data-variant="tonal"], [data-variant="ghost"]),
+    .orch-drawer .w-btn:is([data-variant="secondary"], [data-variant="tonal"], [data-variant="ghost"]) {
+        height: auto;
+        min-height: 0;
+        padding: 2px 0;
+        border: 0;
+        background: none;
+        box-shadow: none;
+        color: var(--wash-ink);
+    }
+    .orch-page .w-btn:is([data-variant="secondary"], [data-variant="tonal"], [data-variant="ghost"]):hover:not([aria-disabled="true"]):not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+    .orch-page .w-btn[data-danger], .orch-page .w-btn[data-tone="danger"]:not([data-variant="primary"]) { color: var(--wash-danger-ink); }
+    .orch-page .w-btn[aria-disabled="true"]:not([data-variant="primary"]) { color: var(--wash-ink-3); }
+    .orch-page .w-btn-row, .orch-page .orch-toolbar, .orch-page .w-decision__acts { gap: var(--wash-space-2) var(--wash-space-5); }
+
+    /* Groups: titles are headings in ink, never plum boxes. */
+    .orch-page .orch-section { gap: var(--wash-space-2); }
+    .orch-page .orch-section__title, .orch-page .w-card__title {
+        color: var(--wash-ink);
+        font-size: var(--wash-type-title-3-size);
+        line-height: var(--wash-type-title-3-line);
+        font-weight: var(--wash-type-title-3-weight);
+    }
+    .orch-page .w-group__head .w-signword { font-size: var(--wash-type-label-size); }
+
+    /* Cards inside the leaf become plain groups (no glass inside glass, §2.1). */
+    .orch-page .w-card {
+        --w-card-pad: 0px;
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+    }
+    .orch-page .w-card[data-state] .w-card__head,
+    .orch-page .w-card__head { padding: 0 0 var(--wash-space-2); border: 0; background: none; }
+    .orch-page .w-card[data-state] .w-card__head .w-card__title { color: var(--wash-ink); }
+    .orch-page .w-card[data-state] .w-card__body, .orch-page .w-card__body { padding: 0; color: var(--wash-ink); }
+    .orch-page .w-card__foot { justify-content: flex-start; padding: var(--wash-space-3) 0 0; border: 0; }
+    .orch-page .w-card[data-state="plan"] { border: 0; }
+    .orch-page .w-card__meta { margin-left: 0; }
+
+    /* Tables: no outer box; a hairline under the head and between rows (§5.6). */
+    .orch-page .w-table-wrap, .orch-drawer .w-table-wrap {
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+    }
+    .orch-page .w-table th { padding-left: 0; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-weight: 400; }
+    .orch-page .w-table td { padding-left: 0; }
+    .orch-page .w-table tbody tr:hover { background: var(--w-glass-fill-subtle); }
+    .orch-cell-acts { display: inline-flex; gap: var(--wash-space-4); }
+    /* Settings' section links: jump links in a row, not pills. */
+    .orch-settings__nav { gap: var(--wash-space-1) var(--wash-space-4); background: none; }
+    .orch-settings__nav .w-chip { height: auto; padding: 0; border: 0; background: none; color: var(--wash-ink-3); }
+    .orch-settings__nav .w-chip:is(:hover, [aria-current]) { color: var(--wash-ink); }
+
+    /* Banners become one quiet line: the sign and the tone's ink, no fill. */
+    .orch-page .w-banner {
+        min-height: 0;
+        padding: 0;
+        border-radius: 0;
+        background: none;
+        outline: 0;
+        color: var(--w-tone-ink, var(--wash-ink-2));
+        align-items: baseline;
+    }
+    .orch-page .w-banner .w-banner__msg { color: var(--wash-ink-2); }
+    .orch-page .w-banner .w-banner__msg strong { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
+    .orch-page .w-banner .w-btn { height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
+
+    /* Tabs inside a page read like the header's text tabs. */
+    .orch-page .w-tabs { gap: var(--wash-space-5); border-bottom: 0; }
+    .orch-page .w-tabs__tab { height: auto; padding: 0 0 var(--wash-space-2); }
+    .orch-page .w-tabs__tab:is([aria-selected="true"], [aria-current="page"]) { border-bottom-color: var(--wash-ink); }
+    .orch-page .w-tabs__tab .w-count { background: none; color: var(--wash-ink-3); padding: 0; min-width: 0; }
+
+    /* Marks, effects and labels: words, not chips (§5.4). */
+    .orch-mark { white-space: nowrap; }
+    .orch-page .orch-effect, .orch-drawer .orch-effect { color: inherit; white-space: nowrap; }
+    .orch-page .orch-effect:is([data-effect="destructive"], [data-tone="danger"]) { color: var(--wash-danger-ink); }
+    .orch-meta { color: var(--wash-ink-3); }
+    .orch-labels { gap: 0 var(--wash-space-3); }
+    .orch-label, .orch-tag { height: auto; padding: 0; color: var(--wash-ink-3); }
+    .w-row__title .orch-tag { margin-left: var(--wash-space-2); font-weight: 400; }
+    .orch-page [data-tone="danger"]:not(.w-banner):not(.w-decision):not(.w-leaf-alert):not(.w-textbtn):not(.w-btn):not(.w-empty) { color: var(--wash-danger-ink); }
+    .orch-page .w-row__sub [data-tone="attention"]:not(.orch-effect), .orch-page td [data-tone="attention"]:not(.orch-effect) { color: var(--wash-attention-ink); }
+    .orch-access-why { display: block; margin-top: 2px; }
+    .orch-progress { margin: 0 0 var(--wash-space-3); }
+    .orch-decision .w-btn { flex: none; }
+    .orch-page .orch-toolbar:not(:has(*)) { display: none; }
+
+    /* Menus: the page ⋯ and the tabs' More (details popovers). */
+    .orch-pop { position: relative; display: inline-flex; }
+    .orch-pop > summary { list-style: none; cursor: pointer; }
+    .orch-pop > summary::-webkit-details-marker { display: none; }
+    .orch-pop__menu { position: absolute; top: calc(100% + 6px); right: 0; min-width: 220px; }
+    .orch-tabs-more .orch-pop__menu { right: auto; left: 0; }
+    .orch-pop:not([open]) > .orch-pop__menu { display: none; }
+
+    /* ------------------------------------------------------------ Mu round 2: width, dock, filters */
+    /* Filters are quiet text tabs (no chips): the pressed one in ink with an underline. */
+    .orch-textfilters { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--wash-space-1) var(--wash-space-5); }
+    .orch-textfilter {
+        padding: 0 0 var(--wash-space-1);
+        border: 0;
+        background: none;
+        box-shadow: inset 0 -2px 0 transparent;
+        color: var(--wash-ink-3);
+        font: inherit;
+        font-size: var(--wash-type-label-size);
+        font-weight: var(--wash-type-label-weight);
+        cursor: pointer;
+    }
+    .orch-textfilter { border-radius: 0; }
+    /* The decision question takes programmatic focus for screen readers; not a control. */
+    .orch-decision .w-decision__q[tabindex="-1"]:focus { outline: none; }
+    .orch-textfilters.orch-filters { justify-content: flex-start; }
+    .orch-textfilter:hover { color: var(--wash-ink); }
+    .orch-textfilter[aria-pressed="true"] { color: var(--wash-ink); box-shadow: inset 0 -2px 0 var(--wash-ink); }
+    .orch-textfilter .orch-count { margin-left: 2px; color: var(--wash-ink-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+    .orch-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--wash-space-3) var(--wash-space-5); }
+    .orch-filters .orch-search { width: min(320px, 100%); margin-left: auto; }
+    .orch-filters > :is(.w-segmented, .orch-textfilters) { flex: 0 1 auto; width: auto; }
+    .orch-section__head > .w-textbtn { flex: none; }
+
+    /* The endpoint line above the inventory. */
+    .orch-endpoint-line .w-state .w-sign { width: auto; margin-right: 2px; }
+    .orch-endpoint-line .w-disclose { margin-top: var(--wash-space-2); }
+
+    /* A one-line note (agent outdated, no sandbox, policy errors): sign + words, no fill. */
+    .orch-note { margin: 0; color: var(--wash-ink-2); }
+    .orch-note[data-tone="danger"] { color: var(--wash-danger-ink); }
+    .orch-note .w-sign { width: auto; margin-right: 2px; }
+
+    /* Detail pages (a run, a node, a tool): the main column and a sticky aside with the
+     * state, actions and facts from 1200px (Mu §3.3: the leaf is used whole). */
+    .orch-detail { display: flex; flex-direction: column; gap: var(--wash-space-7); }
+    .orch-detail__aside { display: flex; flex-direction: column; gap: var(--wash-space-5); min-width: 0; }
+    .orch-detail__main { display: flex; flex-direction: column; gap: var(--wash-space-7); min-width: 0; }
+    @media (width >= 1200px) {
+        .orch-detail:not([data-paned]) {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) clamp(300px, 30%, 440px);
+            align-items: start;
+            column-gap: var(--wash-space-8);
+        }
+        .orch-detail:not([data-paned]) > .orch-detail__aside {
+            position: sticky;
+            top: var(--wash-space-5);
+            grid-column: 2;
+            grid-row: 1 / span 20;
+            padding-left: var(--wash-space-7);
+            border-left: 1px solid var(--wash-hairline);
+        }
+        .orch-detail:not([data-paned]) > .orch-detail__main { grid-column: 1; }
+    }
+    .orch-detail__aside .w-group__title { font-size: var(--wash-type-label-size); line-height: var(--wash-type-label-line); color: var(--wash-ink-2); }
+    .orch-detail__aside .w-facts { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
+    .orch-detail__aside .orch-vchecks { display: flex; flex-wrap: wrap; gap: var(--wash-space-2) var(--wash-space-4); margin: 0; }
+    .orch-settings__nav { margin-bottom: var(--wash-space-7); }
+    .orch-detail__aside .orch-grid-2 { grid-template-columns: minmax(0, 1fr); }
+    .orch-aside .orch-detail__aside .orch-toolbar .w-btn[data-variant="primary"] { align-self: flex-start; }
+    @media (width >= 1200px) {
+        .orch-wizard-layout { grid-template-columns: minmax(0, 1fr) minmax(360px, 44%); }
+    }
+
+    /* Settings sections are form sections (mu.css .w-formsection): what the section is on
+     * the left, its fields on the right; the index above stays a row of quiet links. */
+    .orch-settings .w-formsection__head .orch-formsection__tools { display: flex; flex-wrap: wrap; gap: var(--wash-space-4); margin-top: var(--wash-space-3); }
+    .orch-settings .w-formsection__body { max-width: 900px; }
+    .orch-settings .orch-grid-2 { gap: var(--wash-space-6); }
+
+    /* ------------------------------------------------------------ the workspace (Mu §11b) */
+    /* #orch-app is a .w-panes (mu.css): list | main | aside. view.js sets data-layout per
+     * route; panes a layout leaves out are hidden here (an unplaced grid item would open an
+     * implicit track). */
+    @media (width >= 840px) {
+        .orch-panes[data-layout="main"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; }
+    }
+    .orch-panes[data-layout="main"] > :is([data-pane="list"], [data-pane="aside"]),
+    .orch-panes[data-layout="list-main"] > [data-pane="aside"],
+    .orch-panes[data-layout="main-aside"] > [data-pane="list"] { display: none; }
+    .orch-main { padding-top: var(--wash-space-5); }
+    .orch-page { padding-top: 0; }
+    .orch-backbar { display: none; margin-bottom: var(--wash-space-3); }
+    .orch-aside-toggle, .orch-aside__close { display: none; }
+    /* Boards fill MAIN edge to edge; cells carry the padding. */
+    .orch-main:has(.orch-board) { padding: 0; }
+    .orch-main:has(.orch-board) .orch-firstrun { padding: var(--wash-space-7) var(--w-leaf-pad, 24px) 0; }
+    .orch-board { border-top: 0; }
+    /* The Now board: one column, then the fleet and recent runs beside dispatch and the
+     * audit trail from 1200px. Spans never open implicit tracks. */
+    .orch-board > [data-span] { grid-column: 1 / -1; }
+    .orch-nowboard { grid-template-columns: minmax(0, 1fr); }
+    @media (width >= 1200px) {
+        .orch-nowboard { grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); }
+        .orch-nowboard > [data-span="2"] { grid-column: 1; }
+    }
+    .orch-tabs-more > summary { white-space: nowrap; }
+    .orch-board .w-pane__head { justify-content: space-between; }
+    .orch-board .w-pane__head .orch-sub { display: inline; }
+    .orch-board .w-board__big[data-tone="danger"] { color: var(--wash-danger-ink); }
+    .orch-big__of { color: var(--wash-ink-3); font-size: var(--wash-type-body-size); font-weight: 400; letter-spacing: 0; }
+    .orch-board__line { margin: var(--wash-space-2) 0 0; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); }
+    .orch-board__line[data-tone="attention"] { color: var(--wash-attention-ink); }
+    .orch-board .w-row { margin-right: 0; }
+    .orch-catalog-facts { margin-top: var(--wash-space-4); }
+    .orch-catalog-facts a[data-tone="attention"] { color: var(--wash-attention-ink); }
+
+    /* The list pane: search on top, quiet filters, compact rows; the selected row is marked. */
+    .orch-list .w-pane__title { color: var(--wash-ink); }
+    .orch-list__tools { display: flex; gap: var(--wash-space-3); }
+    .orch-list__tools:empty { display: none; }
+    .orch-listtools { display: flex; flex-direction: column; gap: var(--wash-space-2); margin-bottom: var(--wash-space-3); }
+    .orch-list .orch-filters { flex-direction: column; align-items: stretch; gap: var(--wash-space-2); }
+    .orch-list .orch-filters .orch-search, .orch-list .orch-search { width: 100%; margin: 0; }
+    .orch-list .orch-textfilters, .orch-list .orch-textfilters.orch-filters { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--wash-space-1) var(--wash-space-3); }
+    .orch-list .orch-textfilter { padding-inline: 0; }
+    /* A toolbar with nothing to do now is noise: only "N unavailable" — fold it away. */
+    .orch-aside .orch-toolbar:not(:has(.orch-action)) { display: none; }
+    .orch-list .orch-settings__nav .orch-textfilter[aria-current="true"] { background: var(--mu-accent-wash, var(--w-glass-fill-subtle)); color: var(--wash-ink); }
+    .orch-list .orch-stack { gap: var(--wash-space-3); }
+    .orch-list .w-group + .w-group, .orch-list .orch-section { margin-top: var(--wash-space-5); }
+    .orch-list .w-group__title, .orch-list .orch-section__title { font-size: var(--wash-type-label-size); line-height: var(--wash-type-label-line); color: var(--wash-ink-3); font-weight: var(--wash-type-label-weight); }
+    .orch-list .w-row[data-selected] { background: var(--mu-accent-wash, var(--w-glass-fill-subtle)); }
+    .orch-list .w-row[data-selected] .w-row__title { color: var(--wash-ink); }
+    .orch-list .w-row__sub { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    /* Settings: the section index runs down the list pane. */
+    .orch-list .orch-settings__nav { display: flex; flex-direction: column; align-items: stretch; gap: 2px; margin: 0; }
+    .orch-list .orch-settings__nav .orch-textfilter { padding: var(--wash-space-2) var(--wash-space-2); border-radius: var(--wash-radius-sm); box-shadow: none; text-align: left; }
+    .orch-list .orch-settings__nav .orch-textfilter:hover { background: var(--w-glass-fill-subtle); }
+
+    /* Meters (Mu §11b): numbers beside a 4px bar, tone from 80% / 92%. */
+    .orch-meter { display: inline-flex; align-items: center; gap: var(--wash-space-1); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .orch-meter + .orch-meter { margin-left: var(--wash-space-3); }
+    .orch-meter .w-bar { --w-bar-w: 36px; }
+    .orch-meter__num[data-tone="attention"] { color: var(--wash-attention-ink); }
+    .orch-meter__num[data-tone="danger"] { color: var(--wash-danger-ink); }
+    .orch-rowbar { --w-bar-w: 44px; margin-right: var(--wash-space-2); }
+    .orch-progressline { display: flex; flex-direction: column; gap: var(--wash-space-2); margin-bottom: var(--wash-space-4); }
+    .orch-gauges { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--wash-space-5); margin: var(--wash-space-2) 0 var(--wash-space-5); }
+    .orch-gauge { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: var(--wash-space-1) var(--wash-space-2); }
+    .orch-gauge__label { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .orch-gauge__num { color: var(--wash-ink); font-size: var(--wash-type-title-3-size); font-weight: 500; font-variant-numeric: tabular-nums; }
+    .orch-gauge .w-bar { grid-column: 1 / -1; }
+
+    /* A list item at the top of MAIN: its name, its state sentence, the Details toggle. */
+    .orch-item__title.w-page__title { margin: 0; font-size: var(--wash-type-title-2-size); line-height: var(--wash-type-title-2-line); font-weight: var(--wash-type-title-2-weight); letter-spacing: var(--wash-type-title-2-tracking); color: var(--wash-ink); }
+    .orch-head:has(.orch-item__title) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--wash-space-1) var(--wash-space-4); margin-bottom: var(--wash-space-5); }
+    .orch-head:has(.orch-item__title) > .orch-item__state { grid-column: 1 / -1; margin: 0; }
+    .orch-head:has(.orch-item__title) > .orch-aside-toggle { grid-column: 2; grid-row: 1; }
+    .orch-detail[data-paned] { display: block; }
+    .orch-detail[data-paned] > .orch-detail__main { gap: var(--wash-space-7); }
+
+    /* The ASIDE pane holds the item's context column. */
+    .orch-aside .orch-detail__aside { position: static; padding: 0; border: 0; gap: var(--wash-space-6); }
+    .orch-aside .w-row { margin-right: 0; }
+    .orch-aside .w-row__sub { white-space: normal; }
+    /* The run's selected execution: its log at a readable height, in step with the grid. */
+    .orch-exec .orch-log { max-height: min(48vh, 520px); }
+    .orch-exec .w-group__head { flex-wrap: wrap; }
+    .orch-cell[data-selected] { outline: 2px solid var(--mu-accent-ink, var(--wash-accent-ink)); outline-offset: 1px; border-radius: var(--wash-radius-xs); }
+
+    @media (width < 1200px) {
+        .orch-aside-toggle { display: inline-flex; }
+        .orch-panes[data-aside="open"] .orch-aside__close { display: flex; justify-content: flex-end; margin-bottom: var(--wash-space-2); }
+    }
+    @media (width < 840px) {
+        .orch-panes[data-layout^="list"] .orch-backbar:not([hidden]) { display: block; }
+    }
+    @media (width < 840px) {
+        .orch-head-actions .w-textbtn { display: none; }
+    }
 }
+
+/* First run (no nodes, no runs): "Set up a node" in the empty state is the one primary
+ * action (Mu §4.4); "New run" has nothing to run on yet. */
+.orch-body:has(.orch-firstrun) #w-pagehead [data-head-actions] .w-btn[data-variant="primary"] { display: none; }

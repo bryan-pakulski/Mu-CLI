@@ -25,7 +25,8 @@ def test_web_welcome_has_three_primary_entries_and_guided_creation():
 def test_container_manager_exposes_edit_clone_and_template_actions():
     html = (ROOT / "mu/gui/templates/containers.html").read_text()
     script = (ROOT / "mu/gui/static/js/containers.js").read_text()
-    assert "Container environments" in html
+    # Mu §4.1: the page is named once, by its noun, in the page header.
+    assert "{% block page_title %}Environments{% endblock %}" in html
     assert "Folder mounts" in html
     assert "edit" in script
     assert "clone" in script
@@ -190,3 +191,33 @@ def test_file_browser_is_cloaked_and_above_nested_creation_modals():
     assert decls(modal, ".w-modal")["z-index"] == "var(--wash-z-modal)"
     assert 'class="welcome-modal-backdrop w-modal"' in welcome  # guided welcome modal
     assert 'class="container-editor-backdrop w-modal"' in welcome  # nested Docker/network editor
+
+
+def test_environment_workspace_shows_list_main_and_context_side_by_side():
+    # Mu §11b: the page is a list | main | aside workspace. The list holds the
+    # environments then the templates; MAIN is the chosen environment itself (live
+    # charts over a rolling sample buffer, the terminal inline) or the template's
+    # editor; ASIDE is its context. The first environment is chosen on arrival
+    # without writing the URL; a picked row (click, j/k) goes in ?open= so a reload
+    # reopens it.
+    html = (ROOT / "mu/gui/templates/containers.html").read_text()
+    script = (ROOT / "mu/gui/static/js/containers.js").read_text()
+    panes = html.split('<div class="w-panes w-env-panes" id="env-panes" data-layout="list-main-aside">', 1)[1]
+    assert panes.index('data-pane="list"') < panes.index('id="container-list"') < panes.index('id="template-list"') \
+        < panes.index('data-pane="main"') < panes.index('data-pane="aside"')
+    assert '<section class="w-env-terminal-host" id="env-terminal-host"' in html and 'id="shell-modal"' in html
+    assert "function autoSelect()" in script and "if (!selectFromUrl()) autoSelect();" in script
+    assert "setOpenParam(kind === 'template' ? `template:${name}` : name);" in script
+    # Live charts: a bounded rolling buffer; disk I/O is a rate between cumulative samples.
+    assert "const HISTORY = 72;" in script and "if (series.length > HISTORY) series.splice(0, series.length - HISTORY);" in script
+    assert "r: prev && dt ? Math.max(0, (br - prev.br) / dt) : 0," in script
+    # The terminal moves between the main pane and the modal; one body, one socket.
+    assert "const inlineShell = () => !window.matchMedia || window.matchMedia('(width >= 840px)').matches;" in script
+    assert "target.appendChild(body);" in script
+    # Narrow screens: list ↔ main; the aside opens on demand below 1200px.
+    assert "panes().setAttribute('data-show', 'main');" in script and "data-env-back" in script
+    assert "panes().setAttribute('data-aside', 'open')" in script
+    # Hidden dialogs carry aria-modal statically: only a visible one blocks j/k.
+    assert "el.getClientRects().length > 0" in script
+    # No zero counts in the create flow's summaries (Mu §5.5).
+    assert "'No outbound domains'" in script and "state.devices.length ? ` · ${state.devices.length} device" in script

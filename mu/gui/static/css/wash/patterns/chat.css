@@ -11,6 +11,7 @@
 @import url("panels.css") layer(patterns);
 @import url("settings.css") layer(patterns);
 @import url("welcome.css") layer(patterns);
+@import url("chat-surfaces.css") layer(patterns);
 
 /* ==================================================================== Wash rules
  * The chat page on the shared shell (G§8.1). Components (.w-msg, .w-toolcard,
@@ -40,7 +41,7 @@
     .w-chat-sidebar .sidebar-primary-action { justify-content: flex-start; width: 100%; }
     .w-chat-sidebar .w-btn .w-nav__label { flex: 1 1 auto; text-align: left; }
     .chat-body .w-toast-region { bottom: calc(var(--composer-height, 0px) + var(--wash-space-4)); }
-    .w-chat-sidebar .sidebar-new-session { justify-content: flex-start; width: 100%; margin-top: var(--wash-space-1); color: var(--wash-ink-3); }
+    .w-chat-sidebar .sidebar-new-session:not(.w-sessions__add) { justify-content: flex-start; width: 100%; margin-top: var(--wash-space-1); color: var(--wash-ink-3); }
     .w-session .session-type-svg { width: 16px; height: 16px; }
     .w-session .thread-status-dot { background: none; border: 0; }
 
@@ -472,4 +473,260 @@
         .chat-history .msg.interim-entering,
         .chat-history .msg.interim-leaving { animation: none; }
     }
+
+    /* ==================================================================== Mu (§10.1)
+     * The chat page on the frame: the session header above the conversation,
+     * prose on the leaf, the composer as the one float, the workspace panel
+     * as a float from the right, the rail's session list as plain lines. */
+
+    /* ------------------------------------------------------------ leaf alert (the Reconnecting… line) */
+    .w-chat__reconnecting { display: inline-flex; align-items: center; gap: var(--wash-space-2); color: var(--wash-caution-ink); }
+
+    /* ------------------------------------------------------------ session header */
+    .w-chathead {
+        position: relative;
+        z-index: var(--wash-z-dropdown);
+        display: flex;
+        align-items: center;
+        gap: var(--wash-space-2);
+        flex: none;
+        width: min(100%, calc(680px + var(--wash-space-6) * 2));
+        margin: 0 auto;
+        padding: var(--wash-space-6) var(--wash-space-6) var(--wash-space-2);
+    }
+    .w-chathead__title {
+        display: flex;
+        align-items: baseline;
+        gap: var(--wash-space-2);
+        min-width: 0;
+        margin: 0;
+        color: var(--wash-ink);
+        font-size: var(--wash-type-title-3-size);
+        line-height: var(--wash-type-title-3-line);
+        font-weight: var(--wash-type-label-weight);
+        letter-spacing: -0.01em;
+    }
+    .w-chathead__title .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-chathead__thread { color: var(--wash-ink-3); font-size: var(--wash-type-body-size); font-weight: 400; white-space: nowrap; }
+    .w-chathead__thread::before { content: "· "; }
+    .w-chathead__menu { position: relative; }
+    .w-chathead__more { color: var(--wash-ink-3); }
+    .w-chathead__more:hover, .w-chathead__more[aria-expanded="true"] { color: var(--wash-ink); }
+    .w-chathead__popover {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        width: 260px;
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+    /* Solid: the transcript under it must never read through the menu. */
+    .w-chathead__popover { background: var(--wash-raised); }
+    .w-chathead__popover .w-menu__item[aria-current="true"] { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
+    .w-chathead__popover .yolo-toggle[data-tone="caution"] { color: var(--wash-caution-ink); }
+    /* The transcript's own top padding sits under the header. */
+    .w-chathead + .w-transcript, .w-chathead + * .w-transcript { padding-top: var(--wash-space-4); }
+    /* The mode tint band starts under the leaf's edge, not behind the header text. */
+    .w-chat__column::before { height: 96px; }
+
+    /* ------------------------------------------------------------ transcript */
+    .chat-history .msg.user { margin-left: 0; }
+    .w-transcript .w-diff { border-color: transparent; background: var(--w-glass-fill-subtle); }
+    .w-transcript .w-worked__row { color: var(--wash-ink-3); }
+    .chat-history .msg.command.cmd-err { background: none; }
+    .chat-history .empty-state { padding: var(--wash-space-9) 0; }
+
+    /* ------------------------------------------------------------ composer: the one float */
+    .w-composer { width: min(100%, calc(680px + var(--wash-space-6) * 2)); }
+    .w-composer__form {
+        border-radius: var(--wash-radius-xl);
+        background: var(--w-glass-fill-strong);
+        padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-2) var(--wash-space-4);
+    }
+    /* Foot items: text with a caret, ink-3 at rest, ink-2 while the composer has focus (§7.5). */
+    .w-composer__bar { gap: var(--wash-space-4); color: var(--wash-ink-3); font-size: var(--wash-type-label-size); }
+    .w-composer__form:focus-within .w-composer__bar { color: var(--wash-ink-2); }
+    .w-composer__bar .attach-btn { margin-left: calc(-1 * var(--wash-space-2)); color: inherit; }
+    .w-composer__bar .composer-mode-pill,
+    .w-composer__bar .w-composer__effort {
+        min-height: 28px;
+        padding: 0;
+        border: 0;
+        background: none;
+        box-shadow: none;
+        color: inherit;
+        font-size: inherit;
+    }
+    .w-composer__bar .composer-mode-pill .value { color: inherit; font-weight: 400; }
+    .w-composer__bar .w-composer__effort-select { color: inherit; font-weight: 400; }
+    .w-composer__bar .w-chip__caret, .w-composer__caret { margin-left: 3px; font-size: 0.8em; opacity: 0.8; }
+    .w-composer__item {
+        display: inline-flex;
+        align-items: center;
+        min-width: 0;
+        max-width: 220px;
+        min-height: 28px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+    }
+    .w-composer__model { min-width: 0; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-composer__bar .composer-settings > .w-composer__item { width: 100%; }
+    .w-composer__bar :is(.composer-mode-pill, .w-composer__item, .w-composer__effort):hover { color: var(--wash-ink); }
+    .w-composer__bar .composer-settings-btn.open, .w-composer__bar .composer-mode-pill.open { color: var(--wash-ink); }
+    /* Auto-approve: a word in caution ink, always visible while on. */
+    .w-composer__yolo {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 28px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--wash-caution-ink);
+        font: inherit;
+        font-weight: var(--wash-type-label-weight);
+        cursor: pointer;
+    }
+    .w-composer__yolo:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .w-composer__ring {
+        display: inline-grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: none;
+        cursor: pointer;
+    }
+    .w-composer__ring:hover { background: var(--w-glass-fill-subtle); }
+    .w-composer__send, .w-composer__stop { width: 32px; height: 32px; }
+    .w-composer__hint:empty { display: none; }
+
+    /* ------------------------------------------------------------ workspace panel: the aside pane
+     * Mu revision 2 (§11b): from 1200px the workspace panel is the chat page's aside pane —
+     * full height, flat, a hairline on its left, the same tint as every aside pane; it
+     * keeps its resize handle and gives its space back when closed. Below 1200 it opens
+     * over the conversation as a float (opaque, one soft elevation). */
+    @media (width >= 1200px) {
+        .w-chat__stage {
+            margin: 0;
+            border: 0;
+            border-left: 1px solid var(--wash-hairline);
+            border-radius: 0;
+            background: color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface));
+            box-shadow: none;
+            overflow: hidden;
+        }
+        .w-chat__resize { margin: 0 -3px; }
+    }
+    @media (width < 1200px) {
+        .w-chat__stage { top: 0; right: 0; bottom: 0; border-radius: 0; border-left: 1px solid var(--wash-hairline); overflow: hidden; }
+    }
+    @media (width < 840px) {
+        .w-chat__stage { inset: 0; border-radius: 0; border-left: 0; }
+        .w-chathead, .w-composer { padding-left: var(--wash-space-4); padding-right: var(--wash-space-4); }
+        .w-chathead { padding-left: calc(var(--wash-space-4) + 44px); padding-top: var(--wash-space-4); }
+    }
+
+    /* ------------------------------------------------------------ rail sessions */
+    .w-chat-sidebar { margin-top: var(--wash-space-5); gap: 0; }
+    .w-chat-sidebar .w-sessions__head { margin: 0 var(--wash-space-3) var(--wash-space-1); }
+    .w-chat-sidebar .nav-section + .nav-section .w-sessions__head { margin-top: var(--wash-space-4); }
+    .w-sessions__add {
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--wash-radius-xs);
+        background: none;
+        color: var(--wash-ink-3);
+        font: inherit;
+        line-height: 1;
+        cursor: pointer;
+        flex: none;
+        transition: background-color var(--wash-motion-micro) var(--wash-ease-micro), color var(--wash-motion-micro) var(--wash-ease-micro);
+    }
+    .w-sessions__add .w-icon { width: 14px; height: 14px; }
+    .w-sessions__add:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
+    .w-session__type { display: inline-flex; flex: none; color: var(--wash-ink-3); }
+    .w-session__type .w-icon { width: 15px; height: 15px; }
+    .w-session[aria-current="true"] .w-session__type { color: var(--mu-accent-ink, var(--wash-accent-ink)); }
+    .w-session__waiting { min-width: 18px; height: 18px; font-size: var(--wash-type-caption-size); line-height: 18px; }
+    .w-session__state { padding: 0; background: none; }
+    .w-session__state[data-state="loaded"]::before { display: none; }
+    @container w-sidebar (width < 120px) {
+        .w-sidebar .w-session__type .w-icon { width: var(--wash-size-icon); height: var(--wash-size-icon); }
+        .w-sidebar .w-session__status { top: 0; right: 4px; }
+    }
 }
+
+/* ==================================================================== revision 2
+ * Chat as a three-pane workspace inside the persistent shell (Mu §11b):
+ * sessions (the view's list pane) | conversation | workspace (the aside pane). Flat:
+ * no tint bands, no shadows on planes, hairlines only. */
+@layer patterns {
+    /* ------------------------------------------------------------ flat conversation */
+    .w-chat__column::before { display: none; }
+    .chat-body .w-stage-head::before { display: none; }
+    .chat-body .w-stage-head { border-bottom: 1px solid var(--wash-hairline); background: transparent; }
+
+    /* ------------------------------------------------------------ list pane: sessions */
+    html[data-embed] body.chat-body .w-shell > .mu-viewside {
+        gap: 0;
+        padding: calc(var(--wash-space-6) + 4px) var(--wash-space-2) var(--wash-space-5);
+        overflow-y: auto;
+    }
+    .mu-viewside .w-chat-sidebar { margin-top: 0; }
+    /* The list's first heading lines up with the session name across the panes. */
+    .mu-viewside .w-chat-sidebar > .nav-section:first-child:is([hidden], [style*="display: none"]) + .nav-section .w-sessions__head { margin-top: 0; }
+    .mu-viewside .w-sessions__head { margin: 0 var(--wash-space-2) var(--wash-space-1); }
+    .mu-viewside .w-session {
+        min-height: 30px;
+        padding: 0 var(--wash-space-2);
+        border-radius: var(--wash-radius-sm);
+        box-shadow: none;
+    }
+    .mu-viewside .w-session[aria-current="true"] { background: var(--wash-sunken); box-shadow: none; }
+    .w-sessions__filter {
+        width: calc(100% - 2 * var(--wash-space-2));
+        height: 28px;
+        margin: 0 var(--wash-space-2) var(--wash-space-2);
+        padding: 0 var(--wash-space-1);
+        border: 0;
+        border-bottom: 1px solid var(--wash-hairline);
+        border-radius: 0;
+        background: transparent;
+        color: var(--wash-ink);
+        font: inherit;
+        font-size: var(--wash-type-label-size);
+    }
+    .w-sessions__filter:focus-visible { outline: none; box-shadow: none; border-bottom-color: var(--mu-accent-ink, var(--wash-accent-ink)); }
+    .w-sessions__filter::placeholder { color: var(--wash-ink-3); }
+
+    /* Narrow views: the list pane is an overlay opened from the session header. */
+    .w-chathead__sessions { display: none; }
+    @media (width < 840px) {
+        html[data-embed] .w-chathead__sessions { display: inline-flex; color: var(--wash-ink-3); }
+        /* The shell's navigation button floats over the view's top-left corner. */
+        html[data-embed] .w-chathead { padding-left: calc(var(--wash-space-4) + 44px); }
+        html[data-embed] body.chat-body .w-shell > .mu-viewside[data-open] {
+            position: fixed;
+            inset: 0 auto 0 0;
+            z-index: var(--wash-z-modal);
+            display: block;
+            width: min(300px, 86vw);
+            padding-top: calc(var(--wash-space-4) + 44px);
+            border-right: 1px solid var(--wash-hairline);
+            background: var(--wash-raised);
+            box-shadow: var(--w-glass-lift-3);
+        }
+    }
+}
+

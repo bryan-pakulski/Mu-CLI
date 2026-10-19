@@ -1,22 +1,18 @@
 {% import "macros/wash.html" as w %}
-{#- Welcome / launcher (G§9.18): the Dawn wash hero dissolving into paper, the
-    display headline, three choice cards (Continue, Start new, Environments)
-    and the control footnote. The sessions list and the creation wizard open
-    as Wash modals. -#}
+{#- Welcome / launcher (Mu §4.6, §9.1): the empty state when no session is
+    open — a spot wash, one sentence, then the places to go as rows (continue
+    the latest session, start new, environments); each choice is said once. The
+    sessions list and the creation wizard open as Wash modals. -#}
 <div class="welcome welcome-launcher w-welcome" x-data="welcomeView()" x-init="load()">
-    <header class="welcome-hero w-hero" data-art="hero" data-size="lg">
-        <span class="w-eyebrow welcome-kicker"><i class="w-eyebrow__swatch"></i>Your AI workspace</span>
-        <h1 class="w-hero__title">What are we building today?</h1>
-        <p class="w-hero__lede lede">Pick up a session, start something new, or spin up an isolated environment. Your models and code stay under your control.</p>
-        <div class="w-btn-row w-welcome__actions">
-            <button type="button" class="w-btn" data-variant="primary" data-size="lg" @click="openCreate()">Start something new</button>
-            <button type="button" class="w-btn" data-variant="secondary" data-size="lg" @click="openSessions()">Continue a session <span class="w-btn__chevron" aria-hidden="true">›</span></button>
-        </div>
+    <header class="welcome-hero w-welcome__head">
+        <span class="w-welcome__spot" aria-hidden="true"></span>
+        <h1 class="w-hero__title w-welcome__headline">Start a session</h1>
+        <p class="w-hero__lede lede">Chat, a workspace on a folder, or an isolated container.</p>
     </header>
 
     <div class="welcome-entry-grid w-welcome__choices" role="list" aria-label="Start options">
         <button type="button" class="welcome-entry w-welcome__choice" role="listitem" @click="openSessions()">
-            <span class="welcome-entry-icon w-welcome__icon" data-tone="accent" aria-hidden="true">{{ w.icon("arrow-up-right") }}</span>
+            <span class="welcome-entry-icon w-welcome__icon" data-tone="accent" aria-hidden="true">{{ w.icon("arrow-up-right", size="sm") }}</span>
             <span class="welcome-entry-copy w-choice__copy">
                 <strong class="w-welcome__title">Continue</strong>
                 <small class="w-welcome__meta" x-text="sessions.length
@@ -26,7 +22,7 @@
             <span class="welcome-entry-arrow w-welcome__arrow" aria-hidden="true">›</span>
         </button>
         <button type="button" class="welcome-entry w-welcome__choice" role="listitem" @click="openCreate()">
-            <span class="welcome-entry-icon w-welcome__icon" data-tone="attention" aria-hidden="true">{{ w.icon("plus") }}</span>
+            <span class="welcome-entry-icon w-welcome__icon" data-tone="attention" aria-hidden="true">{{ w.icon("plus", size="sm") }}</span>
             <span class="welcome-entry-copy w-choice__copy">
                 <strong class="w-welcome__title">Start new</strong>
                 <small class="w-welcome__meta">Chat, workspace or isolated container</small>
@@ -37,15 +33,11 @@
             <span class="welcome-entry-icon w-welcome__icon session-type-icon" data-tone="ok" x-html="sessionIcon('container')" aria-hidden="true"></span>
             <span class="welcome-entry-copy w-choice__copy">
                 <strong class="w-welcome__title">Environments</strong>
-                <small class="w-welcome__meta" x-text="`${containers.length} environment${containers.length === 1 ? '' : 's'} · ${templates.length} template${templates.length === 1 ? '' : 's'}`">Isolated Docker workspaces</small>
+                <small class="w-welcome__meta" x-text="[containers.length ? `${containers.length} environment${containers.length === 1 ? '' : 's'}` : '', templates.length ? `${templates.length} template${templates.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') || 'Isolated Docker workspaces'">Isolated Docker workspaces</small>
             </span>
             <span class="welcome-entry-arrow w-welcome__arrow" aria-hidden="true">›</span>
         </a>
     </div>
-
-    <footer class="welcome-footnote w-welcome__foot">
-        <span>Your models, workspace and environments stay under your control. Providers use credentials configured on the μcli host.</span>
-    </footer>
 
     <!-- Sessions -->
     <div class="welcome-modal-backdrop w-modal" x-dialog="modal === 'sessions'"
@@ -57,7 +49,7 @@
                  role="dialog" aria-modal="true" aria-labelledby="welcome-sessions-title"
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head w-modal__head">
-                <div><span class="welcome-modal-eyebrow w-eyebrow">Saved work</span><h2 class="w-modal__title" id="welcome-sessions-title">Sessions</h2></div>
+                <div><h2 class="w-modal__title" id="welcome-sessions-title">Sessions</h2></div>
                 <button type="button" class="w-btn" data-variant="icon" @click="closeModal()" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </header>
             <div class="welcome-modal-body session-modal-body w-modal__body">
@@ -109,7 +101,7 @@
                  role="dialog" aria-modal="true" aria-labelledby="welcome-create-title"
                  x-transition:enter="welcome-rise-enter" x-transition:enter-start="welcome-rise-start">
             <header class="welcome-modal-head wizard-head w-modal__head">
-                <div><span class="welcome-modal-eyebrow w-eyebrow">New session</span><h2 class="w-modal__title" id="welcome-create-title" x-text="stepTitle"></h2></div>
+                <div><h2 class="w-modal__title" id="welcome-create-title" x-text="stepTitle"></h2></div>
                 <button type="button" class="w-btn" data-variant="icon" @click="closeModal()" :disabled="creating" aria-label="Close" title="Close"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button>
             </header>
 
@@ -165,7 +157,7 @@
                     <label class="wizard-field w-field"><span>Model</span>
                         <select x-model="form.model" x-show="models.length">
                             <option value="">Select a model</option>
-                            <template x-for="m in models" :key="m"><option :value="m" x-text="m"></option></template>
+                            <template x-for="(m, mi) in models" :key="mi"><option :value="m" x-text="m"></option></template>
                         </select>
                         <input x-model.trim="form.model" x-show="!models.length" placeholder="Enter model name">
                         <small x-show="loadingModels">Loading models…</small>
@@ -347,7 +339,7 @@ function welcomeView() {
         openCreate(){ this.resetForm(); const ollama=this.providers.find(x=>x.name==='ollama'); this.form.ollamaKeySet=!!(ollama&&ollama.cloud_key_set); this.modal='create'; },
         closeModal(){ if(this.creating)return; this.modal=null; },
         nextStep(){ this.error=null; if(!this.canContinue){this.error='Complete the required fields before continuing.';return;} this.step=Math.min(4,this.step+1); },
-        sessionIcon(type){ return sessionTypeIconMarkup(type, 'session-type-svg'); },
+        sessionIcon(type){ return sessionTypeIconMarkup(type, 'w-icon session-type-svg'); },
         sessionState(s){ if(!s) return ''; if(s.is_current) return 'Active'; if(s.is_busy) return 'Working'; if(s.is_loaded) return 'Loaded'; return ''; },
         sessionStateHint(s){ const st=this.sessionState(s); return st==='Active' ? 'Currently focused in this window' : st==='Working' ? 'Loaded and mid-turn' : st==='Loaded' ? 'Loaded in memory' : ''; },
         sessionRank(s){ return s.is_current ? 0 : s.is_busy ? 1 : s.is_loaded ? 2 : 3; },

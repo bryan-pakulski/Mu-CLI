@@ -69,7 +69,10 @@ def test_standalone_pages_render_on_the_shared_layout(client, path, marker):
     html = response.text
     assert marker in html
     assert '<link rel="stylesheet" href="/static/css/wash/wash.css">' in html
-    assert 'class="w-topbar"' in html and 'id="w-sidebar"' in html
-    assert 'data-route-theme' in html
+    # Mu §3.1: the frame is the rail plus the leaf; there is no top bar. The
+    # theme controller loads on every page (the toggle lives in Settings).
+    assert 'class="w-topbar"' not in html
+    assert 'id="w-sidebar"' in html and 'class="w-stage" id="w-main"' in html
+    assert '/static/js/route_theme.js' in html
     assert 'aria-current="page"' in html
     assert "/static/vendor/htmx.min.js" not in html

@@ -28,7 +28,11 @@ def test_composer_has_an_effort_picker_next_to_the_mode_chip():
 
 
 def test_settings_render_options_as_selects_with_group_labels_and_notes():
-    assert "v.options && v.options.length" in CHAT and "settings-var-options" in CHAT
-    assert "$store.inspector.groupLabel(g.name)" in CHAT and "$store.inspector.groupNote(g.name)" in CHAT
+    # Mu §6.1: session variables have one home, the settings drawer; the composer's
+    # model popover keeps provider and model and links there.
+    inspector = (ROOT / "mu/gui/templates/fragments/inspector.html").read_text()
+    assert "v.options && v.options.length" in inspector and "var-options" in inspector
+    assert "$store.inspector.groupLabel(group.name)" in inspector and "$store.inspector.groupNote(group.name)" in inspector
+    assert "All session settings" in CHAT and "$store.inspector.openDrawer()" in CHAT
     assert '"speed & effort": "Speed & effort"' in APP and '"openai": "OpenAI"' in APP
     assert "never use num_ctx or keep_alive" in APP and "at least 64k" in APP

@@ -1,11 +1,15 @@
-{#- Orchestration (/orchestration) on the shared Wash shell (G§8.2;
-    documentation/plans/orchestration.md §8). The page is one routed view
-    (#orch-view) filled by static/js/orchestration/*.js. Hash routes: #/
-    overview, #/nodes, #/node/<id>, #/setup[/<token id>], #/catalog,
-    #/tool/<id>/<v>, #/runbook/<id>/<v>, #/studio[/<id>/<v>],
-    #/studio/runbook/<id>/<v> (or /new), #/runs, #/run/<id>, #/new-run,
-    #/approvals, #/audit and #/settings. Every mutation posts to
-    /api/orchestration/cmd with the CSRF token carried on #orch-app. -#}
+{#- Orchestration (/orchestration) as an application workspace (mu_style_guide.md
+    §11b; documentation/plans/orchestration.md §8). #orch-app is the page's
+    .w-panes, a direct child of the leaf: list | main | aside, each scrolling on
+    its own, filled by static/js/orchestration/*.js (view.js lays them out per
+    route). Hash routes: #/ Now (a board; #/approvals is the same screen),
+    #/runs, #/run/<id>, #/nodes, #/node/<id>, #/catalog, #/tool/<id>/<v>,
+    #/runbook/<id>/<v>, #/studio[/<id>/<v>], #/studio/runbook/<id>/<v> (or /new),
+    #/setup[/<token id>], #/new-run, #/audit and #/settings. On Runs, Nodes and
+    Catalog the list stays while a row's hash route fills main (the item itself)
+    and aside (its context: a run's execution log, a node's executions, a tool's
+    actions and runs). Every mutation posts to /api/orchestration/cmd with the
+    CSRF token carried on #orch-app. -#}
 {% extends "_layout.html" %}
 {% import "macros/wash.html" as w %}
 {% block title %}Orchestration · μcli{% endblock %}
@@ -18,37 +22,28 @@
 {% block ambient %}lagoon{% endblock %}
 {% block body_class %}orch-body{% endblock %}
 
-{% block crumbs_attrs %} id="orch-crumbs"{% endblock %}
-{% block crumbs %}<li class="w-breadcrumb__item"><a href="#/">Orchestration</a></li><li class="w-breadcrumb__item"><span aria-current="page">Overview</span></li>{% endblock %}
-
-{% block topbar_chips_attrs %} id="orch-chips"{% endblock %}
-{% block topbar_chips %}
-<li data-orch-chip-slot="paused" hidden><a href="#/" class="w-chip" data-tone="danger" title="All dispatch is paused"><span class="w-chip__glyph" aria-hidden="true">✗</span><span>Dispatch paused</span></a></li>
-<li><a href="#/approvals" class="w-chip" data-tone="neutral" data-orch-chip="needs" title="Nothing needs you"><span class="w-chip__glyph" aria-hidden="true">◆</span><span data-chip-text>0 need you</span></a></li>
-<li class="w-optional"><span class="w-chip" data-tone="caution" data-orch-chip="live" title="Live updates reconnecting"><span class="w-chip__glyph" aria-hidden="true" data-chip-glyph>○</span><span data-chip-text>Connecting…</span></span></li>
-{% endblock %}
-
-{% block sidebar_extra %}
-<p class="w-sidebar__heading" id="w-sidebar-orch">Orchestration</p>
-<ul class="w-sidebar__section orch-side" aria-labelledby="w-sidebar-orch">
-    <li><a href="#/" class="w-nav__item" data-orch-nav="overview" title="Overview">{{ w.icon("layout-dashboard") }}<span class="w-nav__label">Overview</span></a></li>
-    <li><a href="#/approvals" class="w-nav__item" data-orch-nav="approvals" title="Approvals">{{ w.icon("shield-check") }}<span class="w-nav__label">Approvals</span><span class="w-count" data-tone="attention" id="orch-approvals-badge" hidden>0</span></a></li>
-    <li><a href="#/nodes" class="w-nav__item" data-orch-nav="nodes" title="Nodes">{{ w.icon("server") }}<span class="w-nav__label">Nodes</span></a></li>
-    <li><a href="#/catalog" class="w-nav__item" data-orch-nav="catalog" title="Catalog">{{ w.icon("book-open") }}<span class="w-nav__label">Catalog</span></a></li>
-    <li><a href="#/studio" class="w-nav__item" data-orch-nav="studio" title="Tool studio">{{ w.icon("sparkles") }}<span class="w-nav__label">Studio</span></a></li>
-    <li><a href="#/runs" class="w-nav__item" data-orch-nav="runs" title="Runs">{{ w.icon("play") }}<span class="w-nav__label">Runs</span></a></li>
-    <li><a href="#/audit" class="w-nav__item" data-orch-nav="audit" title="Audit log">{{ w.icon("history") }}<span class="w-nav__label">Audit</span></a></li>
-    <li><a href="#/settings" class="w-nav__item" data-orch-nav="settings" title="Settings">{{ w.icon("settings") }}<span class="w-nav__label">Settings</span></a></li>
-</ul>
-{% endblock %}
+{#- The page header (Mu §4): view.js rewrites it per route through
+    window.WashHead — Orchestration with the state sentence and tabs on the top
+    routes, the item's own name and a back link on detail routes. -#}
+{% block page_title %}Orchestration{% endblock %}
+{% block page_tabs %}<a class="w-pagetabs__tab" href="#/" aria-current="page">Now</a><a class="w-pagetabs__tab" href="#/runs">Runs</a><a class="w-pagetabs__tab" href="#/nodes">Nodes</a><a class="w-pagetabs__tab" href="#/catalog">Catalog</a>{% endblock %}
 
 {% block content %}
-<div class="orch-app" id="orch-app" data-csrf="{{ csrf_token }}">
-    <div class="w-page orch-page" id="orch-view">
-        <div class="orch-loading" role="status"><span class="w-inkdrop" data-tone="running" aria-hidden="true"></span>Loading…</div>
-    </div>
-    <noscript><div class="w-page"><p>Orchestration needs JavaScript.</p></div></noscript>
+<div class="w-panes orch-app orch-panes" id="orch-app" data-csrf="{{ csrf_token }}" data-layout="main">
+    <section class="w-pane orch-list" data-pane="list" id="orch-list" aria-labelledby="orch-list-title">
+        <div class="w-pane-resize" data-pane-resize aria-hidden="true"></div>
+        <header class="w-pane__head"><h2 class="w-pane__title" id="orch-list-title" data-list-title>List</h2><span class="orch-list__tools" data-list-tools></span></header>
+        <div id="orch-list-body"></div>
+    </section>
+    <section class="w-pane orch-main" data-pane="main" id="orch-main" aria-label="Orchestration">
+        <div class="orch-backbar" data-backbar hidden><button type="button" class="w-textbtn" data-tone="quiet" data-show-list>← <span data-backbar-label>Back</span></button></div>
+        <div class="w-page orch-page" id="orch-view">
+            <div class="orch-loading" role="status"><span class="w-inkdrop" data-tone="running" aria-hidden="true"></span>Loading…</div>
+        </div>
+    </section>
+    <aside class="w-pane orch-aside" data-pane="aside" id="orch-aside" aria-label="Context"></aside>
 </div>
+<noscript><div class="w-page"><p>Orchestration needs JavaScript.</p></div></noscript>
 {% endblock %}
 
 {% block body_end %}

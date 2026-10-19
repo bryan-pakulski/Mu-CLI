@@ -1,0 +1,117 @@
+{#- Settings (Mu §10.6, §11b): panes — the sections on the left, their fields
+    in the main pane (form sections: what a section is, then its controls),
+    separated by hairlines, never cards. A setting is a row: label and help on the left, the
+    control on the right. Global preferences live here (theme, decoration);
+    each area's own settings stay with the area and are linked. -#}
+{% extends "_layout.html" %}
+{% import "macros/wash.html" as w %}
+{% set nav_active = "settings" %}
+{% block title %}Settings · μcli{% endblock %}
+{% block ambient %}dawn{% endblock %}
+{% block body_class %}settings-page-body{% endblock %}
+{% block page_title %}Settings{% endblock %}
+{% block content %}
+<div class="w-panes" data-layout="list-main" data-show="main">
+    <nav class="w-pane" data-pane="list" aria-label="Settings sections">
+        <ul class="w-rows mu-settings-index">
+            <li class="w-row"><a class="w-row__main" href="#set-appearance"><span class="w-row__title">Appearance</span><span class="w-row__sub">Theme, light or dark, decoration</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="#set-areas"><span class="w-row__title">Areas</span><span class="w-row__sub">Chat, Work, Orchestration, pricing</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="#set-keys"><span class="w-row__title">Keyboard</span><span class="w-row__sub">Shortcuts and the palette</span></a></li>
+        </ul>
+    </nav>
+    <div class="w-pane" data-pane="main">
+
+    <section class="w-formsection" aria-labelledby="set-appearance">
+        <header class="w-formsection__head"><h2 class="w-formsection__title" id="set-appearance">Appearance</h2><p class="w-formsection__lede">How μcli looks on this device.</p></header>
+        <div class="w-formsection__body">
+        {#- Themes (Mu revision 2): every theme has a light and a dark side; the cards show
+            both (canvas, surface, ink and the accent / ok / attention / danger / plan
+            pigments), straight from tokens.json via mu.design.palette_choices(). -#}
+        <div class="w-themes" role="group" aria-label="Theme">
+            {%- for p in wash_palette_choices() %}
+            <button type="button" class="w-themecard" data-palette-choice="{{ p.name }}" aria-pressed="false" title="{{ p.note }}">
+                <span class="w-themecard__sides" aria-hidden="true">
+                    {%- for side in (p.light, p.dark) %}
+                    <span class="w-themecard__side" style="--sw-canvas: {{ side.canvas }}; --sw-surface: {{ side.surface }}; --sw-ink: {{ side.ink }}; --sw-ink3: {{ side.ink3 }}; --sw-line: {{ side.hairline }};">
+                        <span class="w-themecard__bar"></span><span class="w-themecard__line" data-w="long"></span><span class="w-themecard__line" data-w="short"></span>
+                        <span class="w-themecard__dots">{% for dot in side.dots %}<i style="--sw-dot: {{ dot }}"></i>{% endfor %}</span>
+                    </span>
+                    {%- endfor %}
+                </span>
+                <span class="w-themecard__label">{{ p.label }}</span>
+                <span class="w-themecard__note">{{ p.note }}</span>
+            </button>
+            {%- endfor %}
+        </div>
+        <div class="w-setting">
+            <label class="w-setting__label" for="set-theme">Light or dark<span class="w-setting__help">System follows your operating system. Every theme has both.</span></label>
+            <span class="w-select"><select id="set-theme" class="w-select__control" data-theme-select>
+                <option value="system">System</option>
+                <option value="paper">Light</option>
+                <option value="dusk">Dark</option>
+            </select></span>
+        </div>
+        <div class="w-setting">
+            <label class="w-setting__label" for="set-decoration">Reduce decoration<span class="w-setting__help">A flat colour instead of the watercolour around the page.</span></label>
+            <span class="w-switch"><input id="set-decoration" type="checkbox" class="w-switch__input" role="switch" data-decoration-toggle></span>
+        </div>
+        </div>
+    </section>
+
+    <section class="w-formsection" aria-labelledby="set-areas">
+        <header class="w-formsection__head"><h2 class="w-formsection__title" id="set-areas">Areas</h2><p class="w-formsection__lede">Each area keeps its own settings beside its work.</p></header>
+        <div class="w-formsection__body">
+        <ul class="w-rows">
+            <li class="w-row"><a class="w-row__main" href="/?settings=open"><span class="w-row__title">Chat and workspace</span><span class="w-row__sub">Provider, model, tools and the workspace for the open session</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="/work#/settings"><span class="w-row__title">Work</span><span class="w-row__sub">Job rules, agents, checks and environments</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="/orchestration#/settings"><span class="w-row__title">Orchestration</span><span class="w-row__sub">Access policy, schedules, secrets and the network</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="/models/costs"><span class="w-row__title">Model pricing</span><span class="w-row__sub">Prices used for cost estimates</span></a></li>
+        </ul>
+        </div>
+    </section>
+
+    <section class="w-formsection" aria-labelledby="set-keys">
+        <header class="w-formsection__head"><h2 class="w-formsection__title" id="set-keys">Keyboard</h2><p class="w-formsection__lede">Everything is a key away; the palette finds the rest.</p></header>
+        <div class="w-formsection__body">
+        <dl class="w-facts w-keys">
+            <dt><kbd>⌘K</kbd> / <kbd>Ctrl K</kbd></dt><dd>Command palette: every page, action, session, job, run and node</dd>
+            <dt><kbd>g</kbd> then <kbd>c</kbd> <kbd>w</kbd> <kbd>o</kbd> <kbd>e</kbd> <kbd>i</kbd> <kbd>s</kbd></dt><dd>Go to Chat, Work, Orchestration, Environments, Insights, Settings</dd>
+            <dt><kbd>n</kbd></dt><dd>The page's primary action</dd>
+            <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Move between rows</dd>
+            <dt><kbd>Enter</kbd></dt><dd>Open the row</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Close the sheet, menu or dialog</dd>
+            <dt><kbd>/</kbd></dt><dd>Focus the composer</dd>
+        </dl>
+        </div>
+    </section>
+    </div>
+</div>
+<script>
+/* The index follows the section in view; links scroll inside the main pane. */
+(function () {
+    var main = document.querySelector('.w-pane[data-pane="main"]');
+    var links = Array.prototype.slice.call(document.querySelectorAll('.mu-settings-index a'));
+    links.forEach(function (link) {
+        link.addEventListener('click', function (event) {
+            var target = document.querySelector(link.getAttribute('href'));
+            if (!target) return;
+            event.preventDefault();
+            target.closest('.w-formsection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+    function mark() {
+        var current = null;
+        links.forEach(function (link) {
+            var section = document.querySelector(link.getAttribute('href'));
+            if (section && section.getBoundingClientRect().top - main.getBoundingClientRect().top < 120) current = link;
+        });
+        links.forEach(function (link) {
+            var row = link.closest('.w-row');
+            if (link === (current || links[0])) row.setAttribute('data-selected', ''); else row.removeAttribute('data-selected');
+        });
+    }
+    main.addEventListener('scroll', mark, { passive: true });
+    mark();
+})();
+</script>
+{% endblock %}

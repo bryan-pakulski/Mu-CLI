@@ -157,7 +157,7 @@ def test_container_manager_page_has_shell_and_templates():
     root = Path(__file__).resolve().parents[1]
     markup = (root / "mu/gui/templates/containers.html").read_text()
     script = (root / "mu/gui/static/js/containers.js").read_text()
-    assert "Container environments" in markup
+    assert "{% block page_title %}Environments{% endblock %}" in markup
     assert "Templates" in markup
     assert "shell-modal" in markup
     assert "/api/containers/" in script

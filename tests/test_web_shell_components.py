@@ -81,8 +81,10 @@ def test_approval_card_announces_assertively_and_shows_the_queue():
     assert "(index + 1) + ' of ' + $store.prompts.visibleQueue.length" in card
     assert '$store.prompts.step(-1)' in card and '$store.prompts.step(1)' in card
     assert 'x-show="index === $store.prompts.cursorIndex"' in card
-    # Top-bar ◆ N attention chip jumps to the queue.
-    assert '@click="$store.prompts.focusCard()"' in INDEX
+    # Mu §6.1: no top-bar chip; the composer's "waiting for your answer" line
+    # jumps to the queue, and the rail counts the prompts waiting per session.
+    assert '@click="$store.prompts.focusCard()"' in CHAT
+    assert "$store.prompts.queue.filter(p => p.session_name === s.name).length" in INDEX
 
 
 def test_approval_card_is_a_state_card_with_danger_escalation():
@@ -94,8 +96,10 @@ def test_approval_card_is_a_state_card_with_danger_escalation():
     risky = _func(APP_JS, "risky() {")
     assert "this.prompt.risk" in risky and '"always_human"' in risky
     css = (GUI / "static/css/wash/components/approval.css").read_text(encoding="utf-8")
-    # State shows in a tone-wash header strip, not a side stripe (G§3.4, §9.9).
-    assert "background: color-mix(in srgb, var(--w-approval-wash) 72%, var(--w-glass-fill));" in css
+    # Mu §7.6: the decision block — the whole card is the tone wash, no border
+    # and no header strip; never a side stripe (G§3.4, §9.9).
+    block = css.split(".w-approval {", 1)[1].split("}", 1)[0]
+    assert "background: var(--w-approval-wash);" in block and "border: 0;" in block
     assert "inset 4px 0" not in css and "--w-approval-pigment" not in css
 
 

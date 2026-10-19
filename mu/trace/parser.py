@@ -279,6 +279,7 @@ def list_trace_runs() -> List[Dict[str, Any]]:
                 "mode": header.get("mode", ""),
                 "context_limit": header.get("context_limit", 0),
                 "max_iterations": header.get("max_iterations", 0),
+                "ts": header.get("ts"),
                 "iters": _iter_count_fast(path),
                 "bytes": os.path.getsize(path) if os.path.exists(path) else 0,
                 "file": os.path.basename(path),

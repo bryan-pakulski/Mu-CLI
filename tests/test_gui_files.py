@@ -457,7 +457,10 @@ def test_shell_animates_side_panels_and_centers_settings_modal():
     assert "place-items: center" in css
     assert 'role="dialog"' in inspector
     assert 'aria-modal="true"' in inspector
-    assert "$store.inspector.openDrawer()" in index
+    # Mu §10.1: the settings entry is in the session header's ⋯ menu.
+    header = open(os.path.join(REPO, "mu", "gui", "templates", "fragments", "session_header.html"), encoding="utf-8").read()
+    assert "fragments/session_header.html" in index
+    assert "$store.inspector.openDrawer()" in header
 
 
 def test_prompt_picker_preserves_all_multi_select_values_and_recovery_choice():

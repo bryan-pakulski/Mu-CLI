@@ -1,6 +1,7 @@
+{% import "macros/wash.html" as w %}
 {#- The chat column (G§8.1, §9.6–§9.10): transcript, approval card queue,
     stage rail and composer. Components:
-      .w-msg (components/message.css)       user bubble / assistant prose
+      .w-msg (components/message.css)       "You" prose / assistant prose (Mu, no bubbles)
       renderToolCards / renderToolCard     static/js/wash/toolcard.js — one
                                             renderer for live traces, history
                                             hydration and sub-agent actions
@@ -80,7 +81,7 @@
                 <section class="msg visualization w-msg" data-role="visualization">
                     <div class="visualization-head">
                         <div>
-                            <div class="role w-eyebrow"><i class="w-eyebrow__swatch"></i>Visualization</div>
+                            <div class="role visualization-kind">Visualization</div>
                             <strong x-text="t.artifact.title || t.artifact.name"></strong>
                         </div>
                         <div class="visualization-actions">
@@ -652,7 +653,7 @@
                 })()"
             ></textarea>
         </div>
-        <!-- Composer bar: attach, mode, effort, plan, settings · mic, Send/Stop -->
+        <!-- Composer foot (Mu §7.5): + attach · mode · provider·model · effort · plan · auto-approve, then the context ring, mic and Send/Stop -->
         <div class="composer-toolbar w-composer__bar">
             <button type="button" class="attach-btn w-btn" data-variant="icon"
                     aria-label="Attach a file"
@@ -692,40 +693,27 @@
                     </template>
                 </div>
             </div>
-            <label class="w-chip w-composer__effort" data-variant="meta"
-                   title="Model effort for agent turns. Lower = faster, less thinking. Each provider maps it: Anthropic effort, OpenAI reasoning_effort, Ollama think.">
-                <span class="w-sr-only">Effort</span>
-                <span class="w-composer__effort-label" aria-hidden="true">Effort</span>
-                <select class="effort-select w-composer__effort-select" aria-label="Model effort"
-                        :value="$store.effort.value"
-                        @change="$store.effort.set($event.target.value)">
-                    <option value="" :selected="!$store.effort.value">Default</option>
-                    <template x-for="level in $store.effort.levels" :key="level">
-                        <option :value="level" :selected="$store.effort.value === level" x-text="$store.effort.label(level)"></option>
-                    </template>
-                </select>
-                <span class="w-chip__caret" aria-hidden="true">▾</span>
-            </label>
-            <span class="w-chip" data-tone="plan" x-show="$store.planMode.active" x-cloak>Plan</span>
-
-            <span class="w-composer__spacer"></span>
-
-            <!-- Settings: quick access to session variables -->
+            <!-- Provider · model (Mu §7.5): text with a caret; opens the session
+                 settings popover, which holds the provider and model pickers. -->
             <div class="composer-settings">
-                <button type="button" class="composer-settings-btn w-btn" data-variant="icon"
+                <button type="button" class="composer-settings-btn provider-model w-composer__item"
+                        x-data="{
+                            get _provider() { return $store.inspector.currentProvider || '{{ provider }}'; },
+                            get _model() { return $store.inspector.currentModel || '{{ model }}'; }
+                        }"
                         @click="settingsOpen = !settingsOpen; modeOpen = false; if (settingsOpen) { $store.inspector.loadVariables(); $store.inspector.loadCurrentProvider(); }"
                         :class="{ open: settingsOpen }"
-                        aria-label="Session settings"
-                        title="Session settings"
+                        aria-label="Session settings: provider and model"
+                        :title="_provider + ' · ' + _model + ' — session settings'"
                         aria-haspopup="true" :aria-expanded="settingsOpen">
-                    <svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-sliders-horizontal"></use></svg>
+                    <span class="w-composer__model" x-text="_model || _provider || 'Model'">{{ model or provider or 'Model' }}</span><span class="w-composer__caret" aria-hidden="true">▾</span>
                 </button>
                 <div class="composer-settings-popout settings-side-modal w-popover" x-show="settingsOpen" x-cloak
                      x-transition.opacity.duration.120ms
                      role="dialog" aria-labelledby="w-session-settings-title"
                      x-init="$store.inspector.loadVariables()">
                     <div class="settings-header">
-                        <span id="w-session-settings-title">Session settings</span>
+                        <span id="w-session-settings-title">Model</span>
                         <button type="button" class="settings-close-btn w-btn" data-variant="icon" data-size="sm"
                                 @click="settingsOpen = false"
                                 aria-label="Close settings"
@@ -733,9 +721,8 @@
                     </div>
                     <!-- provider / model switching -->
                     <div class="settings-group provider-model-section">
-                        <div class="settings-group-label">Provider &amp; model</div>
                         <label class="settings-var">
-                            <span class="settings-var-key mono">provider</span>
+                            <span class="settings-var-key">Provider</span>
                             <select class="settings-var-select w-select__control"
                                     x-model="$store.inspector.currentProvider"
                                     @change="$store.inspector.onProviderChange()">
@@ -749,7 +736,7 @@
                         <div class="ollama-mode-row"
                              x-show="$store.inspector.currentProvider === 'ollama'"
                              x-cloak>
-                            <span class="settings-var-key mono">endpoint</span>
+                            <span class="settings-var-key">Endpoint</span>
                             <div class="ollama-mode-toggle w-segmented" data-size="sm" role="group" aria-label="Ollama endpoint">
                                 <button type="button"
                                         class="ollama-mode-btn w-segmented__option"
@@ -768,7 +755,7 @@
                         <label class="ollama-key-row"
                                x-show="$store.inspector.currentProvider === 'ollama' && $store.inspector.ollamaMode === 'cloud'"
                                x-cloak>
-                            <span class="settings-var-key mono">api key</span>
+                            <span class="settings-var-key">API key</span>
                             <input class="ollama-key-input w-input"
                                    type="password"
                                    :placeholder="$store.inspector.ollamaKeySet ? 'key set — type to replace' : 'ollama.com API key'"
@@ -777,70 +764,78 @@
                                    autocomplete="off" />
                         </label>
                         <label class="settings-var">
-                            <span class="settings-var-key mono">model</span>
+                            <span class="settings-var-key">Model</span>
                             <select class="settings-var-select w-select__control"
                                     x-model="$store.inspector.currentModel"
                                     @change="$store.inspector.onModelChange()">
                                 <option value="" :hidden="$store.inspector.currentModel ? true : null">—</option>
-                                <template x-for="m in $store.inspector.modelOptions($store.inspector.currentModel)" :key="m">
+                                <template x-for="(m, mi) in $store.inspector.modelOptions($store.inspector.currentModel)" :key="mi">
                                     <option :value="m" x-text="m"></option>
                                 </template>
                             </select>
                         </label>
                         <label class="settings-var"
                                title="Model used by spawned sub-agents. Empty = inherit the parent (session) model. Uninstalled values fall back to the parent model. Set via /set subagent_model too.">
-                            <span class="settings-var-key mono">subagent model</span>
+                            <span class="settings-var-key">Subagent model</span>
                             <select class="settings-var-select w-select__control"
                                     x-model="$store.inspector.subagentModel"
                                     @change="$store.inspector.onSubagentModelChange()">
                                 <option value="" :hidden="$store.inspector.subagentModel ? true : null">inherit parent</option>
-                                <template x-for="m in $store.inspector.modelOptions($store.inspector.subagentModel)" :key="m">
+                                <template x-for="(m, mi) in $store.inspector.modelOptions($store.inspector.subagentModel)" :key="mi">
                                     <option :value="m" x-text="m"></option>
                                 </template>
                             </select>
                         </label>
                     </div>
-                    <template x-for="g in $store.inspector.variables.groups" :key="g.name">
-                        <div class="settings-group">
-                            <button type="button" class="settings-group-toggle"
-                                    @click="$store.inspector.toggleGroup(g.name)"
-                                    :aria-expanded="$store.inspector.isGroupOpen(g.name)">
-                                <span class="caret" aria-hidden="true">›</span>
-                                <span x-text="$store.inspector.groupLabel(g.name)"></span>
-                            </button>
-                            <div class="settings-vars" x-show="$store.inspector.isGroupOpen(g.name)">
-                                <p class="settings-group-note" x-show="$store.inspector.groupNote(g.name)"
-                                   x-text="$store.inspector.groupNote(g.name)"></p>
-                                <template x-for="v in g.variables" :key="v.key">
-                                    <label class="settings-var" :title="v.help || v.description || v.key">
-                                        <span class="settings-var-key mono" x-text="v.key"></span>
-                                        <template x-if="v.options && v.options.length">
-                                            <select class="settings-var-select settings-var-options w-select__control"
-                                                    :value="v.value ?? ''"
-                                                    @change="$event.target.value === ''
-                                                        ? $store.inspector.resetVariable(v.key)
-                                                        : $store.inspector.setVariable(v.key, $event.target.value)">
-                                                <template x-for="opt in v.options" :key="opt">
-                                                    <option :value="opt" :selected="(v.value ?? '') === opt"
-                                                            x-text="opt === '' ? 'default' : opt"></option>
-                                                </template>
-                                            </select>
-                                        </template>
-                                        <input x-show="!(v.options && v.options.length)" class="settings-var-input"
-                                               :class="v.type === 'bool' ? 'w-check__input' : 'w-input'"
-                                               :type="v.type === 'bool' ? 'checkbox' : 'text'"
-                                               :checked="v.type === 'bool' ? v.value === true || v.value === 'true' : false"
-                                               :value="v.type === 'bool' ? '' : (v.value ?? '')"
-                                               @change="v.type === 'bool'
-                                                   ? $store.inspector.setVariable(v.key, $event.target.checked)
-                                                   : $store.inspector.setVariable(v.key, $event.target.value)">
-                                    </label>
-                                </template>
-                            </div>
-                        </div>
-                    </template>
+                    <!-- Every other session variable has one home: the settings drawer (Mu §6.1). -->
+                    <button type="button" class="settings-all-link w-textbtn" data-tone="quiet"
+                            @click="$store.inspector.tab = 'settings'; $store.inspector.openDrawer()">All session settings ›</button>
                 </div>
             </div>
+            <label class="w-chip w-composer__effort" data-variant="meta"
+                   title="Model effort for agent turns. Lower = faster, less thinking. Each provider maps it: Anthropic effort, OpenAI reasoning_effort, Ollama think.">
+                <span class="w-sr-only">Effort</span>
+                <span class="w-composer__effort-label" aria-hidden="true">Effort</span>
+                <select class="effort-select w-composer__effort-select" aria-label="Model effort"
+                        :value="$store.effort.value"
+                        @change="$store.effort.set($event.target.value)">
+                    <option value="" :selected="!$store.effort.value">Default</option>
+                    <template x-for="level in $store.effort.levels" :key="level">
+                        <option :value="level" :selected="$store.effort.value === level" x-text="$store.effort.label(level)"></option>
+                    </template>
+                </select>
+                <span class="w-chip__caret" aria-hidden="true">▾</span>
+            </label>
+            <!-- Plan mode: the lilac pill shows only while it is on; clicking turns it off
+                 after a confirmation (the plan strip above the transcript says it too). -->
+            <button type="button" class="w-chip plan-mode-pill" data-tone="plan" data-testid="plan-mode-pill"
+                    x-show="$store.planMode.active" x-cloak
+                    aria-label="Plan mode on: read-only, writing is blocked. Click to turn off."
+                    :disabled="$store.planMode.busy"
+                    @click="$store.planMode.turnOff({ confirmFirst: true })"
+                    :title="$store.planMode.tooltip + ' Click to turn plan mode off.'">
+                <span class="plan-mode-glyph" aria-hidden="true">{{ w.icon("lock", size="sm") }}</span>
+                <span class="plan-mode-label">Plan mode</span>
+            </button>
+            <!-- Auto-approve (YOLO): a word in caution ink while it is on, so it is
+                 never missed; it toggles off here and on from the session menu. -->
+            <button type="button" class="w-composer__yolo" x-show="$store.yolo.active" x-cloak
+                    @click="$store.yolo.toggle()"
+                    aria-label="Auto-approve on. Click to require approvals."
+                    title="Auto-approve is on: tool calls run without asking. Click to require approvals.">
+                <span aria-hidden="true">◆</span> Auto-approve
+            </button>
+
+            <span class="w-composer__spacer"></span>
+
+            <!-- Context ring: how full the context window is; opens the context panel. -->
+            <button type="button" class="header-token-meter w-composer__ring"
+                    :title="$store.context.label + ' · ' + ($store.tokens.total || 0).toLocaleString() + ' tokens this session'"
+                    :aria-label="$store.context.label || 'Context'"
+                    @click="$store.mode.setView('memory'); $store.layout.panelOpen = true; $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
+                <span class="w-ring" data-size="sm" :data-level="$store.context.level || null"
+                      :style="'--w-fill:' + ($store.context.known ? Math.min(100, Math.round($store.context.fillPct)) : 0) + '%'" aria-hidden="true"></span>
+            </button>
             <!-- STT mic button (only when stt_enabled) -->
             <button type="button" class="mic-btn w-btn" data-variant="icon"
                     x-show="$store.stt.enabled"

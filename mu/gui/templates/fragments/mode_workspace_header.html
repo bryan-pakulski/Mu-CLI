@@ -1,36 +1,38 @@
-<!-- Shared Mode OS chrome (Wash). Domain content stays in the surrounding mode
+<!-- Shared Mode OS chrome (Mu). Domain content stays in the surrounding mode
      fragment. Quiet type, space and hairlines — no nested surfaces — so the
-     stage panel remains the single plane: eyebrow + status chip, a title-3
-     heading in plum, an ink-2 objective, a compact stat strip, lenses as
-     tabs and a search field. Mode-OS tones (active/good/warn/risk) map onto
+     stage panel remains the single plane: a title-3 heading with the status
+     as a sign + word (provenance on hover), the objective only while the
+     workspace is empty, the metrics that aren't zero, lenses as tabs (no zero
+     counts) and a search field. Mode-OS tones (active/good/warn/risk) map onto
      Wash semantics (running/ok/caution/danger). -->
 <header class="mode-os" x-show="$store.modeWorkspace.current()"
-        x-data="{ washTone(t) { return ({ active: 'running', good: 'ok', warn: 'caution', risk: 'danger' })[t] || 'neutral'; } }">
-    <div class="mode-os-topline">
-        <span class="mode-os-mark w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Mode</span>
-        <span class="mode-os-status w-chip"
+        x-data="{
+            washTone(t) { return ({ active: 'running', good: 'ok', warn: 'caution', risk: 'danger' })[t] || 'neutral'; },
+            signOf(t) { return ({ active: 'active', risk: 'failed', warn: 'unverified', good: 'done' })[t] || 'pending'; },
+            zero(v) { return /^\s*(0+(\.0+)?%?|0\/0|—|-|)\s*$/.test(String(v == null ? '' : v)); },
+            fresh() { const ws = $store.modeWorkspace.current(); return !ws || (ws.metrics || []).every(m => this.zero(m.value)); }
+        }">
+    <div class="mode-os-heading">
+        <h2 x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().title"></h2>
+        <span class="mode-os-status w-signword"
+              :data-status="signOf(($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral')"
               :data-tone="washTone(($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral')"
-              :data-mode-tone="($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral'">
-            <span class="w-chip__glyph" aria-hidden="true"
+              :data-mode-tone="($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral'"
+              :title="$store.modeWorkspace.current() && $store.modeWorkspace.current().provenance">
+            <span class="w-sign" aria-hidden="true"
+                  :data-status="signOf(($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral')"
                   x-text="(($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) || 'neutral') === 'active' ? '●' : ((($store.modeWorkspace.current() && $store.modeWorkspace.current().status.tone) === 'risk') ? '✗' : '○')"></span>
             <span x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().status.label"></span>
         </span>
-        <span class="mode-os-provenance"
-              :title="$store.modeWorkspace.current() && $store.modeWorkspace.current().provenance"
-              x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().provenance"></span>
     </div>
+    <!-- The objective explains the mode only while it holds nothing yet (Mu §4.6). -->
+    <p class="mode-os-objective" x-show="fresh()" x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().objective"></p>
 
-    <div class="mode-os-heading">
-        <div>
-            <h2 x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().title"></h2>
-            <p x-text="$store.modeWorkspace.current() && $store.modeWorkspace.current().objective"></p>
-        </div>
-    </div>
-
+    <!-- Metrics: only the ones that say something; zeros are left out (Mu §5.5). -->
     <dl class="mode-os-metrics">
         <template x-for="metric in (($store.modeWorkspace.current() && $store.modeWorkspace.current().metrics) || [])"
                   :key="metric.id">
-            <div class="mode-os-metric" :data-tone="metric.tone" :title="metric.detail">
+            <div class="mode-os-metric" :data-tone="metric.tone" :title="metric.detail" x-show="!zero(metric.value)">
                 <dd x-text="metric.value"></dd>
                 <dt x-text="metric.label"></dt>
             </div>
@@ -46,7 +48,7 @@
                         :aria-current="$store.modeWorkspace.selectedView() === view.id ? 'page' : null"
                         @click="$store.modeWorkspace.select(view.id)">
                     <span x-text="view.label"></span>
-                    <span class="count w-count" x-show="view.count !== undefined" x-text="view.count"></span>
+                    <span class="count w-count" x-show="view.count !== undefined && !zero(view.count)" x-text="view.count"></span>
                 </button>
             </template>
         </nav>

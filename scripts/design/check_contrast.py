@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import re  # noqa: E402
 
-from mu.design import THEMES, contrast_ratio, load_tokens  # noqa: E402
+from mu.design import THEMES, contrast_ratio, load_tokens, palettes  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ART = ROOT / "mu/gui/static/wash/art"
@@ -108,14 +108,51 @@ def failures() -> list[tuple[str, str, str, float, float]]:
     return out
 
 
+def _flat_failures(label: str, colors: dict, pigments: dict, accent_name: str) -> list:
+    """The text / wash / control / on-ink / focus floors for one flat colour set."""
+    out = []
+    fgs = {name: colors[name] for name in TEXT_TOKENS}
+    fgs.update({f"{name}.ink": spec["ink"] for name, spec in pigments.items()})
+    for fg_name, fg in fgs.items():
+        for bg_name in SURFACES:
+            ratio = contrast_ratio(fg, colors[bg_name])
+            if ratio < TEXT_FLOOR:
+                out.append((label, fg_name, bg_name, ratio, TEXT_FLOOR))
+    for name, spec in pigments.items():
+        ratio = contrast_ratio(spec["ink"], spec["wash"])
+        if ratio < TEXT_FLOOR:
+            out.append((label, f"{name}.ink", f"{name}.wash", ratio, TEXT_FLOOR))
+    ratio = contrast_ratio(colors["on-ink"], colors["ink"])
+    if ratio < TEXT_FLOOR:
+        out.append((label, "on-ink", "ink", ratio, TEXT_FLOOR))
+    for bg_name in ("surface", "sunken"):
+        ratio = contrast_ratio(colors["control-border"], colors[bg_name])
+        if ratio < UI_FLOOR:
+            out.append((label, "control-border", bg_name, ratio, UI_FLOOR))
+    ratio = contrast_ratio(pigments[accent_name]["ink"], colors["surface"])
+    if ratio < UI_FLOOR:
+        out.append((label, "accent focus ring", "surface", ratio, UI_FLOOR))
+    return out
+
+
+def palette_failures() -> list:
+    """Every alternative palette (flat surfaces: no glass), light and dark."""
+    accent = load_tokens()["semantic"]["accent"]
+    out = []
+    for name, spec in palettes().items():
+        for mode in ("light", "dark"):
+            out += _flat_failures(f"{name}/{mode}", spec[mode]["color"], spec[mode]["pigment"], accent)
+    return out
+
+
 def main() -> int:
-    bad = failures()
+    bad = failures() + palette_failures()
     if not bad:
         print("wash contrast: all pairs pass")
         return 0
     print(f"{'theme':6} {'foreground':22} {'background':16} ratio  floor")
     for theme, fg, bg, ratio, floor in bad:
-        print(f"{theme:6} {fg:22} {bg:16} {ratio:5.2f}  {floor}")
+        print(f"{theme:14} {fg:22} {bg:16} {ratio:5.2f}  {floor}")
     return 1
 
 

@@ -195,7 +195,7 @@
 
     <!-- footnote -->
     <div class="panel-footnote"
-         x-show="$store.research.loaded">
+         x-show="$store.research.loaded && ($store.research.sourceCount || $store.research.findingCount)">
         <span x-text="$store.research.sourceCount + ' sources (in-memory)'"></span>
         <span x-show="$store.research.findingCount"
               x-text="' · ' + $store.research.findingCount + ' findings'"></span>

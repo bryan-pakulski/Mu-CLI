@@ -1,0 +1,44 @@
+{#- The persistent shell (mu/gui/shell.py, Mu §3 revision 2). One document for
+    the whole app: the rail, the mode's watercolour (two layers that cross-fade
+    when the mode changes) and a flat leaf hosting one keep-alive view per
+    destination. static/js/mu_shell.js creates each view on first visit, keeps
+    it alive, switches between them without reloading, and keeps the address
+    bar, back/forward and the document title in step with the active view. -#}
+{%- import "macros/wash.html" as w -%}
+<!DOCTYPE html>
+<html lang="en" data-shell-root data-mode="{{ mode }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="color-scheme" content="light dark">
+    <title>μcli</title>
+    <link rel="icon" href="/static/icons/favicon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    {% include "partials/theme_bootstrap.html" %}
+    <link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/wash/wash.css">
+    <script src="/static/js/wash_tokens.js"></script>
+    <script src="/static/js/wash/palette.js"></script>
+    <script src="/static/js/route_theme.js" defer></script>
+    <script src="/static/js/wash_shell.js" defer></script>
+    <script src="/static/js/mu_shell.js" defer></script>
+    <script>window.MU_DESTINATIONS = {{ destinations | tojson }};</script>
+</head>
+<body class="mu-shell-body" data-ambient="none">
+<div class="mu-ambient" aria-hidden="true">
+    <div class="mu-ambient__layer" data-ambient-layer data-mode="{{ mode }}" data-on></div>
+    <div class="mu-ambient__layer" data-ambient-layer></div>
+</div>
+<div class="w-shell mu-shell" id="w-shell" data-shell>
+    <a class="w-skip-link" href="#w-main">Skip to content</a>
+    <button type="button" class="w-btn w-shell__menu" data-variant="icon" data-shell-menu
+            aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
+        {{ w.icon("menu") }}
+    </button>
+    {% include "partials/sidebar.html" %}
+    <main class="w-stage mu-views" id="w-main" tabindex="-1" data-views></main>
+</div>
+{% include "partials/toast_region.html" %}
+{% include "partials/palette.html" %}
+</body>
+</html>

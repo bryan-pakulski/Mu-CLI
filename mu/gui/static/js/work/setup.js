@@ -66,7 +66,7 @@
         host.innerHTML = `
             <section class="w-card work-setup-steps" aria-label="Setup steps"><ul>${list}</ul>${footer}</section>
             <section class="w-card work-setup-detail" aria-labelledby="work-setup-step-title">
-                <header class="w-card__head"><h2 class="w-card__title" id="work-setup-step-title">${esc(step.title)}</h2>${step.optional ? '<span class="w-count">optional</span>' : ''}</header>
+                <header class="w-card__head"><h2 class="w-card__title" id="work-setup-step-title">${esc(step.title)}</h2>${step.optional ? '<span class="work-meta">optional</span>' : ''}</header>
                 <div class="w-card__body work-stack">
                     <p class="work-muted">${esc(step.why)}</p>
                     <p class="work-setup-state">${glyph(STEP_TONE[step.checking ? '' : step.state], STEP_ICON[step.checking ? '' : step.state] ?? '?', step.checking)} ${esc(step.detail)}</p>
@@ -204,12 +204,19 @@
         if (!doctor) return;
         const checks = doctor.checks || [];
         const ok = checks.filter(c => c.status === 'ok').length;
-        badge.textContent = `${ok}/${checks.length} ok${doctor.failed ? ` · ${doctor.failed} failing` : ''}${doctor.warnings ? ` · ${doctor.warnings} warnings` : ''}`;
-        badge.className = 'w-count';
+        // Mu §4.3: no counts on tabs. The tab carries one attention dot while something fails;
+        // the summary is a sentence on the Doctor panel.
+        badge.textContent = doctor.failed ? `${doctor.failed} failing` : '';
+        badge.className = 'w-count work-tab-dot';
         badge.dataset.tone = doctor.failed ? 'danger' : doctor.warnings ? 'attention' : 'ok';
+        badge.hidden = !(doctor.failed || doctor.warnings);
+        const summary = $('work-doctor-summary');
+        if (summary) summary.innerHTML = [`<span class="w-state__part">${ok} of ${checks.length} pass</span>`,
+            doctor.failed ? `<span class="w-state__part" data-tone="danger">${doctor.failed} failing</span>` : '',
+            doctor.warnings ? `<span class="w-state__part" data-tone="attention">${doctor.warnings} warning${doctor.warnings === 1 ? '' : 's'}</span>` : ''].join('');
         host.innerHTML = `
             ${doctorBusy ? `<p class="work-loading" role="status"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>${esc(doctorBusy)}</p>` : ''}
-            ${doctor.failed ? `<div class="w-banner work-doctor-cta" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${doctor.failed} check${doctor.failed === 1 ? '' : 's'} failing. The Checklist tab has the actions that fix them.</p><a class="w-btn" data-variant="tonal" data-tone="danger" data-size="sm" href="#/setup">Open checklist</a></div>` : ''}
+            ${doctor.failed ? `<div class="w-banner work-doctor-cta" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${doctor.failed} check${doctor.failed === 1 ? '' : 's'} failing. The Checklist tab has the actions that fix them.</p><a class="w-textbtn" data-tone="danger" href="#/setup">Open checklist</a></div>` : ''}
             <div class="w-table-wrap"><table class="w-table work-doctor-table"><thead><tr><th scope="col"><span class="w-sr-only">Status</span></th><th scope="col">Check</th><th scope="col">Detail</th></tr></thead>
             <tbody>${checks.map(c => `<tr class="is-${esc(c.status)}"><td>${glyph(DOC_TONE[c.status], DOC_ICON[c.status] || '?', false, `aria-label="${esc(c.status)}"`)}</td>
                 <td><code>${esc(c.name)}</code></td><td class="${c.status === 'ok' ? 'work-muted' : 'work-tone'}"${c.status === 'ok' ? '' : toneAttr(DOC_TONE[c.status])}>${esc(c.detail)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -245,14 +252,17 @@
         const models = missingModels.length ? missingModels.join(', ') : '';
         const signature = `${vm ? `${vm.completed_at || ''}|${vm.blocking.join(',')}` : ''}|${models}`;
         cta.hidden = !(pending || models) || localStorage.getItem(DISMISS_KEY) === signature;
-        const text = cta.querySelector('[data-cta-text]'), link = cta.querySelector('a');
+        const text = cta.querySelector('[data-cta-text]'), link = cta.querySelector('[data-cta-link]') || cta.querySelector('a');
+        const main = cta.querySelector('.w-row__main');
         if (pending) {
             text.textContent = (vm.blocking.length ? `Jobs setup has steps to do: ${vm.blocking.join(', ')}.` : 'Jobs aren’t fully set up yet: the checklist checks Docker, the runtime image, agents and the sandbox.')
                 + (models ? ` No default model for ${models} (jobs use their session’s model).` : '');
             link.href = '#/setup'; link.textContent = 'Open setup';
+            if (main) main.href = '#/setup';
         } else if (models) {
             text.textContent = `No default model for ${models}: jobs use their session’s model for those stages.`;
             link.href = '#/settings'; link.textContent = 'Choose models';
+            if (main) main.href = '#/settings';
         }
         cta.dataset.signature = signature;
     }

@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from mu.design import (  # noqa: E402
-    SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, load_tokens, load_vocabulary,
+    SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, load_tokens, load_vocabulary, palettes,
 )
 
 CSS_OUT = ROOT / "mu/gui/static/css/wash/tokens.css"
@@ -116,6 +116,39 @@ def _theme_block(theme: str) -> list[str]:
     return lines
 
 
+def _palette_block(name: str, mode: str) -> list[str]:
+    """A palette's colours for light (paper) or dark (dusk). Surfaces are flat, so no glass;
+    the watercolour belongs to Wash, so the art is switched off (the mode tint remains)."""
+    tokens = load_tokens()
+    spec = palettes()[name][mode]
+    lines = [f"  color-scheme: {mode};"]
+    for key, value in spec["color"].items():
+        lines.append(f"  --wash-{key}: {value};")
+    for pig, steps in spec["pigment"].items():
+        for step in STEPS:
+            lines.append(f"  --wash-{pig}-{step}: {steps[step]};")
+    tint = spec["shadow"]["tint"]
+    for level, value in tokens["elevation"].items():
+        lines.append(f"  --wash-elevation-{level}: {value.replace('{tint}', tint)};")
+    for wash in tokens["glass"]["ambient"]:
+        lines.append(f"  --wash-art-ambient-{wash}: none;")
+    for art in ("hero", "work", "env"):
+        lines.append(f"  --wash-art-{art}: none;")
+    return lines
+
+
+def _palette_css() -> str:
+    """Every palette × mode as one block keyed on html[data-palette] + [data-theme]."""
+    out = []
+    for name, spec in palettes().items():
+        for mode in ("light", "dark"):
+            themes = ("paper", "light") if mode == "light" else ("dusk", "dark")
+            selector = ", ".join(f'[data-palette="{name}"][data-theme="{t}"]' for t in themes)
+            out.append(f"\n/* palette: {spec['label']} ({mode}) */\n{selector} {{\n"
+                       + "\n".join(_palette_block(name, mode)) + "\n}\n")
+    return "".join(out)
+
+
 def _static_block() -> list[str]:
     tokens = load_tokens()
     lines = [
@@ -187,6 +220,7 @@ def build_css() -> str:
         + "[data-theme=\"dusk\"],\n[data-theme=\"dark\"] {\n" + dusk + "\n}\n\n"
         + "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme]) {\n"
         + "\n".join("  " + line for line in _theme_block("dusk")) + "\n  }\n}\n"
+        + _palette_css()
         + "}\n"
     )
 
@@ -215,6 +249,21 @@ def build_hljs() -> str:
 
 
 # --- JS / TS -------------------------------------------------------------------
+
+
+def _flat(spec: dict) -> dict:
+    tokens = load_tokens()
+    flat = dict(spec["color"])
+    for name, steps in spec["pigment"].items():
+        for step in STEPS:
+            flat[f"{name}-{step}"] = steps[step]
+    for role in SEMANTICS:
+        for step in STEPS:
+            flat[f"{role}-{step}"] = spec["pigment"][tokens["semantic"][role]][step]
+    flat["neutral-wash"] = spec["color"]["sunken"]
+    flat["neutral-pigment"] = spec["color"]["ink-3"]
+    flat["neutral-ink"] = spec["color"]["ink-3"]
+    return flat
 
 
 def _flat_theme(theme: str) -> dict:
@@ -257,6 +306,9 @@ def _payload(*, web: bool = True) -> dict:
         "glass": {theme: tokens["themes"][theme]["glass"] for theme in THEMES},
         "glassEffect": tokens["glass"],
         "vocabulary": load_vocabulary(),
+        **({"palettes": {name: {"label": spec["label"], "note": spec["note"],
+                                "paper": _flat(spec["light"]), "dusk": _flat(spec["dark"])}
+                         for name, spec in palettes().items()}} if web else {}),
     }
 
 
@@ -284,8 +336,14 @@ def build_js() -> str:
         + "    var t = document.documentElement.getAttribute('data-theme');\n"
         + "    return (t === 'dusk' || t === 'dark') ? 'dusk' : 'paper';\n"
         + "  };\n"
+        + "  WASH.palette = function () {\n"
+        + "    var p = document.documentElement.getAttribute('data-palette');\n"
+        + "    return p && WASH.palettes && WASH.palettes[p] ? p : null;\n"
+        + "  };\n"
         + "  WASH.color = function (name, theme) {\n"
-        + "    return WASH.themes[theme || WASH.theme()][name];\n"
+        + "    var t = theme || WASH.theme();\n"
+        + "    var p = WASH.palette();\n"
+        + "    return (p ? WASH.palettes[p][t][name] : null) || WASH.themes[t][name];\n"
         + "  };\n"
         + "  root.WASH = WASH;\n"
         + "})(typeof window !== 'undefined' ? window : globalThis);\n"

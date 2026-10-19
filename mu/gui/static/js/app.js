@@ -71,31 +71,9 @@ function muLayerColor(id, hue) {
     return `var(${muLayerToken(id, hue)})`;
 }
 
-// MuCLI session type icons — same Ionicons used by the mobile app.
-// Kept as local inline SVG so the web GUI has no CDN or icon-font dependency.
-const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({
-    workspace: "folder-open-outline",
-    container: "cube-outline",
-    chat: "chatbubble-ellipses-outline",
-});
-
-const MUCLI_SESSION_TYPE_ICON_CONTENT = Object.freeze({
-    workspace: [
-        '<path d="M64,192V120a40,40,0,0,1,40-40h75.89a40,40,0,0,1,22.19,6.72l27.84,18.56A40,40,0,0,0,252.11,112H408a40,40,0,0,1,40,40v40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-        '<path d="M479.9,226.55,463.68,392a40,40,0,0,1-39.93,40H88.25a40,40,0,0,1-39.93-40L32.1,226.55A32,32,0,0,1,64,192h384.1A32,32,0,0,1,479.9,226.55Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-    ].join(""),
-    container: [
-        '<path d="M448,341.37V170.61A32,32,0,0,0,432.11,143l-152-88.46a47.94,47.94,0,0,0-48.24,0L79.89,143A32,32,0,0,0,64,170.61V341.37A32,32,0,0,0,79.89,369l152,88.46a48,48,0,0,0,48.24,0l152-88.46A32,32,0,0,0,448,341.37Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-        '<polyline points="69 153.99 256 263.99 443 153.99" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-        '<line x1="256" y1="463.99" x2="256" y2="263.99" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-    ].join(""),
-    chat: [
-        '<path d="M87.48,380c1.2-4.38-1.43-10.47-3.94-14.86A42.63,42.63,0,0,0,81,361.34a199.81,199.81,0,0,1-33-110C47.64,139.09,140.72,48,255.82,48,356.2,48,440,117.54,459.57,209.85A199,199,0,0,1,464,251.49c0,112.41-89.49,204.93-204.59,204.93-18.31,0-43-4.6-56.47-8.37s-26.92-8.77-30.39-10.11a31.14,31.14,0,0,0-11.13-2.07,30.7,30.7,0,0,0-12.08,2.43L81.5,462.78A15.92,15.92,0,0,1,76.84,464a9.61,9.61,0,0,1-9.58-9.74,15.85,15.85,0,0,1,.6-3.29Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="32"/>',
-        '<circle cx="160" cy="256" r="32" fill="currentColor"/>',
-        '<circle cx="256" cy="256" r="32" fill="currentColor"/>',
-        '<circle cx="352" cy="256" r="32" fill="currentColor"/>',
-    ].join(""),
-});
+// Session type icons: the Wash line icons from the shared sprite (the same set as
+// the rail), so a session's type reads in the site's own style everywhere.
+const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({ workspace: "folder", container: "box", chat: "message-circle" });
 
 // The rail represents user prompts (conversation checkpoints), not arbitrary
 // provider/tool messages. Scan bounded raw-turn pages until each explicit
@@ -109,15 +87,15 @@ window.sessionTypeIconName = function sessionTypeIconName(type) {
     return MUCLI_SESSION_TYPE_ICON_NAMES[normalized];
 };
 
-window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = "session-type-svg") {
+window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = "w-icon") {
     const normalized = type === "container" || type === "chat" ? type : "workspace";
-    const safeClass = String(className || "session-type-svg").replace(/[^A-Za-z0-9 _-]/g, "");
-    return `<svg class="${safeClass}" viewBox="0 0 512 512" aria-hidden="true" focusable="false">${MUCLI_SESSION_TYPE_ICON_CONTENT[normalized]}</svg>`;
+    const safeClass = String(className || "w-icon").replace(/[^A-Za-z0-9 _-]/g, "");
+    return `<svg class="${safeClass}" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-${MUCLI_SESSION_TYPE_ICON_NAMES[normalized]}"></use></svg>`;
 };
 
-// Session avatar (components/avatar.css): a pigment tile with the session's monogram and a
-// small session-type badge. The pigment is a stable hash of the name, so a session keeps its
-// colour everywhere (the Android drawer uses the same rule: src/ui/SessionAvatar.tsx).
+// Session avatar (components/avatar.css): a flat tile with the session type's line icon.
+// sessionMonogram / sessionPigment stay for the Android parity table and anything that
+// still wants a stable per-session colour.
 const MUCLI_AVATAR_PIGMENTS = Object.freeze(["lagoon", "meadow", "sun", "apricot", "rose", "lilac", "sky", "plum"]);
 const MUCLI_AVATAR_BADGE = Object.freeze({ workspace: "folder", container: "box", chat: "message-circle" });
 
@@ -141,11 +119,8 @@ window.sessionPigment = function sessionPigment(name) {
 window.sessionAvatarMarkup = function sessionAvatarMarkup(name, type, size = "") {
     const normalized = type === "container" || type === "chat" ? type : "workspace";
     const sizeAttr = size === "sm" || size === "lg" ? ` data-size="${size}"` : "";
-    // The monogram is letters and digits only (sessionMonogram), so it is safe as markup.
-    return `<span class="w-avatar" data-pigment="${sessionPigment(name)}"${sizeAttr} aria-hidden="true">`
-        + `<span class="w-avatar__mono">${sessionMonogram(name)}</span>`
-        + `<span class="w-avatar__badge" data-type="${normalized}"><svg class="w-icon" focusable="false">`
-        + `<use href="/static/icons/wash.svg#i-${MUCLI_AVATAR_BADGE[normalized]}"></use></svg></span></span>`;
+    return `<span class="w-avatar" data-type="${normalized}"${sizeAttr} aria-hidden="true">`
+        + `<svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-${MUCLI_AVATAR_BADGE[normalized]}"></use></svg></span>`;
 };
 
 // MUCLI_CONTAINER_PERSISTENCE_V1 — actionable session-load errors.
@@ -2310,6 +2285,20 @@ ${problem.text}`, "error", 16000);
         },
         async remove(thread) {
             if (!thread || !thread.thread_id) return;
+            const sessions = Alpine.store("sessions");
+            if (thread.session_name && thread.session_name === this.currentName) {
+                Alpine.store("toast").show("Switch to another thread before deleting this one.", "error", 6000);
+                return;
+            }
+            // The server refuses to delete a thread whose session is loaded in memory:
+            // unload it first (an idle, non-current thread loses nothing by unloading).
+            if (thread.session_name && sessions.isLoaded(thread.session_name)) {
+                if (sessions.isBusy(thread.session_name)) {
+                    Alpine.store("toast").show(`Thread '${thread.title || thread.session_name}' is running — wait for its turn to finish.`, "error", 6000);
+                    return;
+                }
+                if (!(await sessions.unload(thread.session_name))) return;
+            }
             try {
                 const params = new URLSearchParams({
                     session_name: this.currentName || "",
@@ -2327,7 +2316,7 @@ ${problem.text}`, "error", 16000);
                 await Alpine.store("sessions").load();
                 await this.load(this.currentName);
             } catch (e) {
-                Alpine.store("toast").show(String(e || "thread delete failed"), "error", 9000);
+                Alpine.store("toast").show((e && e.message) || String(e || "Thread delete failed"), "error", 9000);
             }
         },
     });
@@ -2917,10 +2906,26 @@ ${problem.text}`, "error", 16000);
             this.hasExecutionWorkspace = !!data.has_execution_workspace;
             this.realMode = data.current || "default";
             this.active = this.realMode;
+            // Mu revision 2: the workspace panel is the chat page's aside pane. On a
+            // wide view it shows by default — the last view you chose, else Files
+            // (an attached workspace or a container) or Context — unless you closed it.
+            if (!this.panelModes.includes(this.active)) {
+                const fallback = this.defaultView();
+                if (fallback) this.active = fallback;
+            }
             const store = this.panelModes.includes(this.active)
                 ? Alpine.store(this.active)
                 : null;
             if (store && typeof store.load === "function") store.load();
+        },
+        defaultView() {
+            const layout = Alpine.store("layout");
+            if (!layout || !layout.panelOpen) return null;
+            if (!window.matchMedia || !window.matchMedia("(width >= 1200px)").matches) return null;
+            let saved = null;
+            try { saved = localStorage.getItem("mucli-panel-view"); } catch (e) { /* private mode */ }
+            if (saved && this.panelModes.includes(saved)) return saved;
+            return this.hasExecutionWorkspace ? "files" : "memory";
         },
         async set(name) {
             const r = await fetch(`/api/modes/${name}`, { method: "POST" });
@@ -2935,6 +2940,9 @@ ${problem.text}`, "error", 16000);
         },
         setView(name) {
             this.active = name;
+            if (this.panelModes.includes(name)) {
+                try { localStorage.setItem("mucli-panel-view", name); } catch (e) { /* private mode */ }
+            }
             const store = this.panelModes.includes(name)
                 ? Alpine.store(name)
                 : null;
@@ -3520,6 +3528,31 @@ ${problem.text}`, "error", 16000);
         },
         closeMobileSidebar() {
             if (window.matchMedia('(max-width: 760px)').matches) this.sidebarOpen = false;
+            this.closeSessions();
+        },
+        // Inside the persistent shell the sessions column is the view's own list pane
+        // (templates/_layout.html .mu-viewside). Below 840px it hides; the session
+        // header's Sessions button opens it as an overlay.
+        sessionsOpen: false,
+        toggleSessions(force) {
+            this.sessionsOpen = typeof force === "boolean" ? force : !this.sessionsOpen;
+            const side = document.querySelector(".mu-viewside");
+            if (side) side.toggleAttribute("data-open", this.sessionsOpen);
+            if (this._sessionsAway) {
+                document.removeEventListener("pointerdown", this._sessionsAway, true);
+                this._sessionsAway = null;
+            }
+            if (this.sessionsOpen) {
+                // A tap outside the overlay (and outside its toggle) closes it.
+                this._sessionsAway = (e) => {
+                    if (e.target.closest(".mu-viewside, .w-chathead__sessions")) return;
+                    this.toggleSessions(false);
+                };
+                document.addEventListener("pointerdown", this._sessionsAway, true);
+            }
+        },
+        closeSessions() {
+            if (this.sessionsOpen) this.toggleSessions(false);
         },
         togglePanel() {
             this.panelOpen = !this.panelOpen;
@@ -7860,6 +7893,27 @@ document.addEventListener("DOMContentLoaded", () => {
     Alpine.store("skills").load();
     Alpine.store("cmdComplete").load();
     Alpine.store("inspector").loadProviders();
+    // /?settings=open (the Settings page's "Chat and workspace" link) opens the
+    // settings drawer once, then drops the parameter so a reload doesn't reopen it.
+    try {
+        const url = new URL(location.href);
+        if (url.searchParams.get("settings") === "open" && document.querySelector(".w-chat")) {
+            url.searchParams.delete("settings");
+            history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+            Alpine.store("inspector").openDrawer();
+        }
+    } catch (e) { console.error("settings=open", e); }
+    // Inside the persistent shell the same link arrives as a route change: open the
+    // drawer in place instead of reloading the chat view (wash_shell.js `mu:route`).
+    window.addEventListener("mu:route", (event) => {
+        try {
+            const target = new URL(event.detail.href, location.href);
+            if (target.pathname === "/" && target.searchParams.get("settings") === "open" && document.querySelector(".w-chat")) {
+                event.preventDefault();
+                Alpine.store("inspector").openDrawer();
+            }
+        } catch (e) { /* let the view reload */ }
+    });
     function pollVisible(storeName, interval) {
         let pending = false;
         const refresh = async () => {

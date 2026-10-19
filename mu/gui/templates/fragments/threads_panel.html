@@ -3,14 +3,11 @@
        x-show="$store.mode.active === 'threads'"
        x-transition.opacity.duration.200ms>
     <div class="thread-panel-head">
-        <div>
-            <p class="eyebrow w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Thread group</p>
-            <h2>Coordination</h2>
-        </div>
+        <!-- The panel head names the view; the group id is the only header fact. -->
+        <p class="thread-group-id mono" x-text="$store.threads.groupId || 'Loading…'"></p>
         <button type="button" class="history-search-btn w-btn" data-variant="ghost" data-size="sm"
                 @click="$store.threads.load()"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg><span>Refresh</span></button>
     </div>
-    <p class="thread-group-id mono" x-text="$store.threads.groupId || 'Loading…'"></p>
     <div class="history-error w-banner" data-tone="danger" role="alert" x-show="$store.threads.error">
         <span class="w-banner__glyph" aria-hidden="true">✗</span>
         <p class="err-text w-banner__msg" x-text="$store.threads.error"></p>

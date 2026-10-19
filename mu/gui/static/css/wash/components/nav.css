@@ -11,7 +11,8 @@
  *   </ol></nav>
  *
  * Active nav item: a glass-strong pill with ink text and an accent-ink icon
- * (G§9.4). No side bar: the pill and aria-current carry the state.
+ * (G§9.4, Mu §7.1: the one pill on the wash, so you always know where you
+ * are). No side bar: the pill and aria-current carry the state.
  */
 .w-nav__item {
     display: flex;
@@ -21,7 +22,7 @@
     min-width: 0;
     padding: 0 var(--wash-space-3);
     border: 0;
-    border-radius: var(--wash-radius-sm);
+    border-radius: var(--wash-radius-pill);
     background: transparent;
     color: var(--wash-ink-2);
     font: inherit;
@@ -41,7 +42,7 @@
 .w-nav__item[aria-current="true"] {
     background: var(--w-glass-fill-strong);
     color: var(--wash-ink);
-    box-shadow: var(--w-glass-lift-2);
+    box-shadow: var(--wash-glass-highlight), var(--w-glass-ring);
 }
 .w-nav__item :is(svg, .w-icon) {
     flex: none;

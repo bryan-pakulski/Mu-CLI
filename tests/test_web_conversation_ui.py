@@ -61,11 +61,12 @@ def test_interim_updates_are_compact_and_do_not_stack_horizontal_rules():
 
 
 def test_main_response_spacing_is_compact():
-    # Wash W3: the transcript is one flex column with a 12px rhythm (gap) and
-    # a 24px top inset; messages carry no margins of their own.
+    # Wash W3 / Mu §3.3: the transcript is one flex column with one rhythm
+    # (gap; 20px now that turns are separated by space, not bubbles) and a 24px
+    # top inset; messages carry no margins of their own.
     css = MESSAGE_CSS.read_text(encoding="utf-8")
     transcript = css.split(".w-transcript {", 1)[1].split("}", 1)[0]
-    assert "gap: var(--wash-space-3)" in transcript
+    assert "gap: var(--wash-space-5)" in transcript
     assert "padding: var(--wash-space-6)" in transcript
     assert ".chat-history .msg { margin: 0; border: 0; }" in CHAT_CSS.read_text(encoding="utf-8")
 

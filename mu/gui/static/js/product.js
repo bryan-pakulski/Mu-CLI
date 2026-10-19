@@ -228,4 +228,26 @@
             if (!isEditable && focusComposer()) event.preventDefault();
         }
     });
+
+    // Mu §5.5: a count that says zero says nothing. Counts (.w-count) are Alpine-bound
+    // and re-render constantly, so mark the zero ones (data-zero) and let CSS hide them.
+    let zeroQueued = false;
+    function markZeroCounts() {
+        zeroQueued = false;
+        document.querySelectorAll('.w-count').forEach((el) => {
+            const zero = /^\s*0\s*$/.test(el.textContent || '');
+            if (zero !== el.hasAttribute('data-zero')) el.toggleAttribute('data-zero', zero);
+        });
+    }
+    function queueZeroCounts() {
+        if (zeroQueued) return;
+        zeroQueued = true;
+        requestAnimationFrame(markZeroCounts);
+    }
+    function watchZeroCounts() {
+        markZeroCounts();
+        new MutationObserver(queueZeroCounts).observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchZeroCounts);
+    else watchZeroCounts();
 })();

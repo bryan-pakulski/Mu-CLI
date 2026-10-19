@@ -5,35 +5,66 @@
 
 @layer patterns {
     .trace-session { color: var(--wash-ink); }
-    .trace-run-picker { width: min(460px, 100%); }
-    .trace-run-picker .w-select { width: 100%; }
+
+    /* ---------------------------------------------------------- workspace (Mu §11b) */
+    /* Runs | the run's charts and tables | the run at a glance. The picker select stays
+     * for keyboard and assistive use; the rows are the visible choice. */
+    .trace-listcount { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; }
+    .trace-runrow .w-row__title { font-weight: var(--wash-type-label-weight); }
+    .trace-runrow[aria-selected="true"] { background: var(--w-glass-fill-subtle); }
+    .trace-runrow[aria-selected="true"] .w-row__title { color: var(--mu-accent-ink, var(--wash-ink)); }
+    .trace-runlist + .trace-allruns { margin-top: var(--wash-space-3); }
+    .trace-charts { display: flex; flex-direction: column; gap: var(--wash-space-8); min-width: 0; }
+    .trace-charts > .w-group + .w-group { margin-top: 0; }
+    .trace-asidepane .trace-aside { display: flex; flex-direction: column; gap: var(--wash-space-6); }
+    .trace-asidepane .trace-aside > .w-group + .w-group { margin-top: 0; }
+    /* In the narrow pane the metrics read as a two-up list; suspect rows stack. */
+    .trace-asidepane .trace-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .trace-asidepane .tc-val { white-space: normal; overflow-wrap: anywhere; font-size: var(--wash-type-body-lg-size); }
+    .trace-asidepane button.trace-suspect { grid-template-columns: auto 1fr; }
+    .trace-asidepane .ts-detail, .trace-asidepane .ts-next { grid-column: 1 / 3; }
+    .trace-asidepane .trace-sub { display: none; }
+    /* The iteration window sticks to the top of the run pane. */
+    .trace-mainpane .trace-xscroll { top: calc(-1 * var(--wash-space-5)); }
+    .trace-back { display: none; margin-bottom: var(--wash-space-3); }
+    @media (width >= 1200px) { .trace-asidetoggle { display: none; } }
+    /* Opened over the middle pane, the glance sits above its sticky rows. */
+    .trace-panes[data-aside="open"] > .trace-asidepane { z-index: calc(var(--wash-z-sticky) + 1); }
+    @media (width < 840px) {
+        .trace-panes[data-show="main"] .trace-back { display: inline-flex; }
+    }
+    .trace-quiet { margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .trace-quiet__label { color: var(--wash-ink-2); font-weight: var(--wash-type-label-weight); }
 
     /* ---------------------------------------------------------- iteration window */
+    /* A quiet hairline control row that sticks above the charts (no pill, no float). */
     .trace-xscroll {
         position: sticky;
         top: 0;
         z-index: var(--wash-z-sticky);
         display: flex;
         align-items: center;
-        flex-wrap: wrap;
-        gap: var(--wash-space-3);
-        padding: var(--wash-space-2) var(--wash-space-4);
-        border: 1px solid var(--wash-hairline);
-        border-radius: var(--wash-radius-md);
-        /* sticky over scrolling charts: strong glass with its own blur */
-        background: var(--w-glass-fill-strong);
-        backdrop-filter: var(--w-glass-filter);
-        -webkit-backdrop-filter: var(--w-glass-filter);
+        gap: var(--wash-space-4);
+        padding: var(--wash-space-2) 0;
+        border-bottom: 1px solid var(--wash-hairline);
+        background: color-mix(in srgb, var(--wash-surface) 86%, transparent);
         color: var(--wash-ink-3);
         font-size: var(--wash-type-caption-size);
     }
+    :root[data-decoration="reduced"] .trace-xscroll { background: var(--wash-surface); }
     .trace-xscroll-label {
         min-width: 130px;
         color: var(--wash-ink-2);
         font-family: var(--wash-font-mono);
         font-variant-numeric: tabular-nums;
     }
-    .trace-xscroll-hint { white-space: nowrap; }
+    .trace-xscroll-hint {
+        display: inline-flex;
+        flex: none;
+        color: var(--wash-ink-3);
+        cursor: help;
+    }
+    .trace-xscroll-hint:hover, .trace-xscroll-hint:focus-visible { color: var(--wash-ink); }
     .trace-xscroll-track {
         position: relative;
         flex: 1 1 auto;
@@ -62,9 +93,9 @@
         min-width: 28px;
         height: 28px;
         padding: 0 var(--wash-space-2);
-        border: 1px solid var(--wash-hairline-strong);
+        border: 0;
         border-radius: var(--wash-radius-pill);
-        background: var(--w-glass-fill);
+        background: transparent;
         color: var(--wash-ink);
         font: inherit;
         font-size: var(--wash-type-caption-size);
@@ -84,35 +115,45 @@
     .th-badge--saved { color: var(--wash-ok-ink); }
     .th-badge--stored { color: var(--wash-accent-ink); }
 
-    /* ---------------------------------------------------------- suspects */
-    .trace-suspects { display: flex; flex-direction: column; gap: var(--wash-space-2); }
+    /* ---------------------------------------------------------- suspects (the finding) */
+    /* Mu §5.1 / §5.5: each suspect is a row — sign, name and the finding in a sentence, the
+     * next drill-down in the second line. Severity is a word in semantic ink, not a pill. */
+    .trace-suspects { display: flex; flex-direction: column; }
     button.trace-suspect {
+        position: relative;
         display: grid;
         grid-template-columns: auto auto 1fr;
         align-items: baseline;
-        gap: var(--wash-space-1) var(--wash-space-3);
+        gap: 2px var(--wash-space-3);
         width: 100%;
-        padding: var(--wash-space-2) var(--wash-space-3) var(--wash-space-2) var(--wash-space-4);
-        border: 1px solid var(--wash-hairline);
+        padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-3) calc(var(--wash-space-6) + 4px);
+        margin-left: calc(-1 * (var(--wash-space-6) + 4px));
+        width: calc(100% + var(--wash-space-6) + 4px);
+        border: 0;
         border-radius: var(--wash-radius-md);
-        background: var(--w-glass-fill);
-        box-shadow: var(--w-glass-lift-flat);
+        background: transparent;
         color: inherit;
         font: inherit;
         text-align: left;
         cursor: pointer;
     }
-    button.trace-suspect:hover { background: var(--w-glass-fill-subtle); }
+    button.trace-suspect + button.trace-suspect { box-shadow: inset 0 1px 0 var(--wash-hairline); }
+    button.trace-suspect:hover { background: var(--w-glass-fill-subtle); box-shadow: none; }
+    button.trace-suspect::before {
+        content: "◆";
+        position: absolute;
+        left: calc(var(--wash-space-3) + 2px);
+        top: var(--wash-space-3);
+        color: var(--w-suspect-sign, var(--wash-attention-pigment));
+        font-size: var(--wash-type-caption-size);
+        line-height: var(--wash-type-body-line);
+    }
     .trace-suspect > * { min-width: 0; }
-    /* Severity is a tinted chip with semantic ink; no side stripe (G§3.4). */
-    .trace-suspect--high { --w-suspect-wash: var(--wash-danger-wash); --w-suspect-ink: var(--wash-danger-ink); }
-    .trace-suspect--medium { --w-suspect-wash: var(--wash-attention-wash); --w-suspect-ink: var(--wash-attention-ink); }
-    .trace-suspect--low { --w-suspect-wash: var(--wash-neutral-wash); --w-suspect-ink: var(--wash-ink-3); }
+    .trace-suspect--high { --w-suspect-ink: var(--wash-danger-ink); --w-suspect-sign: var(--wash-danger-ink); }
+    .trace-suspect--medium { --w-suspect-ink: var(--wash-attention-ink); --w-suspect-sign: var(--wash-attention-pigment); }
+    .trace-suspect--low { --w-suspect-ink: var(--wash-ink-3); --w-suspect-sign: var(--wash-ink-3); }
     .ts-sev {
         justify-self: start;
-        padding: 0 var(--wash-space-2);
-        border-radius: var(--wash-radius-pill);
-        background: var(--w-suspect-wash, var(--wash-caution-wash));
         color: var(--w-suspect-ink, var(--wash-ink-2));
         font-size: var(--wash-type-caption-size);
         font-weight: var(--wash-type-label-weight);
@@ -321,7 +362,6 @@
         .th-stats { grid-column: 1 / -1; justify-content: flex-start; }
     }
     @media (width < 840px) {
-        .trace-run-picker { width: 100%; }
         button.trace-hist-row { grid-template-columns: minmax(0, 1fr); gap: var(--wash-space-2); }
         .trace-xscroll-hint { display: none; }
         button.trace-suspect { grid-template-columns: auto 1fr; }

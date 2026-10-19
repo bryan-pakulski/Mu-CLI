@@ -53,13 +53,13 @@
                         <input class="w-input work-grow" data-mono type="text" data-suite-key="command" aria-label="Suite command" placeholder="command" value="${esc(s.command || '')}">
                         <input class="w-input work-rule-suite__junit" type="text" data-suite-key="junit" aria-label="JUnit report path (optional)" placeholder="junit path (optional)" value="${esc(s.junit || '')}">
                         <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-suite-remove aria-label="Remove suite" title="Remove suite"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></div>`).join('')}
-                    <button type="button" class="w-btn work-rule-add" data-variant="secondary" data-size="sm" data-suite-add><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Add suite</span></button></div>`;
+                    <button type="button" class="w-textbtn work-rule-add" data-suite-add><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Add suite</span></button></div>`;
             case 'rows':
                 return `<div class="work-stack-tight" ${attrs.replace(`id="${id}"`, `id="${id}" role="group" aria-label="${esc(field.label)}"`)}>
                     ${(value || []).map((row, i) => `<div class="work-toolbar work-rule-suite" data-index="${i}">
                         ${field.columns.map(c => `<input class="w-input work-grow" type="text" data-row-key="${esc(c.key)}" aria-label="${esc(c.label)}" placeholder="${esc(c.placeholder || c.label)}" value="${esc(row[c.key] || '')}">`).join('')}
                         <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-row-remove aria-label="Remove row" title="Remove row"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-x"></use></svg></button></div>`).join('')}
-                    <button type="button" class="w-btn work-rule-add" data-variant="secondary" data-size="sm" data-row-add><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Add</span></button>
+                    <button type="button" class="w-textbtn work-rule-add" data-row-add><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg><span>Add</span></button>
                     ${field.path === 'sandbox.toolchains' ? '<div class="work-stack-tight" data-toolchain-status></div>' : ''}</div>`;
             default:
                 return `<input class="w-input" type="text" ${attrs} value="${esc(value ?? '')}">`;
@@ -70,9 +70,11 @@
         FIELD = Object.fromEntries(rules.schema.flatMap(s => s.fields).map(f => [f.path, f]));
         host.innerHTML = rules.schema.map(section => {
             const changed = section.fields.some(f => dirty.has(f.path));
-            return `<section class="w-card work-card" aria-labelledby="rules-${esc(section.id)}"><header class="w-card__head"><span class="w-eyebrow">Run rules</span><h2 class="w-card__title" id="rules-${esc(section.id)}">${esc(section.title)}</h2>${changed ? '<span class="w-chip" data-tone="attention"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Unsaved</span></span>' : ''}</header>
-                <form class="w-card__body work-form" data-section="${esc(section.id)}" novalidate>
-                    ${section.hint ? `<p class="work-jira-muted">${esc(section.hint)}</p>` : ''}
+            // Mu §10.6: a form section — what it is on the left, its fields on the right.
+            return `<section class="w-formsection work-rules-section" aria-labelledby="rules-${esc(section.id)}"><header class="w-formsection__head"><h2 class="w-formsection__title" id="rules-${esc(section.id)}">${esc(section.title)}</h2>
+                    ${section.hint ? `<p class="w-formsection__lede">${esc(section.hint)}</p>` : ''}
+                    ${changed ? '<p class="w-signword work-unsaved" data-status="waiting"><span class="w-sign" data-status="waiting" aria-hidden="true">◆</span>Unsaved changes</p>' : ''}</header>
+                <form class="w-formsection__body work-form" data-section="${esc(section.id)}" novalidate>
                     ${section.id === 'build_environments' ? '<div class="work-stack-tight work-env-status" data-env-status></div>' : ''}
                     ${section.id === 'harness' ? '<div class="work-stack-tight work-agents-status" data-agents-status></div>' : ''}
                     ${section.id === 'publish' ? '<div class="work-stack-tight work-publish-tokens" data-publish-tokens></div>' : ''}
@@ -87,7 +89,7 @@
                             <div class="work-stack-tight">${control(f, id)}${meta}</div></div>`;
                     }).join('')}
                     ${errorSection === section.id ? `<div class="w-banner" data-tone="danger" role="alert"><span class="w-banner__glyph" aria-hidden="true">✗</span><p class="w-banner__msg">${esc(errorText)}</p></div>` : ''}
-                    <footer class="work-form-actions"><button type="button" class="w-btn" data-variant="secondary" data-discard ${changed ? '' : 'disabled'}>Discard</button><button type="submit" class="w-btn" data-variant="primary" ${changed ? '' : 'disabled'}>Save ${esc(section.title.toLowerCase())}</button></footer>
+                    <footer class="work-form-actions"><button type="button" class="w-textbtn" data-tone="quiet" data-discard ${changed ? '' : 'disabled'}>Discard</button><button type="submit" class="w-btn" data-variant="primary" ${changed ? '' : 'disabled'}>Save ${esc(section.title.toLowerCase())}</button></footer>
                 </form></section>`;
         }).join('');
         bind();
@@ -113,8 +115,8 @@
                     <label for="publish-token-${id}" class="work-publish-token__label">${esc(name)} <span class="work-muted">${esc(t.variable || '')} · ${where(t.source)}</span></label>
                     <div class="w-btn-row work-publish-token__row">
                         <input id="publish-token-${id}" type="password" autocomplete="off" class="w-input work-grow" placeholder="paste a ${esc(name)} access token">
-                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-token-save>Save</button>
-                        ${t.source === 'stored' ? '<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-token-clear>Clear</button>' : ''}
+                        <button type="button" class="w-textbtn" data-token-save>Save</button>
+                        ${t.source === 'stored' ? '<button type="button" class="w-textbtn" data-tone="quiet" data-token-clear>Clear</button>' : ''}
                     </div>
                 </div>`;
             }).join('')}</div>`;
@@ -145,12 +147,12 @@
         }
         const fmtBytes = window.MuJobEnvironments?.bytes || (n => `${n} B`);
         const dind = envStatus.docker_in_docker || {}, gpu = envStatus.gpu || {}, kept = envStatus.kept_jobs || [];
-        target.innerHTML = `<div class="w-chip-row">
-                <span class="w-chip" data-tone="${dind.available ? 'ok' : 'neutral'}"><span class="w-chip__glyph" aria-hidden="true">${dind.available ? '✓' : '○'}</span><span>Docker-in-Docker: ${dind.available ? `available (${esc(dind.engine || 'sysbox')})` : 'Sysbox not installed'}</span></span>
-                <span class="w-chip" data-tone="${gpu.supported ? 'ok' : 'neutral'}" title="${esc(gpu.reason || '')}"><span class="w-chip__glyph" aria-hidden="true">${gpu.supported ? '✓' : '○'}</span><span>GPUs: ${gpu.supported ? esc(gpu.reason || 'available') : 'unavailable'}</span></span></div>
+        target.innerHTML = `<p class="w-state work-env-facts">
+                <span class="w-state__part"><span class="w-sign" data-status="${dind.available ? 'done' : 'pending'}" aria-hidden="true">${dind.available ? '✓' : '○'}</span> Docker-in-Docker ${dind.available ? `available (${esc(dind.engine || 'sysbox')})` : 'not installed (no Sysbox)'}</span>
+                <span class="w-state__part" title="${esc(gpu.reason || '')}"><span class="w-sign" data-status="${gpu.supported ? 'done' : 'pending'}" aria-hidden="true">${gpu.supported ? '✓' : '○'}</span> GPUs ${gpu.supported ? esc(gpu.reason || 'available') : 'unavailable'}</span></p>
             ${dind.available ? '' : `<details class="work-details"><summary>Install Sysbox to enable Docker = yes bindings</summary><ol>${(dind.install || []).map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>`}
             <div class="work-stack-tight"><span><strong>Kept jobs</strong> <span class="work-meta">(exempt from idle retention)</span></span>
-                ${kept.length ? `<ul class="work-list">${kept.map(j => `<li class="work-toolbar"><a class="work-mono" href="#/job/${esc(j.id)}">#${esc(String(j.id).slice(0, 8))}</a><span class="work-grow work-ellipsis" title="${esc(j.bindings || '')}">${esc(j.title || '')}${j.bindings ? ` · <span class="work-meta">${esc(j.bindings)}</span>` : ''}</span><span class="work-num work-meta">${esc(fmtBytes(j.bytes) || '—')}</span><button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-unkeep="${esc(j.id)}">Unkeep</button></li>`).join('')}</ul>`
+                ${kept.length ? `<ul class="work-list">${kept.map(j => `<li class="work-toolbar"><a class="work-mono" href="#/job/${esc(j.id)}">#${esc(String(j.id).slice(0, 8))}</a><span class="work-grow work-ellipsis" title="${esc(j.bindings || '')}">${esc(j.title || '')}${j.bindings ? ` · <span class="work-meta">${esc(j.bindings)}</span>` : ''}</span><span class="work-num work-meta">${esc(fmtBytes(j.bytes) || '—')}</span><button type="button" class="w-textbtn" data-unkeep="${esc(j.id)}">Unkeep</button></li>`).join('')}</ul>`
                     : '<span class="work-meta">No kept jobs.</span>'}</div>`;
         target.querySelectorAll('[data-unkeep]').forEach(b => b.addEventListener('click', async () => {
             b.disabled = true;

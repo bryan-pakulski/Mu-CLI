@@ -20,14 +20,16 @@ def test_web_session_rows_are_primary_action_with_compact_delete():
 
 def test_web_container_cards_use_direct_edit_and_overflow_actions():
     source = read("mu/gui/static/js/containers.js")
-    # Wash W4: the card is a .w-card (interactive) and the overflow is a .w-menu.
-    assert 'class="w-card w-env-card" data-variant="interactive" data-card-action="edit"' in source
+    # Mu §5.1: environments are rows; the whole row opens the detail sheet and the
+    # remaining actions (Configure = edit, clone, template, remove…) sit in a ⋯ .w-menu.
+    assert '<li class="w-row w-env-item"' in source
+    assert 'class="w-row__main" data-card-action="open"' in source
     assert 'class="w-env-overflow"' in source
     assert 'class="w-menu w-env-overflow__menu" role="menu"' in source
-    assert 'Open configuration' in source
+    assert 'data-action="edit" data-name="${esc(ref.name)}">${icon(\'sliders-horizontal\')}<span class="w-menu__label">Configure</span>' in source
     assert 'manager-actions manager-actions-primary' not in source
     assert 'manager-actions manager-actions-secondary' not in source
-    assert 'article class="w-card w-env-card w-env-card--template" data-variant="interactive"' in source
+    assert '<li class="w-row w-env-item w-env-item--template"' in source
     assert 'data-template-action="remove"' in source
 
 

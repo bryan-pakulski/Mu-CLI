@@ -92,7 +92,12 @@ python3 -m pytest tests/ -q
   byte-stable per turn; volatile blocks ride in the trailing RUNTIME STATE message
   (never persisted). Every history shrink records a ledger kind (`turn_fold`,
   `turn_roll`, `pressure_clear`, `pressure_forced`, ...).
-- UI follows the Wash design system (`documentation/design/wash_design_guide.md`).
+- UI follows the Wash design system (`documentation/design/wash_design_guide.md`)
+  composed per Mu (`documentation/design/mu_style_guide.md`, which wins where they
+  differ): no top bar; the rail beside one glass leaf; a page header (title, state
+  sentence, text tabs, one primary action; `WashHead.set` on hash routes); rows,
+  not cards; every fact in one place; details in `WashSheet` or a disclosure.
+  Mu components are in `static/css/wash/components/mu.css`.
   Colours, type, spacing and the job/status vocabulary come only from
   `mu/design/tokens.json` and `vocabulary.json`; after editing them run
   `python3 scripts/design/build_tokens.py` (web CSS/JS + Android TS are

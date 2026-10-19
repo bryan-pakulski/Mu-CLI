@@ -952,18 +952,27 @@ h1, h2, h3 { color: var(--wash-plum); }
  * side-by-side panes) resolves its own glass. Edges are light, never
  * pigment: the glass-border highlight plus a glass-edge outline ring. Text
  * never sits on less than --wash-glass (the 62% floor). */
+/* Mu revision 2 (2026-10-20, "KISS flat"): surfaces are flat paper — solid fills,
+ * hairline edges, no blur and no shadow on planes. Floats (menus, sheets, dialogs)
+ * keep a soft elevation so they read as above the page. The watercolour survives
+ * only around the leaf, as the mode's accent (patterns/shell.css). The variable
+ * names stay (every component composes from them); the values are the flat set. */
 :root, [data-theme] {
-    --w-glass-fill: var(--wash-glass);
-    --w-glass-fill-strong: var(--wash-glass-strong);
-    --w-glass-fill-subtle: var(--wash-glass-subtle);
-    --w-glass-line: var(--wash-glass-border);
-    --w-glass-ring: 0 0 0 1px var(--wash-glass-edge);
-    --w-glass-filter: blur(var(--wash-glass-blur)) saturate(var(--wash-glass-saturate));
-    --w-glass-filter-strong: blur(var(--wash-glass-blur-strong)) saturate(var(--wash-glass-saturate));
-    --w-glass-lift: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-glass-shadow);
-    --w-glass-lift-flat: var(--wash-glass-highlight), var(--w-glass-ring);
-    --w-glass-lift-2: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-elevation-2);
-    --w-glass-lift-3: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-elevation-3);
+    --w-glass-fill: var(--wash-surface);
+    --w-glass-fill-strong: var(--wash-raised);
+    --w-glass-fill-subtle: var(--wash-sunken);
+    --w-glass-line: var(--wash-hairline);
+    --w-glass-ring: 0 0 0 1px var(--wash-hairline);
+    --w-glass-filter: none;
+    --w-glass-filter-strong: none;
+    --w-glass-lift: var(--w-glass-ring);
+    --w-glass-lift-flat: var(--w-glass-ring);
+    --w-glass-lift-2: var(--w-glass-ring), var(--wash-elevation-2);
+    --w-glass-lift-3: var(--w-glass-ring), var(--wash-elevation-3);
+    /* Mu §2.1: the leaf (layout.css .w-shell::before) is the page's one
+     * level-1 plane; the rail sits on the wash, softened to paper beneath it. */
+    --w-leaf-lift: var(--w-glass-ring);
+    --w-rail-veil: color-mix(in srgb, var(--wash-canvas) 84%, transparent);
 }
 
 /* ------------------------------------------------------------ ambient wash (G§6.2)
@@ -1055,18 +1064,16 @@ body[data-ambient]::before {
 
 /* ------------------------------------------------------------ page transitions (G§5)
    Cross-document View Transitions: same-origin navigations (/, /work, /containers,
-   /trace, …) cross-fade instead of flashing white. The shell's top bar and sidebar are
-   named so they hold still; only the stage content fades and rises. The ambient wash
+   /trace, …) cross-fade instead of flashing white. The rail is named so it holds still;
+   only the leaf's content fades and rises (Mu §9.7). The ambient wash
    cross-fades with the root (pages use different washes). Browsers without cross-document
    support use the scripted fade below. */
 @view-transition { navigation: auto; }
 
-.w-topbar { view-transition-name: w-topbar; }
 .w-sidebar { view-transition-name: w-sidebar; }
 .w-stage { view-transition-name: w-stage; }
 
 ::view-transition-group(root),
-::view-transition-group(w-topbar),
 ::view-transition-group(w-sidebar) { animation-duration: var(--wash-motion-medium); animation-timing-function: var(--wash-ease-medium); }
 ::view-transition-old(root),
 ::view-transition-new(root) { animation-duration: var(--wash-motion-medium); animation-timing-function: var(--wash-ease-medium); }

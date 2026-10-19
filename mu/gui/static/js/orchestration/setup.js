@@ -144,9 +144,8 @@
                 ? ui.banner('info', '●', 'You have a node setup in progress.', `<a class="w-btn" data-variant="tonal" data-tone="info" data-size="sm" href="#/setup/${encodeURIComponent(last.token_id)}">Resume it</a>`) : '';
             el.innerHTML = `
                 <header class="w-page__head orch-head">
-                    <div class="orch-head__title"><span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Nodes</span>
-                    <h1 class="w-page__title">Set up a node</h1>
-                    <p class="w-page__lede">Hand the agent to a machine, watch it enrol, accept it and prove it can run a tool. You can close this page and come back: the wizard resumes where it was.</p></div>
+                    <div class="orch-head__title"><h1 class="w-page__title">Set up a node</h1>
+                    </div>
                     <span class="orch-spacer"></span>
                     <div class="w-btn-row"><button type="button" class="w-btn" data-variant="ghost" data-quick>${icon('plus')}<span>Quick enrol</span></button></div>
                 </header>

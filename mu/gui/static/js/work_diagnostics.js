@@ -71,17 +71,14 @@
         section.innerHTML = `
             <div class="work-section-title-row work-diagnostics-head">
                 <div>
-                    <h3>Job diagnostics</h3>
-                    <p class="work-muted">Execution, worker and Git-preflight telemetry. Filter the trace, then expand only the event you need.</p>
+                    <h3 class="w-visually-hidden">Job diagnostics</h3>
+                    <p class="w-state work-diagnostic-facts">${[
+                        // Status and branch are in the job's header and summary already: the worker facts only.
+                        snapshot.worker_id ? `<span class="w-state__part" title="${escapeHtml(snapshot.worker_id)}">worker <code>${escapeHtml(String(snapshot.worker_id).slice(0, 18))}</code></span>` : '<span class="w-state__part">no worker</span>',
+                        snapshot.heartbeat_at ? `<span class="w-state__part">heartbeat ${escapeHtml(fmtWhen(snapshot.heartbeat_at))}</span>` : '',
+                    ].join('')}</p>
                 </div>
-                <a class="w-btn work-export-link" data-variant="secondary" data-size="sm" href="/api/jobs/${encodeURIComponent(snapshot.job_id)}/debug-export">Export debug bundle</a>
-            </div>
-
-            <div class="work-diagnostic-facts">
-                <div><span>Status</span><strong>${escapeHtml(String(snapshot.status || '—').replaceAll('_', ' '))}</strong></div>
-                <div><span>Worker</span><strong title="${escapeHtml(snapshot.worker_id || '')}">${escapeHtml(snapshot.worker_id ? String(snapshot.worker_id).slice(0, 18) : '—')}</strong></div>
-                <div><span>Branch</span><strong title="${escapeHtml(snapshot.branch || '')}">${escapeHtml(snapshot.branch || '—')}</strong></div>
-                <div><span>Heartbeat</span><strong>${escapeHtml(snapshot.heartbeat_at ? fmtWhen(snapshot.heartbeat_at) : '—')}</strong></div>
+                <a class="w-textbtn work-export-link" href="/api/jobs/${encodeURIComponent(snapshot.job_id)}/debug-export">Export debug bundle</a>
             </div>
 
             ${failure ? `

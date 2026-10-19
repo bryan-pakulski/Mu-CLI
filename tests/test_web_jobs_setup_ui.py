@@ -62,9 +62,11 @@ def test_dashboard_shows_one_setup_call_to_action():
     stage = (ROOT / "mu/gui/static/js/work_stage_models.js").read_text()
     assert "Set job models" not in stage and "work-stage-models-banner" not in stage
     assert "mu:stage-models" in stage and "mu:stage-models" in SETUP_JS
-    # Wash W4: the one setup call to action is a caution .w-banner.
+    # Mu §10.2: the one setup call to action is a pinned "needs you" row in Now.
     assert len(re.findall(r'class="[^"]*\bwork-setup-cta\b', HTML)) == 1
-    assert 'class="w-banner work-setup-cta" data-tone="caution"' in HTML
+    assert 'class="w-row work-setup-cta" id="work-setup-cta" data-pinned' in HTML
+    assert '<span class="w-sign" data-status="waiting" aria-hidden="true">◆</span>' in HTML
+    assert "boardEl.querySelector('.work-now-rows')?.prepend(cta)" in (ROOT / "mu/gui/static/js/work/view.js").read_text()
 
 
 @pytest.fixture

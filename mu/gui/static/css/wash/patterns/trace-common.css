@@ -1,29 +1,39 @@
-/* Analyzer pages (/trace and /jobs/trace) — shared Wash patterns.
+/* Insights analyzer pages (/trace and /jobs/trace) — shared patterns.
  *
  * Imported into the `patterns` layer by patterns/trace.css and
- * patterns/job-trace.css. Each analysis is a `.w-card.trace-section` with an
- * eyebrow + title header (`.trace-head`); metrics sit in one hairline grid
- * (not a card per metric), tables are `.w-table`, and charts are plain
- * canvases on the card surface whose colours trace.js / job_trace.js read
- * from the Wash tokens at draw time (documentation/visualization_style_guide.md).
+ * patterns/job-trace.css. Mu §5, §10.5: each analysis is a `.w-group.trace-section`
+ * on the leaf — a title-3 heading (`.trace-head`) and space, no card, no eyebrow;
+ * metrics sit in one hairline grid (folded under "All metrics" on /trace),
+ * tables are `.w-table` without an outer box, and charts are plain canvases on
+ * the leaf whose colours trace.js / job_trace.js read from the Wash tokens at
+ * draw time (documentation/visualization_style_guide.md).
  */
 
 /* ------------------------------------------------------------ page */
-.trace-page-head {
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: var(--wash-space-5);
+/* The subject picker (run / job): a borderless title-level select with a caret. */
+.trace-subject .w-select__control {
+    height: auto;
+    padding: var(--wash-space-1) var(--wash-space-7) var(--wash-space-1) 0;
+    border-color: transparent;
+    background-color: transparent;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    text-overflow: ellipsis;
 }
-.trace-page-head .w-eyebrow { margin-bottom: var(--wash-space-2); }
-.trace-lede {
-    max-width: 64ch;
-    margin: var(--wash-space-1) 0 0;
-    color: var(--wash-ink-2);
-}
+.trace-subject .w-select__control:hover { border-bottom-color: var(--wash-hairline-strong); }
 .trace-main {
     display: flex;
     flex-direction: column;
-    gap: var(--wash-space-4);
+    gap: var(--wash-space-8);
+}
+.trace-main > .w-group + .w-group { margin-top: 0; }
+.trace-finding {
+    display: flex;
+    gap: var(--wash-space-2);
+    margin: 0;
+    color: var(--wash-ink-2);
 }
 .trace-empty {
     max-width: 480px;
@@ -38,15 +48,27 @@
     color: var(--wash-ink-3);
 }
 
-/* ------------------------------------------------------------ section cards */
-/* The info popout escapes the card, so the card does not clip. */
-.trace-section.w-card { overflow: visible; }
+/* ------------------------------------------------------------ sections (groups, not cards) */
+.trace-section.w-group { position: relative; min-width: 0; }
 .trace-head {
     position: relative;
+    flex-wrap: wrap;
+    align-items: baseline;
     row-gap: var(--wash-space-1);
 }
-.trace-head .w-eyebrow { flex: 0 0 auto; }
 .trace-head .trace-h2 { flex: 0 1 auto; }
+.trace-body { min-width: 0; }
+/* No outer box on tables inside the leaf (Mu §5.6): hairline rows only. */
+.trace-section .w-table-wrap { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.trace-table th {
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+/* "All metrics": the 18-metric overview, folded under the finding (Mu §5.5). */
+.trace-metrics__head { position: relative; }
+.trace-metrics__head > .trace-info--metrics { position: absolute; top: 0; right: 0; }
+.trace-allmetrics { margin-top: 0; }
+.trace-allmetrics > summary { font-size: var(--wash-type-title-3-size); line-height: var(--wash-type-title-3-line); font-weight: var(--wash-type-title-3-weight); color: var(--wash-ink); }
 .trace-sub {
     flex: 1 1 240px;
     min-width: 0;
@@ -125,7 +147,7 @@
 .tc-val {
     margin-top: var(--wash-space-1);
     overflow: hidden;
-    color: var(--wash-plum);
+    color: var(--wash-ink);
     font-size: var(--wash-type-title-3-size);
     line-height: var(--wash-type-title-3-line);
     font-weight: var(--wash-type-title-1-weight);

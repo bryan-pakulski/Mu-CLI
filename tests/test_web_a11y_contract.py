@@ -235,10 +235,12 @@ def test_reduce_decoration_preference_is_persisted_and_applied_before_paint():
     assert "root.setAttribute('data-decoration', 'reduced')" in bootstrap
     controller = (STATIC_JS / "route_theme.js").read_text(encoding="utf-8")
     assert "var KEY = 'mucli-decoration';" in controller and "window.MuDecoration" in controller
-    drawer = (TEMPLATES / "fragments" / "inspector.html").read_text(encoding="utf-8")
-    switch = re.search(r'<input class="w-switch__input"[^>]*data-decoration-toggle[^>]*>', drawer, flags=re.S)
-    assert switch and 'role="switch"' in switch.group(0)
-    assert ">Reduce decoration</span>" in drawer
+    # The switch's one home is Settings (Mu §6.1); the chat drawer links there.
+    settings = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
+    switch = re.search(r'<input[^>]*class="w-switch__input"[^>]*data-decoration-toggle[^>]*>', settings, flags=re.S)
+    assert switch and 'role="switch"' in switch.group(0) and 'id="set-decoration"' in switch.group(0)
+    assert '<label class="w-setting__label" for="set-decoration">Reduce decoration' in settings
+    assert 'href="/settings"' in (TEMPLATES / "fragments" / "inspector.html").read_text(encoding="utf-8")
     css = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "mu" / "gui" / "static" / "css" / "wash").rglob("*.css"))
     for hook in (':root[data-decoration="reduced"] .w-hero::before', ':root[data-decoration="reduced"] .w-empty__art::before',
                  ':root[data-decoration="reduced"] .w-panel__head::before'):
@@ -256,10 +258,12 @@ def test_gallery_chat_replay_frame_fits_the_composer():
 # ------------------------------------------------------------ glass restructure (spec §13, G§3.4, §9.9)
 
 def test_approval_card_keeps_its_tinted_header_and_status_chip():
-    # With the coloured side rule gone, the approval card must still be
-    # unmistakable: a header strip tinted with the tone wash (≥70% into the
-    # glass, attention by default, danger for risky tools) carrying the
-    # "◆ Needs you" status chip, on glass, with no inset stripe.
+    # Mu §7.6 (was: a tinted header strip on glass): the approval card is the
+    # decision block — the whole card is the tone wash (attention by default,
+    # danger for risky tools), the only coloured surface on the leaf, with no
+    # border or inset stripe. It must stay unmistakable, so the wash is never
+    # glass or transparent, and the "◆ Needs you" status chip stays in the head
+    # for assistive technology.
     import sys
     sys.path.insert(0, str(ROOT / "tests"))
     from wash_css_helpers import css, decls
@@ -267,12 +271,9 @@ def test_approval_card_keeps_its_tinted_header_and_status_chip():
     approval = css("components/approval.css")
     card = decls(approval, ".w-approval")
     assert card["--w-approval-wash"] == "var(--w-tone-wash, var(--wash-attention-wash))"
-    assert card["background"] == "var(--w-glass-fill)"
-    assert "inset" not in card.get("box-shadow", "").replace("var(--w-glass-lift)", "")
-    head = decls(approval, ".w-approval__head")
-    mix = re.fullmatch(r"color-mix\(in srgb, var\(--w-approval-wash\) (\d+)%, var\(--w-glass-fill\)\)", head["background"])
-    assert mix and int(mix.group(1)) >= 70, head["background"]
-    # The tone channel escalates the strip: data-tone="danger" maps the wash.
+    assert card["background"] == "var(--w-approval-wash)"
+    assert card.get("border") == "0" and "inset" not in card.get("box-shadow", "")
+    # The tone channel escalates the block: data-tone="danger" maps the wash.
     base = css("base.css")
     assert decls(base, '[data-tone="danger"]')["--w-tone-wash"] == "var(--wash-danger-wash)"
     # Live card (chat) and the /design sample both put the status chip in the head.

@@ -19,9 +19,8 @@
         const running = !!ep.running;
         const st = running ? { semantic: 'ok', glyph: '✓', label: 'Listening', status: 'done' }
             : (ep.error ? { semantic: 'danger', glyph: '✗', label: 'Not running', status: 'failed' } : { semantic: 'neutral', glyph: '○', label: 'Not configured', status: 'pending' });
-        return `<article class="w-card orch-card orch-endpoint" aria-labelledby="orch-ep-h">
-            <header class="w-card__head"><h2 class="w-card__title" id="orch-ep-h">Node endpoint</h2>${ui.chip(st)}<span class="orch-spacer"></span><a class="w-btn" data-variant="ghost" data-size="sm" href="#/settings?section=network">Network settings <span class="w-btn__chevron" aria-hidden="true">›</span></a></header>
-            <div class="w-card__body">
+        return `<section class="w-group orch-endpoint" aria-labelledby="orch-ep-h">
+            <div class="w-group__head"><h2 class="w-group__title" id="orch-ep-h">Node endpoint</h2>${ui.chip(st)}<a class="w-group__more" href="#/settings?section=network">Network settings</a></div>
                 ${ep.error ? `<p class="orch-error" role="alert"><span aria-hidden="true">✗</span> ${esc(ep.error)}</p>` : ''}
                 ${ui.kv([
                     ['Address', ep.bind ? `${ep.bind}:${ep.port}` : 'Not set'],
@@ -29,23 +28,41 @@
                     ['TLS fingerprint', ep.fingerprint ? `<code class="orch-mono orch-break">${esc(ep.fingerprint)}</code> <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-orch-copy data-copy-value="${esc(ep.fingerprint)}" aria-label="Copy fingerprint" title="Copy fingerprint">${icon('copy', 'sm')}</button>` : '', true],
                 ])}
                 ${!ep.bind ? '<p class="orch-muted">Nodes reach the master on a private address you choose. Public and any-address binds are refused.</p>' : ''}
-            </div></article>`;
+            </section>`;
+    }
+
+    /* The endpoint in one line above the inventory (Mu §4.2): where nodes connect and whether
+     * it is listening; URL and fingerprint fold into a disclosure. */
+    function endpointLine(ep, { link = true } = {}) {
+        ep = ep || {};
+        const running = !!ep.running;
+        const st = running ? 'done' : (ep.error ? 'failed' : 'waiting');
+        const head = running ? `Listening on ${ep.bind}:${ep.port}` : (ep.error ? 'Node endpoint not running' : 'Node endpoint not configured');
+        return `<div class="orch-endpoint-line" aria-label="Node endpoint">
+            <p class="w-state"><span class="w-state__part"${running ? '' : ` data-tone="${ep.error ? 'danger' : 'attention'}"`}><span class="w-sign" data-status="${st}" aria-hidden="true">${running ? '✓' : (ep.error ? '✗' : '◆')}</span> ${esc(head)}</span>${ep.kind ? `<span class="w-state__part">${esc(ep.kind)}</span>` : ''}${link ? '<a class="w-state__part" href="#/settings?section=network">Network settings</a>' : ''}</p>
+            ${ep.error ? `<p class="orch-error" role="alert"><span aria-hidden="true">✗</span> ${esc(ep.error)}</p>` : ''}
+            ${!ep.bind ? '<p class="orch-muted">Nodes reach the master on a private address you choose. Public and any-address binds are refused.</p>' : ''}
+            ${ep.url || ep.fingerprint ? `<details class="w-disclose"><summary>Endpoint details</summary>${ui.kv([
+                ['URL', ep.url],
+                ['TLS fingerprint', ep.fingerprint ? `<code class="orch-mono orch-break">${esc(ep.fingerprint)}</code> <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-orch-copy data-copy-value="${esc(ep.fingerprint)}" aria-label="Copy fingerprint" title="Copy fingerprint">${icon('copy', 'sm')}</button>` : '', true],
+            ])}</details>` : ''}
+        </div>`;
     }
 
     function nodeName(n, { link = true } = {}) {
         const name = esc(n.name || n.id);
-        const extras = `${n.canary ? ' <span class="w-chip orch-tag" data-variant="meta" title="Canary node: tests and first batches run here">canary</span>' : ''}${n.kind === 'container' ? ' <span class="w-chip orch-tag" data-variant="meta" title="Disposable test node">test node</span>' : ''}`;
+        const extras = `${n.canary ? ' <span class="orch-tag" title="Canary node: tests and first batches run here">canary</span>' : ''}${n.kind === 'container' ? ' <span class="orch-tag" title="Disposable test node">test node</span>' : ''}`;
         return `<span class="orch-node-name">${link ? `<a href="#/node/${encodeURIComponent(n.id)}">${name}</a>` : name}${extras}</span><span class="orch-sub orch-mono">${esc(n.id)}</span>`;
     }
     function sandboxCell(n) {
-        if (n.sandbox === 'none') return '<span class="w-chip" data-tone="caution" title="Tools run without a sandbox on this node"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>No sandbox</span></span>';
+        if (n.sandbox === 'none') return '<span data-tone="attention" title="Tools run without a sandbox on this node">no sandbox</span>';
         return n.sandbox ? esc(n.sandbox) : '<span class="orch-muted">—</span>';
     }
     /* The node's agent version, flagged when it's older than the master's. */
     function agentCell(n) {
         const a = n.agent || {};
         if (!a.outdated) return esc(n.agent_version || '—');
-        return `${esc(n.agent_version)} <span class="w-chip" data-tone="${a.updatable ? 'attention' : 'caution'}" data-size="sm" title="${esc(a.updatable ? `Can be updated to ${a.current}` : a.reason)}"><span class="w-chip__glyph" aria-hidden="true">◆</span><span>${esc(a.updatable ? 'update available' : 'outdated')}</span></span>`;
+        return `${esc(n.agent_version)} <span data-tone="attention" title="${esc(a.updatable ? `Can be updated to ${a.current}` : a.reason)}">(${esc(a.updatable ? 'update available' : 'outdated')})</span>`;
     }
     /* Propose an update job (an ordinary run: plan, approval per the access policy, canary first). */
     async function updateAgents(nodeIds, button) {
@@ -69,7 +86,7 @@
     function policyCell(n) {
         const errs = n.policy_errors || [];
         if (!errs.length) return '<span class="orch-muted">—</span>';
-        return `<span class="w-chip" data-tone="danger" title="${esc(errs.join('\n'))}"><span class="w-chip__glyph" aria-hidden="true">✗</span><span>${esc(ui.plural(errs.length, 'policy error'))}</span></span>`;
+        return `<span data-tone="danger" title="${esc(errs.join('\n'))}">${esc(ui.plural(errs.length, 'policy error'))}</span>`;
     }
 
     /* ------------------------------------------------------------ enrol */
@@ -183,8 +200,43 @@
         } catch (_) { /* toasted */ }
     }
 
-    /* ------------------------------------------------------------ list */
-    async function renderList(el, route, { isCurrent, setQuery, soft }) {
+    /* ------------------------------------------------------------ meters (Mu §11b) */
+    /* A node's fullest disk and memory as inline meters: the number beside a 4px bar, in
+     * attention from 80%, danger from 92%. */
+    const meterTone = v => (v >= 92 ? 'danger' : (v >= 80 ? 'attention' : ''));
+    function meter(label, pct) {
+        if (pct == null || pct === '') return '';
+        const v = Math.max(0, Math.min(100, Math.round(Number(pct))));
+        const tone = meterTone(v);
+        return `<span class="orch-meter"><span class="w-bar" style="--v: ${v}%"${tone ? ` data-tone="${tone}"` : ''} role="img" aria-label="${esc(label)} ${v}% used"></span><span class="orch-meter__num"${tone ? ` data-tone="${tone}"` : ''}>${esc(label)} ${v}%</span></span>`;
+    }
+    const meters = s => [meter('disk', s?.max_disk_used_pct), meter('mem', s?.memory_used_pct)].filter(Boolean).join('');
+    /* One node as a row: sign (online / status), name, the state in words when it isn't
+     * simply active, its meters, agent drift; last seen on the right. */
+    function nodeRow(n, { pinnedAccept = true } = {}) {
+        const accept = pinnedAccept && (n.actions || []).find(a => a.id === 'acceptNode' && a.enabled);
+        const offline = statusKey(n) === 'offline';
+        const stWord = statusKey(n) === 'active' ? '' : `<span${offline || n.status === 'revoked' ? ' data-tone="danger"' : (n.status === 'pending' ? ' data-tone="attention"' : '')}>${esc(ui.cap(offline ? 'offline' : (n.style?.label || n.status)))}</span>`;
+        return ui.row({
+            status: offline ? 'failed' : ui.statusKey(n.style), title: n.name || n.id, href: `#/node/${encodeURIComponent(n.id)}`,
+            titleHtml: `${esc(n.name || n.id)}${n.canary ? ' <span class="orch-tag">canary</span>' : ''}${n.kind === 'container' ? ' <span class="orch-tag">test node</span>' : ''}`,
+            sub: ui.subline([stWord, meters(n.summary), n.agent?.outdated ? `<span data-tone="attention">agent ${esc(n.agent_version)} → ${esc(n.agent.current)}</span>` : '',
+                n.sandbox === 'none' ? sandboxCell(n) : '', (n.policy_errors || []).length ? policyCell(n) : '']),
+            when: n.last_seen ? ui.time(n.last_seen) : '', pinned: !!accept,
+            actions: accept ? `<button type="button" class="w-textbtn" data-accept="${esc(n.id)}">Accept</button>` : '',
+        });
+    }
+    function bindAccept(root, nodes) {
+        root.querySelectorAll('[data-accept]').forEach(b => b.addEventListener('click', async () => {
+            const n = nodes.find(x => x.id === b.dataset.accept);
+            const ok = await ui.confirm({ title: `Accept ${n.name}?`, message: `It will receive work that targets its labels (${ui.formatLabels(n.labels) || 'no labels'}). Check the name and labels match the machine you enrolled.`, confirmLabel: 'Accept node' });
+            if (!ok) return;
+            try { await ui.command('acceptNode', { node_id: n.id }, { ok: `${n.name} accepted`, button: b }); Orch.refresh(); } catch (_) { /* toasted */ }
+        }));
+    }
+
+    /* ------------------------------------------------------------ inventory (the LIST pane) */
+    async function renderInventory(el, route, { isCurrent, setQuery, soft, tools }) {
         const data = await api.get('nodes');
         if (!isCurrent()) return null;
         const filter = route.query.get('status') || '';
@@ -192,76 +244,27 @@
         const search = prev ?? (route.query.get('q') || '');
         const counts = {};
         data.nodes.forEach(n => { const k = statusKey(n); counts[k] = (counts[k] || 0) + 1; });
-        const testStatuses = Object.values(data.test_nodes || {});
-
+        if (tools) {
+            tools.innerHTML = '<button type="button" class="w-textbtn" data-tone="quiet" data-enrol title="Create a join token for one machine">Quick enrol</button>';
+            tools.querySelector('[data-enrol]').onclick = enrol;
+        }
         el.innerHTML = `
-            <header class="w-page__head orch-head">
-                <div><h1 class="w-page__title">Nodes</h1><p class="w-page__lede">Machines enrolled with this master, their facts and their own local policy.</p></div>
-                <span class="orch-spacer"></span>
-                <div class="w-btn-row"><button type="button" class="w-btn" data-variant="secondary" data-test-node>${icon('box')}<span>Start test node</span></button>
-                <button type="button" class="w-btn" data-variant="secondary" data-enrol>${icon('plus')}<span>Quick enrol</span></button>
-                <a class="w-btn" data-variant="primary" href="#/setup">${icon('server')}<span>Set up a node</span></a></div>
-            </header>
-            <div class="orch-stack">
-                ${agentBanner(data.agents)}
-                ${endpointCard(data.endpoint)}
-                ${testStatuses.length ? `<section class="orch-section" aria-labelledby="orch-tn-h"><header class="orch-section__head"><h2 class="orch-section__title" id="orch-tn-h">Test nodes</h2></header>
-                    ${ui.table({ label: 'Test nodes', cols: [{ label: 'Container' }, { label: 'Image' }, { label: 'State' }, { label: 'Node' }, { label: 'Actions', sr: true, cls: 'w-table__actions' }],
-                        rows: testStatuses.map(t => [`<span class="orch-mono">${esc(t.container)}</span>`, `<span class="orch-mono">${esc(t.image)}</span>`,
-                            ui.chip(t.state === 'ready' ? { semantic: 'ok', glyph: '✓', label: 'Ready' } : t.state === 'failed' ? { semantic: 'danger', glyph: '✗', label: 'Failed' } : { semantic: 'running', glyph: '●', label: 'Starting' }, { title: t.error || '' }) + (t.error ? `<span class="orch-sub orch-error">${esc(t.error)}</span>` : ''),
-                            t.node_id ? `<a href="#/node/${encodeURIComponent(t.node_id)}" class="orch-mono">${esc(t.node_id)}</a>` : '—',
-                            t.node_id && (data.test_node_ids || []).includes(t.node_id) ? `<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-stop-test="${esc(t.node_id)}">Stop</button>` : ''] ) })}</section>` : ''}
-                <section class="orch-section" aria-labelledby="orch-inv-h">
-                    <header class="orch-section__head"><h2 class="orch-section__title" id="orch-inv-h">Inventory</h2><span class="w-count">${data.nodes.length}</span></header>
-                    <div class="orch-filters">
-                        <div class="w-chip-row" role="group" aria-label="Filter by status">
-                            <button type="button" class="w-chip" data-variant="filter" aria-pressed="${!filter}" data-filter="">All <span class="orch-count">${data.nodes.length}</span></button>
-                            ${STATUSES.filter(s => counts[s]).map(s => `<button type="button" class="w-chip" data-variant="filter" aria-pressed="${filter === s}" data-filter="${esc(s)}">${esc(ui.cap(ui.vstyle('orch_node_status', s).label))} <span class="orch-count">${counts[s]}</span></button>`).join('')}
-                        </div>
-                        <label class="w-visually-hidden" for="orch-node-search">Search nodes</label>
-                        <input class="w-input orch-search" id="orch-node-search" type="search" placeholder="Search name, id or label" value="${esc(search)}" autocomplete="off">
-                    </div>
-                    <div data-node-table></div>
-                </section>
-                <section class="orch-section" aria-labelledby="orch-groups-h">
-                    <header class="orch-section__head"><div><h2 class="orch-section__title" id="orch-groups-h">Groups</h2><p class="orch-muted">Named label selectors you can target runs and access rules at.</p></div><span class="orch-spacer"></span><button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-add-group>${icon('plus')}<span>New group</span></button></header>
-                    ${ui.table({ label: 'Groups', empty: 'No groups yet.', cols: [{ label: 'Name' }, { label: 'Selector' }, { label: 'Members', num: true }, { label: 'Description' }, { label: 'Actions', sr: true, cls: 'w-table__actions' }],
-                        rows: data.groups.map((g, i) => [`<span class="orch-mono">${esc(g.name)}</span>`, `<code class="orch-mono">${esc(g.selector)}</code>`,
-                            String(data.nodes.filter(n => (n.groups || []).includes(g.name)).length), esc(g.description || ''),
-                            `<button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-edit-group="${i}">Edit</button><button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-del-group="${i}">Delete</button>`]) })}
-                </section>
-                <section class="orch-section" aria-labelledby="orch-tokens-h">
-                    <header class="orch-section__head"><h2 class="orch-section__title" id="orch-tokens-h">Join tokens</h2></header>
-                    ${ui.table({ label: 'Join tokens', empty: 'No join tokens yet.', cols: [{ label: 'Created' }, { label: 'Labels' }, { label: 'Canary' }, { label: 'Status' }, { label: 'Node' }, { label: 'Note' }],
-                        rows: (data.tokens || []).slice(0, 15).map(t => {
-                            const expired = !t.used_at && t.expires_at && t.expires_at * 1000 < Date.now();
-                            const st = t.used_at ? { semantic: 'ok', glyph: '✓', label: 'Used' } : expired ? { semantic: 'neutral', glyph: '–', label: 'Expired' } : { semantic: 'info', glyph: '●', label: `Open until ${ui.when(t.expires_at)}` };
-                            return [ui.time(t.created_at), ui.labelChips(t.labels), t.canary ? 'yes' : 'no', ui.chip(st), t.node_id ? `<a href="#/node/${encodeURIComponent(t.node_id)}" class="orch-mono">${esc(t.node_id)}</a>` : '—', esc(t.note || '')];
-                        }) })}
-                </section>
-            </div>`;
-
+            <div class="orch-listtools">
+                <label class="w-visually-hidden" for="orch-node-search">Search nodes</label>
+                <input class="w-input orch-search" id="orch-node-search" type="search" placeholder="Search name, id or label" value="${esc(search)}" autocomplete="off">
+                ${Object.keys(counts).length > 1 ? `<div class="orch-textfilters" role="group" aria-label="Filter by status">
+                    <button type="button" class="orch-textfilter" aria-pressed="${!filter}" data-filter="">All <span class="orch-count">${data.nodes.length}</span></button>
+                    ${STATUSES.filter(s => counts[s]).map(s => `<button type="button" class="orch-textfilter" aria-pressed="${filter === s}" data-filter="${esc(s)}">${esc(ui.cap(ui.vstyle('orch_node_status', s).label))} <span class="orch-count">${counts[s]}</span></button>`).join('')}
+                </div>` : ''}
+            </div>
+            <div data-node-table></div>`;
         const paintTable = () => {
             const q = (el.querySelector('#orch-node-search').value || '').toLowerCase();
-            const f = Orch.parse().query.get('status') || '';
+            const f = route.query.get('status') || '';
             const rows = data.nodes.filter(n => (!f || statusKey(n) === f) && (!q || [n.name, n.id, n.address, ui.formatLabels(n.labels)].join(' ').toLowerCase().includes(q)));
-            el.querySelector('[data-node-table]').innerHTML = ui.table({
-                label: 'Nodes', empty: data.nodes.length ? 'No nodes match this filter.' : 'No nodes enrolled yet. Create a join token to add one.',
-                cols: [{ label: 'Name' }, { label: 'Status' }, { label: 'Labels' }, { label: 'Last seen' }, { label: 'Agent' }, { label: 'OS / kernel' }, { label: 'Sandbox' }, { label: 'Policy' }, { label: 'Actions', sr: true, cls: 'orch-actions-col' }],
-                rows: rows.map(n => {
-                    const accept = (n.actions || []).find(a => a.id === 'acceptNode' && a.enabled);
-                    return [nodeName(n), ui.chip(n.style), ui.labelChips(n.labels), ui.time(n.last_seen), agentCell(n),
-                        `${esc(n.summary?.os || '—')}<span class="orch-sub">${esc([n.summary?.kernel, n.summary?.arch].filter(Boolean).join(' · '))}</span>`,
-                        sandboxCell(n), policyCell(n),
-                        accept ? `<button type="button" class="w-btn" data-variant="tonal" data-tone="ok" data-size="sm" data-accept="${esc(n.id)}">${icon('check', 'sm')}<span>Accept</span></button>` : `<a class="w-btn" data-variant="ghost" data-size="sm" href="#/node/${encodeURIComponent(n.id)}">Open</a>`];
-                }),
-            });
-            el.querySelectorAll('[data-accept]').forEach(b => b.addEventListener('click', async () => {
-                const n = data.nodes.find(x => x.id === b.dataset.accept);
-                const ok = await ui.confirm({ title: `Accept ${n.name}?`, message: `It will receive work that targets its labels (${ui.formatLabels(n.labels) || 'no labels'}). Check the name and labels match the machine you enrolled.`, confirmLabel: 'Accept node' });
-                if (!ok) return;
-                try { await ui.command('acceptNode', { node_id: n.id }, { ok: `${n.name} accepted`, button: b }); Orch.refresh(); } catch (_) { /* toasted */ }
-            }));
+            el.querySelector('[data-node-table]').innerHTML = ui.rows(rows.map(n => nodeRow(n)), { label: 'Nodes', empty: data.nodes.length ? 'No nodes match this filter.' : 'No nodes enrolled yet. Set one up, or create a join token.' });
+            bindAccept(el, data.nodes);
+            Orch.markSelected?.();
         };
         paintTable();
         el.querySelector('#orch-node-search').addEventListener('input', ui.debounce(() => { setQuery({ q: el.querySelector('#orch-node-search').value }); paintTable(); }, 150));
@@ -270,8 +273,68 @@
             el.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
             paintTable();
         }));
+        return null;
+    }
+
+    /* ------------------------------------------------------------ fleet (MAIN with no node chosen) */
+    /* The fleet's plumbing beside the inventory, as a board of flat sections: the endpoint
+     * nodes dial, agent drift, test nodes, groups and join tokens. */
+    async function renderFleet(el, route, { isCurrent }) {
+        const data = await api.get('nodes');
+        if (!isCurrent()) return null;
+        const testStatuses = Object.values(data.test_nodes || {});
+        const n = data.nodes;
+        const online = n.filter(x => x.online).length;
+        const avg = key => { const v = n.map(x => x.summary?.[key]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + Number(b), 0) / v.length : null; };
+        const hot = n.filter(x => (x.summary?.max_disk_used_pct ?? 0) >= 80 || (x.summary?.memory_used_pct ?? 0) >= 80);
+        el.innerHTML = `
+            <header class="orch-head"><h1 class="w-page__title">Fleet</h1></header>
+            <div class="w-board orch-board">
+                <section class="w-board__cell" aria-labelledby="orch-fl-h">
+                    <header class="w-pane__head"><h2 class="w-pane__title" id="orch-fl-h">Fleet</h2></header>
+                    <span class="w-board__big">${esc(online)}<span class="orch-big__of"> / ${esc(n.length)} online</span></span>
+                    <p class="orch-board__line">${meter('average disk', avg('max_disk_used_pct'))}</p>
+                    <p class="orch-board__line">${meter('average mem', avg('memory_used_pct'))}</p>
+                    ${hot.length ? `<p class="orch-board__line" data-tone="attention">${esc(ui.plural(hot.length, 'node is', 'nodes are'))} above 80% disk or memory: ${hot.slice(0, 4).map(x => `<a href="#/node/${encodeURIComponent(x.id)}">${esc(x.name || x.id)}</a>`).join(', ')}</p>` : ''}
+                </section>
+                <section class="w-board__cell" aria-labelledby="orch-ep2-h">
+                    <header class="w-pane__head"><h2 class="w-pane__title" id="orch-ep2-h">Endpoint</h2></header>
+                    ${endpointLine(data.endpoint)}
+                    ${agentBanner(data.agents)}
+                </section>
+                <section class="w-board__cell" aria-labelledby="orch-tn-h">
+                    <header class="w-pane__head"><h2 class="w-pane__title" id="orch-tn-h">Test nodes</h2><button type="button" class="w-textbtn" data-tone="quiet" data-test-node>Start one</button></header>
+                    ${testStatuses.length ? ui.rows(testStatuses.map(t => ui.row({
+                        status: t.state === 'ready' ? 'done' : (t.state === 'failed' ? 'failed' : 'active'),
+                        title: t.container, titleHtml: `<span class="w-mono">${esc(t.container)}</span>`, href: t.node_id ? `#/node/${encodeURIComponent(t.node_id)}` : '',
+                        sub: ui.subline([esc(ui.cap(t.state === 'ready' ? 'ready' : (t.state || 'starting'))), `<span class="w-mono">${esc(t.image)}</span>`, t.error ? `<span data-tone="danger">${esc(t.error)}</span>` : '']),
+                        pinned: true,
+                        actions: t.node_id && (data.test_node_ids || []).includes(t.node_id) ? `<button type="button" class="w-textbtn" data-tone="danger" data-stop-test="${esc(t.node_id)}">Stop</button>` : '',
+                    })), { label: 'Test nodes' }) : '<p class="w-group__empty">A disposable node in a local container: canary, no sandbox, revoked when you stop it.</p>'}
+                </section>
+                <section class="w-board__cell" aria-labelledby="orch-tokens-h">
+                    <header class="w-pane__head"><h2 class="w-pane__title" id="orch-tokens-h">Join tokens</h2><button type="button" class="w-textbtn" data-tone="quiet" data-enrol>New token</button></header>
+                    ${ui.rows((data.tokens || []).slice(0, 10).map(t => {
+                        const expired = !t.used_at && t.expires_at && t.expires_at * 1000 < Date.now();
+                        const st = t.used_at ? 'done' : (expired ? 'skipped' : 'active');
+                        return ui.row({
+                            status: st, title: t.note || (Object.keys(t.labels || {}).length ? ui.formatLabels(t.labels) : 'join token'),
+                            href: t.node_id ? `#/node/${encodeURIComponent(t.node_id)}` : '',
+                            sub: ui.subline([t.used_at ? 'used' : (expired ? 'expired' : `open until ${esc(ui.when(t.expires_at))}`), t.canary ? 'canary' : '', t.note && Object.keys(t.labels || {}).length ? esc(ui.formatLabels(t.labels)) : '']),
+                            when: ui.time(t.created_at),
+                        });
+                    }), { label: 'Join tokens', empty: 'No join tokens yet.' })}
+                </section>
+                <section class="w-board__cell" data-span="all" aria-labelledby="orch-groups-h">
+                    <header class="w-pane__head"><h2 class="w-pane__title" id="orch-groups-h" title="Named label selectors you can target runs and access rules at">Groups</h2><button type="button" class="w-textbtn" data-tone="quiet" data-add-group>New group</button></header>
+                    ${ui.table({ label: 'Groups', empty: 'No groups yet. A group names a label selector you can target runs and access rules at.', cols: [{ label: 'Name' }, { label: 'Selector' }, { label: 'Members', num: true }, { label: 'Description' }, { label: 'Actions', sr: true, cls: 'w-table__actions' }],
+                        rows: data.groups.map((g, i) => [`<span class="orch-mono">${esc(g.name)}</span>`, `<code class="orch-mono">${esc(g.selector)}</code>`,
+                            String(n.filter(x => (x.groups || []).includes(g.name)).length), esc(g.description || ''),
+                            `<span class="orch-cell-acts"><button type="button" class="w-textbtn" data-tone="quiet" data-edit-group="${i}">Edit</button><button type="button" class="w-textbtn" data-tone="danger" data-del-group="${i}">Delete</button></span>`]) })}
+                </section>
+            </div>`;
         el.querySelector('[data-update-agents]')?.addEventListener('click', e => updateAgents(null, e.currentTarget));
-        el.querySelector('[data-enrol]').addEventListener('click', enrol);
+        el.querySelectorAll('[data-enrol]').forEach(b => b.addEventListener('click', enrol));
         el.querySelector('[data-test-node]').addEventListener('click', e => startTestNode(e.currentTarget, () => Orch.refresh()));
         el.querySelector('[data-add-group]').addEventListener('click', () => groupDialog(null, () => Orch.refresh()));
         el.querySelectorAll('[data-edit-group]').forEach(b => b.addEventListener('click', () => groupDialog(data.groups[Number(b.dataset.editGroup)], () => Orch.refresh())));
@@ -307,46 +370,59 @@
         const s = n.summary || {};
         const policy = n.policy || {};
         const execs = n.recent_executions || [];
+        const execRows = ui.rows(execs.map(x => ui.row({
+            status: ui.statusKey(x.style), title: x.tool, titleHtml: `<span class="w-mono">${esc(x.tool)}</span>`, href: `#/run/${encodeURIComponent(x.run_id)}`,
+            sub: ui.subline([esc(ui.cap(x.style?.label || x.state || '')), esc(x.step_name || x.step), x.exit_code == null ? '' : `exit ${esc(x.exit_code)}`, x.duration_s != null ? esc(ui.dur(x.duration_s)) : '', x.check_mode ? 'check mode' : '', x.rollback_of ? 'rollback' : '', x.reason ? esc(x.reason) : '']),
+            when: ui.time(x.created_at),
+        })), { label: 'Recent executions', empty: 'Nothing has run here yet.' });
+        const labels = Object.entries(n.labels || {});
         el.innerHTML = `
-            <header class="w-page__head orch-head">
-                <div class="orch-head__title">
-                    <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Node</span>
-                    <h1 class="w-page__title">${esc(n.name || n.id)}</h1>
-                    <div class="orch-head__meta">${ui.chip(n.style)}${n.canary ? ui.meta('canary', 'Tests and first batches run here') : ''}${n.kind ? ui.meta(n.kind) : ''}${ui.labelChips(n.labels, { empty: 'no labels' })}</div>
-                </div>
-            </header>
-            <div class="orch-stack">
-                <div class="orch-toolbar">${ui.actionBar(n.actions, { label: 'Node actions' })}${n.kind === 'container' && n.status !== 'revoked' ? '<button type="button" class="w-btn" data-variant="secondary" data-stop-test>' + icon('box') + '<span>Stop test node</span></button>' : ''}</div>
-                ${n.agent?.outdated ? ui.banner(n.agent.updatable ? 'attention' : 'caution', '◆', `<strong>Agent ${esc(n.agent_version)} is older than this master’s ${esc(n.agent.current)}.</strong> ${n.agent.updatable ? 'It can update itself.' : esc(n.agent.reason)}`, n.agent.updatable ? '<button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-update-agent>Update this node</button>' : '') : ''}
+            <header class="orch-head"><h1 class="w-page__title">${esc(n.name || n.id)}</h1></header>
+            <div class="orch-detail">
+                <div class="orch-detail__main">
                 ${n.sandbox === 'none' ? ui.banner('caution', '◆', '<strong>No sandbox.</strong> This node runs tools directly on the host (its local policy sets <code>sandbox: none</code>). Keep it to test or low-risk machines.') : ''}
                 ${(n.policy_errors || []).length ? ui.banner('danger', '✗', `<strong>The node’s local policy has errors</strong>, so it refuses work until they’re fixed: ${n.policy_errors.map(esc).join('; ')}`) : ''}
-                <div class="orch-grid-2">
-                    <article class="w-card orch-card" aria-labelledby="orch-facts-h"><header class="w-card__head"><h2 class="w-card__title" id="orch-facts-h">Facts</h2><span class="w-card__meta">${n.facts_at ? `collected ${esc(ui.ago(n.facts_at))}` : 'not collected yet'}</span></header>
-                        <div class="w-card__body">${ui.kv([
-                            ['Hostname', s.hostname], ['OS', s.os], ['Kernel', s.kernel], ['Architecture', s.arch], ['CPUs', s.cpus],
-                            ['Memory', s.memory_gb != null ? `${s.memory_gb} GB${s.memory_used_pct != null ? ` · ${s.memory_used_pct}% used` : ''}` : ''],
-                            ['Fullest disk', s.max_disk_used_pct != null ? `${s.max_disk_used_pct}% used` : ''], ['Uptime', s.uptime_days != null ? `${s.uptime_days} days` : ''],
-                            ['Load (1 min)', s.load], ['systemd', s.systemd == null ? '' : (s.systemd ? 'yes' : 'no')], ['Services', s.services],
-                        ])}
-                        ${(s.provides || []).length ? `<details class="orch-details"><summary>Provides ${esc(s.provides.length)} commands and services</summary><p class="orch-labels">${s.provides.map(p => `<span class="w-chip" data-variant="meta">${esc(p)}</span>`).join('')}</p></details>` : ''}</div></article>
-                    <article class="w-card orch-card" aria-labelledby="orch-pol-h"><header class="w-card__head"><h2 class="w-card__title" id="orch-pol-h">Node-local policy</h2><span class="w-card__meta">what this node will refuse</span></header>
-                        <div class="w-card__body">${Object.keys(policy).length ? ui.kv(POLICY_ROWS.filter(([k]) => k in policy).map(([k, label]) => [label, listText(policy[k])])) : '<p class="orch-muted">The node hasn’t reported a policy yet.</p>'}</div></article>
-                </div>
-                <div class="orch-grid-2">
-                    <article class="w-card orch-card" aria-labelledby="orch-id-h"><header class="w-card__head"><h2 class="w-card__title" id="orch-id-h">Identity</h2></header>
-                        <div class="w-card__body">${ui.kv([['Node id', `<code class="orch-mono">${esc(n.id)}</code>`, true], ['Address', n.address], ['Agent version', n.agent_version],
-                            ['Last seen', `${ui.time(n.last_seen)}${n.online ? ' · online' : ''}`, true], ['Enrolled', ui.when(n.created_at)]])}</div></article>
-                    <article class="w-card orch-card" aria-labelledby="orch-grp-h"><header class="w-card__head"><h2 class="w-card__title" id="orch-grp-h">Groups</h2></header>
-                        <div class="w-card__body">${(n.groups || []).length ? `<p class="orch-labels">${n.groups.map(g => `<span class="w-chip" data-variant="meta">${esc(g)}</span>`).join('')}</p>` : '<p class="orch-muted">Not in any group. Groups are label selectors; edit them on the Nodes page.</p>'}</div></article>
-                </div>
-                <section class="orch-section" aria-labelledby="orch-ex-h">
-                    <header class="orch-section__head"><h2 class="orch-section__title" id="orch-ex-h">Recent executions</h2></header>
-                    ${ui.table({ label: 'Recent executions', empty: 'Nothing has run here yet.', cols: [{ label: 'When' }, { label: 'Tool' }, { label: 'Step' }, { label: 'State' }, { label: 'Exit', num: true }, { label: 'Duration', num: true }, { label: 'Run' }],
-                        rows: execs.map(x => [ui.time(x.created_at), `<span class="orch-mono">${esc(x.tool)}</span>${x.check_mode ? ' ' + ui.meta('check mode') : ''}${x.rollback_of ? ' ' + ui.meta('rollback') : ''}`, esc(x.step_name || x.step),
-                            ui.chip(x.style, { title: x.reason || '' }), x.exit_code == null ? '—' : esc(x.exit_code), esc(ui.dur(x.duration_s)), `<a href="#/run/${encodeURIComponent(x.run_id)}" class="orch-mono">${esc(x.run_id)}</a>`]) })}
+                <section class="w-group" aria-labelledby="orch-hw-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-hw-h">Machine</h2><span class="orch-sub">${n.facts_at ? `facts collected ${esc(ui.ago(n.facts_at))}` : 'facts not collected yet'}</span></div>
+                    <div class="orch-gauges">
+                        ${s.max_disk_used_pct != null ? `<div class="orch-gauge"><span class="orch-gauge__label">Fullest disk</span><span class="orch-gauge__num">${esc(Math.round(s.max_disk_used_pct))}%</span><span class="w-bar" style="--v: ${esc(Math.round(s.max_disk_used_pct))}%; --w-bar-w: 100%"${meterTone(s.max_disk_used_pct) ? ` data-tone="${meterTone(s.max_disk_used_pct)}"` : ''} aria-hidden="true"></span></div>` : ''}
+                        ${s.memory_used_pct != null ? `<div class="orch-gauge"><span class="orch-gauge__label">Memory${s.memory_gb != null ? ` of ${esc(s.memory_gb)} GB` : ''}</span><span class="orch-gauge__num">${esc(Math.round(s.memory_used_pct))}%</span><span class="w-bar" style="--v: ${esc(Math.round(s.memory_used_pct))}%; --w-bar-w: 100%"${meterTone(s.memory_used_pct) ? ` data-tone="${meterTone(s.memory_used_pct)}"` : ''} aria-hidden="true"></span></div>` : ''}
+                        ${s.load != null ? `<div class="orch-gauge"><span class="orch-gauge__label">Load (1 min)${s.cpus ? ` on ${esc(ui.plural(s.cpus, 'CPU'))}` : ''}</span><span class="orch-gauge__num">${esc(s.load)}</span>${s.cpus ? `<span class="w-bar" style="--v: ${esc(Math.min(100, Math.round(100 * Number(s.load) / Number(s.cpus))))}%; --w-bar-w: 100%" aria-hidden="true"></span>` : ''}</div>` : ''}
+                        ${s.uptime_days != null ? `<div class="orch-gauge"><span class="orch-gauge__label">Uptime</span><span class="orch-gauge__num">${esc(s.uptime_days)} d</span></div>` : ''}
+                    </div>
+                    ${ui.kv([
+                        ['Hostname', s.hostname], ['OS', s.os], ['Kernel', s.kernel], ['Architecture', s.arch], ['CPUs', s.cpus],
+                        ['systemd', s.systemd == null ? '' : (s.systemd ? `yes${s.services != null ? ` · ${s.services} services` : ''}` : 'no')],
+                        ['Address', n.address],
+                    ])}
+                    ${(s.provides || []).length ? `<details class="w-disclose"><summary>Provides ${esc(s.provides.length)} commands and services</summary><p class="orch-labels">${s.provides.map(p => `<span class="orch-label">${esc(p)}</span>`).join('')}</p></details>` : ''}
                 </section>
-                <details class="orch-details orch-card-like"><summary>Raw facts</summary>${ui.code(ui.json(n.facts || {}), { lang: 'json', title: 'facts.json' })}</details>
+                <section class="w-group" aria-labelledby="orch-lab-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-lab-h">Labels and groups</h2></div>
+                    ${labels.length ? `<p class="orch-labels">${labels.map(([k, v]) => `<span class="orch-label">${esc(k)}=${esc(v)}</span>`).join('')}</p>` : '<p class="orch-muted">No labels. Runs target nodes by label; set some from the actions.</p>'}
+                    <p class="orch-sub">${(n.groups || []).length ? `In ${n.groups.map(esc).join(', ')}` : 'In no group (groups are label selectors, set on the fleet page).'}</p>
+                </section>
+                <section class="w-group" aria-labelledby="orch-pol-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-pol-h">Node-local policy</h2><span class="orch-sub">what this node will refuse</span></div>
+                    ${Object.keys(policy).length ? ui.kv(POLICY_ROWS.filter(([k]) => k in policy).map(([k, label]) => [label, listText(policy[k])])) : '<p class="orch-muted">The node hasn’t reported a policy yet.</p>'}</section>
+                </div>
+                <aside class="orch-detail__aside" aria-label="About this node">
+                    <div class="orch-toolbar">${ui.actionBar(n.actions, { label: 'Node actions' })}${n.kind === 'container' && n.status !== 'revoked' ? '<button type="button" class="w-textbtn" data-tone="danger" data-stop-test>Stop test node</button>' : ''}</div>
+                    <section class="w-group" aria-labelledby="orch-agent-h"><h2 class="w-group__title" id="orch-agent-h">Agent</h2>
+                        <p class="orch-note"${n.agent?.outdated ? ' data-tone="attention"' : ''}>${n.agent_version ? `mucli-node ${esc(n.agent_version)}` : 'Version not reported yet'}${n.agent?.outdated ? ` · master has ${esc(n.agent.current)}` : (n.agent_version ? ' · up to date' : '')}</p>
+                        ${n.agent?.outdated ? (n.agent.updatable ? '<button type="button" class="w-textbtn" data-update-agent>Update this node</button>' : `<p class="orch-sub">${esc(n.agent.reason || '')}</p>`) : ''}
+                    </section>
+                    <section class="w-group" aria-labelledby="orch-ex-h"><h2 class="w-group__title" id="orch-ex-h">Recent executions</h2>${execRows}</section>
+                    <details class="w-disclose"><summary>Details</summary>
+                        ${ui.kv([['Node id', `<code class="orch-mono">${esc(n.id)}</code>`, true], ['Address', n.address], ['Agent version', n.agent_version],
+                            ['Last seen', `${ui.time(n.last_seen)}${n.online ? ' · online' : ''}`, true], ['Enrolled', ui.when(n.created_at)]])}
+                        <details class="w-disclose"><summary>Raw facts</summary>${ui.code(ui.json(n.facts || {}), { lang: 'json', title: 'facts.json' })}</details>
+                    </details>
+                </aside>
             </div>`;
+        Orch.itemState([
+            { text: ui.cap(n.status === 'active' && !n.online ? 'offline' : (n.style?.label || n.status)), tone: n.status === 'pending' ? 'attention' : (n.status === 'active' && !n.online) || n.status === 'revoked' ? 'danger' : '' },
+            n.canary ? { text: 'canary' } : null, n.kind ? { text: n.kind } : null,
+            { text: Object.keys(n.labels || {}).length ? ui.formatLabels(n.labels) : 'no labels' },
+            n.last_seen ? { text: `seen ${ui.ago(n.last_seen)}` } : null,
+        ].filter(Boolean));
         const done = () => Orch.refresh();
         ui.bindActions(el, n.actions, { args: { node_id: n.id }, subject: n.name, done, dialogs: { labels: () => labelsDialog(n, done) } });
         el.querySelector('[data-update-agent]')?.addEventListener('click', e => updateAgents([n.id], e.currentTarget));
@@ -357,7 +433,7 @@
         return null;
     }
 
-    Orch.nodes = { enrol, endpointCard, nodeName, labelsDialog, updateAgents };
-    Orch.routes.nodes = { nav: 'nodes', title: 'Nodes', scopes: ['node'], render: renderList, crumbs: () => [{ label: 'Nodes' }] };
+    Orch.nodes = { enrol, endpointCard, endpointLine, nodeName, labelsDialog, updateAgents, renderInventory, nodeRow, meter, meters };
+    Orch.routes.nodes = { nav: 'nodes', title: 'Nodes', scopes: ['node'], render: renderFleet, crumbs: () => [{ label: 'Nodes' }] };
     Orch.routes.node = { nav: 'nodes', title: 'Node', scopes: ['node', 'run'], render: renderDetail, crumbs: r => [{ label: 'Nodes', to: '#/nodes' }, { label: r.parts[0] || 'Node' }] };
 })();

@@ -18,10 +18,11 @@
  * and a grouped listbox; focus is trapped, Esc closes, focus is restored.
  * It is loaded by templates/_layout.html on every page (/, /work,
  * /containers, /trace, /jobs/trace, /models/costs, /design); each page adds
- * its own sources. Navigation between pages (Chat, Work, Environments,
- * Trace, Job analysis, Model pricing) is registered here. `g c` / `g w` /
- * `g e` / `g t` jump between pages when focus is not in a text field
- * (G§10.5) unless the page owns `g` chords (/work).
+ * its own sources. Navigation between destinations (Chat, Work,
+ * Orchestration, Environments, Insights and its tabs, Settings) is registered
+ * here. `g c` / `g w` / `g o` / `g e` / `g i` / `g s` jump between them when
+ * focus is not in a text field (Mu §9.6; `g t` still opens Insights) unless
+ * the page owns `g` chords (/work).
  */
 (function () {
     'use strict';
@@ -208,7 +209,7 @@
         close();
         setTimeout(function () {
             if (typeof item.run === 'function') item.run();
-            else if (item.href) window.location.href = item.href;
+            else if (item.href) go(item.href);
         }, 0);
     }
 
@@ -249,8 +250,14 @@
         return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
     }
 
+    // Inside the persistent shell (mu_shell.js / an embedded view) navigation between
+    // destinations never reloads the page: MuNav switches views instead.
+    function go(href) {
+        if (window.MuNav && typeof window.MuNav.go === 'function') window.MuNav.go(href);
+        else window.location.href = href;
+    }
     var goPending = 0;
-    var GO_KEYS = { c: '/', w: '/work', o: '/orchestration', e: '/containers', t: '/trace' };
+    var GO_KEYS = { c: '/', w: '/work', o: '/orchestration', e: '/containers', i: '/trace', t: '/trace', s: '/settings' };
     document.addEventListener('keydown', function (event) {
         if (!settings.hotkey || document.body.getAttribute('data-palette-hotkey') === 'off') return;
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && String(event.key).toLowerCase() === 'k') {
@@ -264,7 +271,7 @@
         if (goPending && Date.now() - goPending < 1200 && GO_KEYS[key]) {
             goPending = 0;
             event.preventDefault();
-            window.location.href = GO_KEYS[key];
+            go(GO_KEYS[key]);
             return;
         }
         goPending = key === 'g' ? Date.now() : 0;
@@ -275,10 +282,17 @@
         { id: 'nav:work', group: 'Navigate', label: 'Work', icon: 'briefcase', href: '/work', key: 'g w' },
         { id: 'nav:orchestration', group: 'Navigate', label: 'Orchestration', icon: 'server', href: '/orchestration', key: 'g o' },
         { id: 'nav:environments', group: 'Navigate', label: 'Environments', icon: 'box', href: '/containers', key: 'g e' },
-        { id: 'nav:trace', group: 'Navigate', label: 'Trace', icon: 'activity', href: '/trace', key: 'g t' },
-        { id: 'nav:job-analysis', group: 'Navigate', label: 'Job analysis', icon: 'bar-chart-3', href: '/jobs/trace' },
-        { id: 'nav:model-pricing', group: 'Navigate', label: 'Model pricing', icon: 'sliders-horizontal', href: '/models/costs' },
-        { id: 'nav:theme', group: 'Actions', label: 'Toggle Paper / Dusk theme', icon: 'moon', run: function () { if (window.MuTheme) window.MuTheme.toggle(); } },
+        { id: 'nav:trace', group: 'Navigate', label: 'Insights · Runs', hint: 'Trace analyzer', icon: 'activity', href: '/trace', key: 'g i' },
+        { id: 'nav:job-analysis', group: 'Navigate', label: 'Insights · Jobs', hint: 'Job analysis', icon: 'bar-chart-3', href: '/jobs/trace' },
+        { id: 'nav:model-pricing', group: 'Navigate', label: 'Insights · Costs', hint: 'Model pricing', icon: 'sliders-horizontal', href: '/models/costs' },
+        { id: 'nav:settings', group: 'Navigate', label: 'Settings', icon: 'settings', href: '/settings', key: 'g s' },
+        { id: 'nav:theme', group: 'Actions', label: 'Toggle light / dark', icon: 'moon', run: function () { if (window.MuTheme) window.MuTheme.toggle(); } },
+        { id: 'theme:wash', group: 'Actions', label: 'Theme: Wash', icon: 'drop', run: function () { if (window.MuPalette) window.MuPalette.set('wash'); } },
+        { id: 'theme:darcula', group: 'Actions', label: 'Theme: Darcula', icon: 'drop', run: function () { if (window.MuPalette) window.MuPalette.set('darcula'); } },
+        { id: 'theme:one', group: 'Actions', label: 'Theme: One', icon: 'drop', run: function () { if (window.MuPalette) window.MuPalette.set('one'); } },
+        { id: 'theme:material', group: 'Actions', label: 'Theme: Material', icon: 'drop', run: function () { if (window.MuPalette) window.MuPalette.set('material'); } },
+        { id: 'theme:tokyo', group: 'Actions', label: 'Theme: Tokyo Night', icon: 'drop', run: function () { if (window.MuPalette) window.MuPalette.set('tokyo'); } },
+        { id: 'nav:decoration', group: 'Actions', label: 'Reduce decoration on / off', icon: 'drop', run: function () { if (window.MuDecoration) window.MuDecoration.set(window.MuDecoration.reduced() ? 'full' : 'reduced'); } },
     ], { priority: 100 });
 
     window.WashPalette = {

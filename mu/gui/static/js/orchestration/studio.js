@@ -265,7 +265,7 @@
         const rbHref = r => (r.status === 'in_review' ? Orch.catalog.runbookHref(r) : `#/studio/runbook/${encodeURIComponent(r.runbook_id)}/${encodeURIComponent(r.version)}`);
         el.innerHTML = `
             <header class="w-page__head orch-head">
-                <div><h1 class="w-page__title">Tool studio</h1><p class="w-page__lede">Design tools with the AI: describe the goal, shape the spec, test on a canary, then review and publish.</p></div>
+                <div><h1 class="w-page__title">Tool studio</h1></div>
                 <span class="orch-spacer"></span>
                 <div class="w-btn-row"><button type="button" class="w-btn" data-variant="secondary" data-chat>${icon('message-circle')}<span>Open discovery chat</span></button>
                 <a class="w-btn" data-variant="secondary" href="#/studio/runbook/new">${icon('plus')}<span>New runbook</span></a>
@@ -319,7 +319,6 @@
         el.innerHTML = `
             <header class="w-page__head orch-head">
                 <div class="orch-head__title">
-                    <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Draft</span>
                     <h1 class="w-page__title">${esc(t.title)} <span class="orch-version-tag orch-mono">v${esc(t.version)}</span></h1>
                     <div class="orch-head__meta">${ui.chip(t.style)}${ui.effectChip(t.effect_style, t.effect)}<span class="orch-mono orch-sub">${esc(t.ref)}</span><span data-dirty hidden>${ui.chip({ semantic: 'caution', glyph: '◆', label: 'Unsaved changes' })}</span></div>
                 </div>

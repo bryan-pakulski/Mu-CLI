@@ -23,17 +23,7 @@
 {% endblock %}
 {% block ambient %}dawn{% endblock %}
 {% block body_class %}gallery-body{% endblock %}
-{% block crumbs %}
-    <li class="w-breadcrumb__item"><span aria-current="page">Design gallery</span></li>
-{% endblock %}
-{% block topbar_chips %}
-    <li>{{ w.chip("Wash v1", variant="meta") }}</li>
-    <li class="w-optional">{{ w.status("waiting", label="1 needs you") }}</li>
-    <li class="w-optional">{{ w.chip("Live", tone="ok", glyph="●") }}</li>
-{% endblock %}
-{% block topbar_tools %}
-    {{ w.btn("Search", variant="icon", icon="search", attrs={"class": "w-optional"}) }}
-{% endblock %}
+{% block page_title %}Design gallery{% endblock %}
 
 {%- macro section(id, eyebrow, title, theme) -%}
 <section class="g-section" aria-labelledby="g-{{ id }}-{{ theme }}">
@@ -365,6 +355,7 @@ RUN pip install -r requirements.txt</textarea>
 {{ chat_components(theme) }}
 {%- endmacro -%}
 
+{#- The gallery carries its own header (Mu: no empty frame header). -#}
 {% block content %}
 <div class="w-hero" data-art="hero">
     <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Design system</span>

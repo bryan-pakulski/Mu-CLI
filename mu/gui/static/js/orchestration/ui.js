@@ -48,22 +48,32 @@
     const cap = s => { s = String(s || ''); return s ? s[0].toUpperCase() + s.slice(1) : s; };
     const json = value => JSON.stringify(value, null, 2);
 
-    /* ------------------------------------------------------------ chips */
-    function chip(style, { label, title, sm } = {}) {
+    /* ------------------------------------------------------------ marks (Mu §5.4) */
+    /* Status is a sign plus a word, never a pill: the sign is the vocabulary status key
+     * (waiting ◆, active ●, failed ✗, done ✓, pending ○ …); colour only where it asks for you. */
+    const SEMANTIC_STATUS = { ok: 'done', running: 'active', attention: 'waiting', danger: 'failed', caution: 'unverified', neutral: 'pending', plan: 'pending', info: 'pending' };
+    const statusKey = style => (style && (style.status || SEMANTIC_STATUS[style.semantic])) || 'pending';
+    function sign(style) {
+        const st = statusKey(style);
+        const glyph = style?.glyph || ((window.WASH?.vocabulary?.status || {})[st] || {}).glyph || '○';
+        return `<span class="w-sign" data-status="${esc(st)}" aria-hidden="true">${esc(glyph)}</span>`;
+    }
+    function chip(style, { label, title } = {}) {
         if (!style) return '';
         const text = label || cap(style.label || style.status || '');
-        return `<span class="w-chip orch-chip" data-tone="${esc(style.semantic || 'neutral')}" data-status="${esc(style.status || '')}"${title ? ` title="${esc(title)}"` : ''}${sm ? ' data-size="sm"' : ''}><span class="w-chip__glyph" aria-hidden="true">${esc(style.glyph || '○')}</span><span>${esc(text)}</span></span>`;
+        return `<span class="w-signword orch-mark" data-status="${esc(statusKey(style))}"${title ? ` title="${esc(title)}"` : ''}>${sign(style)}${esc(text)}</span>`;
     }
-    const EFFECT_GLYPH = { ok: '○', attention: '◆', danger: '✗' };
+    /* Effects are words (Mu §5.4): destructive in danger ink, the rest quiet. */
     function effectChip(es, effect) {
         if (!es) return '';
-        return `<span class="w-chip orch-effect" data-tone="${esc(es.semantic)}" data-effect="${esc(effect || '')}" title="Effect: ${esc(es.label)}"><span class="w-chip__glyph" aria-hidden="true">${EFFECT_GLYPH[es.semantic] || '◆'}</span><span>${esc(cap(es.label))}</span></span>`;
+        return `<span class="orch-effect" data-tone="${esc(es.semantic)}" data-effect="${esc(effect || '')}" title="Effect: ${esc(es.label)}">${esc(cap(es.label))}</span>`;
     }
-    const meta = (text, title) => `<span class="w-chip" data-variant="meta"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
+    const effectWord = (es, effect) => (es ? `<span class="orch-effect" data-tone="${esc(es.semantic)}" data-effect="${esc(effect || '')}">${esc(es.label)}</span>` : '');
+    const meta = (text, title) => `<span class="orch-meta"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
     function labelChips(labels, { empty = '—' } = {}) {
         const entries = Object.entries(labels || {});
         if (!entries.length) return `<span class="orch-muted">${esc(empty)}</span>`;
-        return `<span class="orch-labels">${entries.map(([k, v]) => `<span class="w-chip orch-label" data-variant="meta">${esc(k)}=${esc(v)}</span>`).join('')}</span>`;
+        return `<span class="orch-labels">${entries.map(([k, v]) => `<span class="orch-label">${esc(k)}=${esc(v)}</span>`).join('')}</span>`;
     }
     /* A style from a WASH vocabulary table ({key: {status, label}}) when the server sent none. */
     function vstyle(tableName, key) {
@@ -73,7 +83,7 @@
         const spec = (v.status || {})[st] || { glyph: '○', semantic: 'neutral' };
         return { status: st, glyph: spec.glyph, semantic: spec.semantic, label: row ? row.label : String(key || '').replace(/_/g, ' ') };
     }
-    const status = (style, text) => `<span class="w-status" data-tone="${esc(style?.semantic || 'neutral')}"><span class="w-status__glyph" aria-hidden="true">${esc(style?.glyph || '○')}</span>${esc(text || cap(style?.label || ''))}</span>`;
+    const status = (style, text) => chip(style, { label: text });
 
     /* ------------------------------------------------------------ blocks */
     const loading = (text = 'Loading…') => `<div class="orch-loading" role="status"><span class="w-inkdrop" data-tone="running" aria-hidden="true"></span>${esc(text)}</div>`;
@@ -88,7 +98,7 @@
     }
     function kv(rows) {
         const items = rows.filter(r => r && r[1] !== undefined && r[1] !== null && r[1] !== '');
-        return `<dl class="orch-kv">${items.map(([k, v, raw]) => `<div class="orch-kv__row"><dt>${esc(k)}</dt><dd>${raw ? v : esc(v)}</dd></div>`).join('')}</dl>`;
+        return `<dl class="w-facts orch-kv">${items.map(([k, v, raw]) => `<dt>${esc(k)}</dt><dd>${raw ? v : esc(v)}</dd>`).join('')}</dl>`;
     }
     function table({ cols, rows, empty: emptyText = 'Nothing here yet.', stack = true, label = '', cls = '' }) {
         if (!rows.length) return `<p class="orch-muted orch-empty-line">${esc(emptyText)}</p>`;
@@ -292,6 +302,26 @@
         finally { if (button && document.contains(button)) { button.removeAttribute('aria-busy'); button.disabled = false; } }
     }
 
+    /* ------------------------------------------------------------ rows (Mu §5.1) */
+    /* row({status, key, title, href, sub, when, actions, pinned, attrs}) — sub/actions are HTML. */
+    function row({ status: st, glyph, key = '', title, titleHtml = '', href = '', sub = '', when: whenHtml = '', actions = '', pinned = false, attrs = '' }) {
+        const tag = href ? 'a' : 'div';
+        const signHtml = st ? `<span class="w-sign" data-status="${esc(st)}" aria-hidden="true">${esc(glyph || ((window.WASH?.vocabulary?.status || {})[st] || {}).glyph || '○')}</span>` : '';
+        return `<li class="w-row"${pinned ? ' data-pinned' : ''}${attrs}>${signHtml}<${tag} class="w-row__main"${href ? ` href="${esc(href)}"` : ''}>`
+            + `<span class="w-row__title">${key ? `<span class="w-row__key">${esc(key)}</span>` : ''}${titleHtml || esc(title)}</span>`
+            + `${sub ? `<span class="w-row__sub">${sub}</span>` : ''}</${tag}>`
+            + `${whenHtml ? `<span class="w-row__when">${whenHtml}</span>` : ''}${actions ? `<span class="w-row__actions">${actions}</span>` : ''}</li>`;
+    }
+    const rows = (items, { empty: emptyText = '', label = '' } = {}) => (items.length
+        ? `<ul class="w-rows"${label ? ` aria-label="${esc(label)}"` : ''}>${items.join('')}</ul>`
+        : (emptyText ? `<p class="w-group__empty">${esc(emptyText)}</p>` : ''));
+    /* A state sentence as HTML (Mu §4.2): parts {text, tone?} → .w-state__part spans (the
+     * separators are drawn by mu.css); falsy parts dropped. */
+    const stateHtml = parts => (parts || []).filter(Boolean).map(p => (typeof p === 'string' ? { text: p } : p))
+        .map(p => `<span class="w-state__part"${p.tone ? ` data-tone="${esc(p.tone)}"` : ''}>${esc(p.text)}</span>`).join('');
+    /* A sub line: parts joined by " · ", falsy parts dropped (parts are HTML). */
+    const subline = parts => parts.filter(Boolean).join(' · ');
+
     /* ------------------------------------------------------------ actions */
     const ACTION_ICONS = {
         acceptNode: 'check', quarantineNode: 'shield', unquarantineNode: 'shield-check', revokeNode: 'circle-x',
@@ -312,6 +342,19 @@
             const disabled = a.enabled ? '' : ` aria-disabled="true" title="${esc(a.reason || 'Not available now')}"`;
             const ic = ACTION_ICONS[a.id];
             return `<button type="button" class="w-btn orch-action" data-variant="${variant}"${tone}${size ? ` data-size="${esc(size)}"` : ''} data-action-index="${i}" data-action="${esc(a.id)}"${a.danger && a.enabled ? ' data-danger' : ''}${disabled}>${ic ? icon(ic) : ''}<span>${esc(a.label)}</span></button>`;
+        }).join('');
+    }
+    /* Row actions (Mu §5.1): text buttons in `only` order; the primary one in ink, danger in
+     * danger ink, the rest quiet. Same data-action-index contract, so bindActions/runAction (typed
+     * confirmation, prompts) apply unchanged. */
+    function rowActions(actions, { only = null, exclude = [], primaryLast = true } = {}) {
+        const order = (actions || []).map((a, i) => [a, i]);
+        if (only) order.sort((x, y) => only.indexOf(x[0].id) - only.indexOf(y[0].id));
+        else if (primaryLast) order.sort((x, y) => (x[0].primary && x[0].enabled ? 1 : 0) - (y[0].primary && y[0].enabled ? 1 : 0));
+        return order.map(([a, i]) => {
+            if (a.hidden || !a.enabled || exclude.includes(a.id) || (only && !only.includes(a.id))) return '';
+            const tone = a.primary ? '' : (a.danger ? ' data-tone="danger"' : ' data-tone="quiet"');
+            return `<button type="button" class="w-textbtn orch-action" data-action-index="${i}" data-action="${esc(a.id)}"${a.danger ? ' data-danger' : ''}${tone}>${esc(a.label)}</button>`;
         }).join('');
     }
     /* Enabled actions as buttons; unavailable ones fold into "N unavailable" with their reasons visible. */
@@ -399,7 +442,8 @@
     const formatLabels = labels => Object.entries(labels || {}).map(([k, v]) => `${k}=${v}`).join(', ');
 
     window.OrchUI = {
-        esc, icon, uid, ago, when, time, dur, plural, cap, json, chip, effectChip, meta, labelChips, status, vstyle,
+        esc, icon, uid, ago, when, time, dur, plural, cap, json, chip, sign, statusKey, effectChip, effectWord, meta, labelChips, status, vstyle,
+        row, rows, subline, rowActions, stateHtml,
         loading, empty, errorState, banner, kv, table, code, highlight, langFor, copyText, outputView,
         tabs, bindTabs, dialog, removeAfterClose, confirm, prompt, toast, busy, actionButtons, actionBar, bindActions, runAction,
         command, debounce, parseLabels, formatLabels,

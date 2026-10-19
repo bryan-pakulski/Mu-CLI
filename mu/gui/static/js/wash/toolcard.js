@@ -5,7 +5,10 @@
  *   renderToolCards(events, options)   a trace's event list → HTML string
  *                                       (pairs tool_call/tool_result, groups
  *                                       3+ consecutive same-kind calls, adds
- *                                       thinking rows and notes)
+ *                                       thinking rows and notes; a finished
+ *                                       trace folds into one summary line,
+ *                                       "Read 3 files · ran 2 commands",
+ *                                       that expands to the rows — Mu §10.1)
  *   buildToolCards(events, options)    the view model renderToolCards uses
  *   subagentActionCard(action)         maps a sub-agent action onto a card
  *
@@ -394,6 +397,40 @@
         return '<p class="w-tracenote">' + icon('info') + '<span>' + esc(item.ev && item.ev.text) + '</span></p>';
     }
 
+    /* One summary line per finished turn (Mu §10.1): "Read 3 files · ran 2
+     * commands", with the failed count in danger ink. Counts every call,
+     * grouped or not, in the order the kinds first appear. */
+    function turnSummary(items) {
+        var order = [];
+        var counts = {};
+        var failed = 0;
+        function add(card) {
+            if (!counts[card.kind]) { counts[card.kind] = 0; order.push(card.kind); }
+            counts[card.kind] += 1;
+            if (card.state === 'error') failed += 1;
+        }
+        items.forEach(function (item) {
+            if (item.type === 'card') add(item);
+            else if (item.type === 'group') item.cards.forEach(add);
+        });
+        var parts = order.map(function (kind, i) {
+            var spec = KINDS[kind] || KINDS.tool;
+            var n = counts[kind];
+            var verb = i === 0 ? spec.verb : spec.verb.toLowerCase();
+            return verb + ' ' + n + ' ' + spec.noun[n === 1 ? 0 : 1];
+        });
+        return { text: parts.join(' · '), failed: failed };
+    }
+
+    function renderItems(items, options) {
+        return items.map(function (item) {
+            if (item.type === 'group') return renderGroup(item, options);
+            if (item.type === 'thinking') return renderThinking(item);
+            if (item.type === 'note') return renderNote(item);
+            return renderToolCard(item, options);
+        }).join('');
+    }
+
     function renderToolCards(events, options) {
         var items = buildToolCards(events, options);
         if (!items.length) {
@@ -401,12 +438,27 @@
                 ? '<div class="w-toollist"><p class="w-tracenote" data-state="working"><span class="w-inkdrop" data-size="sm" data-tone="running"></span><span>Working…</span></p></div>'
                 : '';
         }
-        return '<div class="w-toollist">' + items.map(function (item) {
-            if (item.type === 'group') return renderGroup(item, options);
-            if (item.type === 'thinking') return renderThinking(item);
-            if (item.type === 'note') return renderNote(item);
-            return renderToolCard(item, options);
-        }).join('') + '</div>';
+        var calls = items.filter(function (item) { return item.type === 'card' || item.type === 'group'; });
+        // A finished turn with tool calls folds into one line; a running turn
+        // stays open so you can watch it work.
+        if (!(options && options.running) && calls.length) {
+            var first = calls[0];
+            var source = first.source;
+            var id = 'sum:' + first.id;
+            registry.set(id, { __summary: true, source: source });
+            var open = !!(source && source.summaryOpen);
+            var sum = turnSummary(items);
+            return '<div class="w-toollist" data-summary' + (open ? ' data-open' : '') + (sum.failed ? ' data-state="error"' : '') + '>'
+                + '<button type="button" class="w-toolsummary" data-tc-toggle="' + esc(id) + '" aria-expanded="' + (open ? 'true' : 'false') + '">'
+                + '<span class="w-toolsummary__caret" aria-hidden="true">▸</span>'
+                + (sum.failed ? '<span class="w-toolsummary__glyph" aria-hidden="true">✗</span>' : '')
+                + '<span class="w-toolsummary__label">' + esc(sum.text) + '</span>'
+                + (sum.failed ? '<span class="w-toolsummary__failed">' + sum.failed + ' failed</span>' : '')
+                + '</button>'
+                + (open ? '<div class="w-toolsummary__body">' + renderItems(items, options) + '</div>' : '')
+                + '</div>';
+        }
+        return '<div class="w-toollist">' + renderItems(items, options) + '</div>';
     }
 
     /* Sub-agent action → card. The action object is the reactive source, so
@@ -456,6 +508,8 @@
         if (!entry) return;
         if (entry.__group) {
             if (entry.source) entry.source.groupOpen = !entry.source.groupOpen;
+        } else if (entry.__summary) {
+            if (entry.source) entry.source.summaryOpen = !entry.source.summaryOpen;
         } else {
             var isOpen = toggle.getAttribute('aria-expanded') === 'true';
             entry.open = !isOpen;

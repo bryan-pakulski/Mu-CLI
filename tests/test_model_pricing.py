@@ -267,9 +267,11 @@ def test_cost_registry_is_editable_in_gui_and_exposed_to_all_control_planes():
     assert 'input_modalities' in script
     assert 'output_modalities' in script
     assert 'capabilities' in script
-    # Wash W2: the page uses the shared app top bar from _layout.html.
+    # Mu §4: the page uses the shared page header from _layout.html (Save is its
+    # primary action) and sits under Insights' tabs.
     assert '{% extends "_layout.html" %}' in html
-    assert '{% block topbar_tools %}' in html
+    assert '{% block page_actions %}' in html and 'id="mc-save" class="w-btn" data-variant="primary"' in html
+    assert '{{ w.insights_tabs("costs") }}' in html
     assert '.mc-table' in css
     assert 'estimated_token' in config
     assert '"glm-5.2:cloud"' in config

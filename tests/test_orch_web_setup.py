@@ -32,9 +32,13 @@ def test_route_and_entry_points_are_registered():
     assert template.index("orchestration/nodes.js") < template.index("orchestration/setup.js") < template.index("orchestration/view.js")
     assert "Orch.routes.setup = { nav: 'nodes'" in SETUP
     nodes = (JS / "nodes.js").read_text(encoding="utf-8")
-    assert 'data-variant="primary" href="#/setup"' in nodes and "Quick enrol" in nodes
+    assert "Quick enrol" in nodes
     view = (JS / "view.js").read_text(encoding="utf-8")
-    assert 'href="#/setup"' in view and "orch:setup" in view and "Quick enrol" in view
+    # Mu: the wizard is in the page header on every top route (Nodes included) and is the
+    # primary action of the first-run empty state; the palette and quick enrol stay.
+    assert '<a class="w-textbtn" href="#/setup">Set up a node</a>' in view
+    assert 'data-variant="primary" href="#/setup"' in view
+    assert "orch:setup" in view and "Quick enrol" in view
 
 
 def test_wizard_uses_the_backend_it_needs():
@@ -109,3 +113,23 @@ def test_policy_warnings_and_failure_hints():
     assert "allowed_tools" in out["tools"] and "accept_categories" in out["cat"] and "journalctl" in out["other"]
     assert out["reach"].startswith("curl -sk") and "https://10.0.0.5:30312/api/orchestration/node/install.sh" in out["reach"]
     assert out["exec"] == "main"
+
+
+def test_orchestration_is_a_pane_workspace():
+    """Mu revision 2 (§11b): the page is list | main | aside; a list item fills main in place
+    (the list stays), its context column moves to the aside, Now is a board, and a run's
+    selected execution sits beside its grid."""
+    template = (ROOT / "mu" / "gui" / "templates" / "orchestration.html").read_text(encoding="utf-8")
+    assert '<div class="w-panes orch-app orch-panes" id="orch-app" data-csrf="{{ csrf_token }}" data-layout="main">' in template
+    for pane in ('data-pane="list" id="orch-list"', 'data-pane="main" id="orch-main"', 'data-pane="aside" id="orch-aside"'):
+        assert pane in template
+    view = (JS / "view.js").read_text(encoding="utf-8")
+    assert "runs: { list: 'runs', items: ['run'], title: 'Runs' }" in view
+    assert "const aside = viewEl.querySelector('.orch-detail > .orch-detail__aside');" in view
+    assert "history.replaceState(null, '', href);" in view          # Runs/Catalog open their first row
+    assert 'class="w-board orch-board orch-nowboard"' in view
+    runs = (JS / "runs.js").read_text(encoding="utf-8")
+    assert "data-exec-panel" in runs and "if (panel && asideShows()) showExec(b.dataset.exec, { user: true });" in runs
+    nodes = (JS / "nodes.js").read_text(encoding="utf-8")
+    assert "async function renderInventory(" in nodes and "async function renderFleet(" in nodes
+    assert "meter('disk', s?.max_disk_used_pct)" in nodes

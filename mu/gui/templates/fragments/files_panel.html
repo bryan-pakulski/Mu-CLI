@@ -5,10 +5,8 @@
        x-transition.opacity.duration.200ms>
 
     <div class="panel-head files-browser-head">
-        <div>
-            <div class="panel-title">Files</div>
-            <div class="panel-subtitle">Browse the attached workspace. Editing stays in your normal development environment.</div>
-        </div>
+        <!-- The panel head already says Files (Mu §6.1). -->
+        <p class="files-browser-note">Browse the attached workspace; editing stays in your editor.</p>
         <button type="button" class="files-refresh w-btn" data-variant="icon" @click="$store.files.refreshTree()" title="Refresh workspace" aria-label="Refresh workspace"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg></button>
     </div>
 

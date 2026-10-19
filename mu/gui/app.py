@@ -178,7 +178,13 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     # Shared status vocabulary for the Wash macros (templates/macros/wash.html).
     templates.env.globals["wash_vocab"] = load_vocabulary()
     templates.env.globals["wash_state"] = state_style
+    from mu.design import palette_choices as _palette_choices
+    templates.env.globals["wash_palette_choices"] = _palette_choices
     app.state.templates = templates
+    # The persistent shell: browser navigations to a destination get one shell
+    # document; each destination then loads into it as a keep-alive view.
+    from mu.gui import shell as mu_shell
+    mu_shell.install(app, templates)
 
     # The job trace and model pricing pages moved from static HTML onto the
     # shared Jinja layout. Keep old bookmarks working (query string included).
@@ -258,6 +264,14 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     @app.get("/models/costs", response_class=HTMLResponse)
     async def model_costs(request: Request):
         return templates.TemplateResponse(request, "model_costs.html", {"nav_active": "model_costs"})
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        return templates.TemplateResponse(request, "settings.html", {"nav_active": "settings"})
+
+    @app.get("/insights", include_in_schema=False)
+    async def insights_page():
+        return RedirectResponse("/trace", status_code=307)
 
     @app.get("/work", response_class=HTMLResponse)
     async def engineering_work(request: Request):

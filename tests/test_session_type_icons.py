@@ -47,7 +47,13 @@ class TestWebGuiGlyphs:
 
     def test_session_lists_use_the_avatar(self):
         assert "sessionAvatarMarkup(s.name, s.session_type, 'lg')" in read(WELCOME_HTML)
-        assert "sessionAvatarMarkup(s.name, s.session_type)" in read(ROOT / "mu/gui/templates/index.html")
+        # Mu §3.2: the rail shows the type as the Wash line icon (message-circle chat,
+        # folder workspace, box container) and in the row's hover title, not an avatar.
+        index = read(ROOT / "mu/gui/templates/index.html")
+        assert "x-html=\"sessionTypeIconMarkup(s.session_type || 'workspace', 'w-icon')\"" in index
+        src = read(ROOT / "mu/gui/static/js/app.js")
+        assert '<use href="/static/icons/wash.svg#i-${MUCLI_SESSION_TYPE_ICON_NAMES[normalized]}"></use>' in src
+        assert "(s.session_type || 'workspace') + ' session'" in index
 
     def test_creation_wizard_has_icons(self):
         src = read(WELCOME_HTML)

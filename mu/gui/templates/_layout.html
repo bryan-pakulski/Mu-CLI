@@ -1,34 +1,50 @@
-{#- Shared Wash layout (spec §4.2). Every page extends this, directly or via
-    base.html. Blocks:
+{#- Shared layout (Mu, documentation/design/mu_style_guide.md §3). Every page
+    extends this, directly or via base.html. The frame is the rail (the shared
+    sidebar on the painted wash) and the leaf: one glass sheet (<main
+    class="w-stage">) that holds the page. There is no top bar.
+
+    Blocks:
 
       title          <title> text
       page_css       the page's bundle <link> (static/css/wash/patterns/*.css)
       head_scripts   page / vendor scripts (defer where possible)
       body_class, body_attrs
-      ambient        the fixed ambient wash behind the glass (G§6.2):
+      ambient        the fixed ambient wash around the leaf (G§6.2):
                      dawn (default) | lagoon | meadow
       shell_attrs    extra attributes on .w-shell (e.g. Alpine bindings)
-      mark_attrs     extra attributes on the wordmark μ mark (data-state="working")
-      page           the whole body content; defaults to the app shell below.
-                     Pages with their own chrome (chat, work) replace it.
-      crumbs         <li class="w-breadcrumb__item"> items after "μcli"
-      crumbs_attrs   extra attributes on the breadcrumb <ol> (e.g. an id a
-                     page script rewrites)
-      topbar_chips   <li> status chips (.w-chip) on the right of the top bar
-      topbar_chips_attrs  extra attributes on the chips <ul>
-      sidebar_extra  an extra page section in the shared sidebar, rendered
-                     under the primary navigation (e.g. the Work sub-pages)
-      topbar_tools   tool buttons before the theme toggle
-      content        page content inside <main class="w-stage">
+      mark_attrs     extra attributes on the rail's μ mark (data-state="working")
+      page           the whole body content; defaults to the frame below.
+      leaf_alert     a single line at the top of the leaf, only while something
+                     is broken (reconnecting, Docker down, dispatch paused)
+      pagehead       the page header (§4); pages that need their own (chat)
+                     replace it. Inside it:
+        back         an optional "← Runs" link above the title
+        page_title   the noun: Work, Orchestration, …
+        page_actions the one primary ink pill, plus text buttons / ⋯
+        page_state   the state sentence: .w-state__part spans, zeros left out
+        page_tabs    text tabs (<a class="w-pagetabs__tab">), at most four + More
+      pagehead_attrs, title_attrs, state_attrs, tabs_attrs
+                     extra attributes (ids a page script rewrites)
+      sidebar_extra  an extra section in the rail under the destinations
+                     (chat sessions only)
+      content        page content inside the leaf
       overlays       global modals / popovers (partials/*.html)
       body_end       late scripts
 
-    Context: `nav_active` (chat | work | environments | trace | job_trace |
-    model_costs | design) highlights the sidebar item.
+    Hash-routed pages (Work, Orchestration) rewrite the header per route with
+    window.WashHead.set({title, back, state, tabs, actions}) (wash_shell.js).
+
+    Context: `nav_active` (chat | work | orchestration | environments |
+    insights | settings | design) highlights the rail item.
 -#}
 {%- import "macros/wash.html" as w -%}
+{#- Embed mode: the page is a keep-alive view inside the persistent shell
+    (mu/gui/shell.py) — no rail, no ambient wash; a page's `sidebar_extra`
+    (chat sessions) becomes its own side column inside the view. -#}
+{%- set embed = mu_is_embed(request) if (request is defined and mu_is_embed is defined) else false -%}
+{%- set mu_mode = (mu_destinations.get(request.url.path, ("", ""))[1] if (request is defined and mu_destinations is defined) else "") -%}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if embed %} data-embed{% endif %}{% if mu_mode %} data-mode="{{ mu_mode }}"{% endif %}>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="{% block viewport %}width=device-width, initial-scale=1, viewport-fit=cover{% endblock %}">
@@ -62,27 +78,34 @@
 </head>
 <body class="{% block body_class %}{% endblock %}" data-ambient="{% block ambient %}dawn{% endblock %}"{% block body_attrs %}{% endblock %}>
 {% block page %}
-<div class="w-shell" id="w-shell" data-shell{% block shell_attrs %}{% endblock %}>
+<div class="w-shell" id="w-shell" data-shell{% if embed %} data-embed{% endif %}{% block shell_attrs %}{% endblock %}>
     <a class="w-skip-link" href="#w-main">Skip to content</a>
-    <header class="w-topbar">
-        <button type="button" class="w-btn w-topbar__menu" data-variant="icon" data-shell-menu
-                aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
-            {{ w.icon("menu") }}
-        </button>
-        <a href="/" class="w-wordmark" aria-label="μcli home"><span class="w-mark" aria-hidden="true"{% block mark_attrs %}{% endblock %}></span>μcli</a>
-        <nav class="w-breadcrumb" aria-label="Breadcrumb">
-            <ol class="w-breadcrumb__list"{% block crumbs_attrs %}{% endblock %}>{% block crumbs %}{% endblock %}</ol>
-        </nav>
-        <span class="w-topbar__spacer"></span>
-        <ul class="w-topbar__chips" aria-label="Status"{% block topbar_chips_attrs %}{% endblock %}>{% block topbar_chips %}{% endblock %}</ul>
-        <div class="w-topbar__tools">
-            {% block topbar_tools %}{% endblock %}
-            {{ w.theme_toggle() }}
-        </div>
-    </header>
     {%- set sidebar_extra %}{% block sidebar_extra %}{% endblock %}{% endset %}
+    {%- set mark_attrs %}{% block mark_attrs %}{% endblock %}{% endset %}
+    {%- if embed %}
+    {%- if sidebar_extra | trim %}
+    <aside class="w-sidebar mu-viewside" id="w-sidebar" aria-label="{{ sidebar_label | default('Sections') }}">{{ sidebar_extra }}</aside>
+    {%- endif %}
+    {%- else %}
+    <button type="button" class="w-btn w-shell__menu" data-variant="icon" data-shell-menu
+            aria-controls="w-sidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
+        {{ w.icon("menu") }}
+    </button>
     {% include "partials/sidebar.html" %}
+    {%- endif %}
     <main class="w-stage" id="w-main" tabindex="-1">
+        <div class="w-leaf-alert" data-leaf-alert role="status" aria-live="polite">{% block leaf_alert %}{% endblock %}</div>
+        {% block pagehead %}
+        <header class="w-pagehead" id="w-pagehead"{% block pagehead_attrs %}{% endblock %}>
+            <a class="w-pagehead__back" data-head-back href="{% block back_href %}{% endblock %}"{% if not self.back() | trim %} hidden{% endif %}>{{ w.icon("arrow-left", size="sm") }}<span data-head-back-label>{% block back %}{% endblock %}</span></a>
+            <div class="w-pagehead__row">
+                <h1 class="w-pagehead__title" data-head-title{% block title_attrs %}{% endblock %}>{% block page_title %}{% endblock %}</h1>
+                <div class="w-pagehead__actions" data-head-actions>{% block page_actions %}{% endblock %}</div>
+            </div>
+            <p class="w-state w-pagehead__state" data-head-state{% block state_attrs %}{% endblock %}>{% block page_state %}{% endblock %}</p>
+            <nav class="w-pagetabs" data-head-tabs aria-label="Sections"{% block tabs_attrs %}{% endblock %}>{% block page_tabs %}{% endblock %}</nav>
+        </header>
+        {% endblock %}
         {% block content %}{% endblock %}
     </main>
 </div>

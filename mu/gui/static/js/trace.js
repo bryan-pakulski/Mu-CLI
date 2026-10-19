@@ -163,6 +163,8 @@ function traceApp() {
         hoverIter: null,        // shared crosshair iter (all charts)
         brush: null,            // {a, b} iter positions of the ⇧+drag zoom selection
         readHover: null,        // {x, y, label} read-map hover tooltip state
+        paneShow: "list",       // narrow leaves show one pane: "list" | "main"
+        asideOpen: false,       // below 1200 the at-a-glance pane opens on demand
 
         async init() {
             // Session scope: the analyzer is opened from the chat with
@@ -186,6 +188,15 @@ function traceApp() {
                 this._resizeTimer = setTimeout(() => this.renderAll(), 150);
             };
             window.addEventListener("resize", this._resizeHandler);
+            // Panes resize without the window (the list pane drags): redraw then too.
+            const main = document.querySelector(".trace-mainpane");
+            if (main && window.ResizeObserver) {
+                let lastW = 0;
+                new ResizeObserver((entries) => {
+                    const w = Math.round(entries[0].contentRect.width);
+                    if (w && w !== lastW) { lastW = w; this._resizeHandler(); }
+                }).observe(main);
+            }
             if (this.session) {
                 await this.loadSession();
             } else {
@@ -295,6 +306,39 @@ function traceApp() {
             }
         },
 
+        // The list pane: choose a run (narrow leaves then show it), or in a session
+        // zoom the charts to one of its runs.
+        pickRun(runId) {
+            if (runId !== this.runId) { this.runId = runId; this.loadRun(); }
+            else if (!this.summary) this.loadRun();
+            this.paneShow = "main";
+        },
+        focusRun(b) {
+            this.paneShow = "main";
+            const idx = this._iterIndex ? this._iterIndex.get(b.start_iter) : undefined;
+            const start = idx !== undefined ? idx : Math.max(0, (b.start_iter || 1) - 1);
+            this.xCount = Math.max(this.MIN_VIEW, Math.min(this.totalIters(), b.iters || this.MIN_VIEW));
+            this.xStart = Math.max(0, Math.min(start, this.totalIters() - this.xCount));
+            this.brush = null;
+            this._afterWindowChange();
+        },
+        runSub(r) {
+            const parts = [];
+            if (r.session && r.model) parts.push(r.model);
+            if (r.mode && r.mode !== "default") parts.push(r.mode);
+            parts.push(r.iters + " iteration" + (r.iters === 1 ? "" : "s"));
+            return parts.join(" · ");
+        },
+        runWhen(r) {
+            const ts = Number(r.ts || 0);
+            if (!ts) return String(r.run_id || "").replace(/^run_/, "").slice(0, 6);
+            const d = Math.max(0, Date.now() / 1000 - ts);
+            if (d < 60) return "now";
+            if (d < 3600) return Math.floor(d / 60) + "m";
+            if (d < 86400) return Math.floor(d / 3600) + "h";
+            return Math.floor(d / 86400) + "d";
+        },
+
         toggleInfo(key) {
             this.infoOpen = (this.infoOpen === key) ? null : key;
         },
@@ -309,6 +353,33 @@ function traceApp() {
         fmtMs(v) { v = Number(v || 0); if (v >= 60000) return (v / 60000).toFixed(1) + "m"; if (v >= 1000) return (v / 1000).toFixed(1) + "s"; return Math.round(v) + "ms"; },
         fmtCost(v) { v = Number(v || 0); return v ? "$" + (v < 0.01 ? v.toFixed(6) : v.toFixed(4)) : "—"; },
         fmtStatus(r) { return r.iters > 0 ? "done" : "—"; },
+        // Run picker label (Mu §6.1): only what the state sentence doesn't say —
+        // session · model (mode when not default) and a short run id to tell runs apart.
+        runLabel(r) {
+            const parts = [];
+            if (!this.session && r.session) parts.push(r.session);
+            if (r.model) parts.push(r.model);
+            if (r.mode && r.mode !== "default") parts.push(r.mode);
+            parts.push("run " + String(r.run_id || "").replace(/^run_/, "").slice(0, 6));
+            return parts.join(" · ");
+        },
+        // A table column that would be "—" in every row is left out.
+        spikesHaveParts() {
+            return (this.series.top_context_spikes || []).some(sp => sp.largest_item && sp.largest_item.label);
+        },
+        // Sections with nothing to show hide themselves; the aside names them once.
+        hasSubagents() {
+            return (this.series.subagent_timeline || []).some(d => d.active > 0 || d.stuck || d.stall || (d.children || []).length);
+        },
+        quietList() {
+            const s = this.series || {};
+            const out = [];
+            if (!(s.compaction_timeline || []).length) out.push("no compactions");
+            if (!(s.nudge_timeline || []).length) out.push("no nudges");
+            if (!this.hasSubagents()) out.push("no subagents");
+            if (!(s.context_artifacts || []).length) out.push("no deferred artifacts");
+            return out;
+        },
         // Shared status vocabulary (✓ ok · ● running · ◆ waiting · ✗ failed · ○ pending);
         // the glyph is always rendered next to the status text, never alone.
         statusKind(status) {
@@ -1076,11 +1147,13 @@ function traceApp() {
             this._runMarks(ctx, w, h, pad);
             ctx.font = "9px " + traceFont();
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            let lx = pad.l + 2, ly = 3;
+            // The legend starts after the axis unit caption ("tokens", drawn at the same height).
+            const legendStart = pad.l + 2 + ctx.measureText("tokens").width + 16;
+            let lx = legendStart, ly = 3;
             for (const key of keys) {
                 const label = this.attributionLabel(key);
                 const width = ctx.measureText(label).width + 17;
-                if (lx + width > w - pad.r) { lx = pad.l + 2; ly += 13; }
+                if (lx + width > w - pad.r) { lx = legendStart; ly += 13; }
                 ctx.fillStyle = PALETTE.attribution[key]; ctx.fillRect(lx, ly + 2, 7, 7);
                 ctx.fillStyle = t.dim; ctx.fillText(label, lx + 10, ly);
                 lx += width;

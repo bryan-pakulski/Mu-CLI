@@ -1,8 +1,13 @@
-{#- Model pricing registry (/models/costs) on the shared Wash shell.
-    Formerly static/model_costs.html (that URL now 308-redirects here). -#}
+{#- Insights › Costs (/models/costs): the model pricing registry (Mu §10.5, §11b).
+    Formerly static/model_costs.html (that URL now 308-redirects here). A
+    workspace: providers on the left (a filter with counts), one calm table in
+    the middle — six columns by default (provider, model, billing, input,
+    output, context); "All columns" shows the rest — and the selected model
+    with every field in the right pane (a WashSheet dock). Save is the page's
+    one primary action; reset lives in the ⋯ menu. -#}
 {% extends "_layout.html" %}
 {% import "macros/wash.html" as w %}
-{% block title %}μcli · Model pricing{% endblock %}
+{% block title %}Insights · Model pricing · μcli{% endblock %}
 {% block page_css %}
     <link id="mucli-model-costs-css" rel="stylesheet" href="/static/css/wash/patterns/model-costs.css">
 {% endblock %}
@@ -13,70 +18,83 @@
 {% endblock %}
 {% block ambient %}lagoon{% endblock %}
 {% block body_class %}model-cost-body{% endblock %}
-{% block crumbs %}
-                <li class="w-breadcrumb__item"><a href="/work">Jobs</a></li>
-                <li class="w-breadcrumb__item"><span aria-current="page">Model pricing</span></li>
+{% block page_title %}Insights{% endblock %}
+{% block page_tabs %}{{ w.insights_tabs("costs") }}{% endblock %}
+{% block page_state %}
+            <span class="w-state__part" data-tone="attention" id="mc-dirty" hidden>Unsaved changes</span>
+            <span class="w-state__part" id="mc-models-count"></span>
+            <span class="w-state__part" id="mc-version" title="Registry version">Loading…</span>
+            <span class="w-state__part mc-path" data-tone="quiet" id="mc-config-path" title="Configuration file"></span>
 {% endblock %}
-{% block topbar_chips %}
-            <li class="w-optional"><span class="w-chip" data-variant="meta" id="mc-version" title="Registry version">Pricing registry</span></li>
-            <li class="w-optional"><span class="w-chip mc-path-chip" data-variant="meta" id="mc-config-path" title="Configuration file">loading…</span></li>
-{% endblock %}
-{% block topbar_tools %}
-            <input id="mc-search" class="mc-search w-input" type="search" placeholder="Filter provider or model…" aria-label="Filter models">
+{% block page_actions %}
+            <button id="mc-add" class="w-textbtn" type="button" title="Add model">Add model</button>
+            <button id="mc-save" class="w-btn" data-variant="primary" type="button" title="Save pricing configuration">Save</button>
+            <details class="mc-more">
+                <summary class="w-btn" data-variant="icon" aria-label="More pricing actions" title="More">{{ w.icon("more-horizontal") }}</summary>
+                <div class="w-menu mc-more__menu" role="menu" aria-label="Pricing actions">
+                    <button id="mc-reset" class="w-menu__item" role="menuitem" data-tone="danger" type="button">{{ w.icon("rotate-ccw") }}<span class="w-menu__label">Reset to packaged defaults…</span></button>
+                </div>
+            </details>
 {% endblock %}
 {% block content %}
-<div class="mc-shell w-page" data-width="full">
-    <div id="mc-loading" class="trace-loading mc-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading pricing registry…</div>
-    <div id="mc-error" class="w-banner mc-error" data-tone="danger" role="alert" hidden></div>
-
-    <div id="mc-main" class="mc-main" role="region" aria-label="Pricing registry" hidden>
-        <header class="w-page__head mc-page-head">
-            <div>
-                <span class="w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Cost configuration</span>
-                <h1 class="w-page__title">Pricing registry</h1>
-                <p class="mc-lede">One editable population table drives job cost estimates and native media routing. Inputs describe payloads MuCLI may send directly; unknown models remain text-only.</p>
-            </div>
-            <div class="mc-page-actions">
-                <span class="w-chip mc-dirty" data-tone="attention" id="mc-dirty" hidden><span class="w-chip__glyph" aria-hidden="true">◆</span><span>Unsaved changes</span></span>
-                <button id="mc-reset" class="w-btn mc-text-action" data-variant="ghost" type="button"><span>Reset to packaged defaults</span></button>
-                <button id="mc-add" class="w-btn" data-variant="secondary" type="button" title="Add model">{{ w.icon("plus") }}<span>Add model</span></button>
-                <button id="mc-save" class="w-btn" data-variant="primary" type="button" title="Save pricing configuration">{{ w.icon("check") }}<span>Save</span></button>
-            </div>
+<!-- Mu revision 2 (§11b): providers on the left (a filter with model counts), the pricing
+     table in the middle, the selected model with every field on the right. -->
+<div class="mc-shell w-panes mc-panes" data-layout="list-main-aside" data-show="main" id="mc-panes">
+    <section class="w-pane mc-listpane" data-pane="list" aria-labelledby="mc-providers-title">
+        <header class="w-pane__head">
+            <h2 class="w-pane__title" id="mc-providers-title">Providers</h2>
         </header>
+        <ul class="w-rows mc-providers" id="mc-providers" role="listbox" aria-labelledby="mc-providers-title"></ul>
+        <span class="w-pane-resize" data-pane-resize aria-hidden="true"></span>
+    </section>
 
-        <section class="mc-table-pane" aria-label="Pricing registry models">
-            <div class="mc-table-scroll w-table-wrap">
-                <table class="w-table mc-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">Provider</th>
-                            <th scope="col">Model</th>
-                            <th scope="col">Native inputs</th>
-                            <th scope="col">Outputs</th>
-                            <th scope="col">Capabilities</th>
-                            <th scope="col">Billing</th>
-                            <th scope="col" data-num>Input / 1M</th>
-                            <th scope="col" data-num>Cached input / 1M</th>
-                            <th scope="col" data-num>Output / 1M</th>
-                            <th scope="col" data-num>Context</th>
-                            <th scope="col" data-num>Long cutoff</th>
-                            <th scope="col" data-num>Long input</th>
-                            <th scope="col" data-num>Long cached</th>
-                            <th scope="col" data-num>Long output</th>
-                            <th scope="col">Aliases</th>
-                            <th scope="col">Role / notes</th>
-                            <th scope="col"><span class="w-sr-only">Actions</span></th>
-                        </tr>
-                    </thead>
-                    <tbody id="mc-models"></tbody>
-                </table>
+    <section class="w-pane mc-mainpane" data-pane="main" aria-label="Pricing registry">
+        <div id="mc-loading" class="trace-loading mc-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading pricing registry…</div>
+        <div id="mc-error" class="w-banner mc-error" data-tone="danger" role="alert" hidden></div>
+
+        <div id="mc-main" class="mc-main" role="region" aria-label="Pricing registry" hidden>
+            <div class="w-group__head mc-toolbar">
+                <h2 class="w-group__title">Pricing registry</h2>
+                <input id="mc-search" class="mc-search w-input" type="search" placeholder="Filter provider or model…" aria-label="Filter models">
+                <button id="mc-columns" class="w-textbtn" data-tone="quiet" type="button" aria-pressed="false" aria-controls="mc-table">All columns</button>
             </div>
-        </section>
+            <section class="mc-table-pane" aria-label="Pricing registry models">
+                <div class="mc-table-scroll w-table-wrap">
+                    <table class="w-table mc-table" id="mc-table" data-columns="key">
+                        <thead>
+                            <tr>
+                                <th scope="col">Provider</th>
+                                <th scope="col">Model</th>
+                                <th scope="col">Native inputs</th>
+                                <th scope="col">Outputs</th>
+                                <th scope="col">Capabilities</th>
+                                <th scope="col">Billing</th>
+                                <th scope="col" data-num>Input / 1M</th>
+                                <th scope="col" data-num>Cached input / 1M</th>
+                                <th scope="col" data-num>Output / 1M</th>
+                                <th scope="col" data-num>Context</th>
+                                <th scope="col" data-num>Long cutoff</th>
+                                <th scope="col" data-num>Long input</th>
+                                <th scope="col" data-num>Long cached</th>
+                                <th scope="col" data-num>Long output</th>
+                                <th scope="col">Aliases</th>
+                                <th scope="col">Role / notes</th>
+                                <th scope="col"><span class="w-sr-only">Actions</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="mc-models"></tbody>
+                    </table>
+                </div>
+            </section>
+            <footer class="mc-footer">
+                <div><span id="mc-count" hidden>0 models</span><span>Rates are telemetry estimates, not invoices. Legacy blended estimates are still accepted in the config file for compatibility.</span></div>
+                <div id="mc-status" role="status" aria-live="polite"></div>
+            </footer>
+        </div>
+    </section>
 
-        <footer class="mc-footer">
-            <div><strong id="mc-count">0 models</strong><span> · Rates are telemetry estimates, not invoices. Legacy blended estimates are still accepted in the config file for compatibility.</span></div>
-            <div id="mc-status" role="status" aria-live="polite"></div>
-        </footer>
-    </div>
+    <aside class="w-pane mc-dock" data-pane="aside" data-dock aria-label="Selected model">
+        <p class="w-dock__empty">Select a model to see and edit every field.</p>
+    </aside>
 </div>
 {% endblock %}

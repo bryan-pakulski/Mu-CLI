@@ -1,0 +1,125 @@
+/* Mu inside the leaf (documentation/design/mu_style_guide.md §2.1, §5, §7.3) — the
+ * safety net for Wash components that a page still renders inside the leaf. Every
+ * page, except the chat page (its workspace stage and composer are floats that keep
+ * their glass; chat.css composes them) and the /design gallery (it shows the raw
+ * components). Page bundles load after this file in the
+ * same layer, so a page can still opt a component back in.
+ *
+ *   cards, panels, table wraps   → no box: structure from space and hairlines
+ *   outlined / tonal pills       → text buttons (there are no outlined pills)
+ *   segmented controls           → text tabs
+ *   eyebrows                     → gone (the heading names the section)
+ *   bare inputs / selects        → the Wash field
+ *
+ * Every selector is wrapped in :where() (no specificity): this layer beats the
+ * components layer, and any page rule for the same component still wins.
+ */
+/* ------------------------------------------------------------ cards, panels */
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-card) {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    --w-card-pad: 0px;
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-card > .w-card__foot) {
+    border-top: 0; padding-inline: 0;
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-card[data-variant="interactive"]:hover) {
+    background: var(--w-glass-fill-subtle);
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-panel) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+/* ------------------------------------------------------------ tables */
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-table-wrap) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-table-wrap :is(thead th, th)) {
+    background: transparent;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    font-weight: 400;
+}
+/* ------------------------------------------------------------ buttons */
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-btn[data-variant="secondary"]) {
+    height: auto;
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--wash-ink);
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-btn[data-variant="secondary"]:hover:not(:disabled)) {
+    background: transparent;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-btn[data-variant="secondary"]:disabled) {
+    color: var(--wash-ink-3);
+}
+/* ------------------------------------------------------------ segmented → tabs */
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-segmented) {
+    gap: var(--wash-space-5);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-segmented__option) {
+    padding: 0 0 var(--wash-space-1);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: inset 0 -2px 0 transparent;
+    color: var(--wash-ink-3);
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-segmented__option:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"])) {
+    background: transparent;
+    box-shadow: inset 0 -2px 0 var(--wash-ink);
+    color: var(--wash-ink);
+}
+/* ------------------------------------------------------------ eyebrows */
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-eyebrow) {
+    display: none;
+}
+/* ------------------------------------------------------------ bare fields */
+:where(body:not(.chat-body, .gallery-body) .w-stage :is(select, textarea, input:is(:not([type]), [type="text"], [type="number"], [type="search"], [type="url"], [type="email"], [type="password"])):not([class*="w-"], [class*="cm-"], [hidden])) {
+    min-width: 0;
+    min-height: var(--wash-size-field);
+    padding: 0 var(--wash-space-3);
+    border: 1px solid var(--wash-control-border);
+    border-radius: var(--wash-radius-sm);
+    background-color: var(--w-glass-fill);
+    color: var(--wash-ink);
+    font: inherit;
+    font-size: var(--wash-type-body-size);
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage textarea:not([class*="w-"], [class*="cm-"])) {
+    padding-block: var(--wash-space-2); line-height: var(--wash-type-body-line);
+}
+/* Tonal pills read as text buttons in their tone's ink (danger stays danger). */
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-btn[data-variant="tonal"]) {
+    height: auto;
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--w-tone-ink, var(--wash-ink));
+}
+:where(body:not(.chat-body, .gallery-body) .w-stage .w-btn[data-variant="tonal"]:hover:not(:disabled)) {
+    background: transparent;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}

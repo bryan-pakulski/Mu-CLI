@@ -7,6 +7,10 @@ model costs), Android client, terminal REPL, jobs TUI, and container TUI.
 describes how each surface moves to this guide.
 **Visual reference:** [`reference/wash_reference.html`](reference/wash_reference.html)
 (open it in a browser; screenshots are in `reference/`).
+**Composition:** [Mu](mu_style_guide.md) (2026-10-19) governs how much is on
+screen, where each fact lives and how pages flow. It replaces this guide's top
+bar, hero bands, eyebrows, cards and status chips on working screens (Mu §12).
+Wash's tokens, colour, type, motion and accessibility rules are unchanged.
 
 ---
 

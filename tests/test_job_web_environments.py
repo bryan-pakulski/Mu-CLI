@@ -83,7 +83,8 @@ def test_settings_show_docker_in_docker_status_and_kept_jobs():
 
 
 def test_environments_page_badge_and_scan_warning():
-    assert "ref.jobs_using" in CONTAINERS and "Used by ${Number(ref.jobs_using)} job" in CONTAINERS
+    # Mu §5.7: the badge is part of the row's sentence, so it reads "used by N jobs".
+    assert "ref.jobs_using" in CONTAINERS and "used by ${Number(ref.jobs_using)} job" in CONTAINERS
     assert "ref.job_scan_blocks" in CONTAINERS and "Secret scan blocked job" in CONTAINERS
     assert "w-env-jobs-badge" in CONTAINERS and "w-env-scan-warning" in CONTAINERS
     assert ".w-env-jobs-badge" in CONTAINERS_CSS and ".w-env-scan-warning" in CONTAINERS_CSS
